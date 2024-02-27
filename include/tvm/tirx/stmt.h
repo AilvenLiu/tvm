@@ -21,11 +21,12 @@
  * \brief TIR statements.
  */
 // Acknowledgement: Many low-level stmts originate from Halide.
-#ifndef TVM_TIR_STMT_H_
-#define TVM_TIR_STMT_H_
+#ifndef TVM_TIRX_STMT_H_
+#define TVM_TIRX_STMT_H_
 
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/node/script_printer.h>
+#include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/expr.h>
 
 #include <optional>
@@ -823,6 +824,9 @@ class SBlockNode : public StmtNode {
   /*! \brief The body of the block. */
   Stmt body;
 
+  // TIR+ signature
+  Optional<ExecScope> exec_scope;
+
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<SBlockNode>()
@@ -834,7 +838,8 @@ class SBlockNode : public StmtNode {
         .def_ro("match_buffers", &SBlockNode::match_buffers)
         .def_ro("annotations", &SBlockNode::annotations)
         .def_ro("init", &SBlockNode::init)
-        .def_ro("body", &SBlockNode::body);
+        .def_ro("body", &SBlockNode::body)
+        .def_ro("exec_scope", &BlockNode::exec_scope);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SBlock", SBlockNode, StmtNode);
 };
@@ -852,7 +857,7 @@ class SBlock : public Stmt {
       ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
       ffi::Array<MatchBufferRegion> match_buffers = ffi::Array<MatchBufferRegion>(),
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
-      Span span = Span());
+      Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt);
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SBlock, Stmt, SBlockNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SBlockNode);
@@ -975,6 +980,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
-#endif  // TVM_TIR_STMT_H_
+#endif  // TVM_TIRX_STMT_H_

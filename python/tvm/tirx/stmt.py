@@ -26,18 +26,17 @@ Each statement node have subfields that can be visited from python side.
     assert isinstance(st, tvm.tirx.stmt.BufferStore)
     assert(st.buffer == buffer)
 """
-
 from collections.abc import Mapping
 from enum import IntEnum
 
 import tvm_ffi
-
 from tvm.ir import PrimExpr, Range, Span
 from tvm.runtime import Object, Scriptable, const
 
 from . import _ffi_api
 from .buffer import Buffer
 from .expr import IterVar, StringImm, Var
+from .exec_scope import ExecScope
 
 
 class Stmt(Object, Scriptable):
@@ -271,12 +270,7 @@ class BufferStore(Stmt):
         span: Span | None = None,
     ) -> None:
         self.__init_handle_by_constructor__(
-            _ffi_api.BufferStore,
-            buffer,
-            value,
-            indices,
-            predicate,
-            span,  # type: ignore
+            _ffi_api.BufferStore, buffer, value, indices, predicate, span  # type: ignore
         )
 
 
@@ -367,12 +361,7 @@ class AttrStmt(Stmt):
         span: Span | None = None,
     ) -> None:
         self.__init_handle_by_constructor__(
-            _ffi_api.AttrStmt,
-            node,
-            attr_key,
-            value,
-            body,
-            span,  # type: ignore
+            _ffi_api.AttrStmt, node, attr_key, value, body, span  # type: ignore
         )
 
 
@@ -433,11 +422,7 @@ class IfThenElse(Stmt):
         span: Span | None = None,
     ) -> None:
         self.__init_handle_by_constructor__(
-            _ffi_api.IfThenElse,
-            condition,
-            then_case,
-            else_case,
-            span,  # type: ignore
+            _ffi_api.IfThenElse, condition, then_case, else_case, span  # type: ignore
         )
 
 
@@ -499,9 +484,7 @@ class MatchBufferRegion(Object, Scriptable):
 
     def __init__(self, buffer: Buffer, source: BufferRegion) -> None:
         self.__init_handle_by_constructor__(
-            _ffi_api.MatchBufferRegion,
-            buffer,
-            source,  # type: ignore
+            _ffi_api.MatchBufferRegion, buffer, source  # type: ignore
         )
 
 
@@ -551,6 +534,7 @@ class SBlock(Stmt):
     alloc_buffers: list[Buffer]
     match_buffers: list[MatchBufferRegion]
     annotations: Mapping[str, Object]
+    exec_scope: ExecScope | None
     span: Span | None
 
     def __init__(
@@ -565,6 +549,7 @@ class SBlock(Stmt):
         match_buffers: list[MatchBufferRegion] | None = None,
         annotations: Mapping[str, Object] | None = None,
         span: Span | None = None,
+        exec_scope: ExecScope | None = None,
     ) -> None:
         if alloc_buffers is None:
             alloc_buffers = []
@@ -584,6 +569,7 @@ class SBlock(Stmt):
             match_buffers,
             annotations,
             span,
+            exec_scope,
         )  # type: ignore
 
 
