@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Definition of execution scope."""
-from typing import List, Optional
+from typing import List
 
 from . import _ffi_api
 from tvm._ffi import register_object
@@ -25,27 +25,50 @@ from .expr import PrimExpr, Var
 from ..ir import Range
 
 
+@register_object("tirx.ScopeId")
+class ScopeId(Var):
+    def __init__(self, name: str):
+        self.__init_handle_by_constructor__(_ffi_api.ScopeId, name)
+
+
+@register_object("tirx.ScopeIdDef")
+class ScopeIdDef(Object):
+    def_ids: List[ScopeId]
+    extents: List[PrimExpr]
+    parent: str
+
+    def __init__(self, def_ids: List[ScopeId], extents: List[PrimExpr], parent: str):
+        self.__init_handle_by_constructor__(_ffi_api.ScopeIdDef, def_ids, extents, parent)
+
+
 @register_object("tirx.ExecScope")
 class ExecScope(Object):
-    dims: List[PrimExpr]
     name: str
 
-    def __init__(self, dims: List[PrimExpr], name: str):
-        self.__init_handle_by_constructor__(_ffi_api.ExecScope, dims, name)
+    def __init__(self, name: str):
+        self.__init_handle_by_constructor__(_ffi_api.ExecScope, name)
 
 
-@register_object("tirx.ThreadingVar")
-def ThreadingVar(Var):
-    scope: ExecScope
+@register_object("tirx.WorldScope")
+def WorldScope():
+    scope_id_def: ScopeIdDef
 
-    def __init__(self, scope: ExecScope, name: str):
-        self.__init_handle_by_constructor__(_ffi_api.ThreadingVar, scope, name)
+    def __init__(self, scope_id_def: ScopeIdDef):
+        self.__init_handle_by_constructor__(_ffi_api.WorldScope, scope_id_def)
+
+
+@register_object("tirx.KernelScope")
+def KernelScope():
+    scope_id_def: List[ScopeIdDef]
+
+    def __init__(self, scope_id_def: List[ScopeIdDef]):
+        self.__init_handle_by_constructor__(_ffi_api.KernelScope, scope_id_def)
 
 
 @register_object("tirx.SubExecScope")
-class SubExecScope(ExecScope):
-    def_vars: List[ThreadingVar]
-    ranges: Optional[List[Range]]
+class ExecScopeSlice(ExecScope):
+    def_ids: List[ScopeId]
+    ranges: List[Range]
 
-    def __init__(self, vars: List[PrimExpr], ranges: Optional[List[Range]], name: str):
-        self.__init_handle_by_constructor__(_ffi_api.SubExecScope, vars, ranges, name)
+    def __init__(self, ids: List[PrimExpr], ranges: List[Range], name: str):
+        self.__init_handle_by_constructor__(_ffi_api.SubExecScope, ids, ranges, name)

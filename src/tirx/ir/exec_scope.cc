@@ -24,10 +24,38 @@ namespace tirx {
 
 /******** Constructors ********/
 
-ExecScope::ExecScope(Array<PrimExpr> dims, String name) {
+// ScopeId
+ScopeId::ScopeId(String name) {
+  auto n = make_object<ScopeIdNode>();
+  n->type_annotation = GetTypeFromRuntimeDataType(DataType::Int(32));
+  n->name_hint = std::move(name);
+  data_ = std::move(n);
+}
+
+TVM_REGISTER_NODE_TYPE(ScopeIdNode);
+
+TVM_REGISTER_GLOBAL("tirx.ScopeId").set_body_typed([](String name) { return ScopeId(name); });
+
+// ScopeIdDef
+ScopeIdDef::ScopeIdDef(Array<ScopeId> ids, Array<PrimExpr> extents, String parent) {
+  auto n = make_object<ScopeIdDefNode>();
+  ICHECK_EQ(ids.size(), extents.size()) << "Number of dimensions must match";
+  n->def_ids = std::move(ids);
+  n->extents = std::move(extents);
+  n->parent = std::move(parent);
+  data_ = std::move(n);
+}
+
+TVM_REGISTER_NODE_TYPE(ScopeIdDefNode);
+
+TVM_REGISTER_GLOBAL("tirx.ScopeIdDef")
+    .set_body_typed([](Array<ScopeId> vars, Array<PrimExpr> extents, String parent) {
+      return ScopeIdDef(vars, extents, parent);
+    });
+
+// ExecScope
+ExecScope::ExecScope(String name) {
   auto n = make_object<ExecScopeNode>();
-  ICHECK_LE(dims.size(), 3) << "Only support at most 3 dimensions";
-  n->dims = std::move(dims);
   n->name = std::move(name);
   data_ = std::move(n);
 }
@@ -35,43 +63,53 @@ ExecScope::ExecScope(Array<PrimExpr> dims, String name) {
 TVM_REGISTER_NODE_TYPE(ExecScopeNode);
 
 TVM_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](Array<PrimExpr> dims, String name) {
-  return ExecScope(dims, name);
+  return ExecScope(name);
 });
 
-ThreadingVar::ThreadingVar(ExecScope scope, String name) {
-  auto n = make_object<ThreadingVarNode>();
-  n->scope = std::move(scope);
-  n->type_annotation = GetTypeFromRuntimeDataType(DataType::Int(32));
-  n->dtype = DataType::Int(32);
-  n->name_hint = std::move(name);
+// WorldScope
+WorldScope::WorldScope(ScopeIdDef def) : ExecScope("world") {
+  auto n = make_object<WorldScopeNode>();
+  n->scope_id_def = std::move(def);
   data_ = std::move(n);
 }
 
-TVM_REGISTER_NODE_TYPE(ThreadingVarNode);
+TVM_REGISTER_NODE_TYPE(WorldScopeNode);
 
-TVM_REGISTER_GLOBAL("tirx.ThreadingVar").set_body_typed([](ExecScope scope, String name) {
-  return ThreadingVar(scope, name);
+TVM_REGISTER_GLOBAL("tirx.WorldScope").set_body_typed([](ScopeIdDef def) {
+  return WorldScope(def);
 });
 
-SubExecScope::SubExecScope(Array<ThreadingVar> vars, Optional<Array<Range>> ranges, String name) {
-  auto n = make_object<SubExecScopeNode>();
-  ICHECK(!vars.empty()) << "SubExecScope must have at least one threading variable";
+// KernelScope
+KernelScope::KernelScope(Array<ScopeIdDef> def) : ExecScope("kernel"){
+  auto n = make_object<KernelScopeNode>();
+  n->scope_id_def = std::move(def);
+  data_ = std::move(n);
+}
+
+TVM_REGISTER_NODE_TYPE(KernelScopeNode);
+
+TVM_REGISTER_GLOBAL("tirx.KernelScope").set_body_typed([](Array<ScopeIdDef> def) {
+  return KernelScope(def);
+});
+
+// ExecScopeSlice
+ExecScopeSlice::ExecScopeSlice(Array<ScopeId> ids, Array<Range> ranges, String name) : ExecScope(name) {
+  auto n = make_object<ExecScopeSliceNode>();
+  ICHECK(!ids.empty()) << "ExecScopeSlice must have at least one defining ScopeId";
   if (ranges.defined()) {
-    ICHECK_EQ(vars.size(), ranges.value().size()) << "Number of dimensions must match";
+    ICHECK_EQ(ids.size(), ranges.size()) << "Number of dimensions must match";
   }
-  ICHECK_EQ(vars[0]->scope->size(), vars.size()) << "Number of dimensions must match";
-  n->def_vars = std::move(vars);
+  n->def_ids = std::move(ids);
   n->ranges = std::move(ranges);
-  n->name = std::move(name);
   data_ = std::move(n);
 }
 
-TVM_REGISTER_NODE_TYPE(SubExecScopeNode);
+TVM_REGISTER_NODE_TYPE(ExecScopeSliceNode);
 
-TVM_REGISTER_GLOBAL("tirx.SubExecScope")
-    .set_body_typed([](Array<ThreadingVar> vars, Optional<Array<Range>> ranges, String name) {
-      return SubExecScope(vars, ranges, name);
+TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
+    .set_body_typed([](Array<ScopeId> vars, Array<Range> ranges, String name) {
+      return ExecScopeSlice(vars, ranges, name);
     });
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm

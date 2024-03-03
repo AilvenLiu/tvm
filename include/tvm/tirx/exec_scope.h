@@ -30,28 +30,67 @@
 namespace tvm {
 namespace tirx {
 
-class ExecScopeNode : public Object {
+class ScopeIdNode : public VarNode {
  public:
-  /*! \brief Now support at most 3 dims */
-  Array<PrimExpr> dims;
-  /*! \brief scope name, used when printing */
-  String name;
+  static constexpr const char* _type_key = "tirx.ScopeId";
+  TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdNode, VarNode);
+};
 
-  size_t size() const { return dims.size(); }
+class ScopeId : public Var {
+ public:
+  TVM_DLL explicit ScopeId(String name = "");
+
+  TVM_DEFINE_OBJECT_REF_METHODS(ScopeId, Var, ScopeIdNode);
+};
+
+class ScopeIdDefNode : public Object {
+ public:
+  /*! \brief The ScopeId defined */
+  Array<ScopeId> def_ids;
+  /*! \brief The extents of the ScopeId */
+  Array<PrimExpr> extents;
+  /*! \brief Parent ExecScope name*/
+  String parent;
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("dims", &dims);
-    v->Visit("name", &name);
+    v->Visit("def_ids", &def_ids);
+    v->Visit("extents", &extents);
+    v->Visit("parent", &parent);
   }
 
-  bool SEqualReduce(const ExecScopeNode* other, SEqualReducer equal) const {
-    return equal(dims, other->dims) && equal(name, other->name);
+  bool SEqualReduce(const ScopeIdDefNode* other, SEqualReducer equal) const {
+    return equal(def_ids, other->def_ids) && equal(extents, other->extents) &&
+           equal(parent, other->parent);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(dims);
-    hash_reduce(name);
+    hash_reduce(def_ids);
+    hash_reduce(extents);
+    hash_reduce(parent);
   }
+  static constexpr const char* _type_key = "tirx.ScopeIdDef";
+  TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdDefNode, Object);
+};
+
+class ScopeIdDef : public ObjectRef {
+ public:
+  TVM_DLL ScopeIdDef(Array<ScopeId> def_ids, Array<PrimExpr> extents, String parent);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(ScopeIdDef, ObjectRef, ScopeIdDefNode);
+};
+
+class ExecScopeNode : public Object {
+ public:
+  /*! \brief scope name, used when printing */
+  String name;
+
+  void VisitAttrs(AttrVisitor* v) { v->Visit("name", &name); }
+
+  bool SEqualReduce(const ExecScopeNode* other, SEqualReducer equal) const {
+    return equal(name, other->name);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const { hash_reduce(name); }
 
   static constexpr const char* _type_key = "tirx.ExecScope";
   TVM_DECLARE_BASE_OBJECT_INFO(ExecScopeNode, Object);
@@ -59,79 +98,76 @@ class ExecScopeNode : public Object {
 
 class ExecScope : public ObjectRef {
  public:
-  TVM_DLL explicit ExecScope(Array<PrimExpr> dims, String name = "");
+  TVM_DLL explicit ExecScope(String name = "");
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScope, ObjectRef, ExecScopeNode);
 };
 
-class ThreadingVarNode : public VarNode {
+// Two special ExecSope: World and Kernel
+class WorldScopeNode : public ExecScopeNode {
  public:
-  /*! \brief The execution scope defining this var */
-  ExecScope scope;
-
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("scope", &scope);
-    VarNode::VisitAttrs(v);
-  }
-
-  bool SEqualReduce(const ThreadingVarNode* other, SEqualReducer equal) const {
-    if (!equal(scope, other->scope)) return false;
-    return VarNode::SEqualReduce(other, equal);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(scope);
-    VarNode::SHashReduce(hash_reduce);
-  }
-
-  static constexpr const char* _type_key = "tirx.ThreadingVar";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ThreadingVarNode, VarNode);
+  ScopeIdDef scope_id_def;
+  static constexpr const char* _type_key = "tirx.WorldScope";
+  TVM_DECLARE_FINAL_OBJECT_INFO(WorldScopeNode, ExecScopeNode);
 };
 
-class ThreadingVar : public Var {
+class WorldScope : public ExecScope {
  public:
-  TVM_DLL explicit ThreadingVar(ExecScope scope, String name = "");
+  TVM_DLL explicit WorldScope(ScopeIdDef scope_id_def);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ThreadingVar, Var, ThreadingVarNode);
+  TVM_DEFINE_OBJECT_REF_METHODS(WorldScope, ExecScope, WorldScopeNode);
 };
 
-class SubExecScopeNode : public ExecScopeNode {
+class KernelScopeNode : public ExecScopeNode {
+ public:
+  Array<ScopeIdDef> scope_id_def;
+  static constexpr const char* _type_key = "tirx.KernelScope";
+  TVM_DECLARE_FINAL_OBJECT_INFO(KernelScopeNode, ExecScopeNode);
+};
+
+class KernelScope : public ExecScope {
+ public:
+  TVM_DLL explicit KernelScope(Array<ScopeIdDef> scope_id_def);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(KernelScope, ExecScope, KernelScopeNode);
+};
+
+class ExecScopeSliceNode : public ExecScopeNode {
  public:
   /*! \brief defining threading vars */
-  Array<ThreadingVar> def_vars;
+  Array<ScopeId> def_ids;
   /*! \brief subrange of each threading vars */
-  Optional<Array<Range>> ranges;
+  Array<Range> ranges;
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("def_vars", &def_vars);
+    v->Visit("def_vars", &def_ids);
     v->Visit("ranges", &ranges);
     ExecScopeNode::VisitAttrs(v);
   }
 
-  bool SEqualReduce(const SubExecScopeNode* other, SEqualReducer equal) const {
-    return equal(def_vars, other->def_vars) && equal(ranges, other->ranges) &&
+  bool SEqualReduce(const ExecScopeSliceNode* other, SEqualReducer equal) const {
+    return equal(def_ids, other->def_ids) && equal(ranges, other->ranges) &&
            ExecScopeNode::SEqualReduce(other, equal);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(def_vars);
+    hash_reduce(def_ids);
     hash_reduce(ranges);
     ExecScopeNode::SHashReduce(hash_reduce);
   }
 
-  static constexpr const char* _type_key = "tirx.SubExecScope";
-  TVM_DECLARE_FINAL_OBJECT_INFO(SubExecScopeNode, ExecScopeNode);
+  static constexpr const char* _type_key = "tirx.ExecScopeSlice";
+  TVM_DECLARE_FINAL_OBJECT_INFO(ExecScopeSliceNode, ExecScopeNode);
 };
 
-class SubExecScope : public ExecScope {
+class ExecScopeSlice : public ExecScope {
  public:
-  TVM_DLL explicit SubExecScope(Array<ThreadingVar> vars, Optional<Array<Range>> ranges,
-                                String name = "");
+  TVM_DLL explicit ExecScopeSlice(Array<ScopeId> vars, Array<Range> ranges, String name = "");
 
-  TVM_DEFINE_OBJECT_REF_METHODS(SubExecScope, ExecScope, SubExecScopeNode);
+  TVM_DEFINE_OBJECT_REF_METHODS(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
 };
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_EXEC_SCOPE_H_
