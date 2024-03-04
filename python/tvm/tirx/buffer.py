@@ -245,6 +245,7 @@ def decl_buffer(
     strides=None,
     elem_offset=None,
     scope="",
+    logical_scope="",
     data_alignment=-1,
     offset_factor=0,
     buffer_type="",
@@ -282,6 +283,10 @@ def decl_buffer(
     scope: str, optional
         The storage scope of the buffer, if not global.
         If scope equals empty string, it means it is global memory.
+
+    logical_scope: str, optional
+        The logical scope of the buffer.
+
 
     data_alignment: int, optional
         The alignment of data pointer in bytes.
@@ -341,7 +346,7 @@ def decl_buffer(
         # Bool is represented as uint1 in the IR, but stored as int8
         storage_type = PrimType(dtype)
         storage_type = PrimType("int8") if storage_type.dtype == "bool" else storage_type
-        data = Var(name, PointerType(storage_type, scope), span)
+        data = Var(name, PointerType(storage_type, scope, logical_scope), span)
     return _ffi_api.Buffer(  # type: ignore
         data,
         dtype,

@@ -159,12 +159,17 @@ class PointerTypeNode : public TypeNode {
    * \brief The storage scope of the pointer
    */
   ffi::String storage_scope;
+  /*!
+   * \brief The logical scope of the pointer
+   */
+  ffi::String logical_scope;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<PointerTypeNode>()
         .def_ro("element_type", &PointerTypeNode::element_type)
-        .def_ro("storage_scope", &PointerTypeNode::storage_scope);
+        .def_ro("storage_scope", &PointerTypeNode::storage_scope)
+        .def_ro("logical_scope", &PointerTypeNode::logical_scope);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("ir.PointerType", PointerTypeNode, TypeNode);
 };
@@ -179,8 +184,10 @@ class PointerType : public Type {
    * \brief Constructor
    * \param element_type The type of the element which the pointer points to.
    * \param storage_scope The storage scope into which the pointer addresses
+   * \param logical_scope The logical scope into which the pointer addresses
    */
-  TVM_DLL explicit PointerType(Type element_type, ffi::String storage_scope = "");
+  TVM_DLL explicit PointerType(Type element_type, ffi::String storage_scope = "",
+                               ffi::String logical_scope = "");
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(PointerType, Type, PointerTypeNode);
 };

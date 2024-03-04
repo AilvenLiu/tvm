@@ -47,7 +47,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("ir.PrimType", [](runtime::DataType dtype) { return PrimType(dtype); });
 }
 
-PointerType::PointerType(Type element_type, ffi::String storage_scope) {
+PointerType::PointerType(Type element_type, ffi::String storage_scope, ffi::String logical_scope) {
   ObjectPtr<PointerTypeNode> n = ffi::make_object<PointerTypeNode>();
   if (storage_scope.empty()) {
     n->storage_scope = "global";
@@ -55,6 +55,7 @@ PointerType::PointerType(Type element_type, ffi::String storage_scope) {
     n->storage_scope = std::move(storage_scope);
   }
   n->element_type = std::move(element_type);
+  n->logical_scope = std::move(logical_scope);
   data_ = std::move(n);
 }
 
