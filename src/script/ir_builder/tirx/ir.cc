@@ -170,7 +170,154 @@ SBlockFrame Block(ffi::String name, bool no_realize) {
   n->iter_values.clear();
   n->predicate = std::nullopt;
   n->no_realize = no_realize;
+  n->exec_scope = NullOpt;
   return SBlockFrame(n);
+}
+
+BlockFrame World() { return Block("world", false); }
+
+BlockFrame Kernel() { return Block("kernel", false); }
+
+BlockFrame Warp() { return Block("warp", false); }
+
+BlockFrame Thread() { return Block("thread", false); }
+
+BlockFrame ScopeSlice(Array<tvm::tirx::ScopeId> vars, Array<Range> ranges, String cur) {
+  ObjectPtr<BlockFrameNode> n = make_object<BlockFrameNode>();
+  n->name = cur;
+  n->iter_vars.clear();
+  n->reads = NullOpt;
+  n->writes = NullOpt;
+  n->init = NullOpt;
+  n->alloc_buffers.clear();
+  n->match_buffers.clear();
+  n->annotations = NullOpt;
+  n->iter_values.clear();
+  n->predicate = NullOpt;
+  n->no_realize = false;
+  n->exec_scope = tvm::tirx::ExecScopeSlice(vars, ranges);
+  return BlockFrame(n);
+}
+
+tvm::tirx::ScopeId KernelId(PrimExpr extent) {
+  BlockFrame frame = FindBlockFrame("T.kernel_id");
+  if (frame->name != "world") {
+    LOG(FATAL) << "ValueError: Kernel scope id should be decalred in world scope named \"world\""
+               << "but this one is declared in scope named \"" << frame->name << "\"";
+  }
+  if (frame->exec_scope.defined()) {
+    LOG(FATAL) << "ValueError: Duplicate kernel scope id declaration, previous one is "
+               << frame->exec_scope;
+  }
+  tvm::tirx::ScopeId scope_id("");
+  frame->exec_scope =
+      tvm::tirx::WorldScope(tvm::tirx::ScopeIdDef({scope_id}, {extent}, "world", "kernel"));
+  return scope_id;
+}
+
+Array<tvm::tirx::ScopeId> KernelScopeId(Array<PrimExpr> extents, String parent, String name,
+                                       String cur) {
+  BlockFrame frame = FindBlockFrame(name);
+  if (frame->name != "kernel") {
+    LOG(FATAL) << "ValueError: " << cur
+               << " scope id should be decalred in kernel scope named \"kernel\""
+               << "but this one is declared in scope named \"" << frame->name << "\"";
+  }
+  if (!frame->exec_scope.defined()) {
+    frame->exec_scope = tvm::tirx::KernelScope(Array<tvm::tirx::ScopeIdDef>());
+  }
+  Array<tvm::tirx::ScopeId> scope_ids;
+  for (int i = 0; i < extents.size(); ++i) {
+    scope_ids.push_back(tvm::tirx::ScopeId(""));
+  }
+  const_cast<tvm::tirx::KernelScopeNode*>(frame->exec_scope.as<tvm::tirx::KernelScopeNode>())
+      ->scope_id_def.push_back(tvm::tirx::ScopeIdDef(scope_ids, extents, parent, cur));
+  return scope_ids;
+}
+
+Array<tvm::tirx::ScopeId> BlockId(Array<PrimExpr> extents, String parent) {
+  return KernelScopeId(extents, parent, "T.block_id", "block");
+}
+
+Array<tvm::tirx::ScopeId> WarpId(Array<PrimExpr> extents, String parent) {
+  return KernelScopeId(extents, parent, "T.warp_id", "warp");
+}
+
+Array<tvm::tirx::ScopeId> ThreadId(Array<PrimExpr> extents, String parent) {
+  return KernelScopeId(extents, parent, "T.thread_id", "thread");
+}
+
+BlockFrame World() { return Block("world", false); }
+
+BlockFrame Kernel() { return Block("kernel", false); }
+
+BlockFrame Warp() { return Block("warp", false); }
+
+BlockFrame Thread() { return Block("thread", false); }
+
+BlockFrame ScopeSlice(Array<tvm::tirx::ScopeId> vars, Array<Range> ranges, String cur) {
+  ObjectPtr<BlockFrameNode> n = make_object<BlockFrameNode>();
+  n->name = cur;
+  n->iter_vars.clear();
+  n->reads = NullOpt;
+  n->writes = NullOpt;
+  n->init = NullOpt;
+  n->alloc_buffers.clear();
+  n->match_buffers.clear();
+  n->annotations = NullOpt;
+  n->iter_values.clear();
+  n->predicate = NullOpt;
+  n->no_realize = false;
+  n->exec_scope = tvm::tirx::ExecScopeSlice(vars, ranges);
+  return BlockFrame(n);
+}
+
+tvm::tirx::ScopeId KernelId(PrimExpr extent) {
+  BlockFrame frame = FindBlockFrame("T.kernel_id");
+  if (frame->name != "world") {
+    LOG(FATAL) << "ValueError: Kernel scope id should be decalred in world scope named \"world\""
+               << "but this one is declared in scope named \"" << frame->name << "\"";
+  }
+  if (frame->exec_scope.defined()) {
+    LOG(FATAL) << "ValueError: Duplicate kernel scope id declaration, previous one is "
+               << frame->exec_scope;
+  }
+  tvm::tirx::ScopeId scope_id("");
+  frame->exec_scope =
+      tvm::tirx::WorldScope(tvm::tirx::ScopeIdDef({scope_id}, {extent}, "world", "kernel"));
+  return scope_id;
+}
+
+Array<tvm::tirx::ScopeId> KernelScopeId(Array<PrimExpr> extents, String parent, String name,
+                                       String cur) {
+  BlockFrame frame = FindBlockFrame(name);
+  if (frame->name != "kernel") {
+    LOG(FATAL) << "ValueError: " << cur
+               << " scope id should be decalred in kernel scope named \"kernel\""
+               << "but this one is declared in scope named \"" << frame->name << "\"";
+  }
+  if (!frame->exec_scope.defined()) {
+    frame->exec_scope = tvm::tirx::KernelScope(Array<tvm::tirx::ScopeIdDef>());
+  }
+  Array<tvm::tirx::ScopeId> scope_ids;
+  for (int i = 0; i < extents.size(); ++i) {
+    scope_ids.push_back(tvm::tirx::ScopeId(""));
+  }
+  const_cast<tvm::tirx::KernelScopeNode*>(frame->exec_scope.as<tvm::tirx::KernelScopeNode>())
+      ->scope_id_def.push_back(tvm::tirx::ScopeIdDef(scope_ids, extents, parent, cur));
+  return scope_ids;
+}
+
+Array<tvm::tirx::ScopeId> BlockId(Array<PrimExpr> extents, String parent) {
+  return KernelScopeId(extents, parent, "T.block_id", "block");
+}
+
+Array<tvm::tirx::ScopeId> WarpId(Array<PrimExpr> extents, String parent) {
+  return KernelScopeId(extents, parent, "T.warp_id", "warp");
+}
+
+Array<tvm::tirx::ScopeId> ThreadId(Array<PrimExpr> extents, String parent) {
+  return KernelScopeId(extents, parent, "T.thread_id", "thread");
 }
 
 BlockInitFrame Init() { return BlockInitFrame(ffi::make_object<BlockInitFrameNode>()); }
@@ -298,7 +445,7 @@ IterVar PushBlockVar(IterVar iter_var, PrimExpr binding) {
   return iter_var;
 }
 
-#define TVM_TIR_IR_BUILDER_AXIS(Method, Kind, Name)                                           \
+#define TVM_TIRX_IR_BUILDER_AXIS(Method, Kind, Name)                                           \
   Var Method(Range dom, PrimExpr binding, DataType dtype) {                                   \
     TVM_FFI_ICHECK(dom.defined()) << Name << " axis must have a domain";                      \
     int bits = std::max({dom->min.dtype().bits(), dom->extent.dtype().bits(), dtype.bits()}); \
@@ -307,11 +454,11 @@ IterVar PushBlockVar(IterVar iter_var, PrimExpr binding) {
                         binding)                                                              \
         ->var;                                                                                \
   }
-TVM_TIR_IR_BUILDER_AXIS(Spatial, tvm::tirx::IterVarType::kDataPar, "Spatial");
-TVM_TIR_IR_BUILDER_AXIS(Reduce, tvm::tirx::IterVarType::kCommReduce, "Reduction");
-TVM_TIR_IR_BUILDER_AXIS(Scan, tvm::tirx::IterVarType::kOrdered, "Scan");
-TVM_TIR_IR_BUILDER_AXIS(Opaque, tvm::tirx::IterVarType::kOpaque, "Opaque");
-#undef TVM_TIR_IR_BUILDER_AXIS
+TVM_TIRX_IR_BUILDER_AXIS(Spatial, tvm::tirx::IterVarType::kDataPar, "Spatial");
+TVM_TIRX_IR_BUILDER_AXIS(Reduce, tvm::tirx::IterVarType::kCommReduce, "Reduction");
+TVM_TIRX_IR_BUILDER_AXIS(Scan, tvm::tirx::IterVarType::kOrdered, "Scan");
+TVM_TIRX_IR_BUILDER_AXIS(Opaque, tvm::tirx::IterVarType::kOpaque, "Opaque");
+#undef TVM_TIRX_IR_BUILDER_AXIS
 
 ffi::Array<Var> Remap(ffi::String kinds, ffi::Array<PrimExpr> bindings, DataType dtype) {
   using namespace tvm::tirx;
@@ -366,7 +513,7 @@ ffi::Array<Var> Remap(ffi::String kinds, ffi::Array<PrimExpr> bindings, DataType
 
 }  // namespace axis
 
-#define TVM_TIR_IR_BUILDER_FOR_FRAME(Method, Kind)                                            \
+#define TVM_TIRX_IR_BUILDER_FOR_FRAME(Method, Kind)                                            \
   ForFrame Method(PrimExpr start, PrimExpr stop,                                              \
                   ffi::Optional<ffi::Map<ffi::String, Any>> annotations,                      \
                   ffi::Optional<PrimExpr> step) {                                             \
@@ -389,12 +536,12 @@ ffi::Array<Var> Remap(ffi::String kinds, ffi::Array<PrimExpr> bindings, DataType
     return ForFrame(n);                                                                       \
   }
 
-TVM_TIR_IR_BUILDER_FOR_FRAME(Serial, tvm::tirx::ForKind::kSerial);
-TVM_TIR_IR_BUILDER_FOR_FRAME(Parallel, tvm::tirx::ForKind::kParallel);
-TVM_TIR_IR_BUILDER_FOR_FRAME(Vectorized, tvm::tirx::ForKind::kVectorized);
-TVM_TIR_IR_BUILDER_FOR_FRAME(Unroll, tvm::tirx::ForKind::kUnrolled);
+TVM_TIRX_IR_BUILDER_FOR_FRAME(Serial, tvm::tirx::ForKind::kSerial);
+TVM_TIRX_IR_BUILDER_FOR_FRAME(Parallel, tvm::tirx::ForKind::kParallel);
+TVM_TIRX_IR_BUILDER_FOR_FRAME(Vectorized, tvm::tirx::ForKind::kVectorized);
+TVM_TIRX_IR_BUILDER_FOR_FRAME(Unroll, tvm::tirx::ForKind::kUnrolled);
 
-#undef TVM_TIR_IR_BUILDER_FOR_FRAME
+#undef TVM_TIRX_IR_BUILDER_FOR_FRAME
 
 ForFrame ThreadBinding(PrimExpr start, PrimExpr stop, ffi::String thread,
                        ffi::Optional<ffi::Map<ffi::String, Any>> annotations) {
@@ -709,38 +856,47 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              TVM_FFI_THROW(ValueError) << "Unexpected type for TIR Arg: " << obj->GetTypeKey();
              throw;
            })
-      .def("script.ir_builder.tirx.FuncName", FuncName)
-      .def("script.ir_builder.tirx.FuncAttrs", FuncAttrs)
-      .def("script.ir_builder.tirx.FuncRet", FuncRet)
-      .def("script.ir_builder.tirx.MatchBuffer", MatchBuffer)
-      .def("script.ir_builder.tirx.Block", Block)
-      .def("script.ir_builder.tirx.Init", Init)
-      .def("script.ir_builder.tirx.Where", Where)
-      .def("script.ir_builder.tirx.Reads", Reads)
-      .def("script.ir_builder.tirx.Writes", Writes)
-      .def("script.ir_builder.tirx.BlockAttrs", BlockAttrs)
-      .def("script.ir_builder.tirx.SBlockAllocBuffer", SBlockAllocBuffer)
-      .def("script.ir_builder.tirx.AxisSpatial", axis::Spatial)
-      .def("script.ir_builder.tirx.AxisReduce", axis::Reduce)
-      .def("script.ir_builder.tirx.AxisScan", axis::Scan)
-      .def("script.ir_builder.tirx.AxisOpaque", axis::Opaque)
-      .def("script.ir_builder.tirx.AxisRemap", axis::Remap)
-      .def("script.ir_builder.tirx.Serial", Serial)
-      .def("script.ir_builder.tirx.Parallel", Parallel)
-      .def("script.ir_builder.tirx.Vectorized", Vectorized)
-      .def("script.ir_builder.tirx.Unroll", Unroll)
-      .def("script.ir_builder.tirx.ThreadBinding", ThreadBinding)
-      .def("script.ir_builder.tirx.Grid", Grid)
-      .def("script.ir_builder.tirx.Assert", Assert)
-      .def("script.ir_builder.tirx.Bind", Bind)
-      .def("script.ir_builder.tirx.Attr", Attr)
-      .def("script.ir_builder.tirx.While", While)
-      .def("script.ir_builder.tirx.If", If)
-      .def("script.ir_builder.tirx.Then", Then)
-      .def("script.ir_builder.tirx.Else", Else)
-      .def("script.ir_builder.tirx.DeclBuffer", DeclBuffer)
-      .def("script.ir_builder.tirx.AllocBuffer", AllocBuffer)
-      .def("script.ir_builder.tirx.LaunchThread",
+      .def("script.ir_builder.tir.FuncName", FuncName)
+      .def("script.ir_builder.tir.FuncAttrs", FuncAttrs)
+      .def("script.ir_builder.tir.FuncRet", FuncRet)
+      .def("script.ir_builder.tir.MatchBuffer", MatchBuffer)
+      .def("script.ir_builder.tir.Block", Block)
+      .def("script.ir_builder.tir.World", World)
+      .def("script.ir_builder.tir.Kernel", Kernel)
+      .def("script.ir_builder.tir.Warp", Warp)
+      .def("script.ir_builder.tir.Thread", Thread)
+      .def("script.ir_builder.tir.ScopeSlice", ScopeSlice)
+      .def("script.ir_builder.tir.KernelId", KernelId)
+      .def("script.ir_builder.tir.BlockId", BlockId)
+      .def("script.ir_builder.tir.WarpId", WarpId)
+      .def("script.ir_builder.tir.ThreadId", ThreadId)
+      .def("script.ir_builder.tir.Init", Init)
+      .def("script.ir_builder.tir.Where", Where)
+      .def("script.ir_builder.tir.Reads", Reads)
+      .def("script.ir_builder.tir.Writes", Writes)
+      .def("script.ir_builder.tir.BlockAttrs", BlockAttrs)
+      .def("script.ir_builder.tir.SBlockAllocBuffer", SBlockAllocBuffer)
+      .def("script.ir_builder.tir.AxisSpatial", axis::Spatial)
+      .def("script.ir_builder.tir.AxisReduce", axis::Reduce)
+      .def("script.ir_builder.tir.AxisScan", axis::Scan)
+      .def("script.ir_builder.tir.AxisOpaque", axis::Opaque)
+      .def("script.ir_builder.tir.AxisRemap", axis::Remap)
+      .def("script.ir_builder.tir.Serial", Serial)
+      .def("script.ir_builder.tir.Parallel", Parallel)
+      .def("script.ir_builder.tir.Vectorized", Vectorized)
+      .def("script.ir_builder.tir.Unroll", Unroll)
+      .def("script.ir_builder.tir.ThreadBinding", ThreadBinding)
+      .def("script.ir_builder.tir.Grid", Grid)
+      .def("script.ir_builder.tir.Assert", Assert)
+      .def("script.ir_builder.tir.Bind", Bind)
+      .def("script.ir_builder.tir.Attr", Attr)
+      .def("script.ir_builder.tir.While", While)
+      .def("script.ir_builder.tir.If", If)
+      .def("script.ir_builder.tir.Then", Then)
+      .def("script.ir_builder.tir.Else", Else)
+      .def("script.ir_builder.tir.DeclBuffer", DeclBuffer)
+      .def("script.ir_builder.tir.AllocBuffer", AllocBuffer)
+      .def("script.ir_builder.tir.LaunchThread",
            [](ffi::Variant<tvm::tirx::Var, ffi::String> thread_tag_or_var, PrimExpr extent) {
              if (auto var = thread_tag_or_var.as<tvm::tirx::Var>()) {
                return LaunchThread(var.value(), extent);
@@ -884,7 +1040,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

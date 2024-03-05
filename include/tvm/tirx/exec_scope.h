@@ -49,24 +49,28 @@ class ScopeIdDefNode : public Object {
   Array<ScopeId> def_ids;
   /*! \brief The extents of the ScopeId */
   Array<PrimExpr> extents;
-  /*! \brief Parent ExecScope name*/
+  /*! \brief Parent ExecScope name */
   String parent;
+  /*! \brief Current ExecScope name */
+  String cur;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("def_ids", &def_ids);
     v->Visit("extents", &extents);
     v->Visit("parent", &parent);
+    v->Visit("cur", &cur);
   }
 
   bool SEqualReduce(const ScopeIdDefNode* other, SEqualReducer equal) const {
     return equal(def_ids, other->def_ids) && equal(extents, other->extents) &&
-           equal(parent, other->parent);
+           equal(parent, other->parent) && equal(cur, other->cur);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(def_ids);
     hash_reduce(extents);
     hash_reduce(parent);
+    hash_reduce(cur);
   }
   static constexpr const char* _type_key = "tirx.ScopeIdDef";
   TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdDefNode, Object);
@@ -74,7 +78,7 @@ class ScopeIdDefNode : public Object {
 
 class ScopeIdDef : public ObjectRef {
  public:
-  TVM_DLL ScopeIdDef(Array<ScopeId> def_ids, Array<PrimExpr> extents, String parent);
+  TVM_DLL ScopeIdDef(Array<ScopeId> def_ids, Array<PrimExpr> extents, String parent, String cur);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ScopeIdDef, ObjectRef, ScopeIdDefNode);
 };

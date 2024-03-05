@@ -36,9 +36,10 @@ class ScopeIdDef(Object):
     def_ids: List[ScopeId]
     extents: List[PrimExpr]
     parent: str
+    cur: str
 
-    def __init__(self, def_ids: List[ScopeId], extents: List[PrimExpr], parent: str):
-        self.__init_handle_by_constructor__(_ffi_api.ScopeIdDef, def_ids, extents, parent)
+    def __init__(self, def_ids: List[ScopeId], extents: List[PrimExpr], parent: str, cur: str):
+        self.__init_handle_by_constructor__(_ffi_api.ScopeIdDef, def_ids, extents, parent, cur)
 
 
 @register_object("tirx.ExecScope")
@@ -50,7 +51,7 @@ class ExecScope(Object):
 
 
 @register_object("tirx.WorldScope")
-def WorldScope():
+class WorldScope(ExecScope):
     scope_id_def: ScopeIdDef
 
     def __init__(self, scope_id_def: ScopeIdDef):
@@ -58,17 +59,17 @@ def WorldScope():
 
 
 @register_object("tirx.KernelScope")
-def KernelScope():
+class KernelScope(ExecScope):
     scope_id_def: List[ScopeIdDef]
 
     def __init__(self, scope_id_def: List[ScopeIdDef]):
         self.__init_handle_by_constructor__(_ffi_api.KernelScope, scope_id_def)
 
 
-@register_object("tirx.SubExecScope")
+@register_object("tirx.ExecScopeSlice")
 class ExecScopeSlice(ExecScope):
     def_ids: List[ScopeId]
     ranges: List[Range]
 
     def __init__(self, ids: List[PrimExpr], ranges: List[Range], name: str):
-        self.__init_handle_by_constructor__(_ffi_api.SubExecScope, ids, ranges, name)
+        self.__init_handle_by_constructor__(_ffi_api.ExecScopeSlice, ids, ranges, name)

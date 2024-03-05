@@ -37,20 +37,21 @@ TVM_REGISTER_NODE_TYPE(ScopeIdNode);
 TVM_REGISTER_GLOBAL("tirx.ScopeId").set_body_typed([](String name) { return ScopeId(name); });
 
 // ScopeIdDef
-ScopeIdDef::ScopeIdDef(Array<ScopeId> ids, Array<PrimExpr> extents, String parent) {
+ScopeIdDef::ScopeIdDef(Array<ScopeId> ids, Array<PrimExpr> extents, String parent, String cur) {
   auto n = make_object<ScopeIdDefNode>();
   ICHECK_EQ(ids.size(), extents.size()) << "Number of dimensions must match";
   n->def_ids = std::move(ids);
   n->extents = std::move(extents);
   n->parent = std::move(parent);
+  n->cur = std::move(cur);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_NODE_TYPE(ScopeIdDefNode);
 
 TVM_REGISTER_GLOBAL("tirx.ScopeIdDef")
-    .set_body_typed([](Array<ScopeId> vars, Array<PrimExpr> extents, String parent) {
-      return ScopeIdDef(vars, extents, parent);
+    .set_body_typed([](Array<ScopeId> vars, Array<PrimExpr> extents, String parent, String cur) {
+      return ScopeIdDef(vars, extents, parent, cur);
     });
 
 // ExecScope
@@ -111,5 +112,5 @@ TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
       return ExecScopeSlice(vars, ranges, name);
     });
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

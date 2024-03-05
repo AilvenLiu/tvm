@@ -91,8 +91,8 @@ void SBlockFrameNode::ExitWithScope() {
     attrs.Set("tirx.script_parsing_detect_access", tvm::IntImm(DataType::Int(64), detect_access));
   }
   tvm::tirx::SBlock block(iter_vars, reads.value_or(ffi::Array<tvm::tirx::BufferRegion>()),
-                          writes.value_or(ffi::Array<tvm::tirx::BufferRegion>()), name,
-                          AsStmt(stmts), init, tir_alloc_buffers, match_buffers, attrs);
+                         writes.value_or(ffi::Array<tvm::tirx::BufferRegion>()), name, AsStmt(stmts),
+                         init, tir_alloc_buffers, match_buffers, attrs, tvm::Span(), exec_scope);
   if (no_realize) {
     TVM_FFI_CHECK(iter_values.empty(), ValueError)
         << "Block bindings are not allowed when `no_realize=True`";
@@ -197,7 +197,7 @@ void ElseFrameNode::ExitWithScope() {
   FindIfFrame("T.else_")->else_stmts = stmts;
 }
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
