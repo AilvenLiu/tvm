@@ -31,15 +31,15 @@ namespace tvm {
 namespace tirx {
 
 // Base class for layout
-class LayoutNode : public Object {
+class TLayoutNode : public Object {
  public:
-  static constexpr const char* _type_key = "tirx.Layout";
-  TVM_DECLARE_BASE_OBJECT_INFO(LayoutNode, Object);
+  static constexpr const char* _type_key = "tirx.TLayout";
+  TVM_DECLARE_BASE_OBJECT_INFO(TLayoutNode, Object);
 };
 
-class Layout : public ObjectRef {
+class TLayout : public ObjectRef {
  public:
-  TVM_DEFINE_OBJECT_REF_METHODS(Layout, ObjectRef, LayoutNode);
+  TVM_DEFINE_OBJECT_REF_METHODS(TLayout, ObjectRef, TLayoutNode);
 };
 
 // IterTreeSplit
@@ -114,7 +114,7 @@ class IterTree : public ObjectRef {
 };
 
 // CoordIterTree
-class CoordIterTreeNode : public IterTreeNode {
+class DataIterTreeNode : public IterTreeNode {
  public:
   /*! \brief The coefficients of each leaf node */
   Array<PrimExpr> coeff;
@@ -124,7 +124,7 @@ class CoordIterTreeNode : public IterTreeNode {
     v->Visit("coeff", &coeff);
   }
 
-  bool SEqualReduce(const CoordIterTreeNode* other, SEqualReducer equal) const {
+  bool SEqualReduce(const DataIterTreeNode* other, SEqualReducer equal) const {
     return IterTreeNode::SEqualReduce(other, equal) && equal(coeff, other->coeff);
   }
 
@@ -133,15 +133,15 @@ class CoordIterTreeNode : public IterTreeNode {
     hash_reducer(coeff);
   }
 
-  static constexpr const char* _type_key = "tirx.CoordIterTree";
-  TVM_DECLARE_FINAL_OBJECT_INFO(CoordIterTreeNode, IterTreeNode);
+  static constexpr const char* _type_key = "tirx.DataIterTree";
+  TVM_DECLARE_FINAL_OBJECT_INFO(DataIterTreeNode, IterTreeNode);
 };
 
-class CoordIterTree : public IterTree {
+class DataIterTree : public IterTree {
  public:
-  TVM_DLL explicit CoordIterTree(Var root, Array<IterTreeSplit> splits, Array<PrimExpr> coeff);
+  TVM_DLL explicit DataIterTree(Var root, Array<IterTreeSplit> splits, Array<PrimExpr> coeff);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(CoordIterTree, IterTree, CoordIterTreeNode);
+  TVM_DEFINE_OBJECT_REF_METHODS(DataIterTree, IterTree, DataIterTreeNode);
 };
 
 // ScopeIdAttr
@@ -155,7 +155,7 @@ class ScopeIdAttrNode : public Object {
  public:
   /*! \brief type of ScopeID, can be split (S), replicate (R), exclusive (E) */
   ScopeIdType type;
-  /*! \brief If type is split, the bound leaf in CoordIterTree */
+  /*! \brief If type is split, the bound leaf in DataIterTree */
   Optional<Var> bound;
   /*! \brief If type is exclusive, the id that owns the data */
   Optional<PrimExpr> owner;
@@ -188,8 +188,8 @@ class ScopeIdAttr : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_METHODS(ScopeIdAttr, ObjectRef, ScopeIdAttrNode);
 };
 
-// ScopeIdIterTree
-class ScopeIdIterTreeNode : public IterTreeNode {
+// DeviceIterTree
+class DeviceIterTreeNode : public IterTreeNode {
  public:
   /*! \brief The attributes of each leaf node */
   Array<ScopeIdAttr> attrs;
@@ -199,7 +199,7 @@ class ScopeIdIterTreeNode : public IterTreeNode {
     v->Visit("attrs", &attrs);
   }
 
-  bool SEqualReduce(const ScopeIdIterTreeNode* other, SEqualReducer equal) const {
+  bool SEqualReduce(const DeviceIterTreeNode* other, SEqualReducer equal) const {
     return IterTreeNode::SEqualReduce(other, equal) && equal(attrs, other->attrs);
   }
 
@@ -208,53 +208,51 @@ class ScopeIdIterTreeNode : public IterTreeNode {
     hash_reducer(attrs);
   }
 
-  static constexpr const char* _type_key = "tirx.ScopeIdIterTree";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdIterTreeNode, IterTreeNode);
+  static constexpr const char* _type_key = "tirx.DeviceIterTree";
+  TVM_DECLARE_FINAL_OBJECT_INFO(DeviceIterTreeNode, IterTreeNode);
 };
 
-class ScopeIdIterTree : public IterTree {
+class DeviceIterTree : public IterTree {
  public:
-  TVM_DLL explicit ScopeIdIterTree(Var root, Array<IterTreeSplit> splits, Array<ScopeIdAttr> attrs);
+  TVM_DLL explicit DeviceIterTree(Var root, Array<IterTreeSplit> splits, Array<ScopeIdAttr> attrs);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ScopeIdIterTree, IterTree, ScopeIdIterTreeNode);
+  TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterTree, IterTree, DeviceIterTreeNode);
 };
 
 // TileLayout
-class TileLayoutNode : public LayoutNode {
+class TileLayoutNode : public TLayoutNode {
  public:
   /*! \brief coordinate iter forest  */
-  Array<CoordIterTree> coord_iter_trees;
+  Array<DataIterTree> data_trees;
   /*! \brief scope id iter forest */
-  Array<ScopeIdIterTree> scope_id_iter_trees;
+  Array<DeviceIterTree> device_trees;
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("coord_iter_trees", &coord_iter_trees);
-    v->Visit("scope_id_iter_trees", &scope_id_iter_trees);
+    v->Visit("data_trees", &data_trees);
+    v->Visit("device_trees", &device_trees);
   }
 
   bool SEqualReduce(const TileLayoutNode* other, SEqualReducer equal) const {
-    return equal(coord_iter_trees, other->coord_iter_trees) &&
-           equal(scope_id_iter_trees, other->scope_id_iter_trees);
+    return equal(data_trees, other->data_trees) && equal(device_trees, other->device_trees);
   }
 
   void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(coord_iter_trees);
-    hash_reducer(scope_id_iter_trees);
+    hash_reducer(data_trees);
+    hash_reducer(device_trees);
   }
 
   static constexpr const char* _type_key = "tirx.TileLayout";
-  TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, LayoutNode);
+  TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, TLayoutNode);
 };
 
-class TileLayout : public Layout {
+class TileLayout : public TLayout {
  public:
-  TVM_DLL explicit TileLayout(Array<CoordIterTree> coord_iter_trees,
-                              Array<ScopeIdIterTree> scope_id_iter_trees);
+  TVM_DLL explicit TileLayout(Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, Layout, TileLayoutNode);
+  TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
 };
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

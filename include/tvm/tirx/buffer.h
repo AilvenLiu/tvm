@@ -21,14 +21,15 @@
  * \file tvm/tirx/buffer.h
  * \brief Symbolic n-dimensional array, to represent a memory buffer.
  */
-#ifndef TVM_TIR_BUFFER_H_
-#define TVM_TIR_BUFFER_H_
+#ifndef TVM_TIRX_BUFFER_H_
+#define TVM_TIRX_BUFFER_H_
 
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 #include <tvm/ir/expr.h>
 #include <tvm/node/script_printer.h>
+#include <tvm/tirx/layout.h>
 #include <tvm/tirx/var.h>
 
 #include <string>
@@ -245,6 +246,62 @@ TVM_DLL Buffer decl_buffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType
                            ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
                            Span span = Span());
 
+/*! \brief TIR+ Buffer*/
+class TBufferNode : public BufferNode {
+ public:
+  /*! \brief The layout of the buffer */
+  Optional<TLayout> layout;
+
+  void VisitAttrs(AttrVisitor* v) {
+    BufferNode::VisitAttrs(v);
+    v->Visit("layout", &layout);
+  }
+
+  static constexpr const char* _type_key = "tirx.TBuffer";
+  TVM_DECLARE_FINAL_OBJECT_INFO(TBufferNode, BufferNode);
+};
+
+/*!
+ * \brief Managed reference to TBufferNode.
+ * \sa TBufferNode
+ */
+class TBuffer : public Buffer {
+ public:
+  TVM_DLL TBuffer(Var data, DataType dtype, Array<PrimExpr> shape, Array<PrimExpr> strides,
+                  PrimExpr elem_offset, String name, int data_alignment, int offset_factor,
+                  BufferType buffer_type, Array<IntImm> axis_separators = {},
+                  Optional<TLayout> layout = std::nullopt, Span span = Span());
+  TVM_DEFINE_OBJECT_REF_METHODS(TBuffer, Buffer, TBufferNode);
+};
+
+/*! \brief TIR+ Buffer*/
+class TBufferNode : public BufferNode {
+ public:
+  /*! \brief The layout of the buffer */
+  Optional<TLayout> layout;
+
+  void VisitAttrs(AttrVisitor* v) {
+    BufferNode::VisitAttrs(v);
+    v->Visit("layout", &layout);
+  }
+
+  static constexpr const char* _type_key = "tirx.TBuffer";
+  TVM_DECLARE_FINAL_OBJECT_INFO(TBufferNode, BufferNode);
+};
+
+/*!
+ * \brief Managed reference to TBufferNode.
+ * \sa TBufferNode
+ */
+class TBuffer : public Buffer {
+ public:
+  TVM_DLL TBuffer(Var data, DataType dtype, Array<PrimExpr> shape, Array<PrimExpr> strides,
+                  PrimExpr elem_offset, String name, int data_alignment, int offset_factor,
+                  BufferType buffer_type, Array<IntImm> axis_separators = {},
+                  Optional<TLayout> layout = NullOpt, Span span = Span());
+  TVM_DEFINE_OBJECT_REF_METHODS(TBuffer, Buffer, TBufferNode);
+};
+
 /*!
  * \brief Base node for data producers.
  *
@@ -305,6 +362,6 @@ TVM_DLL tirx::Buffer BufferWithOffsetAlignment(ffi::Array<PrimExpr> shape, DataT
                                                std::string name, int data_alignment,
                                                int offset_factor, bool compact,
                                                std::string memory_scope = "");
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
-#endif  // TVM_TIR_BUFFER_H_
+#endif  // TVM_TIRX_BUFFER_H_
