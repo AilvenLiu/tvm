@@ -505,10 +505,6 @@ class BufferView(Object, Scriptable):
         The destination buffer.
     """
 
-    src_buffer: Buffer
-    layout: TLayout
-    dst_buffer: Buffer
-
     def __init__(self, src_buffer: Buffer, layout: TLayout, dst_buffer: Buffer) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.BufferView, src_buffer, layout, dst_buffer  # type: ignore

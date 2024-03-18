@@ -19,7 +19,8 @@
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/reflection/registry.h>
-#include <tvm/script/ir_builder/tirx/ir.h>
+#include <tvm/script/ir_builder/tir/ir.h>
+#include <tvm/tirx/layout.h>
 
 #include "./utils.h"
 
@@ -29,15 +30,16 @@ namespace ir_builder {
 namespace tirx {
 
 using tvm::tirx::IterVar;
+using tvm::tirx::TLayout;
 
 Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
                   ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators) {
-  TVM_FFI_CHECK(buffer_type == "auto" || buffer_type == "default" || buffer_type.empty(),
-                ValueError)
-      << "`buffer_type` must be `auto` or `default` or empty";
+                  ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                  ffi::Optional<TLayout> layout) {
+  TVM_FFI_CHECK(buffer_type == "auto" || buffer_type == "default" || buffer_type.empty())
+      << "ValueError: `buffer_type` must be `auto` or `default` or empty";
   Var buffer_data;
   if (!data.defined()) {
     DataType storage_dtype = dtype;
@@ -52,10 +54,10 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
     DataType shape_dtype = shape.empty() ? DataType::Int(32) : shape[0]->dtype;
     elem_offset = tvm::tirx::Var("elem_offset", shape_dtype);
   }
-  return Buffer(buffer_data, dtype, shape, strides.value_or(ffi::Array<PrimExpr>()),
-                elem_offset.value_or(PrimExpr()), buffer_name, align, offset_factor,
-                (buffer_type == "auto" ? tvm::tirx::kAutoBroadcast : tvm::tirx::kDefault),
-                axis_separators.value_or(ffi::Array<IntImm>()));
+  return TBuffer(buffer_data, dtype, shape, strides.value_or(ffi::Array<PrimExpr>()),
+                 elem_offset.value_or(PrimExpr()), buffer_name, align, offset_factor,
+                 (buffer_type == "auto" ? tvm::tirx::kAutoBroadcast : tvm::tirx::kDefault),
+                 axis_separators.value_or(ffi::Array<IntImm>()), layout);
 }
 
 PrimFuncFrame PrimFunc(bool is_private) {
@@ -90,8 +92,7 @@ Buffer Arg(ffi::String name, Buffer buffer) {
 void FuncName(ffi::String name) {
   PrimFuncFrame frame = FindPrimFuncFrame("T.func_name");
   if (frame->name.has_value()) {
-    TVM_FFI_THROW(ValueError) << "Duplicate prim func name, previous one is "
-                              << frame->name.value();
+    TVM_FFI_THROW(InternalError) << "ValueError: Duplicate prim func name, previous one is " << frame->name.value();
   }
   frame->name = name;
 }
@@ -101,16 +102,16 @@ void FuncAttrs(ffi::Map<ffi::String, ffi::Any> new_attrs) {
   PrimFuncFrame frame = FindPrimFuncFrame("T.func_attr");
   for (const auto& [key, value] : new_attrs) {
     if (key == tvm::attr::kGlobalSymbol && frame->is_private) {
-      TVM_FFI_THROW(ValueError) << "A private function may not have the kGlobalSymbol (\""
-                                << tvm::attr::kGlobalSymbol << "\") attribute.  "
-                                << "However, a private function specified the global symbol as "
-                                << value;
+      TVM_FFI_THROW(InternalError) << "ValueError: "
+                 << "A private function may not have the kGlobalSymbol (\""
+                 << tvm::attr::kGlobalSymbol << "\") attribute.  "
+                 << "However, a private function specified the global symbol as " << value;
     }
 
     if (auto prev = frame->attrs.Get(key)) {
-      TVM_FFI_THROW(ValueError) << "Duplicate prim func annotation for key = \"" << key << "\".  "
-                                << "Previous value was " << prev.value()
-                                << ", with later definition as " << value;
+      TVM_FFI_THROW(InternalError) << "ValueError: "
+                 << "Duplicate prim func annotation for key = \"" << key << "\".  "
+                 << "Previous value was " << prev.value() << ", with later definition as " << value;
     } else {
       frame->attrs.Set(key, value);
     }
@@ -120,8 +121,8 @@ void FuncAttrs(ffi::Map<ffi::String, ffi::Any> new_attrs) {
 tvm::Type FuncRet(tvm::Type ret_type) {
   PrimFuncFrame frame = FindPrimFuncFrame("T.ret_type");
   if (frame->ret_type.defined()) {
-    TVM_FFI_THROW(ValueError) << "Duplicate prim func return type, previous one is "
-                              << frame->ret_type.value();
+    TVM_FFI_THROW(InternalError) << "ValueError: Duplicate prim func return type, previous one is "
+               << frame->ret_type.value();
   }
   frame->ret_type = ret_type;
   return ret_type;
@@ -142,7 +143,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
         return buffer;
       }
     }
-    TVM_FFI_THROW(ValueError) << "Can not bind non-input param to buffer.";
+    TVM_FFI_THROW(InternalError) << "ValueError: Can not bind non-input param to buffer.";
   } else if (const auto* buffer_load = param.as<tvm::tirx::BufferLoadNode>()) {
     SBlockFrame frame = FindSBlockFrame("T.match_buffer");
     frame->match_buffers.push_back(tvm::tirx::MatchBufferRegion(
@@ -152,7 +153,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
     frame->match_buffers.push_back(
         tvm::tirx::MatchBufferRegion(buffer, ffi::GetRef<tvm::tirx::BufferRegion>(buffer_region)));
   } else {
-    TVM_FFI_THROW(ValueError) << "Unexpected type for TIR MatchBuffer.";
+    TVM_FFI_THROW(InternalError) << "ValueError: Unexpected type for TIR MatchBuffer.";
   }
   return buffer;
 }
@@ -202,11 +203,11 @@ BlockFrame ScopeSlice(Array<tvm::tirx::ScopeId> vars, Array<Range> ranges, Strin
 tvm::tirx::ScopeId KernelId(PrimExpr extent) {
   BlockFrame frame = FindBlockFrame("T.kernel_id");
   if (frame->name != "world") {
-    LOG(FATAL) << "ValueError: Kernel scope id should be decalred in world scope named \"world\""
+    TVM_FFI_THROW(InternalError) << "ValueError: Kernel scope id should be decalred in world scope named \"world\""
                << "but this one is declared in scope named \"" << frame->name << "\"";
   }
   if (frame->exec_scope.defined()) {
-    LOG(FATAL) << "ValueError: Duplicate kernel scope id declaration, previous one is "
+    TVM_FFI_THROW(InternalError) << "ValueError: Duplicate kernel scope id declaration, previous one is "
                << frame->exec_scope;
   }
   tvm::tirx::ScopeId scope_id("");
@@ -219,7 +220,7 @@ Array<tvm::tirx::ScopeId> KernelScopeId(Array<PrimExpr> extents, String parent, 
                                        String cur) {
   BlockFrame frame = FindBlockFrame(name);
   if (frame->name != "kernel") {
-    LOG(FATAL) << "ValueError: " << cur
+    TVM_FFI_THROW(InternalError) << "ValueError: " << cur
                << " scope id should be decalred in kernel scope named \"kernel\""
                << "but this one is declared in scope named \"" << frame->name << "\"";
   }
@@ -227,7 +228,7 @@ Array<tvm::tirx::ScopeId> KernelScopeId(Array<PrimExpr> extents, String parent, 
     frame->exec_scope = tvm::tirx::KernelScope(Array<tvm::tirx::ScopeIdDef>());
   }
   Array<tvm::tirx::ScopeId> scope_ids;
-  for (int i = 0; i < extents.size(); ++i) {
+  for (size_t i = 0; i < extents.size(); ++i) {
     scope_ids.push_back(tvm::tirx::ScopeId(""));
   }
   const_cast<tvm::tirx::KernelScopeNode*>(frame->exec_scope.as<tvm::tirx::KernelScopeNode>())
@@ -275,11 +276,11 @@ BlockFrame ScopeSlice(Array<tvm::tirx::ScopeId> vars, Array<Range> ranges, Strin
 tvm::tirx::ScopeId KernelId(PrimExpr extent) {
   BlockFrame frame = FindBlockFrame("T.kernel_id");
   if (frame->name != "world") {
-    LOG(FATAL) << "ValueError: Kernel scope id should be decalred in world scope named \"world\""
+    TVM_FFI_THROW(InternalError) << "ValueError: Kernel scope id should be decalred in world scope named \"world\""
                << "but this one is declared in scope named \"" << frame->name << "\"";
   }
   if (frame->exec_scope.defined()) {
-    LOG(FATAL) << "ValueError: Duplicate kernel scope id declaration, previous one is "
+    TVM_FFI_THROW(InternalError) << "ValueError: Duplicate kernel scope id declaration, previous one is "
                << frame->exec_scope;
   }
   tvm::tirx::ScopeId scope_id("");
@@ -292,7 +293,7 @@ Array<tvm::tirx::ScopeId> KernelScopeId(Array<PrimExpr> extents, String parent, 
                                        String cur) {
   BlockFrame frame = FindBlockFrame(name);
   if (frame->name != "kernel") {
-    LOG(FATAL) << "ValueError: " << cur
+    TVM_FFI_THROW(InternalError) << "ValueError: " << cur
                << " scope id should be decalred in kernel scope named \"kernel\""
                << "but this one is declared in scope named \"" << frame->name << "\"";
   }
@@ -300,7 +301,7 @@ Array<tvm::tirx::ScopeId> KernelScopeId(Array<PrimExpr> extents, String parent, 
     frame->exec_scope = tvm::tirx::KernelScope(Array<tvm::tirx::ScopeIdDef>());
   }
   Array<tvm::tirx::ScopeId> scope_ids;
-  for (int i = 0; i < extents.size(); ++i) {
+  for (size_t i = 0; i < extents.size(); ++i) {
     scope_ids.push_back(tvm::tirx::ScopeId(""));
   }
   const_cast<tvm::tirx::KernelScopeNode*>(frame->exec_scope.as<tvm::tirx::KernelScopeNode>())
@@ -320,13 +321,15 @@ Array<tvm::tirx::ScopeId> ThreadId(Array<PrimExpr> extents, String parent) {
   return KernelScopeId(extents, parent, "T.thread_id", "thread");
 }
 
-BlockInitFrame Init() { return BlockInitFrame(ffi::make_object<BlockInitFrameNode>()); }
+ffi::Optional<BlockInitFrame> Init() {
+  return BlockInitFrame(ffi::make_object<BlockInitFrameNode>());
+}
 
 void Where(PrimExpr predicate) {
   SBlockFrame frame = FindSBlockFrame("T.where");
   if (frame->predicate.defined()) {
-    TVM_FFI_THROW(ValueError) << "Duplicate block predicate declaration, previous one is "
-                              << frame->predicate;
+    TVM_FFI_THROW(InternalError) << "ValueError: Duplicate block predicate declaration, previous one is "
+               << frame->predicate;
   }
   frame->predicate = predicate;
 }
@@ -335,8 +338,7 @@ void Reads(ffi::Array<ObjectRef> buffer_slices) {
   using namespace tvm::tirx;
   SBlockFrame frame = FindSBlockFrame("T.reads");
   if (frame->reads.defined()) {
-    TVM_FFI_THROW(ValueError) << "Duplicate read region declaration, previous one is "
-                              << frame->reads;
+    TVM_FFI_THROW(InternalError) << "ValueError: Duplicate read region declaration, previous one is " << frame->reads;
   }
   ffi::Array<BufferRegion> reads;
   for (const ObjectRef& obj : buffer_slices) {
@@ -355,8 +357,8 @@ void Writes(ffi::Array<ObjectRef> buffer_slices) {
   using namespace tvm::tirx;
   SBlockFrame frame = FindSBlockFrame("T.writes");
   if (frame->writes.defined()) {
-    TVM_FFI_THROW(ValueError) << "Duplicate write region declaration, previous one is "
-                              << frame->writes;
+    TVM_FFI_THROW(InternalError) << "ValueError: Duplicate write region declaration, previous one is "
+               << frame->writes;
   }
   ffi::Array<BufferRegion> writes;
   for (const ObjectRef& obj : buffer_slices) {
@@ -395,9 +397,8 @@ ffi::Map<ffi::String, Any> MergeAnnotations(const ffi::Map<ffi::String, Any>& ne
     }
     // Case 2.2: the values are not both dicts, check if the keys are the same
     if (!ffi::AnyEqual()(old_value.value(), value)) {
-      TVM_FFI_THROW(ValueError) << "Try to merge two annotations with different values for key `"
-                                << key << "`, previous one is " << old_value.value()
-                                << ", new one is " << value;
+      TVM_FFI_THROW(InternalError) << "ValueError: Try to merge two annotations with different values for key `"
+                 << key << "`, previous one is " << old_value.value() << ", new one is " << value;
     }
   }
   return result;
@@ -418,17 +419,18 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                          ffi::Array<PrimExpr> strides, PrimExpr elem_offset,
                          ffi::String storage_scope, int align, int offset_factor,
                          ffi::String buffer_type_str,
-                         ffi::Optional<ffi::Array<IntImm>> axis_separators) {
+                         ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                         ffi::Optional<TLayout> layout) {
   Buffer buffer = BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align,
-                             offset_factor, buffer_type_str, axis_separators);
+                             offset_factor, buffer_type_str, axis_separators, layout);
   IRBuilder builder = IRBuilder::Current();
   if (ffi::Optional<SBlockFrame> frame = builder->FindFrame<SBlockFrame>()) {
     frame.value()->alloc_buffers.push_back(buffer);
   } else if (ffi::Optional<PrimFuncFrame> frame = builder->GetLastFrame<PrimFuncFrame>()) {
     frame.value()->root_alloc_buffers.push_back(buffer);
   } else {
-    TVM_FFI_THROW(ValueError) << "Block frame or PrimFunc frame not find. Please ensure "
-                                 "'T.alloc_buffer' is called under T.sblock() or T.prim_func()";
+    TVM_FFI_THROW(InternalError) << "ValueError: Block frame or PrimFunc frame not find. Please ensure "
+                  "'T.alloc_buffer' is called under T.sblock() or T.prim_func()";
   }
   return buffer;
 }
@@ -440,14 +442,14 @@ IterVar PushBlockVar(IterVar iter_var, PrimExpr binding) {
     frame->iter_vars.push_back(iter_var);
     frame->iter_values.push_back(binding);
   } else {
-    TVM_FFI_THROW(TypeError) << "The last frame is not SBlockFrame";
+    TVM_FFI_THROW(InternalError) << "TypeError: The last frame is not SBlockFrame";
   }
   return iter_var;
 }
 
 #define TVM_TIRX_IR_BUILDER_AXIS(Method, Kind, Name)                                           \
   Var Method(Range dom, PrimExpr binding, DataType dtype) {                                   \
-    TVM_FFI_ICHECK(dom.defined()) << Name << " axis must have a domain";                      \
+    TVM_FFI_ICHECK(dom.defined()) << Name << " axis must have a domain";                              \
     int bits = std::max({dom->min.dtype().bits(), dom->extent.dtype().bits(), dtype.bits()}); \
     return PushBlockVar(IterVar(/*dom=*/dom, /*var=*/Var("", dtype.with_bits(bits)),          \
                                 /*iter_type=*/Kind, /*thread_tag=*/""),                       \
@@ -470,7 +472,7 @@ ffi::Array<Var> Remap(ffi::String kinds, ffi::Array<PrimExpr> bindings, DataType
     char c = kinds.c_str()[i];
     PrimExpr e = bindings[i];
     const VarNode* v = e.as<VarNode>();
-    TVM_FFI_CHECK(v, TypeError) << "Only Var is supported in T.axis.remap";
+    TVM_FFI_ICHECK(v) << "TypeError: Only Var is supported in T.axis.remap";
     Range dom{nullptr};
     for (const auto& frame : IRBuilder::Current()->frames) {
       if (const auto* for_frame = frame.as<ForFrameNode>()) {
@@ -487,8 +489,7 @@ ffi::Array<Var> Remap(ffi::String kinds, ffi::Array<PrimExpr> bindings, DataType
         }
       }
     }
-    TVM_FFI_CHECK(dom.defined(), TypeError)
-        << "Variable is not in the loop: " << ffi::GetRef<Var>(v);
+    TVM_FFI_ICHECK(dom.defined()) << "TypeError: Variable is not in the loop: " << ffi::GetRef<Var>(v);
     DataType dtype = v->dtype;
     if (c == 'S') {
       results.push_back(PushBlockVar(IterVar(/*dom=*/dom,
@@ -513,27 +514,27 @@ ffi::Array<Var> Remap(ffi::String kinds, ffi::Array<PrimExpr> bindings, DataType
 
 }  // namespace axis
 
-#define TVM_TIRX_IR_BUILDER_FOR_FRAME(Method, Kind)                                            \
-  ForFrame Method(PrimExpr start, PrimExpr stop,                                              \
-                  ffi::Optional<ffi::Map<ffi::String, Any>> annotations,                      \
-                  ffi::Optional<PrimExpr> step) {                                             \
-    PrimExpr min = start;                                                                     \
-    PrimExpr extent = arith::Analyzer().Simplify(stop - start);                               \
-    ObjectPtr<ForFrameNode> n = ffi::make_object<ForFrameNode>();                             \
-    int bits = std::max(min.dtype().bits(), extent.dtype().bits());                           \
-    n->vars = {Var("v", DataType(min.dtype().code(), bits, 1))};                              \
-    n->doms = {Range::FromMinExtent(min, extent)};                                            \
-    n->steps = {step};                                                                        \
-    n->f_make_for_loop = [annotations](ffi::Array<Var> vars, ffi::Array<Range> doms,          \
-                                       ffi::Array<ffi::Optional<PrimExpr>> steps,             \
+#define TVM_TIRX_IR_BUILDER_FOR_FRAME(Method, Kind)                                           \
+  ForFrame Method(PrimExpr start, PrimExpr stop,                                             \
+                  ffi::Optional<ffi::Map<ffi::String, Any>> annotations,                     \
+                  ffi::Optional<PrimExpr> step) {                                            \
+    PrimExpr min = start;                                                                    \
+    PrimExpr extent = arith::Analyzer().Simplify(stop - start);                              \
+    ObjectPtr<ForFrameNode> n = ffi::make_object<ForFrameNode>();                            \
+    int bits = std::max(min.dtype().bits(), extent.dtype().bits());                          \
+    n->vars = {Var("v", DataType(min.dtype().code(), bits, 1))};                             \
+    n->doms = {Range::FromMinExtent(min, extent)};                                           \
+    n->steps = {step};                                                                       \
+    n->f_make_for_loop = [annotations](ffi::Array<Var> vars, ffi::Array<Range> doms,         \
+                                       ffi::Array<ffi::Optional<PrimExpr>> steps,            \
                                        tvm::tirx::Stmt body) {                                \
-      TVM_FFI_ICHECK_EQ(vars.size(), 1);                                                      \
-      TVM_FFI_ICHECK_EQ(doms.size(), 1);                                                      \
-      TVM_FFI_ICHECK_EQ(steps.size(), 1);                                                     \
+      TVM_FFI_ICHECK_EQ(vars.size(), 1);                                                             \
+      TVM_FFI_ICHECK_EQ(doms.size(), 1);                                                             \
+      TVM_FFI_ICHECK_EQ(steps.size(), 1);                                                            \
       return tvm::tirx::For(vars[0], doms[0]->min, doms[0]->extent, Kind, body, std::nullopt, \
-                            annotations.value_or(ffi::Map<ffi::String, Any>()), steps[0]);    \
-    };                                                                                        \
-    return ForFrame(n);                                                                       \
+                           annotations.value_or(ffi::Map<ffi::String, Any>()), steps[0]);    \
+    };                                                                                       \
+    return ForFrame(n);                                                                      \
   }
 
 TVM_TIRX_IR_BUILDER_FOR_FRAME(Serial, tvm::tirx::ForKind::kSerial);
@@ -628,8 +629,8 @@ LaunchThreadFrame LaunchThread(Var var, PrimExpr extent) {
     if (ffi::Optional<IterVar> opt_iter_var = opt_frame.value()->env_threads.Get(var)) {
       iter_var = opt_iter_var.value();
     } else {
-      TVM_FFI_THROW(ValueError) << var->name_hint
-                                << " is not an env_thread created using T.env_thread.";
+      TVM_FFI_THROW(InternalError) << "ValueError: " << var->name_hint
+                 << " is not an env_thread created using T.env_thread.";
     }
   } else {
     TVM_FFI_THROW(InternalError) << "LaunchThread can only be used inside a PrimFunc";
@@ -639,8 +640,8 @@ LaunchThreadFrame LaunchThread(Var var, PrimExpr extent) {
     const_cast<tvm::tirx::IterVarNode*>(iter_var.get())->dom =
         Range(tvm::tirx::make_zero(extent.dtype()), extent);
   } else if (!arith::Analyzer().CanProveEqual(iter_var->dom->extent, extent)) {
-    TVM_FFI_THROW(ValueError) << "Inconsistent extents of environment thread. "
-                              << iter_var->dom->extent << " vs " << extent;
+    TVM_FFI_THROW(InternalError) << "ValueError: Inconsistent extents of environment thread. "
+               << iter_var->dom->extent << " vs " << extent;
   }
   n->iter_var = iter_var;
   n->extent = extent;
@@ -741,9 +742,9 @@ void BufferStore(Buffer buffer, PrimExpr value, ffi::Array<PrimExpr> indices,
     }
 
     if (!lanes_match) {
-      TVM_FFI_THROW(TypeError) << "Incompatible types in BufferStore"
-                               << ": LHS is `" << lhs_dtype << "`, RHS is `" << rhs_dtype
-                               << "`, indexing lanes: " << index_lanes;
+      TVM_FFI_THROW(InternalError) << "TypeError: Incompatible types in BufferStore"
+                 << ": LHS is `" << lhs_dtype << "`, RHS is `" << rhs_dtype
+                 << "`, indexing lanes: " << index_lanes;
     }
     if (lhs_dtype.code() != rhs_dtype.code()) {
       if (
@@ -819,8 +820,38 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     });
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
+    .set_dispatch<tvm::tirx::TBufferNode>([](const ObjectRef& node, ffi::String name) -> void {
+      tvm::tirx::TBufferNode* buffer =
+          const_cast<tvm::tirx::TBufferNode*>(node.as<tvm::tirx::TBufferNode>());
+      buffer->name = name;
+      Namer::Name(buffer->data, name);
+      int n = buffer->strides.size();
+      for (int i = 0; i < n; ++i) {
+        PrimExpr e = buffer->strides[i];
+        if (auto v = e.as<tvm::tirx::Var>()) {
+          Namer::Name(v.value(), name + "_s" + std::to_string(i));
+        }
+      }
+    });
+
+TVM_STATIC_IR_FUNCTOR(Namer, vtable)
+    .set_dispatch<tvm::tirx::TBufferNode>([](const ObjectRef& node, ffi::String name) -> void {
+      tvm::tirx::TBufferNode* buffer =
+          const_cast<tvm::tirx::TBufferNode*>(node.as<tvm::tirx::TBufferNode>());
+      buffer->name = name;
+      Namer::Name(buffer->data, name);
+      int n = buffer->strides.size();
+      for (int i = 0; i < n; ++i) {
+        PrimExpr e = buffer->strides[i];
+        if (auto v = e.as<tvm::tirx::Var>()) {
+          Namer::Name(v.value(), name + "_s" + std::to_string(i));
+        }
+      }
+    });
+
+TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     .set_dispatch<tvm::tirx::SizeVarNode>([](const ObjectRef& node, ffi::String name) -> void {
-      using namespace tvm::tirx;
+      using namespace tvm::tir;
       SizeVarNode* var = const_cast<SizeVarNode*>(node.as<SizeVarNode>());
       var->name_hint = name;
     });
@@ -853,7 +884,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              if (auto buffer = obj.as<Buffer>()) {
                return Arg(name, buffer.value());
              }
-             TVM_FFI_THROW(ValueError) << "Unexpected type for TIR Arg: " << obj->GetTypeKey();
+             TVM_FFI_THROW(InternalError) << "ValueError: Unexpected type for TIR Arg: " << obj->GetTypeKey();
              throw;
            })
       .def("script.ir_builder.tir.FuncName", FuncName)
@@ -903,8 +934,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              } else if (auto str = thread_tag_or_var.as<ffi::String>()) {
                return LaunchThread(str.value(), extent);
              } else {
-               TVM_FFI_THROW(ValueError)
-                   << "Unexpected type for TIR LaunchThread: " << thread_tag_or_var.GetTypeKey();
+               TVM_FFI_THROW(InternalError) << "ValueError: Unexpected type for TIR LaunchThread: "
+                          << thread_tag_or_var.GetTypeKey();
                throw;
              }
            })
@@ -1040,7 +1071,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -41,6 +41,7 @@ from tvm.tirx import Buffer, BufferRegion, IndexMap, PrimExpr
 from tvm.tirx import op as _tir_op
 from tvm.tirx import type_annotation
 from tvm.tirx.exec_scope import ExecScope, ScopeIdDef, ScopeId, WorldScope, KernelScope
+from tvm.tirx.layout import TLayout
 
 # import tirx.expr for direct ir construction to pass structural_equal comparison
 from tvm.tirx.expr import (
@@ -610,6 +611,7 @@ def sblock_alloc_buffer(
     offset_factor: int = 0,
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
+    layout: TLayout | None = None,
 ) -> Buffer:
     """SBlock-level buffer allocation function.
 
@@ -637,6 +639,9 @@ def sblock_alloc_buffer(
         The buffer type.
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
+        
+    layout : Optional[TLayout]
+        The layout of the buffer.
 
     Returns
     -------
@@ -659,6 +664,7 @@ def sblock_alloc_buffer(
         offset_factor,
         buffer_type,
         axis_separators,
+        layout
     )
 
 

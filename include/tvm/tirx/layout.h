@@ -102,7 +102,7 @@ class IterTreeNode : public Object {
     hash_reducer(splits);
   }
 
-  static constexpr const char* _type_key = "tirx.IterTreeNode";
+  static constexpr const char* _type_key = "tirx.IterTree";
   TVM_DECLARE_BASE_OBJECT_INFO(IterTreeNode, Object);
 };
 
@@ -252,7 +252,7 @@ class TileLayout : public TLayout {
   TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
 };
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

@@ -22,6 +22,7 @@
 #include <tvm/script/ir_builder/base.h>
 #include <tvm/script/ir_builder/tir/frame.h>
 #include <tvm/tirx/exec_scope.h>
+#include <tvm/tirx/layout.h>
 #include <tvm/tirx/op.h>
 
 namespace tvm {
@@ -30,6 +31,8 @@ namespace ir_builder {
 namespace tirx {
 
 using tvm::tirx::Buffer;
+using tvm::tirx::TBuffer;
+using tvm::tirx::TLayout;
 using tvm::tirx::Var;
 
 /*!
@@ -45,13 +48,15 @@ using tvm::tirx::Var;
  * \param offset_factor The factor of elem_offset field.
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
+ * \param layout The layout of the buffer.
  * \return The declared buffer.
  */
 Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
                   ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators);
+                  ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                  ffi::Optional<TLayout> layout = std::nullopt);
 
 /*!
  * \brief The primitive function statement.
@@ -180,13 +185,15 @@ void BlockAttrs(ffi::Map<ffi::String, ffi::Any> attrs);
  * \param offset_factor The factor of elem_offset field.
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
+ * \param layout The layout of the buffer.
  * \return The allocated buffer.
  */
 Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::Float(32),
                          ffi::Optional<Var> data = std::nullopt, ffi::Array<PrimExpr> strides = {},
                          PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "",
                          int align = -1, int offset_factor = 0, ffi::String buffer_type = "default",
-                         ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt);
+                   ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
+                   ffi::Optional<TLayout> layout = std::nullopt);
 namespace axis {
 
 /*!
@@ -529,7 +536,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

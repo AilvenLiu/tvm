@@ -542,6 +542,22 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   });
 }
 
+// BufferView
+BufferView::BufferView(Buffer src_buufer, TLayout layout, Buffer dst_buffer) {
+  ObjectPtr<BufferViewNode> node = make_object<BufferViewNode>();
+  node->src_buffer = std::move(src_buufer);
+  node->layout = std::move(layout);
+  node->dst_buffer = std::move(dst_buffer);
+  data_ = std::move(node);
+}
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.BufferView", [](Buffer src_buffer, TLayout layout, Buffer dst_buffer) {
+    return BufferView(src_buffer, layout, dst_buffer);
+  });
+});
+
 // Block
 SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
                ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,

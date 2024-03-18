@@ -777,6 +777,7 @@ class MatchBufferRegion : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(MatchBufferRegionNode);
 };
 
+// BufferView
 class BufferViewNode : public Object {
  public:
   /*! \brief The source buffer of the buffer view. */
