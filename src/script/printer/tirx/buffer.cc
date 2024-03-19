@@ -175,6 +175,21 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
     kwargs.Set("axis_separators",
                d->AsDoc<ExprDoc>(buffer->axis_separators, buffer_p->Attr("axis_separators")));
   }
+  // Step 11. Handle `buffer.logical_scope`
+  {
+    String scope = buffer.logical_scope();
+    if (scope != "") {
+      kwargs.Set(
+          "logical_scope",
+          LiteralDoc::Str(scope,
+                          buffer_p->Attr("data")->Attr("type_annotation")->Attr("logical_scope")));
+    }
+  }
+  // Step 12. Handle `buffer.layout`
+  if (const tirx::TBufferNode* tbuffer = buffer.as<tirx::TBufferNode>()) {
+    kwargs.Set("layout", d->AsDoc<ExprDoc>(tbuffer->layout, buffer_p->Attr("layout")));
+  }
+
   if (var_def_lhs.size() == 1) {
     frame->stmts.push_back(AssignDoc(var_def_lhs[0], var_def_rhs[0], std::nullopt));
   } else if (var_def_lhs.size() > 1) {
@@ -193,7 +208,7 @@ ExprDoc BufferCall(const ExprDoc& prefix, const ffi::Map<ffi::String, ExprDoc>& 
     }
   }
   for (ffi::String s : {"data", "strides", "elem_offset", "scope", "align", "offset_factor",
-                        "buffer_type", "axis_separators"}) {
+                        "buffer_type", "axis_separators", "logical_scope", "layout"}) {
     if (ffi::Optional<ExprDoc> doc = attrs.Get(s)) {
       kwargs_keys.push_back(s);
       kwargs_values.push_back(doc.value());
@@ -340,6 +355,76 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
       LOG(FATAL) << "IndexError: TBuffer is not defined in the environment: " << buffer;
     });
 
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
+    .set_dispatch<tirx::TileLayout>(
+        "", [](tirx::TileLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
+          Doc doc = TIR(d, "TLayout")
+                        ->Call({}, {"data_trees", "device_trees"},
+                               {
+                                   d->AsDoc<ExprDoc>(layout->data_trees, p->Attr("data_trees")),
+                                   d->AsDoc<ExprDoc>(layout->device_trees, p->Attr("device_trees")),
+                               });
+          return doc;
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
+    .set_dispatch<tirx::DataIterTree>(
+        "", [](tirx::DataIterTree tree, ObjectPath p, IRDocsifier d) -> Doc {
+          Doc doc = TIR(d, "DataIterTree")
+                        ->Call({}, {"root", "splits", "coeff"},
+                               {
+                                   d->AsDoc<ExprDoc>(tree->root, p->Attr("root")),
+                                   d->AsDoc<ExprDoc>(tree->splits, p->Attr("splits")),
+                                   d->AsDoc<ExprDoc>(tree->coeff, p->Attr("coeff")),
+                               });
+          return doc;
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
+    .set_dispatch<tirx::DeviceIterTree>(
+        "", [](tirx::DeviceIterTree tree, ObjectPath p, IRDocsifier d) -> Doc {
+          Doc doc = TIR(d, "DeviceIterTree")
+                        ->Call({}, {"root", "splits", "attrs"},
+                               {
+                                   d->AsDoc<ExprDoc>(tree->root, p->Attr("root")),
+                                   d->AsDoc<ExprDoc>(tree->splits, p->Attr("splits")),
+                                   d->AsDoc<ExprDoc>(tree->attrs, p->Attr("attrs")),
+                               });
+          return doc;
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
+    .set_dispatch<tirx::IterTreeSplit>(
+        "", [](tirx::IterTreeSplit split, ObjectPath p, IRDocsifier d) -> Doc {
+          Doc doc = TIR(d, "IterTreeSplit")
+                        ->Call({}, {"parent", "children", "extents"},
+                               {
+                                   d->AsDoc<ExprDoc>(split->parent, p->Attr("parent")),
+                                   d->AsDoc<ExprDoc>(split->children, p->Attr("children")),
+                                   d->AsDoc<ExprDoc>(split->extents, p->Attr("extents")),
+                               });
+          return doc;
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
+    .set_dispatch<tirx::ScopeIdAttr>(
+        "", [](tirx::ScopeIdAttr attr, ObjectPath p, IRDocsifier d) -> Doc {
+          Array<String> keys;
+          Array<ExprDoc> values;
+          keys.push_back("type");
+          values.push_back(LiteralDoc::Int(attr->type, p->Attr("type")));
+          if (attr->bound.defined()) {
+            keys.push_back("bound");
+            values.push_back(d->AsDoc<ExprDoc>(attr->bound, p->Attr("bound")));
+          }
+          if (attr->owner.defined()) {
+            keys.push_back("owner");
+            values.push_back(d->AsDoc<ExprDoc>(attr->owner, p->Attr("owner")));
+          }
+          Doc doc = TIR(d, "ScopeIdAttr")->Call({}, keys, values);
+          return doc;
+        });
+
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::MatchBufferRegion>(
         "", [](tirx::MatchBufferRegion stmt, AccessPath p, IRDocsifier d) -> Doc {
@@ -363,6 +448,10 @@ TVM_SCRIPT_REPR(tirx::BufferLoadNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferStoreNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::TBufferNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::DataIterTreeNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::DeviceIterTreeNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::IterTreeSplitNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::ScopeIdAttrNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::MatchBufferRegionNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::ProducerLoadNode, ReprPrintTIR);
 

@@ -36,7 +36,8 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                  ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::String logical_scope,
+
                   ffi::Optional<TLayout> layout) {
   TVM_FFI_CHECK(buffer_type == "auto" || buffer_type == "default" || buffer_type.empty())
       << "ValueError: `buffer_type` must be `auto` or `default` or empty";
@@ -46,7 +47,8 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
     if (storage_dtype == DataType::Bool()) {
       storage_dtype = DataType::Int(8);
     }
-    buffer_data = tvm::tirx::Var(buffer_name, PointerType(PrimType(storage_dtype), storage_scope));
+    buffer_data = tvm::tirx::Var(buffer_name,
+                                PointerType(PrimType(storage_dtype), storage_scope, logical_scope));
   } else {
     buffer_data = data.value();
   }
@@ -420,9 +422,12 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                          ffi::String storage_scope, int align, int offset_factor,
                          ffi::String buffer_type_str,
                          ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                         ffi::Optional<TLayout> layout) {
-  Buffer buffer = BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align,
-                             offset_factor, buffer_type_str, axis_separators, layout);
+                   ffi::String logical_scope, ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                   ffi::Optional<TLayout> layout) {
+                         ffi::String logical_scope, ffi::Optional<TLayout> layout) {
+  Buffer buffer =
+      BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align, offset_factor,
+                 buffer_type_str, axis_separators, logical_scope, layout);
   IRBuilder builder = IRBuilder::Current();
   if (ffi::Optional<SBlockFrame> frame = builder->FindFrame<SBlockFrame>()) {
     frame.value()->alloc_buffers.push_back(buffer);
@@ -1071,7 +1076,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

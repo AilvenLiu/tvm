@@ -33,11 +33,13 @@ def test_tensor_lowering():
 
             with T.block():
                 A = T.alloc_buffer([2,], dtype="float16", scope="local")
+                B = T.alloc_buffer([8, 8], dtype="float16", scope="local", logical_scope="warp", layout=T.TileLayout([], []))
 
-                out[0] = A[0]
+                out[0] = A[0] + B[0, 0]
     # fmt: on
 
-    print(tvm.lower(test))
+    test.show(black_format=False)
+    tvm.lower(test).show(black_format=False)
 
 
 if __name__ == "__main__":

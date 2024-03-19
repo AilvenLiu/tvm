@@ -466,6 +466,12 @@ ffi::String Buffer::scope() const {
   return ptr_type->storage_scope;
 }
 
+String Buffer::logical_scope() const {
+  const auto* ptr_type = (*this)->data->type_annotation.as<PointerTypeNode>();
+  ICHECK(ptr_type) << "Buffer variable is not of pointer type";
+  return ptr_type->logical_scope;
+}
+
 Buffer Buffer::MakeStrideView() const {
   if ((*this)->strides.size() != 0) return *this;
   if ((*this)->shape.size() == 0) return *this;

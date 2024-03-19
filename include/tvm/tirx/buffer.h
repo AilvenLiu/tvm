@@ -226,6 +226,11 @@ class Buffer : public ObjectRef {
    */
   TVM_DLL ffi::String scope() const;
 
+  /*!
+   * \brief Return the logical scope associated with this buffer.
+   */
+  TVM_DLL ffi::String logical_scope() const;
+
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Buffer, ObjectRef, BufferNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(BufferNode);
 };

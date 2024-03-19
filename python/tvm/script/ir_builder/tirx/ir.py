@@ -41,7 +41,15 @@ from tvm.tirx import Buffer, BufferRegion, IndexMap, PrimExpr
 from tvm.tirx import op as _tir_op
 from tvm.tirx import type_annotation
 from tvm.tirx.exec_scope import ExecScope, ScopeIdDef, ScopeId, WorldScope, KernelScope
-from tvm.tirx.layout import TLayout
+from tvm.tirx.layout import (
+    TLayout,
+    TileLayout,
+    DeviceIterTree,
+    ScopeIdAttr,
+    DataIterTree,
+    IterTree,
+    IterTreeSplit,
+)
 
 # import tirx.expr for direct ir construction to pass structural_equal comparison
 from tvm.tirx.expr import (
@@ -611,6 +619,7 @@ def sblock_alloc_buffer(
     offset_factor: int = 0,
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
+    logical_scope: str = "",
     layout: TLayout | None = None,
 ) -> Buffer:
     """SBlock-level buffer allocation function.
@@ -639,7 +648,10 @@ def sblock_alloc_buffer(
         The buffer type.
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
-        
+
+    logical_scope : str
+        The logical scope of the buffer.
+
     layout : Optional[TLayout]
         The layout of the buffer.
 
@@ -664,7 +676,8 @@ def sblock_alloc_buffer(
         offset_factor,
         buffer_type,
         axis_separators,
-        layout
+        logical_scope,
+        layout,
     )
 
 
@@ -2437,4 +2450,11 @@ __all__ += [
     "ExecScope",
     "ScopeIdDef",
     "ScopeId",
+    "TLayout",
+    "TileLayout",
+    "DeviceIterTree",
+    "ScopeIdAttr",
+    "DataIterTree",
+    "IterTree",
+    "IterTreeSplit",
 ]
