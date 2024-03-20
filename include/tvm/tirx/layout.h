@@ -34,6 +34,8 @@ namespace tirx {
 class TLayoutNode : public Object {
  public:
   static constexpr const char* _type_key = "tirx.TLayout";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_BASE_OBJECT_INFO(TLayoutNode, Object);
 };
 
@@ -70,6 +72,8 @@ class IterTreeSplitNode : public Object {
   }
 
   static constexpr const char* _type_key = "tirx.IterTreeSplit";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(IterTreeSplitNode, Object);
 };
 
@@ -103,6 +107,8 @@ class IterTreeNode : public Object {
   }
 
   static constexpr const char* _type_key = "tirx.IterTree";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_BASE_OBJECT_INFO(IterTreeNode, Object);
 };
 
@@ -177,6 +183,8 @@ class ScopeIdAttrNode : public Object {
   }
 
   static constexpr const char* _type_key = "tirx.ScopeIdAttr";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdAttrNode, Object);
 };
 
@@ -252,7 +260,7 @@ class TileLayout : public TLayout {
   TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
 };
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

@@ -49,6 +49,7 @@ from tvm.tirx.layout import (
     DataIterTree,
     IterTree,
     IterTreeSplit,
+    S,
 )
 
 # import tirx.expr for direct ir construction to pass structural_equal comparison
@@ -2457,4 +2458,5 @@ __all__ += [
     "DataIterTree",
     "IterTree",
     "IterTreeSplit",
+    "S",
 ]
