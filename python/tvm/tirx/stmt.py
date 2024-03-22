@@ -497,18 +497,38 @@ class BufferView(Object, Scriptable):
     ----------
     src_buffer : Buffer
         The source buffer.
-
+    
     layout : TLayout
         The layout of the buffer view.
-
+    
     dst_buffer : Buffer
         The destination buffer.
     """
+
+    src_buffer: Buffer
+    layout: TLayout
+    dst_buffer: Buffer
 
     def __init__(self, src_buffer: Buffer, layout: TLayout, dst_buffer: Buffer) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.BufferView, src_buffer, layout, dst_buffer  # type: ignore
         )
+
+@tvm_ffi.register_object("tir.BufferGet")
+class BufferGet(Object, Scriptable):
+    """BufferGet node.
+
+    Parameters
+    ----------
+    src_buffer : Buffer
+        The source buffer.
+    dst_buffer : Buffer
+        The destination buffer.
+    """
+
+    def __init__(self, src_buffer: Buffer, dst_buffer: Buffer) -> None:
+        self.__init_handle_by_constructor__(_ffi_api.BufferGet, src_buffer, dst_buffer)
+
 
 @tvm_ffi.register_object("tir.SBlock")
 class SBlock(Stmt):

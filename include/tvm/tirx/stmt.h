@@ -818,6 +818,42 @@ class BufferView : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(BufferViewNode);
 };
 
+// BufferGet
+class BufferGetNode : public Object {
+ public:
+  /*! \brief The source buffer of the buffer get */
+  Buffer src_buffer;
+  /*! \brief The target buffer of the buffer get */
+  Buffer dst_buffer;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("src_buffer", &src_buffer);
+    v->Visit("dst_buffer", &dst_buffer);
+  }
+
+  bool SEqualReduce(const BufferGetNode* other, SEqualReducer equal) const {
+    return equal(src_buffer, other->src_buffer) && equal(dst_buffer, other->dst_buffer);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(src_buffer);
+    hash_reduce(dst_buffer);
+  }
+
+  static constexpr const char* _type_key = "tir.BufferGet";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  TVM_DECLARE_FINAL_OBJECT_INFO(BufferGetNode, Object);
+};
+
+class BufferGet : public ObjectRef {
+ public:
+  TVM_DLL explicit BufferGet(Buffer src_buffer, Buffer dst_buffer);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(BufferGet, ObjectRef, BufferGetNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(BufferGetNode);
+};
+
 /*!
  * \brief A block is a basic schedule unit in TIR.
  * \note SBlock's body is parameterized by iter vars.
@@ -869,8 +905,10 @@ class SBlockNode : public StmtNode {
   // TIR+ signature
   // The execution scope of the block.
   Optional<ExecScope> exec_scope;
-  // Views of buffers
+  // Collective views of buffers
   Array<BufferView> buffer_views;
+  // Local views of buffers
+  Array<BufferGet> buffer_gets;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -885,7 +923,8 @@ class SBlockNode : public StmtNode {
         .def_ro("init", &SBlockNode::init)
         .def_ro("body", &SBlockNode::body)
         .def_ro("exec_scope", &SBlockNode::exec_scope)
-        .def_ro("buffer_views", &SBlockNode::buffer_views);
+        .def_ro("buffer_views", &SBlockNode::buffer_views)
+        .def_ro("buffer_gets", &SBlockNode::buffer_gets);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SBlock", SBlockNode, StmtNode);
 };
@@ -904,7 +943,8 @@ class SBlock : public Stmt {
       ffi::Array<MatchBufferRegion> match_buffers = ffi::Array<MatchBufferRegion>(),
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
       Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt,
-      ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>());
+      ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
+      ffi::Array<BufferGet> buffer_gets = ffi::Array<BufferGet>());
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SBlock, Stmt, SBlockNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SBlockNode);

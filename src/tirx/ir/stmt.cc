@@ -558,12 +558,27 @@ TVM_FFI_STATIC_INIT_BLOCK({
   });
 });
 
+// BufferGet
+BufferGet::BufferGet(Buffer src_buffer, Buffer dst_buffer) {
+  ObjectPtr<BufferGetNode> node = make_object<BufferGetNode>();
+  node->src_buffer = std::move(src_buffer);
+  node->dst_buffer = std::move(dst_buffer);
+  data_ = std::move(node);
+}
+
+TVM_REGISTER_GLOBAL("tir.BufferGet").set_body_typed([](Buffer src_buffer, Buffer dst_buffer) {
+  return BufferGet(src_buffer, dst_buffer);
+});
+
+TVM_REGISTER_NODE_TYPE(BufferGetNode);
+
 // Block
 SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
                ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,
                ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
                ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
-               Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views) {
+               Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views,
+               ffi::Array<BufferGet> buffer_gets) {
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = std::move(iter_vars);
   node->reads = std::move(reads);
@@ -577,6 +592,7 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
   node->exec_scope = std::move(exec_scope);
   node->span = std::move(span);
   node->buffer_views = std::move(buffer_views);
+  node->buffer_gets = std::move(buffer_gets);
   data_ = std::move(node);
 }
 
@@ -588,9 +604,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
          ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,
          ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
          ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
-         Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views) {
+         Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views,
+         ffi::Array<BufferGet> buffer_gets) {
         return SBlock(iter_vars, reads, writes, name_hint, body, init, alloc_buffers, match_buffers,
-                      annotations, span, exec_scope, buffer_views);
+                      annotations, span, exec_scope, buffer_views, buffer_gets);
       });
 }
 
