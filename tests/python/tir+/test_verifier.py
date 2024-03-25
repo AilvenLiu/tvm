@@ -20,17 +20,78 @@ from tvm.script import tir as T
 from tvm.tir.analysis import verify_tirp_well_formed as verify
 
 
-def test_exec_scope_verifier():
+def test_root_scope():
     # fmt: off
     @T.prim_func(tirp=True)
-    def test() -> None:
+    def test1() -> None:
         with T.thread():
+            pass
+    
+    @T.prim_func(tirp=True)
+    def test2() -> None:
+        with T.warp():
+            pass
+
+    @T.prim_func(tirp=True)
+    def test3() -> None:
+        with T.cta():
+            pass
+
+    @T.prim_func(tirp=True)
+    def test4() -> None:
+        with T.kernel():
+            pass
+
+    @T.prim_func(tirp=True)
+    def test5() -> None:
+        with T.world():
             pass
     # fmt: on
 
-    with pytest.raises(Exception, match="invalid exec_scope"):
-        verify(test)
+    with pytest.raises(Exception, match="invalid exec_scope thread as root"):
+        verify(test1)
+    with pytest.raises(Exception, match="invalid exec_scope warp as root"):
+        verify(test2)
+    with pytest.raises(Exception, match="invalid exec_scope cta as root"):
+        verify(test3)
+    verify(test4)
+    verify(test5)
+
+
+def test_nested_scope():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test1() -> None:
+        with T.kernel():
+            with T.cta():
+                with T.warp():
+                    with T.thread():
+                        pass
+                with T.thread():
+                    pass
+    
+    @T.prim_func(tirp=True)
+    def test2() -> None:
+        with T.kernel():
+                with T.thread():
+                    with T.cta():
+                        pass
+
+    @T.prim_func(tirp=True)
+    def test3() -> None:
+        with T.kernel():
+                with T.warp():
+                    with T.thread():
+                        with T.cta():
+                            pass
+    # fmt: on
+
+    verify(test1)
+    verify(test2)
+    with pytest.raises(Exception, match="invalid exec_scope cta under warp"):
+        verify(test3)
 
 
 if __name__ == "__main__":
-    test_exec_scope_verifier()
+    test_root_scope()
+    test_nested_scope()

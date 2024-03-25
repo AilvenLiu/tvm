@@ -129,12 +129,17 @@ TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
 
 /******** Helper functions ********/
 
+static std::unordered_map<String, int> scope_order = {
+    {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"cta", 3},
+    {"warp_group", 4}, {"warp", 5},   {"thread", 6}};
+
 bool Higher(const ExecScope& lhs, const ExecScope& rhs) {
-  static std::unordered_map<String, int> scope_order = {
-      {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"block", 3},
-      {"warp_group", 4}, {"warp", 5},   {"thread", 6}};
+  ICHECK(scope_order.count(lhs->name) && scope_order.count(rhs->name))
+      << "Unknown scope name: " << lhs->name << " or " << rhs->name;
   return scope_order.at(lhs->name) < scope_order.at(rhs->name);
 }
+
+bool ValideScope(const ExecScope& scope) { return scope_order.count(scope->name) > 0; }
 
 }  // namespace tirx
 }  // namespace tvm

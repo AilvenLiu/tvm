@@ -48,9 +48,10 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
     Verify(op->exec_scope != nullptr) << "Block at " << path << " has no exec_scope";
     auto scope = op->exec_scope.value();
+    Verify(ValideScope(scope)) << "Block at " << path << " has unknown exec_scope " << scope->name;
     if (scope_stack_.empty()) {
-      Verify(scope.Is("world") || scope.Is("global"))
-          << "Block at " << path << " has invalid exec_scope " << scope->name;
+      Verify(scope.Is("world") || scope.Is("kernel"))
+          << "Block at " << path << " has invalid exec_scope " << scope->name << " as root";
     } else {
       if (Higher(scope_stack_.back(), scope)) {
         cur_roof_ = scope_stack_.back();
@@ -62,6 +63,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
       }
     }
     scope_stack_.push_back(scope);
+    Verifier::VisitStmt_(op, path);
   }
 
   ExecScope cur_roof_{"None"};

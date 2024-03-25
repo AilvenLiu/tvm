@@ -178,6 +178,8 @@ class ExecScopeSlice : public ExecScope {
 
 bool Higher(const ExecScope& lhs, const ExecScope& rhs);
 
+bool ValideScope(const ExecScope& scope);
+
 }  // namespace tirx
 }  // namespace tvm
 
