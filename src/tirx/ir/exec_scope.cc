@@ -61,6 +61,18 @@ ExecScope::ExecScope(String name) {
   data_ = std::move(n);
 }
 
+bool ExecScope::Is(const String& name) const { return name == this->get()->name; }
+
+ExecScope ExecScope::Create(String name) {
+  if (name == "world") {
+    return WorldScope(ScopeIdDef({}, {}, "", ""));
+  } else if (name == "kernel") {
+    return KernelScope(Array<ScopeIdDef>({}));
+  } else {
+    return ExecScope(name);
+  }
+}
+
 TVM_REGISTER_NODE_TYPE(ExecScopeNode);
 
 TVM_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](Array<PrimExpr> dims, String name) {
@@ -68,8 +80,9 @@ TVM_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](Array<PrimExpr> dims, St
 });
 
 // WorldScope
-WorldScope::WorldScope(ScopeIdDef def) : ExecScope("world") {
+WorldScope::WorldScope(ScopeIdDef def) {
   auto n = make_object<WorldScopeNode>();
+  n->name = "world";
   n->scope_id_def = std::move(def);
   data_ = std::move(n);
 }
@@ -81,8 +94,9 @@ TVM_REGISTER_GLOBAL("tirx.WorldScope").set_body_typed([](ScopeIdDef def) {
 });
 
 // KernelScope
-KernelScope::KernelScope(Array<ScopeIdDef> def) : ExecScope("kernel"){
+KernelScope::KernelScope(Array<ScopeIdDef> def) {
   auto n = make_object<KernelScopeNode>();
+  n->name = "kernel";
   n->scope_id_def = std::move(def);
   data_ = std::move(n);
 }
@@ -94,12 +108,13 @@ TVM_REGISTER_GLOBAL("tirx.KernelScope").set_body_typed([](Array<ScopeIdDef> def)
 });
 
 // ExecScopeSlice
-ExecScopeSlice::ExecScopeSlice(Array<ScopeId> ids, Array<Range> ranges, String name) : ExecScope(name) {
+ExecScopeSlice::ExecScopeSlice(Array<ScopeId> ids, Array<Range> ranges, String name) {
   auto n = make_object<ExecScopeSliceNode>();
   ICHECK(!ids.empty()) << "ExecScopeSlice must have at least one defining ScopeId";
   if (ranges.defined()) {
     ICHECK_EQ(ids.size(), ranges.size()) << "Number of dimensions must match";
   }
+  n->name = name;
   n->def_ids = std::move(ids);
   n->ranges = std::move(ranges);
   data_ = std::move(n);
@@ -112,5 +127,14 @@ TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
       return ExecScopeSlice(vars, ranges, name);
     });
 
-}  // namespace tirxxx
+/******** Helper functions ********/
+
+bool Higher(const ExecScope& lhs, const ExecScope& rhs) {
+  static std::unordered_map<String, int> scope_order = {
+      {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"block", 3},
+      {"warp_group", 4}, {"warp", 5},   {"thread", 6}};
+  return scope_order.at(lhs->name) < scope_order.at(rhs->name);
+}
+
+}  // namespace tirx
 }  // namespace tvm

@@ -28,7 +28,10 @@ from ..core.parser import Parser, ScriptMacro
 
 
 def prim_func(
-    func: Callable | None = None, private: bool = False, check_well_formed=True
+    func: Callable | None = None,
+    private: bool = False,
+    check_well_formed=True,
+    tirp: bool = False,
 ) -> PrimFunc | Callable:
     """The parsing method for tirx prim func, by using `@prim_func` as decorator.
 

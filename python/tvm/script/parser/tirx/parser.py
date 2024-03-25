@@ -394,10 +394,11 @@ def visit_function_def(self: Parser, node: doc.FunctionDef) -> None:
     supplied_annotation = self.function_annotations
     func_annotation = supplied_annotation.get(node.name, {})
     privacy = find_decorator_annotation(node, "private", default=False)
+    tirp = find_decorator_annotation(node, "tirp", default=False)
     self.function_annotations = None
     with self.var_table.with_frame():
         self.var_table.add("range", range_sugar)
-        with T.prim_func(is_private=privacy):
+        with T.prim_func(is_private=privacy, is_tirp=tirp):
             T.func_name(node.name)
             if node.returns is not None:
                 ret_type = self.eval_expr(node.returns)

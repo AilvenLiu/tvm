@@ -56,8 +56,8 @@ void PrimFuncFrameNode::ExitWithScope() {
       /*body=*/AsStmt(stmts),
       /*ret_type=*/ret_type.value_or(TupleType::Empty()),
       /*buffer_map=*/buffer_map,
-      /*attrs=*/DictAttrs(attrs));
-  func = tvm::tirx::ScriptComplete(func, root_alloc_buffers);
+      /*attrs=*/attrs.defined() ? DictAttrs(attrs.value()) : NullValue<DictAttrs>());
+  func = tvm::tirx::ScriptComplete(func, root_alloc_buffers, is_tirp);
   IRBuilder builder = IRBuilder::Current();
   if (builder->frames.empty()) {
     TVM_FFI_CHECK(!builder->result.defined(), ValueError) << "Builder.result has already been set";
@@ -197,7 +197,7 @@ void ElseFrameNode::ExitWithScope() {
   FindIfFrame("T.else_")->else_stmts = stmts;
 }
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

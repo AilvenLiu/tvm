@@ -64,7 +64,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
  * \brief The primitive function statement.
  * \return The PrimFuncFrame.
  */
-PrimFuncFrame PrimFunc(bool is_private);
+PrimFuncFrame PrimFunc(bool is_private, bool is_tirp = false);
 
 /*!
  * \brief The PrimFunc variable arguments adding function.
@@ -127,23 +127,31 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
  * \brief The block declaration statement.
  * \param name The name of the block.
  * \param no_realize The flag whether to construct SBlockRealize or SBlock.
+ * \param exec_scope The name of the execution scope.
  * \return The SBlockFrame.
  */
-SBlockFrame Block(ffi::String name, bool no_realize = false);
+SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_scope = "");
 
 BlockFrame World();
 
 BlockFrame Kernel();
 
-BlockFrame ScopeSlice(Array<tvm::tirx::ScopeId> vars, Array<Range> ranges, String cur);
+BlockFrame CTA();
+
+BlockFrame Warp();
+
+BlockFrame Thread();
+
+BlockFrame ScopeSlice(ffi::Array<tvm::tirx::ScopeId> vars, ffi::Array<Range> ranges,
+                      ffi::String cur);
 
 tvm::tirx::ScopeId KernelId(PrimExpr extent);
 
-Array<tvm::tirx::ScopeId> BlockId(Array<PrimExpr> extents, String parent);
+ffi::Array<tvm::tirx::ScopeId> BlockId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
-Array<tvm::tirx::ScopeId> WarpId(Array<PrimExpr> extents, String parent);
+ffi::Array<tvm::tirx::ScopeId> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
-Array<tvm::tirx::ScopeId> ThreadId(Array<PrimExpr> extents, String parent);
+ffi::Array<tvm::tirx::ScopeId> ThreadId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
 /*!
  * \brief The block initialization statement.
@@ -539,7 +547,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

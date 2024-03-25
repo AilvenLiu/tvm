@@ -86,6 +86,9 @@ class PrimFuncFrameNode : public TIRFrameNode {
   /*! \brief The buffer allocated in root block. */
   ffi::Array<tvm::tirx::Buffer> root_alloc_buffers;
 
+  /*! \brief Whether it is TIR+ PrimFunc. */
+  bool is_tirp;
+
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<PrimFuncFrameNode>()
@@ -96,7 +99,8 @@ class PrimFuncFrameNode : public TIRFrameNode {
         .def_ro("buffer_map", &PrimFuncFrameNode::buffer_map)
         .def_ro("attrs", &PrimFuncFrameNode::attrs)
         .def_ro("env_threads", &PrimFuncFrameNode::env_threads)
-        .def_ro("root_alloc_buffers", &PrimFuncFrameNode::root_alloc_buffers);
+        .def_ro("root_alloc_buffers", &PrimFuncFrameNode::root_alloc_buffers)
+        .def_ro("is_tirp", &PrimFuncFrameNode::is_tirp);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.PrimFuncFrame", PrimFuncFrameNode,
                                     TIRFrameNode);

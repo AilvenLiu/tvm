@@ -20,6 +20,7 @@
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/script/ir_builder/tir/ir.h>
+#include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/layout.h>
 
 #include "./utils.h"
@@ -62,7 +63,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                  axis_separators.value_or(ffi::Array<IntImm>()), layout);
 }
 
-PrimFuncFrame PrimFunc(bool is_private) {
+PrimFuncFrame PrimFunc(bool is_private, bool is_tirp) {
   ObjectPtr<PrimFuncFrameNode> n = ffi::make_object<PrimFuncFrameNode>();
   n->name = std::nullopt;
   n->is_private = is_private;
@@ -72,6 +73,7 @@ PrimFuncFrame PrimFunc(bool is_private) {
   n->attrs = {};
   n->env_threads.clear();
   n->root_alloc_buffers.clear();
+  n->is_tirp = is_tirp;
   return PrimFuncFrame(n);
 }
 
@@ -160,7 +162,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
   return buffer;
 }
 
-SBlockFrame Block(ffi::String name, bool no_realize) {
+SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope) {
   ObjectPtr<SBlockFrameNode> n = ffi::make_object<SBlockFrameNode>();
   n->name = name;
   n->iter_vars.clear();
@@ -173,63 +175,60 @@ SBlockFrame Block(ffi::String name, bool no_realize) {
   n->iter_values.clear();
   n->predicate = std::nullopt;
   n->no_realize = no_realize;
-  n->exec_scope = NullOpt;
+  if (exec_scope.empty()) {
+    n->exec_scope = std::nullopt;
+  } else {
+    n->exec_scope = tvm::tirx::ExecScope::Create(exec_scope);
+  }
   return SBlockFrame(n);
 }
 
-BlockFrame World() { return Block("world", false); }
+BlockFrame World() { return Block("", false, "world"); }
 
-BlockFrame Kernel() { return Block("kernel", false); }
+BlockFrame Kernel() { return Block("", false, "kernel"); }
 
-BlockFrame Warp() { return Block("warp", false); }
+BlockFrame CTA() { return Block("", false, "cta"); }
 
-BlockFrame Thread() { return Block("thread", false); }
+BlockFrame Warp() { return Block("", false, "warp"); }
 
-BlockFrame ScopeSlice(Array<tvm::tirx::ScopeId> vars, Array<Range> ranges, String cur) {
-  ObjectPtr<BlockFrameNode> n = make_object<BlockFrameNode>();
+BlockFrame Thread() { return Block("", false, "thread"); }
+
+BlockFrame ScopeSlice(ffi::Array<tvm::tirx::ScopeId> vars, ffi::Array<Range> ranges,
+                      ffi::String cur) {
+  ObjectPtr<BlockFrameNode> n = ffi::make_object<BlockFrameNode>();
   n->name = cur;
   n->iter_vars.clear();
-  n->reads = NullOpt;
-  n->writes = NullOpt;
-  n->init = NullOpt;
+  n->reads = std::nullopt;
+  n->writes = std::nullopt;
+  n->init = std::nullopt;
   n->alloc_buffers.clear();
   n->match_buffers.clear();
-  n->annotations = NullOpt;
+  n->annotations = std::nullopt;
   n->iter_values.clear();
-  n->predicate = NullOpt;
+  n->predicate = std::nullopt;
   n->no_realize = false;
-  n->exec_scope = tvm::tirx::ExecScopeSlice(vars, ranges);
+  n->exec_scope = tvm::tirx::ExecScopeSlice(vars, ranges, cur);
   return BlockFrame(n);
 }
 
 tvm::tirx::ScopeId KernelId(PrimExpr extent) {
   BlockFrame frame = FindBlockFrame("T.kernel_id");
-  if (frame->name != "world") {
-    TVM_FFI_THROW(InternalError) << "ValueError: Kernel scope id should be decalred in world scope named \"world\""
-               << "but this one is declared in scope named \"" << frame->name << "\"";
-  }
-  if (frame->exec_scope.defined()) {
-    TVM_FFI_THROW(InternalError) << "ValueError: Duplicate kernel scope id declaration, previous one is "
-               << frame->exec_scope;
-  }
+  TVM_FFI_ICHECK(frame->exec_scope.defined()) << "InternalError: exec_scope is not defined.";
+  TVM_FFI_ICHECK(frame->exec_scope->IsInstance<tvm::tirx::WorldScopeNode>())
+      << "InternalError: exec_scope is not WorldScope.";
   tvm::tirx::ScopeId scope_id("");
   frame->exec_scope =
       tvm::tirx::WorldScope(tvm::tirx::ScopeIdDef({scope_id}, {extent}, "world", "kernel"));
   return scope_id;
 }
 
-Array<tvm::tirx::ScopeId> KernelScopeId(Array<PrimExpr> extents, String parent, String name,
-                                       String cur) {
+ffi::Array<tvm::tirx::ScopeId> KernelScopeId(ffi::Array<PrimExpr> extents, ffi::String parent,
+                                            ffi::String name, ffi::String cur) {
   BlockFrame frame = FindBlockFrame(name);
-  if (frame->name != "kernel") {
-    TVM_FFI_THROW(InternalError) << "ValueError: " << cur
-               << " scope id should be decalred in kernel scope named \"kernel\""
-               << "but this one is declared in scope named \"" << frame->name << "\"";
-  }
-  if (!frame->exec_scope.defined()) {
-    frame->exec_scope = tvm::tirx::KernelScope(Array<tvm::tirx::ScopeIdDef>());
-  }
-  Array<tvm::tirx::ScopeId> scope_ids;
+  TVM_FFI_ICHECK(frame->exec_scope.defined()) << "InternalError: exec_scope is not defined.";
+  TVM_FFI_ICHECK(frame->exec_scope->IsInstance<tvm::tirx::KernelScopeNode>())
+      << "InternalError: exec_scope is not KernelScope.";
+  ffi::Array<tvm::tirx::ScopeId> scope_ids;
   for (size_t i = 0; i < extents.size(); ++i) {
     scope_ids.push_back(tvm::tirx::ScopeId(""));
   }
@@ -238,94 +237,19 @@ Array<tvm::tirx::ScopeId> KernelScopeId(Array<PrimExpr> extents, String parent, 
   return scope_ids;
 }
 
-Array<tvm::tirx::ScopeId> BlockId(Array<PrimExpr> extents, String parent) {
+ffi::Array<tvm::tirx::ScopeId> BlockId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   return KernelScopeId(extents, parent, "T.block_id", "block");
 }
 
-Array<tvm::tirx::ScopeId> WarpId(Array<PrimExpr> extents, String parent) {
+ffi::Array<tvm::tirx::ScopeId> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   return KernelScopeId(extents, parent, "T.warp_id", "warp");
 }
 
-Array<tvm::tirx::ScopeId> ThreadId(Array<PrimExpr> extents, String parent) {
+ffi::Array<tvm::tirx::ScopeId> ThreadId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   return KernelScopeId(extents, parent, "T.thread_id", "thread");
 }
 
-BlockFrame World() { return Block("world", false); }
-
-BlockFrame Kernel() { return Block("kernel", false); }
-
-BlockFrame Warp() { return Block("warp", false); }
-
-BlockFrame Thread() { return Block("thread", false); }
-
-BlockFrame ScopeSlice(Array<tvm::tirx::ScopeId> vars, Array<Range> ranges, String cur) {
-  ObjectPtr<BlockFrameNode> n = make_object<BlockFrameNode>();
-  n->name = cur;
-  n->iter_vars.clear();
-  n->reads = NullOpt;
-  n->writes = NullOpt;
-  n->init = NullOpt;
-  n->alloc_buffers.clear();
-  n->match_buffers.clear();
-  n->annotations = NullOpt;
-  n->iter_values.clear();
-  n->predicate = NullOpt;
-  n->no_realize = false;
-  n->exec_scope = tvm::tirx::ExecScopeSlice(vars, ranges);
-  return BlockFrame(n);
-}
-
-tvm::tirx::ScopeId KernelId(PrimExpr extent) {
-  BlockFrame frame = FindBlockFrame("T.kernel_id");
-  if (frame->name != "world") {
-    TVM_FFI_THROW(InternalError) << "ValueError: Kernel scope id should be decalred in world scope named \"world\""
-               << "but this one is declared in scope named \"" << frame->name << "\"";
-  }
-  if (frame->exec_scope.defined()) {
-    TVM_FFI_THROW(InternalError) << "ValueError: Duplicate kernel scope id declaration, previous one is "
-               << frame->exec_scope;
-  }
-  tvm::tirx::ScopeId scope_id("");
-  frame->exec_scope =
-      tvm::tirx::WorldScope(tvm::tirx::ScopeIdDef({scope_id}, {extent}, "world", "kernel"));
-  return scope_id;
-}
-
-Array<tvm::tirx::ScopeId> KernelScopeId(Array<PrimExpr> extents, String parent, String name,
-                                       String cur) {
-  BlockFrame frame = FindBlockFrame(name);
-  if (frame->name != "kernel") {
-    TVM_FFI_THROW(InternalError) << "ValueError: " << cur
-               << " scope id should be decalred in kernel scope named \"kernel\""
-               << "but this one is declared in scope named \"" << frame->name << "\"";
-  }
-  if (!frame->exec_scope.defined()) {
-    frame->exec_scope = tvm::tirx::KernelScope(Array<tvm::tirx::ScopeIdDef>());
-  }
-  Array<tvm::tirx::ScopeId> scope_ids;
-  for (size_t i = 0; i < extents.size(); ++i) {
-    scope_ids.push_back(tvm::tirx::ScopeId(""));
-  }
-  const_cast<tvm::tirx::KernelScopeNode*>(frame->exec_scope.as<tvm::tirx::KernelScopeNode>())
-      ->scope_id_def.push_back(tvm::tirx::ScopeIdDef(scope_ids, extents, parent, cur));
-  return scope_ids;
-}
-
-Array<tvm::tirx::ScopeId> BlockId(Array<PrimExpr> extents, String parent) {
-  return KernelScopeId(extents, parent, "T.block_id", "block");
-}
-
-Array<tvm::tirx::ScopeId> WarpId(Array<PrimExpr> extents, String parent) {
-  return KernelScopeId(extents, parent, "T.warp_id", "warp");
-}
-
-Array<tvm::tirx::ScopeId> ThreadId(Array<PrimExpr> extents, String parent) {
-  return KernelScopeId(extents, parent, "T.thread_id", "thread");
-}
-
-ffi::Optional<BlockInitFrame> Init() {
-  return BlockInitFrame(ffi::make_object<BlockInitFrameNode>());
-}
+BlockInitFrame Init() { return BlockInitFrame(ffi::make_object<BlockInitFrameNode>()); }
 
 void Where(PrimExpr predicate) {
   SBlockFrame frame = FindSBlockFrame("T.where");
@@ -899,6 +823,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.Block", Block)
       .def("script.ir_builder.tir.World", World)
       .def("script.ir_builder.tir.Kernel", Kernel)
+      .def("script.ir_builder.tir.CTA", CTA)
       .def("script.ir_builder.tir.Warp", Warp)
       .def("script.ir_builder.tir.Thread", Thread)
       .def("script.ir_builder.tir.ScopeSlice", ScopeSlice)
@@ -1076,7 +1001,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

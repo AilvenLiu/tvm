@@ -203,7 +203,7 @@ def buffer_decl(*args, **kwargs):
     return buffer(*args, **kwargs)
 
 
-def prim_func(is_private: bool = False) -> frame.PrimFuncFrame:
+def prim_func(is_private: bool = False, is_tirp=False) -> frame.PrimFuncFrame:
     """The primitive function statement.
 
     Parameters
@@ -213,12 +213,15 @@ def prim_func(is_private: bool = False) -> frame.PrimFuncFrame:
         (if yes, it does not have a global symbol assigned;
         otherwise, the global symbol is the PrimFunc's name)
 
+    is_tirp : bool
+        Whether the PrimFunc is a TIR+ PrimFunc
+
     Returns
     -------
     res : frame.PrimFuncFrame
         The PrimFuncFrame.
     """
-    return _ffi_api.PrimFunc(is_private)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.PrimFunc(is_private, is_tirp)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def arg(name: str, obj: Var | Buffer) -> Var | Buffer:
@@ -376,7 +379,7 @@ def match_buffer(
     )
 
 
-def sblock(name: str = "", no_realize: bool = False) -> frame.SBlockFrame:
+def sblock(name: str = "", no_realize: bool = False, exec_scope="") -> frame.SBlockFrame:
     """The sblock declaration statement.
 
     Parameters
@@ -386,6 +389,9 @@ def sblock(name: str = "", no_realize: bool = False) -> frame.SBlockFrame:
 
     no_realize : bool
         The flag whether to construct SBlockRealize or SBlock.
+
+    exec_scope : str
+        The execution scope of the block.
 
     Returns
     -------
@@ -398,7 +404,7 @@ def sblock(name: str = "", no_realize: bool = False) -> frame.SBlockFrame:
     block_suffix = _get_sblock_name_suffix()
     if block_suffix and name:
         name = name + block_suffix
-    return _ffi_api.Block(name, no_realize)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Block(name, no_realize, exec_scope)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def world() -> frame.BlockFrame:
@@ -426,6 +432,22 @@ def kernel(
     if vars:
         return _ffi_api.ScopeSlice(vars, ranges, "kernel")
     return _ffi_api.Kernel()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def cta(
+    vars: Optional[List[ScopeId]] = None,
+    ranges: Optional[List[ir.Range]] = None,
+) -> frame.BlockFrame:
+    """The block declaration statement.
+
+    Returns
+    -------
+    res : frame.BlockFrame
+        The BlockFrame.
+    """
+    if vars:
+        return _ffi_api.ScopeSlice(vars, ranges, "cta")
+    return _ffi_api.CTA()  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def warp(
@@ -2440,6 +2462,7 @@ __all__ = float_types + [
 __all__ += [
     "world",
     "kernel",
+    "cta",
     "warp",
     "thread",
     "kernel_id",

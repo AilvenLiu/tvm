@@ -121,7 +121,7 @@ class ScriptCompleter : public StmtMutator {
   bool is_root_block_ = true;
 };
 
-PrimFunc ScriptComplete(PrimFunc func, const ffi::Array<Buffer>& root_allocates) {
+PrimFunc ScriptComplete(PrimFunc func, const ffi::Array<Buffer>& root_allocates, bool is_tirp) {
   ffi::Map<Var, Buffer> buffer_var_map;
   for (const auto& pair : func->buffer_map) {
     const Buffer& buffer = pair.second;
@@ -150,7 +150,7 @@ PrimFunc ScriptComplete(PrimFunc func, const ffi::Array<Buffer>& root_allocates)
     return false;
   }();
 
-  if (should_insert_root) {
+  if (!is_tirp && should_insert_root) {
     SBlock root_block({}, {}, {}, "root", std::move(res), std::nullopt, root_allocates);
     res = SBlockRealize({}, Bool(true), std::move(root_block));
   }

@@ -60,10 +60,6 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
                            block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("parent"))});
         (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, NullOpt));
       }
-    } else if (block->exec_scope.as<tvm::tir::ExecScopeSliceNode>()) {
-      // do nothing
-    } else {
-      LOG_FATAL << "Unsupported ExecScope";
     }
   }
 
@@ -247,23 +243,17 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     kwargs_values.push_back(LiteralDoc::Boolean(true, std::nullopt));
   }
   // tir+
-  if (block->name_hint == "world" || block->name_hint == "kernel" || block->name_hint == "block" ||
-      block->name_hint == "warp" || block->name_hint == "thread") {
-    if (const tvm::tir::ExecScopeSliceNode* scope =
-            block->exec_scope.as<tvm::tir::ExecScopeSliceNode>()) {
-      return ScopeDoc(
-          NullOpt,
-          TIR(d, block->name_hint)
-              ->Call(
-                  {d->AsDoc<ExprDoc>(scope->def_ids, block_p->Attr("exec_scope")->Attr("def_ids")),
-                   d->AsDoc<ExprDoc>(scope->ranges, block_p->Attr("exec_scope")->Attr("ranges"))}),
-          (*frame)->stmts);
-    }
-    return ScopeDoc(NullOpt, TIR(d, block->name_hint)->Call({}), (*frame)->stmts);
-  }
   if (block->exec_scope.defined()) {
-    kwargs_keys.push_back("exec_scope");
-    kwargs_values.push_back(d->AsDoc<ExprDoc>(block->exec_scope, block_p->Attr("exec_scope")));
+    if (auto scope = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
+      return ScopeDoc(NullOpt,
+                      TIR(d, block->exec_scope.value()->name)
+                          ->Call({d->AsDoc<ExprDoc>(scope.value()->def_ids,
+                                                    block_p->Attr("exec_scope")->Attr("def_ids")),
+                                  d->AsDoc<ExprDoc>(scope.value()->ranges,
+                                                    block_p->Attr("exec_scope")->Attr("ranges"))}),
+                      (*frame)->stmts);
+    }
+    return ScopeDoc(NullOpt, TIR(d, block->exec_scope.value()->name)->Call({}), (*frame)->stmts);
   }
   return ScopeDoc(std::nullopt,
                   TIR(d, "sblock")  //

@@ -208,6 +208,9 @@ TVM_DLL bool VerifyWellFormed(const PrimFunc& func, bool assert_mode = true);
  */
 TVM_DLL bool VerifyWellFormed(const IRModule& mod, bool assert_mode = true);
 
+TVM_DLL bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode = true);
+TVM_DLL bool VerifyTIRpWellFormed(const IRModule& mod, bool assert_mode = true);
+
 /*!
  * \brief Find the entry function of the given IRModule, i.e, functions marked by
  * `tirx::attr::kIsEntryFunc`, whose name is `main` or being the only PrimeFunc.

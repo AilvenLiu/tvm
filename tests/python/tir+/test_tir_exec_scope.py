@@ -31,7 +31,7 @@ def test_roundtrip():
                 tx, ty, tz = T.thread_id([16, 8, 1], parent="block")
                 warp_id = T.warp_id([4], parent="block")
                 lane_id = T.thread_id([32], parent="warp")
-                with T.block():
+                with T.cta():
                     with T.warp():
                         with T.thread():
                             T.evaluate(0)
@@ -47,4 +47,4 @@ def test_roundtrip():
 
 
 if __name__ == "__main__":
-    tvm.testing.main()
+    test_roundtrip()
