@@ -21,8 +21,31 @@ from tvm.script import tir as T, from_source
 import pytest
 
 
+def test_roundtrip_scopeid():
+    # fmt: off
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.block_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([1], parent="block")
+            lane_id = T.thread_id([32], parent="warp")
+            with T.cta():
+                with T.warp():
+                    with T.thread():
+                        A_local = T.alloc_buffer([1], dtype="float16", 
+                                                 scope="local", logical_scope="thread")
+                        for i in T.serial(2):
+                            A_local[0] = A[lane_id * 2 + i]
+    # fmt: on
+
+    code = test.script()
+    assert from_source(code).script() == code
+
+
 def test_roundtrip_exec_scope():
-    @T.prim_func
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test():
         with T.world():
             kid = T.kernel_id(2)
@@ -48,7 +71,7 @@ def test_roundtrip_exec_scope():
 
 def test_roundtrip_buffer_view_get():
     # fmt: off
-    @T.prim_func
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test(out_ptr: T.handle) -> None:
         out = T.match_buffer(out_ptr, (2), "float32", scope="global")
 
@@ -72,5 +95,6 @@ def test_roundtrip_buffer_view_get():
 
 
 if __name__ == "__main__":
+    test_roundtrip_scopeid()
     test_roundtrip_exec_scope()
     test_roundtrip_buffer_view_get()

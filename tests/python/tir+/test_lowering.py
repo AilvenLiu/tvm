@@ -19,7 +19,7 @@ import tvm.testing
 from tvm.script import tir as T, from_source
 
 
-def test_tensor_lowering():
+def test_lowering1():
     # fmt: off
     @T.prim_func
     def test(in_ptr: T.handle, out_ptr: T.handle) -> None:
@@ -32,25 +32,35 @@ def test_tensor_lowering():
             lane_id = T.thread_id([32], parent="warp")            
 
             with T.thread():
-                A = T.alloc_buffer([2], dtype="float16", 
-                                    scope="local", logical_scope="thread")
+                A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
+                """
+                B = in_buf
+                """
                 with T.warp():
-                    B = T.view(A, layout = None)
-                    """
-                    B = in_buf
-                    out = B
-                    """
+                    T.reads(out[:])
+                    T.writes(A[:])
+                    
+                    B = T.view(A, layout=None, dst_buffer=T.Buffer(8, dtype="float16", scope="local", logical_scope="warp"))
                     with T.thread():
-                        A_local = T.get(B, ...)
+                        A_local = T.get(B, T.Buffer(2, dtype="float16", scope="local", logical_scope="thread"))
                         for i in T.vectorized(2):
                             A_local[i] = T.float32(in_buf[lane_id * 2 + i])
+                """
+                out_buf = B * 2
+                """
+                with T.warp():
+                    T.reads(A[:])
+                    T.writes(out[:])
+                    
+                    B = T.view(A, layout=None, dst_buffer=T.Buffer(8, dtype="float16", scope="local", logical_scope="warp"))
+                    with T.thread():
+                        A_local = T.get(B, T.Buffer(2, dtype="float16", scope="local", logical_scope="thread"))
                         for i in T.vectorized(2):
                             out[lane_id * 2 + i] = T.float32(A_local[i])
     # fmt: on
 
     test.show(black_format=False)
-    tvm.lower(test).show(black_format=False)
 
 
 if __name__ == "__main__":
-    test_tensor_lowering()
+    test_lowering1()

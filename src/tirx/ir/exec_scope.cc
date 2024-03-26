@@ -28,6 +28,7 @@ namespace tirx {
 ScopeId::ScopeId(String name) {
   auto n = make_object<ScopeIdNode>();
   n->type_annotation = GetTypeFromRuntimeDataType(DataType::Int(32));
+  n->dtype = DataType::Int(32);
   n->name_hint = std::move(name);
   data_ = std::move(n);
 }
