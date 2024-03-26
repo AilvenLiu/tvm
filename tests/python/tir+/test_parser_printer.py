@@ -56,11 +56,13 @@ def test_roundtrip_buffer_view_get():
             bx, by, bz = T.block_id([32, 32, 1], parent="kernel")
             tx, ty, tz = T.thread_id([16, 8, 1], parent="block")
             warp_id = T.warp_id([4], parent="block")
-            lane_id = T.thread_id([32], parent="warp")            
+            lane_id = T.thread_id([32], parent="warp")
 
             with T.block():
                 A = T.alloc_buffer([2,], dtype="float16", scope="local")
-                B = T.alloc_buffer([8, 8], dtype="float16", scope="local", logical_scope="warp", layout=T.TileLayout([], []))
+                B = T.alloc_buffer([8, 8], dtype="float16", 
+                                   scope="local", logical_scope="warp", 
+                                   layout=T.TileLayout([], []))
                 C = T.view(A, T.TileLayout([], []), T.Buffer((2,), dtype="float16"))
                 D = T.get(B, T.Buffer((2,), dtype="float16"))
                 out[0] = A[0] + B[0, 0]

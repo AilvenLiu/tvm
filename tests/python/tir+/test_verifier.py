@@ -30,22 +30,32 @@ def test_root_scope():
     @T.prim_func(tirp=True)
     def test2() -> None:
         with T.warp():
-            pass
+            with T.thread():
+                pass
 
     @T.prim_func(tirp=True)
     def test3() -> None:
         with T.cta():
-            pass
+            with T.warp():
+                with T.thread():
+                    pass
 
     @T.prim_func(tirp=True)
     def test4() -> None:
         with T.kernel():
-            pass
+            with T.cta():
+                with T.warp():
+                    with T.thread():
+                        pass
 
     @T.prim_func(tirp=True)
     def test5() -> None:
         with T.world():
-            pass
+            with T.kernel():
+                with T.cta():
+                    with T.warp():
+                        with T.thread():
+                            pass
     # fmt: on
 
     with pytest.raises(Exception, match="invalid exec_scope thread as root"):
@@ -73,16 +83,18 @@ def test_nested_scope():
     @T.prim_func(tirp=True)
     def test2() -> None:
         with T.kernel():
-                with T.thread():
-                    with T.cta():
+            with T.thread():
+                with T.cta():
+                    with T.thread():
                         pass
 
     @T.prim_func(tirp=True)
     def test3() -> None:
         with T.kernel():
-                with T.warp():
-                    with T.thread():
-                        with T.cta():
+            with T.warp():
+                with T.thread():
+                    with T.cta():
+                        with T.thread():
                             pass
     # fmt: on
 
@@ -92,6 +104,48 @@ def test_nested_scope():
         verify(test3)
 
 
+def test_invalid_stmt():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test1() -> None:
+        with T.kernel():
+            with T.cta():
+                with T.warp():
+                    with T.thread():
+                        pass
+                with T.thread():
+                    pass
+
+    @T.prim_func(tirp=True)
+    def test2() -> None:
+        with T.kernel():
+            with T.cta():
+                for i in range(3):
+                    with T.warp():
+                        with T.thread():
+                            pass
+                    with T.thread():
+                        pass
+
+    @T.prim_func(tirp=True)
+    def test3() -> None:
+        with T.kernel():
+            with T.cta():
+                T.evaluate(1)
+                with T.warp():
+                    with T.thread():
+                        pass
+                with T.thread():
+                    pass
+    # fmt: on
+
+    verify(test1)
+    verify(test2)
+    with pytest.raises(Exception, match="is not under a thread scope"):
+        verify(test3)
+
+
 if __name__ == "__main__":
     test_root_scope()
     test_nested_scope()
+    test_invalid_stmt()

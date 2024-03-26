@@ -51,9 +51,13 @@ class TIRVisitorWithPath
 
  protected:
   // Delegate to ExprFunctor::VisitExpr for PrimExpr, and any subclasses
-  inline void Visit(const PrimExpr& obj, ffi::reflection::AccessPath path) { VisitExpr(obj, path); }
+  virtual inline void Visit(const PrimExpr& obj, ffi::reflection::AccessPath path) {
+    VisitExpr(obj, path);
+  }
   // Delegate to ExprFunctor::VisitStmt for Stmt, and any subclasses
-  inline void Visit(const Stmt& obj, ffi::reflection::AccessPath path) { VisitStmt(obj, path); }
+  virtual inline void Visit(const Stmt& obj, ffi::reflection::AccessPath path) {
+    VisitStmt(obj, path);
+  }
 
   // Visit a buffer at a use site (BufferLoad, BufferStore, reads/writes).
   // By default, does not re-visit buffer fields (shape, strides, elem_offset),

@@ -22,20 +22,30 @@ from tvm.script import tir as T, from_source
 def test_tensor_lowering():
     # fmt: off
     @T.prim_func
-    def test(out_ptr: T.handle) -> None:
-        out = T.match_buffer(out_ptr, (2), "float32", scope="global")
+    def test(in_ptr: T.handle, out_ptr: T.handle) -> None:
+        in_buf = T.match_buffer(in_ptr, (64), "float32", scope="global")
+        out = T.match_buffer(out_ptr, (64), "float32", scope="global")
 
         with T.kernel():
-            bx, by, bz = T.block_id([32, 32, 1], parent="kernel")
-            tx, ty, tz = T.thread_id([16, 8, 1], parent="block")
-            warp_id = T.warp_id([4], parent="block")
+            bx, by, bz = T.block_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([1], parent="block")
             lane_id = T.thread_id([32], parent="warp")            
 
-            with T.block():
-                A = T.alloc_buffer([2,], dtype="float16", scope="local")
-                B = T.alloc_buffer([8, 8], dtype="float16", scope="local", logical_scope="warp", layout=T.TileLayout([], []))
-
-                out[0] = A[0] + B[0, 0]
+            with T.thread():
+                A = T.alloc_buffer([2], dtype="float16", 
+                                    scope="local", logical_scope="thread")
+                with T.warp():
+                    B = T.view(A, layout = None)
+                    """
+                    B = in_buf
+                    out = B
+                    """
+                    with T.thread():
+                        A_local = T.get(B, ...)
+                        for i in T.vectorized(2):
+                            A_local[i] = T.float32(in_buf[lane_id * 2 + i])
+                        for i in T.vectorized(2):
+                            out[lane_id * 2 + i] = T.float32(A_local[i])
     # fmt: on
 
     test.show(black_format=False)
