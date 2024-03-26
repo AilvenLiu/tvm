@@ -69,7 +69,21 @@ def test_roundtrip_exec_scope():
     assert from_source(code).script() == code
 
 
-def test_roundtrip_buffer_view_get():
+def test_roundtrip_buffer_view_get1():
+    # fmt: off
+    @T.prim_func
+    def test() -> None:
+        with T.block():
+            A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
+            with T.block():
+                A_local = T.get(A, T.Buffer(2, dtype="float16", scope="local", logical_scope="thread"))
+                A_local[0] = T.float16(0)
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+
+
+def test_roundtrip_buffer_view_get2():
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def test(out_ptr: T.handle) -> None:
@@ -88,7 +102,7 @@ def test_roundtrip_buffer_view_get():
                                    layout=T.TileLayout([], []))
                 C = T.view(A, T.TileLayout([], []), T.Buffer((2,), dtype="float16"))
                 D = T.get(B, T.Buffer((2,), dtype="float16"))
-                out[0] = A[0] + B[0, 0]
+                out[0] = A[0] + B[0, 0] + D[0]
     # fmt: on
     code = test.script()
     assert from_source(code).script() == code
@@ -97,4 +111,5 @@ def test_roundtrip_buffer_view_get():
 if __name__ == "__main__":
     test_roundtrip_scopeid()
     test_roundtrip_exec_scope()
-    test_roundtrip_buffer_view_get()
+    test_roundtrip_buffer_view_get1()
+    test_roundtrip_buffer_view_get2()

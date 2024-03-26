@@ -226,6 +226,40 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     StmtDoc doc = d->AsDoc<StmtDoc>(buffer_region, buffer_region_p);
     (*frame)->stmts.push_back(doc);
   }
+
+  // tir+
+  for (size_t i = 0; i < block->buffer_views.size(); ++i) {
+    tir::BufferView buffer_view = block->buffer_views[i];
+    ObjectPath buffer_view_p = block_p->Attr("buffer_views")->ArrayIndex(i);
+
+    IdDoc lhs = DefineBuffer(buffer_view->dst_buffer, *frame, d);
+    // ExprDoc rhs =
+    //     d->AsDoc<ExprDoc>(block->buffer_views[i], block_p->Attr("buffer_views")->ArrayIndex(i));
+
+    ExprDoc rhs = TIR(d, "view")->Call({
+        d->AsDoc<ExprDoc>(buffer_view->src_buffer, buffer_view_p->Attr("src_buffer")),
+        d->AsDoc<ExprDoc>(buffer_view->layout, buffer_view_p->Attr("layout")),
+        BufferDecl(buffer_view->dst_buffer, "Buffer", {}, buffer_view_p->Attr("dst_buffer"), *frame,
+                   d, BufferVarDefinition::DataPointer),
+    });
+    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
+  }
+  for (size_t i = 0; i < block->buffer_gets.size(); ++i) {
+    tir::BufferGet buffer_get = block->buffer_gets[i];
+    ObjectPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayIndex(i);
+
+    IdDoc lhs = DefineBuffer(buffer_get->dst_buffer, *frame, d);
+    // ExprDoc rhs =
+    //     d->AsDoc<ExprDoc>(block->buffer_gets[i], block_p->Attr("buffer_gets")->ArrayIndex(i));
+
+    ExprDoc rhs = TIR(d, "get")->Call({
+        d->AsDoc<ExprDoc>(buffer_get->src_buffer, buffer_get_p->Attr("src_buffer")),
+        BufferDecl(buffer_get->dst_buffer, "Buffer", {}, buffer_get_p->Attr("dst_buffer"), *frame,
+                   d, BufferVarDefinition::DataPointer),
+    });
+    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
+  }
+
   // Step 7. Handle init block
   if (block->init.defined()) {
     tirx::Stmt init = block->init.value();
@@ -243,37 +277,6 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     kwargs_values.push_back(LiteralDoc::Boolean(true, std::nullopt));
   }
   // tir+
-  for (size_t i = 0; i < block->buffer_views.size(); ++i) {
-    tir::BufferView buffer_view = block->buffer_views[i];
-    ObjectPath buffer_view_p = block_p->Attr("buffer_views")->ArrayIndex(i);
-
-    IdDoc lhs = DefineBuffer(buffer_view->dst_buffer, *frame, d);
-    // ExprDoc rhs =
-    //     d->AsDoc<ExprDoc>(block->buffer_views[i], block_p->Attr("buffer_views")->ArrayIndex(i));
-
-    ExprDoc rhs = TIR(d, "view")->Call({
-        d->AsDoc<ExprDoc>(buffer_view->src_buffer, buffer_view_p->Attr("src_buffer")),
-        d->AsDoc<ExprDoc>(buffer_view->layout, buffer_view_p->Attr("layout")),
-        BufferDecl(buffer_view->dst_buffer, "Buffer", {}, buffer_view_p->Attr("dst_buffer"), *frame,
-                   d, BufferVarDefinition::DataPointer),
-    });
-    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
-  }
-  for (size_t i = 0; i < block->buffer_gets.size(); ++i) {
-    tir::BufferGet buffer_get = block->buffer_gets[i];
-    ObjectPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayIndex(i);
-
-    IdDoc lhs = DefineBuffer(buffer_get->dst_buffer, *frame, d);
-    // ExprDoc rhs =
-    //     d->AsDoc<ExprDoc>(block->buffer_gets[i], block_p->Attr("buffer_gets")->ArrayIndex(i));
-
-    ExprDoc rhs = TIR(d, "get")->Call({
-        d->AsDoc<ExprDoc>(buffer_get->src_buffer, buffer_get_p->Attr("src_buffer")),
-        BufferDecl(buffer_get->dst_buffer, "Buffer", {}, buffer_get_p->Attr("dst_buffer"), *frame,
-                   d, BufferVarDefinition::DataPointer),
-    });
-    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
-  }
   if (block->exec_scope.defined()) {
     if (auto scope = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
       return ScopeDoc(NullOpt,
@@ -284,7 +287,8 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
                                                     block_p->Attr("exec_scope")->Attr("ranges"))}),
                       (*frame)->stmts);
     }
-    return ScopeDoc(NullOpt, TIR(d, block->exec_scope.value()->name)->Call({}), (*frame)->stmts);
+    return ScopeDoc(std::nullopt, TIR(d, block->exec_scope.value()->name)->Call({}),
+                    (*frame)->stmts);
   }
   return ScopeDoc(std::nullopt,
                   TIR(d, "sblock")  //
