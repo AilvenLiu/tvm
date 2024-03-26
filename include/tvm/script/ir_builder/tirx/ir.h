@@ -123,6 +123,10 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
                    ffi::String buffer_type = "default",
                    ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt);
 
+Buffer BufferView(tvm::tir::Buffer buffer, tvm::tir::TLayout layout, Buffer dst_buffer);
+
+Buffer BufferGet(tvm::tir::Buffer buffer, Buffer dst_buffer);
+
 /*!
  * \brief The block declaration statement.
  * \param name The name of the block.

@@ -162,6 +162,18 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
   return buffer;
 }
 
+Buffer BufferView(tvm::tir::Buffer buffer, tvm::tir::TLayout layout, Buffer dst_buffer) {
+  SBlockFrame frame = FindSBlockFrame("T.View");
+  frame->buffer_views.push_back(tvm::tir::BufferView(buffer, layout, dst_buffer));
+  return dst_buffer;
+}
+
+Buffer BufferGet(tvm::tir::Buffer buffer, Buffer dst_buffer) {
+  SBlockFrame frame = FindSBlockFrame("T.Get");
+  frame->buffer_gets.push_back(tvm::tir::BufferGet(buffer, dst_buffer));
+  return dst_buffer;
+}
+
 SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope) {
   ObjectPtr<SBlockFrameNode> n = ffi::make_object<SBlockFrameNode>();
   n->name = name;
@@ -180,6 +192,8 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope) {
   } else {
     n->exec_scope = tvm::tirx::ExecScope::Create(exec_scope);
   }
+  n->buffer_views.clear();
+  n->buffer_gets.clear();
   return SBlockFrame(n);
 }
 
@@ -820,6 +834,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.FuncAttrs", FuncAttrs)
       .def("script.ir_builder.tir.FuncRet", FuncRet)
       .def("script.ir_builder.tir.MatchBuffer", MatchBuffer)
+      .def("script.ir_builder.tir.BufferView", BufferView)
+      .def("script.ir_builder.tir.BufferGet", BufferGet)
       .def("script.ir_builder.tir.Block", Block)
       .def("script.ir_builder.tir.World", World)
       .def("script.ir_builder.tir.Kernel", Kernel)

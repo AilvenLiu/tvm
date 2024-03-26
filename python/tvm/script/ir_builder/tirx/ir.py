@@ -138,6 +138,8 @@ def buffer(
     offset_factor: int = 0,
     buffer_type: str = "",
     axis_separators: list[int] | None = None,
+    logical_scope: str = "",
+    layout: TLayout | None = None,
 ) -> Buffer:
     """The buffer declaration function.
 
@@ -195,6 +197,8 @@ def buffer(
         offset_factor,
         buffer_type,
         axis_separators,
+        logical_scope,
+        layout,
     )
 
 
@@ -377,6 +381,14 @@ def match_buffer(
         buffer_type,
         axis_separators,
     )
+
+
+def view(src_buffer: Buffer, layout: TLayout, dst_buffer: Buffer) -> Buffer:
+    return _ffi_api.BufferView(src_buffer, layout, dst_buffer)
+
+
+def get(src_buffer: Buffer, dst_buffer: Buffer) -> Buffer:
+    return _ffi_api.BufferGet(src_buffer, dst_buffer)
 
 
 def sblock(name: str = "", no_realize: bool = False, exec_scope="") -> frame.SBlockFrame:
@@ -2482,4 +2494,6 @@ __all__ += [
     "IterTree",
     "IterTreeSplit",
     "S",
+    "view",
+    "get",
 ]

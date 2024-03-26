@@ -198,6 +198,8 @@ class BufferProxy:
         offset_factor=0,
         buffer_type="",
         axis_separators=None,
+        logical_scope="",
+        layout=None,
     ) -> Buffer:
         return buffer(
             shape,
@@ -210,6 +212,8 @@ class BufferProxy:
             offset_factor=offset_factor,
             buffer_type=buffer_type,
             axis_separators=axis_separators,
+            logical_scope=logical_scope,
+            layout=layout,
         )
 
     @deprecated("T.Buffer[...]", "T.Buffer(...)")

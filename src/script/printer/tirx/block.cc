@@ -243,6 +243,37 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     kwargs_values.push_back(LiteralDoc::Boolean(true, std::nullopt));
   }
   // tir+
+  for (size_t i = 0; i < block->buffer_views.size(); ++i) {
+    tir::BufferView buffer_view = block->buffer_views[i];
+    ObjectPath buffer_view_p = block_p->Attr("buffer_views")->ArrayIndex(i);
+
+    IdDoc lhs = DefineBuffer(buffer_view->dst_buffer, *frame, d);
+    // ExprDoc rhs =
+    //     d->AsDoc<ExprDoc>(block->buffer_views[i], block_p->Attr("buffer_views")->ArrayIndex(i));
+
+    ExprDoc rhs = TIR(d, "view")->Call({
+        d->AsDoc<ExprDoc>(buffer_view->src_buffer, buffer_view_p->Attr("src_buffer")),
+        d->AsDoc<ExprDoc>(buffer_view->layout, buffer_view_p->Attr("layout")),
+        BufferDecl(buffer_view->dst_buffer, "Buffer", {}, buffer_view_p->Attr("dst_buffer"), *frame,
+                   d, BufferVarDefinition::DataPointer),
+    });
+    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+  }
+  for (size_t i = 0; i < block->buffer_gets.size(); ++i) {
+    tir::BufferGet buffer_get = block->buffer_gets[i];
+    ObjectPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayIndex(i);
+
+    IdDoc lhs = DefineBuffer(buffer_get->dst_buffer, *frame, d);
+    // ExprDoc rhs =
+    //     d->AsDoc<ExprDoc>(block->buffer_gets[i], block_p->Attr("buffer_gets")->ArrayIndex(i));
+
+    ExprDoc rhs = TIR(d, "get")->Call({
+        d->AsDoc<ExprDoc>(buffer_get->src_buffer, buffer_get_p->Attr("src_buffer")),
+        BufferDecl(buffer_get->dst_buffer, "Buffer", {}, buffer_get_p->Attr("dst_buffer"), *frame,
+                   d, BufferVarDefinition::DataPointer),
+    });
+    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+  }
   if (block->exec_scope.defined()) {
     if (auto scope = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
       return ScopeDoc(NullOpt,
@@ -279,6 +310,29 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 
 TVM_SCRIPT_REPR(tirx::SBlockNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::SBlockRealizeNode, ReprPrintTIR);
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::BufferGet>(
+        "", [](tir::BufferGet buffer_get, ObjectPath p, IRDocsifier d) -> Doc {
+          Doc doc = TIR(d, "get")->Call({
+              d->AsDoc<ExprDoc>(buffer_get->src_buffer, p->Attr("src_buffer")),
+              d->AsDoc<ExprDoc>(buffer_get->dst_buffer, p->Attr("dst_buffer")),
+          });
+          return doc;
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::BufferView>(
+        "", [](tir::BufferView buffer_view, ObjectPath p, IRDocsifier d) -> Doc {
+          Doc doc = TIR(d, "view")->Call({
+              d->AsDoc<ExprDoc>(buffer_view->src_buffer, p->Attr("src_buffer")),
+              d->AsDoc<ExprDoc>(buffer_view->layout, p->Attr("layout")),
+              d->AsDoc<ExprDoc>(buffer_view->dst_buffer, p->Attr("dst_buffer")),
+          });
+          return doc;
+        });
+TVM_SCRIPT_REPR(tir::BufferGetNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tir::BufferViewNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tir::WorldScope>(

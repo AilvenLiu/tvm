@@ -162,6 +162,8 @@ class SBlockFrameNode : public TIRFrameNode {
 
   // TIR+ signature
   Optional<tvm::tirx::ExecScope> exec_scope;
+  Array<tvm::tirx::BufferView> buffer_views;
+  Array<tvm::tirx::BufferGet> buffer_gets;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -177,7 +179,9 @@ class SBlockFrameNode : public TIRFrameNode {
         .def_ro("iter_values", &SBlockFrameNode::iter_values)
         .def_ro("predicate", &SBlockFrameNode::predicate)
         .def_ro("no_realize", &SBlockFrameNode::no_realize)
-        .def_ro("exec_scope", &SBlockFrameNode::exec_scope);
+        .def_ro("exec_scope", &SBlockFrameNode::exec_scope)
+        .def_ro("buffer_views", &SBlockFrameNode::buffer_views)
+        .def_ro("buffer_gets", &SBlockFrameNode::buffer_gets);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.SSBlockFrame", SBlockFrameNode,
                                     TIRFrameNode);
@@ -605,7 +609,7 @@ class ElseFrame : public TIRFrame {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ElseFrame, TIRFrame, ElseFrameNode);
 };
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
