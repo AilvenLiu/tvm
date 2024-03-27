@@ -32,7 +32,17 @@ namespace tirx {
 
 class ScopeIdNode : public VarNode {
  public:
+  void VisitAttrs(AttrVisitor* v) { VarNode::VisitAttrs(v); }
+
+  bool SEqualReduce(const ScopeIdNode* other, SEqualReducer equal) const {
+    return VarNode::SEqualReduce(other, equal);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const { VarNode::SHashReduce(hash_reduce); }
+
   static constexpr const char* _type_key = "tirx.ScopeId";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdNode, VarNode);
 };
 
@@ -62,7 +72,7 @@ class ScopeIdDefNode : public Object {
   }
 
   bool SEqualReduce(const ScopeIdDefNode* other, SEqualReducer equal) const {
-    return equal(def_ids, other->def_ids) && equal(extents, other->extents) &&
+    return equal.DefEqual(def_ids, other->def_ids) && equal(extents, other->extents) &&
            equal(parent, other->parent) && equal(cur, other->cur);
   }
 
@@ -73,6 +83,8 @@ class ScopeIdDefNode : public Object {
     hash_reduce(cur);
   }
   static constexpr const char* _type_key = "tirx.ScopeIdDef";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdDefNode, Object);
 };
 
@@ -97,6 +109,8 @@ class ExecScopeNode : public Object {
   void SHashReduce(SHashReducer hash_reduce) const { hash_reduce(name); }
 
   static constexpr const char* _type_key = "tirx.ExecScope";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_BASE_OBJECT_INFO(ExecScopeNode, Object);
 };
 
@@ -116,7 +130,24 @@ class ExecScope : public ObjectRef {
 class WorldScopeNode : public ExecScopeNode {
  public:
   ScopeIdDef scope_id_def;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("scope_id_def", &scope_id_def);
+    ExecScopeNode::VisitAttrs(v);
+  }
+
+  bool SEqualReduce(const WorldScopeNode* other, SEqualReducer equal) const {
+    return equal(scope_id_def, other->scope_id_def) && ExecScopeNode::SEqualReduce(other, equal);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(scope_id_def);
+    ExecScopeNode::SHashReduce(hash_reduce);
+  }
+
   static constexpr const char* _type_key = "tirx.WorldScope";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(WorldScopeNode, ExecScopeNode);
 };
 
@@ -130,7 +161,24 @@ class WorldScope : public ExecScope {
 class KernelScopeNode : public ExecScopeNode {
  public:
   Array<ScopeIdDef> scope_id_def;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("scope_id_def", &scope_id_def);
+    ExecScopeNode::VisitAttrs(v);
+  }
+
+  bool SEqualReduce(const KernelScopeNode* other, SEqualReducer equal) const {
+    return equal(scope_id_def, other->scope_id_def) && ExecScopeNode::SEqualReduce(other, equal);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(scope_id_def);
+    ExecScopeNode::SHashReduce(hash_reduce);
+  }
+
   static constexpr const char* _type_key = "tirx.KernelScope";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(KernelScopeNode, ExecScopeNode);
 };
 
@@ -166,6 +214,8 @@ class ExecScopeSliceNode : public ExecScopeNode {
   }
 
   static constexpr const char* _type_key = "tirx.ExecScopeSlice";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(ExecScopeSliceNode, ExecScopeNode);
 };
 
@@ -180,7 +230,7 @@ bool Higher(const ExecScope& lhs, const ExecScope& rhs);
 
 bool ValideScope(const ExecScope& scope);
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_EXEC_SCOPE_H_

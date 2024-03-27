@@ -87,8 +87,13 @@ void SBlockFrameNode::ExitWithScope() {
     tir_alloc_buffers.push_back(buffer);
   }
   ffi::Map<ffi::String, Any> attrs = annotations.value_or({});
-  if (int detect_access = (!reads.defined()) | (!writes.defined() << 1)) {
-    attrs.Set("tirx.script_parsing_detect_access", tvm::IntImm(DataType::Int(64), detect_access));
+
+  ffi::Optional<PrimFuncFrame> frame = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
+  ICHECK(frame.defined()) << "ValueError: Block must be defined within a PrimFunc";
+  if (!frame.value()->is_tirp) {
+    if (int detect_access = (!reads.defined()) | (!writes.defined() << 1)) {
+      attrs.Set("tirx.script_parsing_detect_access", tvm::IntImm(DataType::Int(64), detect_access));
+    }
   }
   tvm::tirx::SBlock block(iter_vars, reads.value_or(ffi::Array<tvm::tirx::BufferRegion>()),
                          writes.value_or(ffi::Array<tvm::tirx::BufferRegion>()), name, AsStmt(stmts),
@@ -198,7 +203,7 @@ void ElseFrameNode::ExitWithScope() {
   FindIfFrame("T.else_")->else_stmts = stmts;
 }
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

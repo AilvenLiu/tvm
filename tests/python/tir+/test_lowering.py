@@ -16,13 +16,25 @@
 # under the License.
 import tvm
 import tvm.testing
-from tvm.script import tir as T, from_source
+from tvm.script import tir as T
+from tvm.tir.function import PrimFunc
+from tvm.tir.transform import LowerTIRp
+
+
+def compare(before, after, transform):
+    if isinstance(before, PrimFunc):
+        before = tvm.IRModule({"main": before})
+    if isinstance(after, PrimFunc):
+        after = tvm.IRModule({"main": after})
+    assert isinstance(before, tvm.IRModule)
+    assert isinstance(after, tvm.IRModule)
+    tvm.ir.assert_structural_equal(transform()(before), after, map_free_vars=False)
 
 
 def test_lowering1():
     # fmt: off
-    @T.prim_func
-    def test(in_ptr: T.handle, out_ptr: T.handle) -> None:
+    @T.prim_func(private=True, tirp=True)
+    def before(in_ptr: T.handle, out_ptr: T.handle) -> None:
         in_buf = T.match_buffer(in_ptr, (64), "float32", scope="global")
         out = T.match_buffer(out_ptr, (64), "float32", scope="global")
 
@@ -37,7 +49,7 @@ def test_lowering1():
                 B = in_buf
                 """
                 with T.warp():
-                    T.reads(out[:])
+                    T.reads(in_buf[:])
                     T.writes(A[:])
                     
                     B = T.view(A, layout=None, dst_buffer=T.Buffer(8, dtype="float16", scope="local", logical_scope="warp"))
@@ -57,9 +69,36 @@ def test_lowering1():
                         A_local = T.get(B, T.Buffer(2, dtype="float16", scope="local", logical_scope="thread"))
                         for i in T.vectorized(2):
                             out[lane_id * 2 + i] = T.float32(A_local[i])
+
+    @T.prim_func(private=True, tirp=True)
+    def after(in_ptr: T.handle, out_ptr: T.handle) -> None:
+        in_buf = T.match_buffer(in_ptr, (64), "float32", scope="global")
+        out = T.match_buffer(out_ptr, (64), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.block_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([1], parent="block")
+            lane_id = T.thread_id([32], parent="warp")            
+
+            with T.thread():
+                A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
+                with T.warp():
+                    T.reads(in_buf[:])
+                    T.writes(A[:])
+                    
+                    with T.thread():
+                        for i in T.vectorized(2):
+                            A[i] = T.float32(in_buf[lane_id * 2 + i])
+                with T.warp():
+                    T.reads(A[:])
+                    T.writes(out[:])
+                    
+                    with T.thread():
+                        for i in T.vectorized(2):
+                            out[lane_id * 2 + i] = T.float32(A[i])
     # fmt: on
 
-    test.show(black_format=False)
+    compare(before, after, LowerTIRp)
 
 
 if __name__ == "__main__":
