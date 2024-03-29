@@ -39,8 +39,8 @@ def test_lowering1():
         out = T.match_buffer(out_ptr, (64), "float32", scope="global")
 
         with T.kernel():
-            bx, by, bz = T.block_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="block")
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([1], parent="cta")
             lane_id = T.thread_id([32], parent="warp")            
 
             with T.thread():
@@ -76,26 +76,31 @@ def test_lowering1():
         out = T.match_buffer(out_ptr, (64), "float32", scope="global")
 
         with T.kernel():
-            bx, by, bz = T.block_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="block")
-            lane_id = T.thread_id([32], parent="warp")            
+            T.reads()
+            T.writes()
+            for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
+                for threadIdx in T.thread_binding(32, thread="threadIdx.x"):
+                    with T.thread():
+                        T.reads()
+                        T.writes()
+                        A = T.alloc_buffer((2,), "float16", scope="local", logical_scope="thread", layout=None)
+                        with T.warp():
+                            T.reads(in_buf[:])
+                            T.writes(A[:])
+                            with T.thread():
+                                T.reads()
+                                T.writes()
+                                for i in T.vectorized(2):
+                                    A[i] = T.Cast("float16", in_buf[threadIdx % 32 * 2 + i])
+                        with T.warp():
+                            T.reads(A[:])
+                            T.writes(out[:])
+                            with T.thread():
+                                T.reads()
+                                T.writes()
+                                for i in T.vectorized(2):
+                                    out[threadIdx % 32 * 2 + i] = T.Cast("float32", A[i])
 
-            with T.thread():
-                A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
-                with T.warp():
-                    T.reads(in_buf[:])
-                    T.writes(A[:])
-                    
-                    with T.thread():
-                        for i in T.vectorized(2):
-                            A[i] = T.float32(in_buf[lane_id * 2 + i])
-                with T.warp():
-                    T.reads(A[:])
-                    T.writes(out[:])
-                    
-                    with T.thread():
-                        for i in T.vectorized(2):
-                            out[lane_id * 2 + i] = T.float32(A[i])
     # fmt: on
 
     compare(before, after, LowerTIRp)

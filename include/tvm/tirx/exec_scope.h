@@ -51,6 +51,7 @@ class ScopeId : public Var {
   TVM_DLL explicit ScopeId(String name = "");
 
   TVM_DEFINE_OBJECT_REF_METHODS(ScopeId, Var, ScopeIdNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopeIdNode);
 };
 
 class ScopeIdDefNode : public Object {
@@ -82,6 +83,7 @@ class ScopeIdDefNode : public Object {
     hash_reduce(parent);
     hash_reduce(cur);
   }
+
   static constexpr const char* _type_key = "tirx.ScopeIdDef";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
@@ -90,10 +92,37 @@ class ScopeIdDefNode : public Object {
 
 class ScopeIdDef : public ObjectRef {
  public:
-  TVM_DLL ScopeIdDef(Array<ScopeId> def_ids, Array<PrimExpr> extents, String parent, String cur);
+  TVM_DLL explicit ScopeIdDef(Array<ScopeId> def_ids, Array<PrimExpr> extents, String parent,
+                              String cur);
+
+  explicit ScopeIdDef(String parent, String cur);
+
+  PrimExpr fused_extent() const;
+
+  // Hash and Equal for only scope comparison
+  struct ScopeHash {
+    size_t operator()(const ScopeIdDef& lhs) const {
+      return std::hash<String>()(lhs->parent) ^ std::hash<String>()(lhs->cur);
+    }
+  };
+  struct ScopeEqual {
+    bool operator()(const ScopeIdDef& lhs, const ScopeIdDef& rhs) const {
+      return lhs->parent == rhs->parent && lhs->cur == rhs->cur;
+    }
+  };
 
   TVM_DEFINE_OBJECT_REF_METHODS(ScopeIdDef, ObjectRef, ScopeIdDefNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopeIdDefNode);
 };
+
+Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
+
+Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
+
+inline std::ostream& operator<<(std::ostream& out, const ScopeIdDef& input) {
+  out << input->parent << " --> " << input->cur;
+  return out;
+}
 
 class ExecScopeNode : public Object {
  public:
@@ -124,6 +153,7 @@ class ExecScope : public ObjectRef {
   bool Is(const String& name) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScope, ObjectRef, ExecScopeNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeNode);
 };
 
 // Two special ExecSope: World and Kernel
@@ -156,6 +186,7 @@ class WorldScope : public ExecScope {
   TVM_DLL explicit WorldScope(ScopeIdDef scope_id_def);
 
   TVM_DEFINE_OBJECT_REF_METHODS(WorldScope, ExecScope, WorldScopeNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(WorldScopeNode);
 };
 
 class KernelScopeNode : public ExecScopeNode {
@@ -187,6 +218,7 @@ class KernelScope : public ExecScope {
   TVM_DLL explicit KernelScope(Array<ScopeIdDef> scope_id_def);
 
   TVM_DEFINE_OBJECT_REF_METHODS(KernelScope, ExecScope, KernelScopeNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(KernelScopeNode);
 };
 
 class ExecScopeSliceNode : public ExecScopeNode {
@@ -224,13 +256,22 @@ class ExecScopeSlice : public ExecScope {
   TVM_DLL explicit ExecScopeSlice(Array<ScopeId> vars, Array<Range> ranges, String name);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeSliceNode);
 };
+
+static const std::unordered_map<String, int> ScopeOrder = {
+    {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"cta", 3},
+    {"warp_group", 4}, {"warp", 5},   {"thread", 6}};
 
 bool Higher(const ExecScope& lhs, const ExecScope& rhs);
 
+bool Higher(const String& lhs, const String& rhs);
+
 bool ValideScope(const ExecScope& scope);
 
-}  // namespace tirxx
+bool ValideScope(const String& scope);
+
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_EXEC_SCOPE_H_

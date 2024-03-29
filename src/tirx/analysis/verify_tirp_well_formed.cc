@@ -22,7 +22,9 @@
  * \brief Check if the TIR+ program is well-formed.
  */
 
+#include <tvm/arith/analyzer.h>
 #include <tvm/runtime/registry.h>
+#include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 
@@ -80,8 +82,53 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   std::vector<ExecScope> scope_stack_;
 };
 
+class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
+ public:
+  using Verifier::Verifier;
+
+ private:
+  using Verifier::Visit;
+
+  void VisitStmt_(const BlockNode* op, ObjectPath path) override {
+    Verify(op->exec_scope.defined())
+        << "Internal Error: exec_scope is not defined for block at " << path;
+    const auto& scope = op->exec_scope.value();
+    if (auto opt_kernel = scope.as<KernelScope>()) {
+      const auto& kernel = opt_kernel.value();
+      std::unordered_map<ScopeIdDef, ScopeIdDef, ScopeIdDef::ScopeHash, ScopeIdDef::ScopeEqual>
+          scope_id_map;
+      for (const auto& def : kernel->scope_id_def) {
+        Verify(ValideScope(def->parent))
+            << "ScopeIdDef at " << path << " has unknown exec scope " << def->parent;
+        Verify(ValideScope(def->cur))
+            << "ScopeIdDef at " << path << " has unknown exec scope " << def->cur;
+        scope_id_map[ScopeIdDef{def->parent, def->cur}] = def;
+      }
+      for (const auto& [_, def1] : scope_id_map) {
+        for (const auto& [_, def2] : scope_id_map) {
+          if (auto composed_opt = Compose(def1, def2)) {
+            auto composed = composed_opt.value();
+            auto it = scope_id_map.find(composed);
+            if (it != scope_id_map.end()) {
+              Verify(ana_.CanProveEqual(it->second.fused_extent(),
+                                        def1.fused_extent() * def2.fused_extent()))
+                  << "Kernel at " << path << " has invalid scope_id_def between scope " << def1
+                  << " and scope " << def2;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  arith::Analyzer ana_;
+};
+
 bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode) {
   if (!ExecScopeVerifier::Verify(func, assert_mode)) {
+    return false;
+  }
+  if (!ScopeIdVerifier::Verify(func, assert_mode)) {
     return false;
   }
 
@@ -112,5 +159,5 @@ TVM_REGISTER_GLOBAL("tirx.analysis.VerifyTIRpWellFormed")
       }
     });
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm

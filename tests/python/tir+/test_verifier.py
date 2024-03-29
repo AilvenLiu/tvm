@@ -145,7 +145,49 @@ def test_invalid_stmt():
         verify(test3)
 
 
+def test_inconsistent_scope_id():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test1(): 
+        with T.kernel():
+            bx = T.cta_id([32], parent="kernel")
+            wid = T.warp_id([4], parent="cta")
+            lane = T.thread_id([32], parent="warp")
+
+            with T.thread():
+                pass
+
+    @T.prim_func(tirp=True)
+    def test2(): 
+        with T.kernel():
+            bx = T.cta_id([32], parent="kernel")
+            wid = T.warp_id([4], parent="cta")
+            lane = T.thread_id([32], parent="warp")
+            tid = T.thread_id([128], parent="cta")
+
+            with T.thread():
+                pass
+
+    @T.prim_func(tirp=True)
+    def test3(): 
+        with T.kernel():
+            bx = T.cta_id([32], parent="kernel")
+            wid = T.warp_id([2], parent="cta")
+            lane = T.thread_id([32], parent="warp")
+            tid = T.thread_id([128], parent="cta")
+
+            with T.thread():
+                pass
+    # fmt: on
+
+    verify(test1)
+    verify(test2)
+    with pytest.raises(Exception, match="invalid scope_id_def between"):
+        verify(test3)
+
+
 if __name__ == "__main__":
     test_root_scope()
     test_nested_scope()
     test_invalid_stmt()
+    test_inconsistent_scope_id()

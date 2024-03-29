@@ -40,7 +40,10 @@ TVM_REGISTER_GLOBAL("tirx.ScopeId").set_body_typed([](String name) { return Scop
 // ScopeIdDef
 ScopeIdDef::ScopeIdDef(Array<ScopeId> ids, Array<PrimExpr> extents, String parent, String cur) {
   auto n = make_object<ScopeIdDefNode>();
-  ICHECK_EQ(ids.size(), extents.size()) << "Number of dimensions must match";
+  ICHECK_EQ(ids.size(), extents.size()) << "ValueError: Number of dimensions must match, got "
+                                        << ids.size() << " and " << extents.size();
+  ICHECK(Higher(parent, cur)) << "ValueError: Parent scope must be higher than current scope, got "
+                              << parent << " and " << cur;
   n->def_ids = std::move(ids);
   n->extents = std::move(extents);
   n->parent = std::move(parent);
@@ -55,6 +58,37 @@ TVM_REGISTER_GLOBAL("tirx.ScopeIdDef")
       return ScopeIdDef(vars, extents, parent, cur);
     });
 
+ScopeIdDef::ScopeIdDef(String parent, String cur) : ScopeIdDef({}, {}, parent, cur) {}
+
+PrimExpr ScopeIdDef::fused_extent() const {
+  PrimExpr res = get()->extents[0];
+  for (size_t i = 1; i < get()->extents.size(); ++i) {
+    res = res * get()->extents[i];
+  }
+  return res;
+}
+
+Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
+  if (lhs->cur == rhs->parent) {
+    return ScopeIdDef(lhs->parent, rhs->cur);
+  } else {
+    return NullOpt;
+  }
+}
+
+Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
+  if (lhs->parent == rhs->parent) {
+    if (Higher(rhs->cur, lhs->cur)) {
+      return ScopeIdDef(rhs->cur, lhs->cur);
+    }
+  } else if (lhs->cur == rhs->cur) {
+    if (Higher(lhs->parent, rhs->parent)) {
+      return ScopeIdDef(lhs->parent, rhs->parent);
+    }
+  }
+  return NullOpt;
+}
+
 // ExecScope
 ExecScope::ExecScope(String name) {
   auto n = make_object<ExecScopeNode>();
@@ -66,7 +100,7 @@ bool ExecScope::Is(const String& name) const { return name == this->get()->name;
 
 ExecScope ExecScope::Create(String name) {
   if (name == "world") {
-    return WorldScope(ScopeIdDef({}, {}, "", ""));
+    return WorldScope(ScopeIdDef({}, {}, "world", "kernel"));
   } else if (name == "kernel") {
     return KernelScope(Array<ScopeIdDef>({}));
   } else {
@@ -130,17 +164,21 @@ TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
 
 /******** Helper functions ********/
 
-static std::unordered_map<String, int> scope_order = {
-    {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"cta", 3},
-    {"warp_group", 4}, {"warp", 5},   {"thread", 6}};
-
 bool Higher(const ExecScope& lhs, const ExecScope& rhs) {
-  ICHECK(scope_order.count(lhs->name) && scope_order.count(rhs->name))
+  ICHECK(ScopeOrder.count(lhs->name) && ScopeOrder.count(rhs->name))
       << "Unknown scope name: " << lhs->name << " or " << rhs->name;
-  return scope_order.at(lhs->name) < scope_order.at(rhs->name);
+  return ScopeOrder.at(lhs->name) < ScopeOrder.at(rhs->name);
 }
 
-bool ValideScope(const ExecScope& scope) { return scope_order.count(scope->name) > 0; }
+bool Higher(const String& lhs, const String& rhs) {
+  ICHECK(ScopeOrder.count(lhs) && ScopeOrder.count(rhs))
+      << "Unknown scope name: " << lhs << " or " << rhs;
+  return ScopeOrder.at(lhs) < ScopeOrder.at(rhs);
+}
+
+bool ValideScope(const ExecScope& scope) { return ScopeOrder.count(scope->name) > 0; }
+
+bool ValideScope(const String& scope) { return ScopeOrder.count(scope) > 0; }
 
 }  // namespace tirx
 }  // namespace tvm

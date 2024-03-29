@@ -123,9 +123,9 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
                    ffi::String buffer_type = "default",
                    ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt);
 
-Buffer BufferView(tvm::tir::Buffer buffer, tvm::tir::TLayout layout, Buffer dst_buffer);
+Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Buffer dst_buffer);
 
-Buffer BufferGet(tvm::tir::Buffer buffer, Buffer dst_buffer);
+Buffer BufferGet(tvm::tirx::Buffer buffer, Buffer dst_buffer);
 
 /*!
  * \brief The block declaration statement.
@@ -151,7 +151,7 @@ BlockFrame ScopeSlice(ffi::Array<tvm::tirx::ScopeId> vars, ffi::Array<Range> ran
 
 tvm::tirx::ScopeId KernelId(PrimExpr extent);
 
-ffi::Array<tvm::tirx::ScopeId> BlockId(ffi::Array<PrimExpr> extents, ffi::String parent);
+ffi::Array<tvm::tirx::ScopeId> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
 ffi::Array<tvm::tirx::ScopeId> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
@@ -551,7 +551,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -28,8 +28,8 @@ def test_roundtrip_scopeid():
         A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
 
         with T.kernel():
-            bx, by, bz = T.block_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="block")
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([1], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
             with T.cta():
                 with T.warp():
@@ -50,9 +50,9 @@ def test_roundtrip_exec_scope():
         with T.world():
             kid = T.kernel_id(2)
             with T.kernel():
-                bx, by, bz = T.block_id([32, 32, 1], parent="kernel")
-                tx, ty, tz = T.thread_id([16, 8, 1], parent="block")
-                warp_id = T.warp_id([4], parent="block")
+                bx, by, bz = T.cta_id([32, 32, 1], parent="kernel")
+                tx, ty, tz = T.thread_id([16, 8, 1], parent="cta")
+                warp_id = T.warp_id([4], parent="cta")
                 lane_id = T.thread_id([32], parent="warp")
                 with T.cta():
                     with T.warp():
@@ -90,9 +90,9 @@ def test_roundtrip_buffer_view_get2():
         out = T.match_buffer(out_ptr, (2), "float32", scope="global")
 
         with T.kernel():
-            bx, by, bz = T.block_id([32, 32, 1], parent="kernel")
-            tx, ty, tz = T.thread_id([16, 8, 1], parent="block")
-            warp_id = T.warp_id([4], parent="block")
+            bx, by, bz = T.cta_id([32, 32, 1], parent="kernel")
+            tx, ty, tz = T.thread_id([16, 8, 1], parent="cta")
+            warp_id = T.warp_id([4], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
 
             with T.block():

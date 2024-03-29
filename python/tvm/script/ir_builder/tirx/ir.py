@@ -502,8 +502,8 @@ def kernel_id(extent: Union[PrimExpr, int]) -> ScopeId:
     return _ffi_api.KernelId(extent)
 
 
-def block_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[ScopeId]:
-    ret = _ffi_api.BlockId(extents, parent)
+def cta_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[ScopeId]:
+    ret = _ffi_api.CtaId(extents, parent)
     if len(ret) == 1:
         return ret[0]
     return ret
@@ -2478,7 +2478,7 @@ __all__ += [
     "warp",
     "thread",
     "kernel_id",
-    "block_id",
+    "cta_id",
     "warp_id",
     "thread_id",
     "WorldScope",

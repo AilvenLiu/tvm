@@ -162,15 +162,15 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
   return buffer;
 }
 
-Buffer BufferView(tvm::tir::Buffer buffer, tvm::tir::TLayout layout, Buffer dst_buffer) {
+Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Buffer dst_buffer) {
   SBlockFrame frame = FindSBlockFrame("T.View");
-  frame->buffer_views.push_back(tvm::tir::BufferView(buffer, layout, dst_buffer));
+  frame->buffer_views.push_back(tvm::tirx::BufferView(buffer, layout, dst_buffer));
   return dst_buffer;
 }
 
-Buffer BufferGet(tvm::tir::Buffer buffer, Buffer dst_buffer) {
+Buffer BufferGet(tvm::tirx::Buffer buffer, Buffer dst_buffer) {
   SBlockFrame frame = FindSBlockFrame("T.Get");
-  frame->buffer_gets.push_back(tvm::tir::BufferGet(buffer, dst_buffer));
+  frame->buffer_gets.push_back(tvm::tirx::BufferGet(buffer, dst_buffer));
   return dst_buffer;
 }
 
@@ -251,8 +251,8 @@ ffi::Array<tvm::tirx::ScopeId> KernelScopeId(ffi::Array<PrimExpr> extents, ffi::
   return scope_ids;
 }
 
-ffi::Array<tvm::tirx::ScopeId> BlockId(ffi::Array<PrimExpr> extents, ffi::String parent) {
-  return KernelScopeId(extents, parent, "T.block_id", "block");
+ffi::Array<tvm::tirx::ScopeId> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent) {
+  return KernelScopeId(extents, parent, "T.cta_id", "cta");
 }
 
 ffi::Array<tvm::tirx::ScopeId> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent) {
@@ -844,7 +844,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.Thread", Thread)
       .def("script.ir_builder.tir.ScopeSlice", ScopeSlice)
       .def("script.ir_builder.tir.KernelId", KernelId)
-      .def("script.ir_builder.tir.BlockId", BlockId)
+      .def("script.ir_builder.tir.CTAId", CtaId)
       .def("script.ir_builder.tir.WarpId", WarpId)
       .def("script.ir_builder.tir.ThreadId", ThreadId)
       .def("script.ir_builder.tir.Init", Init)
@@ -1017,7 +1017,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
