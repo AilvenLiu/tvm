@@ -106,5 +106,33 @@ def test_lowering1():
     compare(before, after, LowerTIRp)
 
 
+def test_lower_scope_id():
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before() -> None:
+        with T.kernel():
+            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
+            warp_id = T.warp_id([1], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")            
+
+            with T.thread():
+                T.evaluate(bx + by + bz)
+
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def after() -> None:
+        with T.kernel():
+            for blockIdx in T.thread_binding(60, thread="blockIdx.x"):
+                for threadIdx in T.thread_binding(32, thread="threadIdx.x"):
+                    with T.thread():
+                        T.reads()
+                        T.writes()
+                        T.evaluate(blockIdx % 3 + blockIdx % 12 // 3 + blockIdx % 60 // 12)
+    # fmt: on
+
+    compare(before, after, LowerTIRp)
+
+
 if __name__ == "__main__":
     test_lowering1()
+    test_lower_scope_id()

@@ -226,8 +226,8 @@ class ScopeIdDefRemover : public StmtExprMutator {
     PrimExpr mod = extents[0];
     res.push_back(FloorMod(fused, mod));
     for (size_t i = 1; i < extents.size(); i++) {
-      mod = mod * extents[i];
       res.push_back(FloorMod(FloorDiv(fused, mod), extents[i]));
+      mod = mod * extents[i];
     }
     return std::move(res);
   }
