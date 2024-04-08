@@ -66,10 +66,15 @@ class PointerType(Type):
 
     storage_scope : str
         The storage scope into which the pointer addresses.
+
+    logical_scope : str
+        The logical scope into which the pointer addresses.
     """
 
-    def __init__(self, element_type, storage_scope=""):
-        self.__init_handle_by_constructor__(_ffi_api.PointerType, element_type, storage_scope)
+    def __init__(self, element_type, storage_scope="", logical_scope=""):
+        self.__init_handle_by_constructor__(
+            _ffi_api.PointerType, element_type, storage_scope, logical_scope
+        )
 
 
 @tvm_ffi.register_object("ir.TupleType")

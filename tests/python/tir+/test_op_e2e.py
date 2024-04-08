@@ -18,18 +18,28 @@ import numpy as np
 
 import tvm
 import tvm.testing
+from tvm import te
 from tvm.script import tir as T
 from tvm.tir.function import PrimFunc
 from tvm.tir.transform import LowerTIRp
+from tvm.contrib import cublas
 
 
 def test_gemm_ampere():
     # no pipeline, no write cache, fully manual impl
-    # fmt: off
-    M, N, K = 1024, 1024, 1024
+    M, N, K = 512, 512, 512
     BLK_M, BLK_N, BLK_K = 128, 128, 32
     VEC = 4
 
+    A_np = np.random.randn(M, K).astype(np.float16)
+    B_np = np.random.randn(N, K).astype(np.float16)
+    DEV = tvm.cuda()
+    A_tvm = tvm.nd.array(A_np, device=DEV)
+    B_tvm = tvm.nd.array(B_np, device=DEV)
+
+    target = tvm.target.Target("nvidia/nvidia-a100")
+
+    # fmt: off
     @T.prim_func(tirp=True)
     def func(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (M, K), "float16", scope="global")
@@ -57,7 +67,7 @@ def test_gemm_ampere():
                 with T.thread():
                     T.reads()
                     T.writes(acc[:, :])
-                    acc_local = T.get(acc, T.Buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local", logical_scope="thread"))
+                    acc_local = T.get(acc)
                     for i, j in T.grid(BLK_N // 16, BLK_N // 16):
                         for vec in T.vectorized(2):
                             acc_local[i, j, vec] = 0
@@ -74,14 +84,14 @@ def test_gemm_ampere():
                         T.static_assert(128 % (BLK_K // VEC) == 0, "128 should be multiple of BLK_K // VEC")
                         thread_per_col = T.meta_var(BLK_K // VEC)
                         thread_per_row = T.meta_var(128 // thread_per_col)
-                        
+
                         for tile in T.serial(BLK_M // thread_per_row):
                             row = T.meta_var(tile * thread_per_row + tid // thread_per_col)
                             col = T.meta_var(tid % thread_per_col * VEC)
                             for vec in T.vectorized(VEC):
                                 A_smem[row, col + vec] = A[bx * BLK_M + row, k * BLK_K + col + vec]
                     T.tvm_storage_sync("shared")
-                    
+
                     # T.load(B_smem, B[k * BLK_K: k * BLK_K + BLK_K, by * BLK_N: by * BLK_N + BLK_N])
                     with T.thread():
                         T.reads(B[:, :])
@@ -90,20 +100,20 @@ def test_gemm_ampere():
                         T.static_assert(128 % (BLK_K // VEC) == 0, "128 should be multiple of BLK_K // VEC")
                         thread_per_col = T.meta_var(BLK_K // VEC)
                         thread_per_row = T.meta_var(128 // thread_per_col)
-                        
+
                         for tile in T.serial(BLK_N // thread_per_row):
                             row = T.meta_var(tile * thread_per_row + tid // thread_per_col)
                             col = T.meta_var(tid % thread_per_col * VEC)
                             for vec in T.vectorized(VEC):
-                                B_smem[row, col + vec] = B[by * BLK_N + row, k * BLK_K + col + vec]                        
+                                B_smem[row, col + vec] = B[by * BLK_N + row, k * BLK_K + col + vec]
                     T.tvm_storage_sync("shared")
 
                     # acc += A_smem @ B_smem
                     with T.warp():
                         T.reads(A_smem[:, :], B_smem[:, :])
                         T.writes(acc[:, :])
-                        A_storage = T.alloc_buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local", logical_scope="warp")
-                        B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local", logical_scope="warp")
+                        A_storage = T.alloc_buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local", logical_scope="thread")
+                        B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local", logical_scope="thread")
 
                         A_warp = T.view(A_storage, 
                                         layout=None, 
@@ -127,8 +137,7 @@ def test_gemm_ampere():
                                     # T.load(A_warp[i * 16 : i * 16 + 16, :], 
                                     #        A_smem[st_m + i * 16 : st_m + i * 16 + 16, k_inner * 16 : k_inner * 16 + 16])
                                     with T.thread():
-                                        A_local = T.get(A_warp, 
-                                                        T.Buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local", logical_scope="thread"))
+                                        A_local = T.get(A_warp)
                                         T.ptx_ldmatrix(
                                             "float16", False, 4, ".b16",
                                             # TODO: change the signature of ptx_ldmatrix / introduce an op to get data from buffer
@@ -148,8 +157,7 @@ def test_gemm_ampere():
                                     # T.load(B_warp[i * 16 : i * 16 + 16, :],
                                     #        B_smem[st_n + i * 16 : st_n + i * 16 + 16, k_inner * 16 : k_inner * 16 + 16])
                                     with T.thread():
-                                        B_local = T.get(B_warp, 
-                                                        T.Buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local", logical_scope="thread"))
+                                        B_local = T.get(B_warp)
                                         T.ptx_ldmatrix(
                                             "float16", False, 4, ".b16",
                                             # TODO: change the signature of ptx_ldmatrix / introduce an op to get data from buffer
@@ -168,12 +176,9 @@ def test_gemm_ampere():
                                         # acc_warp[tile_m * 16 : tile_m * 16 + 16, tile_n * 16 : tile_n * 16 + 16] +=
                                         #     A_warp[tile_m * 16 : tile_m * 16 + 16, :] @ B_warp[tile_n * 16 : tile_n * 16 + 16, :]    
                                         with T.thread():
-                                            A_local = T.get(A_warp, 
-                                                            T.Buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local", logical_scope="thread"))
-                                            B_local = T.get(B_warp,
-                                                            T.Buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local", logical_scope="thread"))
-                                            acc_local = T.get(acc_warp, 
-                                                              T.Buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local", logical_scope="thread"))
+                                            A_local = T.get(A_warp)
+                                            B_local = T.get(B_warp)
+                                            acc_local = T.get(acc_warp)
                                             T.ptx_mma(
                                                 "m16n8k16", "row", "col",
                                                 "fp16", "fp16", "fp32",
@@ -199,36 +204,50 @@ def test_gemm_ampere():
                 with T.thread():
                     T.reads(acc[:, :])
                     T.writes(C[:, :])
-                    acc_local = T.get(acc, T.Buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local", logical_scope="thread"))
+                    acc_local = T.get(acc)
                     # TODO: Add write cache (Ampere)
                     for j, i in T.grid(BLK_N // 16, BLK_M // 16):
                         st_m = T.meta_var(bx * BLK_M + warp_id // 2 * BLK_M // 2 + i * 8 + lane_id // 4)
                         st_n = T.meta_var(by * BLK_N + warp_id % 2 * BLK_N // 2 + j * 8 + lane_id % 4 * 2)
                         for vec in T.serial(2):
                             C[st_m, st_n + vec] = acc_local[j, i, vec]
-
     # fmt: on
     np.random.seed(0)
-    mod = tvm.IRModule({"main": func})
-    mod = LowerTIRp()(mod)
-    with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
-        target = tvm.target.Target("nvidia/geforce-rtx-4090")
-        mod = tvm.build(mod, target=target)
 
-        A_np = np.random.randn(M, K).astype(np.float16)
-        B_np = np.random.randn(N, K).astype(np.float16)
+    def tvm_gemm():
+        with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
+            mod = tvm.IRModule({"main": func})
+            mod = LowerTIRp()(mod)
+            mod = tvm.build(mod, target=target)
+
+            C_np = np.zeros((M, N), dtype=np.float32)
+            C_tvm = tvm.nd.array(C_np, device=DEV)
+            timer = mod.time_evaluator(mod.entry_name, DEV, number=10, repeat=3)
+            res = timer(A_tvm, B_tvm, C_tvm)
+            print(res)
+        return C_tvm
+
+    # cublas
+    def cublas_gemm():
+        A = te.placeholder((M, K), name="A", dtype="float16")
+        B = te.placeholder((N, K), name="B", dtype="float16")
+        C = cublas.matmul(A, B, transb=True, dtype="float32")
+        s = te.create_schedule(C.op)
+
         C_np = np.zeros((M, N), dtype=np.float32)
-        DEV = tvm.cuda()
-        A = tvm.nd.array(A_np, device=DEV)
-        B = tvm.nd.array(B_np, device=DEV)
-        C = tvm.nd.array(C_np, device=DEV)
-        mod(A, B, C)
-        tvm.testing.assert_allclose(
-            C.asnumpy(),
-            np.dot(A_np.astype(np.float32), B_np.astype(np.float32).T),
-            rtol=1e-3,
-            atol=1e-3,
-        )
+        C_tvm = tvm.nd.array(C_np, device=DEV)
+        mod_cublaslt = tvm.build(s, [A, B, C], target)
+        mod_cublaslt(A_tvm, B_tvm, C_tvm)
+        timer = mod_cublaslt.time_evaluator(mod_cublaslt.entry_name, DEV, number=10, repeat=3)
+        res = timer(A_tvm, B_tvm, C_tvm)
+        print(res)
+
+        return C_tvm
+
+    C_tvm = tvm_gemm()
+    C_cublas = cublas_gemm()
+
+    tvm.testing.assert_allclose(C_tvm.asnumpy(), C_cublas.asnumpy(), rtol=1e-2, atol=1e-2)
 
 
 if __name__ == "__main__":

@@ -61,8 +61,9 @@ PointerType::PointerType(Type element_type, ffi::String storage_scope, ffi::Stri
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("ir.PointerType", [](Type element_type, ffi::String storage_scope = "") {
-    return PointerType(element_type, storage_scope);
+  refl::GlobalDef().def("ir.PointerType", [](Type element_type, ffi::String storage_scope = "",
+                                             ffi::String logical_scope = "") {
+    return PointerType(element_type, storage_scope, logical_scope);
   });
 }
 

@@ -74,6 +74,7 @@ PrimFuncFrame PrimFunc(bool is_private, bool is_tirp) {
   n->env_threads.clear();
   n->root_alloc_buffers.clear();
   n->is_tirp = is_tirp;
+  n->buffer_view_map.clear();
   return PrimFuncFrame(n);
 }
 
@@ -165,11 +166,40 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
 Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Buffer dst_buffer) {
   SBlockFrame frame = FindSBlockFrame("T.View");
   frame->buffer_views.push_back(tvm::tirx::BufferView(buffer, layout, dst_buffer));
+  {
+    // Update BufferView tree
+    Optional<PrimFuncFrame> func_frame_opt = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
+    ICHECK(func_frame_opt.defined()) << "ValueError: Block must be defined within a PrimFunc";
+    PrimFuncFrame func_frame = func_frame_opt.value();
+    func_frame->buffer_view_map.Set(dst_buffer, buffer);
+  }
   return dst_buffer;
 }
 
-Buffer BufferGet(tvm::tirx::Buffer buffer, Buffer dst_buffer) {
+Buffer BufferGet(tvm::tirx::Buffer buffer) {
   SBlockFrame frame = FindSBlockFrame("T.Get");
+  Buffer dst_buffer;
+  {
+    // Get the dst buffer from the buffer map
+    Optional<PrimFuncFrame> func_frame_opt = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
+    ICHECK(func_frame_opt.defined()) << "ValueError: Block must be defined within a PrimFunc";
+    PrimFuncFrame func_frame = func_frame_opt.value();
+
+    // Find the root of view tree
+    auto it = func_frame->buffer_view_map.find(buffer);
+    ICHECK(it != func_frame->buffer_view_map.end());
+    do {
+      dst_buffer = (*it).second;
+      it = func_frame->buffer_view_map.find(dst_buffer);
+    } while (it != func_frame->buffer_view_map.end());
+
+    // Check if the buffer is a stroage buffer
+    ICHECK(tvm::tirx::IsStorageBuffer(dst_buffer.scope(), dst_buffer.logical_scope()));
+
+    // Copy the dst buffer
+    auto n = dst_buffer.CopyOnWrite();
+    n->data = buffer->data.copy_with_suffix("");
+  }
   frame->buffer_gets.push_back(tvm::tirx::BufferGet(buffer, dst_buffer));
   return dst_buffer;
 }
@@ -1017,7 +1047,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxx
+}  // namespace tirxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

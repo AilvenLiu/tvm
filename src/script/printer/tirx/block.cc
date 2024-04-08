@@ -254,8 +254,8 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
 
     ExprDoc rhs = TIR(d, "get")->Call({
         d->AsDoc<ExprDoc>(buffer_get->src_buffer, buffer_get_p->Attr("src_buffer")),
-        BufferDecl(buffer_get->dst_buffer, "Buffer", {}, buffer_get_p->Attr("dst_buffer"), *frame,
-                   d, BufferVarDefinition::DataPointer),
+        // BufferDecl(buffer_get->dst_buffer, "Buffer", {}, buffer_get_p->Attr("dst_buffer"), *frame,
+        //            d, BufferVarDefinition::DataPointer),
     });
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
   }

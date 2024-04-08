@@ -387,8 +387,8 @@ def view(src_buffer: Buffer, layout: TLayout, dst_buffer: Buffer) -> Buffer:
     return _ffi_api.BufferView(src_buffer, layout, dst_buffer)
 
 
-def get(src_buffer: Buffer, dst_buffer: Buffer) -> Buffer:
-    return _ffi_api.BufferGet(src_buffer, dst_buffer)
+def get(src_buffer: Buffer) -> Buffer:
+    return _ffi_api.BufferGet(src_buffer)
 
 
 def sblock(name: str = "", no_realize: bool = False, exec_scope="") -> frame.SBlockFrame:

@@ -180,5 +180,10 @@ bool ValideScope(const ExecScope& scope) { return ScopeOrder.count(scope->name) 
 
 bool ValideScope(const String& scope) { return ScopeOrder.count(scope) > 0; }
 
+bool IsStorageBuffer(const String& storage, const String& logical) {
+  return (storage == "global" && logical == "kernel") ||
+         (storage == "shared" && logical == "cta") || (storage == "local" && logical == "thread");
+}
+
 }  // namespace tirx
 }  // namespace tvm

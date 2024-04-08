@@ -125,7 +125,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
 
 Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Buffer dst_buffer);
 
-Buffer BufferGet(tvm::tirx::Buffer buffer, Buffer dst_buffer);
+Buffer BufferGet(tvm::tirx::Buffer buffer);
 
 /*!
  * \brief The block declaration statement.
@@ -551,7 +551,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

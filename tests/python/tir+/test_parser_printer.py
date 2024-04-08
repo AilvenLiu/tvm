@@ -71,13 +71,16 @@ def test_roundtrip_exec_scope():
 
 def test_roundtrip_buffer_view_get1():
     # fmt: off
-    @T.prim_func
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test() -> None:
-        with T.block():
-            A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
-            with T.block():
-                A_local = T.get(A, T.Buffer(2, dtype="float16", scope="local", logical_scope="thread"))
-                A_local[0] = T.float16(0)
+        with T.kernel():
+            with T.cta():
+                A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
+                A_warp = T.view(A, layout=None, dst_buffer=T.Buffer([8, 8]))
+
+                with T.thread():
+                    A_local = T.get(A_warp)
+                    A_local[0] = T.float16(0)
     # fmt: on
     code = test.script()
     assert from_source(code).script() == code
@@ -96,12 +99,10 @@ def test_roundtrip_buffer_view_get2():
             lane_id = T.thread_id([32], parent="warp")
 
             with T.block():
-                A = T.alloc_buffer([2,], dtype="float16", scope="local")
-                B = T.alloc_buffer([8, 8], dtype="float16", 
-                                   scope="local", logical_scope="warp", 
-                                   layout=T.TileLayout([], []))
-                C = T.view(A, T.TileLayout([], []), T.Buffer((2,), dtype="float16"))
-                D = T.get(B, T.Buffer((2,), dtype="float16"))
+                A = T.alloc_buffer([2,], dtype="float16", scope="local", logical_scope="thread")
+                B = T.view(A, layout=None,
+                           dst_buffer=T.Buffer([8, 8], dtype="float16", scope="local", logical_scope="warp"))
+                D = T.get(B)
                 out[0] = A[0] + B[0, 0] + D[0]
     # fmt: on
     code = test.script()

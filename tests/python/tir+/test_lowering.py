@@ -54,7 +54,7 @@ def test_lowering1():
                     
                     B = T.view(A, layout=None, dst_buffer=T.Buffer(8, dtype="float16", scope="local", logical_scope="warp"))
                     with T.thread():
-                        A_local = T.get(B, T.Buffer(2, dtype="float16", scope="local", logical_scope="thread"))
+                        A_local = T.get(B)
                         for i in T.vectorized(2):
                             A_local[i] = T.float32(in_buf[lane_id * 2 + i])
                 """
@@ -66,7 +66,7 @@ def test_lowering1():
                     
                     B = T.view(A, layout=None, dst_buffer=T.Buffer(8, dtype="float16", scope="local", logical_scope="warp"))
                     with T.thread():
-                        A_local = T.get(B, T.Buffer(2, dtype="float16", scope="local", logical_scope="thread"))
+                        A_local = T.get(B)
                         for i in T.vectorized(2):
                             out[lane_id * 2 + i] = T.float32(A_local[i])
 

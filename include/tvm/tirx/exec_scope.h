@@ -271,6 +271,8 @@ bool ValideScope(const ExecScope& scope);
 
 bool ValideScope(const String& scope);
 
+bool IsStorageBuffer(const String& storage, const String& logical);
+
 }  // namespace tirx
 }  // namespace tvm
 
