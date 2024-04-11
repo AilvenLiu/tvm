@@ -47,16 +47,31 @@ void PrimFuncFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
   // if the prim func is not private and there isn't already a global symbol,
   // add a global symbol
+  auto insert_attr = [&](String key, ffi::Any value) {
+    if (!attrs.defined()) {
+      attrs = {{key, value}};
+    } else if (!attrs.count(key)) {
+      // copy over attributes (can't mutate the dict inside the optional in-place)
+      Map<String, ffi::Any> new_attrs;
+      for (auto kv : attrs) {
+        new_attrs.Set(kv.first, kv.second);
+      }
+      new_attrs.Set(key, value);
+      attrs = std::move(new_attrs);
+    }
+  };
   if (!is_private && name.has_value() && !attrs.count(tvm::attr::kGlobalSymbol)) {
-    attrs.Set(tvm::attr::kGlobalSymbol, name.value());
+    insert_attr(tvm::attr::kGlobalSymbol, name.value());
   }
-
+  if (is_tirp) {
+    insert_attr(tvm::attr::kIsTIRp, tvm::Bool(true));
+  }
   tvm::tirx::PrimFunc func(
       /*params=*/args,
       /*body=*/AsStmt(stmts),
       /*ret_type=*/ret_type.value_or(TupleType::Empty()),
       /*buffer_map=*/buffer_map,
-      /*attrs=*/attrs.defined() ? DictAttrs(attrs.value()) : NullValue<DictAttrs>());
+      /*attrs=*/attrs.defined() ? DictAttrs(attrs) : NullValue<DictAttrs>());
   func = tvm::tirx::ScriptComplete(func, root_alloc_buffers, is_tirp);
   IRBuilder builder = IRBuilder::Current();
   if (builder->frames.empty()) {
@@ -203,7 +218,7 @@ void ElseFrameNode::ExitWithScope() {
   FindIfFrame("T.else_")->else_stmts = stmts;
 }
 
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

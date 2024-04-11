@@ -199,6 +199,21 @@ def verify_well_formed(obj: Union[PrimFunc, IRModule], assert_mode: bool = True)
 
 
 def verify_tirp_well_formed(obj: Union[PrimFunc, IRModule], assert_mode: bool = True) -> bool:
+    """Verify if the given TIR+ is well-formed.
+
+    Parameters
+    ----------
+    obj: Union[tvm.tir.PrimFunc, tvm.ir.IRModule]
+        The function or module to be verified.
+
+    assert_mode: bool
+        The indicator if it raises an error when the function is not well-formed.
+
+    Returns
+    -------
+    result: bool
+        Whether it is a well-formed TIR+ function.
+    """
     return _ffi_api.VerifyTIRpWellFormed(obj, assert_mode)  # type: ignore # pylint: disable=no-member
 
 

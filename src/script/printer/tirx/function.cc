@@ -106,24 +106,26 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       // Step 2. Handle `func->attrs`
       if (func->attrs.defined() && !func->attrs->dict.empty()) {
         // for global symbol, don't display it if it matches the func name
+        std::unordered_set<String, ObjectHash, ObjectEqual> keys_to_remove;
         if (func->attrs->dict.count(tvm::attr::kGlobalSymbol) &&
             Downcast<ffi::String>(func->attrs->dict.at(tvm::attr::kGlobalSymbol)) ==
                 func_name->name) {
-          ffi::Map<ffi::String, Any> new_attrs;
-          for (auto kv : func->attrs->dict) {
-            if (kv.first != tvm::attr::kGlobalSymbol) {
-              new_attrs.Set(kv.first, kv.second);
-            }
+          keys_to_remove.insert(tvm::attr::kGlobalSymbol);
+        }
+        // for TIRp, don't display it
+        if (func->attrs->dict.count(tvm::attr::kIsTIRp)) {
+          keys_to_remove.insert(tvm::attr::kIsTIRp);
+        }
+        ffi::Map<ffi::String, Any> new_attrs;
+        for (auto kv : func->attrs->dict) {
+          if (!keys_to_remove.count(kv.first)) {
+            new_attrs.Set(kv.first, kv.second);
           }
-          if (!new_attrs.empty()) {
-            (*f)->stmts.push_back(ExprStmtDoc(
-                TIR(d, "func_attr")  //
-                    ->Call({d->AsDoc<ExprDoc>(DictAttrs(new_attrs), p->Attr("attrs"))})));
-          }
-        } else {
+        }
+        if (!new_attrs.empty()) {
           (*f)->stmts.push_back(
               ExprStmtDoc(TIR(d, "func_attr")  //
-                              ->Call({d->AsDoc<ExprDoc>(func->attrs, p->Attr("attrs"))})));
+                              ->Call({d->AsDoc<ExprDoc>(DictAttrs(new_attrs), p->Attr("attrs"))})));
         }
       }
       // Step 3. Handle `func->buffer_map`
@@ -189,13 +191,21 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       }
       // Step 5. Determine if we need to display the private annotation in the decorator
       ExprDoc decorator = TIR(d, "prim_func");
+      Array<String, void> kwargs_keys;
+      Array<ExprDoc, void> kwargs_values;
       // mark private if there is no global symbol
       if (!func->attrs.defined() || !func->attrs->dict.count(tvm::attr::kGlobalSymbol)) {
         ffi::Array<ExprDoc> pos_args;
         decorator = decorator->Call(pos_args, {"private"},
                                     {LiteralDoc::Boolean(true, ffi::Optional<AccessPath>())});
       }
-
+      if (func->attrs.defined() && func->attrs->dict.count(tvm::attr::kIsTIRp)) {
+        Array<ExprDoc> pos_args;
+        decorator = decorator->Call(pos_args, {"tirp"},
+                                    {LiteralDoc::Boolean(true, Optional<ObjectPath>())});
+      }
+      Array<ExprDoc> pos_args;
+      decorator = std::move(decorator->Call(pos_args, kwargs_keys, kwargs_values));
       return HeaderWrapper(d, FunctionDoc(
                                   /*name=*/func_name,
                                   /*args=*/args,

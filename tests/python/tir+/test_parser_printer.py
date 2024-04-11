@@ -15,15 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 import tvm
+import tvm.script
 import tvm.testing
-from tvm.script import tir as T, from_source
+from tvm.script import tir as T
 
 import pytest
 
 
+def from_source(code):
+    return tvm.script.from_source(code, tirp=True)
+
+
 def test_roundtrip_scopeid():
     # fmt: off
-    @T.prim_func(tirp=True, check_well_formed=False)
+    @T.prim_func(tirp=True)
     def test(A_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
 
@@ -45,7 +50,8 @@ def test_roundtrip_scopeid():
 
 
 def test_roundtrip_exec_scope():
-    @T.prim_func(tirp=True, check_well_formed=False)
+    # fmt: off
+    @T.prim_func(tirp=True)
     def test():
         with T.world():
             kid = T.kernel_id(2)
@@ -61,9 +67,11 @@ def test_roundtrip_exec_scope():
                     with T.thread():
                         T.evaluate(0)
                     with T.warp([warp_id], [T.Range(0, 2)]):
-                        T.evaluate(0)
+                        with T.thread():
+                            T.evaluate(0)
                     with T.thread([lane_id], [T.Range(0, 16)]):
                         T.evaluate(0)
+    # fmt: on
 
     code = test.script()
     assert from_source(code).script() == code
@@ -71,7 +79,7 @@ def test_roundtrip_exec_scope():
 
 def test_roundtrip_buffer_view_get1():
     # fmt: off
-    @T.prim_func(tirp=True, check_well_formed=False)
+    @T.prim_func(tirp=True)
     def test() -> None:
         with T.kernel():
             with T.cta():
@@ -88,7 +96,7 @@ def test_roundtrip_buffer_view_get1():
 
 def test_roundtrip_buffer_view_get2():
     # fmt: off
-    @T.prim_func(tirp=True, check_well_formed=False)
+    @T.prim_func(tirp=True)
     def test(out_ptr: T.handle) -> None:
         out = T.match_buffer(out_ptr, (2), "float32", scope="global")
 
@@ -98,12 +106,14 @@ def test_roundtrip_buffer_view_get2():
             warp_id = T.warp_id([4], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
 
-            with T.block():
+            with T.cta():
                 A = T.alloc_buffer([2,], dtype="float16", scope="local", logical_scope="thread")
                 B = T.view(A, layout=None,
                            dst_buffer=T.Buffer([8, 8], dtype="float16", scope="local", logical_scope="warp"))
                 D = T.get(B)
-                out[0] = A[0] + B[0, 0] + D[0]
+
+                with T.thread():
+                    out[0] = A[0] + B[0, 0] + D[0]
     # fmt: on
     code = test.script()
     assert from_source(code).script() == code

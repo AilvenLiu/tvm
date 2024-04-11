@@ -22,25 +22,25 @@ from tvm.tir.analysis import verify_tirp_well_formed as verify
 
 def test_root_scope():
     # fmt: off
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test1() -> None:
         with T.thread():
             pass
     
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test2() -> None:
         with T.warp():
             with T.thread():
                 pass
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test3() -> None:
         with T.cta():
             with T.warp():
                 with T.thread():
                     pass
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test4() -> None:
         with T.kernel():
             with T.cta():
@@ -48,7 +48,7 @@ def test_root_scope():
                     with T.thread():
                         pass
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test5() -> None:
         with T.world():
             with T.kernel():
@@ -70,7 +70,7 @@ def test_root_scope():
 
 def test_nested_scope():
     # fmt: off
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test1() -> None:
         with T.kernel():
             with T.cta():
@@ -80,7 +80,7 @@ def test_nested_scope():
                 with T.thread():
                     pass
     
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test2() -> None:
         with T.kernel():
             with T.thread():
@@ -88,7 +88,7 @@ def test_nested_scope():
                     with T.thread():
                         pass
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test3() -> None:
         with T.kernel():
             with T.warp():
@@ -106,7 +106,7 @@ def test_nested_scope():
 
 def test_invalid_stmt():
     # fmt: off
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test1() -> None:
         with T.kernel():
             with T.cta():
@@ -116,7 +116,7 @@ def test_invalid_stmt():
                 with T.thread():
                     pass
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test2() -> None:
         with T.kernel():
             with T.cta():
@@ -127,7 +127,7 @@ def test_invalid_stmt():
                     with T.thread():
                         pass
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test3() -> None:
         with T.kernel():
             with T.cta():
@@ -147,7 +147,7 @@ def test_invalid_stmt():
 
 def test_inconsistent_scope_id():
     # fmt: off
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test1(): 
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
@@ -157,7 +157,7 @@ def test_inconsistent_scope_id():
             with T.thread():
                 pass
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test2(): 
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
@@ -168,7 +168,7 @@ def test_inconsistent_scope_id():
             with T.thread():
                 pass
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True, check_well_formed=False)
     def test3(): 
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")

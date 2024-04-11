@@ -125,6 +125,13 @@ constexpr const char* kTarget = "target";
  */
 constexpr const char* kGlobalSymbol = "global_symbol";
 
+/*!
+ * \brief The function is a TIR primitive function.
+ *
+ * Type: Bool
+ */
+constexpr const char* kIsTIRp = "is_tirp";
+
 }  // namespace attr
 
 /*!
