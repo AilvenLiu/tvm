@@ -25,6 +25,7 @@ from tvm._ffi import register_object
 from tvm.runtime import Object
 
 from .expr import Var, PrimExpr
+from .exec_scope import ExecScope
 
 
 @register_object("tirx.TLayout")
@@ -89,11 +90,21 @@ class S:
 
 @register_object("tirx.TileLayout")
 class TileLayout(TLayout):
-    coord_iter_trees: List[DataIterTree]
-    scope_id_iter_trees: List[DeviceIterTree]
+    data_trees: List[DataIterTree]
+    device_trees: List[DeviceIterTree]
+    from_scope: Optional[ExecScope]
+    to_scope: Optional[ExecScope]
 
-    def __init__(self, data_trees: List[DataIterTree], device_trees: List[DeviceIterTree]):
-        self.__init_handle_by_constructor__(_ffi_api.TileLayout, data_trees, device_trees)
+    def __init__(
+        self,
+        data_trees: List[DataIterTree],
+        device_trees: List[DeviceIterTree],
+        from_scope: Optional[ExecScope] = None,
+        to_scope: Optional[ExecScope] = None,
+    ):
+        self.__init_handle_by_constructor__(
+            _ffi_api.TileLayout, data_trees, device_trees, from_scope, to_scope
+        )
 
     @staticmethod
     def _construct_device_iter_tree(
@@ -179,7 +190,11 @@ class TileLayout(TLayout):
 
     @staticmethod
     def from_nested_tuple(
-        data: Tuple, strides: Tuple, device: Tuple, exclusive: Optional[Tuple] = None
+        data: Tuple,
+        strides: Tuple,
+        device: Tuple,
+        exclusive: Optional[Tuple] = None,
+        from_to: Optional[Tuple[str]] = None,
     ):
         device_iter_tree, _, device_extents = TileLayout._construct_device_iter_tree(device)
         scope_id_attrs = list(device_iter_tree.attrs)
@@ -199,4 +214,6 @@ class TileLayout(TLayout):
                     root=device_iter_tree.root, splits=device_iter_tree.splits, attrs=scope_id_attrs
                 )
             ],
+            from_scope=ExecScope.create(from_to[0]) if from_to else None,
+            to_scope=ExecScope.create(from_to[1]) if from_to else None,
         )

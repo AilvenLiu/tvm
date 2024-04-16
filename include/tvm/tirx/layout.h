@@ -234,19 +234,28 @@ class TileLayoutNode : public TLayoutNode {
   Array<DataIterTree> data_trees;
   /*! \brief scope id iter forest */
   Array<DeviceIterTree> device_trees;
+  /*! \brief From exec scope */
+  Optional<ExecScope> from;
+  /*! \brief To exec scope */
+  Optional<ExecScope> to;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("data_trees", &data_trees);
     v->Visit("device_trees", &device_trees);
+    v->Visit("from", &from);
+    v->Visit("to", &to);
   }
 
   bool SEqualReduce(const TileLayoutNode* other, SEqualReducer equal) const {
-    return equal(data_trees, other->data_trees) && equal(device_trees, other->device_trees);
+    return equal(data_trees, other->data_trees) && equal(device_trees, other->device_trees) &&
+           equal(from, other->from) && equal(to, other->to);
   }
 
   void SHashReduce(SHashReducer hash_reducer) const {
     hash_reducer(data_trees);
     hash_reducer(device_trees);
+    hash_reducer(from);
+    hash_reducer(to);
   }
 
   static constexpr const char* _type_key = "tirx.TileLayout";
@@ -255,7 +264,8 @@ class TileLayoutNode : public TLayoutNode {
 
 class TileLayout : public TLayout {
  public:
-  TVM_DLL explicit TileLayout(Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees);
+  TVM_DLL explicit TileLayout(Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees,
+                              Optional<ExecScope> from = NullOpt, Optional<ExecScope> to = NullOpt);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
 };

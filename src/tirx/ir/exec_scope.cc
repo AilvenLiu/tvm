@@ -91,6 +91,8 @@ Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
 
 // ExecScope
 ExecScope::ExecScope(String name) {
+  ICHECK(name != "world" && name != "kernel") << "ValueError: Reserved scope name: " << name;
+  ICHECK(ValideScope(name)) << "ValueError: Unknown scope name: " << name;
   auto n = make_object<ExecScopeNode>();
   n->name = std::move(name);
   data_ = std::move(n);
@@ -112,6 +114,10 @@ TVM_REGISTER_NODE_TYPE(ExecScopeNode);
 
 TVM_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](Array<PrimExpr> dims, String name) {
   return ExecScope(name);
+});
+
+TVM_REGISTER_GLOBAL("tir.ExecScopeCreate").set_body_typed([](String name) {
+  return ExecScope::Create(name);
 });
 
 // WorldScope

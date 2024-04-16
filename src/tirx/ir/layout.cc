@@ -102,19 +102,23 @@ TVM_REGISTER_GLOBAL("tirx.DeviceIterTree")
     });
 
 // TileLayout
-TileLayout::TileLayout(Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees) {
+TileLayout::TileLayout(Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees,
+                       Optional<ExecScope> from, Optional<ExecScope> to) {
   auto n = make_object<TileLayoutNode>();
   n->data_trees = std::move(data_trees);
   n->device_trees = std::move(device_trees);
+  n->from = std::move(from);
+  n->to = std::move(to);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_NODE_TYPE(TileLayoutNode);
 
 TVM_REGISTER_GLOBAL("tirx.TileLayout")
-    .set_body_typed([](Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees) {
-      return TileLayout(data_trees, device_trees);
+    .set_body_typed([](Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees,
+                       Optional<ExecScope> from, Optional<ExecScope> to) {
+      return TileLayout(data_trees, device_trees, from, to);
     });
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

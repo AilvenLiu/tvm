@@ -17,6 +17,7 @@
 import tvm
 import tvm.testing
 from tvm.script import tir as T, from_source
+from tvm.tir.exec_scope import ExecScope
 
 
 def test_nested_tuple():
@@ -25,6 +26,7 @@ def test_nested_tuple():
         strides=((16, -1), (2, (-1, 1))),
         device=(4, 8),
         exclusive=((1, 0),),
+        from_to=("thread", "warp"),
     )
     print(layout)
     data_root = T.Var("", "int32")
@@ -84,6 +86,8 @@ def test_nested_tuple():
                 ],
             )
         ],
+        from_scope=ExecScope.create("thread"),
+        to_scope=ExecScope.create("warp"),
     )
     tvm.ir.assert_structural_equal(layout, layout_expected, True)
 

@@ -18,7 +18,7 @@
 from typing import List
 
 from . import _ffi_api
-from tvm._ffi import register_object
+from tvm._ffi import register_object, get_global_func
 from tvm.runtime import Object
 
 from .expr import PrimExpr, Var
@@ -48,6 +48,10 @@ class ExecScope(Object):
 
     def __init__(self, name: str):
         self.__init_handle_by_constructor__(_ffi_api.ExecScope, name)
+
+    @staticmethod
+    def create(name: str):
+        return get_global_func("tir.ExecScopeCreate")(name)
 
 
 @register_object("tirx.WorldScope")

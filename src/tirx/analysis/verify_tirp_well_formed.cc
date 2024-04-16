@@ -51,34 +51,38 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     if (!scope_stack_.empty() && !scope_stack_.back().Is("thread")) {
       Verify(obj->IsInstance<BlockNode>() || obj->IsInstance<ForNode>() ||
              obj->IsInstance<BlockRealizeNode>() || obj->IsInstance<SeqStmtNode>())
-          << "Stmt at " << path << " is not under a thread scope and has type "
+          << "TIRpError: Stmt at " << path << " is not under a thread scope and has type "
           << obj->GetTypeKey();
     }
     Verifier::Visit(obj, path);
   }
 
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
-    Verify(op->exec_scope != nullptr) << "Block at " << path << " has no exec_scope";
+    Verify(op->exec_scope != nullptr) << "TIRpError: Block at " << path << " has no exec_scope";
     auto scope = op->exec_scope.value();
-    Verify(ValideScope(scope)) << "Block at " << path << " has unknown exec_scope " << scope->name;
+    Verify(ValideScope(scope)) << "TIRpError: Block at " << path << " has unknown exec_scope "
+                               << scope->name;
     if (scope_stack_.empty()) {
       Verify(scope.Is("world") || scope.Is("kernel"))
-          << "Block at " << path << " has invalid exec_scope " << scope->name << " as root";
+          << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
+          << " as root";
     } else {
       if (Higher(scope_stack_.back(), scope)) {
         cur_roof_ = scope_stack_.back();
       } else if (scope_stack_.back().Is(scope->name)) {
         // do nothing
       } else {
-        Verify(!Higher(scope, cur_roof_)) << "Block at " << path << " has invalid exec_scope "
-                                          << scope->name << " under " << cur_roof_->name;
+        ICHECK(cur_roof_.defined()) << "TIRpError: root scope should be the highest scope";
+        Verify(!Higher(scope, cur_roof_.value()))
+            << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
+            << " under " << cur_roof_.value()->name;
       }
     }
     scope_stack_.push_back(scope);
     Verifier::VisitStmt_(op, path);
   }
 
-  ExecScope cur_roof_{"None"};
+  Optional<ExecScope> cur_roof_ = NullOpt;
   std::vector<ExecScope> scope_stack_;
 };
 
@@ -91,7 +95,7 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
 
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
     Verify(op->exec_scope.defined())
-        << "Internal Error: exec_scope is not defined for block at " << path;
+        << "InternalError: exec_scope is not defined for block at " << path;
     const auto& scope = op->exec_scope.value();
     if (auto opt_kernel = scope.as<KernelScope>()) {
       const auto& kernel = opt_kernel.value();
@@ -99,9 +103,9 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
           scope_id_map;
       for (const auto& def : kernel->scope_id_def) {
         Verify(ValideScope(def->parent))
-            << "ScopeIdDef at " << path << " has unknown exec scope " << def->parent;
+            << "TIRpError: ScopeIdDef at " << path << " has unknown exec scope " << def->parent;
         Verify(ValideScope(def->cur))
-            << "ScopeIdDef at " << path << " has unknown exec scope " << def->cur;
+            << "TIRpError: ScopeIdDef at " << path << " has unknown exec scope " << def->cur;
         scope_id_map[ScopeIdDef{def->parent, def->cur}] = def;
       }
       for (const auto& [_, def1] : scope_id_map) {
@@ -112,8 +116,8 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
             if (it != scope_id_map.end()) {
               Verify(ana_.CanProveEqual(it->second.fused_extent(),
                                         def1.fused_extent() * def2.fused_extent()))
-                  << "Kernel at " << path << " has invalid scope_id_def between scope " << def1
-                  << " and scope " << def2;
+                  << "TIRpError: Kernel at " << path << " has invalid scope_id_def between scope "
+                  << def1 << " and scope " << def2;
             }
           }
         }

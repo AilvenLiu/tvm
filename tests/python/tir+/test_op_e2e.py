@@ -59,8 +59,8 @@ def test_gemm_ampere():
                 B_smem = T.alloc_buffer([BLK_N, BLK_K], dtype="float16", scope="shared", logical_scope="cta",
                                         layout=None)
 
-                acc = T.view(acc_storage, 
-                             layout=None, 
+                acc = T.view(acc_storage,
+                             layout=None,
                              dst_buffer=T.Buffer([BLK_M, BLK_N], dtype="float32", scope="local", logical_scope="cta"))
 
                 # T.fill(acc, 0)
