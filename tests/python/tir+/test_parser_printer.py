@@ -77,6 +77,36 @@ def test_roundtrip_exec_scope():
     assert from_source(code).script() == code
 
 
+def test_roundtrip_layout():
+    def get_layout():
+        return T.TileLayout.from_nested_tuple(
+            data=((8, T.S(0)), (8, (T.S(1), 2))),
+            strides=((16, -1), (2, (-1, 1))),
+            device=(4, 8),
+            exclusive=((1, 0),),
+            from_to=("thread", "warp"),
+        )
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([1], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            with T.cta():
+                layout = get_layout()
+                A_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=layout)
+                with T.thread():
+                    T.evaluate(A_warp[0, 0])
+    # fmt: on
+
+    code = test.script()
+    assert from_source(code).script() == code
+
+
 def test_roundtrip_buffer_view_get1():
     # fmt: off
     @T.prim_func(tirp=True)
@@ -136,7 +166,6 @@ def test_alloc_buffer_default_logical_scope():
                         pass
     # fmt: on
 
-    code = test.script()
     body = test.body.block.body.block
     A = body.alloc_buffers[0]
     B = body.alloc_buffers[1]
@@ -148,9 +177,9 @@ def test_alloc_buffer_default_logical_scope():
 
 
 if __name__ == "__main__":
-    test_roundtrip_scopeid()
-    test_roundtrip_exec_scope()
-    test_roundtrip_buffer_view_get1()
-    test_roundtrip_buffer_view_get2()
-    test_alloc_buffer_default_logical_scope()
-    
+    # test_roundtrip_scopeid()
+    # test_roundtrip_exec_scope()
+    test_roundtrip_layout()
+    # test_roundtrip_buffer_view_get1()
+    # test_roundtrip_buffer_view_get2()
+    # test_alloc_buffer_default_logical_scope()

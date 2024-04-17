@@ -811,6 +811,11 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     });
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
+    .set_dispatch<tvm::tirx::TileLayoutNode>([](const ObjectRef& node, ffi::String name) -> void {
+
+    });
+
+TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     .set_dispatch<tvm::tirx::TBufferNode>([](const ObjectRef& node, ffi::String name) -> void {
       tvm::tirx::TBufferNode* buffer =
           const_cast<tvm::tirx::TBufferNode*>(node.as<tvm::tirx::TBufferNode>());
@@ -1050,7 +1055,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxx
+}  // namespace tirxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
