@@ -119,8 +119,38 @@ def test_roundtrip_buffer_view_get2():
     assert from_source(code).script() == code
 
 
+def test_alloc_buffer_default_logical_scope():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test() -> None:
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([1], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            with T.cta():
+                A = T.alloc_buffer([1], dtype="float16", scope="local")
+                B = T.alloc_buffer([1], dtype="float16", scope="shared")
+                C = T.alloc_buffer([1], dtype="float16", scope="global")
+                with T.warp():
+                    with T.thread():
+                        pass
+    # fmt: on
+
+    code = test.script()
+    body = test.body.block.body.block
+    A = body.alloc_buffers[0]
+    B = body.alloc_buffers[1]
+    C = body.alloc_buffers[2]
+
+    assert A.logical_scope() == "thread"
+    assert B.logical_scope() == "cta"
+    assert C.logical_scope() == "kernel"
+
+
 if __name__ == "__main__":
     test_roundtrip_scopeid()
     test_roundtrip_exec_scope()
     test_roundtrip_buffer_view_get1()
     test_roundtrip_buffer_view_get2()
+    test_alloc_buffer_default_logical_scope()
+    

@@ -166,6 +166,15 @@ class Buffer(Object, Scriptable):
         """
         return _ffi_api.BufferStorageScope(self)  # type: ignore
 
+    def logical_scope(self):
+        """Return the logical scope associated with this buffer.
+        Returns
+        -------
+        scope : str
+            The logical scope associated with this buffer.
+        """
+        return _ffi_api.BufferLogicalScope(self)
+
     def get_flattened_buffer(self):
         """Generate a Buffer that is a flattened version of this buffer.
 

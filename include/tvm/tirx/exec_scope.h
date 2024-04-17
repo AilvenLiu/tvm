@@ -263,6 +263,9 @@ static const std::unordered_map<String, int> ScopeOrder = {
     {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"cta", 3},
     {"warp_group", 4}, {"warp", 5},   {"thread", 6}};
 
+static const std::unordered_map<String, String> StorageToLogical = {
+    {"local", "thread"}, {"shared", "cta"}, {"global", "kernel"}};
+
 bool Higher(const ExecScope& lhs, const ExecScope& rhs);
 
 bool Higher(const String& lhs, const String& rhs);
@@ -272,6 +275,8 @@ bool ValideScope(const ExecScope& scope);
 bool ValideScope(const String& scope);
 
 bool IsStorageBuffer(const String& storage, const String& logical);
+
+String StorageToLogicalScope(const String& storage);
 
 }  // namespace tirx
 }  // namespace tvm

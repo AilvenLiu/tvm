@@ -170,11 +170,7 @@ TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
 
 /******** Helper functions ********/
 
-bool Higher(const ExecScope& lhs, const ExecScope& rhs) {
-  ICHECK(ScopeOrder.count(lhs->name) && ScopeOrder.count(rhs->name))
-      << "Unknown scope name: " << lhs->name << " or " << rhs->name;
-  return ScopeOrder.at(lhs->name) < ScopeOrder.at(rhs->name);
-}
+bool Higher(const ExecScope& lhs, const ExecScope& rhs) { return Higher(lhs->name, rhs->name); }
 
 bool Higher(const String& lhs, const String& rhs) {
   ICHECK(ScopeOrder.count(lhs) && ScopeOrder.count(rhs))
@@ -182,13 +178,17 @@ bool Higher(const String& lhs, const String& rhs) {
   return ScopeOrder.at(lhs) < ScopeOrder.at(rhs);
 }
 
-bool ValideScope(const ExecScope& scope) { return ScopeOrder.count(scope->name) > 0; }
+bool ValideScope(const ExecScope& scope) { return ValideScope(scope->name); }
 
 bool ValideScope(const String& scope) { return ScopeOrder.count(scope) > 0; }
 
 bool IsStorageBuffer(const String& storage, const String& logical) {
-  return (storage == "global" && logical == "kernel") ||
-         (storage == "shared" && logical == "cta") || (storage == "local" && logical == "thread");
+  return StorageToLogical.count(storage) && StorageToLogical.at(storage) == logical;
+}
+
+String StorageToLogicalScope(const String& storage) {
+  ICHECK(StorageToLogical.count(storage)) << "Unknown storage type: " << storage;
+  return StorageToLogical.at(storage);
 }
 
 }  // namespace tirx

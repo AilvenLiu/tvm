@@ -674,8 +674,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("tirx.BufferOffsetOf", &Buffer::OffsetOf)
       .def_method("tirx.BufferVLoad", &Buffer::vload)
       .def_method("tirx.BufferVStore", &Buffer::vstore)
-      .def_method("tirx.BufferStorageScope", &Buffer::scope);
+      .def_method("tirx.BufferStorageScope", &Buffer::scope)
+      .def_method("tirx.BufferLogicalScope", &Buffer::logical_scope);
 }
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm

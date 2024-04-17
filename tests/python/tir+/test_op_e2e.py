@@ -53,10 +53,10 @@ def test_gemm_ampere():
             tid = T.thread_id([128], parent="cta")
 
             with T.cta():
-                acc_storage = T.alloc_buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local", logical_scope="thread")
-                A_smem = T.alloc_buffer([BLK_M, BLK_K], dtype="float16", scope="shared", logical_scope="cta",
+                acc_storage = T.alloc_buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local")
+                A_smem = T.alloc_buffer([BLK_M, BLK_K], dtype="float16", scope="shared",
                                         layout=None)
-                B_smem = T.alloc_buffer([BLK_N, BLK_K], dtype="float16", scope="shared", logical_scope="cta",
+                B_smem = T.alloc_buffer([BLK_N, BLK_K], dtype="float16", scope="shared",
                                         layout=None)
 
                 acc = T.view(acc_storage,
@@ -112,8 +112,8 @@ def test_gemm_ampere():
                     with T.warp():
                         T.reads(A_smem[:, :], B_smem[:, :])
                         T.writes(acc[:, :])
-                        A_storage = T.alloc_buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local", logical_scope="thread")
-                        B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local", logical_scope="thread")
+                        A_storage = T.alloc_buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local")
+                        B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local")
 
                         A_warp = T.view(A_storage, 
                                         layout=None, 

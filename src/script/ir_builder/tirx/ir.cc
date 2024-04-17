@@ -40,6 +40,9 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::String logical_scope,
 
                   ffi::Optional<TLayout> layout) {
+  if (logical_scope == "" && storage_scope != "") {
+    logical_scope = tvm::tirx::StorageToLogicalScope(storage_scope);
+  }
   TVM_FFI_CHECK(buffer_type == "auto" || buffer_type == "default" || buffer_type.empty())
       << "ValueError: `buffer_type` must be `auto` or `default` or empty";
   Var buffer_data;
@@ -169,7 +172,7 @@ Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Buffer ds
   {
     // Update BufferView tree
     Optional<PrimFuncFrame> func_frame_opt = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
-    ICHECK(func_frame_opt.defined()) << "ValueError: Block must be defined within a PrimFunc";
+    TVM_FFI_ICHECK(func_frame_opt.defined()) << "ValueError: Block must be defined within a PrimFunc";
     PrimFuncFrame func_frame = func_frame_opt.value();
     func_frame->buffer_view_map.Set(dst_buffer, buffer);
   }
@@ -182,19 +185,19 @@ Buffer BufferGet(tvm::tirx::Buffer buffer) {
   {
     // Get the dst buffer from the buffer map
     Optional<PrimFuncFrame> func_frame_opt = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
-    ICHECK(func_frame_opt.defined()) << "ValueError: Block must be defined within a PrimFunc";
+    TVM_FFI_ICHECK(func_frame_opt.defined()) << "ValueError: Block must be defined within a PrimFunc";
     PrimFuncFrame func_frame = func_frame_opt.value();
 
     // Find the root of view tree
     auto it = func_frame->buffer_view_map.find(buffer);
-    ICHECK(it != func_frame->buffer_view_map.end());
+    TVM_FFI_ICHECK(it != func_frame->buffer_view_map.end());
     do {
       dst_buffer = (*it).second;
       it = func_frame->buffer_view_map.find(dst_buffer);
     } while (it != func_frame->buffer_view_map.end());
 
     // Check if the buffer is a stroage buffer
-    ICHECK(tvm::tirx::IsStorageBuffer(dst_buffer.scope(), dst_buffer.logical_scope()));
+    TVM_FFI_ICHECK(tvm::tirx::IsStorageBuffer(dst_buffer.scope(), dst_buffer.logical_scope()));
 
     // Copy the dst buffer
     auto n = dst_buffer.CopyOnWrite();
@@ -1047,7 +1050,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxx
+}  // namespace tirxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
