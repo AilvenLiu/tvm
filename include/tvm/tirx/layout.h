@@ -24,6 +24,7 @@
 #define TVM_TIRX_LAYOUT_H_
 
 #include <tvm/ir/module.h>
+#include <tvm/runtime/object.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/var.h>
 
@@ -117,6 +118,7 @@ class IterTree : public ObjectRef {
   TVM_DLL explicit IterTree(Var root, Array<IterTreeSplit> splits);
 
   TVM_DEFINE_OBJECT_REF_METHODS(IterTree, ObjectRef, IterTreeNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeNode);
 };
 
 // CoordIterTree
@@ -148,16 +150,17 @@ class DataIterTree : public IterTree {
   TVM_DLL explicit DataIterTree(Var root, Array<IterTreeSplit> splits, Array<PrimExpr> coeff);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DataIterTree, IterTree, DataIterTreeNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(DataIterTreeNode);
 };
 
-// ScopeIdAttr
+// DeviceIterAttr
 enum ScopeIdType : int {
   kSplit = 0,
   kReplicate = 1,
   kExclusive = 2,
 };
 
-class ScopeIdAttrNode : public Object {
+class DeviceIterAttrNode : public Object {
  public:
   /*! \brief type of ScopeID, can be split (S), replicate (R), exclusive (E) */
   ScopeIdType type;
@@ -172,7 +175,7 @@ class ScopeIdAttrNode : public Object {
     v->Visit("owner", &owner);
   }
 
-  bool SEqualReduce(const ScopeIdAttrNode* other, SEqualReducer equal) const {
+  bool SEqualReduce(const DeviceIterAttrNode* other, SEqualReducer equal) const {
     return equal(type, other->type) && equal(bound, other->bound) && equal(owner, other->owner);
   }
 
@@ -182,25 +185,30 @@ class ScopeIdAttrNode : public Object {
     hash_reducer(owner);
   }
 
-  static constexpr const char* _type_key = "tirx.ScopeIdAttr";
+  static constexpr const char* _type_key = "tirx.DeviceIterAttr";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
-  TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdAttrNode, Object);
+  TVM_DECLARE_FINAL_OBJECT_INFO(DeviceIterAttrNode, Object);
 };
 
-class ScopeIdAttr : public ObjectRef {
+class DeviceIterAttr : public ObjectRef {
  public:
-  TVM_DLL explicit ScopeIdAttr(ScopeIdType type, Optional<Var> bound = NullOpt,
-                               Optional<PrimExpr> owner = NullOpt);
+  TVM_DLL explicit DeviceIterAttr(ScopeIdType type, Optional<Var> bound = NullOpt,
+                                  Optional<PrimExpr> owner = NullOpt);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ScopeIdAttr, ObjectRef, ScopeIdAttrNode);
+  static DeviceIterAttr Replicate();
+
+  static DeviceIterAttr Split(Var bound);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterAttr, ObjectRef, DeviceIterAttrNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(DeviceIterAttrNode);
 };
 
 // DeviceIterTree
 class DeviceIterTreeNode : public IterTreeNode {
  public:
   /*! \brief The attributes of each leaf node */
-  Array<ScopeIdAttr> attrs;
+  Array<DeviceIterAttr> attrs;
 
   void VisitAttrs(AttrVisitor* v) {
     IterTreeNode::VisitAttrs(v);
@@ -222,9 +230,13 @@ class DeviceIterTreeNode : public IterTreeNode {
 
 class DeviceIterTree : public IterTree {
  public:
-  TVM_DLL explicit DeviceIterTree(Var root, Array<IterTreeSplit> splits, Array<ScopeIdAttr> attrs);
+  TVM_DLL explicit DeviceIterTree(Var root, Array<IterTreeSplit> splits,
+                                  Array<DeviceIterAttr> attrs);
+
+  static Array<ObjectRef> FromTuple(const ObjectRef& device);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterTree, IterTree, DeviceIterTreeNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(DeviceIterTreeNode);
 };
 
 // TileLayout
@@ -267,10 +279,14 @@ class TileLayout : public TLayout {
   TVM_DLL explicit TileLayout(Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees,
                               Optional<ExecScope> from = NullOpt, Optional<ExecScope> to = NullOpt);
 
+  static TileLayout FromTile(const Array<PrimExpr>& shape, const TileLayout& inner,
+                             const Optional<ObjectRef>& device, const Optional<ObjectRef>& from_to);
+
   TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);
 };
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

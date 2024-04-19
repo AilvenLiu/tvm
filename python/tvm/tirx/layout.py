@@ -21,7 +21,7 @@ import operator
 from typing import List, Optional, Tuple, Union
 
 from . import _ffi_api
-from tvm._ffi import register_object
+from tvm._ffi import register_object, get_global_func
 from tvm.runtime import Object
 
 from .expr import Var, PrimExpr
@@ -61,8 +61,8 @@ class DataIterTree(IterTree):
         self.__init_handle_by_constructor__(_ffi_api.DataIterTree, root, splits, coeff)
 
 
-@register_object("tirx.ScopeIdAttr")
-class ScopeIdAttr(Object):
+@register_object("tirx.DeviceIterAttr")
+class DeviceIterAttr(Object):
     Split = 0
     Replicate = 1
     Exclusive = 2
@@ -72,14 +72,14 @@ class ScopeIdAttr(Object):
     owner: Optional[PrimExpr]
 
     def __init__(self, type: int, bound: Optional[Var] = None, owner: Optional[PrimExpr] = None):
-        self.__init_handle_by_constructor__(_ffi_api.ScopeIdAttr, type, bound, owner)
+        self.__init_handle_by_constructor__(_ffi_api.DeviceIterAttr, type, bound, owner)
 
 
 @register_object("tirx.DeviceIterTree")
 class DeviceIterTree(IterTree):
-    attrs: List[ScopeIdAttr]
+    attrs: List[DeviceIterAttr]
 
-    def __init__(self, root: Var, splits: List[IterTreeSplit], attrs: List[ScopeIdAttr]):
+    def __init__(self, root: Var, splits: List[IterTreeSplit], attrs: List[DeviceIterAttr]):
         self.__init_handle_by_constructor__(_ffi_api.DeviceIterTree, root, splits, attrs)
 
 
@@ -110,42 +110,13 @@ class TileLayout(TLayout):
     def _construct_device_iter_tree(
         device: Union[Tuple, int, PrimExpr]
     ) -> Tuple[DeviceIterTree, int, List[int]]:
-        root = Var("", "int32")
-        if isinstance(device, (int, PrimExpr)):
-            return (
-                DeviceIterTree(
-                    root=root,
-                    splits=[],
-                    attrs=[ScopeIdAttr(type=ScopeIdAttr.Replicate, bound=None, owner=None)],
-                ),
-                device,
-                [device],
-            )
-        assert isinstance(device, tuple)
-        splits = []
-        children = []
-        extents = []
-        attrs = []
-        leaf_extents = []
-        for d in reversed(device):
-            child, sub_extent, sub_leaf_extents = TileLayout._construct_device_iter_tree(d)
-            splits.extend(child.splits)
-            children.append(child.root)
-            extents.append(sub_extent)
-            leaf_extents.extend(sub_leaf_extents)
-            attrs.extend(child.attrs)
-        splits.append(IterTreeSplit(parent=root, children=children, extents=extents))
-        return (
-            DeviceIterTree(root=root, splits=splits, attrs=attrs),
-            functools.reduce(operator.mul, extents, 1),
-            leaf_extents,
-        )
+        return get_global_func("tir.DeviceIterTreeFromTuple")(device)
 
     @staticmethod
     def _construct_data_iter_tree(
         data: Union[Tuple, int, PrimExpr, S],
         strides: Union[Tuple, int, PrimExpr],
-        scope_id_attrs: List[ScopeIdAttr],
+        scope_id_attrs: List[DeviceIterAttr],
         device_extents: List[int],
     ):
         root = Var("", "int32")
@@ -157,10 +128,10 @@ class TileLayout(TLayout):
             )
         if isinstance(data, S):
             assert (
-                scope_id_attrs[data.device_index].type == ScopeIdAttr.Replicate
+                scope_id_attrs[data.device_index].type == DeviceIterAttr.Replicate
             ), f"Scope ID on axis {data.device_index} has been bound to var {scope_id_attrs[data.device_index].bound}."
-            scope_id_attrs[data.device_index] = ScopeIdAttr(
-                type=ScopeIdAttr.Split, bound=root, owner=None
+            scope_id_attrs[data.device_index] = DeviceIterAttr(
+                type=DeviceIterAttr.Split, bound=root, owner=None
             )
             return (
                 DataIterTree(root=root, splits=[], coeff=[strides]),
@@ -204,8 +175,8 @@ class TileLayout(TLayout):
         if exclusive:
             for e in exclusive:
                 axis, owner = e
-                scope_id_attrs[axis] = ScopeIdAttr(
-                    type=ScopeIdAttr.Exclusive, bound=scope_id_attrs[axis].bound, owner=owner
+                scope_id_attrs[axis] = DeviceIterAttr(
+                    type=DeviceIterAttr.Exclusive, bound=scope_id_attrs[axis].bound, owner=owner
                 )
         return TileLayout(
             data_trees=[data_iter_tree],
@@ -217,3 +188,12 @@ class TileLayout(TLayout):
             from_scope=ExecScope.create(from_to[0]) if from_to else None,
             to_scope=ExecScope.create(from_to[1]) if from_to else None,
         )
+
+    @staticmethod
+    def from_tile(
+        shape: Tuple,
+        inner: TLayout,
+        device: Optional[Tuple] = None,
+        from_to: Optional[Tuple[str]] = None,
+    ):
+        return get_global_func("tir.TileLayoutFromTile")(shape, inner, device, from_to)

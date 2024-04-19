@@ -21,6 +21,15 @@
 namespace tvm {
 namespace tirx {
 
+/******** Utils ********/
+PrimExpr ReduceMul(Array<PrimExpr> values) {
+  PrimExpr result = values[0];
+  for (size_t i = 1; i < values.size(); i++) {
+    result = result * values[i];
+  }
+  return result;
+}
+
 /******** Constructors ********/
 
 // IterTreeSplit
@@ -69,24 +78,64 @@ TVM_REGISTER_GLOBAL("tirx.DataIterTree")
       return DataIterTree(root, splits, coeff);
     });
 
-// ScopeIdAttr
-ScopeIdAttr::ScopeIdAttr(ScopeIdType type, Optional<Var> bound, Optional<PrimExpr> owner) {
-  auto n = make_object<ScopeIdAttrNode>();
+std::tuple<DeviceIterTree, PrimExpr, std::vector<PrimExpr>> DeviceIterTreeFromTupleImpl(
+    const ObjectRef& device) {
+  Var root("");
+  if (auto leaf_ptr = device.as<PrimExprNode>()) {
+    auto leaf = GetRef<PrimExpr>(leaf_ptr);
+    return {DeviceIterTree(root, {}, {DeviceIterAttr::Replicate()}), leaf, {leaf}};
+  }
+  auto tuple = device.as<ArrayNode>();
+  ICHECK(tuple != nullptr) << "ValueError: Expect a tuple while get " << device->GetTypeKey();
+
+  std::vector<IterTreeSplit> splits;
+  std::vector<Var> children;
+  std::vector<PrimExpr> extents;
+  std::vector<DeviceIterAttr> attrs;
+  std::vector<PrimExpr> leaf_extents;
+  for (int i = tuple->size() - 1; i >= 0; i--) {
+    auto d = tuple->at(i);
+    auto [child, sub_extent, sub_leaf_extents] = DeviceIterTreeFromTupleImpl(d);
+    splits.insert(splits.end(), child->splits.begin(), child->splits.end());
+    children.push_back(child->root);
+    extents.push_back(sub_extent);
+    leaf_extents.insert(leaf_extents.end(), sub_leaf_extents.begin(), sub_leaf_extents.end());
+    attrs.insert(attrs.end(), child->attrs.begin(), child->attrs.end());
+  }
+  splits.push_back(IterTreeSplit(root, children, extents));
+  return {DeviceIterTree(root, splits, attrs), ReduceMul(extents), leaf_extents};
+}
+
+Array<ObjectRef> DeviceIterTree::FromTuple(const ObjectRef& device) {
+  auto [tree, extent, leaf_extents] = DeviceIterTreeFromTupleImpl(device);
+  return {tree, extent, Array<PrimExpr>(leaf_extents)};
+}
+
+TVM_REGISTER_GLOBAL("tirx.DeviceIterTreeFromTuple")
+    .set_body_typed(DeviceIterTree::FromTuple);
+
+// DeviceIterAttr
+DeviceIterAttr::DeviceIterAttr(ScopeIdType type, Optional<Var> bound, Optional<PrimExpr> owner) {
+  auto n = make_object<DeviceIterAttrNode>();
   n->type = type;
   n->bound = bound;
   n->owner = owner;
   data_ = std::move(n);
 }
 
-TVM_REGISTER_NODE_TYPE(ScopeIdAttrNode);
+TVM_REGISTER_NODE_TYPE(DeviceIterAttrNode);
 
-TVM_REGISTER_GLOBAL("tirx.ScopeIdAttr")
+TVM_REGISTER_GLOBAL("tirx.DeviceIterAttr")
     .set_body_typed([](int type, Optional<Var> bound, Optional<PrimExpr> owner) {
-      return ScopeIdAttr(static_cast<ScopeIdType>(type), bound, owner);
+      return DeviceIterAttr(static_cast<ScopeIdType>(type), bound, owner);
     });
 
+DeviceIterAttr DeviceIterAttr::Replicate() { return DeviceIterAttr(kReplicate, NullOpt, NullOpt); }
+
+DeviceIterAttr DeviceIterAttr::Split(Var bound) { return DeviceIterAttr(kSplit, bound, NullOpt); }
+
 // DeviceIterTree
-DeviceIterTree::DeviceIterTree(Var root, Array<IterTreeSplit> splits, Array<ScopeIdAttr> attrs) {
+DeviceIterTree::DeviceIterTree(Var root, Array<IterTreeSplit> splits, Array<DeviceIterAttr> attrs) {
   auto n = make_object<DeviceIterTreeNode>();
   n->root = std::move(root);
   n->splits = std::move(splits);
@@ -97,7 +146,7 @@ DeviceIterTree::DeviceIterTree(Var root, Array<IterTreeSplit> splits, Array<Scop
 TVM_REGISTER_NODE_TYPE(DeviceIterTreeNode);
 
 TVM_REGISTER_GLOBAL("tirx.DeviceIterTree")
-    .set_body_typed([](Var root, Array<IterTreeSplit> splits, Array<ScopeIdAttr> attrs) {
+    .set_body_typed([](Var root, Array<IterTreeSplit> splits, Array<DeviceIterAttr> attrs) {
       return DeviceIterTree(root, splits, attrs);
     });
 
@@ -120,5 +169,25 @@ TVM_REGISTER_GLOBAL("tirx.TileLayout")
       return TileLayout(data_trees, device_trees, from, to);
     });
 
-}  // namespace tirxxx
+TileLayout TileLayout::FromTile(const Array<PrimExpr>& shape, const TileLayout& inner,
+                                const Optional<ObjectRef>& device,
+                                const Optional<ObjectRef>& from_to) {
+  // Create outer IterSplits
+  
+  if (device.defined()) {
+    ICHECK(from_to.defined()) << "ValueError: from_to must be defined when device is defined";
+
+  } else {
+    ICHECK(!from_to.defined()) << "ValueError: from_to must not be defined when device is not defined";
+
+  } 
+}
+
+TVM_REGISTER_GLOBAL("tirx.TileLayoutFromTile")
+    .set_body_typed([](const Array<PrimExpr>& shape, const TileLayout& inner,
+                       const Optional<ObjectRef>& device, const Optional<ObjectRef>& from_to) {
+      return TileLayout::FromTile(shape, inner, device, from_to);
+    });
+
+}  // namespace tirx
 }  // namespace tvm

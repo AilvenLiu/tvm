@@ -177,9 +177,9 @@ def test_alloc_buffer_default_logical_scope():
 
 
 if __name__ == "__main__":
-    # test_roundtrip_scopeid()
-    # test_roundtrip_exec_scope()
+    test_roundtrip_scopeid()
+    test_roundtrip_exec_scope()
     test_roundtrip_layout()
-    # test_roundtrip_buffer_view_get1()
-    # test_roundtrip_buffer_view_get2()
-    # test_alloc_buffer_default_logical_scope()
+    test_roundtrip_buffer_view_get1()
+    test_roundtrip_buffer_view_get2()
+    test_alloc_buffer_default_logical_scope()

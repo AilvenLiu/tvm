@@ -81,8 +81,8 @@ def test_nested_tuple():
                     )
                 ],
                 attrs=[
-                    T.ScopeIdAttr(type=0, bound=data_64_outer_8_inner, owner=None),
-                    T.ScopeIdAttr(type=2, bound=data_64_inner_8_inner_4_outer, owner=0),
+                    T.DeviceIterAttr(type=0, bound=data_64_outer_8_inner, owner=None),
+                    T.DeviceIterAttr(type=2, bound=data_64_inner_8_inner_4_outer, owner=0),
                 ],
             )
         ],
