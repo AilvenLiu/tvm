@@ -33,40 +33,94 @@ PrimExpr ReduceMul(Array<PrimExpr> values) {
 /******** Constructors ********/
 
 // IterTreeSplit
-IterTreeSplit::IterTreeSplit(Var parent, Array<Var> children, Array<PrimExpr> extents) {
+IterTreeSplit::IterTreeSplit(PrimExpr extent, Array<IterTreeBase> children) {
   auto n = make_object<IterTreeSplitNode>();
-  n->parent = std::move(parent);
+  n->extent = std::move(extent);
   n->children = std::move(children);
-  n->extents = std::move(extents);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_NODE_TYPE(IterTreeSplitNode);
 
 TVM_REGISTER_GLOBAL("tirx.IterTreeSplit")
-    .set_body_typed([](Var parent, Array<Var> children, Array<PrimExpr> extents) {
-      return IterTreeSplit(parent, children, extents);
+    .set_body_typed([](PrimExpr extent, Array<IterTreeBase> children) {
+      return IterTreeSplit(extent, children);
     });
 
 // IterTree
-IterTree::IterTree(Var root, Array<IterTreeSplit> splits) {
+IterTree::IterTree(IterTreeSplit root) {
   auto n = make_object<IterTreeNode>();
   n->root = std::move(root);
-  n->splits = std::move(splits);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_NODE_TYPE(IterTreeNode);
 
-TVM_REGISTER_GLOBAL("tirx.IterTree").set_body_typed([](Var root, Array<IterTreeSplit> splits) {
-  return IterTree(root, splits);
+TVM_REGISTER_GLOBAL("tirx.IterTree").set_body_typed([](IterTreeSplit root) {
+  return IterTree(root);
 });
 
+std::pair<IterTree, std::vector<IterTreeBase>> IterTreeFromTupleImpl(const ObjectRef& device) {
+  if (auto leaf_ptr = device.as<PrimExprNode>()) {
+    auto leaf = GetRef<PrimExpr>(leaf_ptr);
+    auto root = IterTreeSplit(leaf, {});
+    return {IterTree({root}), {root}};
+  }
+  auto tuple = device.as<ArrayNode>();
+  ICHECK(tuple != nullptr) << "ValueError: Expect a tuple while get " << device->GetTypeKey();
+
+  std::vector<IterTreeBase> children;
+  std::vector<IterTreeBase> leaves;
+  std::vector<PrimExpr> extents;
+  for (auto d : *tuple) {
+    auto [child, child_leaves] = IterTreeFromTupleImpl(d);
+    children.push_back(child->root);
+    leaves.insert(leaves.end(), child_leaves.begin(), child_leaves.end());
+    extents.push_back(child->root->extent);
+  }
+  auto root = IterTreeSplit(ReduceMul(extents), Array<IterTreeBase>(children));
+  return {IterTree(root), leaves};
+}
+
+Array<ObjectRef> IterTree::FromTuple(const ObjectRef& device) {
+  auto [tree, leaves] = IterTreeFromTupleImpl(device);
+  return {tree, Array<IterTreeBase>(leaves)};
+}
+
+TVM_REGISTER_GLOBAL("tirx.IterTreeFromTuple").set_body_typed(IterTree::FromTuple);
+
+Array<IterTreeBase> IterTree::GetLeaves() const {
+  auto* n = operator->();
+  std::vector<IterTreeBase> leaves;
+  std::function<void(const IterTreeBase&)> visit = [&](const IterTreeBase& node) {
+    if (auto* split = node.as<IterTreeSplitNode>()) {
+      if (split->children.size() == 0) {
+        leaves.push_back(node);
+      }
+      for (const auto& child : split->children) {
+        visit(child);
+      }
+    } else {
+      LOG(FATAL) << "InternalError: Expect IterTreeSplit but get " << node->GetTypeKey();
+    }
+  };
+  visit(n->root);
+  return Array<IterTreeBase>(leaves);
+}
+
+IterTree::LeafIndexMap IterTree::GetLeafToIndex() const {
+  Array<IterTreeBase> leaves = GetLeaves();
+  LeafIndexMap leaf_to_index;
+  for (size_t i = 0; i < leaves.size(); i++) {
+    leaf_to_index[leaves[i]] = i;
+  }
+  return std::move(leaf_to_index);
+}
+
 // DataIterTree
-DataIterTree::DataIterTree(Var root, Array<IterTreeSplit> splits, Array<PrimExpr> coeff) {
+DataIterTree::DataIterTree(IterTreeSplit root, Array<PrimExpr> coeff) {
   auto n = make_object<DataIterTreeNode>();
   n->root = std::move(root);
-  n->splits = std::move(splits);
   n->coeff = std::move(coeff);
   data_ = std::move(n);
 }
@@ -74,48 +128,13 @@ DataIterTree::DataIterTree(Var root, Array<IterTreeSplit> splits, Array<PrimExpr
 TVM_REGISTER_NODE_TYPE(DataIterTreeNode);
 
 TVM_REGISTER_GLOBAL("tirx.DataIterTree")
-    .set_body_typed([](Var root, Array<IterTreeSplit> splits, Array<PrimExpr> coeff) {
-      return DataIterTree(root, splits, coeff);
+    .set_body_typed([](IterTreeSplit root, Array<PrimExpr> coeff) {
+      return DataIterTree(root, coeff);
     });
 
-std::tuple<DeviceIterTree, PrimExpr, std::vector<PrimExpr>> DeviceIterTreeFromTupleImpl(
-    const ObjectRef& device) {
-  Var root("");
-  if (auto leaf_ptr = device.as<PrimExprNode>()) {
-    auto leaf = GetRef<PrimExpr>(leaf_ptr);
-    return {DeviceIterTree(root, {}, {DeviceIterAttr::Replicate()}), leaf, {leaf}};
-  }
-  auto tuple = device.as<ArrayNode>();
-  ICHECK(tuple != nullptr) << "ValueError: Expect a tuple while get " << device->GetTypeKey();
-
-  std::vector<IterTreeSplit> splits;
-  std::vector<Var> children;
-  std::vector<PrimExpr> extents;
-  std::vector<DeviceIterAttr> attrs;
-  std::vector<PrimExpr> leaf_extents;
-  for (int i = tuple->size() - 1; i >= 0; i--) {
-    auto d = tuple->at(i);
-    auto [child, sub_extent, sub_leaf_extents] = DeviceIterTreeFromTupleImpl(d);
-    splits.insert(splits.end(), child->splits.begin(), child->splits.end());
-    children.push_back(child->root);
-    extents.push_back(sub_extent);
-    leaf_extents.insert(leaf_extents.end(), sub_leaf_extents.begin(), sub_leaf_extents.end());
-    attrs.insert(attrs.end(), child->attrs.begin(), child->attrs.end());
-  }
-  splits.push_back(IterTreeSplit(root, children, extents));
-  return {DeviceIterTree(root, splits, attrs), ReduceMul(extents), leaf_extents};
-}
-
-Array<ObjectRef> DeviceIterTree::FromTuple(const ObjectRef& device) {
-  auto [tree, extent, leaf_extents] = DeviceIterTreeFromTupleImpl(device);
-  return {tree, extent, Array<PrimExpr>(leaf_extents)};
-}
-
-TVM_REGISTER_GLOBAL("tirx.DeviceIterTreeFromTuple")
-    .set_body_typed(DeviceIterTree::FromTuple);
-
 // DeviceIterAttr
-DeviceIterAttr::DeviceIterAttr(ScopeIdType type, Optional<Var> bound, Optional<PrimExpr> owner) {
+DeviceIterAttr::DeviceIterAttr(ScopeIdType type, Optional<PrimExpr> bound,
+                               Optional<PrimExpr> owner) {
   auto n = make_object<DeviceIterAttrNode>();
   n->type = type;
   n->bound = bound;
@@ -126,19 +145,22 @@ DeviceIterAttr::DeviceIterAttr(ScopeIdType type, Optional<Var> bound, Optional<P
 TVM_REGISTER_NODE_TYPE(DeviceIterAttrNode);
 
 TVM_REGISTER_GLOBAL("tirx.DeviceIterAttr")
-    .set_body_typed([](int type, Optional<Var> bound, Optional<PrimExpr> owner) {
+    .set_body_typed([](int type, Optional<PrimExpr> bound, Optional<PrimExpr> owner) {
       return DeviceIterAttr(static_cast<ScopeIdType>(type), bound, owner);
     });
 
 DeviceIterAttr DeviceIterAttr::Replicate() { return DeviceIterAttr(kReplicate, NullOpt, NullOpt); }
 
-DeviceIterAttr DeviceIterAttr::Split(Var bound) { return DeviceIterAttr(kSplit, bound, NullOpt); }
+DeviceIterAttr DeviceIterAttr::Split(PrimExpr bound) { return DeviceIterAttr(kSplit, bound); }
+
+DeviceIterAttr DeviceIterAttr::Exclusive(PrimExpr owner) {
+  return DeviceIterAttr(kExclusive, NullOpt, owner);
+}
 
 // DeviceIterTree
-DeviceIterTree::DeviceIterTree(Var root, Array<IterTreeSplit> splits, Array<DeviceIterAttr> attrs) {
+DeviceIterTree::DeviceIterTree(IterTreeSplit root, Array<DeviceIterAttr> attrs) {
   auto n = make_object<DeviceIterTreeNode>();
   n->root = std::move(root);
-  n->splits = std::move(splits);
   n->attrs = std::move(attrs);
   data_ = std::move(n);
 }
@@ -146,16 +168,16 @@ DeviceIterTree::DeviceIterTree(Var root, Array<IterTreeSplit> splits, Array<Devi
 TVM_REGISTER_NODE_TYPE(DeviceIterTreeNode);
 
 TVM_REGISTER_GLOBAL("tirx.DeviceIterTree")
-    .set_body_typed([](Var root, Array<IterTreeSplit> splits, Array<DeviceIterAttr> attrs) {
-      return DeviceIterTree(root, splits, attrs);
+    .set_body_typed([](IterTreeSplit root, Array<DeviceIterAttr> attrs) {
+      return DeviceIterTree(root, attrs);
     });
 
 // TileLayout
-TileLayout::TileLayout(Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees,
-                       Optional<ExecScope> from, Optional<ExecScope> to) {
+TileLayout::TileLayout(DataIterTree data_tree, DeviceIterTree device_tree, Optional<ExecScope> from,
+                       Optional<ExecScope> to) {
   auto n = make_object<TileLayoutNode>();
-  n->data_trees = std::move(data_trees);
-  n->device_trees = std::move(device_trees);
+  n->data_tree = std::move(data_tree);
+  n->device_tree = std::move(device_tree);
   n->from = std::move(from);
   n->to = std::move(to);
   data_ = std::move(n);
@@ -164,23 +186,22 @@ TileLayout::TileLayout(Array<DataIterTree> data_trees, Array<DeviceIterTree> dev
 TVM_REGISTER_NODE_TYPE(TileLayoutNode);
 
 TVM_REGISTER_GLOBAL("tirx.TileLayout")
-    .set_body_typed([](Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees,
-                       Optional<ExecScope> from, Optional<ExecScope> to) {
-      return TileLayout(data_trees, device_trees, from, to);
+    .set_body_typed([](DataIterTree data_tree, DeviceIterTree device_tree, Optional<ExecScope> from,
+                       Optional<ExecScope> to) {
+      return TileLayout(data_tree, device_tree, from, to);
     });
 
 TileLayout TileLayout::FromTile(const Array<PrimExpr>& shape, const TileLayout& inner,
                                 const Optional<ObjectRef>& device,
                                 const Optional<ObjectRef>& from_to) {
   // Create outer IterSplits
-  
   if (device.defined()) {
     ICHECK(from_to.defined()) << "ValueError: from_to must be defined when device is defined";
 
   } else {
-    ICHECK(!from_to.defined()) << "ValueError: from_to must not be defined when device is not defined";
-
-  } 
+    ICHECK(!from_to.defined())
+        << "ValueError: from_to must not be defined when device is not defined";
+  }
 }
 
 TVM_REGISTER_GLOBAL("tirx.TileLayoutFromTile")
@@ -189,5 +210,5 @@ TVM_REGISTER_GLOBAL("tirx.TileLayoutFromTile")
       return TileLayout::FromTile(shape, inner, device, from_to);
     });
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm

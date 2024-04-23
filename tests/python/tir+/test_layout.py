@@ -24,71 +24,65 @@ def test_nested_tuple():
     layout = T.TileLayout.from_nested_tuple(
         data=((8, T.S(0)), (8, (T.S(1), 2))),
         strides=((16, -1), (2, (-1, 1))),
-        device=(4, 8),
-        exclusive=((1, 0),),
+        device=(8, 4),
         from_to=("thread", "warp"),
     )
-    print(layout)
-    data_root = T.Var("", "int32")
-    data_64_outer = T.Var("", "int32")
-    data_64_outer_8_outer = T.Var("", "int32")
-    data_64_outer_8_inner = T.Var("", "int32")
-    data_64_inner = T.Var("", "int32")
-    data_64_inner_8_outer = T.Var("", "int32")
-    data_64_inner_8_inner = T.Var("", "int32")
-    data_64_inner_8_inner_4_outer = T.Var("", "int32")
-    data_64_inner_8_inner_2_inner = T.Var("", "int32")
 
-    device_root = T.Var("", "int32")
-    device_4_outer = T.Var("", "int32")
-    device_8_inner = T.Var("", "int32")
+    data_leaf1 = T.IterTreeSplit(children=[], extent=8)
+    data_leaf2 = T.IterTreeSplit(children=[], extent=8)
+    data_leaf3 = T.IterTreeSplit(children=[], extent=8)
+    data_leaf4 = T.IterTreeSplit(children=[], extent=4)
+    data_leaf5 = T.IterTreeSplit(children=[], extent=2)
+
+    device_leaf1 = T.IterTreeSplit(children=[], extent=8)
+    device_leaf2 = T.IterTreeSplit(children=[], extent=4)
 
     layout_expected = T.TileLayout(
-        data_trees=[
-            T.DataIterTree(
-                root=data_root,
-                splits=[
+        data_tree=T.DataIterTree(
+            root=T.IterTreeSplit(
+                children=[
                     T.IterTreeSplit(
-                        parent=data_64_inner_8_inner,
-                        children=[data_64_inner_8_inner_2_inner, data_64_inner_8_inner_4_outer],
-                        extents=[2, 4],
+                        children=[
+                            data_leaf1,
+                            data_leaf2,
+                        ],
+                        extent=64,
                     ),
                     T.IterTreeSplit(
-                        parent=data_64_inner,
-                        children=[data_64_inner_8_inner, data_64_inner_8_outer],
-                        extents=[8, 8],
-                    ),
-                    T.IterTreeSplit(
-                        parent=data_64_outer,
-                        children=[data_64_outer_8_inner, data_64_outer_8_outer],
-                        extents=[8, 8],
-                    ),
-                    T.IterTreeSplit(
-                        parent=data_root, children=[data_64_inner, data_64_outer], extents=[64, 64]
+                        children=[
+                            data_leaf3,
+                            T.IterTreeSplit(
+                                children=[
+                                    data_leaf4,
+                                    data_leaf5,
+                                ],
+                                extent=8,
+                            ),
+                        ],
+                        extent=64,
                     ),
                 ],
-                coeff=[1, -1, 2, -1, 16],
-            )
-        ],
-        device_trees=[
-            T.DeviceIterTree(
-                root=device_root,
-                splits=[
-                    T.IterTreeSplit(
-                        parent=device_root,
-                        children=[device_8_inner, device_4_outer],
-                        extents=[8, 4],
-                    )
+                extent=4096,
+            ),
+            coeff=[16, -1, 2, -1, 1],
+        ),
+        device_tree=T.DeviceIterTree(
+            root=T.IterTreeSplit(
+                children=[
+                    device_leaf1,
+                    device_leaf2,
                 ],
-                attrs=[
-                    T.DeviceIterAttr(type=0, bound=data_64_outer_8_inner, owner=None),
-                    T.DeviceIterAttr(type=2, bound=data_64_inner_8_inner_4_outer, owner=0),
-                ],
-            )
-        ],
-        from_scope=ExecScope.create("thread"),
-        to_scope=ExecScope.create("warp"),
+                extent=32,
+            ),
+            attrs=[
+                T.DeviceIterAttr.split(bound=1),
+                T.DeviceIterAttr.split(bound=3),
+            ],
+        ),
+        from_scope=T.ExecScope.create("thread"),
+        to_scope=T.ExecScope.create("warp"),
     )
+
     tvm.ir.assert_structural_equal(layout, layout_expected, True)
 
 

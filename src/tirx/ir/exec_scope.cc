@@ -112,11 +112,11 @@ ExecScope ExecScope::Create(String name) {
 
 TVM_REGISTER_NODE_TYPE(ExecScopeNode);
 
-TVM_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](Array<PrimExpr> dims, String name) {
+TVM_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](String name) {
   return ExecScope(name);
 });
 
-TVM_REGISTER_GLOBAL("tir.ExecScopeCreate").set_body_typed([](String name) {
+TVM_REGISTER_GLOBAL("tirx.ExecScopeCreate").set_body_typed([](String name) {
   return ExecScope::Create(name);
 });
 
@@ -191,5 +191,5 @@ String StorageToLogicalScope(const String& storage) {
   return StorageToLogical.at(storage);
 }
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm

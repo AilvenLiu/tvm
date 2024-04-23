@@ -18,7 +18,7 @@
 from dataclasses import dataclass
 import functools
 import operator
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Dict
 
 from . import _ffi_api
 from tvm._ffi import register_object, get_global_func
@@ -34,31 +34,35 @@ class TLayout(Object):
         self.__init_handle_by_constructor__(_ffi_api.TLayout)
 
 
+@register_object("tirx.IterTreeBase")
+class IterTreeBase(Object):
+    def __init__(self):
+        self.__init_handle_by_constructor__(_ffi_api.IterTreeBase)
+
+
 @register_object("tirx.IterTreeSplit")
 class IterTreeSplit(Object):
-    parent: Var
-    children: List[Var]
-    extents: List[PrimExpr]
+    extent: PrimExpr
+    children: List[IterTreeBase]
 
-    def __init__(self, parent: Var, children: List[Var], extents: List[PrimExpr]):
-        self.__init_handle_by_constructor__(_ffi_api.IterTreeSplit, parent, children, extents)
+    def __init__(self, extent: PrimExpr, children: List[IterTreeBase]):
+        self.__init_handle_by_constructor__(_ffi_api.IterTreeSplit, extent, children)
 
 
 @register_object("tirx.IterTree")
 class IterTree(Object):
-    root: Var
-    splits: List[IterTreeSplit]
+    root: IterTreeSplit
 
-    def __init__(self, root: Var, splits: List[IterTreeSplit]):
-        self.__init_handle_by_constructor__(_ffi_api.IterTree, root, splits)
+    def __init__(self, root: IterTreeSplit):
+        self.__init_handle_by_constructor__(_ffi_api.IterTree, root)
 
 
 @register_object("tirx.DataIterTree")
 class DataIterTree(IterTree):
     coeff: List[PrimExpr]
 
-    def __init__(self, root: Var, splits: List[IterTreeSplit], coeff: List[PrimExpr]):
-        self.__init_handle_by_constructor__(_ffi_api.DataIterTree, root, splits, coeff)
+    def __init__(self, root: IterTreeSplit, coeff: List[PrimExpr]):
+        self.__init_handle_by_constructor__(_ffi_api.DataIterTree, root, coeff)
 
 
 @register_object("tirx.DeviceIterAttr")
@@ -68,19 +72,31 @@ class DeviceIterAttr(Object):
     Exclusive = 2
 
     type: int
-    bound: Optional[Var]
+    bound: Optional[PrimExpr]
     owner: Optional[PrimExpr]
 
     def __init__(self, type: int, bound: Optional[Var] = None, owner: Optional[PrimExpr] = None):
         self.__init_handle_by_constructor__(_ffi_api.DeviceIterAttr, type, bound, owner)
+
+    @staticmethod
+    def replicate():
+        return DeviceIterAttr(type=DeviceIterAttr.Replicate)
+
+    @staticmethod
+    def split(bound: PrimExpr):
+        return DeviceIterAttr(type=DeviceIterAttr.Split, bound=bound)
+
+    @staticmethod
+    def exclusive(owner: PrimExpr):
+        return DeviceIterAttr(type=DeviceIterAttr.Exclusive, owner=owner)
 
 
 @register_object("tirx.DeviceIterTree")
 class DeviceIterTree(IterTree):
     attrs: List[DeviceIterAttr]
 
-    def __init__(self, root: Var, splits: List[IterTreeSplit], attrs: List[DeviceIterAttr]):
-        self.__init_handle_by_constructor__(_ffi_api.DeviceIterTree, root, splits, attrs)
+    def __init__(self, root: IterTreeSplit, attrs: List[DeviceIterAttr]):
+        self.__init_handle_by_constructor__(_ffi_api.DeviceIterTree, root, attrs)
 
 
 @dataclass
@@ -90,74 +106,67 @@ class S:
 
 @register_object("tirx.TileLayout")
 class TileLayout(TLayout):
-    data_trees: List[DataIterTree]
-    device_trees: List[DeviceIterTree]
+    data_tree: DataIterTree
+    device_tree: DeviceIterTree
     from_scope: Optional[ExecScope]
     to_scope: Optional[ExecScope]
 
     def __init__(
         self,
-        data_trees: List[DataIterTree],
-        device_trees: List[DeviceIterTree],
+        data_tree: DataIterTree,
+        device_tree: DeviceIterTree,
         from_scope: Optional[ExecScope] = None,
         to_scope: Optional[ExecScope] = None,
     ):
         self.__init_handle_by_constructor__(
-            _ffi_api.TileLayout, data_trees, device_trees, from_scope, to_scope
+            _ffi_api.TileLayout, data_tree, device_tree, from_scope, to_scope
         )
 
     @staticmethod
     def _construct_device_iter_tree(
         device: Union[Tuple, int, PrimExpr]
-    ) -> Tuple[DeviceIterTree, int, List[int]]:
-        return get_global_func("tir.DeviceIterTreeFromTuple")(device)
+    ) -> Tuple[DeviceIterTree, List[int]]:
+        f = get_global_func("tir.IterTreeFromTuple")
+        iter_tree, leaves = f(device)
+        attrs = [DeviceIterAttr(type=DeviceIterAttr.Replicate) for _ in leaves]
+        device_iter_tree = DeviceIterTree(root=iter_tree.root, attrs=attrs)
+        return device_iter_tree, leaves
 
     @staticmethod
     def _construct_data_iter_tree(
         data: Union[Tuple, int, PrimExpr, S],
         strides: Union[Tuple, int, PrimExpr],
-        scope_id_attrs: List[DeviceIterAttr],
-        device_extents: List[int],
+        device_attrs: List[DeviceIterAttr],
+        device_leaves: List[IterTreeBase],
+        inc_leaf_cnt: callable,
     ):
-        root = Var("", "int32")
         if isinstance(data, (int, PrimExpr)):
+            inc_leaf_cnt()
             assert isinstance(strides, (int, PrimExpr))
-            return (
-                DataIterTree(root=root, splits=[], coeff=[strides]),
-                data,
-            )
+            node = IterTreeSplit(extent=data, children=[])
+            return DataIterTree(root=node, coeff=[strides]), [node]
         if isinstance(data, S):
-            assert (
-                scope_id_attrs[data.device_index].type == DeviceIterAttr.Replicate
-            ), f"Scope ID on axis {data.device_index} has been bound to var {scope_id_attrs[data.device_index].bound}."
-            scope_id_attrs[data.device_index] = DeviceIterAttr(
-                type=DeviceIterAttr.Split, bound=root, owner=None
-            )
-            return (
-                DataIterTree(root=root, splits=[], coeff=[strides]),
-                device_extents[data.device_index],
-            )
-        splits = []
+            device_axis = device_leaves[data.device_index]
+            node = IterTreeSplit(extent=device_axis.extent, children=[])
+            device_attrs[data.device_index] = DeviceIterAttr.split(bound=inc_leaf_cnt())
+            return DataIterTree(root=node, coeff=[strides]), [node]
+
         children = []
-        extents = []
+        leaves = []
         coeff = []
         if isinstance(data, tuple):
             assert len(data) == len(strides)
-            root = Var("", dtype="int32")
-            splits = []
-            for d, s in zip(reversed(data), reversed(strides)):
-                child, sub_extent = TileLayout._construct_data_iter_tree(
-                    d, s, scope_id_attrs, device_extents
+            for d, s in zip(data, strides):
+                child, sub_leaves = TileLayout._construct_data_iter_tree(
+                    d, s, device_attrs, device_leaves, inc_leaf_cnt
                 )
-                splits.extend(child.splits)
                 children.append(child.root)
-                extents.append(sub_extent)
+                leaves.extend(sub_leaves)
                 coeff.extend(child.coeff)
-        splits.append(IterTreeSplit(parent=root, children=children, extents=extents))
-        return (
-            DataIterTree(root=root, splits=splits, coeff=coeff),
-            functools.reduce(operator.mul, extents, 1),
-        )
+
+        extent = functools.reduce(operator.mul, [c.extent for c in children], 1)
+        node = IterTreeSplit(extent=extent, children=children)
+        return DataIterTree(root=node, coeff=coeff), leaves
 
     @staticmethod
     def from_nested_tuple(
@@ -167,24 +176,26 @@ class TileLayout(TLayout):
         exclusive: Optional[Tuple] = None,
         from_to: Optional[Tuple[str]] = None,
     ):
-        device_iter_tree, _, device_extents = TileLayout._construct_device_iter_tree(device)
-        scope_id_attrs = list(device_iter_tree.attrs)
-        data_iter_tree, _ = TileLayout._construct_data_iter_tree(
-            data, strides, scope_id_attrs, device_extents
+        device_tree, device_leaves = TileLayout._construct_device_iter_tree(device)
+        device_attrs = list(device_tree.attrs)
+
+        leaf_cnt = 0
+
+        def inc_leaf_cnt():
+            nonlocal leaf_cnt
+            leaf_cnt += 1
+            return leaf_cnt - 1
+
+        data_tree, _ = TileLayout._construct_data_iter_tree(
+            data, strides, device_attrs, device_leaves, inc_leaf_cnt
         )
         if exclusive:
             for e in exclusive:
                 axis, owner = e
-                scope_id_attrs[axis] = DeviceIterAttr(
-                    type=DeviceIterAttr.Exclusive, bound=scope_id_attrs[axis].bound, owner=owner
-                )
+                device_attrs[axis] = DeviceIterAttr.exclusive(owner)
         return TileLayout(
-            data_trees=[data_iter_tree],
-            device_trees=[
-                DeviceIterTree(
-                    root=device_iter_tree.root, splits=device_iter_tree.splits, attrs=scope_id_attrs
-                )
-            ],
+            data_tree=data_tree,
+            device_tree=DeviceIterTree(device_tree.root, device_attrs),
             from_scope=ExecScope.create(from_to[0]) if from_to else None,
             to_scope=ExecScope.create(from_to[1]) if from_to else None,
         )

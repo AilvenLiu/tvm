@@ -45,67 +45,70 @@ class TLayout : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_METHODS(TLayout, ObjectRef, TLayoutNode);
 };
 
-// IterTreeSplit
-class IterTreeSplitNode : public Object {
+// Base class for nodes in IterTree
+// IterTree is the core data structure of TileLayout
+class IterTreeBaseNode : public Object {
  public:
-  /*! \brief parent node */
-  Var parent;
-  /*! \brief split children */
-  Array<Var> children;
-  /*! \brief The extent of the split */
-  Array<PrimExpr> extents;
+  static constexpr const char* _type_key = "tir.IterTreeBase";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  TVM_DECLARE_BASE_OBJECT_INFO(IterTreeBaseNode, Object);
+};
+
+class IterTreeBase : public ObjectRef {
+ public:
+  TVM_DEFINE_OBJECT_REF_METHODS(IterTreeBase, ObjectRef, IterTreeBaseNode);
+};
+
+// IterTreeSplit
+class IterTreeSplitNode : public IterTreeBaseNode {
+ public:
+  /*! \brief extent of this split */
+  PrimExpr extent;
+  /*! \brief children of the split */
+  Array<IterTreeBase> children;
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("parent", &parent);
+    v->Visit("extent", &extent);
     v->Visit("children", &children);
-    v->Visit("extents", &extents);
   }
 
   bool SEqualReduce(const IterTreeSplitNode* other, SEqualReducer equal) const {
-    return equal(parent, other->parent) && equal(children, other->children) &&
-           equal(extents, other->extents);
+    return equal(extent, other->extent) && equal(children, other->children);
   }
 
   void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(parent);
+    hash_reducer(extent);
     hash_reducer(children);
-    hash_reducer(extents);
   }
 
   static constexpr const char* _type_key = "tirx.IterTreeSplit";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
-  TVM_DECLARE_FINAL_OBJECT_INFO(IterTreeSplitNode, Object);
+  TVM_DECLARE_FINAL_OBJECT_INFO(IterTreeSplitNode, IterTreeBaseNode);
 };
 
-class IterTreeSplit : public ObjectRef {
+class IterTreeSplit : public IterTreeBase {
  public:
-  TVM_DLL explicit IterTreeSplit(Var parent, Array<Var> children, Array<PrimExpr> extents);
+  TVM_DLL explicit IterTreeSplit(PrimExpr extent, Array<IterTreeBase> children);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(IterTreeSplit, ObjectRef, IterTreeSplitNode);
+  TVM_DEFINE_OBJECT_REF_METHODS(IterTreeSplit, IterTreeBase, IterTreeSplitNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeBaseNode);
 };
 
 // IterTree
 class IterTreeNode : public Object {
  public:
-  /*! \brief root var */
-  Var root;
-  /*! \brief The splits in the tree */
-  Array<IterTreeSplit> splits;
+  /*! \brief The root split */
+  IterTreeSplit root;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("root", &root);
-    v->Visit("splits", &splits);
-  }
+  void VisitAttrs(AttrVisitor* v) { v->Visit("root", &root); }
 
   bool SEqualReduce(const IterTreeNode* other, SEqualReducer equal) const {
-    return equal(root, other->root) && equal(splits, other->splits);
+    return equal(root, other->root);
   }
 
-  void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(root);
-    hash_reducer(splits);
-  }
+  void SHashReduce(SHashReducer hash_reducer) const { hash_reducer(root); }
 
   static constexpr const char* _type_key = "tirx.IterTree";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -115,13 +118,21 @@ class IterTreeNode : public Object {
 
 class IterTree : public ObjectRef {
  public:
-  TVM_DLL explicit IterTree(Var root, Array<IterTreeSplit> splits);
+  TVM_DLL explicit IterTree(IterTreeSplit root);
+
+  static Array<ObjectRef> FromTuple(const ObjectRef& device);
+
+  Array<IterTreeBase> GetLeaves() const;
+
+  using LeafIndexMap = std::unordered_map<IterTreeBase, int, ObjectPtrHash, ObjectPtrEqual>;
+
+  LeafIndexMap GetLeafToIndex() const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(IterTree, ObjectRef, IterTreeNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeNode);
 };
 
-// CoordIterTree
+// DataIterTree
 class DataIterTreeNode : public IterTreeNode {
  public:
   /*! \brief The coefficients of each leaf node */
@@ -147,7 +158,7 @@ class DataIterTreeNode : public IterTreeNode {
 
 class DataIterTree : public IterTree {
  public:
-  TVM_DLL explicit DataIterTree(Var root, Array<IterTreeSplit> splits, Array<PrimExpr> coeff);
+  TVM_DLL explicit DataIterTree(IterTreeSplit root, Array<PrimExpr> coeff);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DataIterTree, IterTree, DataIterTreeNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(DataIterTreeNode);
@@ -165,7 +176,7 @@ class DeviceIterAttrNode : public Object {
   /*! \brief type of ScopeID, can be split (S), replicate (R), exclusive (E) */
   ScopeIdType type;
   /*! \brief If type is split, the bound leaf in DataIterTree */
-  Optional<Var> bound;
+  Optional<PrimExpr> bound;
   /*! \brief If type is exclusive, the id that owns the data */
   Optional<PrimExpr> owner;
 
@@ -193,12 +204,14 @@ class DeviceIterAttrNode : public Object {
 
 class DeviceIterAttr : public ObjectRef {
  public:
-  TVM_DLL explicit DeviceIterAttr(ScopeIdType type, Optional<Var> bound = NullOpt,
+  TVM_DLL explicit DeviceIterAttr(ScopeIdType type, Optional<PrimExpr> bound = NullOpt,
                                   Optional<PrimExpr> owner = NullOpt);
 
   static DeviceIterAttr Replicate();
 
-  static DeviceIterAttr Split(Var bound);
+  static DeviceIterAttr Split(PrimExpr bound);
+
+  static DeviceIterAttr Exclusive(PrimExpr owner);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterAttr, ObjectRef, DeviceIterAttrNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(DeviceIterAttrNode);
@@ -230,10 +243,7 @@ class DeviceIterTreeNode : public IterTreeNode {
 
 class DeviceIterTree : public IterTree {
  public:
-  TVM_DLL explicit DeviceIterTree(Var root, Array<IterTreeSplit> splits,
-                                  Array<DeviceIterAttr> attrs);
-
-  static Array<ObjectRef> FromTuple(const ObjectRef& device);
+  TVM_DLL explicit DeviceIterTree(IterTreeSplit root, Array<DeviceIterAttr> attrs);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterTree, IterTree, DeviceIterTreeNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(DeviceIterTreeNode);
@@ -242,30 +252,30 @@ class DeviceIterTree : public IterTree {
 // TileLayout
 class TileLayoutNode : public TLayoutNode {
  public:
-  /*! \brief coordinate iter forest  */
-  Array<DataIterTree> data_trees;
-  /*! \brief scope id iter forest */
-  Array<DeviceIterTree> device_trees;
+  /*! \brief data iter tree */
+  DataIterTree data_tree;
+  /*! \brief device iter tree */
+  DeviceIterTree device_tree;
   /*! \brief From exec scope */
   Optional<ExecScope> from;
   /*! \brief To exec scope */
   Optional<ExecScope> to;
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("data_trees", &data_trees);
-    v->Visit("device_trees", &device_trees);
+    v->Visit("data_tree", &data_tree);
+    v->Visit("device_tree", &device_tree);
     v->Visit("from", &from);
     v->Visit("to", &to);
   }
 
   bool SEqualReduce(const TileLayoutNode* other, SEqualReducer equal) const {
-    return equal(data_trees, other->data_trees) && equal(device_trees, other->device_trees) &&
+    return equal(data_tree, other->data_tree) && equal(device_tree, other->device_tree) &&
            equal(from, other->from) && equal(to, other->to);
   }
 
   void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(data_trees);
-    hash_reducer(device_trees);
+    hash_reducer(data_tree);
+    hash_reducer(device_tree);
     hash_reducer(from);
     hash_reducer(to);
   }
@@ -276,7 +286,7 @@ class TileLayoutNode : public TLayoutNode {
 
 class TileLayout : public TLayout {
  public:
-  TVM_DLL explicit TileLayout(Array<DataIterTree> data_trees, Array<DeviceIterTree> device_trees,
+  TVM_DLL explicit TileLayout(DataIterTree data_tree, DeviceIterTree device_tree,
                               Optional<ExecScope> from = NullOpt, Optional<ExecScope> to = NullOpt);
 
   static TileLayout FromTile(const Array<PrimExpr>& shape, const TileLayout& inner,

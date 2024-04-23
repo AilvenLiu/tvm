@@ -359,10 +359,12 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::TileLayout>(
         "", [](tirx::TileLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
           Doc doc = TIR(d, "TileLayout")
-                        ->Call({}, {"data_trees", "device_trees"},
+                        ->Call({}, {"data_tree", "device_tree", "from_scope", "to_scope"},
                                {
-                                   d->AsDoc<ExprDoc>(layout->data_trees, p->Attr("data_trees")),
-                                   d->AsDoc<ExprDoc>(layout->device_trees, p->Attr("device_trees")),
+                                   d->AsDoc<ExprDoc>(layout->data_tree, p->Attr("data_tree")),
+                                   d->AsDoc<ExprDoc>(layout->device_tree, p->Attr("device_tree")),
+                                   d->AsDoc<ExprDoc>(layout->from, p->Attr("from_scope")),
+                                   d->AsDoc<ExprDoc>(layout->to, p->Attr("to_scope")),
                                });
           return doc;
         });
@@ -371,10 +373,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::DataIterTree>(
         "", [](tirx::DataIterTree tree, ObjectPath p, IRDocsifier d) -> Doc {
           Doc doc = TIR(d, "DataIterTree")
-                        ->Call({}, {"root", "splits", "coeff"},
+                        ->Call({}, {"root", "coeff"},
                                {
                                    d->AsDoc<ExprDoc>(tree->root, p->Attr("root")),
-                                   d->AsDoc<ExprDoc>(tree->splits, p->Attr("splits")),
                                    d->AsDoc<ExprDoc>(tree->coeff, p->Attr("coeff")),
                                });
           return doc;
@@ -384,10 +385,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::DeviceIterTree>(
         "", [](tirx::DeviceIterTree tree, ObjectPath p, IRDocsifier d) -> Doc {
           Doc doc = TIR(d, "DeviceIterTree")
-                        ->Call({}, {"root", "splits", "attrs"},
+                        ->Call({}, {"root", "attrs"},
                                {
                                    d->AsDoc<ExprDoc>(tree->root, p->Attr("root")),
-                                   d->AsDoc<ExprDoc>(tree->splits, p->Attr("splits")),
                                    d->AsDoc<ExprDoc>(tree->attrs, p->Attr("attrs")),
                                });
           return doc;
@@ -397,11 +397,10 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::IterTreeSplit>(
         "", [](tirx::IterTreeSplit split, ObjectPath p, IRDocsifier d) -> Doc {
           Doc doc = TIR(d, "IterTreeSplit")
-                        ->Call({}, {"parent", "children", "extents"},
+                        ->Call({}, {"children", "extent"},
                                {
-                                   d->AsDoc<ExprDoc>(split->parent, p->Attr("parent")),
                                    d->AsDoc<ExprDoc>(split->children, p->Attr("children")),
-                                   d->AsDoc<ExprDoc>(split->extents, p->Attr("extents")),
+                                   d->AsDoc<ExprDoc>(split->extent, p->Attr("extent")),
                                });
           return doc;
         });
