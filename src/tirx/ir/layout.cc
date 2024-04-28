@@ -108,10 +108,12 @@ Array<IterTreeBase> IterTree::GetLeaves() const {
   return Array<IterTreeBase>(leaves);
 }
 
-IterTree::LeafIndexMap IterTree::GetLeafToIndex() const {
-  Array<IterTreeBase> leaves = GetLeaves();
+IterTree::LeafIndexMap IterTree::GetLeafIndexMap(Optional<Array<IterTreeBase>> opt_leaves) const {
+  Array<IterTreeBase> leaves = opt_leaves.defined() ? opt_leaves.value() : GetLeaves();
   LeafIndexMap leaf_to_index;
   for (size_t i = 0; i < leaves.size(); i++) {
+    auto it = leaf_to_index.find(leaves[i]);
+    ICHECK(it == leaf_to_index.end()) << "ValueError: Duplicate leaf node in the tree";
     leaf_to_index[leaves[i]] = i;
   }
   return std::move(leaf_to_index);
@@ -131,6 +133,19 @@ TVM_REGISTER_GLOBAL("tirx.DataIterTree")
     .set_body_typed([](IterTreeSplit root, Array<PrimExpr> coeff) {
       return DataIterTree(root, coeff);
     });
+
+DataIterTree::CoeffMap DataIterTree::GetCoeffMap(Optional<Array<IterTreeBase>> opt_leaves) const {
+  auto leaves = opt_leaves.defined() ? opt_leaves.value() : GetLeaves();
+  ICHECK_EQ(leaves.size(), this->get()->coeff.size())
+      << "ValueError: The number of leaves and coefficients must be the same";
+  CoeffMap coeff_map;
+  for (size_t i = 0; i < leaves.size(); i++) {
+    auto it = coeff_map.find(leaves[i]);
+    ICHECK(it == coeff_map.end()) << "ValueError: Duplicate leaf node in the tree";
+    coeff_map[leaves[i]] = this->get()->coeff[i];
+  }
+  return std::move(coeff_map);
+}
 
 // DeviceIterAttr
 DeviceIterAttr::DeviceIterAttr(ScopeIdType type, Optional<PrimExpr> bound,
@@ -157,6 +172,21 @@ DeviceIterAttr DeviceIterAttr::Exclusive(PrimExpr owner) {
   return DeviceIterAttr(kExclusive, NullOpt, owner);
 }
 
+bool DeviceIterAttr::IsReplicate() const { return this->get()->type == kReplicate; }
+
+bool DeviceIterAttr::IsSplit() const { return this->get()->type == kSplit; }
+
+bool DeviceIterAttr::IsExclusive() const { return this->get()->type == kExclusive; }
+
+size_t DeviceIterAttr::GetIntBound() const {
+  ICHECK(this->get()->bound.defined()) << "ValueError: The bound is not defined";
+  auto bound = this->get()->bound.value();
+  const auto* n = bound.as<IntImmNode>();
+  ICHECK(n != nullptr) << "ValueError: The bound is not an integer";
+  ICHECK(n->value >= 0) << "ValueError: The bound must be non-negative";
+  return n->value;
+}
+
 // DeviceIterTree
 DeviceIterTree::DeviceIterTree(IterTreeSplit root, Array<DeviceIterAttr> attrs) {
   auto n = make_object<DeviceIterTreeNode>();
@@ -171,6 +201,19 @@ TVM_REGISTER_GLOBAL("tirx.DeviceIterTree")
     .set_body_typed([](IterTreeSplit root, Array<DeviceIterAttr> attrs) {
       return DeviceIterTree(root, attrs);
     });
+
+DeviceIterTree::AttrMap DeviceIterTree::GetAttrMap(Optional<Array<IterTreeBase>> opt_leaves) const {
+  auto leaves = opt_leaves.defined() ? opt_leaves.value() : GetLeaves();
+  ICHECK_EQ(leaves.size(), this->get()->attrs.size())
+      << "ValueError: The number of leaves and attributes must be the same";
+  AttrMap attr_map;
+  for (size_t i = 0; i < leaves.size(); i++) {
+    auto it = attr_map.find(leaves[i]);
+    ICHECK(it == attr_map.end()) << "ValueError: Duplicate leaf node in the tree";
+    attr_map[leaves[i]] = this->get()->attrs[i];
+  }
+  return std::move(attr_map);
+}
 
 // TileLayout
 TileLayout::TileLayout(DataIterTree data_tree, DeviceIterTree device_tree, Optional<ExecScope> from,
@@ -210,5 +253,29 @@ TVM_REGISTER_GLOBAL("tirx.TileLayoutFromTile")
       return TileLayout::FromTile(shape, inner, device, from_to);
     });
 
-}  // namespace tirxx
+TileLayout::SplitMap TileLayout::GetSplitMap(
+    Optional<Array<IterTreeBase>> opt_data_leaves,
+    Optional<Array<IterTreeBase>> opt_device_leaves) const {
+  auto* n = operator->();
+  auto data_leaves = opt_data_leaves.defined() ? opt_data_leaves.value() : n->data_tree.GetLeaves();
+  auto device_leaves =
+      opt_device_leaves.defined() ? opt_device_leaves.value() : n->device_tree.GetLeaves();
+  ICHECK_EQ(n->device_tree->attrs.size(), device_leaves.size())
+      << "ValueError: The number of leaves and attributes must be the same for the device tree";
+  SplitMap split_map;
+  for (size_t i = 0; i < device_leaves.size(); i++) {
+    auto it = split_map.find(device_leaves[i]);
+    ICHECK(it == split_map.end()) << "ValueError: Duplicate leaf node in the tree";
+    auto attr = n->device_tree->attrs[i];
+    if (attr.IsSplit()) {
+      size_t bound = attr.GetIntBound();
+      ICHECK(bound < data_leaves.size())
+          << "ValueError: The bound of the split attribute is out of range";
+      split_map[data_leaves[bound]] = device_leaves[i];
+    }
+  }
+  return std::move(split_map);
+}
+
+}  // namespace tirx
 }  // namespace tvm

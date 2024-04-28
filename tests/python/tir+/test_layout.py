@@ -14,13 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import pytest
+
 import tvm
 import tvm.testing
-from tvm.script import tir as T, from_source
-from tvm.tir.exec_scope import ExecScope
+from tvm.script import tir as T
 
 
-def test_nested_tuple():
+def test_constructor_nested_tuple():
     layout = T.TileLayout.from_nested_tuple(
         data=((8, T.S(0)), (8, (T.S(1), 2))),
         strides=((16, -1), (2, (-1, 1))),
@@ -85,6 +86,57 @@ def test_nested_tuple():
 
     tvm.ir.assert_structural_equal(layout, layout_expected, True)
 
+    with pytest.raises(AssertionError):
+        # device axis 1 can only either be S or E
+        layout = T.TileLayout.from_nested_tuple(
+            data=((8, T.S(0)), (8, (T.S(1), 2))),
+            strides=((16, -1), (2, (-1, 1))),
+            device=(4, 8),
+            exclusive=[(1, 0)],
+            from_to=("thread", "warp"),
+        )
+    with pytest.raises(AssertionError):
+        # device axis 0 can only be bound once
+        layout = T.TileLayout.from_nested_tuple(
+            data=((8, T.S(0)), (8, (T.S(0), 2))),
+            strides=((16, -1), (2, (-1, 1))),
+            device=(4, 8),
+            from_to=("thread", "warp"),
+        )
+    with pytest.raises(AssertionError):
+        # from_to must be a tuple of length 2 if provided
+        layout = T.TileLayout.from_nested_tuple(
+            data=((8, T.S(0)), (8, (T.S(1), 2))),
+            strides=((16, -1), (2, (-1, 1))),
+            device=(4, 8),
+            from_to=("thread",),
+        )
+    with pytest.raises(AssertionError):
+        # data and strides do not match
+        layout = T.TileLayout.from_nested_tuple(
+            data=((8, T.S(0)), (8, (T.S(1), 2))),
+            strides=((16, -1), (2, (-1, 1), 1)),
+            device=(4, 8),
+            from_to=("thread", "warp"),
+        )
+    with pytest.raises(AssertionError):
+        # device index out of bound
+        layout = T.TileLayout.from_nested_tuple(
+            data=((8, T.S(0)), (8, (T.S(2), 2))),
+            strides=((16, -1), (2, (-1, 1))),
+            device=(4, 8),
+            from_to=("thread", "warp"),
+        )
+    with pytest.raises(AssertionError):
+        # device index out of bound
+        layout = T.TileLayout.from_nested_tuple(
+            data=((8, T.S(0)), (8, (T.S(1), 2))),
+            strides=((16, -1), (2, (-1, 1))),
+            device=(4, 8),
+            exclusive=[(2, 0)],
+            from_to=("thread", "warp"),
+        )
+
 
 if __name__ == "__main__":
-    test_nested_tuple()
+    test_constructor_nested_tuple()

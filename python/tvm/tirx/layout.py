@@ -142,12 +142,18 @@ class TileLayout(TLayout):
     ):
         if isinstance(data, (int, PrimExpr)):
             inc_leaf_cnt()
-            assert isinstance(strides, (int, PrimExpr))
+            assert isinstance(
+                strides, (int, PrimExpr)
+            ), "the leaf of strides must be int or PrimExpr"
             node = IterTreeSplit(extent=data, children=[])
             return DataIterTree(root=node, coeff=[strides]), [node]
         if isinstance(data, S):
+            assert data.device_index < len(device_leaves), "device index out of bound"
             device_axis = device_leaves[data.device_index]
             node = IterTreeSplit(extent=device_axis.extent, children=[])
+            assert (
+                device_attrs[data.device_index].type == DeviceIterAttr.Replicate
+            ), "device axis {} can only be bound once".format(data.device_index)
             device_attrs[data.device_index] = DeviceIterAttr.split(bound=inc_leaf_cnt())
             return DataIterTree(root=node, coeff=[strides]), [node]
 
@@ -155,7 +161,7 @@ class TileLayout(TLayout):
         leaves = []
         coeff = []
         if isinstance(data, tuple):
-            assert len(data) == len(strides)
+            assert len(data) == len(strides), "data and strides do not match"
             for d, s in zip(data, strides):
                 child, sub_leaves = TileLayout._construct_data_iter_tree(
                     d, s, device_attrs, device_leaves, inc_leaf_cnt
@@ -176,6 +182,9 @@ class TileLayout(TLayout):
         exclusive: Optional[Tuple] = None,
         from_to: Optional[Tuple[str]] = None,
     ):
+        assert (
+            from_to is None or len(from_to) == 2
+        ), "from_to must be a tuple of length 2 if provided"
         device_tree, device_leaves = TileLayout._construct_device_iter_tree(device)
         device_attrs = list(device_tree.attrs)
 
@@ -192,6 +201,10 @@ class TileLayout(TLayout):
         if exclusive:
             for e in exclusive:
                 axis, owner = e
+                assert axis < len(device_attrs), "device index out of bound"
+                assert (
+                    device_attrs[axis].type == DeviceIterAttr.Replicate
+                ), "device axis {} can only either be S or E".format(axis)
                 device_attrs[axis] = DeviceIterAttr.exclusive(owner)
         return TileLayout(
             data_tree=data_tree,

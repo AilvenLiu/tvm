@@ -122,11 +122,10 @@ class IterTree : public ObjectRef {
 
   static Array<ObjectRef> FromTuple(const ObjectRef& device);
 
-  Array<IterTreeBase> GetLeaves() const;
-
   using LeafIndexMap = std::unordered_map<IterTreeBase, int, ObjectPtrHash, ObjectPtrEqual>;
 
-  LeafIndexMap GetLeafToIndex() const;
+  Array<IterTreeBase> GetLeaves() const;
+  LeafIndexMap GetLeafIndexMap(Optional<Array<IterTreeBase>> opt_leaves = NullOpt) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(IterTree, ObjectRef, IterTreeNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeNode);
@@ -159,6 +158,9 @@ class DataIterTreeNode : public IterTreeNode {
 class DataIterTree : public IterTree {
  public:
   TVM_DLL explicit DataIterTree(IterTreeSplit root, Array<PrimExpr> coeff);
+
+  using CoeffMap = std::unordered_map<IterTreeBase, PrimExpr, ObjectPtrHash, ObjectPtrEqual>;
+  CoeffMap GetCoeffMap(Optional<Array<IterTreeBase>> opt_leaves = NullOpt) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(DataIterTree, IterTree, DataIterTreeNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(DataIterTreeNode);
@@ -213,6 +215,14 @@ class DeviceIterAttr : public ObjectRef {
 
   static DeviceIterAttr Exclusive(PrimExpr owner);
 
+  bool IsReplicate() const;
+
+  bool IsSplit() const;
+
+  bool IsExclusive() const;
+
+  size_t GetIntBound() const;
+
   TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterAttr, ObjectRef, DeviceIterAttrNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(DeviceIterAttrNode);
 };
@@ -244,6 +254,10 @@ class DeviceIterTreeNode : public IterTreeNode {
 class DeviceIterTree : public IterTree {
  public:
   TVM_DLL explicit DeviceIterTree(IterTreeSplit root, Array<DeviceIterAttr> attrs);
+
+  using AttrMap = std::unordered_map<IterTreeBase, DeviceIterAttr, ObjectPtrHash, ObjectPtrEqual>;
+
+  AttrMap GetAttrMap(Optional<Array<IterTreeBase>> opt_leaves = NullOpt) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterTree, IterTree, DeviceIterTreeNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(DeviceIterTreeNode);
@@ -288,6 +302,10 @@ class TileLayout : public TLayout {
  public:
   TVM_DLL explicit TileLayout(DataIterTree data_tree, DeviceIterTree device_tree,
                               Optional<ExecScope> from = NullOpt, Optional<ExecScope> to = NullOpt);
+
+  using SplitMap = std::unordered_map<IterTreeBase, IterTreeBase, ObjectPtrHash, ObjectPtrEqual>;
+  SplitMap GetSplitMap(Optional<Array<IterTreeBase>> opt_data_leaves = NullOpt,
+                       Optional<Array<IterTreeBase>> opt_device_leaves = NullOpt) const;
 
   static TileLayout FromTile(const Array<PrimExpr>& shape, const TileLayout& inner,
                              const Optional<ObjectRef>& device, const Optional<ObjectRef>& from_to);

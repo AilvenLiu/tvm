@@ -78,12 +78,20 @@ def test_roundtrip_exec_scope():
 
 
 def test_roundtrip_layout():
-    def get_layout():
+    def get_layout1():
         return T.TileLayout.from_nested_tuple(
             data=((8, T.S(0)), (8, (T.S(1), 2))),
             strides=((16, -1), (2, (-1, 1))),
-            device=(4, 8),
-            exclusive=((1, 0),),
+            device=(8, 4),
+            from_to=("thread", "warp"),
+        )
+
+    def get_layout2():
+        return T.TileLayout.from_nested_tuple(
+            data=((8, T.S(0)), (8, (4, 2))),
+            strides=((64, -1), (8, (2, 1))),
+            device=(8, 4),
+            exclusive=[(1, 0)],
             from_to=("thread", "warp"),
         )
 
@@ -97,10 +105,10 @@ def test_roundtrip_layout():
             warp_id = T.warp_id([1], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
             with T.cta():
-                layout = get_layout()
-                A_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=layout)
+                A_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout1())
+                B_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout2())
                 with T.thread():
-                    T.evaluate(A_warp[0, 0])
+                    T.evaluate(A_warp[0, 0] + B_warp[0, 0])
     # fmt: on
 
     code = test.script()

@@ -355,19 +355,125 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
       LOG(FATAL) << "IndexError: TBuffer is not defined in the environment: " << buffer;
     });
 
+std::pair<ExprDoc, ExprDoc> PrintDataIterTree(tirx::IterTreeBase root, const Array<PrimExpr>& coeff,
+                                              const tirx::TileLayout::SplitMap& split_map,
+                                              const tirx::IterTree::LeafIndexMap& data_leaf2idx,
+                                              const tirx::IterTree::LeafIndexMap& device_leaf2idx,
+                                              IRDocsifier d, ObjectPath coeff_p,
+                                              ObjectPath root_p) {
+  Array<ExprDoc> results_data, results_strides;
+  const auto* split = root.as<tirx::IterTreeSplitNode>();
+  ICHECK(split != nullptr) << "InternalError: Expect IterTreeSplit but get " << root->GetTypeKey();
+  if (split->children.empty()) {
+    // leaf node
+    auto data_idx_it = data_leaf2idx.find(root);
+    ICHECK(data_idx_it != data_leaf2idx.end())
+        << "InternalError: Cannot find data index for leaf " << root;
+    int data_idx = data_idx_it->second;
+    ExprDoc stride = d->AsDoc<ExprDoc>(coeff[data_idx], coeff_p->ArrayIndex(data_idx));
+    auto it = split_map.find(root);
+    if (it != split_map.end()) {
+      // Bound leaf, print T.S(device_index)
+      auto dev_idx_it = device_leaf2idx.find(it->second);
+      ICHECK(dev_idx_it != device_leaf2idx.end())
+          << "InternalError: Cannot find device index for leaf " << it->second;
+      int dev_idx = dev_idx_it->second;
+      return {TIR(d, "S")->Call({LiteralDoc::Int(dev_idx, NullOpt)}, {}, {}), stride};
+    } else {
+      // Data leaf, print extent
+      return {d->AsDoc<ExprDoc>(split->extent, root_p->Attr("extent")), stride};
+    }
+  } else {
+    results_data.reserve(split->children.size());
+    results_strides.reserve(split->children.size());
+    for (size_t i = 0; i < split->children.size(); ++i) {
+      auto [data, stride] =
+          PrintDataIterTree(split->children[i], coeff, split_map, data_leaf2idx, device_leaf2idx, d,
+                            coeff_p, root_p->Attr("children")->ArrayIndex(i));
+      results_data.push_back(data);
+      results_strides.push_back(stride);
+    }
+  }
+  return {TupleDoc(results_data), TupleDoc(results_strides)};
+}
+
+ExprDoc PrintDeviceIterTree(tirx::IterTreeBase root, IRDocsifier d, ObjectPath p) {
+  Array<ExprDoc> results;
+  const auto* split = root.as<tirx::IterTreeSplitNode>();
+  ICHECK(split != nullptr) << "InternalError: Expect IterTreeSplit but get " << root->GetTypeKey();
+  if (split->children.empty()) {
+    // leaf node
+    return d->AsDoc<ExprDoc>(split->extent, p->Attr("extent"));
+  } else {
+    results.reserve(split->children.size());
+    for (size_t i = 0; i < split->children.size(); ++i) {
+      results.push_back(
+          PrintDeviceIterTree(split->children[i], d, p->Attr("children")->ArrayIndex(i)));
+    }
+  }
+  return TupleDoc(results);
+}
+
+Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
+  const auto& data_leaves = layout->data_tree.GetLeaves();
+  const auto& device_leaves = layout->device_tree.GetLeaves();
+  tirx::DataIterTree::CoeffMap coeff_map = layout->data_tree.GetCoeffMap(data_leaves);
+  tirx::DeviceIterTree::AttrMap attr_map = layout->device_tree.GetAttrMap(device_leaves);
+  tirx::IterTree::LeafIndexMap device_leaf2idx = layout->device_tree.GetLeafIndexMap(device_leaves);
+  tirx::IterTree::LeafIndexMap data_leaf2idx = layout->data_tree.GetLeafIndexMap(data_leaves);
+
+  tirx::TileLayout::SplitMap split_map = layout.GetSplitMap(data_leaves, device_leaves);
+  auto [data, strides] = PrintDataIterTree(
+      layout->data_tree->root, layout->data_tree->coeff, split_map, data_leaf2idx, device_leaf2idx,
+      d, p->Attr("data_tree")->Attr("coeff"), p->Attr("data_tree")->Attr("root"));
+  auto device =
+      PrintDeviceIterTree(layout->device_tree->root, d, p->Attr("device_tree")->Attr("root"));
+  Array<String> keys;
+  Array<ExprDoc> values;
+  keys.push_back("data");
+  values.push_back(data);
+  keys.push_back("strides");
+  values.push_back(strides);
+  keys.push_back("device");
+  values.push_back(device);
+  // print Exclusive Attrs
+  {
+    Array<ExprDoc> e_docs;
+    for (size_t i = 0; i < device_leaves.size(); ++i) {
+      auto it = attr_map.find(device_leaves[i]);
+      ICHECK(it != attr_map.end())
+          << "InternalError: Cannot find device attribute for leaf " << device_leaves[i];
+      const tirx::DeviceIterAttr& attr = it->second;
+      if (attr.IsExclusive()) {
+        ExprDoc idx = LiteralDoc::Int(i, NullOpt);
+        ExprDoc owner = d->AsDoc<ExprDoc>(
+            attr->owner, p->Attr("device_tree")->Attr("attrs")->ArrayIndex(i)->Attr("owner"));
+        e_docs.push_back(TupleDoc({idx, owner}));
+      }
+    }
+    if (!e_docs.empty()) {
+      keys.push_back("exclusive");
+      values.push_back(ListDoc(e_docs));
+    }
+  }
+  // print from_to scope
+  {
+    if (layout->from.defined()) {
+      ICHECK(layout->to.defined()) << "InternalError: `to` must be defined if `from` is defined";
+      keys.push_back("from_to");
+      values.push_back(TupleDoc({d->AsDoc<ExprDoc>(layout->from.value()->name, p->Attr("from")),
+                                 d->AsDoc<ExprDoc>(layout->from.value()->name, p->Attr("to"))}));
+    }
+  }
+
+  return TIR(d, "TileLayout")->Attr("from_nested_tuple")->Call({}, {keys}, {values});
+}
+
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
-    .set_dispatch<tirx::TileLayout>(
-        "", [](tirx::TileLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
-          Doc doc = TIR(d, "TileLayout")
-                        ->Call({}, {"data_tree", "device_tree", "from_scope", "to_scope"},
-                               {
-                                   d->AsDoc<ExprDoc>(layout->data_tree, p->Attr("data_tree")),
-                                   d->AsDoc<ExprDoc>(layout->device_tree, p->Attr("device_tree")),
-                                   d->AsDoc<ExprDoc>(layout->from, p->Attr("from_scope")),
-                                   d->AsDoc<ExprDoc>(layout->to, p->Attr("to_scope")),
-                               });
-          return doc;
-        });
+    .set_dispatch<tirx::TileLayout>("",
+                                   [](tirx::TileLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
+                                     return PrintTileLayout(layout, d, p);
+                                   });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::DataIterTree>(
