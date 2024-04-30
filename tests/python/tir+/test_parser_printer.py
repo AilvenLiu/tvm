@@ -18,6 +18,7 @@ import tvm
 import tvm.script
 import tvm.testing
 from tvm.script import tir as T
+from tvm.ir import assert_structural_equal
 
 import pytest
 
@@ -47,6 +48,7 @@ def test_roundtrip_scopeid():
 
     code = test.script()
     assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
 
 
 def test_roundtrip_exec_scope():
@@ -95,6 +97,12 @@ def test_roundtrip_layout():
             from_to=("thread", "warp"),
         )
 
+    def get_layout3():
+        return T.TileLayout.from_nested_tuple(
+            data=((8, 16), (8, 16)),
+            strides=((1024, 16), (128, 1)),
+        )
+
     # fmt: off
     @T.prim_func(tirp=True)
     def test(A_ptr: T.handle) -> None:
@@ -104,15 +112,19 @@ def test_roundtrip_layout():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
             warp_id = T.warp_id([1], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
+            
+            C = T.alloc_buffer([128, 128], dtype="float16", scope="shared", layout=get_layout3())
+            
             with T.cta():
                 A_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout1())
                 B_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout2())
                 with T.thread():
-                    T.evaluate(A_warp[0, 0] + B_warp[0, 0])
+                    T.evaluate(A_warp[0, 0] + B_warp[0, 0] + C[0, 0])
     # fmt: on
 
     code = test.script()
     assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
 
 
 def test_roundtrip_buffer_view_get1():
@@ -130,6 +142,7 @@ def test_roundtrip_buffer_view_get1():
     # fmt: on
     code = test.script()
     assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
 
 
 def test_roundtrip_buffer_view_get2():
@@ -155,6 +168,7 @@ def test_roundtrip_buffer_view_get2():
     # fmt: on
     code = test.script()
     assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
 
 
 def test_alloc_buffer_default_logical_scope():

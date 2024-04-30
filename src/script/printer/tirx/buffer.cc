@@ -356,8 +356,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     });
 
 std::pair<ExprDoc, ExprDoc> PrintDataIterTree(tirx::IterTreeBase root, const Array<PrimExpr>& coeff,
-                                              const tirx::TileLayout::SplitMap& split_map,
                                               const tirx::IterTree::LeafIndexMap& data_leaf2idx,
+                                              const tirx::TileLayout::SplitMap& split_map,
                                               const tirx::IterTree::LeafIndexMap& device_leaf2idx,
                                               IRDocsifier d, ObjectPath coeff_p,
                                               ObjectPath root_p) {
@@ -388,7 +388,7 @@ std::pair<ExprDoc, ExprDoc> PrintDataIterTree(tirx::IterTreeBase root, const Arr
     results_strides.reserve(split->children.size());
     for (size_t i = 0; i < split->children.size(); ++i) {
       auto [data, stride] =
-          PrintDataIterTree(split->children[i], coeff, split_map, data_leaf2idx, device_leaf2idx, d,
+          PrintDataIterTree(split->children[i], coeff, data_leaf2idx, split_map, device_leaf2idx, d,
                             coeff_p, root_p->Attr("children")->ArrayIndex(i));
       results_data.push_back(data);
       results_strides.push_back(stride);
@@ -415,34 +415,46 @@ ExprDoc PrintDeviceIterTree(tirx::IterTreeBase root, IRDocsifier d, ObjectPath p
 }
 
 Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
-  const auto& data_leaves = layout->data_tree.GetLeaves();
-  const auto& device_leaves = layout->device_tree.GetLeaves();
-  tirx::DataIterTree::CoeffMap coeff_map = layout->data_tree.GetCoeffMap(data_leaves);
-  tirx::DeviceIterTree::AttrMap attr_map = layout->device_tree.GetAttrMap(device_leaves);
-  tirx::IterTree::LeafIndexMap device_leaf2idx = layout->device_tree.GetLeafIndexMap(device_leaves);
-  tirx::IterTree::LeafIndexMap data_leaf2idx = layout->data_tree.GetLeafIndexMap(data_leaves);
-
-  tirx::TileLayout::SplitMap split_map = layout.GetSplitMap(data_leaves, device_leaves);
-  auto [data, strides] = PrintDataIterTree(
-      layout->data_tree->root, layout->data_tree->coeff, split_map, data_leaf2idx, device_leaf2idx,
-      d, p->Attr("data_tree")->Attr("coeff"), p->Attr("data_tree")->Attr("root"));
-  auto device =
-      PrintDeviceIterTree(layout->device_tree->root, d, p->Attr("device_tree")->Attr("root"));
   Array<String> keys;
   Array<ExprDoc> values;
+
+  const auto& data_leaves = layout->data_tree.GetLeaves();
+  tirx::IterTree::LeafIndexMap data_leaf2idx = layout->data_tree.GetLeafIndexMap(data_leaves);
+  if (!layout->device_tree.defined()) {
+    // No device tree
+    auto [data, strides] = PrintDataIterTree(
+        layout->data_tree->root, layout->data_tree->coeff, data_leaf2idx, {}, {}, d,
+        p->Attr("data_tree")->Attr("coeff"), p->Attr("data_tree")->Attr("root"));
+    keys.push_back("data");
+    values.push_back(data);
+    keys.push_back("strides");
+    values.push_back(strides);
+    return TIR(d, "TileLayout")->Attr("from_nested_tuple")->Call({}, {keys}, {values});
+  }
+  const auto& device_tree = layout->device_tree.value();
+  const auto& dev_leaves = device_tree.GetLeaves();
+  tirx::DeviceIterTree::AttrMap attr_map = device_tree.GetAttrMap(dev_leaves);
+  tirx::IterTree::LeafIndexMap dev_leaf2idx = device_tree.GetLeafIndexMap(dev_leaves);
+  tirx::TileLayout::SplitMap split_map = layout.GetSplitMap(data_leaves, dev_leaves);
+
+  auto [data, strides] = PrintDataIterTree(
+      layout->data_tree->root, layout->data_tree->coeff, data_leaf2idx, split_map, dev_leaf2idx, d,
+      p->Attr("data_tree")->Attr("coeff"), p->Attr("data_tree")->Attr("root"));
   keys.push_back("data");
   values.push_back(data);
   keys.push_back("strides");
   values.push_back(strides);
+
+  auto device = PrintDeviceIterTree(device_tree->root, d, p->Attr("device_tree")->Attr("root"));
   keys.push_back("device");
   values.push_back(device);
   // print Exclusive Attrs
   {
     Array<ExprDoc> e_docs;
-    for (size_t i = 0; i < device_leaves.size(); ++i) {
-      auto it = attr_map.find(device_leaves[i]);
+    for (size_t i = 0; i < dev_leaves.size(); ++i) {
+      auto it = attr_map.find(dev_leaves[i]);
       ICHECK(it != attr_map.end())
-          << "InternalError: Cannot find device attribute for leaf " << device_leaves[i];
+          << "InternalError: Cannot find device attribute for leaf " << dev_leaves[i];
       const tirx::DeviceIterAttr& attr = it->second;
       if (attr.IsExclusive()) {
         ExprDoc idx = LiteralDoc::Int(i, NullOpt);
@@ -462,10 +474,9 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
       ICHECK(layout->to.defined()) << "InternalError: `to` must be defined if `from` is defined";
       keys.push_back("from_to");
       values.push_back(TupleDoc({d->AsDoc<ExprDoc>(layout->from.value()->name, p->Attr("from")),
-                                 d->AsDoc<ExprDoc>(layout->from.value()->name, p->Attr("to"))}));
+                                 d->AsDoc<ExprDoc>(layout->to.value()->name, p->Attr("to"))}));
     }
   }
-
   return TIR(d, "TileLayout")->Attr("from_nested_tuple")->Call({}, {keys}, {values});
 }
 

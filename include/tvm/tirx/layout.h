@@ -49,7 +49,7 @@ class TLayout : public ObjectRef {
 // IterTree is the core data structure of TileLayout
 class IterTreeBaseNode : public Object {
  public:
-  static constexpr const char* _type_key = "tir.IterTreeBase";
+  static constexpr const char* _type_key = "tirx.IterTreeBase";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_BASE_OBJECT_INFO(IterTreeBaseNode, Object);
@@ -92,6 +92,12 @@ class IterTreeSplit : public IterTreeBase {
  public:
   TVM_DLL explicit IterTreeSplit(PrimExpr extent, Array<IterTreeBase> children);
 
+  /*! \brief Whether this is a leaf node */
+  bool IsLeaf() const;
+
+  /*! \brief Get all the leaves in the tree in DFS order */
+  Array<IterTreeBase> GetLeaves() const;
+
   TVM_DEFINE_OBJECT_REF_METHODS(IterTreeSplit, IterTreeBase, IterTreeSplitNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeBaseNode);
 };
@@ -120,11 +126,19 @@ class IterTree : public ObjectRef {
  public:
   TVM_DLL explicit IterTree(IterTreeSplit root);
 
-  static Array<ObjectRef> FromTuple(const ObjectRef& device);
-
   using LeafIndexMap = std::unordered_map<IterTreeBase, int, ObjectPtrHash, ObjectPtrEqual>;
 
+  /*!
+   * \brief Create an IterTree from a (nested) tuple of PrimExpr.
+   * \param tuple_in The input nested tuple.
+   * \return A pair. The first element is the IterTree, and the second element is the leaves.
+   */
+  static Array<ObjectRef> FromTuple(const ObjectRef& tuple_in);
+
+  /*! \brief Get all the leaves in the tree in DFS order */
   Array<IterTreeBase> GetLeaves() const;
+
+  /*! \brief Get the index of each leaf in the DFS order */
   LeafIndexMap GetLeafIndexMap(Optional<Array<IterTreeBase>> opt_leaves = NullOpt) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(IterTree, ObjectRef, IterTreeNode);
@@ -160,6 +174,8 @@ class DataIterTree : public IterTree {
   TVM_DLL explicit DataIterTree(IterTreeSplit root, Array<PrimExpr> coeff);
 
   using CoeffMap = std::unordered_map<IterTreeBase, PrimExpr, ObjectPtrHash, ObjectPtrEqual>;
+
+  /*! \brief Get the mapping from leaf to coefficient */
   CoeffMap GetCoeffMap(Optional<Array<IterTreeBase>> opt_leaves = NullOpt) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(DataIterTree, IterTree, DataIterTreeNode);
@@ -209,18 +225,25 @@ class DeviceIterAttr : public ObjectRef {
   TVM_DLL explicit DeviceIterAttr(ScopeIdType type, Optional<PrimExpr> bound = NullOpt,
                                   Optional<PrimExpr> owner = NullOpt);
 
+  /*! \brief Create a replicate attribute */
   static DeviceIterAttr Replicate();
 
+  /*! \brief Create a split attribute */
   static DeviceIterAttr Split(PrimExpr bound);
 
+  /*! \brief Create an exclusive attribute */
   static DeviceIterAttr Exclusive(PrimExpr owner);
 
+  /*! \brief Check if the attribute is replicate */
   bool IsReplicate() const;
 
+  /*! \brief Check if the attribute is split */
   bool IsSplit() const;
 
+  /*! \brief Check if the attribute is exclusive */
   bool IsExclusive() const;
 
+  /*! \brief Get the bound of the split attribute */
   size_t GetIntBound() const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterAttr, ObjectRef, DeviceIterAttrNode);
@@ -257,6 +280,7 @@ class DeviceIterTree : public IterTree {
 
   using AttrMap = std::unordered_map<IterTreeBase, DeviceIterAttr, ObjectPtrHash, ObjectPtrEqual>;
 
+  /*! \brief Get the mapping from leaf to DeviceIterAttr */
   AttrMap GetAttrMap(Optional<Array<IterTreeBase>> opt_leaves = NullOpt) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterTree, IterTree, DeviceIterTreeNode);
@@ -269,7 +293,7 @@ class TileLayoutNode : public TLayoutNode {
   /*! \brief data iter tree */
   DataIterTree data_tree;
   /*! \brief device iter tree */
-  DeviceIterTree device_tree;
+  Optional<DeviceIterTree> device_tree;
   /*! \brief From exec scope */
   Optional<ExecScope> from;
   /*! \brief To exec scope */
@@ -300,12 +324,20 @@ class TileLayoutNode : public TLayoutNode {
 
 class TileLayout : public TLayout {
  public:
-  TVM_DLL explicit TileLayout(DataIterTree data_tree, DeviceIterTree device_tree,
+  TVM_DLL explicit TileLayout(DataIterTree data_tree,
+                              Optional<DeviceIterTree> device_tree = NullOpt,
                               Optional<ExecScope> from = NullOpt, Optional<ExecScope> to = NullOpt);
 
   using SplitMap = std::unordered_map<IterTreeBase, IterTreeBase, ObjectPtrHash, ObjectPtrEqual>;
+
+  /*! \brief Get the mapping from leaf in data tree to leaf in device tree when they are bound */
   SplitMap GetSplitMap(Optional<Array<IterTreeBase>> opt_data_leaves = NullOpt,
                        Optional<Array<IterTreeBase>> opt_device_leaves = NullOpt) const;
+
+  /*! \brief Update the tree with the given roots and mappings */
+  TileLayout UpdateTree(IterTreeSplit data_root, Optional<IterTreeSplit> device_root,
+                        const DataIterTree::CoeffMap& coeff, const DeviceIterTree::AttrMap& attr,
+                        const SplitMap& split_map);
 
   static TileLayout FromTile(const Array<PrimExpr>& shape, const TileLayout& inner,
                              const Optional<ObjectRef>& device, const Optional<ObjectRef>& from_to);
@@ -314,7 +346,9 @@ class TileLayout : public TLayout {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);
 };
 
-}  // namespace tirxxxxx
+TileLayout NormalizeTileLayout(TileLayout layout);
+
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

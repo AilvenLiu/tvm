@@ -153,7 +153,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           tirx::SBlock root_block = root_block_realize->block;
           if (!root_block->annotations.size() && !root_block->match_buffers.size() &&
               !root_block->reads.size() && !root_block->writes.size() &&
-              !root_block->init.defined()) {
+              !root_block->init.defined() && !root_block->exec_scope.defined()) {
             const tirx::SBlockRealizeNode* block_realize =
                 root_block->body.as<tirx::SBlockRealizeNode>();
             if (root_block->alloc_buffers.size() ||

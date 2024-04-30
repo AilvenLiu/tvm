@@ -107,14 +107,14 @@ class S:
 @register_object("tirx.TileLayout")
 class TileLayout(TLayout):
     data_tree: DataIterTree
-    device_tree: DeviceIterTree
+    device_tree: Optional[DeviceIterTree]
     from_scope: Optional[ExecScope]
     to_scope: Optional[ExecScope]
 
     def __init__(
         self,
         data_tree: DataIterTree,
-        device_tree: DeviceIterTree,
+        device_tree: Optional[DeviceIterTree] = None,
         from_scope: Optional[ExecScope] = None,
         to_scope: Optional[ExecScope] = None,
     ):
@@ -136,8 +136,8 @@ class TileLayout(TLayout):
     def _construct_data_iter_tree(
         data: Union[Tuple, int, PrimExpr, S],
         strides: Union[Tuple, int, PrimExpr],
-        device_attrs: List[DeviceIterAttr],
-        device_leaves: List[IterTreeBase],
+        device_attrs: Optional[List[DeviceIterAttr]],
+        device_leaves: Optional[List[IterTreeBase]],
         inc_leaf_cnt: callable,
     ):
         if isinstance(data, (int, PrimExpr)):
@@ -178,16 +178,10 @@ class TileLayout(TLayout):
     def from_nested_tuple(
         data: Tuple,
         strides: Tuple,
-        device: Tuple,
+        device: Optional[Tuple] = None,
         exclusive: Optional[Tuple] = None,
         from_to: Optional[Tuple[str]] = None,
     ):
-        assert (
-            from_to is None or len(from_to) == 2
-        ), "from_to must be a tuple of length 2 if provided"
-        device_tree, device_leaves = TileLayout._construct_device_iter_tree(device)
-        device_attrs = list(device_tree.attrs)
-
         leaf_cnt = 0
 
         def inc_leaf_cnt():
@@ -195,23 +189,39 @@ class TileLayout(TLayout):
             leaf_cnt += 1
             return leaf_cnt - 1
 
-        data_tree, _ = TileLayout._construct_data_iter_tree(
-            data, strides, device_attrs, device_leaves, inc_leaf_cnt
-        )
-        if exclusive:
-            for e in exclusive:
-                axis, owner = e
-                assert axis < len(device_attrs), "device index out of bound"
-                assert (
-                    device_attrs[axis].type == DeviceIterAttr.Replicate
-                ), "device axis {} can only either be S or E".format(axis)
-                device_attrs[axis] = DeviceIterAttr.exclusive(owner)
-        return TileLayout(
-            data_tree=data_tree,
-            device_tree=DeviceIterTree(device_tree.root, device_attrs),
-            from_scope=ExecScope.create(from_to[0]) if from_to else None,
-            to_scope=ExecScope.create(from_to[1]) if from_to else None,
-        )
+        if device is None:
+            assert exclusive is None, "exclusive must be None if device is None"
+            assert from_to is None, "from_to must be None if device is None"
+
+            data_tree, _ = TileLayout._construct_data_iter_tree(
+                data, strides, None, None, lambda: 0
+            )
+            return TileLayout(data_tree=data_tree)
+
+        else:
+            assert from_to is not None, "from_to must be provided if device is provided"
+            assert isinstance(from_to, tuple) and len(from_to) == 2, "from_to must be a tuple of 2"
+
+            device_tree, device_leaves = TileLayout._construct_device_iter_tree(device)
+            device_attrs = list(device_tree.attrs)
+
+            data_tree, _ = TileLayout._construct_data_iter_tree(
+                data, strides, device_attrs, device_leaves, inc_leaf_cnt
+            )
+            if exclusive:
+                for e in exclusive:
+                    axis, owner = e
+                    assert axis < len(device_attrs), "device index out of bound"
+                    assert (
+                        device_attrs[axis].type == DeviceIterAttr.Replicate
+                    ), "device axis {} can only either be S or E".format(axis)
+                    device_attrs[axis] = DeviceIterAttr.exclusive(owner)
+            return TileLayout(
+                data_tree=data_tree,
+                device_tree=DeviceIterTree(device_tree.root, device_attrs),
+                from_scope=ExecScope.create(from_to[0]) if from_to else None,
+                to_scope=ExecScope.create(from_to[1]) if from_to else None,
+            )
 
     @staticmethod
     def from_tile(
@@ -221,3 +231,7 @@ class TileLayout(TLayout):
         from_to: Optional[Tuple[str]] = None,
     ):
         return get_global_func("tir.TileLayoutFromTile")(shape, inner, device, from_to)
+
+
+def normalize_tile_layout(layout: TileLayout) -> TileLayout:
+    return get_global_func("tir.NormalizeTileLayout")(layout)
