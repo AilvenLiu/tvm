@@ -22,7 +22,7 @@ from typing import List, Optional, Tuple, Union, Dict
 
 from . import _ffi_api
 from tvm._ffi import register_object, get_global_func
-from tvm.runtime import Object
+from tvm.runtime import Object, convert_to_object
 
 from .expr import Var, PrimExpr
 from .exec_scope import ExecScope
@@ -127,7 +127,7 @@ class TileLayout(TLayout):
         device: Union[Tuple, int, PrimExpr]
     ) -> Tuple[DeviceIterTree, List[int]]:
         f = get_global_func("tir.IterTreeFromTuple")
-        iter_tree, leaves = f(device)
+        iter_tree, leaves = f(convert_to_object(device))
         attrs = [DeviceIterAttr(type=DeviceIterAttr.Replicate) for _ in leaves]
         device_iter_tree = DeviceIterTree(root=iter_tree.root, attrs=attrs)
         return device_iter_tree, leaves
@@ -139,7 +139,7 @@ class TileLayout(TLayout):
         device_attrs: Optional[List[DeviceIterAttr]],
         device_leaves: Optional[List[IterTreeBase]],
         inc_leaf_cnt: callable,
-    ):
+    ) -> Tuple[DataIterTree, List[IterTreeBase]]:
         if isinstance(data, (int, PrimExpr)):
             inc_leaf_cnt()
             assert isinstance(
@@ -181,7 +181,7 @@ class TileLayout(TLayout):
         device: Optional[Tuple] = None,
         exclusive: Optional[Tuple] = None,
         from_to: Optional[Tuple[str]] = None,
-    ):
+    ) -> "TileLayout":
         leaf_cnt = 0
 
         def inc_leaf_cnt():
@@ -224,14 +224,9 @@ class TileLayout(TLayout):
             )
 
     @staticmethod
-    def from_tile(
-        shape: Tuple,
-        inner: TLayout,
-        device: Optional[Tuple] = None,
-        from_to: Optional[Tuple[str]] = None,
-    ):
-        return get_global_func("tir.TileLayoutFromTile")(shape, inner, device, from_to)
+    def tile(outer: "TileLayout", inner: "TileLayout") -> "TileLayout":
+        return get_global_func("tir.TileLayoutTile")(outer, inner)
 
-
-def normalize_tile_layout(layout: TileLayout) -> TileLayout:
-    return get_global_func("tir.NormalizeTileLayout")(layout)
+    @staticmethod
+    def normalize(layout: "TileLayout") -> "TileLayout":
+        return get_global_func("tir.NormalizeTileLayout")(layout)

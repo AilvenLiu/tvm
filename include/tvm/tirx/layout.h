@@ -58,6 +58,7 @@ class IterTreeBaseNode : public Object {
 class IterTreeBase : public ObjectRef {
  public:
   TVM_DEFINE_OBJECT_REF_METHODS(IterTreeBase, ObjectRef, IterTreeBaseNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeBaseNode);
 };
 
 // IterTreeSplit
@@ -99,7 +100,7 @@ class IterTreeSplit : public IterTreeBase {
   Array<IterTreeBase> GetLeaves() const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(IterTreeSplit, IterTreeBase, IterTreeSplitNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeBaseNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeSplitNode);
 };
 
 // IterTree
@@ -335,17 +336,25 @@ class TileLayout : public TLayout {
                        Optional<Array<IterTreeBase>> opt_device_leaves = NullOpt) const;
 
   /*! \brief Update the tree with the given roots and mappings */
-  TileLayout UpdateTree(IterTreeSplit data_root, Optional<IterTreeSplit> device_root,
-                        const DataIterTree::CoeffMap& coeff, const DeviceIterTree::AttrMap& attr,
-                        const SplitMap& split_map);
+  static TileLayout FromMaps(IterTreeSplit data_root, Optional<IterTreeSplit> device_root,
+                             const DataIterTree::CoeffMap& coeff,
+                             const DeviceIterTree::AttrMap& attr, const SplitMap& split_map,
+                             Optional<ExecScope> from = NullOpt, Optional<ExecScope> to = NullOpt);
 
-  static TileLayout FromTile(const Array<PrimExpr>& shape, const TileLayout& inner,
-                             const Optional<ObjectRef>& device, const Optional<ObjectRef>& from_to);
+  TileLayout Tile(TileLayout outer);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);
 };
 
+/*! \brief Construct a new layout by tiling the ouer layout over the inner layout */
+TileLayout Tile(TileLayout outer, TileLayout inner);
+
+/*! \brief Layout normalization
+    1. Deduplicate the split nodes in the tree, such that no two split nodes share the same child
+   node.
+    2. Remove the split nodes with extent 1.
+ */
 TileLayout NormalizeTileLayout(TileLayout layout);
 
 }  // namespace tirx

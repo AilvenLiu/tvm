@@ -19,7 +19,6 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tir as T
-from tvm.tir.layout import normalize_tile_layout
 from tvm.ir import assert_structural_equal
 
 
@@ -205,6 +204,9 @@ def test_constructor_nested_tuple():
 
 
 def test_normalize_tile_layout():
+    def normalize_tile_layout(layout):
+        return T.TileLayout.normalize(layout)
+
     # no normalization case
     layout = T.TileLayout.from_nested_tuple(
         data=((8, 8), (8, (4, 2))),
@@ -284,8 +286,44 @@ def test_normalize_tile_layout():
     )
     assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
 
+    # unit layout case#1
+    layout = T.TileLayout.from_nested_tuple(
+        data=((1, 1), (1, (1, 1))), strides=((1, 1), (1, (1, 1)))
+    )
+    layout_unit = T.TileLayout.from_nested_tuple(data=1, strides=1)
+    assert_structural_equal(layout_unit, normalize_tile_layout(layout))
+
+    # unit layout case#2
+    layout = T.TileLayout.from_nested_tuple(
+        data=((1, T.S(0)), (T.S(1), (1, 1))),
+        strides=((1, -1), (-1, (1, 1))),
+        device=(1, 1),
+        from_to=("thread", "warp"),
+    )
+    layout_unit = T.TileLayout.from_nested_tuple(
+        data=1, strides=1, device=1, from_to=("thread", "warp")
+    )
+    assert_structural_equal(layout_unit, normalize_tile_layout(layout))
+
+
+def test_tile_layout():
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    layout_tile = T.TileLayout.from_nested_tuple(data=((8, 8), (8, 8)), strides=((512, 8), (64, 1)))
+    assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout))
+
+    layout2 = T.TileLayout.from_nested_tuple(data=(2, 4), strides=(1, 2))
+    layout_tile = T.TileLayout.from_nested_tuple(data=((8, 2), (8, 4)), strides=((64, 1), (8, 2)))
+    assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout2))
+
+    layout3 = T.TileLayout.from_nested_tuple(data=((4, 2), (2, 4)), strides=((16, 8), (1, 2)))
+    layout_tile = T.TileLayout.from_nested_tuple(
+        data=((8, (4, 2)), (8, (2, 4))), strides=((512, (16, 8)), (64, (1, 2)))
+    )
+    assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout3))
+
 
 if __name__ == "__main__":
     test_constructor_nested_tuple_no_device()
     test_constructor_nested_tuple()
     test_normalize_tile_layout()
+    test_tile_layout()
