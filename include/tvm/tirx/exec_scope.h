@@ -270,6 +270,10 @@ bool Higher(const ExecScope& lhs, const ExecScope& rhs);
 
 bool Higher(const String& lhs, const String& rhs);
 
+bool Equal(const ExecScope& lhs, const ExecScope& rhs);
+
+bool Equal(const String& lhs, const String& rhs);
+
 bool ValideScope(const ExecScope& scope);
 
 bool ValideScope(const String& scope);

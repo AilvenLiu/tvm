@@ -307,6 +307,10 @@ def test_normalize_tile_layout():
 
 
 def test_tile_layout():
+    layout = T.TileLayout.from_nested_tuple(data=8, strides=1)
+    layout_tile = T.TileLayout.from_nested_tuple(data=((8, 8),), strides=((8, 1),))
+    assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout))
+
     layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
     layout_tile = T.TileLayout.from_nested_tuple(data=((8, 8), (8, 8)), strides=((512, 8), (64, 1)))
     assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout))
@@ -321,9 +325,88 @@ def test_tile_layout():
     )
     assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout3))
 
+    with pytest.raises(Exception):
+        # dims mismatch
+        layout = T.TileLayout.from_nested_tuple(data=8, strides=1)
+        layout2 = T.TileLayout.from_nested_tuple(data=(2, 4), strides=(1, 2))
+        T.TileLayout.tile(layout, layout2)
+
+
+def test_shard_layout():
+    # mma layout test
+    layout = T.TileLayout.from_nested_tuple(data=(1, 2), strides=(2, 1))
+    layout_warp = T.TileLayout.shard(
+        shape=(8, 8), mesh=(8, 4), strategy="S0S1", inner=layout, from_to=("thread", "warp")
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), 1), (T.S(1), 2)),
+        strides=((-1, 2), (-1, 1)),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+    assert_structural_equal(layout_expected, layout_warp)
+
+    layout_cta = T.TileLayout.shard(
+        shape=(16, 16), mesh=(2, 2), strategy="S0S1", inner=layout_warp, from_to=("warp", "cta")
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), (T.S(2), 1)), (T.S(1), (T.S(3), 2))),
+        strides=((-1, (-1, 2)), (-1, (-1, 1))),
+        device=(2, 2, 8, 4),
+        from_to=("thread", "cta"),
+    )
+    assert_structural_equal(layout_expected, layout_cta)
+
+    # quad shuffle test
+    layout = T.TileLayout.from_nested_tuple(data=(1, 2), strides=(2, 1))
+    layout_warp = T.TileLayout.shard(
+        shape=(8, 2),
+        mesh=(8, 4),
+        strategy="S0E0",
+        inner=layout,
+        from_to=("thread", "warp"),
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), 1), 2),
+        strides=((-1, 2), 1),
+        device=(8, 4),
+        exclusive=[(1, 0)],
+        from_to=("thread", "warp"),
+    )
+    assert_structural_equal(layout_expected, layout_warp)
+
+    # replicate test
+    layout = T.TileLayout.from_nested_tuple(data=(64, 128), strides=(128, 1))
+    layout_rep = T.TileLayout.shard(
+        shape=(128, 128),
+        mesh=(2, 2),
+        strategy="S0R",
+        inner=layout,
+        from_to=("kernel", "world"),
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), 64), 128),
+        strides=((-1, 128), 1),
+        device=(2, 2),
+        from_to=("kernel", "world"),
+    )
+    assert_structural_equal(layout_expected, layout_rep)
+
+    # error case: shape, mesh and inner shape mismatch
+    layout = T.TileLayout.from_nested_tuple(data=(64, 64), strides=(128, 1))
+    with pytest.raises(Exception):
+        layout_rep = T.TileLayout.shard(
+            shape=(128, 128),
+            mesh=(2, 2),
+            strategy="S0R",
+            inner=layout,
+            from_to=("kernel", "world"),
+        )
+
 
 if __name__ == "__main__":
     test_constructor_nested_tuple_no_device()
     test_constructor_nested_tuple()
     test_normalize_tile_layout()
     test_tile_layout()
+    test_shard_layout()

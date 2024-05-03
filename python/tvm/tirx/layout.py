@@ -176,9 +176,9 @@ class TileLayout(TLayout):
 
     @staticmethod
     def from_nested_tuple(
-        data: Tuple,
-        strides: Tuple,
-        device: Optional[Tuple] = None,
+        data: Union[Tuple, int],
+        strides: Union[Tuple, int],
+        device: Optional[Union[Tuple, int]] = None,
         exclusive: Optional[Tuple] = None,
         from_to: Optional[Tuple[str]] = None,
     ) -> "TileLayout":
@@ -188,6 +188,11 @@ class TileLayout(TLayout):
             nonlocal leaf_cnt
             leaf_cnt += 1
             return leaf_cnt - 1
+
+        if not isinstance(data, tuple):
+            data = (data,)
+        if not isinstance(strides, tuple):
+            strides = (strides,)
 
         if device is None:
             assert exclusive is None, "exclusive must be None if device is None"
@@ -199,6 +204,9 @@ class TileLayout(TLayout):
             return TileLayout(data_tree=data_tree)
 
         else:
+            if not isinstance(device, tuple):
+                device = (device,)
+
             assert from_to is not None, "from_to must be provided if device is provided"
             assert isinstance(from_to, tuple) and len(from_to) == 2, "from_to must be a tuple of 2"
 
@@ -226,6 +234,28 @@ class TileLayout(TLayout):
     @staticmethod
     def tile(outer: "TileLayout", inner: "TileLayout") -> "TileLayout":
         return get_global_func("tir.TileLayoutTile")(outer, inner)
+
+    @staticmethod
+    def shard(
+        shape: Tuple[PrimExpr, int],
+        mesh: Tuple,
+        strategy: str,
+        inner: "TileLayout",
+        from_to: Optional[Tuple[str]] = None,
+    ) -> "TileLayout":
+        assert from_to is not None, "from_to must be provided if device is provided"
+        assert isinstance(from_to, tuple) and len(from_to) == 2, "from_to must be a tuple of 2"
+
+        f = get_global_func("tir.IterTreeFromTuple")
+        iter_tree, _ = f(convert_to_object(mesh))
+        return get_global_func("tir.TileLayoutShard")(
+            shape,
+            iter_tree,
+            strategy,
+            inner,
+            ExecScope.create(from_to[0]) if from_to else None,
+            ExecScope.create(from_to[1]) if from_to else None,
+        )
 
     @staticmethod
     def normalize(layout: "TileLayout") -> "TileLayout":

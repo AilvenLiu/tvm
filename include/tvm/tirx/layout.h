@@ -350,6 +350,18 @@ class TileLayout : public TLayout {
 /*! \brief Construct a new layout by tiling the ouer layout over the inner layout */
 TileLayout Tile(TileLayout outer, TileLayout inner);
 
+/*!
+ * \brief Construct a new layout to express the sharding strategy of a tensor.
+ * \param shape The shape of the tensor.
+ * \param mesh The device mesh
+ * \param strategy The sharding strategy of the tensor.
+ * \param inner The layout of the sharded partition of the tensor.
+ * \param from The source scope of the layout.
+ * \param to The target scope of the layout.
+ */
+TileLayout Shard(Array<PrimExpr> shape, IterTree mesh, String strategy, TileLayout inner,
+                 ExecScope from, ExecScope to);
+
 /*! \brief Layout normalization
     1. Deduplicate the split nodes in the tree, such that no two split nodes share the same child
    node.

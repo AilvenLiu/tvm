@@ -112,9 +112,7 @@ ExecScope ExecScope::Create(String name) {
 
 TVM_REGISTER_NODE_TYPE(ExecScopeNode);
 
-TVM_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](String name) {
-  return ExecScope(name);
-});
+TVM_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](String name) { return ExecScope(name); });
 
 TVM_REGISTER_GLOBAL("tirx.ExecScopeCreate").set_body_typed([](String name) {
   return ExecScope::Create(name);
@@ -178,6 +176,10 @@ bool Higher(const String& lhs, const String& rhs) {
   return ScopeOrder.at(lhs) < ScopeOrder.at(rhs);
 }
 
+bool Equal(const ExecScope& lhs, const ExecScope& rhs) { return lhs->name == rhs->name; }
+
+bool Equal(const String& lhs, const String& rhs) { return lhs == rhs; }
+
 bool ValideScope(const ExecScope& scope) { return ValideScope(scope->name); }
 
 bool ValideScope(const String& scope) { return ScopeOrder.count(scope) > 0; }
@@ -191,5 +193,5 @@ String StorageToLogicalScope(const String& storage) {
   return StorageToLogical.at(storage);
 }
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm
