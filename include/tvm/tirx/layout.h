@@ -37,6 +37,9 @@ class TLayoutNode : public Object {
   /*! \brief Get the input shape of the layout */
   virtual Array<PrimExpr> GetShape() const = 0;
 
+  /*! \brief Verify if the layout is well-formed */
+  virtual bool VerifyWellFormed() const = 0;
+
   static constexpr const char* _type_key = "tirx.TLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
@@ -325,6 +328,9 @@ class TileLayoutNode : public TLayoutNode {
   /*! \brief Get the input shape of the layout */
   Array<PrimExpr> GetShape() const final;
 
+  /*! \brief Verify if the layout is well-formed */
+  bool VerifyWellFormed() const final;
+
   static constexpr const char* _type_key = "tirx.TileLayout";
   TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, TLayoutNode);
 };
@@ -373,7 +379,7 @@ TileLayout Shard(Array<PrimExpr> shape, IterTree mesh, String strategy, TileLayo
  */
 TileLayout NormalizeTileLayout(TileLayout layout);
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

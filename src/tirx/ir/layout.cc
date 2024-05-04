@@ -34,12 +34,6 @@ PrimExpr ReduceMul(Array<PrimExpr> values) {
 }
 
 /******** Constructors ********/
-// TLayout
-
-Array<PrimExpr> TLayoutNode::GetShape() const {
-  LOG(FATAL) << "InternalError: The GetShape method is not implemented";
-}
-
 // IterTreeSplit
 IterTreeSplit::IterTreeSplit(PrimExpr extent, Array<IterTreeBase> children) {
   auto n = make_object<IterTreeSplitNode>();
@@ -129,6 +123,56 @@ IterTree::LeafIndexMap IterTree::GetLeafIndexMap(Optional<Array<IterTreeBase>> o
   }
   return std::move(leaf_to_index);
 }
+
+class IterTreeVisitor {
+ public:
+  virtual ~IterTreeVisitor() = default;
+
+  virtual void Visit(const IterTreeBase& node) {
+    if (auto* split = node.as<IterTreeSplitNode>()) {
+      VisitIterSplit(split);
+    } else {
+      LOG(FATAL) << "InternalError: Expect IterTreeSplit but get " << node->GetTypeKey();
+    }
+  }
+
+  virtual void VisitIterSplit(const IterTreeSplitNode* node) = 0;
+};
+
+class IterTreeMutator {
+ public:
+  virtual ~IterTreeMutator() = default;
+
+  virtual Optional<IterTreeBase> Visit(IterTreeBase node) {
+    if (auto* split = node.as<IterTreeSplitNode>()) {
+      return VisitIterSplit(split);
+    } else {
+      LOG(FATAL) << "InternalError: Expect IterTreeSplit but get " << node->GetTypeKey();
+      return IterTreeBase();
+    }
+  }
+
+  virtual Optional<IterTreeBase> VisitIterSplit(const IterTreeSplitNode* node) {
+    bool changed = false;
+    std::vector<IterTreeBase> new_children;
+    for (const auto& child : node->children) {
+      auto new_child = Visit(child);
+      if (new_child.defined()) {
+        new_children.push_back(new_child.value());
+        changed |= (!new_child.same_as(child));
+      } else {
+        changed = true;
+      }
+    }
+    if (changed) {
+      auto* n = GetRef<IterTreeSplit>(node).CopyOnWrite();
+      n->children = new_children;
+      return GetRef<IterTreeBase>(n);
+    } else {
+      return GetRef<IterTreeBase>(node);
+    }
+  }
+};
 
 // DataIterTree
 DataIterTree::DataIterTree(IterTreeSplit root, Array<PrimExpr> coeff) {
@@ -341,43 +385,53 @@ Array<PrimExpr> TileLayoutNode::GetShape() const {
   return Array<PrimExpr>(shape);
 }
 
+class IterTreeVerifier : public IterTreeVisitor {
+ public:
+  IterTreeVerifier() = default;
+
+  static bool VerifyWellFormed(const IterTreeBase& node) {
+    IterTreeVerifier verifier;
+    verifier.Visit(node);
+    return verifier.result_;
+  }
+
+  void VisitIterSplit(const IterTreeSplitNode* node) final {
+    if (node->children.empty()) return;
+    PrimExpr extent = 1;
+    for (const auto& child : node->children) {
+      this->Visit(child);
+      extent = extent * Downcast<IterTreeSplit>(child)->extent;
+    }
+    if (!ana_.CanProveEqual(extent, node->extent)) {
+      result_ = false;
+    }
+  }
+
+ private:
+  bool result_{true};
+  arith::Analyzer ana_;
+};
+
+bool TileLayoutNode::VerifyWellFormed() const {
+  arith::Analyzer analyzer;
+  // Verify the data tree
+  bool result = IterTreeVerifier::VerifyWellFormed(data_tree->root);
+  if (device_tree.defined()) {
+    // Verify the device tree if it is defined
+    result &= IterTreeVerifier::VerifyWellFormed(device_tree.value()->root);
+    // Verify the split map
+    auto split_map = GetRef<TileLayout>(this).GetSplitMap();
+    for (const auto& kv : split_map) {
+      ICHECK(analyzer.CanProveEqual(Downcast<IterTreeSplit>(kv.first)->extent,
+                                    Downcast<IterTreeSplit>(kv.second)->extent))
+          << "ValueError: The extents of the data and device leaves must be the same";
+    }
+  }
+  return result;
+}
+
 /******** Normalization ********/
 using NodeSet = std::unordered_set<IterTreeBase, ObjectPtrHash, ObjectPtrEqual>;
-
-class IterTreeMutator {
- public:
-  virtual ~IterTreeMutator() = default;
-
-  virtual Optional<IterTreeBase> Visit(IterTreeBase node) {
-    if (auto* split = node.as<IterTreeSplitNode>()) {
-      return VisitIterSplit(split);
-    } else {
-      LOG(FATAL) << "InternalError: Expect IterTreeSplit but get " << node->GetTypeKey();
-      return IterTreeBase();
-    }
-  }
-
-  virtual Optional<IterTreeBase> VisitIterSplit(const IterTreeSplitNode* node) {
-    bool changed = false;
-    std::vector<IterTreeBase> new_children;
-    for (const auto& child : node->children) {
-      auto new_child = Visit(child);
-      if (new_child.defined()) {
-        new_children.push_back(new_child.value());
-        changed |= (!new_child.same_as(child));
-      } else {
-        changed = true;
-      }
-    }
-    if (changed) {
-      auto* n = GetRef<IterTreeSplit>(node).CopyOnWrite();
-      n->children = new_children;
-      return GetRef<IterTreeBase>(n);
-    } else {
-      return GetRef<IterTreeBase>(node);
-    }
-  }
-};
 
 class DeepCopyMutator : public IterTreeMutator {
  public:

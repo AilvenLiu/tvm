@@ -186,8 +186,41 @@ def test_inconsistent_scope_id():
         verify(test3)
 
 
+def test_layout():
+    # fmt: off
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test1(): 
+        with T.kernel():
+            bx = T.cta_id([32], parent="kernel")
+            wid = T.warp_id([4], parent="cta")
+            lane = T.thread_id([32], parent="warp")
+
+            with T.thread():
+                A = T.alloc_buffer((2,), layout=T.TileLayout.from_nested_tuple(2, 1))
+
+                A[0] = 0
+    
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test2(): 
+        with T.kernel():
+            bx = T.cta_id([32], parent="kernel")
+            wid = T.warp_id([4], parent="cta")
+            lane = T.thread_id([32], parent="warp")
+
+            with T.thread():
+                A = T.alloc_buffer((2,), layout=T.TileLayout.from_nested_tuple(3, 1))
+
+                A[0] = 0
+    # fmt: on
+
+    verify(test1)
+    with pytest.raises(Exception, match="invalid layout"):
+        verify(test2)
+
+
 if __name__ == "__main__":
     test_root_scope()
     test_nested_scope()
     test_invalid_stmt()
     test_inconsistent_scope_id()
+    test_layout()

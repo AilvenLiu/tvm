@@ -122,10 +122,50 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
           }
         }
       }
+      Verifier::VisitStmt_(op, path);
     }
   }
 
   arith::Analyzer ana_;
+};
+
+class LayoutVerifier : public Verifier<LayoutVerifier> {
+ public:
+  using Verifier::Verifier;
+
+ private:
+  using Verifier::Visit;
+
+  void VisitStmt_(const BlockNode* op, ObjectPath path) override {
+    arith::Analyzer ana;
+    auto reduce = [&](const Array<PrimExpr>& values) {
+      PrimExpr result = values[0];
+      for (size_t i = 1; i < values.size(); i++) {
+        result = result * values[i];
+      }
+      return result;
+    };
+    auto verify = [&](const TBuffer& buffer) {
+      if (buffer->layout.defined()) {
+        Verify(buffer->layout.value()->VerifyWellFormed())
+            << "TIRpError: Buffer at " << path << " has invalid layout " << buffer->layout;
+        ICHECK(ana.CanProveEqual(reduce(buffer->shape), reduce(buffer->layout.value()->GetShape())))
+            << "TIRpError: Buffer at " << path << " has invalid layout " << buffer->layout
+            << " for shape " << buffer->shape;
+      }
+    };
+    for (const auto& view : op->buffer_views) {
+      if (auto buffer = view->dst_buffer.as<TBuffer>()) {
+        verify(buffer.value());
+      }
+    }
+    for (const auto& alloc : op->alloc_buffers) {
+      if (auto buffer = alloc.as<TBuffer>()) {
+        verify(buffer.value());
+      }
+    }
+    Verifier::VisitStmt_(op, path);
+  }
 };
 
 bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode) {
@@ -135,7 +175,9 @@ bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode) {
   if (!ScopeIdVerifier::Verify(func, assert_mode)) {
     return false;
   }
-
+  if (!LayoutVerifier::Verify(func, assert_mode)) {
+    return false;
+  }
   return true;
 }
 
