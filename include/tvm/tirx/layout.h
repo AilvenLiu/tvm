@@ -34,6 +34,9 @@ namespace tirx {
 // Base class for layout
 class TLayoutNode : public Object {
  public:
+  /*! \brief Get the input shape of the layout */
+  virtual Array<PrimExpr> GetShape() const = 0;
+
   static constexpr const char* _type_key = "tirx.TLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
@@ -319,6 +322,9 @@ class TileLayoutNode : public TLayoutNode {
     hash_reducer(to);
   }
 
+  /*! \brief Get the input shape of the layout */
+  Array<PrimExpr> GetShape() const final;
+
   static constexpr const char* _type_key = "tirx.TileLayout";
   TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, TLayoutNode);
 };
@@ -340,8 +346,6 @@ class TileLayout : public TLayout {
                              const DataIterTree::CoeffMap& coeff,
                              const DeviceIterTree::AttrMap& attr, const SplitMap& split_map,
                              Optional<ExecScope> from = NullOpt, Optional<ExecScope> to = NullOpt);
-
-  TileLayout Tile(TileLayout outer);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);
@@ -369,7 +373,7 @@ TileLayout Shard(Array<PrimExpr> shape, IterTree mesh, String strategy, TileLayo
  */
 TileLayout NormalizeTileLayout(TileLayout layout);
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

@@ -236,12 +236,9 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     // ExprDoc rhs =
     //     d->AsDoc<ExprDoc>(block->buffer_views[i], block_p->Attr("buffer_views")->ArrayIndex(i));
 
-    ExprDoc rhs = TIR(d, "view")->Call({
-        d->AsDoc<ExprDoc>(buffer_view->src_buffer, buffer_view_p->Attr("src_buffer")),
-        d->AsDoc<ExprDoc>(buffer_view->layout, buffer_view_p->Attr("layout")),
-        BufferDecl(buffer_view->dst_buffer, "Buffer", {}, buffer_view_p->Attr("dst_buffer"), *frame,
-                   d, BufferVarDefinition::DataPointer),
-    });
+    ExprDoc rhs = TIR(d, "view")->Call(
+        {d->AsDoc<ExprDoc>(buffer_view->src_buffer, buffer_view_p->Attr("src_buffer")),
+         d->AsDoc<ExprDoc>(buffer_view->layout, buffer_view_p->Attr("layout"))});
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
   }
   for (size_t i = 0; i < block->buffer_gets.size(); ++i) {
@@ -254,7 +251,8 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
 
     ExprDoc rhs = TIR(d, "get")->Call({
         d->AsDoc<ExprDoc>(buffer_get->src_buffer, buffer_get_p->Attr("src_buffer")),
-        // BufferDecl(buffer_get->dst_buffer, "Buffer", {}, buffer_get_p->Attr("dst_buffer"), *frame,
+        // BufferDecl(buffer_get->dst_buffer, "Buffer", {}, buffer_get_p->Attr("dst_buffer"),
+        // *frame,
         //            d, BufferVarDefinition::DataPointer),
     });
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
@@ -328,11 +326,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tir::BufferView>(
         "", [](tir::BufferView buffer_view, ObjectPath p, IRDocsifier d) -> Doc {
-          Doc doc = TIR(d, "view")->Call({
-              d->AsDoc<ExprDoc>(buffer_view->src_buffer, p->Attr("src_buffer")),
-              d->AsDoc<ExprDoc>(buffer_view->layout, p->Attr("layout")),
-              d->AsDoc<ExprDoc>(buffer_view->dst_buffer, p->Attr("dst_buffer")),
-          });
+          Doc doc = TIR(d, "view")->Call(
+              {d->AsDoc<ExprDoc>(buffer_view->src_buffer, p->Attr("src_buffer")),
+               d->AsDoc<ExprDoc>(buffer_view->layout, p->Attr("layout"))});
           return doc;
         });
 TVM_SCRIPT_REPR(tir::BufferGetNode, ReprPrintTIR);

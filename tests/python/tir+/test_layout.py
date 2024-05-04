@@ -325,6 +325,25 @@ def test_tile_layout():
     )
     assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout3))
 
+    # Tile over a sharded layout
+    layout = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), 1), (T.S(1), 2)),
+        strides=((-1, 2), (-1, 1)),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+    layout_tile = T.TileLayout.tile(
+        outer=T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1)),
+        inner=layout,
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=((8, (T.S(0), 1)), (8, (T.S(1), 2))),
+        strides=((16, (-1, 2)), (2, (-1, 1))),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+    assert_structural_equal(layout_expected, layout_tile)
+
     with pytest.raises(Exception):
         # dims mismatch
         layout = T.TileLayout.from_nested_tuple(data=8, strides=1)

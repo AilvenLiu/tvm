@@ -134,11 +134,16 @@ def test_roundtrip_buffer_view_get1():
         with T.kernel():
             with T.cta():
                 A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
-                A_warp = T.view(A, layout=None, dst_buffer=T.Buffer([8, 8]))
+                A_layout = T.TileLayout.from_nested_tuple((1, 2), (2, 1))
+                A_warp_layout = T.TileLayout.shard(
+                    (8, 8), (8, 4), "S0S1", inner=A_layout, from_to=("thread", "warp")
+                )
+                A_warp = T.view(A, layout=A_warp_layout)
 
                 with T.thread():
                     A_local = T.get(A_warp)
                     A_local[0] = T.float16(0)
+
     # fmt: on
     code = test.script()
     assert from_source(code).script() == code
@@ -159,8 +164,11 @@ def test_roundtrip_buffer_view_get2():
 
             with T.cta():
                 A = T.alloc_buffer([2,], dtype="float16", scope="local", logical_scope="thread")
-                B = T.view(A, layout=None,
-                           dst_buffer=T.Buffer([8, 8], dtype="float16", scope="local", logical_scope="warp"))
+                A_layout = T.TileLayout.from_nested_tuple((1, 2), (2, 1))
+                B_layout = T.TileLayout.shard(
+                    (8, 8), (8, 4), "S0S1", inner=A_layout, from_to=("thread", "warp")
+                )
+                B = T.view(A, layout=B_layout)
                 D = T.get(B)
 
                 with T.thread():

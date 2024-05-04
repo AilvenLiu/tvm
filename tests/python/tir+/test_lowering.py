@@ -45,6 +45,8 @@ def test_lowering1():
 
             with T.thread():
                 A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
+                A_layout = T.TileLayout.from_nested_tuple((2,), (1,))
+                B_layout = T.TileLayout.shard((64,), (32,), "S0", inner=A_layout, from_to=("thread", "warp"))
                 """
                 B = in_buf
                 """
@@ -52,7 +54,7 @@ def test_lowering1():
                     T.reads(in_buf[:])
                     T.writes(A[:])
                     
-                    B = T.view(A, layout=None, dst_buffer=T.Buffer(8, dtype="float16", scope="local", logical_scope="warp"))
+                    B = T.view(A, layout=B_layout)
                     with T.thread():
                         A_local = T.get(B)
                         for i in T.vectorized(2):
@@ -64,7 +66,7 @@ def test_lowering1():
                     T.reads(A[:])
                     T.writes(out[:])
                     
-                    B = T.view(A, layout=None, dst_buffer=T.Buffer(8, dtype="float16", scope="local", logical_scope="warp"))
+                    B = T.view(A, layout=B_layout)
                     with T.thread():
                         A_local = T.get(B)
                         for i in T.vectorized(2):

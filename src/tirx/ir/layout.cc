@@ -34,6 +34,11 @@ PrimExpr ReduceMul(Array<PrimExpr> values) {
 }
 
 /******** Constructors ********/
+// TLayout
+
+Array<PrimExpr> TLayoutNode::GetShape() const {
+  LOG(FATAL) << "InternalError: The GetShape method is not implemented";
+}
 
 // IterTreeSplit
 IterTreeSplit::IterTreeSplit(PrimExpr extent, Array<IterTreeBase> children) {
@@ -326,6 +331,14 @@ TileLayout::SplitMap TileLayout::GetSplitMap(
     }
   }
   return std::move(split_map);
+}
+
+Array<PrimExpr> TileLayoutNode::GetShape() const {
+  std::vector<PrimExpr> shape;
+  for (const auto& child : this->data_tree->root->children) {
+    shape.push_back(Downcast<IterTreeSplit>(child)->extent);
+  }
+  return Array<PrimExpr>(shape);
 }
 
 /******** Normalization ********/
@@ -658,7 +671,13 @@ TileLayout Tile(TileLayout outer, TileLayout inner) {
   auto coeff_map = inner_n->data_tree.GetCoeffMap();
   auto coeff_map_outer = new_outer->data_tree.GetCoeffMap();
   coeff_map.insert(coeff_map_outer.begin(), coeff_map_outer.end());
-  return TileLayout::FromMaps(root, NullOpt, coeff_map, {}, {}, inner_n->from, inner->to);
+  auto attr_map = inner_n->device_tree.defined() ? inner_n->device_tree.value().GetAttrMap()
+                                                 : tvm::tir::DeviceIterTree::AttrMap();
+  auto split_map = inner.GetSplitMap();
+  return TileLayout::FromMaps(root,
+                              inner_n->device_tree.defined() ? inner_n->device_tree.value()->root
+                                                             : Optional<IterTreeSplit>(),
+                              coeff_map, attr_map, split_map, inner_n->from, inner_n->to);
 }
 
 TVM_REGISTER_GLOBAL("tirx.TileLayoutTile").set_body_typed([](TileLayout outer, TileLayout inner) {

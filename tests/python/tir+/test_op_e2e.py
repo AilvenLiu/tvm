@@ -38,7 +38,6 @@ def test_gemm_ampere():
     B_tvm = tvm.nd.array(B_np, device=DEV)
 
     target = tvm.target.Target("nvidia/nvidia-a100")
-
     # fmt: off
     @T.prim_func(tirp=True)
     def func(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
@@ -47,21 +46,37 @@ def test_gemm_ampere():
         C = T.match_buffer(C_ptr, (M, N), "float32", scope="global")
 
         with T.kernel():
-            bx, by, bz = T.cta_id([M // BLK_M, N // BLK_N, 1], parent="kernel")
+            bx, by = T.cta_id([M // BLK_M, N // BLK_N], parent="kernel")
             warp_id = T.warp_id([4], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
             tid = T.thread_id([128], parent="cta")
 
             with T.cta():
-                acc_storage = T.alloc_buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local")
-                A_smem = T.alloc_buffer([BLK_M, BLK_K], dtype="float16", scope="shared",
-                                        layout=None)
-                B_smem = T.alloc_buffer([BLK_N, BLK_K], dtype="float16", scope="shared",
-                                        layout=None)
+                mma_layout = T.TileLayout.from_nested_tuple(data=(1, 2), strides=(2, 1))
+                mma_layout_atom = T.TileLayout.shard(
+                    shape=(8, 8),
+                    mesh=(8, 4),
+                    strategy="S0S1",
+                    inner=mma_layout,
+                    from_to=("thread", "warp"),
+                )
+                acc_layout_cta_atom = T.TileLayout.shard(
+                    shape=(16, 16),
+                    mesh=(2, 2),
+                    strategy="S0S1",
+                    inner=mma_layout_atom,
+                    from_to=("warp", "cta"),
+                )
+                tiling = T.TileLayout.from_nested_tuple(
+                    data=(BLK_M // 16, BLK_N // 16), strides=(BLK_N // 16, 1)
+                )
+                acc_layout_cta = T.TileLayout.tile(tiling, acc_layout_cta_atom)
 
-                acc = T.view(acc_storage,
-                             layout=None,
-                             dst_buffer=T.Buffer([BLK_M, BLK_N], dtype="float32", scope="local", logical_scope="cta"))
+                acc_storage = T.alloc_buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local")
+                A_smem = T.alloc_buffer([BLK_M, BLK_K], dtype="float16", scope="shared", layout=None) # TODO: swizzle layout
+                B_smem = T.alloc_buffer([BLK_N, BLK_K], dtype="float16", scope="shared", layout=None) # TODO: swizzle layout
+
+                acc = T.view(acc_storage, layout=acc_layout_cta)
 
                 # T.fill(acc, 0)
                 with T.thread():
@@ -114,16 +129,14 @@ def test_gemm_ampere():
                         T.writes(acc[:, :])
                         A_storage = T.alloc_buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local")
                         B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local")
+                        
+                        tiling_AB = T.TileLayout.from_nested_tuple(data=(BLK_M // 16, 2), strides=(2, 1))
+                        AB_layout = T.TileLayout.tile(tiling_AB, mma_layout_atom)
+                        A_warp = T.view(A_storage, layout=AB_layout)
+                        B_warp = T.view(B_storage, layout=AB_layout)
 
-                        A_warp = T.view(A_storage, 
-                                        layout=None, 
-                                        dst_buffer=T.Buffer([BLK_M // 2, 16], dtype="float16", scope="local", logical_scope="warp"))
-                        B_warp = T.view(B_storage, 
-                                        layout=None, 
-                                        dst_buffer=T.Buffer([BLK_N // 2, 16], dtype="float16", scope="local", logical_scope="warp"))
-                        acc_warp = T.view(acc_storage,
-                                          layout=None,
-                                          dst_buffer=T.Buffer([BLK_M // 2, BLK_N // 2], dtype="float32", scope="local", logical_scope="warp"))
+                        acc_warp_layout = T.TileLayout.tile(tiling, mma_layout_atom)
+                        acc_warp = T.view(acc_storage, layout=acc_warp_layout)
 
                         for k_inner in T.serial(BLK_K // 16):
                             st_m = T.meta_var((warp_id // 2) * (BLK_M // 2))
@@ -211,12 +224,14 @@ def test_gemm_ampere():
                         st_n = T.meta_var(by * BLK_N + warp_id % 2 * BLK_N // 2 + j * 8 + lane_id % 4 * 2)
                         for vec in T.serial(2):
                             C[st_m, st_n + vec] = acc_local[j, i, vec]
+
     # fmt: on
     np.random.seed(0)
 
     def tvm_gemm():
         with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
             mod = tvm.IRModule({"main": func})
+            mod.show(black_format=False)
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
 

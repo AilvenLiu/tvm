@@ -383,8 +383,8 @@ def match_buffer(
     )
 
 
-def view(src_buffer: Buffer, layout: TLayout, dst_buffer: Buffer) -> Buffer:
-    return _ffi_api.BufferView(src_buffer, layout, dst_buffer)
+def view(src_buffer: Buffer, layout: TLayout) -> Buffer:
+    return _ffi_api.BufferView(src_buffer, layout)
 
 
 def get(src_buffer: Buffer) -> Buffer:

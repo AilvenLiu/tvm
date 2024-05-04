@@ -166,8 +166,22 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
   return buffer;
 }
 
-Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Buffer dst_buffer) {
+Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout) {
   SBlockFrame frame = FindSBlockFrame("T.View");
+
+  String logical_scope = buffer.logical_scope();
+  if (auto tile_layout = layout.as<tvm::tirx::TileLayoutNode>()) {
+    if (tile_layout->from.defined()) {
+      ICHECK(tile_layout->to.defined())
+          << "ValueError: The from scope of the layout must match the to scope of the layout.";
+      ICHECK(tvm::tirx::Equal(tvm::tirx::ExecScope::Create(logical_scope), tile_layout->from.value()))
+          << "ValueError: The logical scope of the buffer must match the from scope of the layout.";
+      logical_scope = tile_layout->to.value()->name;
+    }
+  }
+  Buffer dst_buffer = BufferDecl(layout->GetShape(), buffer->dtype, "", NullOpt, NullOpt, NullOpt,
+                                 buffer.scope(), 1, 1, "auto", NullOpt, logical_scope, layout);
+
   frame->buffer_views.push_back(tvm::tirx::BufferView(buffer, layout, dst_buffer));
   {
     // Update BufferView tree
@@ -1055,7 +1069,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxx
+}  // namespace tirxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
