@@ -34,11 +34,21 @@ namespace tirx {
 // Base class for layout
 class TLayoutNode : public Object {
  public:
-  /*! \brief Get the input shape of the layout */
-  virtual Array<PrimExpr> GetShape() const = 0;
+  /*! \brief Get the default input shape of the layout, used by BufferView to create new logical
+   * buffer */
+  virtual Array<PrimExpr> GetDefaultShape() const = 0;
+
+  /*! \brief Compatible with shape */
+  virtual bool CompatibleWithShape(const Array<PrimExpr>& shape) const = 0;
 
   /*! \brief Verify if the layout is well-formed */
   virtual bool VerifyWellFormed() const = 0;
+
+  /*! \brief Get the size of the layout */
+  virtual PrimExpr GetSize() const = 0;
+
+  /*! \brief Get the cosize of the layout */
+  virtual PrimExpr GetCosize() const = 0;
 
   static constexpr const char* _type_key = "tirx.TLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -326,10 +336,19 @@ class TileLayoutNode : public TLayoutNode {
   }
 
   /*! \brief Get the input shape of the layout */
-  Array<PrimExpr> GetShape() const final;
+  Array<PrimExpr> GetDefaultShape() const final;
+
+  /*! \brief Compatible with shape */
+  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
 
   /*! \brief Verify if the layout is well-formed */
   bool VerifyWellFormed() const final;
+
+  /*! \brief Get the size of the layout */
+  PrimExpr GetSize() const final;
+
+  /*! \brief Get the cosize of the layout */
+  PrimExpr GetCosize() const final;
 
   static constexpr const char* _type_key = "tirx.TileLayout";
   TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, TLayoutNode);
@@ -379,7 +398,67 @@ TileLayout Shard(Array<PrimExpr> shape, IterTree mesh, String strategy, TileLayo
  */
 TileLayout NormalizeTileLayout(TileLayout layout);
 
-}  // namespace tirxxx
+// SwizzleLayout
+class SwizzleLayoutNode : public TLayoutNode {
+ public:
+  int per_element;
+  int swizzle_len;
+  int atom_len;
+  bool swizzle_inner;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("per_element", &per_element);
+    v->Visit("swizzle_len", &swizzle_len);
+    v->Visit("atom_len", &atom_len);
+    v->Visit("swizzle_inner", &swizzle_inner);
+  }
+
+  bool SEqualReduce(const SwizzleLayoutNode* other, SEqualReducer equal) const {
+    return equal(per_element, other->per_element) && equal(swizzle_len, other->swizzle_len) &&
+           equal(atom_len, other->atom_len) && equal(swizzle_inner, other->swizzle_inner);
+  }
+
+  void SHashReduce(SHashReducer hash_reducer) const {
+    hash_reducer(per_element);
+    hash_reducer(swizzle_len);
+    hash_reducer(atom_len);
+    hash_reducer(swizzle_inner);
+  }
+
+  /*! \brief Get the input shape of the layout */
+  Array<PrimExpr> GetDefaultShape() const final;
+
+  /*! \brief Compatible with shape */
+  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
+
+  /*! \brief Verify if the layout is well-formed */
+  bool VerifyWellFormed() const final;
+
+  /*! \brief Get the size of the layout */
+  PrimExpr GetSize() const final;
+
+  /*! \brief Get the cosize of the layout */
+  PrimExpr GetCosize() const final;
+
+  static constexpr const char* _type_key = "tirx.SwizzleLayout";
+  TVM_DECLARE_FINAL_OBJECT_INFO(SwizzleLayoutNode, TLayoutNode);
+
+ private:
+  friend class SwizzleLayout;
+  int inner_mask;
+  int outer_mask;
+};
+
+class SwizzleLayout : public TLayout {
+ public:
+  TVM_DLL explicit SwizzleLayout(int per_element, int swizzle_len, int atom_len,
+                                 bool swizzle_inner);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(SwizzleLayout, TLayout, SwizzleLayoutNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(SwizzleLayoutNode);
+};
+
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

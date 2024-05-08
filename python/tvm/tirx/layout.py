@@ -33,6 +33,14 @@ class TLayout(Object):
     def __init__(self):
         self.__init_handle_by_constructor__(_ffi_api.TLayout)
 
+    @property
+    def size(self):
+        return get_global_func("tir.TLayoutGetSize")(self)
+
+    @property
+    def cosize(self):
+        return get_global_func("tir.TLayoutGetCosize")(self)
+
 
 @register_object("tirx.IterTreeBase")
 class IterTreeBase(Object):
@@ -260,3 +268,18 @@ class TileLayout(TLayout):
     @staticmethod
     def normalize(layout: "TileLayout") -> "TileLayout":
         return get_global_func("tir.NormalizeTileLayout")(layout)
+
+
+@register_object("tir.SwizzleLayout")
+class SwizzleLayout(TLayout):
+    per_element: int
+    swizzle_len: int
+    atom_len: int
+    swizzle_inner: bool
+
+    def __init__(
+        self, per_element: int, swizzle_len: int, atom_len: int, swizzle_inner: bool = True
+    ):
+        self.__init_handle_by_constructor__(
+            _ffi_api.SwizzleLayout, per_element, swizzle_len, atom_len, swizzle_inner
+        )

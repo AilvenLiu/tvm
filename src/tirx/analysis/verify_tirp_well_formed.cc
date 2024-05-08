@@ -137,21 +137,13 @@ class LayoutVerifier : public Verifier<LayoutVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
-    arith::Analyzer ana;
-    auto reduce = [&](const Array<PrimExpr>& values) {
-      PrimExpr result = values[0];
-      for (size_t i = 1; i < values.size(); i++) {
-        result = result * values[i];
-      }
-      return result;
-    };
     auto verify = [&](const TBuffer& buffer) {
       if (buffer->layout.defined()) {
         Verify(buffer->layout.value()->VerifyWellFormed())
             << "TIRpError: Buffer at " << path << " has invalid layout " << buffer->layout;
-        ICHECK(ana.CanProveEqual(reduce(buffer->shape), reduce(buffer->layout.value()->GetShape())))
-            << "TIRpError: Buffer at " << path << " has invalid layout " << buffer->layout
-            << " for shape " << buffer->shape;
+        ICHECK(buffer->layout.value()->CompatibleWithShape(buffer->shape))
+            << "TIRpError: Buffer at " << path << " has layout " << buffer->layout
+            << " that is not compatible with shape " << buffer->shape;
       }
     };
     for (const auto& view : op->buffer_views) {

@@ -24,7 +24,7 @@
 namespace tvm {
 namespace tirx {
 
-/******** Utils ********/
+/**************** Utils ****************/
 PrimExpr ReduceMul(Array<PrimExpr> values) {
   PrimExpr result = values[0];
   for (size_t i = 1; i < values.size(); i++) {
@@ -33,8 +33,16 @@ PrimExpr ReduceMul(Array<PrimExpr> values) {
   return result;
 }
 
-/******** Constructors ********/
-// IterTreeSplit
+/**************** TLayout ****************/
+TVM_REGISTER_GLOBAL("tirx.TLayoutGetSize").set_body_typed([](TLayout layout) {
+  return layout->GetSize();
+});
+
+TVM_REGISTER_GLOBAL("tirx.TLayoutGetCosize").set_body_typed([](TLayout layout) {
+  return layout->GetCosize();
+});
+
+/**************** IterTree ****************/
 IterTreeSplit::IterTreeSplit(PrimExpr extent, Array<IterTreeBase> children) {
   auto n = make_object<IterTreeSplitNode>();
   n->extent = std::move(extent);
@@ -69,7 +77,7 @@ Array<IterTreeBase> IterTreeSplit::GetLeaves() const {
   return Array<IterTreeBase>(leaves);
 }
 
-// IterTree
+/**************** IterTree ****************/
 IterTree::IterTree(IterTreeSplit root) {
   auto n = make_object<IterTreeNode>();
   n->root = std::move(root);
@@ -174,7 +182,34 @@ class IterTreeMutator {
   }
 };
 
-// DataIterTree
+class IterTreeVerifier : public IterTreeVisitor {
+ public:
+  IterTreeVerifier() = default;
+
+  static bool VerifyWellFormed(const IterTreeBase& node) {
+    IterTreeVerifier verifier;
+    verifier.Visit(node);
+    return verifier.result_;
+  }
+
+  void VisitIterSplit(const IterTreeSplitNode* node) final {
+    if (node->children.empty()) return;
+    PrimExpr extent = 1;
+    for (const auto& child : node->children) {
+      this->Visit(child);
+      extent = extent * Downcast<IterTreeSplit>(child)->extent;
+    }
+    if (!ana_.CanProveEqual(extent, node->extent)) {
+      result_ = false;
+    }
+  }
+
+ private:
+  bool result_{true};
+  arith::Analyzer ana_;
+};
+
+/**************** DataIterTree ****************/
 DataIterTree::DataIterTree(IterTreeSplit root, Array<PrimExpr> coeff) {
   auto n = make_object<DataIterTreeNode>();
   n->root = std::move(root);
@@ -202,7 +237,7 @@ DataIterTree::CoeffMap DataIterTree::GetCoeffMap(Optional<Array<IterTreeBase>> o
   return std::move(coeff_map);
 }
 
-// DeviceIterAttr
+/**************** DeviceIterAttr ****************/
 DeviceIterAttr::DeviceIterAttr(ScopeIdType type, Optional<PrimExpr> bound,
                                Optional<PrimExpr> owner) {
   auto n = make_object<DeviceIterAttrNode>();
@@ -242,7 +277,7 @@ size_t DeviceIterAttr::GetIntBound() const {
   return n->value;
 }
 
-// DeviceIterTree
+/**************** DeviceIterTree ****************/
 DeviceIterTree::DeviceIterTree(IterTreeSplit root, Array<DeviceIterAttr> attrs) {
   auto n = make_object<DeviceIterTreeNode>();
   n->root = std::move(root);
@@ -270,7 +305,68 @@ DeviceIterTree::AttrMap DeviceIterTree::GetAttrMap(Optional<Array<IterTreeBase>>
   return std::move(attr_map);
 }
 
-// TileLayout
+/**************** TileLayout ****************/
+Array<PrimExpr> TileLayoutNode::GetDefaultShape() const {
+  std::vector<PrimExpr> shape;
+  for (const auto& child : this->data_tree->root->children) {
+    shape.push_back(Downcast<IterTreeSplit>(child)->extent);
+  }
+  return Array<PrimExpr>(shape);
+}
+
+bool TileLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const {
+  arith::Analyzer analyzer;
+  return analyzer.CanProveEqual(FloorMod(ReduceMul(shape), this->GetSize()), 0);
+}
+
+PrimExpr TileLayoutNode::GetSize() const { return this->data_tree->root->extent; }
+
+PrimExpr TileLayoutNode::GetCosize() const {
+  auto data_leaves = this->data_tree.GetLeaves();
+  auto split_map = GetRef<TileLayout>(this).GetSplitMap(data_leaves);
+  arith::Analyzer analyzer;
+  PrimExpr cosize = 1;
+  for (size_t i = 0; i < data_leaves.size(); ++i) {
+    if (split_map.find(data_leaves[i]) != split_map.end()) {
+      continue;
+    }
+    // Check if the coefficient is non-negative
+    ICHECK(analyzer.CanProveGreaterEqual(this->data_tree->coeff[i], 0))
+        << "ValueError: The coefficient of a non-bound leaf must be non-negative";
+    cosize += this->data_tree->coeff[i] * (Downcast<IterTreeSplit>(data_leaves[i])->extent - 1);
+  }
+  return cosize;
+}
+
+bool TileLayoutNode::VerifyWellFormed() const {
+  arith::Analyzer analyzer;
+  // Verify the data tree
+  bool result = IterTreeVerifier::VerifyWellFormed(data_tree->root);
+  if (device_tree.defined()) {
+    // Verify the device tree if it is defined
+    result &= IterTreeVerifier::VerifyWellFormed(device_tree.value()->root);
+  }
+  // Verify the split map
+  auto data_leaves = data_tree.GetLeaves();
+  const auto& split_map = GetRef<TileLayout>(this).GetSplitMap(data_leaves);
+  for (const auto& kv : split_map) {
+    ICHECK(analyzer.CanProveEqual(Downcast<IterTreeSplit>(kv.first)->extent,
+                                  Downcast<IterTreeSplit>(kv.second)->extent))
+        << "ValueError: The extents of the data and device leaves must be the same";
+  }
+  // Verify coefficients are non-negative for non-bound leaves in the data tree
+  const auto& coeff_map = data_tree.GetCoeffMap(data_leaves);
+  for (const auto& kv : coeff_map) {
+    auto it = split_map.find(kv.first);
+    if (it == split_map.end()) {
+      ICHECK(analyzer.CanProveGreaterEqual(kv.second, 0))
+          << "ValueError: The coefficient of a non-bound leaf must be non-negative";
+    }
+  }
+  return result;
+}
+
+/**************** TileLayout ****************/
 TileLayout::TileLayout(DataIterTree data_tree, Optional<DeviceIterTree> device_tree,
                        Optional<ExecScope> from, Optional<ExecScope> to) {
   auto n = make_object<TileLayoutNode>();
@@ -375,59 +471,6 @@ TileLayout::SplitMap TileLayout::GetSplitMap(
     }
   }
   return std::move(split_map);
-}
-
-Array<PrimExpr> TileLayoutNode::GetShape() const {
-  std::vector<PrimExpr> shape;
-  for (const auto& child : this->data_tree->root->children) {
-    shape.push_back(Downcast<IterTreeSplit>(child)->extent);
-  }
-  return Array<PrimExpr>(shape);
-}
-
-class IterTreeVerifier : public IterTreeVisitor {
- public:
-  IterTreeVerifier() = default;
-
-  static bool VerifyWellFormed(const IterTreeBase& node) {
-    IterTreeVerifier verifier;
-    verifier.Visit(node);
-    return verifier.result_;
-  }
-
-  void VisitIterSplit(const IterTreeSplitNode* node) final {
-    if (node->children.empty()) return;
-    PrimExpr extent = 1;
-    for (const auto& child : node->children) {
-      this->Visit(child);
-      extent = extent * Downcast<IterTreeSplit>(child)->extent;
-    }
-    if (!ana_.CanProveEqual(extent, node->extent)) {
-      result_ = false;
-    }
-  }
-
- private:
-  bool result_{true};
-  arith::Analyzer ana_;
-};
-
-bool TileLayoutNode::VerifyWellFormed() const {
-  arith::Analyzer analyzer;
-  // Verify the data tree
-  bool result = IterTreeVerifier::VerifyWellFormed(data_tree->root);
-  if (device_tree.defined()) {
-    // Verify the device tree if it is defined
-    result &= IterTreeVerifier::VerifyWellFormed(device_tree.value()->root);
-    // Verify the split map
-    auto split_map = GetRef<TileLayout>(this).GetSplitMap();
-    for (const auto& kv : split_map) {
-      ICHECK(analyzer.CanProveEqual(Downcast<IterTreeSplit>(kv.first)->extent,
-                                    Downcast<IterTreeSplit>(kv.second)->extent))
-          << "ValueError: The extents of the data and device leaves must be the same";
-    }
-  }
-  return result;
 }
 
 /******** Normalization ********/
@@ -685,19 +728,9 @@ TileLayout Tile(TileLayout outer, TileLayout inner) {
       << "ValueError: The number of children of the data tree root must be the same";
   ICHECK(!outer->device_tree.defined() && !outer->from.defined() && !outer->to.defined())
       << "ValueError: The outer layout must not have device tree or scope";
-  // Find the maximum stride in the inner layout
+  // Get the stride in the inner layout
   arith::Analyzer analyzer;
-  PrimExpr inner_extent = 1;
-  PrimExpr inner_stride = 0;
-  auto inner_leaves = inner_n->data_tree.GetLeaves();
-  for (size_t i = 0; i < inner_leaves.size(); i++) {
-    auto coeff = inner_n->data_tree->coeff[i];
-    if (analyzer.CanProve(inner_stride < coeff)) {
-      inner_stride = coeff;
-      inner_extent = inner_leaves[i].as<IterTreeSplitNode>()->extent;
-    }
-  }
-  inner_stride = analyzer.Simplify(inner_stride * inner_extent);
+  PrimExpr inner_stride = inner->GetCosize();
   // Update the coeff of the outer layout
   std::vector<PrimExpr> coeff;
   for (const auto& stride : outer_n->data_tree->coeff) {
@@ -726,7 +759,7 @@ TileLayout Tile(TileLayout outer, TileLayout inner) {
   auto coeff_map_outer = new_outer->data_tree.GetCoeffMap();
   coeff_map.insert(coeff_map_outer.begin(), coeff_map_outer.end());
   auto attr_map = inner_n->device_tree.defined() ? inner_n->device_tree.value().GetAttrMap()
-                                                 : tvm::tir::DeviceIterTree::AttrMap();
+                                                 : tvm::tirx::DeviceIterTree::AttrMap();
   auto split_map = inner.GetSplitMap();
   return TileLayout::FromMaps(root,
                               inner_n->device_tree.defined() ? inner_n->device_tree.value()->root
@@ -851,6 +884,42 @@ TVM_REGISTER_GLOBAL("tirx.TileLayoutShard")
     .set_body_typed([](Array<PrimExpr> shape, IterTree mesh, String strategy, TileLayout inner,
                        ExecScope from,
                        ExecScope to) { return Shard(shape, mesh, strategy, inner, from, to); });
+
+/**************** SwizzleLayout ****************/
+SwizzleLayout::SwizzleLayout(int per_element, int swizzle_len, int atom_len, bool swizzle_inner) {
+  auto n = make_object<SwizzleLayoutNode>();
+  n->per_element = per_element;
+  n->swizzle_len = swizzle_len;
+  n->atom_len = atom_len;
+  n->swizzle_inner = swizzle_inner;
+  ICHECK(n->VerifyWellFormed()) << "ValueError: The swizzle layout is not well-formed";
+  int swizzle_mask = (1 << swizzle_len) - 1;
+  n->inner_mask = swizzle_mask << per_element;
+  n->outer_mask = swizzle_mask << (per_element + atom_len);
+  data_ = std::move(n);
+}
+
+TVM_REGISTER_NODE_TYPE(SwizzleLayoutNode);
+
+TVM_REGISTER_GLOBAL("tirx.SwizzleLayout")
+    .set_body_typed([](int per_element, int swizzle_len, int atom_len, bool swizzle_inner) {
+      return SwizzleLayout(per_element, swizzle_len, atom_len, swizzle_inner);
+    });
+
+Array<PrimExpr> SwizzleLayoutNode::GetDefaultShape() const { return {GetSize()}; }
+
+bool SwizzleLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const {
+  arith::Analyzer analyzer;
+  return analyzer.CanProveEqual(FloorMod(ReduceMul(shape), GetSize()), 0);
+}
+
+bool SwizzleLayoutNode::VerifyWellFormed() const {
+  return per_element >= 0 && swizzle_len >= 0 && atom_len >= swizzle_len;
+}
+
+PrimExpr SwizzleLayoutNode::GetSize() const { return 1 << (per_element + swizzle_len + atom_len); }
+
+PrimExpr SwizzleLayoutNode::GetCosize() const { return GetSize(); }
 
 }  // namespace tirx
 }  // namespace tvm

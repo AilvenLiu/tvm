@@ -50,6 +50,7 @@ from tvm.tirx.layout import (
     IterTree,
     IterTreeSplit,
     S,
+    SwizzleLayout,
 )
 
 # import tirx.expr for direct ir construction to pass structural_equal comparison
@@ -2498,7 +2499,8 @@ __all__ += [
     "IterTree",
     "IterTreeSplit",
     "S",
+    "SwizzleLayout",
     "view",
     "get",
-    "static_assert"
+    "static_assert",
 ]

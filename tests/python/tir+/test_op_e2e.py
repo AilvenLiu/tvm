@@ -20,16 +20,17 @@ import tvm
 import tvm.testing
 from tvm import te
 from tvm.script import tir as T
-from tvm.tir.function import PrimFunc
 from tvm.tir.transform import LowerTIRp
 from tvm.contrib import cublas
 
 
 def test_gemm_ampere():
     # no pipeline, no write cache, fully manual impl
-    M, N, K = 512, 512, 512
+    M, N, K = 4096, 4096, 4096
     BLK_M, BLK_N, BLK_K = 128, 128, 32
-    VEC = 4
+    VEC = 8
+
+    np.random.seed(0)
 
     A_np = np.random.randn(M, K).astype(np.float16)
     B_np = np.random.randn(N, K).astype(np.float16)
@@ -37,7 +38,7 @@ def test_gemm_ampere():
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
 
-    target = tvm.target.Target("nvidia/nvidia-a100")
+    target = tvm.target.Target("nvidia/geforce-rtx-4090")
     # fmt: off
     @T.prim_func(tirp=True)
     def func(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
@@ -88,6 +89,7 @@ def test_gemm_ampere():
                             acc_local[i, j, vec] = 0
 
                 for k in T.serial(T.ceildiv(K, BLK_K)):
+                    T.tvm_storage_sync("shared")
                     T.static_assert(M % BLK_M == 0, f"M={M}, BLK_M={BLK_M}")
                     T.static_assert(N % BLK_N == 0, f"N={N}, BLK_N={BLK_N}")
                     T.static_assert(K % BLK_K == 0, f"K={K}, BLK_K={BLK_K}")
@@ -97,6 +99,7 @@ def test_gemm_ampere():
                         T.writes(A_smem[:, :])
                         T.static_assert(BLK_K % VEC == 0, "BLK_K should be multiple of VEC")
                         T.static_assert(128 % (BLK_K // VEC) == 0, "128 should be multiple of BLK_K // VEC")
+                        T.static_assert(BLK_M % (128 // (BLK_K // VEC)) == 0, "BLK_M should be multiple of 128 // (BLK_K // VEC)")
                         thread_per_col = T.meta_var(BLK_K // VEC)
                         thread_per_row = T.meta_var(128 // thread_per_col)
 
@@ -113,6 +116,7 @@ def test_gemm_ampere():
                         T.writes(B_smem[:, :])
                         T.static_assert(BLK_K % VEC == 0, "BLK_K should be multiple of VEC")
                         T.static_assert(128 % (BLK_K // VEC) == 0, "128 should be multiple of BLK_K // VEC")
+                        T.static_assert(BLK_N % (128 // (BLK_K // VEC)) == 0, "BLK_N should be multiple of 128 // (BLK_K // VEC)")
                         thread_per_col = T.meta_var(BLK_K // VEC)
                         thread_per_row = T.meta_var(128 // thread_per_col)
 
@@ -226,15 +230,12 @@ def test_gemm_ampere():
                             C[st_m, st_n + vec] = acc_local[j, i, vec]
 
     # fmt: on
-    np.random.seed(0)
 
     def tvm_gemm():
         with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
             mod = tvm.IRModule({"main": func})
-            mod.show(black_format=False)
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
-
             C_np = np.zeros((M, N), dtype=np.float32)
             C_tvm = tvm.nd.array(C_np, device=DEV)
             timer = mod.time_evaluator(mod.entry_name, DEV, number=10, repeat=3)
@@ -262,7 +263,8 @@ def test_gemm_ampere():
     C_tvm = tvm_gemm()
     C_cublas = cublas_gemm()
 
-    tvm.testing.assert_allclose(C_tvm.asnumpy(), C_cublas.asnumpy(), rtol=1e-2, atol=1e-2)
+    tvm.testing.assert_allclose(C_tvm.asnumpy(), C_cublas.asnumpy(), rtol=1e-3, atol=1e-3)
+    print("test passed")
 
 
 if __name__ == "__main__":

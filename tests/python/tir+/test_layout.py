@@ -423,9 +423,36 @@ def test_shard_layout():
         )
 
 
+def test_size_cosize():
+    ###################################################################### size
+    # TileLayout
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    assert layout.size == 64
+
+    # SwizzleLayout
+    layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+    assert layout.size == 512
+    layout = T.SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
+    assert layout.size == 1024
+
+    ###################################################################### cosize
+    # TileLayout
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    assert layout.cosize == 64
+    layout = T.TileLayout.from_nested_tuple(data=(8, 6), strides=(8, 1))
+    assert layout.cosize == 62
+
+    # SwizzleLayout
+    layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+    assert layout.cosize == 512
+    layout = T.SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
+    assert layout.cosize == 1024
+
+
 if __name__ == "__main__":
     test_constructor_nested_tuple_no_device()
     test_constructor_nested_tuple()
     test_normalize_tile_layout()
     test_tile_layout()
     test_shard_layout()
+    test_size_cosize()
