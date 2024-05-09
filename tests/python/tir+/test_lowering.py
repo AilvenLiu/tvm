@@ -31,7 +31,7 @@ def compare(before, after, transform):
     tvm.ir.assert_structural_equal(transform()(before), after, map_free_vars=False)
 
 
-def test_lowering1():
+def test_lower_view_get():
     # fmt: off
     @T.prim_func(private=True, tirp=True)
     def before(in_ptr: T.handle, out_ptr: T.handle) -> None:
@@ -136,5 +136,5 @@ def test_lower_scope_id():
 
 
 if __name__ == "__main__":
-    test_lowering1()
+    test_lower_view_get()
     test_lower_scope_id()

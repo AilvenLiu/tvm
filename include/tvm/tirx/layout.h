@@ -50,6 +50,9 @@ class TLayoutNode : public Object {
   /*! \brief Get the cosize of the layout */
   virtual PrimExpr GetCosize() const = 0;
 
+  /*! \breif Apply the input coordinate and get the mapped output */
+  virtual PrimExpr Apply(const Array<PrimExpr>& coord) const = 0;
+
   static constexpr const char* _type_key = "tirx.TLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
@@ -350,6 +353,9 @@ class TileLayoutNode : public TLayoutNode {
   /*! \brief Get the cosize of the layout */
   PrimExpr GetCosize() const final;
 
+  /*! \breif Apply the input coordinate and get the mapped output */
+  PrimExpr Apply(const Array<PrimExpr>& coord) const final;
+
   static constexpr const char* _type_key = "tirx.TileLayout";
   TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, TLayoutNode);
 };
@@ -440,6 +446,9 @@ class SwizzleLayoutNode : public TLayoutNode {
   /*! \brief Get the cosize of the layout */
   PrimExpr GetCosize() const final;
 
+  /*! \breif Apply the input coordinate and get the mapped output */
+  PrimExpr Apply(const Array<PrimExpr>& coord) const final;
+
   static constexpr const char* _type_key = "tirx.SwizzleLayout";
   TVM_DECLARE_FINAL_OBJECT_INFO(SwizzleLayoutNode, TLayoutNode);
 
@@ -458,7 +467,7 @@ class SwizzleLayout : public TLayout {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SwizzleLayoutNode);
 };
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

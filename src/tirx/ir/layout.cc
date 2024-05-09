@@ -42,6 +42,10 @@ TVM_REGISTER_GLOBAL("tirx.TLayoutGetCosize").set_body_typed([](TLayout layout) {
   return layout->GetCosize();
 });
 
+TVM_REGISTER_GLOBAL("tirx.TLayoutApply").set_body_typed([](TLayout layout, Array<PrimExpr> coord) {
+  return layout->Apply(coord);
+});
+
 /**************** IterTree ****************/
 IterTreeSplit::IterTreeSplit(PrimExpr extent, Array<IterTreeBase> children) {
   auto n = make_object<IterTreeSplitNode>();
@@ -364,6 +368,69 @@ bool TileLayoutNode::VerifyWellFormed() const {
     }
   }
   return result;
+}
+
+class TileLayoutApplier : public IterTreeVisitor {
+ public:
+  static Array<PrimExpr> Apply(PrimExpr input, IterTree data_tree) {
+    TileLayoutApplier applier(input);
+    applier.Visit(data_tree->root);
+    std::reverse(applier.result_.begin(), applier.result_.end());
+    return std::move(applier.result_);
+  }
+
+  explicit TileLayoutApplier(PrimExpr input) : cur_input_{input}, result_{} {}
+
+  void VisitIterSplit(const IterTreeSplitNode* node) final {
+    if (node->children.empty()) {
+      result_.push_back(cur_input_);
+      return;
+    }
+    for (int i = node->children.size() - 1; i >= 0; i--) {
+      auto* child = node->children[i].as<IterTreeSplitNode>();
+      ICHECK(child != nullptr) << "InternalError: Expect IterTreeSplit but get "
+                               << node->children[i]->GetTypeKey();
+      PrimExpr tmp = FloorDiv(cur_input_, child->extent);
+      cur_input_ = FloorMod(cur_input_, child->extent);
+      VisitIterSplit(child);
+      cur_input_ = tmp;
+    }
+  }
+
+ private:
+  PrimExpr cur_input_;
+  std::vector<PrimExpr> result_;
+};
+
+PrimExpr TileLayoutNode::Apply(const Array<PrimExpr>& coord) const {
+  PrimExpr input;
+  arith::Analyzer analyzer;
+  if (coord.size() == 1) {
+    input = coord[0];
+  } else {
+    const auto& shape = GetDefaultShape();
+    ICHECK_EQ(coord.size(), shape.size())
+        << "ValueError: The number of coordinates must be the same as the number of dimensions";
+    input = 0;
+    for (size_t i = 0; i < coord.size(); i++) {
+      input = input * shape[i] + coord[i];
+    }
+  }
+  input = analyzer.Simplify(input);
+  auto data_leaves = this->data_tree.GetLeaves();
+  auto leaf_coord = TileLayoutApplier::Apply(input, this->data_tree);
+
+  ICHECK_EQ(leaf_coord.size(), data_leaves.size())
+      << "ValueError: The number of coordinates must be the same as the number of leaves";
+  auto split_map = GetRef<TileLayout>(this).GetSplitMap(data_leaves);
+  PrimExpr result = 0;
+  for (size_t i = 0; i < leaf_coord.size(); i++) {
+    if (split_map.find(data_leaves[i]) != split_map.end()) {
+      continue;
+    }
+    result += leaf_coord[i] * this->data_tree->coeff[i];
+  }
+  return analyzer.Simplify(result);
 }
 
 /**************** TileLayout ****************/
@@ -920,6 +987,16 @@ bool SwizzleLayoutNode::VerifyWellFormed() const {
 PrimExpr SwizzleLayoutNode::GetSize() const { return 1 << (per_element + swizzle_len + atom_len); }
 
 PrimExpr SwizzleLayoutNode::GetCosize() const { return GetSize(); }
+
+PrimExpr SwizzleLayoutNode::Apply(const Array<PrimExpr>& coord) const {
+  ICHECK_EQ(coord.size(), 1) << "ValueError: The number of coordinates must be 1";
+  PrimExpr input = coord[0];
+  if (swizzle_inner) {
+    return input ^ ((input & outer_mask) >> atom_len);
+  } else {
+    return input ^ ((input & inner_mask) << atom_len);
+  }
+}
 
 }  // namespace tirx
 }  // namespace tvm

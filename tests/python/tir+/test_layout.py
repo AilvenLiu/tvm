@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import pytest
+import itertools
 
 import tvm
 import tvm.testing
@@ -449,6 +450,65 @@ def test_size_cosize():
     assert layout.cosize == 1024
 
 
+def test_apply():
+    # TileLayout
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    for i, j in itertools.product(range(8), range(8)):
+        assert layout.apply(i * 8 + j) == i * 8 + j * 1
+    for i, j in itertools.product(range(8), range(8)):
+        assert layout.apply(i, j) == i * 8 + j * 1
+    with pytest.raises(Exception):
+        layout.apply(1, 1, 1)
+
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(10, 1))
+    for i, j in itertools.product(range(8), range(8)):
+        assert layout.apply(i * 8 + j) == i * 10 + j * 1
+    for i, j in itertools.product(range(8), range(8)):
+        assert layout.apply(i, j) == i * 10 + j * 1
+
+    layout = T.TileLayout.from_nested_tuple(
+        data=((2, 3), (4, (2, 2))), strides=((1, 2), (12, (6, 48)))
+    )
+
+    def f(i0, i1):
+        leaf1 = i0 // 3
+        leaf2 = i0 % 3
+        leaf3 = i1 // 4
+        leaf4 = (i1 % 4) // 2
+        leaf5 = i1 % 2
+        assert layout.apply(i0, i1) == leaf1 * 1 + leaf2 * 2 + leaf3 * 12 + leaf4 * 6 + leaf5 * 48
+
+    for i0, i1 in itertools.product(range(6), range(16)):
+        f(i0, i1)
+    for i in range(6 * 16):
+        f(i // 16, i % 16)
+
+    layout = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), 1), (T.S(1), 2)),
+        strides=((-1, 2), (-1, 1)),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+    for i0, i1 in itertools.product(range(8), range(8)):
+        assert layout.apply(i0, i1) == i1 % 2
+
+    # Swizzle Layout
+    layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3)
+    assert layout.size == 64
+    for i, j in itertools.product(range(8), range(8)):
+        assert layout.apply(i * 8 + j) == i * 8 + i ^ j
+
+    layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+    assert layout.size == 512
+    for i, j, k in itertools.product(range(8), range(8), range(8)):
+        assert layout.apply((i * 8 + j) * 8 + k) == (i * 8 + (i ^ j)) * 8 + k
+
+    layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3, swizzle_inner=False)
+    assert layout.size == 64
+    for i, j in itertools.product(range(8), range(8)):
+        assert layout.apply(i * 8 + j) == (i ^ j) * 8 + j
+
+
 if __name__ == "__main__":
     test_constructor_nested_tuple_no_device()
     test_constructor_nested_tuple()
@@ -456,3 +516,4 @@ if __name__ == "__main__":
     test_tile_layout()
     test_shard_layout()
     test_size_cosize()
+    test_apply()

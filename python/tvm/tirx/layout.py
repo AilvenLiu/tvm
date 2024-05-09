@@ -41,6 +41,9 @@ class TLayout(Object):
     def cosize(self):
         return get_global_func("tir.TLayoutGetCosize")(self)
 
+    def apply(self, *coord: List[PrimExpr]) -> PrimExpr:
+        return get_global_func("tir.TLayoutApply")(self, coord)
+
 
 @register_object("tirx.IterTreeBase")
 class IterTreeBase(Object):
