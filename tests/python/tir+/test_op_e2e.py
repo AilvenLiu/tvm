@@ -74,15 +74,15 @@ def test_gemm_ampere():
                 acc_layout_cta = T.TileLayout.tile(tiling, acc_layout_cta_atom)
 
                 acc_storage = T.alloc_buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local")
-                A_smem = T.alloc_buffer([BLK_M, BLK_K], dtype="float16", scope="shared", layout=None) # TODO: swizzle layout
-                B_smem = T.alloc_buffer([BLK_N, BLK_K], dtype="float16", scope="shared", layout=None) # TODO: swizzle layout
+                A_smem = T.alloc_buffer([BLK_M, BLK_K], dtype="float16", scope="shared", 
+                                        layout=T.SwizzleLayout(3, 3, 3))
+                B_smem = T.alloc_buffer([BLK_N, BLK_K], dtype="float16", scope="shared",
+                                        layout=T.SwizzleLayout(3, 3, 3))
 
                 acc = T.view(acc_storage, layout=acc_layout_cta)
 
                 # T.fill(acc, 0)
                 with T.thread():
-                    T.reads()
-                    T.writes(acc[:, :])
                     acc_local = T.get(acc)
                     for i, j in T.grid(BLK_N // 16, BLK_N // 16):
                         for vec in T.vectorized(2):
@@ -95,42 +95,36 @@ def test_gemm_ampere():
                     T.static_assert(K % BLK_K == 0, f"K={K}, BLK_K={BLK_K}")
                     # T.load(A_smem, A[bx * BLK_M: bx * BLK_M + BLK_M, k * BLK_K: k * BLK_K + BLK_K])
                     with T.thread():
-                        T.reads(A[:, :])
-                        T.writes(A_smem[:, :])
                         T.static_assert(BLK_K % VEC == 0, "BLK_K should be multiple of VEC")
                         T.static_assert(128 % (BLK_K // VEC) == 0, "128 should be multiple of BLK_K // VEC")
                         T.static_assert(BLK_M % (128 // (BLK_K // VEC)) == 0, "BLK_M should be multiple of 128 // (BLK_K // VEC)")
-                        thread_per_col = T.meta_var(BLK_K // VEC)
-                        thread_per_row = T.meta_var(128 // thread_per_col)
+                        thread_col = T.meta_var(BLK_K // VEC)
+                        thread_row = T.meta_var(128 // thread_col)
 
-                        for tile in T.serial(BLK_M // thread_per_row):
-                            row = T.meta_var(tile * thread_per_row + tid // thread_per_col)
-                            col = T.meta_var(tid % thread_per_col * VEC)
+                        for tile in T.serial(BLK_M // thread_row):
+                            row = T.meta_var(tile * thread_row + tid // thread_col)
+                            col = T.meta_var(tid % thread_col * VEC)
                             for vec in T.vectorized(VEC):
                                 A_smem[row, col + vec] = A[bx * BLK_M + row, k * BLK_K + col + vec]
                     T.tvm_storage_sync("shared")
 
                     # T.load(B_smem, B[k * BLK_K: k * BLK_K + BLK_K, by * BLK_N: by * BLK_N + BLK_N])
                     with T.thread():
-                        T.reads(B[:, :])
-                        T.writes(B_smem[:, :])
                         T.static_assert(BLK_K % VEC == 0, "BLK_K should be multiple of VEC")
                         T.static_assert(128 % (BLK_K // VEC) == 0, "128 should be multiple of BLK_K // VEC")
                         T.static_assert(BLK_N % (128 // (BLK_K // VEC)) == 0, "BLK_N should be multiple of 128 // (BLK_K // VEC)")
-                        thread_per_col = T.meta_var(BLK_K // VEC)
-                        thread_per_row = T.meta_var(128 // thread_per_col)
+                        thread_col = T.meta_var(BLK_K // VEC)
+                        thread_row = T.meta_var(128 // thread_col)
 
-                        for tile in T.serial(BLK_N // thread_per_row):
-                            row = T.meta_var(tile * thread_per_row + tid // thread_per_col)
-                            col = T.meta_var(tid % thread_per_col * VEC)
+                        for tile in T.serial(BLK_N // thread_row):
+                            row = T.meta_var(tile * thread_row + tid // thread_col)
+                            col = T.meta_var(tid % thread_col * VEC)
                             for vec in T.vectorized(VEC):
                                 B_smem[row, col + vec] = B[by * BLK_N + row, k * BLK_K + col + vec]
                     T.tvm_storage_sync("shared")
 
                     # acc += A_smem @ B_smem
                     with T.warp():
-                        T.reads(A_smem[:, :], B_smem[:, :])
-                        T.writes(acc[:, :])
                         A_storage = T.alloc_buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local")
                         B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local")
                         
@@ -146,8 +140,6 @@ def test_gemm_ampere():
                             st_m = T.meta_var((warp_id // 2) * (BLK_M // 2))
                             # T.load(A_warp, A_smem[st_m: st_m + BLK_M // 2, k_inner * 16: k_inner * 16 + 16])
                             with T.warp():
-                                T.reads(A_smem[:, :])
-                                T.writes(A_warp[:, :])
                                 T.static_assert(BLK_M % 32 == 0, "BLK_M should be multiple of 32")
                                 for i in T.serial(BLK_M // 32):
                                     # 16x16 ptx ldmatrix
@@ -158,16 +150,14 @@ def test_gemm_ampere():
                                         T.ptx_ldmatrix(
                                             "float16", False, 4, ".b16",
                                             # TODO: change the signature of ptx_ldmatrix / introduce an op to get data from buffer
-                                            A_storage.data, A_local.offset_of([i, 0, 0])[0],
-                                            A_smem.data, A_smem.offset_of([st_m + i * 16 + lane_id % 16, 
-                                                                           k_inner * 16 + lane_id // 16 * 8])[0]
+                                            A_storage.data, A_local.offset_of_p([i, 0, 0]),
+                                            A_smem.data, A_smem.offset_of_p([st_m + i * 16 + lane_id % 16, 
+                                                                           k_inner * 16 + lane_id // 16 * 8])
                                         )
 
                             st_n = T.meta_var((warp_id % 2) * (BLK_N // 2))
                             # T.load(B_warp, B_smem[st_n: st_n + BLK_N // 2, k_inner * 16: k_inner * 16 + 16]) 
                             with T.warp():
-                                T.reads(B_smem[:, :])
-                                T.writes(B_warp[:, :])
                                 T.static_assert(BLK_N % 32 == 0, "BLK_N should be multiple of 32")
                                 for i in T.serial(BLK_N // 32):
                                     # 16x16 ptx ldmatrix
@@ -178,15 +168,13 @@ def test_gemm_ampere():
                                         T.ptx_ldmatrix(
                                             "float16", False, 4, ".b16",
                                             # TODO: change the signature of ptx_ldmatrix / introduce an op to get data from buffer
-                                            B_storage.data, B_local.offset_of([i * 2, 0, 0])[0],
-                                            B_smem.data, B_smem.offset_of([st_n + i * 16 + lane_id // 16 * 8 + lane_id % 8,
-                                                                           k_inner * 16 + lane_id % 16 // 8 * 8])[0]
+                                            B_storage.data, B_local.offset_of_p([i * 2, 0, 0]),
+                                            B_smem.data, B_smem.offset_of_p([st_n + i * 16 + lane_id // 16 * 8 + lane_id % 8,
+                                                                           k_inner * 16 + lane_id % 16 // 8 * 8])
                                         )
 
                             # acc_warp += A_warp @ B_warp
                             with T.warp():
-                                T.reads(A_warp[:, :], B_warp[:, :])
-                                T.writes(acc_warp[:, :])
                                 for tile_m in range(BLK_M // 32):
                                     for tile_n in range(BLK_N // 32):
                                         # 16x16x16 ptx mma
@@ -200,9 +188,9 @@ def test_gemm_ampere():
                                                 "m16n8k16", "row", "col",
                                                 "fp16", "fp16", "fp32",
                                                 # TODO: change the signature of ptx_ldmatrix / introduce an op to get data from buffer
-                                                A_storage.data, A_local.offset_of([tile_m, 0, 0])[0],
-                                                B_storage.data, B_local.offset_of([tile_n * 2, 0, 0])[0],
-                                                acc_storage.data, acc_local.offset_of([tile_n * 2, tile_m * 2, 0])[0],
+                                                A_storage.data, A_local.offset_of_p([tile_m, 0, 0]),
+                                                B_storage.data, B_local.offset_of_p([tile_n * 2, 0, 0]),
+                                                acc_storage.data, acc_local.offset_of_p([tile_n * 2, tile_m * 2, 0]),
                                                 False,
                                                 dtype="int32"
                                             )
@@ -210,17 +198,15 @@ def test_gemm_ampere():
                                                 "m16n8k16", "row", "col",
                                                 "fp16", "fp16", "fp32",
                                                 # TODO: change the signature of ptx_ldmatrix / introduce an op to get data from buffer
-                                                A_storage.data, A_local.offset_of([tile_m, 0, 0])[0],
-                                                B_storage.data, B_local.offset_of([tile_n * 2 + 1, 0, 0])[0],
-                                                acc_storage.data, acc_local.offset_of([tile_n * 2 + 1, tile_m * 2, 0])[0],
+                                                A_storage.data, A_local.offset_of_p([tile_m, 0, 0]),
+                                                B_storage.data, B_local.offset_of_p([tile_n * 2 + 1, 0, 0]),
+                                                acc_storage.data, acc_local.offset_of_p([tile_n * 2 + 1, tile_m * 2, 0]),
                                                 False,
                                                 dtype="int32"
                                             )
 
                 # T.store(C[bx * BLK_M: bx * BLK_M + BLK_M, by * BLK_N: by * BLK_N + BLK_N], acc)
                 with T.thread():
-                    T.reads(acc[:, :])
-                    T.writes(C[:, :])
                     acc_local = T.get(acc)
                     # TODO: Add write cache (Ampere)
                     for j, i in T.grid(BLK_N // 16, BLK_M // 16):
@@ -236,6 +222,7 @@ def test_gemm_ampere():
             mod = tvm.IRModule({"main": func})
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
+
             C_np = np.zeros((M, N), dtype=np.float32)
             C_tvm = tvm.nd.array(C_np, device=DEV)
             timer = mod.time_evaluator(mod.entry_name, DEV, number=10, repeat=3)

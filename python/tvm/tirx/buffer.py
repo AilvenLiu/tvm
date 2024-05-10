@@ -1,4 +1,3 @@
-
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -203,9 +202,30 @@ class Buffer(Object, Scriptable):
         """
         return _ffi_api.BufferOffsetOf(self, indices)  # type: ignore
 
+    def offset_of_p(self, indices):
+        """Get the buffer_offset op for the given index.
+
+        Parameters
+        ----------
+        indices : Union[PrimExpr, List[PrimExpr]]
+
+            The indices of the element in the original buffer.
+
+        Returns
+        -------
+        op: Op
+
+            The buffer_offset op for the given index.
+        """
+        return _ffi_api.BufferOffsetOfp(self, indices)
+
     def __getitem__(self, indices):
         from ..arith import Analyzer  # pylint: disable=import-outside-toplevel
-        from .expr import BufferLoad, Ramp, const  # pylint: disable=import-outside-toplevel
+        from .expr import (  # pylint: disable=import-outside-toplevel
+            BufferLoad,
+            Ramp,
+            const,
+        )
         from .stmt import BufferRegion  # pylint: disable=import-outside-toplevel
 
         if not isinstance(indices, tuple | list):
@@ -372,6 +392,57 @@ def decl_buffer(
     )
 
 
-@tvm_ffi.register_object("tirx.DataProducer")
+@tvm_ffi.register_object("tir.DataProducer")
+def decl_buffer(
+    shape,
+    dtype=None,
+    name="buffer",
+    data=None,
+    strides=None,
+    elem_offset=None,
+    scope="",
+    logical_scope="",
+    data_alignment=-1,
+    offset_factor=0,
+    buffer_type="",
+    axis_separators=None,
+    span=None,
+    layout=None,
+):
+    # pylint: disable=import-outside-toplevel
+    from .expr import Var
+
+    shape = (shape,) if isinstance(shape, (PrimExpr, Integral)) else shape
+    dtype = "float32" if dtype is None else dtype
+    strides = () if strides is None else strides
+
+    if axis_separators is None:
+        axis_separators = []
+
+    if offset_factor != 0 and elem_offset is None:
+        shape_dtype = shape[0].dtype if shape and hasattr(shape[0], "dtype") else "int32"
+        elem_offset = Var(f"{name}_elem_offset", shape_dtype)
+    if data is None:
+        # Bool is represented as uint1 in the IR, but stored as int8
+        storage_type = PrimType(dtype)
+        storage_type = PrimType("int8") if storage_type.dtype == "bool" else storage_type
+        data = Var(name, PointerType(storage_type, scope, logical_scope), span)
+    return _ffi_api.Buffer(  # type: ignore
+        data,
+        dtype,
+        shape,
+        strides,
+        elem_offset,
+        name,
+        data_alignment,
+        offset_factor,
+        buffer_type,
+        axis_separators,
+        span,
+        layout,
+    )
+
+
+@tvm_ffi.register_object("tir.DataProducer")
 class DataProducer(Object):
     pass

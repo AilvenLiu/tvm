@@ -435,6 +435,9 @@ TIR_DEFINE_BUILTIN_FUNC(ignore_loop_partition)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure))
     .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
                                          Integer(ScriptDtypePrintLocation::kNone));
+TIR_DEFINE_BUILTIN_FUNC(buffer_offset)
+    .set_num_inputs(2)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
 
 }  // namespace builtin
 }  // namespace tirx

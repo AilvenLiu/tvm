@@ -442,6 +442,13 @@ def test_size_cosize():
     assert layout.cosize == 64
     layout = T.TileLayout.from_nested_tuple(data=(8, 6), strides=(8, 1))
     assert layout.cosize == 62
+    layout = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), 1), (T.S(1), 2)),
+        strides=((-1, 2), (-1, 1)),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+    assert layout.cosize == 2
 
     # SwizzleLayout
     layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
@@ -451,62 +458,98 @@ def test_size_cosize():
 
 
 def test_apply():
-    # TileLayout
-    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
-    for i, j in itertools.product(range(8), range(8)):
-        assert layout.apply(i * 8 + j) == i * 8 + j * 1
-    for i, j in itertools.product(range(8), range(8)):
-        assert layout.apply(i, j) == i * 8 + j * 1
-    with pytest.raises(Exception):
-        layout.apply(1, 1, 1)
+    ################ TileLayout
+    def test0():
+        layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+        for i, j in itertools.product(range(8), range(8)):
+            assert layout.apply(i * 8 + j) == i * 8 + j * 1
+        for i, j in itertools.product(range(8), range(8)):
+            assert layout.apply(i, j) == i * 8 + j * 1
+        # apply can accept coord larger than size
+        for p in range(1024):
+            outer = p // 64
+            inner = p % 64
+            i, j = inner // 8, inner % 8
+            assert layout.apply(p) == outer * 64 + i * 8 + j * 1
+        with pytest.raises(Exception):
+            layout.apply(1, 1, 1)
 
-    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(10, 1))
-    for i, j in itertools.product(range(8), range(8)):
-        assert layout.apply(i * 8 + j) == i * 10 + j * 1
-    for i, j in itertools.product(range(8), range(8)):
-        assert layout.apply(i, j) == i * 10 + j * 1
+    def test1():
+        layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(10, 1))
+        for i, j in itertools.product(range(8), range(8)):
+            assert layout.apply(i * 8 + j) == i * 10 + j * 1
+        for i, j in itertools.product(range(8), range(8)):
+            assert layout.apply(i, j) == i * 10 + j * 1
 
-    layout = T.TileLayout.from_nested_tuple(
-        data=((2, 3), (4, (2, 2))), strides=((1, 2), (12, (6, 48)))
-    )
+        # apply can accept coord larger than size
+        for p in range(1024):
+            outer = p // 64
+            inner = p % 64
+            i, j = inner // 8, inner % 8
+            assert layout.apply(p) == outer * 78 + i * 10 + j * 1
 
-    def f(i0, i1):
-        leaf1 = i0 // 3
-        leaf2 = i0 % 3
-        leaf3 = i1 // 4
-        leaf4 = (i1 % 4) // 2
-        leaf5 = i1 % 2
-        assert layout.apply(i0, i1) == leaf1 * 1 + leaf2 * 2 + leaf3 * 12 + leaf4 * 6 + leaf5 * 48
+    def test2():
+        layout = T.TileLayout.from_nested_tuple(
+            data=((2, 3), (4, (2, 2))), strides=((1, 2), (12, (6, 48)))
+        )
 
-    for i0, i1 in itertools.product(range(6), range(16)):
-        f(i0, i1)
-    for i in range(6 * 16):
-        f(i // 16, i % 16)
+        def f(i0, i1):
+            leaf1 = i0 // 3
+            leaf2 = i0 % 3
+            leaf3 = i1 // 4
+            leaf4 = (i1 % 4) // 2
+            leaf5 = i1 % 2
+            assert (
+                layout.apply(i0, i1) == leaf1 * 1 + leaf2 * 2 + leaf3 * 12 + leaf4 * 6 + leaf5 * 48
+            )
 
-    layout = T.TileLayout.from_nested_tuple(
-        data=((T.S(0), 1), (T.S(1), 2)),
-        strides=((-1, 2), (-1, 1)),
-        device=(8, 4),
-        from_to=("thread", "warp"),
-    )
-    for i0, i1 in itertools.product(range(8), range(8)):
-        assert layout.apply(i0, i1) == i1 % 2
+        for i0, i1 in itertools.product(range(6), range(16)):
+            f(i0, i1)
+        for i in range(6 * 16):
+            f(i // 16, i % 16)
 
-    # Swizzle Layout
-    layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3)
-    assert layout.size == 64
-    for i, j in itertools.product(range(8), range(8)):
-        assert layout.apply(i * 8 + j) == i * 8 + i ^ j
+    def test3():
+        layout = T.TileLayout.from_nested_tuple(
+            data=((T.S(0), 1), (T.S(1), 2)),
+            strides=((-1, 2), (-1, 1)),
+            device=(8, 4),
+            from_to=("thread", "warp"),
+        )
+        for i0, i1 in itertools.product(range(8), range(8)):
+            assert layout.apply(i0, i1) == i1 % 2
 
-    layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-    assert layout.size == 512
-    for i, j, k in itertools.product(range(8), range(8), range(8)):
-        assert layout.apply((i * 8 + j) * 8 + k) == (i * 8 + (i ^ j)) * 8 + k
+    ################ Swizzle Layout
+    def test4():
+        layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3)
+        assert layout.size == 64
+        for i, j in itertools.product(range(8), range(8)):
+            assert layout.apply(i * 8 + j) == i * 8 + i ^ j
 
-    layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3, swizzle_inner=False)
-    assert layout.size == 64
-    for i, j in itertools.product(range(8), range(8)):
-        assert layout.apply(i * 8 + j) == (i ^ j) * 8 + j
+    def test5():
+        layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        assert layout.size == 512
+        for i, j, k in itertools.product(range(8), range(8), range(8)):
+            assert layout.apply((i * 8 + j) * 8 + k) == (i * 8 + (i ^ j)) * 8 + k
+        # apply can accept coord larger than size
+        for p in range(4096):
+            outer = p // 512
+            inner = p % 512
+            i, j, k = inner // 64, (inner % 64) // 8, inner % 8
+            assert layout.apply(p) == outer * 512 + (i * 8 + (i ^ j)) * 8 + k
+
+    def test6():
+        layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3, swizzle_inner=False)
+        assert layout.size == 64
+        for i, j in itertools.product(range(8), range(8)):
+            assert layout.apply(i * 8 + j) == (i ^ j) * 8 + j
+
+    test0()
+    test1()
+    test2()
+    test3()
+    test4()
+    test5()
+    test6()
 
 
 if __name__ == "__main__":

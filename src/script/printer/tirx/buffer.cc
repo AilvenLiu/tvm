@@ -186,8 +186,8 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
     }
   }
   // Step 12. Handle `buffer.layout`
-  if (const tirx::TBufferNode* tbuffer = buffer.as<tirx::TBufferNode>()) {
-    kwargs.Set("layout", d->AsDoc<ExprDoc>(tbuffer->layout, buffer_p->Attr("layout")));
+  if (buffer->layout.defined()) {
+    kwargs.Set("layout", d->AsDoc<ExprDoc>(buffer->layout, buffer_p->Attr("layout")));
   }
 
   if (var_def_lhs.size() == 1) {
@@ -337,22 +337,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
       }
       TVM_FFI_THROW(IndexError) << "Buffer is not defined in the environment: " << buffer;
       TVM_FFI_UNREACHABLE();
-    });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
-    .set_dispatch<tirx::TBuffer>("", [](tirx::TBuffer buffer, ObjectPath p, IRDocsifier d) -> Doc {
-      if (!d->IsVarDefined(buffer)) {
-        if (Optional<Frame> opt_f = FindLowestVarDef(buffer, d)) {
-          ExprDoc lhs = DefineBuffer(buffer, opt_f.value(), d);
-          ExprDoc rhs = BufferDecl(buffer, "Buffer", {}, p, opt_f.value(), d,
-                                   BufferVarDefinition::DataPointer);
-          opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
-        }
-      }
-      if (Optional<ExprDoc> doc = d->GetVarDoc(buffer)) {
-        return doc.value();
-      }
-      LOG(FATAL) << "IndexError: TBuffer is not defined in the environment: " << buffer;
     });
 
 std::pair<ExprDoc, ExprDoc> PrintDataIterTree(tirx::IterTreeBase root, const Array<PrimExpr>& coeff,
@@ -577,7 +561,6 @@ TVM_SCRIPT_REPR(tirx::BufferRegionNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferLoadNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferStoreNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferNode, ReprPrintTIR);
-TVM_SCRIPT_REPR(tirx::TBufferNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::TileLayoutNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::SwizzleLayoutNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::DataIterTreeNode, ReprPrintTIR);

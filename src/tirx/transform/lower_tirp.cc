@@ -24,11 +24,14 @@
 #include <tvm/arith/analyzer.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/tirx/function.h>
+#include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/transform.h>
 
 #include <queue>
 #include <unordered_map>
+
+#include "../../arith/ir_mutator_with_analyzer.h"
 
 namespace tvm {
 namespace tirx {
@@ -67,6 +70,8 @@ class LogicalTensorRemover : public StmtExprMutator {
     if (it != replace_map_.end()) {
       auto* n = store.CopyOnWrite();
       n->buffer = it->second;
+      ICHECK_EQ(it->second->shape.size(), op->indices.size())
+          << "Internal Error: Inconsistent shape for " << it->second;
     }
     return std::move(store);
   }
@@ -77,6 +82,8 @@ class LogicalTensorRemover : public StmtExprMutator {
     if (it != replace_map_.end()) {
       auto* n = load.CopyOnWrite();
       n->buffer = it->second;
+      ICHECK_EQ(it->second->shape.size(), op->indices.size())
+          << "Internal Error: Inconsistent shape for " << it->second;
     }
     return std::move(load);
   }
@@ -239,13 +246,143 @@ class ScopeIdDefRemover : public StmtExprMutator {
   arith::Analyzer ana_;
 };
 
-namespace transform {
+class StorageLower : public arith::IRMutatorWithAnalyzer {
+ public:
+  static Stmt Flatten(const Stmt& stmt, const Map<tirx::Var, Buffer> buffer_map) {
+    arith::Analyzer ana;
+    StorageLower storage_lower(&ana);
+    for (const auto& kv : buffer_map) {
+    }
+    return storage_lower(stmt);
+  }
 
+ private:
+  explicit StorageLower(arith::Analyzer* analyzer) : arith::IRMutatorWithAnalyzer(analyzer) {}
+
+  Stmt VisitStmt_(const BlockNode* op) final {
+    ICHECK_EQ(op->buffer_gets.size(), 0) << "Unexpected BufferGet found";
+    ICHECK_EQ(op->buffer_views.size(), 0) << "Unexpected BufferView found";
+    ICHECK_EQ(op->match_buffers.size(), 0) << "Unexpected MatchBufferRegion found";
+
+    Block block = GetRef<Block>(op);
+
+    Array<Buffer> alloc_buffers = op->alloc_buffers;
+    alloc_buffers.MutateByApply([this](Buffer buf) { return GetFlattenedBuffer(buf); });
+    if (!alloc_buffers.same_as(op->alloc_buffers)) {
+      block.CopyOnWrite()->alloc_buffers = alloc_buffers;
+    }
+
+    return StmtExprMutator::VisitStmt_(block.get());
+  }
+
+  Buffer GetFlattenedBuffer(Buffer buf) {
+    auto it = buffer_remap_.find(buf);
+    if (it != buffer_remap_.end()) {
+      return it->second;
+    }
+    auto flattened = buf.GetFlattenedBuffer();
+    auto writer = flattened.CopyOnWrite();
+
+    // TODO(Lunderberg): Move the handling of boolean into a
+    // dedicated pass.
+    if (flattened->dtype == DataType::Bool()) {
+      writer->dtype = DataType::Int(8);
+    }
+    // canonicalize shape
+    for (size_t i = 0; i < flattened->shape.size(); ++i) {
+      writer->shape.Set(i, analyzer_->canonical_simplify(flattened->shape[i]));
+    }
+    writer->layout = NullOpt;
+
+    buffer_remap_[buf] = flattened;
+    return flattened;
+  }
+
+  Stmt VisitStmt_(const BufferStoreNode* op) final {
+    BufferStore store = Downcast<BufferStore>(StmtExprMutator::VisitStmt_(op));
+    bool store_returns_bool = (op->value.dtype() == DataType::Bool());
+    store = VisitBufferAccess(store);
+
+    // Handle casts from the value's dtype to the dtype of the
+    // backing array.
+    // TODO(Lunderberg): Move the handling of boolean into a
+    // dedicated pass.
+    if (store_returns_bool) {
+      ICHECK_EQ(store->buffer->dtype, DataType::Int(8))
+          << "Expected int8 backing array for boolean tensor";
+      auto writer = store.CopyOnWrite();
+      writer->value = tvm::cast(DataType::Int(8), store->value);
+      return std::move(store);
+    }
+    return std::move(store);
+  }
+
+  PrimExpr VisitExpr_(const BufferLoadNode* op) final {
+    bool load_returns_bool = (op->dtype == DataType::Bool());
+    BufferLoad load = Downcast<BufferLoad>(StmtExprMutator::VisitExpr_(op));
+    load = VisitBufferAccess(load);
+    // Handle casts from dtype of the backing array to value's dtype.
+    // TODO(Lunderberg): Move the handling of boolean into a
+    // dedicated pass.
+    if (load_returns_bool) {
+      ICHECK_EQ(load->buffer->dtype, DataType::Int(8))
+          << "Expected int8 backing array for boolean tensor";
+      load.CopyOnWrite()->dtype = DataType::Int(8);
+      return tvm::cast(DataType::Bool(), load);
+    } else {
+      return std::move(load);
+    }
+  }
+
+  Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer, const Array<PrimExpr>& indices) {
+    auto flattened_indices = buffer->ElemOffset(indices);
+    flattened_indices = this->IterMapSimplifyWithContext(flattened_indices, false);
+    ICHECK_EQ(flattened_indices.size(), 1) << "Expected a single element offset";
+    if (buffer->layout.defined()) {
+      return {analyzer_->Simplify(buffer->layout.value()->Apply({flattened_indices[0]}))};
+    }
+    return flattened_indices;
+  }
+
+  template <typename Node>
+  Node VisitBufferAccess(Node node) {
+    ICHECK(node->buffer.defined());
+    auto flattened_indices = GetSimplifiedElemOffset(node->buffer, node->indices);
+    Buffer flattened_buffer = GetFlattenedBuffer(node->buffer);
+
+    auto writer = node.CopyOnWrite();
+    writer->buffer = flattened_buffer;
+    writer->indices = flattened_indices;
+    return node;
+  }
+
+  /*! \brief Map of buffers being remapped. */
+  std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_remap_;
+};
+
+class BufferOffsetRemover : public StmtExprMutator {
+ public:
+  static Stmt Remove(const Stmt& stmt) { return BufferOffsetRemover()(stmt); }
+
+ private:
+  PrimExpr VisitExpr_(const tirx::CallNode* call) final {
+    if (call->op.same_as(tirx::builtin::buffer_offset())) {
+      auto buffer_load = Downcast<BufferLoad>(call->args[0]);
+      ICHECK_EQ(buffer_load->indices.size(), 1) << "Expected a single index";
+      return buffer_load->indices[0];
+    }
+    return StmtExprMutator::VisitExpr_(call);
+  }
+};
+
+namespace transform {
 Pass LowerTIRp() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
     auto* n = f.CopyOnWrite();
     n->body = LogicalTensorRemover::Remove(n->body);
     n->body = ScopeIdDefRemover::Remove(n->body);
+    n->body = StorageLower::Flatten(n->body, n->buffer_map);
+    n->body = BufferOffsetRemover::Remove(n->body);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRp", {});
@@ -254,5 +391,5 @@ Pass LowerTIRp() {
 TVM_REGISTER_GLOBAL("tirx.transform.LowerTIRp").set_body_typed(LowerTIRp);
 
 }  // namespace transform
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm

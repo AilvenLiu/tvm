@@ -137,7 +137,7 @@ class LayoutVerifier : public Verifier<LayoutVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
-    auto verify = [&](const TBuffer& buffer) {
+    auto verify = [&](const Buffer& buffer) {
       if (buffer->layout.defined()) {
         Verify(buffer->layout.value()->VerifyWellFormed())
             << "TIRpError: Buffer at " << path << " has invalid layout " << buffer->layout;
@@ -147,14 +147,10 @@ class LayoutVerifier : public Verifier<LayoutVerifier> {
       }
     };
     for (const auto& view : op->buffer_views) {
-      if (auto buffer = view->dst_buffer.as<TBuffer>()) {
-        verify(buffer.value());
-      }
+      verify(view->dst_buffer);
     }
     for (const auto& alloc : op->alloc_buffers) {
-      if (auto buffer = alloc.as<TBuffer>()) {
-        verify(buffer.value());
-      }
+      verify(alloc);
     }
     Verifier::VisitStmt_(op, path);
   }

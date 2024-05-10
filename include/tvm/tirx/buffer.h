@@ -110,6 +110,10 @@ class BufferNode : public Object {
    *        Reserved debug information.
    */
   mutable Span span;
+
+  /*! \brief The layout of the buffer */
+  Optional<TLayout> layout;
+
   /*! \brief constructor */
   BufferNode() {}
 
@@ -127,7 +131,8 @@ class BufferNode : public Object {
         .def_ro("data_alignment", &BufferNode::data_alignment)
         .def_ro("offset_factor", &BufferNode::offset_factor)
         .def_ro("buffer_type", &BufferNode::buffer_type)
-        .def_ro("span", &BufferNode::span, refl::AttachFieldFlag::SEqHashIgnore());
+        .def_ro("span", &BufferNode::span, refl::AttachFieldFlag::SEqHashIgnore())
+        .def_ro("layout", &BufferNode::layout);
   }
 
   /*! \return preferred index type for this buffer node */
@@ -161,7 +166,7 @@ class Buffer : public ObjectRef {
   TVM_DLL Buffer(Var data, DataType dtype, ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> strides,
                  PrimExpr elem_offset, ffi::String name, int data_alignment, int offset_factor,
                  BufferType buffer_type, ffi::Array<IntImm> axis_separators = {},
-                 Span span = Span());
+                 Span span = Span(), ffi::Optional<TLayout> layout = std::nullopt);
 
   /*!
    * \brief Return a new buffer that is equivalent with current one
@@ -222,6 +227,13 @@ class Buffer : public ObjectRef {
   ffi::Array<PrimExpr> OffsetOf(ffi::Array<PrimExpr> index) const;
 
   /*!
+   * \brief Get the buffer_offset op for the given index.
+   * \param index The index to be accessed.
+   * \return The buffer_offset op.
+   */
+  PrimExpr OffsetOf_p(const ffi::Array<PrimExpr>& indices) const;
+
+  /*!
    * \brief Return the storage scope associated with this buffer.
    */
   TVM_DLL ffi::String scope() const;
@@ -278,35 +290,6 @@ class TBuffer : public Buffer {
                   Optional<TLayout> layout = std::nullopt, Span span = Span());
   TVM_DEFINE_OBJECT_REF_METHODS(TBuffer, Buffer, TBufferNode);
 };
-
-/*! \brief TIR+ Buffer*/
-class TBufferNode : public BufferNode {
- public:
-  /*! \brief The layout of the buffer */
-  Optional<TLayout> layout;
-
-  void VisitAttrs(AttrVisitor* v) {
-    BufferNode::VisitAttrs(v);
-    v->Visit("layout", &layout);
-  }
-
-  static constexpr const char* _type_key = "tirx.TBuffer";
-  TVM_DECLARE_FINAL_OBJECT_INFO(TBufferNode, BufferNode);
-};
-
-/*!
- * \brief Managed reference to TBufferNode.
- * \sa TBufferNode
- */
-class TBuffer : public Buffer {
- public:
-  TVM_DLL TBuffer(Var data, DataType dtype, Array<PrimExpr> shape, Array<PrimExpr> strides,
-                  PrimExpr elem_offset, String name, int data_alignment, int offset_factor,
-                  BufferType buffer_type, Array<IntImm> axis_separators = {},
-                  Optional<TLayout> layout = NullOpt, Span span = Span());
-  TVM_DEFINE_OBJECT_REF_METHODS(TBuffer, Buffer, TBufferNode);
-};
-
 /*!
  * \brief Base node for data producers.
  *
@@ -367,6 +350,6 @@ TVM_DLL tirx::Buffer BufferWithOffsetAlignment(ffi::Array<PrimExpr> shape, DataT
                                                std::string name, int data_alignment,
                                                int offset_factor, bool compact,
                                                std::string memory_scope = "");
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_BUFFER_H_

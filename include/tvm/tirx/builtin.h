@@ -960,6 +960,12 @@ TVM_DLL const Op& get_active_lane_mask();
 
 /*! \brief Annotate a predicate not be considered as target condition of loop partition. */
 TVM_DLL const Op& ignore_loop_partition();
+/*!
+ * \brief Get the element offset of a buffer given logical indices.
+
+  The offset is determined by the layout of the buffer.
+ */
+TVM_DLL const Op& buffer_offset();
 
 /*! \brief The kind of structure field info used in intrinsic */
 enum TVMStructFieldKind : int {

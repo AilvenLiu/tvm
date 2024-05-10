@@ -417,6 +417,11 @@ PrimExpr TileLayoutNode::Apply(const Array<PrimExpr>& coord) const {
     }
   }
   input = analyzer.Simplify(input);
+  const auto& size = GetSize();
+  const auto& cosize = GetCosize();
+  const auto& inner = analyzer.Simplify(floormod(input, size));
+  const auto& outer = analyzer.Simplify(floordiv(input, size));
+
   auto data_leaves = this->data_tree.GetLeaves();
   auto leaf_coord = TileLayoutApplier::Apply(input, this->data_tree);
 
@@ -430,7 +435,7 @@ PrimExpr TileLayoutNode::Apply(const Array<PrimExpr>& coord) const {
     }
     result += leaf_coord[i] * this->data_tree->coeff[i];
   }
-  return analyzer.Simplify(result);
+  return analyzer.Simplify(outer * cosize + result);
 }
 
 /**************** TileLayout ****************/
@@ -961,8 +966,8 @@ SwizzleLayout::SwizzleLayout(int per_element, int swizzle_len, int atom_len, boo
   n->swizzle_inner = swizzle_inner;
   ICHECK(n->VerifyWellFormed()) << "ValueError: The swizzle layout is not well-formed";
   int swizzle_mask = (1 << swizzle_len) - 1;
-  n->inner_mask = swizzle_mask << per_element;
-  n->outer_mask = swizzle_mask << (per_element + atom_len);
+  n->inner_mask = swizzle_mask;
+  n->outer_mask = swizzle_mask << atom_len;
   data_ = std::move(n);
 }
 
@@ -991,11 +996,18 @@ PrimExpr SwizzleLayoutNode::GetCosize() const { return GetSize(); }
 PrimExpr SwizzleLayoutNode::Apply(const Array<PrimExpr>& coord) const {
   ICHECK_EQ(coord.size(), 1) << "ValueError: The number of coordinates must be 1";
   PrimExpr input = coord[0];
-  if (swizzle_inner) {
-    return input ^ ((input & outer_mask) >> atom_len);
-  } else {
-    return input ^ ((input & inner_mask) << atom_len);
-  }
+  auto f = [&](const PrimExpr& x) -> PrimExpr {
+    if (swizzle_inner) {
+      return x ^ ((x & outer_mask) >> atom_len);
+    } else {
+      return x ^ ((x & inner_mask) << atom_len);
+    }
+  };
+  auto base = 1 << per_element;
+  arith::Analyzer analyzer;
+  // It takes more arithmetic operations to compute the result, but it is more friendly to the
+  // vectorization
+  return analyzer.Simplify((f(floordiv(input, base)) << per_element) + floormod(input, base));
 }
 
 }  // namespace tirx

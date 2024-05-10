@@ -347,17 +347,20 @@ static void ValidateAxisSeparators(const ffi::Array<IntImm>& axis_separators, si
   for (size_t i = 0; (i + 1) < axis_separators.size(); i++) {
     auto sep = axis_separators[i]->value;
     auto next_sep = axis_separators[i + 1]->value;
-    TVM_FFI_CHECK_LE(sep, next_sep, ValueError)
-        << "Axis separators must be in increasing order, "
-        << "but axis_separators[" << i << "] = " << sep
-        << " is greater than or equal to axis_separators[" << (i + 1) << "] = " << next_sep << ".";
+    TVM_FFI_CHECK_LE(sep, next_sep) << "ValueError: "
+                            << "Axis separators must be in increasing order, "
+                            << "but axis_separators[" << i << "] = " << sep
+                            << " is greater than or equal to axis_separators[" << (i + 1)
+                            << "] = " << next_sep << ".";
   }
   if (axis_separators.size()) {
     auto first_sep = axis_separators[0]->value;
-    TVM_FFI_CHECK_GE(first_sep, 0, ValueError) << "All axis separators must be non-negative.  "
-                                               << "However, the axis_separators[0] = " << first_sep;
+    TVM_FFI_CHECK_GE(first_sep, 0) << "ValueError: "
+                           << "All axis separators must be non-negative.  "
+                           << "However, the axis_separators[0] = " << first_sep;
     auto last_sep = axis_separators[axis_separators.size() - 1]->value;
-    TVM_FFI_CHECK_LE(last_sep, buffer_dim, ValueError)
+    TVM_FFI_CHECK_LE(last_sep, buffer_dim)
+        << "ValueError: "
         << "All axis separators must be within the range "
         << "0 <= sep <= buffer_dim.  "
         << "However, the last axis_separators[" << (axis_separators.size() - 1)
@@ -422,7 +425,7 @@ PrimExpr Buffer::vload(ffi::Array<PrimExpr> begin, DataType value_dtype,
   const BufferNode* n = operator->();
   TVM_FFI_ICHECK(n != nullptr);
   TVM_FFI_ICHECK(value_dtype.element_of() == n->dtype.element_of() &&
-                 value_dtype.get_lanes_or_vscale_factor() % n->dtype.lanes() == 0)
+         value_dtype.get_lanes_or_vscale_factor() % n->dtype.lanes() == 0)
       << "Cannot load " << value_dtype << " from buffer of " << n->dtype;
 
   ffi::Array<PrimExpr> indices = begin;
@@ -443,7 +446,7 @@ Stmt Buffer::vstore(ffi::Array<PrimExpr> begin, PrimExpr value,
   TVM_FFI_ICHECK(n != nullptr);
   DataType value_dtype = value.dtype();
   TVM_FFI_ICHECK(value_dtype.element_of() == n->dtype.element_of() &&
-                 value_dtype.get_lanes_or_vscale_factor() % n->dtype.lanes() == 0)
+         value_dtype.get_lanes_or_vscale_factor() % n->dtype.lanes() == 0)
       << "Cannot store " << value_dtype << " to buffer of " << n->dtype;
 
   ffi::Array<PrimExpr> indices = begin;
@@ -468,7 +471,7 @@ ffi::String Buffer::scope() const {
 
 String Buffer::logical_scope() const {
   const auto* ptr_type = (*this)->data->type_annotation.as<PointerTypeNode>();
-  ICHECK(ptr_type) << "Buffer variable is not of pointer type";
+  TVM_FFI_ICHECK(ptr_type) << "Buffer variable is not of pointer type";
   return ptr_type->logical_scope;
 }
 
@@ -567,7 +570,8 @@ PrimExpr Buffer::access_ptr(int access_mask, DataType ptr_type, int content_lane
 
 Buffer::Buffer(Var data, DataType dtype, ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> strides,
                PrimExpr elem_offset, ffi::String name, int data_alignment, int offset_factor,
-               BufferType buffer_type, ffi::Array<IntImm> axis_separators, Span span) {
+               BufferType buffer_type, ffi::Array<IntImm> axis_separators, Span span,
+               ffi::Optional<TLayout> layout) {
   DataType storage_dtype = dtype;
   // specially handle bool
   if (storage_dtype == DataType::Bool()) {
@@ -618,6 +622,7 @@ Buffer::Buffer(Var data, DataType dtype, ffi::Array<PrimExpr> shape, ffi::Array<
     }
   }
   n->span = std::move(span);
+  n->layout = std::move(layout);
   data_ = std::move(n);
 }
 
@@ -653,7 +658,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef()
       .def_packed("tirx.Buffer",
                   [](ffi::PackedArgs args, ffi::Any* ret) {
-                    TVM_FFI_ICHECK_EQ(args.size(), 11);
+                    TVM_FFI_ICHECK_EQ(args.size(), 12);
                     auto buffer_type = args[8].cast<ffi::String>();
                     BufferType type = (buffer_type == "auto_broadcast") ? kAutoBroadcast : kDefault;
                     auto data = args[0].cast<Var>();
@@ -667,7 +672,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                     auto axis_separators = args[9].cast<ffi::Array<IntImm>>();
                     auto span = args[10].cast<Span>();
                     *ret = Buffer(data, dtype, shape, strides, elem_offset, name, data_alignment,
-                                  offset_factor, type, axis_separators, span);
+                                  offset_factor, type, axis_separators, span, args[11]);
                   })
       .def_method("tirx.BufferAccessPtr", &Buffer::access_ptr)
       .def_method("tirx.BufferGetFlattenedBuffer", &Buffer::GetFlattenedBuffer)

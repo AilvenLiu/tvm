@@ -31,7 +31,6 @@ namespace ir_builder {
 namespace tirx {
 
 using tvm::tirx::Buffer;
-using tvm::tirx::TBuffer;
 using tvm::tirx::TLayout;
 using tvm::tirx::Var;
 
@@ -551,7 +550,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxx
+}  // namespace tirxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
