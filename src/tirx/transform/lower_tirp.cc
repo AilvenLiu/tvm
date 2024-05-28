@@ -32,9 +32,22 @@
 #include <unordered_map>
 
 #include "../../arith/ir_mutator_with_analyzer.h"
+#include "../ir/tir_visitor_with_path.h"
 
 namespace tvm {
 namespace tirx {
+
+class NoOpCallVerifier : public Verifier<NoOpCallVerifier> {
+ public:
+  using Verifier::Verifier;
+
+ private:
+  using Verifier::Visit;
+
+  void VisitStmt_(const tirp::OpCallNode* obj, ObjectPath path) final {
+    Verify(false) << "TIRpError: OpCall at " << path << " is not allowed in TIRp before lowering";
+  }
+};
 
 class LogicalTensorRemover : public StmtExprMutator {
  public:
@@ -378,6 +391,8 @@ class BufferOffsetRemover : public StmtExprMutator {
 namespace transform {
 Pass LowerTIRp() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
+    NoOpCallVerifier::Verify(f, true);
+
     auto* n = f.CopyOnWrite();
     n->body = LogicalTensorRemover::Remove(n->body);
     n->body = ScopeIdDefRemover::Remove(n->body);

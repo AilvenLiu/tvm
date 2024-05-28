@@ -14,9 +14,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import pytest
 import tvm
 import tvm.testing
 from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.tir.function import PrimFunc
 from tvm.tir.transform import LowerTIRp
 
@@ -222,7 +224,32 @@ def test_lower_layout():
     compare(before, after, LowerTIRp)
 
 
+def test_lower_opcall_fail():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([1], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            with T.cta():
+                A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
+
+                Tp.copy(A[0:64], A_smem[0:64])
+                for i in range(10):
+                    Tp.fill(A_smem[0:64], T.float32(0))
+                    Tp.gemm(A_smem, A_smem, A_smem, A_smem)
+                Tp.copy(A_smem[0:64], A[0:64])
+    # fmt: on
+
+    with pytest.raises(Exception):
+        LowerTIRp()(tvm.IRModule({"main": test}))
+
+
 if __name__ == "__main__":
     test_lower_view_get()
     test_lower_scope_id()
     test_lower_layout()
+    test_lower_opcall_fail()

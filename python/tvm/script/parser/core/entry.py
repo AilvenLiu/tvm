@@ -39,6 +39,7 @@ def _default_globals() -> dict[str, Any]:
     from tvm.script.parser import ir  # pylint: disable=import-outside-toplevel
     from tvm.script.parser import relax  # pylint: disable=import-outside-toplevel
     from tvm.script.parser import tir  # pylint: disable=import-outside-toplevel
+    from tvm.script import tirp  # pylint: disable=import-outside-toplevel
 
     extra_vars = {
         "tvm": tvm,
@@ -48,6 +49,7 @@ def _default_globals() -> dict[str, Any]:
         "tirx": tirx,
         "R": relax,
         "relax": relax,
+        "Tp": tirp,
     }
     return extra_vars
 

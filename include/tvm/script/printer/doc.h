@@ -1238,6 +1238,44 @@ class DocStringDoc : public StmtDoc {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(DocStringDoc, StmtDoc, DocStringDocNode);
 };
 
+/*!
+ * \brief Doc that represents call to an TIR+ operator
+ *
+ * \sa OpCallDoc
+ */
+class OpCallDocNode : public StmtDocNode {
+ public:
+  /*! \brief The callee of this function call */
+  ExprDoc callee{nullptr};
+  /*! \brief The positional arguments */
+  Array<Doc> args;
+
+  void VisitAttrs(AttrVisitor* v) {
+    StmtDocNode::VisitAttrs(v);
+    v->Visit("callee", &callee);
+    v->Visit("args", &args);
+  }
+
+  static constexpr const char* _type_key = "script.printer.OpCallDoc";
+  TVM_DECLARE_FINAL_OBJECT_INFO(OpCallDocNode, StmtDocNode);
+};
+
+/*!
+ * \brief Reference type of OpCallDocNode.
+ *
+ * \sa OpCallDocNode
+ */
+class OpCallDoc : public StmtDoc {
+ public:
+  /*!
+   * \brief Constructor of OpCallDoc
+   * \param callee The callee of this function call.
+   * \param args The positional arguments.
+   */
+  explicit OpCallDoc(ExprDoc callee, ffi::Array<Doc> args);
+  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(OpCallDoc, StmtDoc, OpCallDocNode);
+};
+
 }  // namespace printer
 }  // namespace script
 }  // namespace tvm

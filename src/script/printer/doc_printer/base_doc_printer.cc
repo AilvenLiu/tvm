@@ -342,6 +342,8 @@ void DocPrinter::PrintDoc(const Doc& doc) {
     PrintTypedDoc(doc_node.value());
   } else if (auto doc_node = doc.as<DocStringDoc>()) {
     PrintTypedDoc(doc_node.value());
+  } else if (auto doc_node = doc.as<OpCallDoc>()) {
+    PrintTypedDoc(doc_node.value());
   } else {
     TVM_FFI_THROW(InternalError) << "Do not know how to print " << doc->GetTypeKey();
     throw;

@@ -31,7 +31,6 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
       opt_realize.defined() ? opt_realize.value().get() : nullptr;
   AccessPath realize_p = *opt_realize_p;
 
-  // tir+
   if (block->exec_scope.defined()) {
     if (const tvm::tir::WorldScopeNode* scope = block->exec_scope.as<tvm::tir::WorldScopeNode>()) {
       ExprDoc lhs = DefineVar(scope->scope_id_def->def_ids[0], *frame, d);

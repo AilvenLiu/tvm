@@ -268,6 +268,13 @@ DocStringDoc::DocStringDoc(ffi::String docs) {
   this->data_ = std::move(n);
 }
 
+OpCallDoc::OpCallDoc(ExprDoc callee, ffi::Array<Doc> args) {
+  ObjectPtr<OpCallDocNode> n = ffi::make_object<OpCallDocNode>();
+  n->callee = callee;
+  n->args = args;
+  this->data_ = std::move(n);
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(
@@ -462,6 +469,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("script.printer.DocStringDoc",
                         [](ffi::String docs) { return DocStringDoc(docs); });
+}
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("script.printer.OpCallDoc", [](ExprDoc callee, ffi::Array<Doc> args) {
+    return OpCallDoc(callee, args);
+  });
 }
 
 }  // namespace printer

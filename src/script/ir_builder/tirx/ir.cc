@@ -19,9 +19,12 @@
 #include <tvm/arith/analyzer.h>
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/ir/op.h>
 #include <tvm/script/ir_builder/tir/ir.h>
 #include <tvm/tirx/exec_scope.h>
+#include <tvm/tirx/expr.h>
 #include <tvm/tirx/layout.h>
+#include <tvm/tirx/tirp_op.h>
 
 #include "./utils.h"
 
@@ -244,6 +247,8 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope) {
   n->buffer_gets.clear();
   return SBlockFrame(n);
 }
+
+void OpCall(tvm::Op op, Array<ObjectRef> args) { AddToParent(tvm::tirx::tirp::OpCall(op, args)); }
 
 BlockFrame World() { return Block("", false, "world"); }
 
@@ -875,6 +880,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.BufferView", BufferView)
       .def("script.ir_builder.tir.BufferGet", BufferGet)
       .def("script.ir_builder.tir.Block", Block)
+      .def("script.ir_builder.tir.OpCall", OpCall)
       .def("script.ir_builder.tir.World", World)
       .def("script.ir_builder.tir.Kernel", Kernel)
       .def("script.ir_builder.tir.CTA", CTA)
@@ -1055,7 +1061,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

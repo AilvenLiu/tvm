@@ -141,6 +141,19 @@ void StmtVisitor::VisitStmt_(const SBlockRealizeNode* op) {
   this->VisitStmt(op->block);
 }
 
+void StmtVisitor::VisitStmt_(const tirp::OpCallNode* op) {
+  VisitArray(op->args, [this](const ObjectRef& e) {
+    if (auto expr = e.as<PrimExpr>()) {
+      this->VisitExpr(expr.value());
+    } else if (auto stmt = e.as<Stmt>()) {
+      this->VisitStmt(stmt.value());
+    } else {
+      ICHECK(e->IsInstance<BufferRegionNode>() || e->IsInstance<BufferNode>())
+          << "ValueError: OpCallNode args must be PrimExpr, Stmt, BufferRegion or Buffer";
+    }
+  });
+}
+
 class StmtMutator::Internal {
  public:
   /*!
@@ -535,6 +548,28 @@ Stmt StmtMutator::VisitStmt_(const SBlockRealizeNode* op) {
     n->iter_values = std::move(v);
     n->predicate = std::move(pred);
     n->block = Downcast<SBlock>(block);
+    return Stmt(n);
+  }
+}
+
+Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
+  auto fmutate = [&](const ObjectRef& e) -> ObjectRef {
+    if (auto expr = e.as<PrimExpr>()) {
+      return this->VisitExpr(expr.value());
+    } else if (auto stmt = e.as<Stmt>()) {
+      return this->VisitStmt(stmt.value());
+    } else {
+      ICHECK(e->IsInstance<BufferRegionNode>() || e->IsInstance<BufferNode>())
+          << "ValueError: OpCallNode args must be PrimExpr, Stmt, BufferRegion or Buffer";
+    }
+    return e;
+  };
+  Array<ObjectRef> args = Internal::MutateArray(this, op->args, fmutate);
+  if (args.same_as(op->args)) {
+    return GetRef<Stmt>(op);
+  } else {
+    auto n = CopyOnWrite(op);
+    n->args = std::move(args);
     return Stmt(n);
   }
 }

@@ -306,6 +306,22 @@ void TIRVisitorWithPath::VisitStmt_(const SBlockRealizeNode* op, AccessPath path
   Visit(op->block, path->Attr("block"));
 }
 
+void TIRVisitorWithPath::VisitStmt_(const tirp::OpCallNode* op, AccessPath path) {
+  for (size_t i = 0; i < op->args.size(); i++) {
+    if (auto expr = op->args[i].as<PrimExpr>()) {
+      Visit(expr.value(), path->Attr("args")->ArrayItem(i));
+    } else if (auto stmt = op->args[i].as<Stmt>()) {
+      Visit(stmt.value(), path->Attr("args")->ArrayItem(i));
+    } else if (auto buf = op->args[i].as<Buffer>()) {
+      Visit(buf.value(), path->Attr("args")->ArrayItem(i));
+    } else if (auto buf_region = op->args[i].as<BufferRegion>()) {
+      Visit(buf_region.value(), path->Attr("args")->ArrayItem(i));
+    } else {
+      LOG(FATAL) << "Unsupported argument type: " << op->args[i]->GetTypeKey();
+    }
+  }
+}
+
 void TIRVisitorWithPath::VisitExpr_(const VarNode* op, AccessPath path) {}
 
 void TIRVisitorWithPath::VisitExpr_(const SizeVarNode* op, AccessPath path) {

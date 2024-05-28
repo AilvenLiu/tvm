@@ -231,7 +231,9 @@ class Buffer(Object, Scriptable):
         if not isinstance(indices, tuple | list):
             indices = [indices]
         has_slice = any(isinstance(i, slice) for i in indices)
-        has_step = any(isinstance(i, slice) and i.step is not None for i in indices)
+        has_step = any(
+            isinstance(i, slice) and (i.step is not None and i.step != 1) for i in indices
+        )
         analyzer = Analyzer()
         if has_slice and not has_step:
             region = []

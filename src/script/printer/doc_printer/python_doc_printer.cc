@@ -20,6 +20,7 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/script/printer/doc.h>
+#include <tvm/tir/tirp_op.h>
 
 #include <algorithm>
 #include <cmath>
@@ -173,6 +174,7 @@ class PythonDocPrinter : public DocPrinter {
   void PrintTypedDoc(const ClassDoc& doc) final;
   void PrintTypedDoc(const CommentDoc& doc) final;
   void PrintTypedDoc(const DocStringDoc& doc) final;
+  void PrintTypedDoc(const OpCallDoc& doc) final;
 
  private:
   void NewLineWithoutIndent() {
@@ -715,6 +717,44 @@ void PythonDocPrinter::PrintTypedDoc(const DocStringDoc& doc) {
   if (doc->comment.has_value() && !doc->comment.value().empty()) {
     PrintDocString(doc->comment.value());
   }
+}
+
+void PythonDocPrinter::PrintTypedDoc(const OpCallDoc& doc) {
+  PrintDoc(doc->callee);
+
+  output_ << "(";
+
+  // Print positional args
+  bool is_first = true;
+  for (const Doc& arg : doc->args) {
+    if (is_first) {
+      is_first = false;
+    } else {
+      output_ << ", ";
+    }
+    PrintDoc(arg);
+  }
+
+  output_ << ")";
+}
+
+void PythonDocPrinter::PrintTypedDoc(const OpCallDoc& doc) {
+  PrintDoc(doc->callee);
+
+  output_ << "(";
+
+  // Print positional args
+  bool is_first = true;
+  for (const Doc& arg : doc->args) {
+    if (is_first) {
+      is_first = false;
+    } else {
+      output_ << ", ";
+    }
+    PrintDoc(arg);
+  }
+
+  output_ << ")";
 }
 
 ffi::String DocToPythonScript(Doc doc, const PrinterConfig& cfg) {

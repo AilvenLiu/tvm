@@ -135,6 +135,8 @@ Buffer BufferGet(tvm::tirx::Buffer buffer);
  */
 SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_scope = "");
 
+void OpCall(tvm::Op op, Array<ObjectRef> args);
+
 BlockFrame World();
 
 BlockFrame Kernel();

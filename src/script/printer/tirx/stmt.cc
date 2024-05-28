@@ -80,6 +80,26 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::tirp::OpCall>(
+        "", [](tirx::tirp::OpCall op_call, AccessPath p, IRDocsifier d) -> Doc {
+          static const OpAttrMap<tirx::TScriptPrinterName>& op_names =
+              Op::GetAttrMap<tirx::TScriptPrinterName>("TScriptPrinterName");
+          auto op = op_call->op;
+          String name = op_names.get(op, op->name);
+          if (op_names.count(op) == 0) {
+            LOG(WARNING) << "No TScriptPrinterName attribute for " << op->name;
+          }
+          static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
+          ICHECK_EQ(tirp_op_map.count(op), 1)
+              << "Only TIR+ ops are allowed in OpCall, but got " << op->name;
+          Array<Doc> args;
+          for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
+            args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
+          }
+          return OpCallDoc(TIRp(d, name), args);
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Evaluate>("", [](tirx::Evaluate eval, AccessPath p, IRDocsifier d) -> Doc {
       if (d->cfg->syntax_sugar) {
         if (auto return_value = FindReturnValue(eval)) {

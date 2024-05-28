@@ -18,6 +18,7 @@ import tvm
 import tvm.script
 import tvm.testing
 from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.ir import assert_structural_equal
 
 import pytest
@@ -115,10 +116,10 @@ def test_roundtrip_layout():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
             warp_id = T.warp_id([1], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
-            
+
             C = T.alloc_buffer([128, 128], dtype="float16", scope="shared", layout=get_layout3())
             D = T.alloc_buffer([128, 32], dtype="float16", scope="shared", layout=get_layout4())
-            
+
             with T.cta():
                 A_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout1())
                 B_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout2())
@@ -211,6 +212,31 @@ def test_alloc_buffer_default_logical_scope():
     assert C.logical_scope() == "kernel"
 
 
+def test_roundtrip_op():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([1], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            with T.cta():
+                A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
+
+                Tp.copy(A[0:64], A_smem[0:64])
+                for i in range(10):
+                    Tp.fill(A_smem[0:64], T.float32(0))
+                    Tp.gemm(A_smem, A_smem, A_smem, A_smem)
+                Tp.copy(A_smem[0:64], A[0:64])
+    # fmt: on
+
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
 if __name__ == "__main__":
     test_roundtrip_scopeid()
     test_roundtrip_exec_scope()
@@ -218,3 +244,4 @@ if __name__ == "__main__":
     test_roundtrip_buffer_view_get1()
     test_roundtrip_buffer_view_get2()
     test_alloc_buffer_default_logical_scope()
+    test_roundtrip_op()

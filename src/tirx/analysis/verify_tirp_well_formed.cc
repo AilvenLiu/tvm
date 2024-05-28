@@ -23,10 +23,12 @@
  */
 
 #include <tvm/arith/analyzer.h>
+#include <tvm/ir/op.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
+#include <tvm/tirx/tirp_op.h>
 
 #include <exception>
 #include <optional>
@@ -50,7 +52,8 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   void Visit(const Stmt& obj, ObjectPath path) override {
     if (!scope_stack_.empty() && !scope_stack_.back().Is("thread")) {
       Verify(obj->IsInstance<BlockNode>() || obj->IsInstance<ForNode>() ||
-             obj->IsInstance<BlockRealizeNode>() || obj->IsInstance<SeqStmtNode>())
+             obj->IsInstance<BlockRealizeNode>() || obj->IsInstance<SeqStmtNode>() ||
+             obj->IsInstance<tirp::OpCallNode>())
           << "TIRpError: Stmt at " << path << " is not under a thread scope and has type "
           << obj->GetTypeKey();
     }
@@ -82,8 +85,14 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     Verifier::VisitStmt_(op, path);
   }
 
+  void VisitStmt_(const tirp::OpCallNode* op, ObjectPath path) override {
+    Verify(tirp_op_map_.count(op->op))
+        << "TIRpError: OpCall at " << path << " has unknown TIR+ op " << op->op;
+  }
+
   Optional<ExecScope> cur_roof_ = NullOpt;
   std::vector<ExecScope> scope_stack_;
+  const tvm::OpAttrMap<Bool>& tirp_op_map_ = Op::GetAttrMap<Bool>("TIsTIRpOp");
 };
 
 class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
@@ -193,5 +202,5 @@ TVM_REGISTER_GLOBAL("tirx.analysis.VerifyTIRpWellFormed")
       }
     });
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm
