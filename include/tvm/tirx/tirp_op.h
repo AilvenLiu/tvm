@@ -36,7 +36,7 @@ using FArgSanitizer = runtime::TypedPackedFunc<void(tvm::Op, Array<ObjectRef>)>;
 /*!
  * \brief See pesudo code below:
 
-   Tp.copy(BufferRegion src, BufferRegion dst)
+   Tp.copy(BufferRegion dst, BufferRegion src)
  */
 TVM_DLL const Op& copy();
 

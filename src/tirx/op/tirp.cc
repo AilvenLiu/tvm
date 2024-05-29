@@ -42,7 +42,7 @@ namespace tirp {
 
 void ArgSanitizer(tvm::Op op, Array<ObjectRef> args) {
   if (op.same_as(copy())) {
-    // copy(src, dst)
+    // copy(dst, src)
     ICHECK_EQ(args.size(), 2U) << "copy() expects 2 arguments";
     ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of copy() must be BufferRegion";
     ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of copy() must be BufferRegion";
@@ -54,10 +54,10 @@ void ArgSanitizer(tvm::Op op, Array<ObjectRef> args) {
   } else if (op.same_as(gemm())) {
     // gemm(A, B, C, D, alpha, beta)
     ICHECK_EQ(args.size(), 6U) << "gemm() expects 6 arguments";
-    ICHECK(args[0].as<BufferNode>()) << "arg[0] of gemm() must be Buffer";
-    ICHECK(args[1].as<BufferNode>()) << "arg[1] of gemm() must be Buffer";
-    ICHECK(args[2].as<BufferNode>()) << "arg[2] of gemm() must be Buffer";
-    ICHECK(args[3].as<BufferNode>()) << "arg[3] of gemm() must be Buffer";
+    ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of gemm() must be BufferRegion";
+    ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of gemm() must be BufferRegion";
+    ICHECK(args[2].as<BufferRegionNode>()) << "arg[2] of gemm() must be BufferRegion";
+    ICHECK(args[3].as<BufferRegionNode>()) << "arg[3] of gemm() must be BufferRegion";
     ICHECK(args[4].as<PrimExprNode>()) << "arg[4] of gemm() must be PrimExpr";
     ICHECK(args[5].as<PrimExprNode>()) << "arg[5] of gemm() must be PrimExpr";
   } else {

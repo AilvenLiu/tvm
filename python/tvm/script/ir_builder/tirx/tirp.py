@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Builtin ops in TIR+"""
+from typing import Union
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
 
@@ -26,52 +27,69 @@ def _get_tirp_op(op_name: str):
     return Op.get("tirp." + op_name)
 
 
-def copy(src: BufferRegion, dst: BufferRegion):
+def _to_region(buffer: Union[BufferRegion, Buffer]):
+    if isinstance(buffer, Buffer):
+        return buffer.__getitem__([slice(None, None, None) for _ in range(len(buffer.shape))])
+    assert isinstance(buffer, BufferRegion)
+    return buffer
+
+
+def copy(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
     """Copy data from src to dst.
 
     Parameters
     ----------
-    src : BufferRegion
-        The source buffer region.
-
-    dst : BufferRegion
+    dst : Union[BufferRegion, Buffer]
         The destination buffer region.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
     """
-    return _ffi_api.OpCall(_get_tirp_op("copy"), [src, dst])
+    dst = _to_region(dst)
+    src = _to_region(src)
+    return _ffi_api.OpCall(_get_tirp_op("copy"), [dst, src])
 
 
-def fill(dst: BufferRegion, value: PrimExpr):
+def fill(dst: Union[BufferRegion, Buffer], value: PrimExpr):
     """Fill the buffer region with the value.
 
     Parameters
     ----------
-    dst : BufferRegion
+    dst : Union[BufferRegion, Buffer]
         The destination buffer region.
 
     value : PrimExpr
         The value to be filled.
     """
+    dst = _to_region(dst)
     return _ffi_api.OpCall(_get_tirp_op("fill"), [dst, value])
 
 
-def gemm(A: Buffer, B: Buffer, C: Buffer, D: Buffer, alpha: PrimExpr = 1.0, beta: PrimExpr = 0.0):
+def gemm(
+    D: Union[BufferRegion, Buffer],
+    A: Union[BufferRegion, Buffer],
+    B: Union[BufferRegion, Buffer],
+    C: Union[BufferRegion, Buffer],
+    alpha: PrimExpr = 1.0,
+    beta: PrimExpr = 0.0,
+):
     """General matrix multiplication.
 
     D = A * B * alpha + C * beta
 
     Parameters
     ----------
-    A : Buffer
+    D : Union[BufferRegion, Buffer]
+        The buffer of matrix D.
+
+    A : Union[BufferRegion, Buffer]
         The buffer of matrix A.
 
-    B : Buffer
+    B : Union[BufferRegion, Buffer]
         The buffer of matrix B.
 
-    C : Buffer
+    C : Union[BufferRegion, Buffer]
         The buffer of matrix C.
-
-    D : Buffer
-        The buffer of matrix D.
 
     alpha : PrimExpr
         The scalar alpha.
@@ -79,7 +97,11 @@ def gemm(A: Buffer, B: Buffer, C: Buffer, D: Buffer, alpha: PrimExpr = 1.0, beta
     beta : PrimExpr
         The scalar beta.
     """
-    return _ffi_api.OpCall(_get_tirp_op("gemm"), [A, B, C, D, alpha, beta])
+    D = _to_region(D)
+    A = _to_region(A)
+    B = _to_region(B)
+    C = _to_region(C)
+    return _ffi_api.OpCall(_get_tirp_op("gemm"), [D, A, B, C, alpha, beta])
 
 
 __all__ = [

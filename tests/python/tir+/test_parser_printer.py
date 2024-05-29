@@ -212,7 +212,7 @@ def test_alloc_buffer_default_logical_scope():
     assert C.logical_scope() == "kernel"
 
 
-def test_roundtrip_op():
+def test_roundtrip_op1():
     # fmt: off
     @T.prim_func(tirp=True)
     def test(A_ptr: T.handle) -> None:
@@ -225,11 +225,81 @@ def test_roundtrip_op():
             with T.cta():
                 A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
 
-                Tp.copy(A[0:64], A_smem[0:64])
+                Tp.copy(A_smem, A)
                 for i in range(10):
-                    Tp.fill(A_smem[0:64], T.float32(0))
+                    Tp.fill(A_smem, T.float32(0))
                     Tp.gemm(A_smem, A_smem, A_smem, A_smem)
-                Tp.copy(A_smem[0:64], A[0:64])
+                Tp.copy(A, A_smem)
+    # fmt: on
+
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_op2():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (128, 128), "float16", scope="global")
+        B = T.match_buffer(B_ptr, (128, 64), "float16", scope="global")
+        C = T.match_buffer(C_ptr, (128, 64), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            with T.cta():
+                A_smem = T.alloc_buffer([128, 32], dtype="float16", scope="shared")
+                B_smem = T.alloc_buffer([32, 64], dtype="float16", scope="shared")
+                
+                C_local = T.alloc_buffer([128, 64], dtype="float32", scope="local")
+                for k in range(4):
+                    Tp.copy(A_smem, A[:, k * 32 : k * 32 + 32])
+                    Tp.copy(B_smem, B[k * 32 : k * 32 + 32, 0:64])
+                    Tp.gemm(C_local, A_smem, B_smem, C_local)
+                Tp.copy(C, C_local)
+    # fmt: on
+
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_op3():
+    # fmt: off
+    NUM_STAGES = 3
+    K = 4096
+
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (128, K), "float16", scope="global")
+        B = T.match_buffer(B_ptr, (K, 64), "float16", scope="global")
+        C = T.match_buffer(C_ptr, (128, 64), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+
+            with T.cta():
+                A_smem = T.alloc_buffer([NUM_STAGES, 128, 32], dtype="float16", scope="shared")
+                B_smem = T.alloc_buffer([NUM_STAGES, 32, 64], dtype="float16", scope="shared")
+
+                C_local = T.alloc_buffer([128, 64], dtype="float32", scope="local")
+                for i in range(NUM_STAGES - 1):
+                    Tp.copy(A_smem[i, :, :], A[:, i * 32 : i * 32 + 32])
+                    Tp.copy(B_smem[i, :, :], B[i * 32 : i * 32 + 32, :])
+                            
+                for k in range(K // 32):
+                    copy_k = T.meta_var(k + NUM_STAGES - 1)
+                    gemm_stage = T.meta_var(k % NUM_STAGES)
+                    copy_stage = T.meta_var(copy_k % NUM_STAGES)
+                    Tp.copy(A_smem[copy_stage, :, :], A[:, copy_k * 32 : copy_k * 32 + 32])
+                    Tp.copy(B_smem[copy_stage, :, :], B[copy_k * 32 : copy_k * 32 + 32, :])
+                    Tp.gemm(C_local, A_smem[gemm_stage, :, :], B_smem[gemm_stage, :, :], C_local)
+
+                Tp.copy(C, C_local)
     # fmt: on
 
     code = test.script()
@@ -244,4 +314,6 @@ if __name__ == "__main__":
     test_roundtrip_buffer_view_get1()
     test_roundtrip_buffer_view_get2()
     test_alloc_buffer_default_logical_scope()
-    test_roundtrip_op()
+    test_roundtrip_op1()
+    test_roundtrip_op2()
+    test_roundtrip_op3()

@@ -60,9 +60,9 @@ def test_gemm():
     C = decl_buffer((64, 64), "float32", scope="global")
     D = decl_buffer((64, 64), "float32", scope="global")
 
-    _test("gemm", A, B, C, D, 1.0, 0.0)
+    _test("gemm", D[:, :], A[:, :], B[:, :], C[:, :], 1.0, 0.0)
     with pytest.raises(Exception):
-        _test("gemm", A, B, C, D, 1.0, 0.0, 1)
+        _test("gemm", D[:, :], A[:, :], B[:, :], C[:, :], 1.0, 0.0, 1)
 
 
 if __name__ == "__main__":
