@@ -2126,6 +2126,7 @@ anylist_setitem_call_packed = _op_wrapper(_tir_op.anylist_setitem_call_packed)
 anylist_setitem_call_cpacked = _op_wrapper(_tir_op.anylist_setitem_call_cpacked)
 vscale = _op_wrapper(_tir_op.vscale)
 ignore_loop_partition = _op_wrapper(_tir_op.ignore_loop_partition)
+print_buffer = _op_wrapper(_tir_op.print_buffer)
 
 
 def _dtype_forward(func):
@@ -2474,6 +2475,7 @@ __all__ = float_types + [
     "get_active_lane_mask",
     "call_kernel",
     "ignore_loop_partition",
+    "print_buffer",
 ]
 
 __all__ += [

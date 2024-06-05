@@ -1285,5 +1285,23 @@ PrimExpr fast_erf_float_expr(PrimExpr arg, int bits) {
 
   return p / q;
 }
+PrimExpr PrintOpPacked(Var data, DataType dtype, Array<PrimExpr> shape) {
+  Array<PrimExpr> args;
+  args.push_back(data);
+  args.push_back(tir::StringImm(runtime::DLDataType2String(dtype)));
+  args.push_back(make_const(DataType::UInt(32), shape.size()));
+  for (const auto& dim : shape) {
+    args.push_back(dim);
+  }
+  return tir::Call(dtype, tir::builtin::print_buffer(), args);
+}
+
+TVM_REGISTER_GLOBAL("tir.print_buffer").set_body([](TVMArgs args, TVMRetValue* ret) {
+  Array<PrimExpr> shape;
+  for (int i = 3; i < args.size(); ++i) {
+    shape.push_back(args[i]);
+  }
+  *ret = PrintOpPacked(args[0], args[1].operator DataType(), shape);
+});
 
 }  // namespace tvm

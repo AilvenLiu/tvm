@@ -991,6 +991,12 @@ enum TVMStructFieldKind : int {
   // Generic int64 array element access: ((int64_t*)buf)[index]
   kInt64ArrayElem,
 };
+
+/*!
+ * \brief Print the content of a buffer during runtime.
+ */
+TVM_DLL const Op& print_buffer();
+
 }  // namespace builtin
 }  // namespace tirx
 }  // namespace tvm

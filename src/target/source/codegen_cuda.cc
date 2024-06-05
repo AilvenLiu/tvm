@@ -202,8 +202,7 @@ std::string CodeGenCUDA::Finish() {
   if (enable_fp16_) {
     decl_stream << "#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)\n";
     decl_stream << "#include <cuda_fp16.h>\n";
-    decl_stream << "__device__ half max"
-                << "(half a, half b)\n"
+    decl_stream << "__device__ half max" << "(half a, half b)\n"
                 << "{\n  return __hgt(__half(a), __half(b)) ? a : b;\n}\n";
     decl_stream << "__device__ half min(half a, half b)\n"
                 << "{\n  return __hlt(__half(a), __half(b)) ? a : b;\n}\n";
@@ -217,8 +216,7 @@ std::string CodeGenCUDA::Finish() {
   if (enable_bf16_) {
     decl_stream << "#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)\n";
     decl_stream << "#include <cuda_bf16.h>\n";
-    decl_stream << "__device__ nv_bfloat16 max"
-                << "(nv_bfloat16 a, nv_bfloat16 b)\n"
+    decl_stream << "__device__ nv_bfloat16 max" << "(nv_bfloat16 a, nv_bfloat16 b)\n"
                 << "{\n  return __hgt(a, b) ? a : b;\n}\n";
     decl_stream << "__device__ nv_bfloat16 min(nv_bfloat16 a, nv_bfloat16 b)\n"
                 << "{\n  return __hlt(a, b) ? a : b;\n}\n";
@@ -702,8 +700,7 @@ void CodeGenCUDA::PrintVecElemStore(const std::string& vec, DataType t, int i,
   TVM_FFI_ICHECK(i >= 0 && i < (t.bits() == 8 ? 16 : (t.bits() == 16 || t.bits() == 32) ? 8 : 4));
   if (t.bits() == 8 && (t.is_int() || t.is_uint())) {
     if (t.lanes() == 2 || t.lanes() == 3) {
-      stream << vec << '.' << access[i % t.lanes()] << "="
-             << "(" << value << ");\n";
+      stream << vec << '.' << access[i % t.lanes()] << "=" << "(" << value << ");\n";
     } else {
       std::string ac = t.lanes() == 4 ? vec : (vec + "." + access[i / 4]);
       std::string type_name = t.is_int() ? "signed char" : "unsigned char";
@@ -1261,8 +1258,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->stream << "\" @!p mov.b32 %0, 0;\\n\"\n";
     this->stream << "\" @p ld.global.nc.f32 %0, [%1];}\\n\"\n";
     // stream << "\" @p ld.global.nc.L2::128B.f32 %0, [%1];}\\n\"\n" ;
-    stream << ": \"=f\"(" << reg << "[" << local_addr << "]"
-           << ")\n";
+    stream << ": \"=f\"(" << reg << "[" << local_addr << "]" << ")\n";
     stream << ": \"l\"((void*)(" << global_buffer << "+" << global_addr << ")), \"r\"((int)"
            << guard << ")\n";
     stream << ");\n";
@@ -1343,6 +1339,113 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
           << "Invalid number of lanes for float4_e2m1fn reinterpret: " << lanes;
     }
     EndScope(ssa_scope);
+  } else if (op->op.same_as(builtin::print_buffer())) {
+    ICHECK_GE(op->args.size(), 3U) << "Print operation expects at least three arguments";
+    const PrimExpr& arg = op->args[0];
+    const auto* var_node = arg.as<VarNode>();
+    DataType dtype = op->dtype;
+    int num_dims = op->args[2].as<IntImmNode>()->value;
+    Array<PrimExpr> shape;
+    for (size_t i = 3; i < op->args.size(); ++i) {
+      shape.push_back(op->args[i]);
+    }
+    std::string format_specifier;
+    bool is_float16 = false;
+    if (dtype.is_float()) {
+      if (dtype.bits() == 16) {
+        format_specifier = "%f";
+        is_float16 = true;
+      } else {
+        format_specifier = "%f";
+      }
+    } else if (dtype.is_int()) {
+      format_specifier = "%d";
+    } else if (dtype.is_uint()) {
+      format_specifier = "%u";
+    } else {
+      LOG(FATAL) << "Unsupported data type for print: " << dtype;
+    }
+    if (var_node) {
+      std::string buffer_name = GetVarID(var_node);
+      std::vector<std::string> indices;
+      for (int i = 0; i < num_dims; ++i) {
+        indices.push_back("i" + std::to_string(i));
+      }
+      auto nested_loops = [&](auto&& self, int dim) -> std::string {
+        if (dim >= num_dims) return "";
+        std::string loop_var = "i" + std::to_string(dim);
+        std::string body = self(self, dim + 1);
+        std::ostringstream oss;
+        oss << "for (int " << loop_var << " = 0; " << loop_var << " < "
+            << shape[dim].as<IntImmNode>()->value << "; ++" << loop_var << ") {\n";
+
+        if (dim == num_dims - 1) {
+          std::string index_calculation = indices[0];
+          for (size_t i = 1; i < indices.size(); ++i) {
+            index_calculation = indices[i] + " + " +
+                                std::to_string(shape[i - 1].as<IntImmNode>()->value) + " * (" +
+                                index_calculation + ")";
+          }
+          oss << "  int idx = " << index_calculation << ";\n";
+          if (is_float16) {
+            oss << "  if (" << loop_var << " == " << shape[dim].as<IntImmNode>()->value
+                << " - 1) {\n"
+                << "  printf(\"" << format_specifier << "\", static_cast<float>(" << buffer_name
+                << "[idx]));\n"
+                << "} else {\n"
+                << "  printf(\"" << format_specifier << "  \", static_cast<float>(" << buffer_name
+                << "[idx]));\n"
+                << "  }\n";
+          } else {
+            oss << "  if (" << loop_var << " == " << shape[dim].as<IntImmNode>()->value
+                << " - 1) {\n"
+                << "  printf(\"" << format_specifier << "\", " << buffer_name << "[idx]);\n"
+                << "} else {\n"
+                << "  printf(\"" << format_specifier << "  \", " << buffer_name << "[idx]);\n"
+                << "  }\n";
+          }
+        } else {
+          oss << "  printf(\"[\");\n"
+              << body << "  if (" << loop_var << " == " << shape[dim].as<IntImmNode>()->value
+              << " - 1) {\n"
+              << "    printf(\"]\");\n"
+              << "} else {\n"
+              << "    printf(\"]\\n\");\n"
+              << "  }\n";
+        }
+        oss << "}\n";
+        return oss.str();
+      };
+      os << "// print_buffer starts\n"
+         << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
+         << "  printf(\"\\nBuffer " << buffer_name << "\\nDatatype: " << dtype << "\\n"
+         << "Shape: [";
+      for (int i = 0; i < num_dims; ++i) {
+        os << "%d" << (i < num_dims - 1 ? ", " : "");
+      }
+      os << "]\\n\", ";
+      for (int i = 0; i < num_dims; ++i) {
+        os << shape[i].as<IntImmNode>()->value << (i < num_dims - 1 ? ", " : "");
+      }
+      os << ");\n"
+         << "  printf(\"Buffer " << buffer_name << " Contents:\\n[\");\n";
+      std::string loops = nested_loops(nested_loops, 0);
+      os << loops << "  printf(\"]\\n\");\n"
+         << "}\n"
+         << "// print_buffer ends\n";
+    } else {
+      std::string print_arg = PrintExpr(arg);
+      if (is_float16) {
+        os << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
+           << "  printf(\"" << format_specifier << "\\n\", static_cast<float>(" << print_arg
+           << "));\n"
+           << "}\n";
+      } else {
+        os << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
+           << "  printf(\"" << format_specifier << "\\n\", " << print_arg << ");\n"
+           << "}\n";
+      }
+    }
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {
@@ -1462,8 +1565,7 @@ void CodeGenCUDA::VisitExpr_(const RampNode* op, std::ostream& os) {
   PrintVecConstructor(op->dtype, os);
   os << "(";
   for (int i = 0; i < lanes; i++) {
-    os << "(" << PrintExpr(op->base) << ")"
-       << "+(" << PrintExpr(op->stride) << "*" << i << ")";
+    os << "(" << PrintExpr(op->base) << ")" << "+(" << PrintExpr(op->stride) << "*" << i << ")";
     if (i != lanes - 1) os << ", ";
   }
   os << ")";

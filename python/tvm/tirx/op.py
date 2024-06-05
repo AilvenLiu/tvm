@@ -3708,6 +3708,34 @@ def ignore_loop_partition(predicate) -> PrimExpr:
     return call_intrin("bool", "tirx.ignore_loop_partition", predicate)
 
 
+def print_buffer(buffer_var, dtype, shape_size, *dims):
+    """Print out buffer memory during runtime on cuda.
+
+    This print function allows printing out buffer in tvm during runtime without
+    dumping all the cuda code.
+
+    Parameters
+    ----------
+    buffer_var : Var
+        The data pointer of the buffer that needs to be printed out.
+
+    dtype : DataType
+        The data type of the buffer.
+
+    shape_size : Int
+        The number of dimensions of the buffer
+
+    *dims : Array
+        The dimensions of the buffer in order.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return _ffi_api.print_buffer(buffer_var, dtype, shape_size, *dims)
+
+
 # pylint: disable=unnecessary-lambda
 sum = comm_reducer(lambda x, y: x + y, lambda t: const(0, dtype=t), name="sum")
 min = comm_reducer(lambda x, y: _ffi_api._OpMin(x, y, None), max_value, name="min")  # type: ignore
