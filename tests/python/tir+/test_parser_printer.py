@@ -41,7 +41,7 @@ def test_roundtrip_scopeid():
             with T.cta():
                 with T.warp():
                     with T.thread():
-                        A_local = T.alloc_buffer([1], dtype="float16", 
+                        A_local = T.alloc_buffer([1], dtype="float16",
                                                  scope="local", logical_scope="thread")
                         for i in T.serial(2):
                             A_local[0] = A[lane_id * 2 + i]
@@ -123,7 +123,7 @@ def test_roundtrip_layout():
             with T.cta():
                 A_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout1())
                 B_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout2())
-                
+
                 with T.thread():
                     T.evaluate(A_warp[0, 0] + B_warp[0, 0] + C[0, 0] + D[0, 0])
     # fmt: on
@@ -252,7 +252,7 @@ def test_roundtrip_op2():
             with T.cta():
                 A_smem = T.alloc_buffer([128, 32], dtype="float16", scope="shared")
                 B_smem = T.alloc_buffer([32, 64], dtype="float16", scope="shared")
-                
+
                 C_local = T.alloc_buffer([128, 64], dtype="float32", scope="local")
                 for k in range(4):
                     Tp.copy(A_smem, A[:, k * 32 : k * 32 + 32])
@@ -290,7 +290,7 @@ def test_roundtrip_op3():
                 for i in range(NUM_STAGES - 1):
                     Tp.copy(A_smem[i, :, :], A[:, i * 32 : i * 32 + 32])
                     Tp.copy(B_smem[i, :, :], B[i * 32 : i * 32 + 32, :])
-                            
+
                 for k in range(K // 32):
                     copy_k = T.meta_var(k + NUM_STAGES - 1)
                     gemm_stage = T.meta_var(k % NUM_STAGES)
@@ -307,6 +307,75 @@ def test_roundtrip_op3():
     assert_structural_equal(test, from_source(code))
 
 
+def test_roundtrip_barrier():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            tid = T.thread_id([128], parent="cta")
+
+            with T.cta():
+                A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
+                b = T.alloc_barrier()
+                
+                with T.thread():
+                    b.init(128)
+                    if (tid < 64):
+                        # producer
+                        A_smem[tid] = A[tid]
+                        b.arrive()
+                        b.wait()
+                    else:
+                        # consumer
+                        b.arrive()
+                        b.wait()
+                        A[tid] = A_smem[tid] + 1
+    # fmt: on
+
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_barrier_array():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            tid = T.thread_id([128], parent="cta")
+
+            with T.cta():
+                A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
+                b = T.alloc_barrier_array(size=4, name_hint="b")
+
+                with T.thread():
+                    b[0].init(128)
+
+                    if (tid < 64):
+                        A_smem[tid] = A[tid]
+                        b[0].arrive()
+                        b[0].wait()
+                    else:
+                        b[0].arrive()
+                        b[0].wait()
+
+                        A[tid] = A_smem[tid] + 1
+
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
 if __name__ == "__main__":
     test_roundtrip_scopeid()
     test_roundtrip_exec_scope()
@@ -317,3 +386,5 @@ if __name__ == "__main__":
     test_roundtrip_op1()
     test_roundtrip_op2()
     test_roundtrip_op3()
+    test_roundtrip_barrier()
+    test_roundtrip_barrier_array()

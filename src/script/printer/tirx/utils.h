@@ -27,9 +27,9 @@
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/index_map.h>
 #include <tvm/tirx/op.h>
-#include <tvm/tirx/tirp_op.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
+#include <tvm/tirx/tirp_op.h>
 
 #include <string>
 #include <unordered_map>
@@ -99,6 +99,32 @@ inline ExprDoc DefineVar(const tirx::Var& var, const Frame& frame, const IRDocsi
  */
 inline IdDoc DefineBuffer(const tirx::Buffer& buffer, const Frame& frame, const IRDocsifier& d) {
   return d->Define(buffer, frame, buffer->name.empty() ? "buffer" : buffer->name);
+}
+
+/*!
+ * \brief Defines a barrier in the IRDocsifier at the given frame,
+ * and returns the corresponding IdDoc
+ * \param barrier The barrier to define
+ * \param frame The frame to define the barrier in
+ * \param d The IRDocsifier
+ * \return The IdDoc corresponding to the barrier
+ */
+inline IdDoc DefineBarrier(const tirx::Barrier& barrier, const Frame& frame, const IRDocsifier& d) {
+  return d->Define(barrier, frame, barrier->name_hint.empty() ? "barrier" : barrier->name_hint);
+}
+
+/*!
+ * \brief Defines a barrier array in the IRDocsifier at the given frame,
+ * and returns the corresponding IdDoc
+ * \param barrier_array The barrier array to define
+ * \param frame The frame to define the barrier array in
+ * \param d The IRDocsifier
+ * \return The IdDoc corresponding to the barrier array
+ */
+inline IdDoc DefineBarrierArray(const tirx::BarrierArray& barrier_array, const Frame& frame,
+                                const IRDocsifier& d) {
+  return d->Define(barrier_array, frame,
+                   barrier_array->name_hint.empty() ? "barrier_array" : barrier_array->name_hint);
 }
 
 /*!

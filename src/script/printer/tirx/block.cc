@@ -227,13 +227,29 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   }
 
   // tir+
+  for (size_t i = 0; i < block->barriers.size(); ++i) {
+    tir::Barrier barrier = block->barriers[i];
+    ObjectPath barrier_p = block_p->Attr("barriers")->ArrayIndex(i);
+    IdDoc lhs = DefineBarrier(barrier, *frame, d);
+    ExprDoc rhs = TIR(d, "alloc_barrier")
+                      ->Call({LiteralDoc::Str(barrier->name_hint, barrier_p->Attr("name"))});
+    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+  }
+  for (size_t i = 0; i < block->barrier_arrays.size(); ++i) {
+    tir::BarrierArray barrier_array = block->barrier_arrays[i];
+    ObjectPath barrier_array_p = block_p->Attr("barrier_arrays")->ArrayIndex(i);
+    IdDoc lhs = DefineBarrierArray(barrier_array, *frame, d);
+    ExprDoc rhs =
+        TIR(d, "alloc_barrier_array")
+            ->Call({LiteralDoc::Int(barrier_array->size, barrier_array_p->Attr("size")),
+                    LiteralDoc::Str(barrier_array->name_hint, barrier_array_p->Attr("name"))});
+    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+  }
   for (size_t i = 0; i < block->buffer_views.size(); ++i) {
     tir::BufferView buffer_view = block->buffer_views[i];
     ObjectPath buffer_view_p = block_p->Attr("buffer_views")->ArrayIndex(i);
 
     IdDoc lhs = DefineBuffer(buffer_view->dst_buffer, *frame, d);
-    // ExprDoc rhs =
-    //     d->AsDoc<ExprDoc>(block->buffer_views[i], block_p->Attr("buffer_views")->ArrayIndex(i));
 
     ExprDoc rhs = TIR(d, "view")->Call(
         {d->AsDoc<ExprDoc>(buffer_view->src_buffer, buffer_view_p->Attr("src_buffer")),
@@ -245,14 +261,9 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     ObjectPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayIndex(i);
 
     IdDoc lhs = DefineBuffer(buffer_get->dst_buffer, *frame, d);
-    // ExprDoc rhs =
-    //     d->AsDoc<ExprDoc>(block->buffer_gets[i], block_p->Attr("buffer_gets")->ArrayIndex(i));
 
     ExprDoc rhs = TIR(d, "get")->Call({
         d->AsDoc<ExprDoc>(buffer_get->src_buffer, buffer_get_p->Attr("src_buffer")),
-        // BufferDecl(buffer_get->dst_buffer, "Buffer", {}, buffer_get_p->Attr("dst_buffer"),
-        // *frame,
-        //            d, BufferVarDefinition::DataPointer),
     });
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
   }

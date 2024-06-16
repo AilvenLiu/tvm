@@ -79,24 +79,98 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
   return call->args[0];
 }
 
+ExprDoc PrintBarrierCreation(const tir::Barrier& barrier, const ObjectPath& p,
+                             const IRDocsifier& d) {
+  return TIR(d, "Barrier")->Call({LiteralDoc::Str(barrier->name_hint, p->Attr("name_hint"))});
+}
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::Barrier>("", [](tir::Barrier barrier, ObjectPath p, IRDocsifier d) -> Doc {
+      if (!d->IsVarDefined(barrier)) {
+        if (Optional<Frame> opt_f = FindLowestVarDef(barrier, d)) {
+          ExprDoc lhs = DefineBarrier(barrier, opt_f.value(), d);
+          ExprDoc rhs = PrintBarrierCreation(barrier, p, d);
+          opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+        } else {
+          LOG(WARNING) << "Didn't find barier definition for: " << barrier->name_hint;
+        }
+      }
+      if (Optional<ExprDoc> doc = d->GetVarDoc(barrier)) {
+        return doc.value();
+      }
+      LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << barrier;
+    });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::BarrierArray>(
+        "", [](tir::BarrierArray barrier_array, ObjectPath p, IRDocsifier d) -> Doc {
+          if (!d->IsVarDefined(barrier_array)) {
+            if (Optional<Frame> opt_f = FindLowestVarDef(barrier_array, d)) {
+              ExprDoc lhs = DefineBarrierArray(barrier_array, opt_f.value(), d);
+              ExprDoc rhs = TIR(d, "BarrierArray")
+                                ->Call({
+                                    LiteralDoc::Int(barrier_array->size, p->Attr("size")),
+                                    LiteralDoc::Str(barrier_array->name_hint, p->Attr("name_hint")),
+                                });
+              opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+            } else {
+              LOG(WARNING) << "Didn't find barier array definition for: "
+                           << barrier_array->name_hint;
+            }
+          }
+          if (Optional<ExprDoc> doc = d->GetVarDoc(barrier_array)) {
+            return doc.value();
+          }
+          LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << barrier_array;
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::BarrierArrayElem>(
+        "", [](tir::BarrierArrayElem elem, ObjectPath p, IRDocsifier d) -> Doc {
+          ExprDoc arr = d->AsDoc<ExprDoc>(elem->arr, p->Attr("arr"));
+          ExprDoc index = d->AsDoc<ExprDoc>(elem->index, p->Attr("index"));
+          return IndexDoc(arr, {index});
+        });
+
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::tirp::OpCall>(
         "", [](tirx::tirp::OpCall op_call, AccessPath p, IRDocsifier d) -> Doc {
           static const OpAttrMap<tirx::TScriptPrinterName>& op_names =
               Op::GetAttrMap<tirx::TScriptPrinterName>("TScriptPrinterName");
           auto op = op_call->op;
-          String name = op_names.get(op, op->name);
           if (op_names.count(op) == 0) {
             LOG(WARNING) << "No TScriptPrinterName attribute for " << op->name;
           }
           static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
-          ICHECK_EQ(tirp_op_map.count(op), 1)
-              << "Only TIR+ ops are allowed in OpCall, but got " << op->name;
-          Array<Doc> args;
-          for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
-            args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
+          static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
+          static const auto& barrier_op_map = Op::GetAttrMap<Bool>("TIsBarrierOp");
+          ICHECK(bool(tirp_op_map.get(op, tvm::Bool(false))))
+              << "Only TIR+ ops can be used in tir::tirp::OpCall";
+          String name = op_names.get(op, op->name);
+          if (bool(schedule_op_map.get(op, tvm::Bool(false)))) {
+            // Schedule ops
+            Array<Doc> args;
+            for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
+              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
+            }
+            return OpCallDoc(TIRp(d, name), args);
+          } else if (bool(barrier_op_map.get(op, tvm::Bool(false)))) {
+            // Barrier ops
+            ICHECK(op_call->args[0]->IsInstance<tir::BarrierNode>())
+                << "First argument must be a Barrier";
+            // barrier_method_name
+            std::string method = std::string(name).substr(8);
+            Array<Doc> args;
+            for (size_t i = 1, n = op_call->args.size(); i < n; ++i) {
+              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
+            }
+            return OpCallDoc(
+                AttrAccessDoc(d->AsDoc<ExprDoc>(op_call->args[0], p->Attr("args")->ArrayItem(0)),
+                              method),
+                args);
+          } else {
+            LOG(FATAL) << "Unknown TIR+ op type: " << op->name;
           }
-          return OpCallDoc(TIRp(d, name), args);
         });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)

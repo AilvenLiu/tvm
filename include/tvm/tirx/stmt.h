@@ -26,6 +26,7 @@
 
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/node/script_printer.h>
+#include <tvm/tirx/async_structs.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/layout.h>
@@ -840,7 +841,7 @@ class BufferGetNode : public Object {
     hash_reduce(dst_buffer);
   }
 
-  static constexpr const char* _type_key = "tir.BufferGet";
+  static constexpr const char* _type_key = "tirx.BufferGet";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(BufferGetNode, Object);
@@ -909,6 +910,10 @@ class SBlockNode : public StmtNode {
   Array<BufferView> buffer_views;
   // Local views of buffers
   Array<BufferGet> buffer_gets;
+  // Barriers in the block
+  Array<Barrier> barriers;
+  // BarrierArray in the block
+  Array<BarrierArray> barrier_arrays;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -924,7 +929,9 @@ class SBlockNode : public StmtNode {
         .def_ro("body", &SBlockNode::body)
         .def_ro("exec_scope", &SBlockNode::exec_scope)
         .def_ro("buffer_views", &SBlockNode::buffer_views)
-        .def_ro("buffer_gets", &SBlockNode::buffer_gets);
+        .def_ro("buffer_gets", &SBlockNode::buffer_gets)
+        .def_ro("barriers", &SBlockNode::barriers)
+        .def_ro("barrier_arrays", &SBlockNode::barrier_arrays);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SBlock", SBlockNode, StmtNode);
 };
@@ -944,7 +951,9 @@ class SBlock : public Stmt {
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
       Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt,
       ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
-      ffi::Array<BufferGet> buffer_gets = ffi::Array<BufferGet>());
+      ffi::Array<BufferGet> buffer_gets = ffi::Array<BufferGet>(),
+      ffi::Array<Barrier> barriers = ffi::Array<Barrier>(),
+      ffi::Array<BarrierArray> barrier_arrays = ffi::Array<BarrierArray>());
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SBlock, Stmt, SBlockNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SBlockNode);
@@ -1067,6 +1076,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

@@ -148,7 +148,8 @@ void StmtVisitor::VisitStmt_(const tirp::OpCallNode* op) {
     } else if (auto stmt = e.as<Stmt>()) {
       this->VisitStmt(stmt.value());
     } else {
-      ICHECK(e->IsInstance<BufferRegionNode>() || e->IsInstance<BufferNode>())
+      ICHECK(e->IsInstance<BufferRegionNode>() || e->IsInstance<BufferNode>() ||
+             e->IsInstance<BarrierNode>())
           << "ValueError: OpCallNode args must be PrimExpr, Stmt, BufferRegion or Buffer";
     }
   });
@@ -559,7 +560,8 @@ Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
     } else if (auto stmt = e.as<Stmt>()) {
       return this->VisitStmt(stmt.value());
     } else {
-      ICHECK(e->IsInstance<BufferRegionNode>() || e->IsInstance<BufferNode>())
+      ICHECK(e->IsInstance<BufferRegionNode>() || e->IsInstance<BufferNode>() ||
+             e->IsInstance<BarrierNode>())
           << "ValueError: OpCallNode args must be PrimExpr, Stmt, BufferRegion or Buffer";
     }
     return e;

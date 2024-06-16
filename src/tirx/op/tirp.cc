@@ -40,6 +40,12 @@ namespace tirp {
   }                                                 \
   TVM_TIRP_REGISTER_OP(#OpName)
 
+#define TIRP_DEFINE_OP(OpName)                                                      \
+  TIRP_DEFINE_BUILTIN_FUNC(OpName)                                                  \
+      .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure)) \
+      .set_attr<FArgSanitizer>("FArgSanitizer", ArgSanitizer)                       \
+      .set_attr<Bool>("TIsTIRpOp", Bool(true))
+
 void ArgSanitizer(tvm::Op op, Array<ObjectRef> args) {
   if (op.same_as(copy())) {
     // copy(dst, src)
@@ -60,28 +66,40 @@ void ArgSanitizer(tvm::Op op, Array<ObjectRef> args) {
     ICHECK(args[3].as<BufferRegionNode>()) << "arg[3] of gemm() must be BufferRegion";
     ICHECK(args[4].as<PrimExprNode>()) << "arg[4] of gemm() must be PrimExpr";
     ICHECK(args[5].as<PrimExprNode>()) << "arg[5] of gemm() must be PrimExpr";
+  } else if (op.same_as(barrier_init())) {
+    ICHECK_EQ(args.size(), 2U) << "barrier_init() expects 1 argument";
+    ICHECK(args[0].as<BarrierNode>()) << "arg[0] of barrier_init() must be Barrier";
+    ICHECK(args[1].as<PrimExprNode>()) << "arg[1] of barrier_init() must be PrimExpr";
+  } else if (op.same_as(barrier_arrive())) {
+    ICHECK_EQ(args.size(), 1U) << "barrier_arrive() expects 1 argument";
+    ICHECK(args[0].as<BarrierNode>()) << "arg[0] of barrier_arrive() must be Barrier";
+  } else if (op.same_as(barrier_wait())) {
+    ICHECK_EQ(args.size(), 1U) << "barrier_wait() expects 1 argument";
+    ICHECK(args[0].as<BarrierNode>()) << "arg[0] of barrier_wait() must be Barrier";
   } else {
     LOG(FATAL) << "Unknown TIR+ op " << op->name;
   }
 }
 
-TIRP_DEFINE_BUILTIN_FUNC(copy)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure))
-    .set_attr<FArgSanitizer>("FArgSanitizer", ArgSanitizer)
-    .set_attr<Bool>("TIsTIRpOp", Bool(true))
-    .set_num_inputs(2);
+/********************* Schedule Ops **********************/
+#define TIRP_DEFINE_SCHEDULE_OP(OpName) \
+  TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsScheduleOp", Bool(true))
 
-TIRP_DEFINE_BUILTIN_FUNC(fill)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure))
-    .set_attr<FArgSanitizer>("FArgSanitizer", ArgSanitizer)
-    .set_attr<Bool>("TIsTIRpOp", Bool(true))
-    .set_num_inputs(2);
+TIRP_DEFINE_SCHEDULE_OP(copy).set_num_inputs(2);
 
-TIRP_DEFINE_BUILTIN_FUNC(gemm)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure))
-    .set_attr<FArgSanitizer>("FArgSanitizer", ArgSanitizer)
-    .set_attr<Bool>("TIsTIRpOp", Bool(true))
-    .set_num_inputs(6);
+TIRP_DEFINE_SCHEDULE_OP(fill).set_num_inputs(2);
+
+TIRP_DEFINE_SCHEDULE_OP(gemm).set_num_inputs(6);
+
+/********************* Barrier Ops **********************/
+#define TIRP_DEFINE_BARRIER_OP(OpName) \
+  TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsBarrierOp", Bool(true))
+
+TIRP_DEFINE_BARRIER_OP(barrier_init).set_num_inputs(2);
+
+TIRP_DEFINE_BARRIER_OP(barrier_arrive).set_num_inputs(1);
+
+TIRP_DEFINE_BARRIER_OP(barrier_wait).set_num_inputs(1);
 
 }  // namespace tirxp
 }  // namespace tirx

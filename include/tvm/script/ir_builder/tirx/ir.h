@@ -21,6 +21,7 @@
 
 #include <tvm/script/ir_builder/base.h>
 #include <tvm/script/ir_builder/tir/frame.h>
+#include <tvm/tirx/async_structs.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/layout.h>
 #include <tvm/tirx/op.h>
@@ -30,6 +31,9 @@ namespace script {
 namespace ir_builder {
 namespace tirx {
 
+using tvm::runtime::Tensor;
+using tvm::tirx::Barrier;
+using tvm::tirx::BarrierArray;
 using tvm::tirx::Buffer;
 using tvm::tirx::TLayout;
 using tvm::tirx::Var;
@@ -210,8 +214,23 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::
                          int align = -1, int offset_factor = 0, ffi::String buffer_type = "default",
                    ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
                    ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt);
-namespace axis {
 
+/*!
+ * \brief The barrier allocation function.
+ * \param name_hint The name hint of the barrier.
+ * \return The allocated barrier.
+ */
+Barrier AllocBarrier(ffi::String name_hint = "");
+
+/*!
+ * \brief The barrier array allocation function.
+ * \param size The number of barriers in the array.
+ * \param name_hint The name hint of the barrier array.
+ * \return The allocated barrier array.
+ */
+BarrierArray AllocBarrierArray(size_t size, ffi::String name_hint = "");
+
+namespace axis {
 /*!
  * \brief The spatial block axis defining function.
  * \param dom The domain of the iteration variable.
@@ -552,7 +571,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxx
+}  // namespace tirxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

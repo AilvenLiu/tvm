@@ -316,6 +316,7 @@ void TIRVisitorWithPath::VisitStmt_(const tirp::OpCallNode* op, AccessPath path)
       Visit(buf.value(), path->Attr("args")->ArrayItem(i));
     } else if (auto buf_region = op->args[i].as<BufferRegion>()) {
       Visit(buf_region.value(), path->Attr("args")->ArrayItem(i));
+    } else if (auto barrier = op->args[i].as<Barrier>()) {
     } else {
       LOG(FATAL) << "Unsupported argument type: " << op->args[i]->GetTypeKey();
     }

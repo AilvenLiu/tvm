@@ -21,6 +21,7 @@
 
 #include <tvm/script/ir_builder/base.h>
 #include <tvm/script/ir_builder/ir/frame.h>
+#include <tvm/tirx/async_structs.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/stmt.h>
 
@@ -90,7 +91,7 @@ class PrimFuncFrameNode : public TIRFrameNode {
   /*! \brief Whether it is TIR+ PrimFunc. */
   bool is_tirp;
   /*! \brief BufferView map */
-  Map<tvm::tir::Buffer, tvm::tir::Buffer> buffer_view_map;
+  Map<tvm::tirx::Buffer, tvm::tirx::Buffer> buffer_view_map;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -168,6 +169,8 @@ class SBlockFrameNode : public TIRFrameNode {
   Optional<tvm::tirx::ExecScope> exec_scope;
   Array<tvm::tirx::BufferView> buffer_views;
   Array<tvm::tirx::BufferGet> buffer_gets;
+  Array<tvm::tirx::Barrier> barriers;
+  Array<tvm::tirx::BarrierArray> barrier_arrays;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -185,7 +188,9 @@ class SBlockFrameNode : public TIRFrameNode {
         .def_ro("no_realize", &SBlockFrameNode::no_realize)
         .def_ro("exec_scope", &SBlockFrameNode::exec_scope)
         .def_ro("buffer_views", &SBlockFrameNode::buffer_views)
-        .def_ro("buffer_gets", &SBlockFrameNode::buffer_gets);
+        .def_ro("buffer_gets", &SBlockFrameNode::buffer_gets)
+        .def_ro("barriers", &SBlockFrameNode::barriers)
+        .def_ro("barrier_arrays", &SBlockFrameNode::barrier_arrays);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.SSBlockFrame", SBlockFrameNode,
                                     TIRFrameNode);
@@ -613,7 +618,7 @@ class ElseFrame : public TIRFrame {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ElseFrame, TIRFrame, ElseFrameNode);
 };
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -54,6 +54,27 @@ TVM_DLL const Op& fill();
  */
 TVM_DLL const Op& gemm();
 
+/*!
+ * \brief See pesudo code below:
+
+   barrier.init(count)
+ */
+TVM_DLL const Op& barrier_init();
+
+/*!
+ * \brief See pesudo code below:
+
+   barrier.arrive()
+ */
+TVM_DLL const Op& barrier_arrive();
+
+/*!
+ * \brief See pesudo code below:
+
+   barrier.wait()
+ */
+TVM_DLL const Op& barrier_wait();
+
 }  // namespace tirxp
 }  // namespace tirx
 }  // namespace tvm

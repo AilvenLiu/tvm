@@ -593,6 +593,8 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
   node->span = std::move(span);
   node->buffer_views = std::move(buffer_views);
   node->buffer_gets = std::move(buffer_gets);
+  node->barriers = std::move(barriers);
+  node->barrier_arrays = std::move(barrier_arrays);
   data_ = std::move(node);
 }
 
