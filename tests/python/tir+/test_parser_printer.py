@@ -321,7 +321,7 @@ def test_roundtrip_barrier():
 
             with T.cta():
                 A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
-                b = T.alloc_barrier()
+                b = Tp.alloc_barrier()
                 
                 with T.thread():
                     b.init(128)
@@ -356,11 +356,10 @@ def test_roundtrip_barrier_array():
 
             with T.cta():
                 A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
-                b = T.alloc_barrier_array(size=4, name_hint="b")
+                b = Tp.alloc_barrier_array(size=4, name_hint="b")
 
+                b[0].init(128)
                 with T.thread():
-                    b[0].init(128)
-
                     if (tid < 64):
                         A_smem[tid] = A[tid]
                         b[0].arrive()
@@ -368,8 +367,81 @@ def test_roundtrip_barrier_array():
                     else:
                         b[0].arrive()
                         b[0].wait()
-
                         A[tid] = A_smem[tid] + 1
+
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_pipeline_no_specialize_async_no_depth():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (4096,), "float32", scope="global")
+        
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            
+            with T.cta():
+                A_smem = T.alloc_buffer([4096], dtype="float32", scope="shared")
+                pipe = Tp.alloc_pipeline(depth=0, specialize=False)
+                pipe.producer_copy_async(A_smem[0:128], A[0:128])
+                pipe.producer_commit_stage()
+
+                for i in range(1, 16):
+                    pipe.producer_copy_async(A_smem[i * 128 : (i + 1) * 128], A[i * 128 : (i + 1) * 128])
+                    pipe.producer_commit_stage()
+
+                    pipe.consumer_wait(num_stages=1)
+                    Tp.fill(A_smem[(i - 1) * 128 : i * 128], T.float32(0))
+                
+                pipe.consumer_wait(num_stages=0)
+
+                Tp.fill(A_smem[15 * 128 : 4096], T.float32(0))
+                Tp.copy(A, A_smem)
+    # fmt: on
+
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_pipeline_specialize_sync_depth():
+    # fmt: off
+    DEPTH = 3
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (32, 4096), "float32", scope="global")
+        B = T.match_buffer(B_ptr, (32, 4096), "float32", scope="global")
+        C = T.match_buffer(C_ptr, (32, 32), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            tid = T.thread_id([128], parent="cta")
+            
+            with T.cta():
+                A_smem = T.alloc_buffer([DEPTH, 128, 32], dtype="float32", scope="shared")
+                B_smem = T.alloc_buffer([DEPTH, 128, 32], dtype="float32", scope="shared")
+                C_local = T.alloc_buffer([32, 32], dtype="float32", scope="local")
+
+                pipe = Tp.alloc_pipeline(depth=DEPTH, specialize=True)
+                
+                with T.thread([tid], [T.Range(0, 64)]):
+                    for i in range(32):
+                        pipe.producer_acquire()
+                        j = T.meta_var(i % DEPTH)
+                        Tp.copy(A_smem[j, 0:32, 0:128], A[i*32, 0:128])
+                        Tp.copy(B_smem[j, 0:32, 0:128], B[i*32, 0:128])
+                        pipe.producer_commit_stage()
+                with T.thread([tid], [T.Range(64, 128)]):
+                    for i in range(32):
+                        pipe.consumer_wait()
+                        j = T.meta_var(i % DEPTH)
+                        Tp.gemm(A_smem[j, 0:32, 0:128], B_smem[j, 0:32, 0:128], C_local, C_local)
+                        pipe.consumer_release()
 
     code = test.script()
     assert from_source(code).script() == code
@@ -388,3 +460,5 @@ if __name__ == "__main__":
     test_roundtrip_op3()
     test_roundtrip_barrier()
     test_roundtrip_barrier_array()
+    test_roundtrip_pipeline_no_specialize_async_no_depth()
+    test_roundtrip_pipeline_specialize_sync_depth()

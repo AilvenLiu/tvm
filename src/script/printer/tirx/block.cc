@@ -231,7 +231,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     tir::Barrier barrier = block->barriers[i];
     ObjectPath barrier_p = block_p->Attr("barriers")->ArrayIndex(i);
     IdDoc lhs = DefineBarrier(barrier, *frame, d);
-    ExprDoc rhs = TIR(d, "alloc_barrier")
+    ExprDoc rhs = TIRp(d, "alloc_barrier")
                       ->Call({LiteralDoc::Str(barrier->name_hint, barrier_p->Attr("name"))});
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
   }
@@ -240,9 +240,20 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     ObjectPath barrier_array_p = block_p->Attr("barrier_arrays")->ArrayIndex(i);
     IdDoc lhs = DefineBarrierArray(barrier_array, *frame, d);
     ExprDoc rhs =
-        TIR(d, "alloc_barrier_array")
+        TIRp(d, "alloc_barrier_array")
             ->Call({LiteralDoc::Int(barrier_array->size, barrier_array_p->Attr("size")),
                     LiteralDoc::Str(barrier_array->name_hint, barrier_array_p->Attr("name"))});
+    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+  }
+  for (size_t i = 0; i < block->pipelines.size(); ++i) {
+    tir::Pipeline pipeline = block->pipelines[i];
+    ObjectPath pipeline_p = block_p->Attr("pipelines")->ArrayIndex(i);
+    IdDoc lhs = DefinePipeline(pipeline, *frame, d);
+    ExprDoc rhs =
+        TIRp(d, "alloc_pipeline")
+            ->Call({LiteralDoc::Int(pipeline->depth, pipeline_p->Attr("depth")),
+                    LiteralDoc::Boolean(pipeline->specialize, pipeline_p->Attr("specialize")),
+                    LiteralDoc::Str(pipeline->name_hint, pipeline_p->Attr("name_hint"))});
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
   }
   for (size_t i = 0; i < block->buffer_views.size(); ++i) {

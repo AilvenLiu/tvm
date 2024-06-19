@@ -171,6 +171,7 @@ class SBlockFrameNode : public TIRFrameNode {
   Array<tvm::tirx::BufferGet> buffer_gets;
   Array<tvm::tirx::Barrier> barriers;
   Array<tvm::tirx::BarrierArray> barrier_arrays;
+  Array<tvm::tirx::Pipeline> pipelines;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -190,7 +191,8 @@ class SBlockFrameNode : public TIRFrameNode {
         .def_ro("buffer_views", &SBlockFrameNode::buffer_views)
         .def_ro("buffer_gets", &SBlockFrameNode::buffer_gets)
         .def_ro("barriers", &SBlockFrameNode::barriers)
-        .def_ro("barrier_arrays", &SBlockFrameNode::barrier_arrays);
+        .def_ro("barrier_arrays", &SBlockFrameNode::barrier_arrays)
+        .def_ro("pipelines", &SBlockFrameNode::pipelines);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.SSBlockFrame", SBlockFrameNode,
                                     TIRFrameNode);
@@ -618,7 +620,7 @@ class ElseFrame : public TIRFrame {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ElseFrame, TIRFrame, ElseFrameNode);
 };
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

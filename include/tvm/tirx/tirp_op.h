@@ -35,45 +35,80 @@ using FArgSanitizer = runtime::TypedPackedFunc<void(tvm::Op, Array<ObjectRef>)>;
 
 /*!
  * \brief See pesudo code below:
-
-   Tp.copy(BufferRegion dst, BufferRegion src)
+ *
+ * Tp.copy(BufferRegion dst, BufferRegion src)
  */
 TVM_DLL const Op& copy();
 
 /*!
  * \brief See pesudo code below:
-
-   Tp.fill(BufferRegion dst, PrimExpr value)
+ *
+ *  Tp.fill(BufferRegion dst, PrimExpr value)
  */
 TVM_DLL const Op& fill();
 
 /*!
  * \brief See pesudo code below:
-
-   Tp.gemm(Buffer A, Buffer B, Buffer C, Buffer D, PrimExpr alpha, PrimExpr beta)
+ *
+ * Tp.gemm(Buffer A, Buffer B, Buffer C, Buffer D, PrimExpr alpha, PrimExpr beta)
  */
 TVM_DLL const Op& gemm();
 
 /*!
  * \brief See pesudo code below:
-
-   barrier.init(count)
+ *
+ *  barrier.init(count)
  */
 TVM_DLL const Op& barrier_init();
 
 /*!
  * \brief See pesudo code below:
-
-   barrier.arrive()
+ *
+ *  barrier.arrive()
  */
 TVM_DLL const Op& barrier_arrive();
 
 /*!
  * \brief See pesudo code below:
-
-   barrier.wait()
+ *
+ *  barrier.wait()
  */
 TVM_DLL const Op& barrier_wait();
+
+/*!
+ * \brief See pesudo code below:
+ *
+ *  pipe.producer_acquire()
+ */
+TVM_DLL const Op& producer_acquire();
+
+/*!
+ * \brief See pesudo code below:
+ *
+ *  pipe.producer_copy_async(BufferRegion dst, BufferRegion src)
+ */
+TVM_DLL const Op& producer_copy_async();
+
+/*!
+ * \brief See pesudo code below:
+ *
+ *  pipe.producer_commit_stage()
+ */
+TVM_DLL const Op& producer_commit_stage();
+
+/*!
+ * \brief See pesudo code below:
+ *
+ *  pipe.consumer_wait(size_t num_stages)
+ */
+TVM_DLL const Op& consumer_wait();
+
+/*!
+ * \brief See pesudo code below:
+ *
+ *  pipe.consumer_release()
+ */
+TVM_DLL const Op& consumer_release();
 
 }  // namespace tirxp
 }  // namespace tirx

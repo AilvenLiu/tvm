@@ -18,6 +18,7 @@
 from typing import Union
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
+from tvm.tir.async_structs import Barrier, BarrierArray, Pipeline
 
 from . import _ffi_api
 
@@ -104,8 +105,68 @@ def gemm(
     return _ffi_api.OpCall(_get_tirp_op("gemm"), [D, A, B, C, alpha, beta])
 
 
+def alloc_barrier(name_hint: str = "") -> Barrier:
+    """The barrier allocation function.
+
+    Parameters
+    ----------
+    name_hint : str
+        The name hint of the barrier.
+
+    Returns
+    -------
+    res : Barrier
+        The allocated barrier.
+    """
+    return _ffi_api.AllocBarrier(name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def alloc_barrier_array(size: int, name_hint="") -> BarrierArray:
+    """The barrier array allocation function.
+
+    Parameters
+    ----------
+    size : int
+        The size of the barrier array.
+
+    name_hint : str
+        The name hint of the barrier array.
+
+    Returns
+    -------
+    res : BarrierArray
+        The allocated barrier array.
+    """
+    return _ffi_api.AllocBarrierArray(size, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def alloc_pipeline(depth: int, specialize: bool, name_hint: str = "") -> Pipeline:
+    """The pipeline allocation function.
+
+    Parameters
+    ----------
+    depth : int
+        The depth of the pipeline.
+
+    specialize : bool
+        The flag whether the pipeline is specialized.
+
+    name_hint : str
+        The name hint of the pipeline.
+
+    Returns
+    -------
+    res : Pipeline
+        The allocated pipeline.
+    """
+    return _ffi_api.AllocPipeline(depth, specialize, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
 __all__ = [
     "copy",
     "fill",
     "gemm",
+    "alloc_barrier",
+    "alloc_barrier_array",
+    "alloc_pipeline"
 ]

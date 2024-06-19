@@ -34,6 +34,7 @@ from tvm.ir import PrimExpr, Range, Span
 from tvm.runtime import Object, Scriptable, const
 
 from . import _ffi_api
+from .async_structs import Barrier, BarrierArray, Pipeline
 from .buffer import Buffer
 from .expr import IterVar, StringImm, Var
 from .exec_scope import ExecScope
@@ -563,6 +564,15 @@ class SBlock(Stmt):
     annotations: Optional[Mapping[str, Object]]
         Additional annotation hints.
 
+    barriers: List[tvm.tir.async_structs.Barrier]
+        The barriers in the block.
+
+    barrier_arrays: List[tvm.tir.async_structs.BarrierArray]
+        The barrier arrays in the block.
+
+    pipelines: List[tvm.tir.async_structs.Pipeline]
+        The pipelines in the block.
+
     span : Optional[Span]
         The location of this block in the source code.
     """
@@ -578,6 +588,10 @@ class SBlock(Stmt):
     annotations: Mapping[str, Object]
     exec_scope: ExecScope | None
     buffer_views: list[BufferView]
+    buffer_gets: list[BufferGet]
+    barriers: list[Barrier]
+    barrier_arrays: list[BarrierArray]
+    pipelines: list[Pipeline]
     span: Span | None
 
     def __init__(
@@ -594,6 +608,10 @@ class SBlock(Stmt):
         span: Span | None = None,
         exec_scope: ExecScope | None = None,
         buffer_views: list[BufferView] | None = None,
+        buffer_gets: list[BufferGet] | None = None,
+        barriers: list[Barrier] | None = None,
+        barrier_arrays: list[BarrierArray] | None = None,
+        pipelines: list[Pipeline] | None = None,
     ) -> None:
         if alloc_buffers is None:
             alloc_buffers = []
@@ -603,6 +621,14 @@ class SBlock(Stmt):
             annotations = {}
         if buffer_views is None:
             buffer_views = []
+        if buffer_gets is None:
+            buffer_gets = []
+        if barriers is None:
+            barriers = []
+        if barrier_arrays is None:
+            barrier_arrays = []
+        if pipelines is None:
+            pipelines = []
         self.__init_handle_by_constructor__(
             _ffi_api.SBlock,  # type: ignore
             iter_vars,
@@ -617,6 +643,10 @@ class SBlock(Stmt):
             span,
             exec_scope,
             buffer_views,
+            buffer_gets,
+            barriers,
+            barrier_arrays,
+            pipelines,
         )  # type: ignore
 
 

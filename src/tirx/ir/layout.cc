@@ -607,9 +607,9 @@ template <typename T>
 T DeduplicateTree(T tree, NodeSet* visited) {
   auto new_root = DeduplicateMutator::Deduplicate(tree->root, visited);
   if (!new_root.same_as(tree->root)) {
-    auto* n = tree.CopyOnWrite();
+    auto n = make_object<typename T::ContainerType>(*(tree.operator->()));
     n->root = Downcast<IterTreeSplit>(new_root);
-    return GetRef<T>(n);
+    return T(n);
   } else {
     return tree;
   }
@@ -645,6 +645,10 @@ std::vector<ObjectRef> Deduplicate(std::vector<ObjectRef> inputs) {
           res.push_back(GetRef<TileLayout>(n));
         }
       }
+    } else if (auto opt_iter_tree = input.as<DataIterTree>()) {
+      res.push_back(DeduplicateTree<DataIterTree>(opt_iter_tree.value(), &visited));
+    } else if (auto opt_iter_tree = input.as<DeviceIterTree>()) {
+      res.push_back(DeduplicateTree<DeviceIterTree>(opt_iter_tree.value(), &visited));
     } else if (auto opt_iter_tree = input.as<IterTree>()) {
       res.push_back(DeduplicateTree<IterTree>(opt_iter_tree.value(), &visited));
     } else {

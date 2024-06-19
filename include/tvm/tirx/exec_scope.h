@@ -153,7 +153,6 @@ class ExecScope : public ObjectRef {
   bool Is(const String& name) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScope, ObjectRef, ExecScopeNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeNode);
 };
 
 // Two special ExecSope: World and Kernel

@@ -79,13 +79,22 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
   return call->args[0];
 }
 
-ExprDoc PrintBarrierCreation(const tir::Barrier& barrier, const ObjectPath& p,
+ExprDoc PrintBarrierCreation(const tirx::Barrier& barrier, const ObjectPath& p,
                              const IRDocsifier& d) {
-  return TIR(d, "Barrier")->Call({LiteralDoc::Str(barrier->name_hint, p->Attr("name_hint"))});
+  return TIRp(d, "Barrier")->Call({LiteralDoc::Str(barrier->name_hint, p->Attr("name_hint"))});
+}
+
+ExprDoc PrintBarrierArrayCreation(const tirx::BarrierArray& barrier_array, const ObjectPath& p,
+                                  const IRDocsifier& d) {
+  return TIRp(d, "BarrierArray")
+      ->Call({
+          LiteralDoc::Int(barrier_array->size, p->Attr("size")),
+          LiteralDoc::Str(barrier_array->name_hint, p->Attr("name_hint")),
+      });
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::Barrier>("", [](tir::Barrier barrier, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::Barrier>("", [](tirx::Barrier barrier, ObjectPath p, IRDocsifier d) -> Doc {
       if (!d->IsVarDefined(barrier)) {
         if (Optional<Frame> opt_f = FindLowestVarDef(barrier, d)) {
           ExprDoc lhs = DefineBarrier(barrier, opt_f.value(), d);
@@ -102,16 +111,12 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::BarrierArray>(
-        "", [](tir::BarrierArray barrier_array, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::BarrierArray>(
+        "", [](tirx::BarrierArray barrier_array, ObjectPath p, IRDocsifier d) -> Doc {
           if (!d->IsVarDefined(barrier_array)) {
             if (Optional<Frame> opt_f = FindLowestVarDef(barrier_array, d)) {
               ExprDoc lhs = DefineBarrierArray(barrier_array, opt_f.value(), d);
-              ExprDoc rhs = TIR(d, "BarrierArray")
-                                ->Call({
-                                    LiteralDoc::Int(barrier_array->size, p->Attr("size")),
-                                    LiteralDoc::Str(barrier_array->name_hint, p->Attr("name_hint")),
-                                });
+              ExprDoc rhs = PrintBarrierArrayCreation(barrier_array, p, d);
               opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
             } else {
               LOG(WARNING) << "Didn't find barier array definition for: "
@@ -125,11 +130,36 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
         });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::BarrierArrayElem>(
-        "", [](tir::BarrierArrayElem elem, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::BarrierArrayElem>(
+        "", [](tirx::BarrierArrayElem elem, ObjectPath p, IRDocsifier d) -> Doc {
           ExprDoc arr = d->AsDoc<ExprDoc>(elem->arr, p->Attr("arr"));
           ExprDoc index = d->AsDoc<ExprDoc>(elem->index, p->Attr("index"));
           return IndexDoc(arr, {index});
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::Pipeline>(
+        "", [](tirx::Pipeline pipeline, ObjectPath p, IRDocsifier d) -> Doc {
+          if (!d->IsVarDefined(pipeline)) {
+            if (Optional<Frame> opt_f = FindLowestVarDef(pipeline, d)) {
+              ExprDoc lhs = DefinePipeline(pipeline, opt_f.value(), d);
+              ExprDoc rhs =
+                  TIRp(d, "Pipeline")
+                      ->Call({
+                          LiteralDoc::Int(pipeline->depth, p->Attr("depth")),
+                          LiteralDoc::Boolean(pipeline->specialize, p->Attr("specialize")),
+                          LiteralDoc::Str(pipeline->name_hint, p->Attr("name_hint")),
+
+                      });
+              opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+            } else {
+              LOG(WARNING) << "Didn't find pipeline definition for: " << pipeline->name_hint;
+            }
+          }
+          if (Optional<ExprDoc> doc = d->GetVarDoc(pipeline)) {
+            return doc.value();
+          }
+          LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << pipeline;
         });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
@@ -141,11 +171,24 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           if (op_names.count(op) == 0) {
             LOG(WARNING) << "No TScriptPrinterName attribute for " << op->name;
           }
+
+          auto print_member_function_call = [&](std::string method) {
+            Array<Doc> args;
+            for (size_t i = 1, n = op_call->args.size(); i < n; ++i) {
+              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayIndex(i)));
+            }
+            return OpCallDoc(
+                AttrAccessDoc(d->AsDoc<ExprDoc>(op_call->args[0], p->Attr("args")->ArrayIndex(0)),
+                              method),
+                args);
+          };
+
           static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
           static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
           static const auto& barrier_op_map = Op::GetAttrMap<Bool>("TIsBarrierOp");
+          static const auto& pipeline_op_map = Op::GetAttrMap<Bool>("TIsPipelineOp");
           ICHECK(bool(tirp_op_map.get(op, tvm::Bool(false))))
-              << "Only TIR+ ops can be used in tir::tirp::OpCall";
+              << "Only TIR+ ops can be used in tirx::tirp::OpCall";
           String name = op_names.get(op, op->name);
           if (bool(schedule_op_map.get(op, tvm::Bool(false)))) {
             // Schedule ops
@@ -156,18 +199,18 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             return OpCallDoc(TIRp(d, name), args);
           } else if (bool(barrier_op_map.get(op, tvm::Bool(false)))) {
             // Barrier ops
-            ICHECK(op_call->args[0]->IsInstance<tir::BarrierNode>())
+            ICHECK(op_call->args[0]->IsInstance<tirx::BarrierNode>())
                 << "First argument must be a Barrier";
             // barrier_method_name
             std::string method = std::string(name).substr(8);
-            Array<Doc> args;
-            for (size_t i = 1, n = op_call->args.size(); i < n; ++i) {
-              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
-            }
-            return OpCallDoc(
-                AttrAccessDoc(d->AsDoc<ExprDoc>(op_call->args[0], p->Attr("args")->ArrayItem(0)),
-                              method),
-                args);
+            return print_member_function_call(method);
+          } else if (bool(pipeline_op_map.get(op, tvm::Bool(false)))) {
+            // Pipeline ops
+            ICHECK(op_call->args[0]->IsInstance<tirx::PipelineNode>())
+                << "First argument must be a Pipeline";
+            // pipeline_method_name
+            std::string method = std::string(name).substr(9);
+            return print_member_function_call(method);
           } else {
             LOG(FATAL) << "Unknown TIR+ op type: " << op->name;
           }

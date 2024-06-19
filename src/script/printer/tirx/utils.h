@@ -128,6 +128,19 @@ inline IdDoc DefineBarrierArray(const tirx::BarrierArray& barrier_array, const F
 }
 
 /*!
+ * \brief Defines a pipeline in the IRDocsifier at the given frame,
+ * and returns the corresponding IdDoc
+ * \param pipeline The pipeline to define
+ * \param frame The frame to define the pipeline in
+ * \param d The IRDocsifier
+ * \return The IdDoc corresponding to the pipeline
+ */
+inline IdDoc DefinePipeline(const tir::Pipeline& pipeline, const Frame& frame,
+                            const IRDocsifier& d) {
+  return d->Define(pipeline, frame, pipeline->name_hint.empty() ? "pipeline" : pipeline->name_hint);
+}
+
+/*!
  * \brief Recursively process the body statements of a TIR fragment represented by a frame
  * \param stmt The body statement to process
  * \param p The object path

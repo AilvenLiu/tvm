@@ -578,7 +578,10 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
                ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
                ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
                Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views,
-               ffi::Array<BufferGet> buffer_gets) {
+               ffi::Array<BufferGet> buffer_gets, ffi::Array<Barrier> barriers,
+               ffi::Array<BarrierArray> barrier_arrays, ffi::Array<Pipeline> pipelines) {
+  annotations =
+      Downcast<ffi::Map<ffi::String, ffi::ObjectRef>>(NormalizeAttributeObject(annotations));
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = std::move(iter_vars);
   node->reads = std::move(reads);
@@ -595,6 +598,7 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
   node->buffer_gets = std::move(buffer_gets);
   node->barriers = std::move(barriers);
   node->barrier_arrays = std::move(barrier_arrays);
+  node->pipelines = std::move(pipelines);
   data_ = std::move(node);
 }
 
@@ -607,9 +611,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
          ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
          ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
          Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views,
-         ffi::Array<BufferGet> buffer_gets) {
+         ffi::Array<BufferGet> buffer_gets, ffi::Array<Barrier> barriers,
+         ffi::Array<BarrierArray> barrier_arrays, ffi::Array<Pipeline> pipelines) {
         return SBlock(iter_vars, reads, writes, name_hint, body, init, alloc_buffers, match_buffers,
-                      annotations, span, exec_scope, buffer_views, buffer_gets);
+                      annotations, span, exec_scope, buffer_views, buffer_gets, barriers,
+                      barrier_arrays, pipelines);
       });
 }
 

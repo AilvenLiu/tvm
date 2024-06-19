@@ -914,6 +914,8 @@ class SBlockNode : public StmtNode {
   Array<Barrier> barriers;
   // BarrierArray in the block
   Array<BarrierArray> barrier_arrays;
+  // Pipelines in the block
+  Array<Pipeline> pipelines;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -931,7 +933,8 @@ class SBlockNode : public StmtNode {
         .def_ro("buffer_views", &SBlockNode::buffer_views)
         .def_ro("buffer_gets", &SBlockNode::buffer_gets)
         .def_ro("barriers", &SBlockNode::barriers)
-        .def_ro("barrier_arrays", &SBlockNode::barrier_arrays);
+        .def_ro("barrier_arrays", &SBlockNode::barrier_arrays)
+        .def_ro("pipelines", &SBlockNode::pipelines);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SBlock", SBlockNode, StmtNode);
 };
@@ -953,7 +956,8 @@ class SBlock : public Stmt {
       ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
       ffi::Array<BufferGet> buffer_gets = ffi::Array<BufferGet>(),
       ffi::Array<Barrier> barriers = ffi::Array<Barrier>(),
-      ffi::Array<BarrierArray> barrier_arrays = ffi::Array<BarrierArray>());
+      ffi::Array<BarrierArray> barrier_arrays = ffi::Array<BarrierArray>(),
+      ffi::Array<Pipeline> pipelines = ffi::Array<Pipeline>());
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SBlock, Stmt, SBlockNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SBlockNode);

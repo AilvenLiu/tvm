@@ -458,6 +458,18 @@ BarrierArray AllocBarrierArray(size_t size, String name_hint) {
   return barrier_array;
 }
 
+Pipeline AllocPipeline(size_t depth, bool specialize, String name_hint) {
+  Pipeline pipeline = tvm::tirx::Pipeline(depth, specialize, name_hint);
+  IRBuilder builder = IRBuilder::Current();
+  if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
+    frame.value()->pipelines.push_back(pipeline);
+  } else {
+    LOG(FATAL) << "ValueError: Block frame not find. Please ensure 'T.alloc_pipeline' is called "
+                  "under T.block()";
+  }
+  return pipeline;
+}
+
 namespace axis {
 
 IterVar PushBlockVar(IterVar iter_var, PrimExpr binding) {
@@ -850,12 +862,22 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     });
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<tvm::tirx::BarrierNode>([](const ObjectRef& node, String name) -> void {
+    .set_dispatch<tvm::tirx::BarrierNode>([](const ObjectRef& node, ffi::String name) -> void {
 
     });
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<tvm::tirx::BarrierArrayNode>([](const ObjectRef& node, String name) -> void {
+    .set_dispatch<tvm::tirx::BarrierArrayNode>([](const ObjectRef& node, ffi::String name) -> void {
+
+    });
+
+TVM_STATIC_IR_FUNCTOR(Namer, vtable)
+    .set_dispatch<tvm::tirx::PipelineNode>([](const ObjectRef& node, ffi::String name) -> void {
+
+    });
+
+TVM_STATIC_IR_FUNCTOR(Namer, vtable)
+    .set_dispatch<tvm::tirx::PipelineNode>([](const ObjectRef& node, ffi::String name) -> void {
 
     });
 
@@ -921,6 +943,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.Writes", Writes)
       .def("script.ir_builder.tir.BlockAttrs", BlockAttrs)
       .def("script.ir_builder.tir.SBlockAllocBuffer", SBlockAllocBuffer)
+      .def("script.ir_builder.tir.AllocPipeline", AllocPipeline)
       .def("script.ir_builder.tir.AxisSpatial", axis::Spatial)
       .def("script.ir_builder.tir.AxisReduce", axis::Reduce)
       .def("script.ir_builder.tir.AxisScan", axis::Scan)
@@ -1085,7 +1108,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

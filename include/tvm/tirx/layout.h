@@ -77,7 +77,6 @@ class IterTreeBaseNode : public Object {
 class IterTreeBase : public ObjectRef {
  public:
   TVM_DEFINE_OBJECT_REF_METHODS(IterTreeBase, ObjectRef, IterTreeBaseNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeBaseNode);
 };
 
 // IterTreeSplit
@@ -162,7 +161,6 @@ class IterTree : public ObjectRef {
   LeafIndexMap GetLeafIndexMap(Optional<Array<IterTreeBase>> opt_leaves = NullOpt) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(IterTree, ObjectRef, IterTreeNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(IterTreeNode);
 };
 
 // DataIterTree

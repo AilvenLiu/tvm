@@ -35,6 +35,7 @@ using tvm::runtime::Tensor;
 using tvm::tirx::Barrier;
 using tvm::tirx::BarrierArray;
 using tvm::tirx::Buffer;
+using tvm::tirx::Pipeline;
 using tvm::tirx::TLayout;
 using tvm::tirx::Var;
 
@@ -229,6 +230,14 @@ Barrier AllocBarrier(ffi::String name_hint = "");
  * \return The allocated barrier array.
  */
 BarrierArray AllocBarrierArray(size_t size, ffi::String name_hint = "");
+
+/*!
+ * \brief The pipeline allocation function.
+ * \param depth The depth of the pipeline.
+ * \param specialize whether the pipeline has specialized producer/consumer threads.
+ * \param name_hint The name hint of the pipeline.
+ */
+Pipeline AllocPipeline(size_t depth, bool specialize, String name_hint = "");
 
 namespace axis {
 /*!
@@ -571,7 +580,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxx
+}  // namespace tirxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

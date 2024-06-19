@@ -16,16 +16,22 @@
 # under the License.
 """Async structures for TIR+"""
 from . import _ffi_api
+import tvm
+from typing import Union
 from tvm._ffi import register_object
 from tvm.runtime import Object
 from tvm.ir import Op
-from tvm.tirx import PrimExpr
-from tvm.script.ir_builder.tir._ffi_api import OpCall
+from tvm.tirx import BufferRegion, Buffer, PrimExpr
 
 
 def _get_tirp_op(op_name: str):
     assert isinstance(op_name, str)
     return Op.get("tirp." + op_name)
+
+
+def make_op_call(op_name: str, args):
+    f = tvm.get_global_func("script.ir_builder.tir.OpCall")
+    return f(_get_tirp_op(op_name), args)
 
 
 @register_object("tirx.Barrier")
@@ -43,15 +49,15 @@ class Barrier(Object):
         count : int
             The expected count of the barrier.
         """
-        return OpCall(_get_tirp_op("barrier_init"), [self, count])
+        return make_op_call("barrier_init", [self, count])
 
     def arrive(self):
         """Arrive the barrier."""
-        return OpCall(_get_tirp_op("barrier_arrive"), [self])
+        return make_op_call("barrier_arrive", [self])
 
     def wait(self):
         """Wait for the barrier."""
-        return OpCall(_get_tirp_op("barrier_wait"), [self])
+        return make_op_call("barrier_wait", [self])
 
 
 @register_object("tirx.BarrierArrayElem")
@@ -69,3 +75,30 @@ class BarrierArray(Object):
 
     def __getitem__(self, index: PrimExpr):
         return BarrierArrayElem(self, index)
+
+
+@register_object("tirx.Pipeline")
+class Pipeline(Object):
+    name_hint: str
+    depth: int
+    specialize: bool
+
+    def __init__(self, depth: int = 0, specialize: bool = False, name_hint: str = ""):
+        self.__init_handle_by_constructor__(_ffi_api.Pipeline, name_hint, depth, specialize)
+
+    def producer_acquire(self):
+        return make_op_call("pipeline_producer_acquire", [self])
+
+    def producer_copy_async(
+        self, dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]
+    ):
+        return make_op_call("pipeline_producer_copy_async", [self, dst, src])
+
+    def producer_commit_stage(self):
+        return make_op_call("pipeline_producer_commit_stage", [self])
+
+    def consumer_wait(self, num_stages: int = -1):
+        return make_op_call("pipeline_consumer_wait", [self, num_stages])
+
+    def consumer_release(self):
+        return make_op_call("pipeline_consumer_release", [self])

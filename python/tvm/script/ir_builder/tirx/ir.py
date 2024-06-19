@@ -41,7 +41,6 @@ from tvm.tirx import Buffer, BufferRegion, IndexMap, PrimExpr
 from tvm.tirx import op as _tir_op
 from tvm.tirx import type_annotation
 from tvm.tirx.exec_scope import ExecScope, ScopeIdDef, ScopeId, WorldScope, KernelScope
-from tvm.tirx.async_structs import Barrier, BarrierArray
 from tvm.tirx.layout import (
     TLayout,
     TileLayout,
@@ -716,41 +715,6 @@ def sblock_alloc_buffer(
         logical_scope,
         layout,
     )
-
-
-def alloc_barrier(name_hint: str = "") -> Barrier:
-    """The barrier allocation function.
-
-    Parameters
-    ----------
-    name_hint : str
-        The name hint of the barrier.
-
-    Returns
-    -------
-    res : Barrier
-        The allocated barrier.
-    """
-    return _ffi_api.AllocBarrier(name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def alloc_barrier_array(size: int, name_hint="") -> BarrierArray:
-    """The barrier array allocation function.
-
-    Parameters
-    ----------
-    size : int
-        The size of the barrier array.
-
-    name_hint : str
-        The name hint of the barrier array.
-
-    Returns
-    -------
-    res : BarrierArray
-        The allocated barrier array.
-    """
-    return _ffi_api.AllocBarrierArray(size, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def _as_range(dom: ir.Range | list[PrimExpr]) -> ir.Range:
@@ -2296,8 +2260,6 @@ __all__ = float_types + [
     "sblock_attr",
     "alloc_buffer",
     "sblock_alloc_buffer",
-    "alloc_barrier",
-    "alloc_barrier_array",
     "axis",
     "serial",
     "parallel",
