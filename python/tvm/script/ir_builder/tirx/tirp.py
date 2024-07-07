@@ -19,6 +19,7 @@ from typing import Union
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
 from tvm.tir.async_structs import Barrier, BarrierArray, Pipeline
+from tvm.tir.exec_scope import ExecScope
 
 from . import _ffi_api
 
@@ -105,11 +106,14 @@ def gemm(
     return _ffi_api.OpCall(_get_tirp_op("gemm"), [D, A, B, C, alpha, beta])
 
 
-def alloc_barrier(name_hint: str = "") -> Barrier:
+def alloc_barrier(exec_scope: ExecScope, name_hint: str = "") -> Barrier:
     """The barrier allocation function.
 
     Parameters
     ----------
+    exec_scope : ExecScope
+        The execution scope of the barrier.
+
     name_hint : str
         The name hint of the barrier.
 
@@ -118,14 +122,21 @@ def alloc_barrier(name_hint: str = "") -> Barrier:
     res : Barrier
         The allocated barrier.
     """
-    return _ffi_api.AllocBarrier(name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+    if isinstance(exec_scope, str):
+        exec_scope = ExecScope.create(exec_scope)
+    else:
+        assert isinstance(exec_scope, ExecScope)
+    return _ffi_api.AllocBarrier(exec_scope, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def alloc_barrier_array(size: int, name_hint="") -> BarrierArray:
+def alloc_barrier_array(exec_scope: ExecScope, size: int, name_hint="") -> BarrierArray:
     """The barrier array allocation function.
 
     Parameters
     ----------
+    exec_scope : ExecScope
+        The execution scope of the barrier array.
+
     size : int
         The size of the barrier array.
 
@@ -137,7 +148,11 @@ def alloc_barrier_array(size: int, name_hint="") -> BarrierArray:
     res : BarrierArray
         The allocated barrier array.
     """
-    return _ffi_api.AllocBarrierArray(size, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+    if isinstance(exec_scope, str):
+        exec_scope = ExecScope(exec_scope)
+    else:
+        assert isinstance(exec_scope, ExecScope)
+    return _ffi_api.AllocBarrierArray(exec_scope, size, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def alloc_pipeline(depth: int, specialize: bool, name_hint: str = "") -> Pipeline:
@@ -162,11 +177,4 @@ def alloc_pipeline(depth: int, specialize: bool, name_hint: str = "") -> Pipelin
     return _ffi_api.AllocPipeline(depth, specialize, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-__all__ = [
-    "copy",
-    "fill",
-    "gemm",
-    "alloc_barrier",
-    "alloc_barrier_array",
-    "alloc_pipeline"
-]
+__all__ = ["copy", "fill", "gemm", "alloc_barrier", "alloc_barrier_array", "alloc_pipeline"]

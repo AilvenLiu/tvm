@@ -40,10 +40,12 @@ TVM_REGISTER_GLOBAL("tirx.ScopeId").set_body_typed([](String name) { return Scop
 // ScopeIdDef
 ScopeIdDef::ScopeIdDef(Array<ScopeId> ids, Array<PrimExpr> extents, String parent, String cur) {
   auto n = make_object<ScopeIdDefNode>();
-  ICHECK_EQ(ids.size(), extents.size()) << "ValueError: Number of dimensions must match, got "
-                                        << ids.size() << " and " << extents.size();
-  ICHECK(Higher(parent, cur)) << "ValueError: Parent scope must be higher than current scope, got "
-                              << parent << " and " << cur;
+  CHECK_EQ(ids.size(), extents.size()) << "ValueError: Number of dimensions must match, got "
+                                       << ids.size() << " and " << extents.size();
+  CHECK(ScopeOrder.count(parent)) << "ValueError: Unknown scope name: " << parent;
+  CHECK(ScopeOrder.count(cur)) << "ValueError: Unknown scope name: " << cur;
+  CHECK(ScopeOrder.at(parent) < ScopeOrder.at(cur))
+      << "ValueError: Parent scope must be higher than current scope";
   n->def_ids = std::move(ids);
   n->extents = std::move(extents);
   n->parent = std::move(parent);
@@ -78,11 +80,11 @@ Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
 
 Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
   if (lhs->parent == rhs->parent) {
-    if (Higher(rhs->cur, lhs->cur)) {
+    if (ExecScope::Create(rhs->cur).Higher(lhs->cur)) {
       return ScopeIdDef(rhs->cur, lhs->cur);
     }
   } else if (lhs->cur == rhs->cur) {
-    if (Higher(lhs->parent, rhs->parent)) {
+    if (ExecScope::Create(lhs->parent).Higher(rhs->parent)) {
       return ScopeIdDef(lhs->parent, rhs->parent);
     }
   }
@@ -91,14 +93,12 @@ Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
 
 // ExecScope
 ExecScope::ExecScope(String name) {
-  ICHECK(name != "world" && name != "kernel") << "ValueError: Reserved scope name: " << name;
-  ICHECK(ValideScope(name)) << "ValueError: Unknown scope name: " << name;
+  CHECK(Valid(name)) << "ValueError: Unknown scope name: " << name;
+  CHECK(name != "world" && name != "kernel") << "ValueError: Reserved scope name: " << name;
   auto n = make_object<ExecScopeNode>();
   n->name = std::move(name);
   data_ = std::move(n);
 }
-
-bool ExecScope::Is(const String& name) const { return name == this->get()->name; }
 
 ExecScope ExecScope::Create(String name) {
   if (name == "world") {
@@ -109,6 +109,20 @@ ExecScope ExecScope::Create(String name) {
     return ExecScope(name);
   }
 }
+
+bool ExecScope::Valid(const String& name) { return ScopeOrder.find(name) != ScopeOrder.end(); }
+
+bool ExecScope::Is(const String& name) const { return name == this->get()->name; }
+
+bool ExecScope::Is(const ExecScope& other) const { return Is(other->name); }
+
+bool ExecScope::Higher(const String& other) const {
+  CHECK(Valid(this->get()->name)) << "ValueError: Unknown scope name";
+  CHECK(Valid(other)) << "ValueError: Unknown scope name";
+  return ScopeOrder.at(this->get()->name) < ScopeOrder.at(other);
+}
+
+bool ExecScope::Higher(const ExecScope& other) const { return Higher(other->name); }
 
 TVM_REGISTER_NODE_TYPE(ExecScopeNode);
 
@@ -167,22 +181,6 @@ TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
     });
 
 /******** Helper functions ********/
-
-bool Higher(const ExecScope& lhs, const ExecScope& rhs) { return Higher(lhs->name, rhs->name); }
-
-bool Higher(const String& lhs, const String& rhs) {
-  ICHECK(ScopeOrder.count(lhs) && ScopeOrder.count(rhs))
-      << "Unknown scope name: " << lhs << " or " << rhs;
-  return ScopeOrder.at(lhs) < ScopeOrder.at(rhs);
-}
-
-bool Equal(const ExecScope& lhs, const ExecScope& rhs) { return lhs->name == rhs->name; }
-
-bool Equal(const String& lhs, const String& rhs) { return lhs == rhs; }
-
-bool ValideScope(const ExecScope& scope) { return ValideScope(scope->name); }
-
-bool ValideScope(const String& scope) { return ScopeOrder.count(scope) > 0; }
 
 bool IsStorageBuffer(const String& storage, const String& logical) {
   return StorageToLogical.count(storage) && StorageToLogical.at(storage) == logical;

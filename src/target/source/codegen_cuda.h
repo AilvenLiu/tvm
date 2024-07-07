@@ -91,6 +91,8 @@ class CodeGenCUDA final : public CodeGenC {
   std::string vid_global_barrier_state_;
   // Global barrier expected node.
   std::string vid_global_barrier_expect_;
+  // whether enable cuda::barrier
+  bool enable_cuda_barrier_{false};
   // whether enable fp16
   bool enable_fp16_{false};
   // whether enable bf16
@@ -114,13 +116,18 @@ class CodeGenCUDA final : public CodeGenC {
   // Op attribute map
   OpAttrMap<bool> op_need_warp_shuffle_ = Op::GetAttrMap<bool>("cuda.need_warp_shuffle");
 
-  // The name of the barrier array in shared memory
+  // The name prefix of the barrier array in shared memory
   const std::string barrier_name_ = "barrier";
   // The size of the barrier array in shared memory
-  int barrier_count_ = -1;
+  std::unordered_map<int, int> barrier_count_;
   // The alignment of the barrier array in shared memory
   // Set to 16 to maintain minimum alignment requirements for async bulk copy
   const int barrier_alignment_bytes_ = 16;
+
+  // The name prefix of the cuda::barrier array in shared memory
+  const std::string cuda_barrier_name_ = "cubar";
+  // The name prefix of the cuda::barrier::arrival_token array in registers
+  const std::string cuda_barrier_arrival_token_name_ = "cubar_tok";
 
   std::unordered_map<const VarNode*, std::string> fragment_shapes;
   std::unordered_map<const VarNode*, std::string> fragment_layouts;

@@ -247,8 +247,9 @@ def test_gemm_ampere():
 
         return C_tvm
 
-    C_tvm = tvm_gemm()
-    C_cublas = cublas_gemm()
+    with target:
+        C_tvm = tvm_gemm()
+        C_cublas = cublas_gemm()
 
     tvm.testing.assert_allclose(C_tvm.asnumpy(), C_cublas.asnumpy(), rtol=1e-3, atol=1e-3)
     print("test passed")

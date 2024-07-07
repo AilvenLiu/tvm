@@ -177,7 +177,7 @@ Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout) {
     if (tile_layout->from.defined()) {
       ICHECK(tile_layout->to.defined())
           << "ValueError: The from scope of the layout must match the to scope of the layout.";
-      ICHECK(tvm::tirx::Equal(tvm::tirx::ExecScope::Create(logical_scope), tile_layout->from.value()))
+      ICHECK(tvm::tirx::ExecScope::Create(logical_scope).Is(tile_layout->from.value()))
           << "ValueError: The logical scope of the buffer must match the from scope of the layout.";
       logical_scope = tile_layout->to.value()->name;
     }
@@ -433,8 +433,8 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
   return buffer;
 }
 
-Barrier AllocBarrier(String name_hint) {
-  Barrier barrier = tvm::tirx::Barrier(name_hint);
+Barrier AllocBarrier(ExecScope exec_scope, String name_hint) {
+  Barrier barrier = tvm::tirx::Barrier(exec_scope, name_hint);
   IRBuilder builder = IRBuilder::Current();
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->barriers.push_back(barrier);
@@ -446,8 +446,8 @@ Barrier AllocBarrier(String name_hint) {
   return barrier;
 }
 
-BarrierArray AllocBarrierArray(size_t size, String name_hint) {
-  BarrierArray barrier_array = tvm::tirx::BarrierArray(size, name_hint);
+BarrierArray AllocBarrierArray(ExecScope exec_scope, size_t size, String name_hint) {
+  BarrierArray barrier_array = tvm::tirx::BarrierArray(exec_scope, size, name_hint);
   IRBuilder builder = IRBuilder::Current();
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->barrier_arrays.push_back(barrier_array);
@@ -1108,7 +1108,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

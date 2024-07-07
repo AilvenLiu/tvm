@@ -63,20 +63,20 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
     Verify(op->exec_scope != nullptr) << "TIRpError: Block at " << path << " has no exec_scope";
     auto scope = op->exec_scope.value();
-    Verify(ValideScope(scope)) << "TIRpError: Block at " << path << " has unknown exec_scope "
-                               << scope->name;
+    Verify(ExecScope::Valid(scope->name))
+        << "TIRpError: Block at " << path << " has unknown exec_scope " << scope->name;
     if (scope_stack_.empty()) {
       Verify(scope.Is("world") || scope.Is("kernel"))
           << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
           << " as root";
     } else {
-      if (Higher(scope_stack_.back(), scope)) {
+      if (scope_stack_.back().Higher(scope)) {
         cur_roof_ = scope_stack_.back();
       } else if (scope_stack_.back().Is(scope->name)) {
         // do nothing
       } else {
         ICHECK(cur_roof_.defined()) << "TIRpError: root scope should be the highest scope";
-        Verify(!Higher(scope, cur_roof_.value()))
+        Verify(!scope.Higher(cur_roof_.value()))
             << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
             << " under " << cur_roof_.value()->name;
       }
@@ -111,9 +111,9 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
       std::unordered_map<ScopeIdDef, ScopeIdDef, ScopeIdDef::ScopeHash, ScopeIdDef::ScopeEqual>
           scope_id_map;
       for (const auto& def : kernel->scope_id_def) {
-        Verify(ValideScope(def->parent))
+        Verify(ExecScope::Valid(def->parent))
             << "TIRpError: ScopeIdDef at " << path << " has unknown exec scope " << def->parent;
-        Verify(ValideScope(def->cur))
+        Verify(ExecScope::Valid(def->cur))
             << "TIRpError: ScopeIdDef at " << path << " has unknown exec scope " << def->cur;
         scope_id_map[ScopeIdDef{def->parent, def->cur}] = def;
       }

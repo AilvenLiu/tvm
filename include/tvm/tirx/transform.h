@@ -509,6 +509,10 @@ TVM_DLL Pass InstrumentProfileIntrinsics();
  */
 TVM_DLL Pass DefaultGPUSchedule();
 
+/*!
+ * \brief Lower the TIR to a lower level IR for the given target.
+ * \return The Pass
+ */
 TVM_DLL Pass LowerTIRp();
 
 /*!

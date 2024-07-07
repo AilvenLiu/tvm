@@ -22,6 +22,7 @@ from tvm._ffi import register_object
 from tvm.runtime import Object
 from tvm.ir import Op
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
+from tvm.tirx.exec_scope import ExecScope
 
 
 def _get_tirp_op(op_name: str):
@@ -36,10 +37,11 @@ def make_op_call(op_name: str, args):
 
 @register_object("tirx.Barrier")
 class Barrier(Object):
+    thread_scope: ExecScope
     name_hint: str
 
-    def __init__(self, name_hint: str = ""):
-        self.__init_handle_by_constructor__(_ffi_api.Barrier, name_hint)
+    def __init__(self, thread_scope: ExecScope, name_hint: str = ""):
+        self.__init_handle_by_constructor__(_ffi_api.Barrier, thread_scope, name_hint)
 
     def init(self, count: int):
         """Initialize the barrier with the given count.
@@ -59,19 +61,28 @@ class Barrier(Object):
         """Wait for the barrier."""
         return make_op_call("barrier_wait", [self])
 
+    def arrive_and_wait(self):
+        """Arrive and wait for the barrier."""
+        return make_op_call("barrier_arrive_and_wait", [self])
+
 
 @register_object("tirx.BarrierArrayElem")
 class BarrierArrayElem(Barrier):
+    arr: "BarrierArray"
+    index: PrimExpr
+
     def __init__(self, barrier_array: "BarrierArray", index: PrimExpr):
         self.__init_handle_by_constructor__(_ffi_api.BarrierArrayElem, barrier_array, index)
 
 
 @register_object("tirx.BarrierArray")
 class BarrierArray(Object):
+    thread_scope: ExecScope
     size: int
+    name_hint: str
 
-    def __init__(self, size: int):
-        self.__init_handle_by_constructor__(_ffi_api.BarrierArray, size)
+    def __init__(self, thread_scope: ExecScope, size: int, name_hint: str = ""):
+        self.__init_handle_by_constructor__(_ffi_api.BarrierArray, thread_scope, size, name_hint)
 
     def __getitem__(self, index: PrimExpr):
         return BarrierArrayElem(self, index)

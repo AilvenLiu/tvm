@@ -26,6 +26,7 @@
 
 #include <tvm/ir/module.h>
 #include <tvm/runtime/object.h>
+#include <tvm/tir/exec_scope.h>
 
 namespace tvm {
 namespace tirx {
@@ -33,16 +34,25 @@ namespace tirx {
 // Barrier
 class BarrierNode : public Object {
  public:
+  /*! \brief The thread scope of the barrier */
+  ExecScope thread_scope;
   /*! \brief The name hint of the barrier. */
   String name_hint;
 
-  void VisitAttrs(AttrVisitor* v) { v->Visit("name_hint", &name_hint); }
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("name_hint", &name_hint);
+    v->Visit("thread_scope", &thread_scope);
+  }
 
   bool SEqualReduce(const BarrierNode* other, SEqualReducer equal) const {
+    if (!equal(thread_scope, other->thread_scope)) return false;
     return equal.FreeVarEqualImpl(this, other);
   }
 
-  void SHashReduce(SHashReducer hash_reduce) const { hash_reduce.FreeVarHashImpl(this); }
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(thread_scope);
+    hash_reduce.FreeVarHashImpl(this);
+  }
 
   static constexpr const char* _type_key = "tirx.Barrier";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -52,7 +62,7 @@ class BarrierNode : public Object {
 
 class Barrier : public ObjectRef {
  public:
-  TVM_DLL explicit Barrier(String name_hint);
+  TVM_DLL explicit Barrier(ExecScope thread_scope, String name_hint = "");
 
   TVM_DEFINE_OBJECT_REF_METHODS_WITHOUT_DEFAULT_CONSTRUCTOR(Barrier, ObjectRef, BarrierNode);
 };
@@ -60,22 +70,27 @@ class Barrier : public ObjectRef {
 // BarrierArray
 class BarrierArrayNode : public Object {
  public:
+  /*! \brief The thread scope of the barriers in the barrier array */
+  ExecScope thread_scope;
   /*! \brief The number of barriers in the array. */
   size_t size;
   /*! \brief The name hint of the barrier array. */
   String name_hint;
 
   void VisitAttrs(AttrVisitor* v) {
+    v->Visit("thread_scope", &thread_scope);
     v->Visit("size", &size);
     v->Visit("name_hint", &name_hint);
   }
 
   bool SEqualReduce(const BarrierArrayNode* other, SEqualReducer equal) const {
+    if (!equal(thread_scope, other->thread_scope)) return false;
     if (!equal(size, other->size)) return false;
     return equal.FreeVarEqualImpl(this, other);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(thread_scope);
     hash_reduce(size);
     hash_reduce.FreeVarHashImpl(this);
   }
@@ -88,7 +103,7 @@ class BarrierArrayNode : public Object {
 
 class BarrierArray : public ObjectRef {
  public:
-  TVM_DLL explicit BarrierArray(size_t size, String name_hint = "");
+  TVM_DLL explicit BarrierArray(ExecScope thread_scope, size_t size, String name_hint = "");
 
   TVM_DEFINE_OBJECT_REF_METHODS(BarrierArray, ObjectRef, BarrierArrayNode);
 };

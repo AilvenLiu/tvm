@@ -657,6 +657,7 @@ TVM_DLL const Op& ptx_cp_async();
  *                   Var global_ptr,
  *                   Expr global_offset,
  *                   size_t bytes,
+ *                   int barrier_arr_id,
  *                   int barrier_id);
  */
 TVM_DLL const Op& ptx_cp_async_bulk();
@@ -674,7 +675,7 @@ TVM_DLL const Op& ptx_wait_group();
 /*!
  * \brief tvm intrinsics for ptx async copy barrier using cp.async.mbarrier.arrive
  *
- * ptx_cp_async_barrier(int barrier_id)
+ * ptx_cp_async_barrier(int barrier_arr_id, int barrier_id)
  *
  */
 TVM_DLL const Op& ptx_cp_async_barrier();
@@ -682,7 +683,7 @@ TVM_DLL const Op& ptx_cp_async_barrier();
 /*!
  * \brief tvm intrinsics for ptx barrier initialization of thread count using mbarrier.init
  *
- * ptx_init_barrier_thread_count(int barrier_id, int thread_count)
+ * ptx_init_barrier_thread_count(int barrier_arr_id, int barrier_id, int thread_count)
  *
  */
 TVM_DLL const Op& ptx_init_barrier_thread_count();
@@ -690,7 +691,7 @@ TVM_DLL const Op& ptx_init_barrier_thread_count();
 /*!
  * \brief tvm intrinsics for ptx barrier arrival using mbarrier.arrive
  *
- * ptx_arrive_barrier(int barrier_id)
+ * ptx_arrive_barrier(int barrier_arr_id, int barrier_id)
  *
  */
 TVM_DLL const Op& ptx_arrive_barrier();
@@ -698,7 +699,7 @@ TVM_DLL const Op& ptx_arrive_barrier();
 /*!
  * \brief tvm intrinsic for ptx barrier arrival with expect tx using mbarrier.arrive.expect_tx
  *
- * ptx_arrive_barrier_expect_tx(int barrier_id, int byte_count)
+ * ptx_arrive_barrier_expect_tx(int barrier_arr_id, int barrier_id, int byte_count)
  *
  */
 TVM_DLL const Op& ptx_arrive_barrier_expect_tx();
@@ -706,7 +707,7 @@ TVM_DLL const Op& ptx_arrive_barrier_expect_tx();
 /*!
  * \brief tvm intrinsics for ptx barrier wait using mbarrier.try_wait
  *
- * ptx_wait_barrier(int barrier_id)
+ * ptx_wait_barrier(int barrier_arr_id, int barrier_id)
  *
  */
 TVM_DLL const Op& ptx_wait_barrier();
@@ -714,10 +715,59 @@ TVM_DLL const Op& ptx_wait_barrier();
 /*!
  * \brief tvm intrinsics to create N barriers
  *
- * ptx_wait_barrier(int barrier_count)
+ * ptx_create_barrier(int barrier_arr_id, int barrier_count)
  *
  */
 TVM_DLL const Op& create_barriers();
+
+/*!
+ * \brief tvm instrinsics to create cuda::barrier arrays
+ * Create barrier tokens for each barrier in the array.
+ *
+ * cuda_barrier_create(String thread_scope, int barrier_count, int barrier_arr_id) {
+ *   __shared__ cuda::barrier<cuda::thread_scope> barrier_arr_id[barrier_count];
+ *   cuda::barrier::arrival_token token_id[barrier_count];
+ * }
+ *
+ * thread_scope can be "world", "kernel", "cta"
+ */
+TVM_DLL const Op& cuda_barrier_create();
+
+/*!
+ * \brief tvm instrinsics to call cuda::barrier::init
+ *
+ * cuda_barrier_init(int thread_count, int barrier_id, int barrier_arr_id) {
+ *   cuda::barrier::init(&barrier_arr_id[barrier_id], thread_count);
+ * }
+ */
+TVM_DLL const Op& cuda_barrier_init();
+
+/*!
+ * \brief tvm instrinsics to call cuda::barrier::arrive
+ *
+ * cuda_barrier_arrive(int barrier_id, int barrier_arr_id) {
+ *   token_id[barrier_id] = barrier_arr_id[barrier_id].arrive();
+ * }
+ */
+TVM_DLL const Op& cuda_barrier_arrive();
+
+/*!
+ * \brief tvm instrinsics to call cuda::barrier::wait
+ *
+ * cuda_barrier_wait(int barrier_id, int barrier_arr_id) {
+ *   barrier_arr_id[barrier_id].wait(std::move(token_id[barrier_id]));
+ * }
+ */
+TVM_DLL const Op& cuda_barrier_wait();
+
+/*!
+ * \brief tvm instrinsics to call cuda::barrier::arrive_and_wait
+ *
+ * cuda_barrier_arrive_and_wait(int barrier_id, int barrier_arr_id) {
+ *   barrier_arr_id[barrier_id].arrive_and_wait();
+ * }
+ */
+TVM_DLL const Op& cuda_barrier_arrive_and_wait();
 
 /*!
  * \brief tvm intrinsic for storing the result of PTX MMA into a destination pointer.

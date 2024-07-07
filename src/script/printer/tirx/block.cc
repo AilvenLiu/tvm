@@ -231,8 +231,10 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     tir::Barrier barrier = block->barriers[i];
     ObjectPath barrier_p = block_p->Attr("barriers")->ArrayIndex(i);
     IdDoc lhs = DefineBarrier(barrier, *frame, d);
-    ExprDoc rhs = TIRp(d, "alloc_barrier")
-                      ->Call({LiteralDoc::Str(barrier->name_hint, barrier_p->Attr("name"))});
+    ExprDoc rhs =
+        TIRp(d, "alloc_barrier")
+            ->Call({LiteralDoc::Str(barrier->thread_scope->name, barrier_p->Attr("thread_scope")),
+                    LiteralDoc::Str(barrier->name_hint, barrier_p->Attr("name"))});
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
   }
   for (size_t i = 0; i < block->barrier_arrays.size(); ++i) {
@@ -241,7 +243,9 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     IdDoc lhs = DefineBarrierArray(barrier_array, *frame, d);
     ExprDoc rhs =
         TIRp(d, "alloc_barrier_array")
-            ->Call({LiteralDoc::Int(barrier_array->size, barrier_array_p->Attr("size")),
+            ->Call({LiteralDoc::Str(barrier_array->thread_scope->name,
+                                    barrier_array_p->Attr("thread_scope")),
+                    LiteralDoc::Int(barrier_array->size, barrier_array_p->Attr("size")),
                     LiteralDoc::Str(barrier_array->name_hint, barrier_array_p->Attr("name"))});
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
   }

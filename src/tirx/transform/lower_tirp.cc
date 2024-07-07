@@ -26,6 +26,7 @@
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt_functor.h>
+#include <tvm/tirx/tirp_op.h>
 #include <tvm/tirx/transform.h>
 
 #include <queue>
@@ -205,7 +206,8 @@ class ScopeIdDefRemover : public StmtExprMutator {
 
           // Push intermediate scopes to the queue
           for (auto [scope, _] : ScopeOrder) {
-            if (Higher(now->parent, scope) && Higher(scope, now->cur)) {
+            if (ExecScope::Create(now->parent).Higher(scope) &&
+                ExecScope::Create(scope).Higher(now->cur)) {
               ScopeIdDef outer = ScopeIdDef{now->parent, scope},
                          inner = ScopeIdDef{scope, now->cur};
               auto it = id_extent_map_.find(inner);
@@ -388,12 +390,141 @@ class BufferOffsetRemover : public StmtExprMutator {
   }
 };
 
+class BarrierToBarrierArray : public StmtExprMutator {
+ public:
+  static Stmt Convert(const Stmt& stmt) { return BarrierToBarrierArray()(stmt); }
+
+ private:
+  Stmt VisitStmt_(const BlockNode* op) final {
+    Block block = GetRef<Block>(op);
+    auto* n = block.CopyOnWrite();
+    std::vector<BarrierArray> barrier_arrays(n->barrier_arrays.begin(), n->barrier_arrays.end());
+    for (const auto& barrier : op->barriers) {
+      ICHECK(barrier_map_.find(barrier) == barrier_map_.end())
+          << "Internal Error: Duplicate barrier found";
+      // Create a BarrierArray with a single barrier
+      BarrierArray barrier_array(barrier->thread_scope, 1, barrier->name_hint);
+      barrier_map_[barrier] = barrier_array;
+      barrier_arrays.push_back(std::move(barrier_array));
+    }
+    n->body = VisitStmt(n->body);
+    n->barriers = {};
+    n->barrier_arrays = std::move(barrier_arrays);
+    return std::move(block);
+  }
+
+  Stmt VisitStmt_(const tirp::OpCallNode* op) final {
+    tirp::OpCall opcall = GetRef<tirp::OpCall>(op);
+    auto* n = opcall.CopyOnWrite();
+    n->args.MutateByApply([this](ObjectRef obj) -> ObjectRef {
+      const auto* barrier = obj.as<BarrierNode>();
+      if (barrier) {
+        auto it = barrier_map_.find(GetRef<Barrier>(barrier));
+        if (it != barrier_map_.end()) {
+          return BarrierArrayElem(it->second, 0);
+        }
+      }
+      return obj;
+    });
+    return std::move(opcall);
+  }
+
+  std::unordered_map<Barrier, BarrierArray, ObjectPtrHash, ObjectPtrEqual> barrier_map_;
+};
+
+class CUDABarrierArrayAllocator : public StmtExprMutator {
+ public:
+  static Stmt Allocate(const Stmt& stmt) { return CUDABarrierArrayAllocator()(stmt); }
+
+ private:
+  Stmt VisitStmt_(const BlockNode* op) final {
+    Block block = GetRef<Block>(op);
+    auto* n = block.CopyOnWrite();
+    ICHECK(op->barriers.empty()) << "Internal Error: Barriers are not removed";
+    if (!op->barrier_arrays.empty()) {
+      std::vector<Stmt> body;
+      for (const auto& barrier_array : op->barrier_arrays) {
+        body.push_back(Evaluate(Call(DataType::Void(), builtin::cuda_barrier_create(),
+                                     {StringImm(barrier_array->thread_scope->name),
+                                      IntImm(DataType::Int(32), barrier_arr_id_),
+                                      IntImm(DataType::Int(32), barrier_array->size)})));
+        barrier_arr_map_[barrier_array] = barrier_arr_id_++;
+      }
+      body.push_back(StmtExprMutator::VisitStmt(n->body));
+      n->body = SeqStmt::Flatten(std::move(body));
+    } else {
+      n->body = StmtExprMutator::VisitStmt(n->body);
+    }
+    return std::move(block);
+  }
+
+  Stmt VisitStmt_(const tirp::OpCallNode* opcall_ptr) final {
+    tirp::OpCall opcall = GetRef<tirp::OpCall>(opcall_ptr);
+    auto* n = opcall.CopyOnWrite();
+    static const auto& barrier_op_map = Op::GetAttrMap<Bool>("TIsBarrierOp");
+    if (bool(barrier_op_map.get(opcall_ptr->op, tvm::Bool(false)))) {
+      auto barrier = opcall_ptr->args[0].as<BarrierArrayElemNode>();
+      ICHECK(barrier) << "Internal Error: Expected BarrierArrayElem";
+      auto it = barrier_arr_map_.find(barrier->arr);
+      ICHECK(it != barrier_arr_map_.end()) << "Internal Error: Cannot find BarrierArray";
+      n->args.push_back(IntImm(DataType::Int(32), it->second));
+    }
+    return std::move(opcall);
+  }
+
+  int barrier_arr_id_{0};
+  std::unordered_map<BarrierArray, int, ObjectPtrHash, ObjectPtrEqual> barrier_arr_map_;
+};
+
+class TIRpOpScheduler : public StmtExprMutator {
+ public:
+  static Stmt LowerOpCalls(const Stmt& stmt) { return TIRpOpScheduler()(stmt); }
+
+ private:
+  Stmt VisitStmt_(const BlockNode* op) final {
+    Block block = GetRef<Block>(op);
+    auto* n = block.CopyOnWrite();
+    if (op->exec_scope.defined()) {
+      exec_scope_stack_.push_back(op->exec_scope.value());
+    }
+    n->body = VisitStmt(n->body);
+    if (op->exec_scope.defined()) {
+      exec_scope_stack_.pop_back();
+    }
+    return std::move(block);
+  }
+
+  Stmt VisitStmt_(const tirp::OpCallNode* op) final {
+    static const auto& op_scheduler_map = Op::GetAttrMap<tirp::FOpScheduler>("FOpScheduler");
+    ICHECK(op_scheduler_map.count(op->op)) << "Internal Error: Unsupported OpCall " << op->op;
+    tirp::FOpScheduler scheduler = op_scheduler_map[op->op];
+    return scheduler(op->op, Target::Current(false), exec_scope_stack_.back(), op->args);
+  }
+
+  std::vector<ExecScope> exec_scope_stack_;
+};
+
 namespace transform {
 Pass LowerTIRp() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
-    NoOpCallVerifier::Verify(f, true);
+    const auto& target = Target::Current(false);
 
     auto* n = f.CopyOnWrite();
+    if (target->kind->name == "cuda" && target->kind->default_device_type == kDLCUDA) {
+      // CUDA specific lowering passes
+      // Preprocess barriers
+      n->body = BarrierToBarrierArray::Convert(n->body);
+      n->body = CUDABarrierArrayAllocator::Allocate(n->body);
+    }
+
+    // Lower TIRp OpCalls
+    while (!NoOpCallVerifier::Verify(n->body, false)) {
+      n->body = TIRpOpScheduler::LowerOpCalls(n->body);
+    }
+    // Verify that there are no OpCalls in the TIRp
+    NoOpCallVerifier::Verify(f, true);
+
+    // Lower other TIRp aux data structures
     n->body = LogicalTensorRemover::Remove(n->body);
     n->body = ScopeIdDefRemover::Remove(n->body);
     n->body = StorageLower::Flatten(n->body, n->buffer_map);
@@ -406,5 +537,5 @@ Pass LowerTIRp() {
 TVM_REGISTER_GLOBAL("tirx.transform.LowerTIRp").set_body_typed(LowerTIRp);
 
 }  // namespace transform
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

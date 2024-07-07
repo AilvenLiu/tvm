@@ -30,7 +30,9 @@ def compare(before, after, transform):
         after = tvm.IRModule({"main": after})
     assert isinstance(before, tvm.IRModule)
     assert isinstance(after, tvm.IRModule)
-    tvm.ir.assert_structural_equal(transform()(before), after, map_free_vars=False)
+
+    with tvm.target.Target("cuda"):
+        tvm.ir.assert_structural_equal(transform()(before), after, map_free_vars=False)
 
 
 def test_lower_view_get():

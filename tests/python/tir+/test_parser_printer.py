@@ -321,7 +321,7 @@ def test_roundtrip_barrier():
 
             with T.cta():
                 A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
-                b = Tp.alloc_barrier()
+                b = Tp.alloc_barrier(exec_scope="thread")
                 
                 with T.thread():
                     b.init(128)
@@ -350,16 +350,26 @@ def test_roundtrip_barrier_array():
 
         with T.kernel():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([4], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
             tid = T.thread_id([128], parent="cta")
 
             with T.cta():
                 A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
-                b = Tp.alloc_barrier_array(size=4, name_hint="b")
+                b = Tp.alloc_barrier_array(exec_scope="thread", size=4, name_hint="b")
 
-                b[0].init(128)
+                """
+                with T.thread([tid], [T.Range(0, 64)]):
+                    b[0].init(128)
+                    A_smem[tid] = A[tid]
+                    b[0].arrive()
+                    b[0].wait()
+                with T.thread([tid], [T.Range(64, 128)]):
+                    b[0].init(128)
+                    b[0].arrive()
+                    A[tid] = A_smem[tid] + 1
+                """
+
                 with T.thread():
+                    b[0].init(128)
                     if (tid < 64):
                         A_smem[tid] = A[tid]
                         b[0].arrive()

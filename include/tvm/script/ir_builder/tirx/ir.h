@@ -35,6 +35,7 @@ using tvm::runtime::Tensor;
 using tvm::tirx::Barrier;
 using tvm::tirx::BarrierArray;
 using tvm::tirx::Buffer;
+using tvm::tirx::ExecScope;
 using tvm::tirx::Pipeline;
 using tvm::tirx::TLayout;
 using tvm::tirx::Var;
@@ -218,18 +219,20 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::
 
 /*!
  * \brief The barrier allocation function.
+ * \param thread_scope The thread scope of the barrier.
  * \param name_hint The name hint of the barrier.
  * \return The allocated barrier.
  */
-Barrier AllocBarrier(ffi::String name_hint = "");
+Barrier AllocBarrier(ExecScope thread_scope, ffi::String name_hint = "");
 
 /*!
  * \brief The barrier array allocation function.
+ * \param thread_scope The thread scope of the barrier.
  * \param size The number of barriers in the array.
  * \param name_hint The name hint of the barrier array.
  * \return The allocated barrier array.
  */
-BarrierArray AllocBarrierArray(size_t size, ffi::String name_hint = "");
+BarrierArray AllocBarrierArray(ExecScope thread_scope, size_t size, ffi::String name_hint = "");
 
 /*!
  * \brief The pipeline allocation function.
@@ -237,7 +240,7 @@ BarrierArray AllocBarrierArray(size_t size, ffi::String name_hint = "");
  * \param specialize whether the pipeline has specialized producer/consumer threads.
  * \param name_hint The name hint of the pipeline.
  */
-Pipeline AllocPipeline(size_t depth, bool specialize, String name_hint = "");
+Pipeline AllocPipeline(size_t depth, bool specialize, ffi::String name_hint = "");
 
 namespace axis {
 /*!
@@ -580,7 +583,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

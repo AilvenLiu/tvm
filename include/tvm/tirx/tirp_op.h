@@ -24,6 +24,8 @@
 #define TVM_TIRX_TIRP_OP_H_
 
 #include <tvm/ir/op.h>
+#include <tvm/target/target.h>
+#include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/tirp_stmt.h>
 
@@ -31,7 +33,21 @@ namespace tvm {
 namespace tirx {
 namespace tirp {
 
+/*!
+ * \brief The type of the function that sanitizes the arguments of a TIR+ operator.
+ * \param op The operator.
+ * \param args The arguments.
+ */
 using FArgSanitizer = runtime::TypedPackedFunc<void(tvm::Op, Array<ObjectRef>)>;
+
+/*!
+ * \brief The type of the function that schedules a TIR+ operator.
+ * \param op The operator.
+ * \param target The target.
+ * \param exec_scope The execution scope.
+ * \param args The arguments.
+ */
+using FOpScheduler = runtime::TypedPackedFunc<Stmt(tvm::Op, Target, ExecScope, Array<ObjectRef>)>;
 
 /*!
  * \brief See pesudo code below:
@@ -78,6 +94,13 @@ TVM_DLL const Op& barrier_wait();
 /*!
  * \brief See pesudo code below:
  *
+ * barrier.arrive_and_wait()
+ */
+TVM_DLL const Op& barrier_arrive_and_wait();
+
+/*!
+ * \brief See pesudo code below:
+ *
  *  pipe.producer_acquire()
  */
 TVM_DLL const Op& producer_acquire();
@@ -110,8 +133,8 @@ TVM_DLL const Op& consumer_wait();
  */
 TVM_DLL const Op& consumer_release();
 
-}  // namespace tirxp
-}  // namespace tirx
+}  // namespace tirxxp
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_TIRP_OP_H_

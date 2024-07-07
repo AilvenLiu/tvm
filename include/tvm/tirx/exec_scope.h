@@ -147,10 +147,23 @@ class ExecScope : public ObjectRef {
  public:
   TVM_DLL explicit ExecScope(String name);
 
+  /*! \brief create a exec scope from scope name */
   static ExecScope Create(String name);
+
+  /*! \brief check if a scope name is valid */
+  static bool Valid(const String& name);
+
+  /*! \brief scope's are the same */
+  bool Is(const ExecScope& other) const;
 
   /*! \brief scope is identified by name */
   bool Is(const String& name) const;
+
+  /*! \brief scope is higher than other sope */
+  bool Higher(const ExecScope& other) const;
+
+  /*! \brief scope is higher than other sope */
+  bool Higher(const String& other) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScope, ObjectRef, ExecScopeNode);
 };
@@ -264,18 +277,6 @@ static const std::unordered_map<String, int> ScopeOrder = {
 
 static const std::unordered_map<String, String> StorageToLogical = {
     {"local", "thread"}, {"shared", "cta"}, {"global", "kernel"}};
-
-bool Higher(const ExecScope& lhs, const ExecScope& rhs);
-
-bool Higher(const String& lhs, const String& rhs);
-
-bool Equal(const ExecScope& lhs, const ExecScope& rhs);
-
-bool Equal(const String& lhs, const String& rhs);
-
-bool ValideScope(const ExecScope& scope);
-
-bool ValideScope(const String& scope);
 
 bool IsStorageBuffer(const String& storage, const String& logical);
 
