@@ -660,18 +660,18 @@ std::string PrintCpAsyncAssembly(const std::string& shared_ptr,
                                  const std::string& shared_elem_offset,
                                  const std::string& global_ptr,
                                  const std::string& global_elem_offset, const std::string& bytes) {
-  std::string asm_code = R"(
-  {
-    unsigned int addr = cast_smem_ptr_to_int({smem_addr});
-    __asm__ __volatile__(
-      #if TVM_ENABLE_L2_PREFETCH
-        "cp.async.{cg_or_ca}.shared.global.L2::128B [%0], [%1], %2;"
-      #else
-        "cp.async.{cg_or_ca}.shared.global [%0], [%1], %2;"
-      #endif
-        :: "r"(addr), "l"((void*)({global_ptr})), "n"({bytes})
-    );
-  }
+  std::string asm_code = R"(// T.ptx_cp_async()
+{
+  unsigned int addr = cast_smem_ptr_to_int({smem_addr});
+  __asm__ __volatile__(
+    #if TVM_ENABLE_L2_PREFETCH
+      "cp.async.{cg_or_ca}.shared.global.L2::128B [%0], [%1], %2;"
+    #else
+      "cp.async.{cg_or_ca}.shared.global [%0], [%1], %2;"
+    #endif
+      :: "r"(addr), "l"((void*)({global_ptr})), "n"({bytes})
+  );
+}
 )";
   Replacer replacer;
   replacer.register_rule("{smem_addr}", shared_ptr + " + " + shared_elem_offset);

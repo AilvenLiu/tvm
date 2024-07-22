@@ -106,12 +106,12 @@ def gemm(
     return _ffi_api.OpCall(_get_tirp_op("gemm"), [D, A, B, C, alpha, beta])
 
 
-def alloc_barrier(exec_scope: ExecScope, name_hint: str = "") -> Barrier:
+def alloc_barrier(thread_scope: ExecScope, name_hint: str = "") -> Barrier:
     """The barrier allocation function.
 
     Parameters
     ----------
-    exec_scope : ExecScope
+    thread_scope : ExecScope
         The execution scope of the barrier.
 
     name_hint : str
@@ -122,19 +122,19 @@ def alloc_barrier(exec_scope: ExecScope, name_hint: str = "") -> Barrier:
     res : Barrier
         The allocated barrier.
     """
-    if isinstance(exec_scope, str):
-        exec_scope = ExecScope.create(exec_scope)
+    if isinstance(thread_scope, str):
+        thread_scope = ExecScope.create(thread_scope)
     else:
-        assert isinstance(exec_scope, ExecScope)
-    return _ffi_api.AllocBarrier(exec_scope, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+        assert isinstance(thread_scope, ExecScope)
+    return _ffi_api.AllocBarrier(thread_scope, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def alloc_barrier_array(exec_scope: ExecScope, size: int, name_hint="") -> BarrierArray:
+def alloc_barrier_array(thread_scope: ExecScope, size: int, name_hint="") -> BarrierArray:
     """The barrier array allocation function.
 
     Parameters
     ----------
-    exec_scope : ExecScope
+    thread_scope : ExecScope
         The execution scope of the barrier array.
 
     size : int
@@ -148,18 +148,23 @@ def alloc_barrier_array(exec_scope: ExecScope, size: int, name_hint="") -> Barri
     res : BarrierArray
         The allocated barrier array.
     """
-    if isinstance(exec_scope, str):
-        exec_scope = ExecScope(exec_scope)
+    if isinstance(thread_scope, str):
+        thread_scope = ExecScope(thread_scope)
     else:
-        assert isinstance(exec_scope, ExecScope)
-    return _ffi_api.AllocBarrierArray(exec_scope, size, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+        assert isinstance(thread_scope, ExecScope)
+    return _ffi_api.AllocBarrierArray(thread_scope, size, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def alloc_pipeline(depth: int, specialize: bool, name_hint: str = "") -> Pipeline:
+def alloc_pipeline(
+    thread_scope: ExecScope, depth: int, specialize: bool, name_hint: str = ""
+) -> Pipeline:
     """The pipeline allocation function.
 
     Parameters
     ----------
+    thread_scope : ExecScope
+        The thread scope of the pipeline.
+
     depth : int
         The depth of the pipeline.
 
@@ -174,7 +179,11 @@ def alloc_pipeline(depth: int, specialize: bool, name_hint: str = "") -> Pipelin
     res : Pipeline
         The allocated pipeline.
     """
-    return _ffi_api.AllocPipeline(depth, specialize, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+    if isinstance(thread_scope, str):
+        thread_scope = ExecScope(thread_scope)
+    else:
+        assert isinstance(thread_scope, ExecScope)
+    return _ffi_api.AllocPipeline(thread_scope, depth, specialize, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 __all__ = ["copy", "fill", "gemm", "alloc_barrier", "alloc_barrier_array", "alloc_pipeline"]

@@ -235,6 +235,9 @@ class ScopeIdDefRemover : public StmtExprMutator {
                     IterVar(Range(nullptr), Var(""), IterVarType::kThreadIndex, "threadIdx.x"));
       n->body = For(blockIdx, 0, get_extent(blockIdx_def), ForKind::kThreadBinding, n->body,
                     IterVar(Range(nullptr), Var(""), IterVarType::kThreadIndex, "blockIdx.x"));
+      n->annotations.Set("scope_id_extent_map", tirp::ScopeExtentMap(id_extent_map_));
+      n->annotations.Set("thread_var_map",
+                         tirp::ThreadVarMap{{"blockIdx.x", blockIdx}, {"threadIdx.x", threadIdx}});
       auto* n_scope = kernel.CopyOnWrite();
       n_scope->scope_id_def = {};
       n->exec_scope = KernelScope(kernel);
@@ -444,6 +447,7 @@ class CUDABarrierArrayAllocator : public StmtExprMutator {
     if (!op->barrier_arrays.empty()) {
       std::vector<Stmt> body;
       for (const auto& barrier_array : op->barrier_arrays) {
+        CHECK(barrier_array->thread_scope.Is("cta")) << "Internal Error: Unsupported thread scope";
         body.push_back(Evaluate(Call(DataType::Void(), builtin::cuda_barrier_create(),
                                      {StringImm(barrier_array->thread_scope->name),
                                       IntImm(DataType::Int(32), barrier_arr_id_),
@@ -484,12 +488,29 @@ class TIRpOpScheduler : public StmtExprMutator {
   Stmt VisitStmt_(const BlockNode* op) final {
     Block block = GetRef<Block>(op);
     auto* n = block.CopyOnWrite();
+    // Get the exec_scope
     if (op->exec_scope.defined()) {
       exec_scope_stack_.push_back(op->exec_scope.value());
     }
+    // Get the scope_id_extent_map and thread_var_map
+    auto it = n->annotations.find("scope_id_extent_map");
+    if (it != n->annotations.end()) {
+      ICHECK(scope_id_extent_stack_.empty())
+          << "Internal Error: scope_id_extent_stack_ is not empty";
+      scope_id_extent_stack_.push_back(Downcast<tirp::ScopeExtentMap>((*it).second));
+      it = n->annotations.find("thread_var_map");
+      ICHECK(it != n->annotations.end()) << "Internal Error: thread_var_map is not found";
+      thread_var_stack_.push_back(Downcast<tirp::ThreadVarMap>((*it).second));
+    }
     n->body = VisitStmt(n->body);
+    // Pop the exec_scope
     if (op->exec_scope.defined()) {
       exec_scope_stack_.pop_back();
+    }
+    // Pop the scope_id_extent_map and thread_var_map
+    if (it != n->annotations.end()) {
+      scope_id_extent_stack_.pop_back();
+      thread_var_stack_.pop_back();
     }
     return std::move(block);
   }
@@ -498,10 +519,33 @@ class TIRpOpScheduler : public StmtExprMutator {
     static const auto& op_scheduler_map = Op::GetAttrMap<tirp::FOpScheduler>("FOpScheduler");
     ICHECK(op_scheduler_map.count(op->op)) << "Internal Error: Unsupported OpCall " << op->op;
     tirp::FOpScheduler scheduler = op_scheduler_map[op->op];
-    return scheduler(op->op, Target::Current(false), exec_scope_stack_.back(), op->args);
+    ICHECK(!exec_scope_stack_.empty()) << "Internal Error: exec_scope_stack_ is empty";
+    ICHECK(!scope_id_extent_stack_.empty()) << "Internal Error: scope_id_extent_stack_ is empty";
+    ICHECK(!thread_var_stack_.empty()) << "Internal Error: thread_var_stack_ is empty";
+    return scheduler(
+        op->op, op->args,
+        tirp::ScheduleContext(Target::Current(false), exec_scope_stack_.back(),
+                              thread_var_stack_.back(), scope_id_extent_stack_.back()));
   }
 
   std::vector<ExecScope> exec_scope_stack_;
+  std::vector<tirp::ScopeExtentMap> scope_id_extent_stack_;
+  std::vector<tirp::ThreadVarMap> thread_var_stack_;
+};
+
+class ScheduleContextRemover : public StmtExprMutator {
+ public:
+  static Stmt Remove(const Stmt& stmt) { return ScheduleContextRemover()(stmt); }
+
+ private:
+  Stmt VisitStmt_(const BlockNode* op) final {
+    Block block = GetRef<Block>(op);
+    auto* n = block.CopyOnWrite();
+    n->annotations.erase("scope_id_extent_map");
+    n->annotations.erase("thread_var_map");
+    n->body = VisitStmt(n->body);
+    return std::move(block);
+  }
 };
 
 namespace transform {
@@ -510,6 +554,9 @@ Pass LowerTIRp() {
     const auto& target = Target::Current(false);
 
     auto* n = f.CopyOnWrite();
+    // Lower scope ids, resolve the scope ids and replace them with blockIdx / threadIdx
+    n->body = ScopeIdDefRemover::Remove(n->body);
+
     if (target->kind->name == "cuda" && target->kind->default_device_type == kDLCUDA) {
       // CUDA specific lowering passes
       // Preprocess barriers
@@ -517,7 +564,7 @@ Pass LowerTIRp() {
       n->body = CUDABarrierArrayAllocator::Allocate(n->body);
     }
 
-    // Lower TIRp OpCalls
+    // Default Schedule: lower TIRp OpCalls
     while (!NoOpCallVerifier::Verify(n->body, false)) {
       n->body = TIRpOpScheduler::LowerOpCalls(n->body);
     }
@@ -525,8 +572,8 @@ Pass LowerTIRp() {
     NoOpCallVerifier::Verify(f, true);
 
     // Lower other TIRp aux data structures
+    n->body = ScheduleContextRemover::Remove(n->body);
     n->body = LogicalTensorRemover::Remove(n->body);
-    n->body = ScopeIdDefRemover::Remove(n->body);
     n->body = StorageLower::Flatten(n->body, n->buffer_map);
     n->body = BufferOffsetRemover::Remove(n->body);
     return f;

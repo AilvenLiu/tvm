@@ -298,6 +298,8 @@ def match_buffer(
     offset_factor: int = 0,
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
+    logical_scope: str = "",
+    layout: TLayout | None = None,
 ) -> Buffer:
     """The buffer match function.
 
@@ -352,6 +354,12 @@ def match_buffer(
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
 
+    logical_scope : str
+        The logical scope of the buffer.
+
+    layout : Optional[TLayout]
+        The layout of the buffer.
+
     Returns
     -------
     res : Buffer
@@ -381,6 +389,8 @@ def match_buffer(
         offset_factor,
         buffer_type,
         axis_separators,
+        logical_scope,
+        layout,
     )
 
 
@@ -2109,6 +2119,11 @@ ptx_init_barrier_thread_count = _op_wrapper(_tir_op.ptx_init_barrier_thread_coun
 ptx_arrive_barrier = _op_wrapper(_tir_op.ptx_arrive_barrier)
 ptx_arrive_barrier_expect_tx = _op_wrapper(_tir_op.ptx_arrive_barrier_expect_tx)
 ptx_wait_barrier = _op_wrapper(_tir_op.ptx_wait_barrier)
+cuda_barrier_create = _op_wrapper(_tir_op.cuda_barrier_create)
+cuda_barrier_init = _op_wrapper(_tir_op.cuda_barrier_init)
+cuda_barrier_arrive = _op_wrapper(_tir_op.cuda_barrier_arrive)
+cuda_barrier_wait = _op_wrapper(_tir_op.cuda_barrier_wait)
+cuda_barrier_arrive_and_wait = _op_wrapper(_tir_op.cuda_barrier_arrive_and_wait)
 make_filled_simdgroup_matrix = _op_wrapper(_tir_op.make_filled_simdgroup_matrix)
 simdgroup_load = _op_wrapper(_tir_op.simdgroup_load)
 simdgroup_store = _op_wrapper(_tir_op.simdgroup_store)
@@ -2400,6 +2415,11 @@ __all__ = float_types + [
     "ptx_arrive_barrier",
     "ptx_arrive_barrier_expect_tx",
     "ptx_wait_barrier",
+    "cuda_barrier_create",
+    "cuda_barrier_init",
+    "cuda_barrier_arrive",
+    "cuda_barrier_wait",
+    "cuda_barrier_arrive_and_wait",
     "make_filled_simdgroup_matrix",
     "simdgroup_load",
     "simdgroup_store",

@@ -31,6 +31,18 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
       opt_realize.defined() ? opt_realize.value().get() : nullptr;
   AccessPath realize_p = *opt_realize_p;
 
+  bool tirp = false;
+  for (Frame f : d->frames) {
+    if (const auto* tir_f = f.as<TIRFrameNode>()) {
+      if (auto func = tir_f->tir.as<tir::PrimFuncNode>()) {
+        if (func->attrs.defined() && func->attrs->dict.count(tvm::attr::kIsTIRp)) {
+          tirp = true;
+          break;
+        }
+      }
+    }
+  }
+
   if (block->exec_scope.defined()) {
     if (const tvm::tir::WorldScopeNode* scope = block->exec_scope.as<tvm::tir::WorldScopeNode>()) {
       ExprDoc lhs = DefineVar(scope->scope_id_def->def_ids[0], *frame, d);
@@ -191,7 +203,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     }
   }
   // Step 3. Handle block read/write regions
-  {
+  if (!tirp) {
     ffi::Array<ExprDoc> reads;
     for (int i = 0, n = block->reads.size(); i < n; ++i) {
       reads.push_back(d->AsDoc<ExprDoc>(block->reads[i], block_p->Attr("reads")->ArrayItem(i)));
@@ -255,7 +267,8 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     IdDoc lhs = DefinePipeline(pipeline, *frame, d);
     ExprDoc rhs =
         TIRp(d, "alloc_pipeline")
-            ->Call({LiteralDoc::Int(pipeline->depth, pipeline_p->Attr("depth")),
+            ->Call({LiteralDoc::Str(pipeline->thread_scope->name, pipeline_p->Attr("thread_scope")),
+                    LiteralDoc::Int(pipeline->depth, pipeline_p->Attr("depth")),
                     LiteralDoc::Boolean(pipeline->specialize, pipeline_p->Attr("specialize")),
                     LiteralDoc::Str(pipeline->name_hint, pipeline_p->Attr("name_hint"))});
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
@@ -391,7 +404,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       Doc doc = TIR(d, "ScopeIdDef")
                     ->Call({d->AsDoc<ExprDoc>(def->def_ids, p->Attr("def_ids")),
                             d->AsDoc<ExprDoc>(def->extents, p->Attr("extents")),
-                            LiteralDoc::Str(def->parent, p->Attr("parent"))});
+                            LiteralDoc::Str(def->parent, p->Attr("parent")),
+                            LiteralDoc::Str(def->cur, p->Attr("cur"))});
       return doc;
     });
 TVM_SCRIPT_REPR(tir::ScopeIdDefNode, ReprPrintTIR);

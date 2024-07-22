@@ -23,7 +23,6 @@ namespace tvm {
 namespace tirx {
 
 /******** Constructors ********/
-
 // ScopeId
 ScopeId::ScopeId(String name) {
   auto n = make_object<ScopeIdNode>();
@@ -181,7 +180,6 @@ TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
     });
 
 /******** Helper functions ********/
-
 bool IsStorageBuffer(const String& storage, const String& logical) {
   return StorageToLogical.count(storage) && StorageToLogical.at(storage) == logical;
 }

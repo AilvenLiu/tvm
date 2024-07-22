@@ -469,7 +469,10 @@ class SwizzleLayout : public TLayout {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SwizzleLayoutNode);
 };
 
-}  // namespace tirxxx
+/********************* Utils *********************/
+bool IsTrivialLayout(const TLayout& layout);
+
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

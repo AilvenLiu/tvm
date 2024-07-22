@@ -76,8 +76,9 @@ TVM_REGISTER_GLOBAL("tirx.BarrierArrayElem").set_body_typed([](BarrierArray arr,
 /*************************** Pipeline ***************************/
 TVM_REGISTER_NODE_TYPE(PipelineNode);
 
-Pipeline::Pipeline(size_t depth, bool specialize, String name_hint) {
+Pipeline::Pipeline(ExecScope thread_scope, size_t depth, bool specialize, String name_hint) {
   auto n = make_object<PipelineNode>();
+  n->thread_scope = std::move(thread_scope);
   n->name_hint = std::move(name_hint);
   n->depth = depth;
   n->specialize = specialize;
@@ -85,9 +86,9 @@ Pipeline::Pipeline(size_t depth, bool specialize, String name_hint) {
 }
 
 TVM_REGISTER_GLOBAL("tirx.Pipeline")
-    .set_body_typed([](size_t depth, bool specialize, String name_hint) {
-      return Pipeline(depth, specialize, name_hint);
+    .set_body_typed([](ExecScope thread_scope, size_t depth, bool specialize, String name_hint) {
+      return Pipeline(thread_scope, depth, specialize, name_hint);
     });
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

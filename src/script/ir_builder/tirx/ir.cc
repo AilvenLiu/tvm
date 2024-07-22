@@ -142,9 +142,10 @@ tvm::Type FuncRet(tvm::Type ret_type) {
 Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
                    ffi::Optional<Var> data, ffi::Array<PrimExpr> strides, PrimExpr elem_offset,
                    ffi::String storage_scope, int align, int offset_factor,
-                   ffi::String buffer_type_str, ffi::Optional<ffi::Array<IntImm>> axis_separators) {
+                   ffi::String buffer_type_str, ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                   ffi::String logical_scope, ffi::Optional<TLayout> layout) {
   Buffer buffer = BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align,
-                             offset_factor, buffer_type_str, axis_separators);
+                             offset_factor, buffer_type_str, axis_separators, "kernel", layout);
   if (const auto* var = param.as<tvm::tirx::VarNode>()) {
     PrimFuncFrame frame = FindPrimFuncFrame("T.match_buffer");
     Var v = ffi::GetRef<Var>(var);
@@ -433,8 +434,8 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
   return buffer;
 }
 
-Barrier AllocBarrier(ExecScope exec_scope, String name_hint) {
-  Barrier barrier = tvm::tirx::Barrier(exec_scope, name_hint);
+Barrier AllocBarrier(ExecScope thread_scope, String name_hint) {
+  Barrier barrier = tvm::tirx::Barrier(thread_scope, name_hint);
   IRBuilder builder = IRBuilder::Current();
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->barriers.push_back(barrier);
@@ -446,8 +447,8 @@ Barrier AllocBarrier(ExecScope exec_scope, String name_hint) {
   return barrier;
 }
 
-BarrierArray AllocBarrierArray(ExecScope exec_scope, size_t size, String name_hint) {
-  BarrierArray barrier_array = tvm::tirx::BarrierArray(exec_scope, size, name_hint);
+BarrierArray AllocBarrierArray(ExecScope thread_scope, size_t size, String name_hint) {
+  BarrierArray barrier_array = tvm::tirx::BarrierArray(thread_scope, size, name_hint);
   IRBuilder builder = IRBuilder::Current();
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->barrier_arrays.push_back(barrier_array);
@@ -458,8 +459,8 @@ BarrierArray AllocBarrierArray(ExecScope exec_scope, size_t size, String name_hi
   return barrier_array;
 }
 
-Pipeline AllocPipeline(size_t depth, bool specialize, String name_hint) {
-  Pipeline pipeline = tvm::tirx::Pipeline(depth, specialize, name_hint);
+Pipeline AllocPipeline(ExecScope thread_scope, size_t depth, bool specialize, String name_hint) {
+  Pipeline pipeline = tvm::tirx::Pipeline(thread_scope, depth, specialize, name_hint);
   IRBuilder builder = IRBuilder::Current();
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->pipelines.push_back(pipeline);
@@ -1108,7 +1109,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

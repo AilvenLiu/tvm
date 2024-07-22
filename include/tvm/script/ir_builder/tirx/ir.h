@@ -119,6 +119,7 @@ Type FuncRet(Type ret_type);
  * \param offset_factor The factor of elem_offset field.
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
+ * \param layout The layout of the buffer.
  * \return The matched buffer.
  */
 Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
@@ -126,7 +127,8 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
                    ffi::Array<PrimExpr> strides = {}, PrimExpr elem_offset = PrimExpr(),
                    ffi::String storage_scope = "global", int align = -1, int offset_factor = 0,
                    ffi::String buffer_type = "default",
-                   ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt);
+                   ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
+                   ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt);
 
 Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout);
 
@@ -214,8 +216,8 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::
                          ffi::Optional<Var> data = std::nullopt, ffi::Array<PrimExpr> strides = {},
                          PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "",
                          int align = -1, int offset_factor = 0, ffi::String buffer_type = "default",
-                   ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
-                   ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt);
+                         ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
+                         ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt);
 
 /*!
  * \brief The barrier allocation function.
@@ -236,11 +238,13 @@ BarrierArray AllocBarrierArray(ExecScope thread_scope, size_t size, ffi::String 
 
 /*!
  * \brief The pipeline allocation function.
+ * \param thread_scope The thread scope of the pipeline.
  * \param depth The depth of the pipeline.
  * \param specialize whether the pipeline has specialized producer/consumer threads.
  * \param name_hint The name hint of the pipeline.
  */
-Pipeline AllocPipeline(size_t depth, bool specialize, ffi::String name_hint = "");
+Pipeline AllocPipeline(ExecScope thread_scope, size_t depth, bool specialize,
+                       ffi::String name_hint = "");
 
 namespace axis {
 /*!

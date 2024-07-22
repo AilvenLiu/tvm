@@ -90,12 +90,17 @@ class BarrierArray(Object):
 
 @register_object("tirx.Pipeline")
 class Pipeline(Object):
+    thread_scope: ExecScope
     name_hint: str
     depth: int
     specialize: bool
 
-    def __init__(self, depth: int = 0, specialize: bool = False, name_hint: str = ""):
-        self.__init_handle_by_constructor__(_ffi_api.Pipeline, name_hint, depth, specialize)
+    def __init__(
+        self, thread_scope: ExecScope, depth: int = 0, specialize: bool = False, name_hint: str = ""
+    ):
+        self.__init_handle_by_constructor__(
+            _ffi_api.Pipeline, thread_scope, name_hint, depth, specialize
+        )
 
     def producer_acquire(self):
         return make_op_call("pipeline_producer_acquire", [self])

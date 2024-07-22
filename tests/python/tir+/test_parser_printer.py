@@ -321,7 +321,7 @@ def test_roundtrip_barrier():
 
             with T.cta():
                 A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
-                b = Tp.alloc_barrier(exec_scope="thread")
+                b = Tp.alloc_barrier(thread_scope="thread")
                 
                 with T.thread():
                     b.init(128)
@@ -354,7 +354,7 @@ def test_roundtrip_barrier_array():
 
             with T.cta():
                 A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
-                b = Tp.alloc_barrier_array(exec_scope="thread", size=4, name_hint="b")
+                b = Tp.alloc_barrier_array(thread_scope="thread", size=4, name_hint="b")
 
                 """
                 with T.thread([tid], [T.Range(0, 64)]):
@@ -397,7 +397,7 @@ def test_roundtrip_pipeline_no_specialize_async_no_depth():
             
             with T.cta():
                 A_smem = T.alloc_buffer([4096], dtype="float32", scope="shared")
-                pipe = Tp.alloc_pipeline(depth=0, specialize=False)
+                pipe = Tp.alloc_pipeline(thread_scope="cta", depth=0, specialize=False)
                 pipe.producer_copy_async(A_smem[0:128], A[0:128])
                 pipe.producer_commit_stage()
 
@@ -437,7 +437,7 @@ def test_roundtrip_pipeline_specialize_sync_depth():
                 B_smem = T.alloc_buffer([DEPTH, 128, 32], dtype="float32", scope="shared")
                 C_local = T.alloc_buffer([32, 32], dtype="float32", scope="local")
 
-                pipe = Tp.alloc_pipeline(depth=DEPTH, specialize=True)
+                pipe = Tp.alloc_pipeline(thread_scope="cta", depth=DEPTH, specialize=True)
                 
                 with T.thread([tid], [T.Range(0, 64)]):
                     for i in range(32):

@@ -939,6 +939,17 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
   }
 
+  auto print = [&](std::string input) {
+    std::string delimiter = "\n";
+    size_t pos = 0;
+    std::string token;
+    while ((pos = input.find(delimiter)) != std::string::npos) {
+      this->PrintIndent();
+      this->stream << input.substr(0, pos) << "\n";
+      input.erase(0, pos + delimiter.length());
+    }
+  };
+
   if (op->op.same_as(builtin::tvm_fill_fragment())) {
     need_mma_h_ = true;
     TVM_FFI_ICHECK_EQ(op->args.size(), 6U);
@@ -1169,10 +1180,10 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     need_cast_smem_ptr_to_int_ = true;
     // use size of argument list to indicate whether or not to use predicated cp.async
     if (op->args.size() == 5) {
-      this->stream << PrintCpAsyncAssembly(dst, dst_offset, src, src_offset, size);
+      print(PrintCpAsyncAssembly(dst, dst_offset, src, src_offset, size));
     } else {
-      this->stream << PrintPredicatedCpAsyncAssembly(dst, dst_offset, src, src_offset, size,
-                                                     this->PrintExpr(op->args[5]));
+      print(PrintPredicatedCpAsyncAssembly(dst, dst_offset, src, src_offset, size,
+                                           this->PrintExpr(op->args[5])));
     }
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk())) {
     need_cast_smem_ptr_to_int_ = true;
@@ -1189,10 +1200,12 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintCpAsyncBulkAsm(dst, dst_offset, src, src_offset, size, barrier);
   } else if (op->op.same_as(builtin::ptx_commit_group())) {
-    this->stream << "__asm__ __volatile__(\"cp.async.commit_group;\");\n\n";
+    this->PrintIndent();
+    this->stream << "__asm__ __volatile__(\"cp.async.commit_group;\");\n";
   } else if (op->op.same_as(builtin::ptx_wait_group())) {
     int n = Downcast<IntImm>(op->args[0])->value;
-    this->stream << "__asm__ __volatile__(\"cp.async.wait_group " << n << ";\");\n\n";
+    this->PrintIndent();
+    this->stream << "__asm__ __volatile__(\"cp.async.wait_group " << n << ";\");\n";
   } else if (op->op.same_as(builtin::ptx_cp_async_barrier())) {
     need_cast_smem_ptr_to_int_ = true;
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;

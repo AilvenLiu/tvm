@@ -165,6 +165,24 @@ class LayoutVerifier : public Verifier<LayoutVerifier> {
   }
 };
 
+class AsyncStructsVerifier : public Verifier<AsyncStructsVerifier> {
+ public:
+  using Verifier::Verifier;
+
+ private:
+  using Verifier::Visit;
+
+  void VisitStmt_(const BlockNode* op, ObjectPath path) override {
+    Verify(op->exec_scope != nullptr) << "TIRpError: Block at " << path << " has no exec_scope";
+    auto scope = op->exec_scope.value();
+    scope_stack_.push_back(scope);
+    Verifier::VisitStmt_(op, path);
+    scope_stack_.pop_back();
+  }
+
+  std::vector<ExecScope> scope_stack_;
+};
+
 bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode) {
   if (!ExecScopeVerifier::Verify(func, assert_mode)) {
     return false;
@@ -173,6 +191,9 @@ bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode) {
     return false;
   }
   if (!LayoutVerifier::Verify(func, assert_mode)) {
+    return false;
+  }
+  if (!AsyncStructsVerifier::Verify(func, assert_mode)) {
     return false;
   }
   return true;

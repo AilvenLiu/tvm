@@ -47,16 +47,54 @@ namespace tirp {
       .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure)) \
       .set_attr<Bool>("TIsTIRpOp", Bool(true))
 
+/********************* ScheduleContext **********************/
+TVM_REGISTER_NODE_TYPE(ScheduleContextNode);
+
+ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope, ThreadVarMap thread_var_map,
+                                 ScopeExtentMap scope_extent_map) {
+  auto n = make_object<ScheduleContextNode>();
+  n->target = target;
+  n->exec_scope = exec_scope;
+  n->thread_var_map = thread_var_map;
+  n->scope_extent_map = scope_extent_map;
+  data_ = std::move(n);
+}
+
+TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
+    .set_body_typed([](Target target, ExecScope exec_scope, ThreadVarMap thread_var_map,
+                       ScopeExtentMap scope_extent_map) {
+      return ScheduleContext(target, exec_scope, thread_var_map, scope_extent_map);
+    });
+
+PrimExpr ScheduleContext::GetScopeExtent(const ScopeIdDef& scope_id) const {
+  std::unordered_map<ScopeIdDef, PrimExpr, ScopeIdDef::ScopeHash, ScopeIdDef::ScopeEqual> map(
+      get()->scope_extent_map.begin(), get()->scope_extent_map.end());
+  auto it = map.find(scope_id);
+  ICHECK(it != map.end()) << "ValueError: Cannot find scope id " << scope_id;
+  return it->second;
+}
+
+Var ScheduleContext::GetThreadVar(const String& name) const {
+  auto it = get()->thread_var_map.find(name);
+  ICHECK(it != get()->thread_var_map.end()) << "ValueError: Cannot find thread variable " << name;
+  return (*it).second;
+}
+
 /********************* Schedule Ops **********************/
 #define TIRP_DEFINE_SCHEDULE_OP(OpName) \
   TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsScheduleOp", Bool(true))
 
-TIRP_DEFINE_SCHEDULE_OP(copy).set_num_inputs(2).set_attr<FArgSanitizer>(
-    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
-      ICHECK_EQ(args.size(), 2U) << "copy() expects 2 arguments";
-      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of copy() must be BufferRegion";
-      ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of copy() must be BufferRegion";
-    });
+TIRP_DEFINE_SCHEDULE_OP(copy)
+    .set_num_inputs(2)
+    .set_attr<FArgSanitizer>("FArgSanitizer",
+                             [](tvm::Op op, Array<ObjectRef> args) {
+                               ICHECK_EQ(args.size(), 2U) << "copy() expects 2 arguments";
+                               ICHECK(args[0].as<BufferRegionNode>())
+                                   << "arg[0] of copy() must be BufferRegion";
+                               ICHECK(args[1].as<BufferRegionNode>())
+                                   << "arg[1] of copy() must be BufferRegion";
+                             })
+    .set_attr<FOpScheduler>("FOpScheduler", CopyOpScheduler);
 
 TIRP_DEFINE_SCHEDULE_OP(fill).set_num_inputs(2).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
@@ -129,48 +167,65 @@ TIRP_DEFINE_BARRIER_OP(barrier_arrive_and_wait)
 
 TIRP_DEFINE_PIPELINE_OP(pipeline_producer_acquire)
     .set_num_inputs(1)
-    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
-      ICHECK_EQ(args.size(), 1U) << "pipeline_producer_acquire() expects 1 argument";
-      ICHECK(args[0].as<PipelineNode>())
-          << "arg[0] of pipeline_producer_acquire() must be Pipeline";
-    });
+    .set_attr<FArgSanitizer>("FArgSanitizer",
+                             [](tvm::Op op, Array<ObjectRef> args) {
+                               ICHECK_EQ(args.size(), 1U)
+                                   << "pipeline_producer_acquire() expects 1 argument";
+                               ICHECK(args[0].as<PipelineNode>())
+                                   << "arg[0] of pipeline_producer_acquire() must be Pipeline";
+                             })
+    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
 
 TIRP_DEFINE_PIPELINE_OP(pipeline_producer_copy_async)
     .set_num_inputs(3)
-    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
-      ICHECK_EQ(args.size(), 3U) << "pipeline_producer_copy_async() expects 3 arguments";
-      ICHECK(args[0].as<PipelineNode>())
-          << "arg[0] of pipeline_producer_copy_async() must be Pipeline";
-      ICHECK(args[1].as<BufferRegionNode>())
-          << "arg[1] of pipeline_producer_copy_async() must be BufferRegion";
+    .set_attr<FArgSanitizer>(
+        "FArgSanitizer",
+        [](tvm::Op op, Array<ObjectRef> args) {
+          ICHECK_EQ(args.size(), 3U) << "pipeline_producer_copy_async() expects 3 arguments";
+          ICHECK(args[0].as<PipelineNode>())
+              << "arg[0] of pipeline_producer_copy_async() must be Pipeline";
+          ICHECK(args[1].as<BufferRegionNode>())
+              << "arg[1] of pipeline_producer_copy_async() must be BufferRegion";
 
-      ICHECK(args[2].as<BufferRegionNode>())
-          << "arg[2] of pipeline_producer_copy_async() must be BufferRegion";
-    });
+          ICHECK(args[2].as<BufferRegionNode>())
+              << "arg[2] of pipeline_producer_copy_async() must be BufferRegion";
+        })
+    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
 
 TIRP_DEFINE_PIPELINE_OP(pipeline_producer_commit_stage)
     .set_num_inputs(1)
-    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
-      ICHECK_EQ(args.size(), 1U) << "pipeline_producer_commit_stage() expects 1 argument";
-      ICHECK(args[0].as<PipelineNode>())
-          << "arg[0] of pipeline_producer_commit_stage() must be Pipeline";
-    });
+    .set_attr<FArgSanitizer>("FArgSanitizer",
+                             [](tvm::Op op, Array<ObjectRef> args) {
+                               ICHECK_EQ(args.size(), 1U)
+                                   << "pipeline_producer_commit_stage() expects 1 argument";
+                               ICHECK(args[0].as<PipelineNode>())
+                                   << "arg[0] of pipeline_producer_commit_stage() must be Pipeline";
+                             })
+    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
 
 TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_wait)
     .set_num_inputs(2)
-    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
-      ICHECK_EQ(args.size(), 2U) << "pipeline_consumer_wait() expects 2 arguments";
-      ICHECK(args[0].as<PipelineNode>()) << "arg[0] of pipeline_consumer_wait() must be Pipeline";
-      ICHECK(args[1].as<PrimExprNode>()) << "arg[1] of pipeline_consumer_wait() must be PrimExpr";
-    });
+    .set_attr<FArgSanitizer>("FArgSanitizer",
+                             [](tvm::Op op, Array<ObjectRef> args) {
+                               ICHECK_EQ(args.size(), 2U)
+                                   << "pipeline_consumer_wait() expects 2 arguments";
+                               ICHECK(args[0].as<PipelineNode>())
+                                   << "arg[0] of pipeline_consumer_wait() must be Pipeline";
+                               ICHECK(args[1].as<PrimExprNode>())
+                                   << "arg[1] of pipeline_consumer_wait() must be PrimExpr";
+                             })
+    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
 
 TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_release)
     .set_num_inputs(1)
-    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
-      ICHECK_EQ(args.size(), 1U) << "pipeline_consumer_release() expects 1 argument";
-      ICHECK(args[0].as<PipelineNode>())
-          << "arg[0] of pipeline_consumer_release() must be Pipeline";
-    });
+    .set_attr<FArgSanitizer>("FArgSanitizer",
+                             [](tvm::Op op, Array<ObjectRef> args) {
+                               ICHECK_EQ(args.size(), 1U)
+                                   << "pipeline_consumer_release() expects 1 argument";
+                               ICHECK(args[0].as<PipelineNode>())
+                                   << "arg[0] of pipeline_consumer_release() must be Pipeline";
+                             })
+    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
 
 }  // namespace tirxp
 }  // namespace tirx

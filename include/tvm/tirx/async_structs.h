@@ -146,26 +146,31 @@ class BarrierArrayElem : public ObjectRef {
 // Pipeline
 class PipelineNode : public Object {
  public:
-  /*! \brief The name hint of the pipeline. */
-  String name_hint;
+  /*! \brief The thread scope of this pipeline */
+  ExecScope thread_scope;
   /*! \brief The pipeline depth */
   size_t depth;
   /*! \brief Whether to specialize producer/consumer threads */
   bool specialize;
+  /*! \brief The name hint of the pipeline. */
+  String name_hint;
 
   void VisitAttrs(AttrVisitor* v) {
+    v->Visit("thread_scope", &thread_scope);
     v->Visit("name_hint", &name_hint);
     v->Visit("depth", &depth);
     v->Visit("specialize", &specialize);
   }
 
   bool SEqualReduce(const PipelineNode* other, SEqualReducer equal) const {
+    if (!equal(thread_scope, other->thread_scope)) return false;
     if (!equal(depth, other->depth)) return false;
     if (!equal(specialize, other->specialize)) return false;
     return equal.FreeVarEqualImpl(this, other);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(thread_scope);
     hash_reduce(depth);
     hash_reduce(specialize);
     hash_reduce.FreeVarHashImpl(this);
@@ -179,7 +184,8 @@ class PipelineNode : public Object {
 
 class Pipeline : public ObjectRef {
  public:
-  TVM_DLL explicit Pipeline(size_t depth = 0, bool specialize = false, String name_hint = "");
+  TVM_DLL explicit Pipeline(ExecScope thread_scope, size_t depth = 0, bool specialize = false,
+                            String name_hint = "");
 
   TVM_DEFINE_OBJECT_REF_METHODS(Pipeline, ObjectRef, PipelineNode);
 };

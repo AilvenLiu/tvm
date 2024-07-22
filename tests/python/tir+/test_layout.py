@@ -203,6 +203,14 @@ def test_constructor_nested_tuple():
             from_to=("thread", "warp"),
         )
 
+    # defualt stride
+    layout = T.TileLayout.from_nested_tuple(data=((8, 4), ((3, 5), 7, (2, 4))))
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=((8, 4), ((3, 5), 7, (2, 4))),
+        strides=((3360, 840), ((280, 56), 8, (4, 1))),
+    )
+    assert_structural_equal(layout, layout_expected)
+
 
 def test_normalize_tile_layout():
     def normalize_tile_layout(layout):

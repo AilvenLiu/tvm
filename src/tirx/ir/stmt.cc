@@ -602,6 +602,30 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
   data_ = std::move(node);
 }
 
+SBlock::SBlock(ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_scope,
+               ffi::Array<Buffer> alloc_buffers, ffi::Array<BufferView> buffer_views,
+               ffi::Array<BufferGet> buffer_gets, ffi::Array<Barrier> barriers,
+               ffi::Array<BarrierArray> barrier_arrays, ffi::Array<Pipeline> pipelines, Span span) {
+  ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
+  node->iter_vars = {};
+  node->reads = {};
+  node->writes = {};
+  node->name_hint = std::move(name_hint);
+  node->body = std::move(body);
+  node->init = std::nullopt;
+  node->alloc_buffers = std::move(alloc_buffers);
+  node->match_buffers = {};
+  node->annotations = {};
+  node->exec_scope = std::move(exec_scope);
+  node->span = std::move(span);
+  node->buffer_views = std::move(buffer_views);
+  node->buffer_gets = std::move(buffer_gets);
+  node->barriers = std::move(barriers);
+  node->barrier_arrays = std::move(barrier_arrays);
+  node->pipelines = std::move(pipelines);
+  data_ = std::move(node);
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(

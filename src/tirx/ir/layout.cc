@@ -33,6 +33,31 @@ PrimExpr ReduceMul(Array<PrimExpr> values) {
   return result;
 }
 
+bool IsTrivialLayout(const TLayout& layout) {
+  auto tile_layout = layout.as<TileLayoutNode>();
+  if (tile_layout == nullptr) {
+    return false;
+  }
+  if (tile_layout->device_tree.defined()) {
+    return false;
+  }
+  ICHECK(tile_layout->data_tree.defined()) << "InternalError: The data tree should be defined";
+  const auto& leaves = tile_layout->data_tree.GetLeaves();
+  ICHECK_EQ(leaves.size(), tile_layout->data_tree->coeff.size())
+      << "InternalError: The number of leaves and coefficients should be the same";
+  arith::Analyzer ana;
+  PrimExpr expected_stride = 1;
+  for (int i = leaves.size() - 1; i >= 0; --i) {
+    if (!ana.CanProveEqual(tile_layout->data_tree->coeff[i], expected_stride)) {
+      return false;
+    }
+    expected_stride = expected_stride * Downcast<IterTreeSplit>(leaves[i])->extent;
+  }
+  return true;
+}
+
+TVM_REGISTER_GLOBAL("tir.IsTrivialLayout").set_body_typed(IsTrivialLayout);
+
 /**************** TLayout ****************/
 TVM_REGISTER_GLOBAL("tirx.TLayoutGetSize").set_body_typed([](TLayout layout) {
   return layout->GetSize();
@@ -961,10 +986,10 @@ class EquivIterFuser : public IterTreeMutator {
       // Fuse the cases when both device tree and data tree are defined as follows:
       // For any two of data leaf nodes that share the same parent and adjacent to each other,
       // If two data nodes are mapped to two device nodes that are adjacent to each other,
-      // then fuse those two data leaf nodes to one single data node with the extent of the new node
-      // equal to the product of the extents of the two rest of data tree structure unchanged, and
-      // fuse those two device nodes to one single node with the value being the product of those
-      // two device nodes
+      // then fuse those two data leaf nodes to one single data node with the extent of the new
+      // node equal to the product of the extents of the two rest of data tree structure
+      // unchanged, and fuse those two device nodes to one single node with the value being the
+      // product of those two device nodes
       if (root.IsLeaf()) {
         // if it's a leaf, keep it
         return root;

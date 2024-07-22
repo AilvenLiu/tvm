@@ -115,14 +115,11 @@ class ScopeIdDef : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopeIdDefNode);
 };
 
+/*! \brief Compose two scope id definitions */
 Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
 
+/*! \brief Compliment two scope id definitions */
 Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
-
-inline std::ostream& operator<<(std::ostream& out, const ScopeIdDef& input) {
-  out << input->parent << " --> " << input->cur;
-  return out;
-}
 
 class ExecScopeNode : public Object {
  public:
@@ -271,15 +268,21 @@ class ExecScopeSlice : public ExecScope {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeSliceNode);
 };
 
+/******** Helper functions ********/
+
+/*! \brief ExecScope order from highest to lowest */
 static const std::unordered_map<String, int> ScopeOrder = {
     {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"cta", 3},
     {"warp_group", 4}, {"warp", 5},   {"thread", 6}};
 
+/*! \brief Map from storage scope to its belonging logical scope */
 static const std::unordered_map<String, String> StorageToLogical = {
     {"local", "thread"}, {"shared", "cta"}, {"global", "kernel"}};
 
+/*! \brief Whether the storage scope belongs to the logical scope*/
 bool IsStorageBuffer(const String& storage, const String& logical);
 
+/*! \brief Return the belonging logical scope of some storage scope */
 String StorageToLogicalScope(const String& storage);
 
 }  // namespace tirx

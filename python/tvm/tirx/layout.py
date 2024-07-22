@@ -134,6 +134,20 @@ class TileLayout(TLayout):
         )
 
     @staticmethod
+    def _get_default_strides(data: Tuple[Union[Tuple, int]], stride: int) -> Tuple:
+        assert isinstance(data, tuple), "data must be a tuple"
+        res = list()
+        for t in reversed(data):
+            if isinstance(t, tuple):
+                res_t, stride = TileLayout._get_default_strides(t, stride)
+                res.append(res_t)
+            else:
+                assert isinstance(t, (int, PrimExpr)), "data must be int or PrimExpr"
+                res.append(stride)
+                stride *= t
+        return tuple(reversed(res)), stride
+
+    @staticmethod
     def _construct_device_iter_tree(
         device: Union[Tuple, int, PrimExpr]
     ) -> Tuple[DeviceIterTree, List[int]]:
@@ -187,9 +201,9 @@ class TileLayout(TLayout):
 
     @staticmethod
     def from_nested_tuple(
-        data: Union[Tuple, int],
-        strides: Union[Tuple, int],
-        device: Optional[Union[Tuple, int]] = None,
+        data: Union[Tuple, int, PrimExpr],
+        strides: Optional[Union[Tuple, int, PrimExpr]] = None,
+        device: Optional[Union[Tuple, int, PrimExpr]] = None,
         exclusive: Optional[Tuple] = None,
         from_to: Optional[Tuple[str]] = None,
     ) -> "TileLayout":
@@ -202,6 +216,10 @@ class TileLayout(TLayout):
 
         if not isinstance(data, tuple):
             data = (data,)
+        if strides is None:
+            # get the default strides from the data
+            strides, _ = TileLayout._get_default_strides(data, 1)
+
         if not isinstance(strides, tuple):
             strides = (strides,)
 

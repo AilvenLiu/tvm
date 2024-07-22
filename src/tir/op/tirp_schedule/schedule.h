@@ -19,10 +19,14 @@
 #ifndef TVM_TIR_OP_TIRP_SCHEDULE_SCHEDULE_H_
 #define TVM_TIR_OP_TIRP_SCHEDULE_SCHEDULE_H_
 
-#include <tvm/target/target.h>
+#include <tvm/arith/analyzer.h>
+#include <tvm/runtime/packed_func.h>
+#include <tvm/target/tag.h>
 #include <tvm/tir/exec_scope.h>
+#include <tvm/tir/layout.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/stmt.h>
+#include <tvm/tir/tirp_op.h>
 
 namespace tvm {
 namespace tir {
@@ -31,8 +35,21 @@ namespace tirp {
 /********************* Utils **********************/
 bool IsCUDA(const Target& target);
 
+Stmt CallBuiltinOp(const Op& op, const Array<PrimExpr>& args);
+
+/********************* Copy Ops **********************/
+enum class CopyInstType { kBufferLoad, kCUDAcpasync };
+
+Stmt VectorizedCopy(const BufferRegion& src, const BufferRegion& dst, ScheduleContext context,
+                    CopyInstType inst_type);
+
+Stmt CopyOpScheduler(const Op& op, Array<ObjectRef> args, ScheduleContext context);
+
 /********************* Barrier Ops **********************/
-Stmt BarrierOpScheduler(const Op& op, Target target, ExecScope exec_scope, Array<ObjectRef> args);
+Stmt BarrierOpScheduler(const Op& op, Array<ObjectRef> args, ScheduleContext context);
+
+/********************* Pipeline Ops **********************/
+Stmt PipelineOpScheduler(const Op& op, Array<ObjectRef> args, ScheduleContext context);
 
 }  // namespace tirp
 }  // namespace tir

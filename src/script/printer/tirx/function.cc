@@ -46,6 +46,9 @@ bool IsSimpleBuffer(const tirx::Buffer& buf) {
       return false;
     }
   }
+  if (buf->layout.defined()) {
+    return false;
+  }
   return buf.scope() == "global" && buf->data_alignment == runtime::kAllocAlignment &&
          buf->offset_factor == 1 && buf->buffer_type == tirx::BufferType::kDefault &&
          !buf->axis_separators.size();
