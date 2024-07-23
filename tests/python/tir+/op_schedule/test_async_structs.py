@@ -174,18 +174,14 @@ def test_pipeline_no_specialize_cta():
                                 with T.thread():
                                     for s in range(8):
                                         T.ptx_cp_async("void", A_smem.data, i * 4096 + s * 512 + threadIdx * 4, A.data, (blockIdx * 131072 + s * 16384 + threadIdx // 32 * 4096 + i * 128 + threadIdx % 32 * 4) // 4194304 * 4194304 + blockIdx * 131072 + s * 16384 + threadIdx // 32 * 4096 + i * 128 + threadIdx % 32 * 4, 16)
-                                with T.thread():
                                     T.ptx_commit_group()
                             for j in range(32):
                                 with T.thread():
                                     for s in range(8):
                                         T.ptx_cp_async("void", A_smem.data, s * 512 + threadIdx * 4, A.data, blockIdx * 131072 + s * 16384 + threadIdx // 32 * 4096 + j * 128 + threadIdx % 32 * 4, 16)
-                                with T.thread():
                                     T.ptx_commit_group()
-                                with T.thread():
                                     T.ptx_wait_group(0)
                                     T.tvm_storage_sync("shared")
-                                with T.thread():
                                     for k in range(32):
                                         O_smem[k * 128 + threadIdx] = O_smem[k * 128 + threadIdx] + A_smem[k * 128 + threadIdx]
                                     T.tvm_storage_sync("shared")

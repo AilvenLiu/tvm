@@ -548,6 +548,48 @@ class ScheduleContextRemover : public StmtExprMutator {
   }
 };
 
+class ScopeMerger : public StmtExprMutator {
+ public:
+  static Stmt Merge(const Stmt& stmt) { return ScopeMerger()(stmt); }
+
+ private:
+  Stmt VisitStmt_(const SeqStmtNode* op) final {
+    Stmt stmt = StmtExprMutator::VisitStmt_(op);
+    if (auto* n = stmt.as<SeqStmtNode>()) {
+      std::vector<Stmt> seq;
+      for (size_t i = 0; i < n->seq.size();) {
+        if (auto* realize = n->seq[i].as<BlockRealizeNode>()) {
+          // Find a sequence of blocks with the same exec_scope
+          auto block = realize->block;
+          std::vector<Stmt> new_body{block->body};
+          ICHECK(block->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
+          auto scope = block->exec_scope.value();
+          for (i++; i < n->seq.size(); i++) {
+            if (auto* next_realize = n->seq[i].as<BlockRealizeNode>()) {
+              const auto& next_block = next_realize->block;
+              ICHECK(next_block->exec_scope.defined())
+                  << "Internal Error: exec_scope is not defined";
+              if (scope.Is(next_block->exec_scope.value())) {
+                new_body.push_back(next_block->body);
+                continue;
+              }
+            }
+            break;
+          }
+          auto* new_block = block.CopyOnWrite();
+          new_block->body = SeqStmt::Flatten(new_body);
+          seq.push_back(BlockRealize({}, Bool(true), block));
+        } else {
+          seq.push_back(n->seq[i]);
+          i++;
+        }
+      }
+      return SeqStmt::Flatten(seq);
+    }
+    return stmt;
+  };
+};
+
 namespace transform {
 Pass LowerTIRp() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
@@ -567,6 +609,7 @@ Pass LowerTIRp() {
     // Default Schedule: lower TIRp OpCalls
     while (!NoOpCallVerifier::Verify(n->body, false)) {
       n->body = TIRpOpScheduler::LowerOpCalls(n->body);
+      n->body = ScopeMerger::Merge(n->body);
     }
     // Verify that there are no OpCalls in the TIRp
     NoOpCallVerifier::Verify(f, true);
