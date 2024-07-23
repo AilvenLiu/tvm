@@ -114,7 +114,7 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
   ana.Bind(s, Range::FromMinExtent(0, s_extent));
   ana.Bind(threadIdx, Range::FromMinExtent(0, thread_cnt));
   // Calculate src and dst indices
-  auto get_indices = [&](const Region& region, CopyInstType inst_type) {
+  auto get_indices = [&](const Region& region, CopyInstType inst_type) -> std::vector<PrimExpr> {
     PrimExpr fused = inst_type == CopyInstType::kBufferLoad
                          ? ana.Simplify((s * thread_cnt + threadIdx) * vec_len.value() + vec)
                          : ana.Simplify((s * thread_cnt + threadIdx) * vec_len.value());

@@ -1719,6 +1719,9 @@ namespace transform {
 
 Pass StorageRewrite() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
+    // Skip if the it's TIRp function
+    if (f->attrs->dict.count(tvm::attr::kIsTIRp)) return f;
+
     bool enable_reuse = true;
     bool reuse_require_exact_matched_dtype = false;
     bool merge_static_smem = ctx->GetConfig<Bool>("tirx.merge_static_smem", Bool(false)).value();
