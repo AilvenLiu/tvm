@@ -37,17 +37,9 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
   const auto& dst = dst_buffer_region->buffer;
   const auto& src_region = src_buffer_region->region;
   const auto& dst_region = dst_buffer_region->region;
+  /****************************** Arg sanitize ******************************/
   CHECK(src->layout.defined()) << "ValueError: src buffer must have layout";
   CHECK(dst->layout.defined()) << "ValueError: dst buffer must have layout";
-  // Currently only support trivial layout copy
-  CHECK(IsTrivialLayout(src->layout.value())) << "ValueError: src buffer layout must be trivial";
-  CHECK(IsTrivialLayout(dst->layout.value())) << "ValueError: dst buffer layout must be trivial";
-  // Currently only support copy between global and shared memory
-  CHECK((src.scope() == "global" && dst.scope() == "shared") ||
-        (src.scope() == "shared" && dst.scope() == "global"))
-      << "ValueError: Unsupported copy between " << src.scope() << " and " << dst.scope();
-  // Currently only support data copy between the same data type
-  CHECK(src->dtype == dst->dtype) << "ValueError: src and dst buffer data type mismatch";
   // Check if the region matches
   // Note that there can be regions with extent 1, which are not considered in this case
   arith::Analyzer ana;
@@ -70,6 +62,26 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
         << "ValueError: src and dst region mismatch, got " << src_extents[i] << " and "
         << dst_extents[i];
   }
+  /****************************** Schedule Dispatch ******************************/
+  // Currently only support copy between global and shared memory
+  CHECK((src.scope() == "global" && dst.scope() == "shared") ||
+        (src.scope() == "shared" && dst.scope() == "global"))
+      << "ValueError: Unsupported copy between " << src.scope() << " and " << dst.scope();
+  // Check the layouts
+  const SwizzleLayoutNode* swizzle = nullptr;
+  if (src.scope() == "global" && dst.scope() == "shared") {
+    swizzle = dst->layout.as<SwizzleLayoutNode>();
+    CHECK(IsTrivialLayout(src->layout.value())) << "ValueError: src buffer layout must be trivial";
+    CHECK(IsTrivialLayout(dst->layout.value()) || swizzle != nullptr)
+        << "ValueError: dst buffer layout must be trivial or swizzle";
+  } else if (src.scope() == "shared" && dst.scope() == "global") {
+    swizzle = src->layout.as<SwizzleLayoutNode>();
+    CHECK(IsTrivialLayout(src->layout.value()) || swizzle != nullptr)
+        << "ValueError: src buffer layout must be trivial or swizzle";
+    CHECK(IsTrivialLayout(dst->layout.value())) << "ValueError: dst buffer layout must be trivial";
+  }
+  // Currently only support data copy between the same data type
+  CHECK(src->dtype == dst->dtype) << "ValueError: src and dst buffer data type mismatch";
   // Currently only consider the number of elements is a multiple of cta thread size
   PrimExpr n_elements = 1;
   for (const auto& region : src_region) {
@@ -85,15 +97,25 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
   const auto& dst_stride = dst->shape.back();
   const auto& src_region_extent = src_region.back()->extent;
   const auto& dst_region_extent = dst_region.back()->extent;
-  std::vector<PrimExpr> vec_len_candidates = {16, 8, 4};  // copy size in bytes
+  std::vector<PrimExpr> vec_candidates = {16, 8, 4};  // copy size in bytes
   if (inst_type == CopyInstType::kBufferLoad) {
-    vec_len_candidates.push_back(1);
+    vec_candidates.push_back(1);
   }
-  for (size_t i = 0; i < vec_len_candidates.size(); ++i) {
-    vec_len_candidates[i] = ana.Simplify(FloorDiv(vec_len_candidates[i], src->dtype.bytes()));
+  if (swizzle != nullptr) {
+    // swizzle layout
+    auto lim = (1 << swizzle->per_element) * src->dtype.bytes();
+    // filter out the candidates that are not aligned with the swizzle layout
+    vec_candidates.erase(std::remove_if(vec_candidates.begin(), vec_candidates.end(),
+                                        [&](const PrimExpr& candidate) {
+                                          return !ana.CanProveEqual(FloorMod(lim, candidate), 0);
+                                        }),
+                         vec_candidates.end());
+  }
+  for (size_t i = 0; i < vec_candidates.size(); ++i) {
+    vec_candidates[i] = ana.Simplify(FloorDiv(vec_candidates[i], src->dtype.bytes()));
   }
   Optional<PrimExpr> vec_len = NullOpt;
-  for (const auto& candidate : vec_len_candidates) {
+  for (const auto& candidate : vec_candidates) {
     if (ana.CanProveEqual(FloorMod(src_st, candidate), 0) &&
         ana.CanProveEqual(FloorMod(dst_st, candidate), 0) &&
         ana.CanProveEqual(FloorMod(src_stride, candidate), 0) &&
@@ -143,6 +165,9 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
   }
   // Create loop nest
   Stmt body = For(s, 0, s_extent, ForKind::kSerial, copy_inst);
+  if (inst_type == CopyInstType::kBufferLoad) {
+    body = SeqStmt({body, CallBuiltinOp(builtin::tvm_storage_sync(), {StringImm("shared")})});
+  }
   body = BlockRealize({}, Bool(true), Block("copy", body, ExecScope::Create("thread")));
   return body;
 }

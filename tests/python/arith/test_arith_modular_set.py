@@ -51,6 +51,14 @@ def test_mul():
     assert m.base == 2
 
 
+def test_shift_left():
+    analyzer = tvm.arith.Analyzer()
+    x, y = te.var("x"), te.var("y")
+    m = analyzer.modular_set((x * 4 + 2) << 2)
+    assert m.coeff == 16
+    assert m.base == 8
+
+
 def test_floormod():
     analyzer = tvm.arith.Analyzer()
     x, y = tvm.tirx.Var("x", "int32"), tvm.tirx.Var("y", "int32")
