@@ -37,6 +37,10 @@ bool IsCUDA(const Target& target);
 
 Stmt CallBuiltinOp(const Op& op, const Array<PrimExpr>& args);
 
+bool IsGlobal(const Buffer& buffer);
+
+bool IsShared(const Buffer& buffer);
+
 /********************* Copy Ops **********************/
 enum class CopyInstType { kBufferLoad, kCUDAcpasync };
 

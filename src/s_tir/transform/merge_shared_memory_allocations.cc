@@ -434,8 +434,12 @@ class SharedMemoryRewriter : public StmtExprMutator {
                   {op->args[0], merged_buf_var_, extra_offset + offset, extent, op->args[4]});
     } else if (op->op.same_as(builtin::ptx_cp_async())) {
       TVM_FFI_ICHECK((op->args.size() == 5U) || (op->args.size() == 6U));
-      DataType dtype = op->dtype;
       Var buffer = Downcast<Var>(op->args[0]);
+      const auto* ptr_type = buffer->type_annotation.as<PointerTypeNode>();
+      TVM_FFI_ICHECK(ptr_type) << "The buffer should be a pointer type.";
+      const auto* prim_type = ptr_type->element_type.as<PrimTypeNode>();
+      TVM_FFI_ICHECK(prim_type) << "The buffer should be a pointer to a primitive type.";
+      DataType dtype = DataType(prim_type->dtype);
       if (!IsAppropriateSharedMemory(buffer)) {
         return StmtExprMutator::VisitExpr_(op);
       }

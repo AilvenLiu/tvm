@@ -601,7 +601,6 @@ Pass LowerTIRp() {
 
     if (target->kind->name == "cuda" && target->kind->default_device_type == kDLCUDA) {
       // CUDA specific lowering passes
-      // Preprocess barriers
       n->body = BarrierToBarrierArray::Convert(n->body);
       n->body = CUDABarrierArrayAllocator::Allocate(n->body);
     }

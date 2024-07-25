@@ -31,6 +31,12 @@ namespace tvm {
 namespace tir {
 namespace tirp {
 
+inline bool IsGlobal(const Buffer& buffer) { return buffer.scope() == "global"; }
+
+inline bool IsShared(const Buffer& buffer) {
+  return buffer.scope() == "shared" || buffer.scope() == "shared.dyn";
+}
+
 Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& dst_buffer_region,
                     ScheduleContext context, CopyInstType inst_type) {
   const auto& src = src_buffer_region->buffer;
@@ -64,17 +70,16 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
   }
   /****************************** Schedule Dispatch ******************************/
   // Currently only support copy between global and shared memory
-  CHECK((src.scope() == "global" && dst.scope() == "shared") ||
-        (src.scope() == "shared" && dst.scope() == "global"))
+  CHECK((IsGlobal(src) && IsShared(dst)) || (IsShared(src) && IsGlobal(dst)))
       << "ValueError: Unsupported copy between " << src.scope() << " and " << dst.scope();
   // Check the layouts
   const SwizzleLayoutNode* swizzle = nullptr;
-  if (src.scope() == "global" && dst.scope() == "shared") {
+  if (IsGlobal(src) && IsShared(dst)) {
     swizzle = dst->layout.as<SwizzleLayoutNode>();
     CHECK(IsTrivialLayout(src->layout.value())) << "ValueError: src buffer layout must be trivial";
     CHECK(IsTrivialLayout(dst->layout.value()) || swizzle != nullptr)
         << "ValueError: dst buffer layout must be trivial or swizzle";
-  } else if (src.scope() == "shared" && dst.scope() == "global") {
+  } else if (IsShared(src) && IsGlobal(dst)) {
     swizzle = src->layout.as<SwizzleLayoutNode>();
     CHECK(IsTrivialLayout(src->layout.value()) || swizzle != nullptr)
         << "ValueError: src buffer layout must be trivial or swizzle";
@@ -158,7 +163,7 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
     copy_inst = For(vec, 0, vec_len.value(), ForKind::kVectorized, copy_inst);
   } else if (inst_type == CopyInstType::kCUDAcpasync) {
     // vectorized copy using CUDA cpasync
-    CHECK(src.scope() == "global" && dst.scope() == "shared") << "ValueError: Unsupported copy";
+    CHECK(IsGlobal(src) && IsShared(dst)) << "ValueError: Unsupported copy";
     copy_inst = CallBuiltinOp(builtin::ptx_cp_async(),
                               {dst->data, dst.OffsetOf_p(dst_indices), src->data,
                                src.OffsetOf_p(src_indices), vec_len.value() * src->dtype.bytes()});

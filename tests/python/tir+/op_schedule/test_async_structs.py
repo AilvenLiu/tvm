@@ -36,7 +36,7 @@ def test_barrier_cta():
             tid = T.thread_id([128], parent="cta")
 
             with T.cta():
-                A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
+                A_smem = T.alloc_buffer([64], dtype="float32", scope="shared.dyn")
                 b = Tp.alloc_barrier(thread_scope="cta", name_hint="b")
 
                 with T.thread():
@@ -61,7 +61,7 @@ def test_barrier_cta():
                 for blockIdx in T.thread_binding(8, thread="blockIdx.x"):
                     for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
                         with T.cta():
-                            A_smem = T.alloc_buffer((64,), scope="shared", logical_scope="cta")
+                            A_smem = T.alloc_buffer((64,), scope="shared.dyn")
                             b = Tp.alloc_barrier_array("cta", 1, "b")
                             T.cuda_barrier_create("cta", 0, 1)
                             with T.thread():
@@ -97,11 +97,11 @@ def test_barrier_cta():
 
 
 def test_pipeline_no_specialize_cta():
-    # fmt: off
     N = 32 * 32
     M = 128 * 32
-    N_STAGES = 1
+    N_STAGES = 3
 
+    # fmt: off
     @T.prim_func(tirp=True)
     def test(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (N, M), "float32", scope="global", 
@@ -114,9 +114,9 @@ def test_pipeline_no_specialize_cta():
             tx = T.thread_id([128], parent="cta")
 
             with T.cta():
-                A_smem = T.alloc_buffer([N_STAGES, 32, 128], dtype="float32", scope="shared", 
+                A_smem = T.alloc_buffer([N_STAGES, 32, 128], dtype="float32", scope="shared.dyn", 
                                         layout=T.TileLayout.from_nested_tuple((N_STAGES, 32, 128)))
-                O_smem = T.alloc_buffer([32, 128], dtype="float32", scope="shared", 
+                O_smem = T.alloc_buffer([32, 128], dtype="float32", scope="shared.dyn", 
                                         layout=T.TileLayout.from_nested_tuple((32, 128)))
 
                 pipe = Tp.alloc_pipeline(thread_scope="cta", depth=0, specialize=False)
@@ -142,7 +142,7 @@ def test_pipeline_no_specialize_cta():
                             O_smem[k, tx] += A_smem[j % N_STAGES, k, tx]
                         T.tvm_storage_sync("shared")
 
-                # pipe.consumer_wait(num_stages=0)
+                pipe.consumer_wait(num_stages=0)
                 for j in range(N_STAGES - 1):
                     i = T.meta_var(j + M // 128 - N_STAGES + 1)
                     with T.thread():
@@ -163,38 +163,42 @@ def test_pipeline_no_specialize_cta():
                 for blockIdx in T.thread_binding(32, thread="blockIdx.x"):
                     for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
                         with T.cta():
-                            A_smem = T.alloc_buffer((4096,), scope="shared", logical_scope="cta")
-                            O_smem = T.alloc_buffer((4096,), scope="shared", logical_scope="cta")
+                            A_smem = T.alloc_buffer((12288,), scope="shared.dyn", logical_scope="cta")
+                            O_smem = T.alloc_buffer((4096,), scope="shared.dyn", logical_scope="cta")
                             pipeline = Tp.alloc_pipeline("cta", 0, False, "")
                             with T.thread():
                                 for k in range(32):
                                     O_smem[k * 128 + threadIdx] = T.float32(0)
                                 T.tvm_storage_sync("shared")
-                            for i in range(0):
+                            for i in range(2):
                                 with T.thread():
                                     for s in range(8):
-                                        T.ptx_cp_async("void", A_smem.data, i * 4096 + s * 512 + threadIdx * 4, A.data, (blockIdx * 131072 + s * 16384 + threadIdx // 32 * 4096 + i * 128 + threadIdx % 32 * 4) // 4194304 * 4194304 + blockIdx * 131072 + s * 16384 + threadIdx // 32 * 4096 + i * 128 + threadIdx % 32 * 4, 16)
+                                        T.ptx_cp_async("void", A_smem.data, i * 4096 + s * 512 + threadIdx * 4, A.data, blockIdx * 131072 + s * 16384 + threadIdx // 32 * 4096 + i * 128 + threadIdx % 32 * 4, 16)
                                     T.ptx_commit_group()
-                            for j in range(32):
+                            for j in range(30):
                                 with T.thread():
                                     for s in range(8):
-                                        T.ptx_cp_async("void", A_smem.data, s * 512 + threadIdx * 4, A.data, blockIdx * 131072 + s * 16384 + threadIdx // 32 * 4096 + j * 128 + threadIdx % 32 * 4, 16)
+                                        T.ptx_cp_async("void", A_smem.data, (j + 2) % 3 * 4096 + s * 512 + threadIdx * 4, A.data, blockIdx * 131072 + s * 16384 + threadIdx // 32 * 4096 + j * 128 + threadIdx % 32 * 4 + 256, 16)
                                     T.ptx_commit_group()
-                                    T.ptx_wait_group(0)
+                                    T.ptx_wait_group(2)
                                     T.tvm_storage_sync("shared")
                                     for k in range(32):
-                                        O_smem[k * 128 + threadIdx] = O_smem[k * 128 + threadIdx] + A_smem[k * 128 + threadIdx]
+                                        O_smem[k * 128 + threadIdx] = O_smem[k * 128 + threadIdx] + A_smem[j % 3 * 4096 + k * 128 + threadIdx]
                                     T.tvm_storage_sync("shared")
-                            for j in range(0):
+                            with T.thread():
+                                T.ptx_wait_group(0)
+                                T.tvm_storage_sync("shared")
+                            for j in range(2):
                                 with T.thread():
                                     for k in range(32):
-                                        O_smem[k * 128 + threadIdx] = O_smem[k * 128 + threadIdx] + A_smem[k * 128 + threadIdx]
+                                        O_smem[k * 128 + threadIdx] = O_smem[k * 128 + threadIdx] + A_smem[j * 4096 + k * 128 + threadIdx]
                                 T.tvm_storage_sync("shared")
                             with T.thread():
                                 for s in range(8):
                                     for vec in T.vectorized(4):
                                         B_1 = T.Buffer((131072,), data=B.data, logical_scope="kernel")
                                         B_1[blockIdx * 4096 + s * 512 + threadIdx * 4 + vec] = O_smem[s * 512 + threadIdx * 4 + vec]
+                                T.tvm_storage_sync("shared")
     # fmt: on
 
     target = tvm.target.Target("nvidia/geforce-rtx-4090")
