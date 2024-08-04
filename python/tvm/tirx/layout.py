@@ -290,6 +290,15 @@ class TileLayout(TLayout):
     def normalize(layout: "TileLayout") -> "TileLayout":
         return get_global_func("tir.NormalizeTileLayout")(layout)
 
+    @staticmethod
+    def is_tile_inner(tile_layout: "TileLayout", inner: "TileLayout") -> bool:
+        # assume outer must be continuous with exactly one layer
+        return get_global_func("tir.IsTileLayout_Inner")(tile_layout, inner)
+
+    @staticmethod
+    def is_tile_outer(tile_layout: "TileLayout", outer: "TileLayout") -> bool:
+        return get_global_func("tir.IsTileLayout_Outer")(tile_layout, outer)
+
 
 @register_object("tir.SwizzleLayout")
 class SwizzleLayout(TLayout):

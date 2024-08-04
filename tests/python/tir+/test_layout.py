@@ -517,25 +517,64 @@ def test_normalize_tile_layout():
 
 
 def test_tile_layout():
+    def normalize_tile_layout(layout):
+        return T.TileLayout.normalize(layout)
+
     layout = T.TileLayout.from_nested_tuple(data=8, strides=1)
     layout_tile = T.TileLayout.from_nested_tuple(data=((8, 8),), strides=((8, 1),))
     assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout))
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, layout
+    ), "The layout is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_outer(
+        layout_tile, layout
+    ), "The layout_tile is a tiling for layout."
 
     layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
     layout_tile = T.TileLayout.from_nested_tuple(data=((8, 8), (8, 8)), strides=((512, 8), (64, 1)))
     assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout))
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, layout
+    ), "The layout is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_outer(
+        layout_tile, layout
+    ), "The layout_tile is a tiling for layout."
 
     layout2 = T.TileLayout.from_nested_tuple(data=(2, 4), strides=(1, 2))
     layout_tile = T.TileLayout.from_nested_tuple(data=((8, 2), (8, 4)), strides=((64, 1), (8, 2)))
     assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout2))
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, layout2
+    ), "The layout2 is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_outer(
+        layout_tile, layout
+    ), "The layout_tile is a tiling for layout."
+    assert not T.TileLayout.is_tile_inner(
+        layout_tile, layout
+    ), "The layout2 is used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_outer(
+        layout_tile, layout2
+    ), "The layout_tile is a tiling for layout."
 
     layout3 = T.TileLayout.from_nested_tuple(data=((4, 2), (2, 4)), strides=((16, 8), (1, 2)))
     layout_tile = T.TileLayout.from_nested_tuple(
         data=((8, (4, 2)), (8, (2, 4))), strides=((512, (16, 8)), (64, (1, 2)))
     )
     assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout3))
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, layout3
+    ), "The layout3 is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_outer(
+        layout_tile, layout
+    ), "The layout_tile is a tiling for layout."
+    assert not T.TileLayout.is_tile_inner(
+        layout_tile, layout
+    ), "The layout3 is not used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_outer(
+        layout_tile, layout3
+    ), "The layout_tile is not a tiling for layout."
 
-    # Tile over a sharded layout
+    # Tile over a sharded layout - 1
     layout = T.TileLayout.from_nested_tuple(
         data=((T.S(0), 1), (T.S(1), 2)),
         strides=((-1, 2), (-1, 1)),
@@ -553,12 +592,218 @@ def test_tile_layout():
         from_to=("thread", "warp"),
     )
     assert_structural_equal(layout_expected, layout_tile)
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, layout
+    ), "The layout is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_outer(
+        layout_tile, T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    ), "The layout is used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_inner(
+        layout_tile, T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    ), "The layout is not used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_outer(
+        layout_tile, layout
+    ), "The layout is not used for tiling layout_tile."
+
+    # Tile over a sharded layout - 2
+    layout = T.TileLayout.from_nested_tuple(
+        data=(T.S(0), T.S(1)),
+        strides=(-1, -1),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+    layout_tile = T.TileLayout.tile(
+        outer=T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1)),
+        inner=layout,
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=((8, T.S(0)), (8, T.S(1))),
+        strides=((8, -1), (1, -1)),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+    assert_structural_equal(layout_expected, layout_tile)
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, layout
+    ), "The layout is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_outer(
+        layout_tile, T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    ), "The layout is used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_inner(
+        layout_tile, T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    ), "The layout is not used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_outer(
+        layout_tile, layout
+    ), "The layout is not used for tiling layout_tile."
+
+    # Tile over a complicated sharded layout - 3
+    layout = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), 1), (T.S(1), 2)),
+        strides=((-1, 2), (-1, 1)),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+
+    outer = T.TileLayout.from_nested_tuple(data=((8, 2), (8, 4)), strides=((8, 4), (2, 1)))
+    layout_tile = T.TileLayout.tile(
+        outer=outer,
+        inner=layout,
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=(((8, 2), (T.S(0), 1)), ((8, 4), (T.S(1), 2))),
+        strides=(((16, 8), (-1, 2)), ((4, 2), (-1, 1))),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+    assert_structural_equal(layout_expected, layout_tile)
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, layout
+    ), "The layout is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_outer(
+        layout_tile, outer
+    ), "The layout is used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_inner(
+        layout_tile, outer
+    ), "The layout is not used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_outer(
+        layout_tile, layout
+    ), "The layout is not used for tiling layout_tile."
+
+    # Normalized Tile Layout Test - 4 (tile < inner)
+    outer = T.TileLayout.from_nested_tuple(data=(4, 2, 1), strides=(2, 1, 1))
+    inner = T.TileLayout.from_nested_tuple(data=(2, 4, 1), strides=(2, 3, 1))
+    layout_tile = T.TileLayout.tile(
+        outer,
+        inner,
+    )
+
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, inner
+    ), "The inner is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), inner
+    ), "The inner is used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), outer
+    ), "The outer is not used for tiling layout_tile as inner."
+
+    # Normalized Tile Layout Test - 5 (tile = inner)
+    outer = T.TileLayout.from_nested_tuple(data=(8, 2), strides=(2, 1))
+    inner = T.TileLayout.from_nested_tuple(data=(2, 4), strides=(4, 1))
+    layout_tile = T.TileLayout.tile(
+        outer,
+        inner,
+    )
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, inner
+    ), "The inner is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), inner
+    ), "The inner is used for tiling layout_tile."
+
+    # Normalized Tile Layout Test - 6 (tile < inner)
+    outer = T.TileLayout.from_nested_tuple(data=(8, 4, 1), strides=(4, 1, 4))
+    inner = T.TileLayout.from_nested_tuple(data=(2, 1, 1), strides=(4, 3, 1))
+    inner_tmp = T.TileLayout.from_nested_tuple(data=(8, 2, 2), strides=(4, 2, 2))
+    layout_tile = T.TileLayout.tile(
+        outer,
+        inner,
+    )
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, inner
+    ), "The inner is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), inner
+    ), "The inner is used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), normalize_tile_layout(outer)
+    ), "The layout is not used for tiling layout_tile as inner."
+    assert not T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), inner_tmp
+    ), "The layout is not used for tiling layout_tile as inner."
+
+    # Normalized Tile Layout Test - 7 (tile = inner)
+    outer = T.TileLayout.from_nested_tuple(data=(8, 8, 4), strides=(32, 4, 1))
+    inner = T.TileLayout.from_nested_tuple(data=(1, 2, 1), strides=(4, 3, 1))
+    inner_tmp = T.TileLayout.from_nested_tuple(data=(1, 2, 2), strides=(8, 4, 3))
+    layout_tile = T.TileLayout.tile(
+        outer,
+        inner,
+    )
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, inner
+    ), "The inner is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), inner
+    ), "The inner is used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), normalize_tile_layout(outer)
+    ), "The layout is not used for tiling layout_tile as inner."
+    assert not T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), inner_tmp
+    ), "The layout is not used for tiling layout_tile as inner."
+
+    # Normalized Tile Layout Test - 8 (tile = inner w/ device)
+    outer = T.TileLayout.from_nested_tuple(data=(8, 8, 4), strides=(32, 4, 1))
+    inner = T.TileLayout.from_nested_tuple(
+        data=(8, (T.S(0), 1), (T.S(1), 2)),
+        strides=(4, (-1, 2), (-1, 1)),
+        device=(8, 4),
+        from_to=("thread", "warp"),
+    )
+    layout_tile = T.TileLayout.tile(
+        outer,
+        inner,
+    )
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, inner
+    ), "The inner is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), inner
+    ), "The inner is used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), normalize_tile_layout(outer)
+    ), "The layout is not used for tiling layout_tile as inner."
+
+    # Normalized Tile Layout Test - 9 (tile = inner w/ device + diff major-dim)
+    outer = T.TileLayout.from_nested_tuple(data=(16, 8, 4), strides=(1, 64, 16))
+    inner = T.TileLayout.from_nested_tuple(data=((2, 4), 2, 2), strides=((4, 1), 4, 3))
+    inner_tmp = T.TileLayout.from_nested_tuple(data=(1, 2, 2), strides=(8, 4, 3))
+    layout_tile = T.TileLayout.tile(
+        outer,
+        inner,
+    )
+    assert T.TileLayout.is_tile_inner(
+        layout_tile, inner
+    ), "The inner is used for tiling layout_tile."
+    assert T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), inner
+    ), "The inner is used for tiling layout_tile."
+    assert not T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), normalize_tile_layout(outer)
+    ), "The layout is not used for tiling layout_tile as inner."
+    assert not T.TileLayout.is_tile_inner(
+        normalize_tile_layout(layout_tile), inner_tmp
+    ), "The layout is not used for tiling layout_tile as inner."
 
     with pytest.raises(Exception):
         # dims mismatch
         layout = T.TileLayout.from_nested_tuple(data=8, strides=1)
         layout2 = T.TileLayout.from_nested_tuple(data=(2, 4), strides=(1, 2))
         T.TileLayout.tile(layout, layout2)
+
+    with pytest.raises(Exception):
+        # outer must not have device tree
+        layout = T.TileLayout.from_nested_tuple(
+            data=((T.S(0), 1), (T.S(1), 2)),
+            strides=((-1, 2), (-1, 1)),
+            device=(8, 4),
+            from_to=("thread", "warp"),
+        )
+        T.TileLayout.tile(
+            outer=layout,
+            inner=T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1)),
+        )
 
 
 def test_shard_layout():

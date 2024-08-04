@@ -1021,7 +1021,7 @@ class EquivIterFuser : public IterTreeMutator {
                 Check_device_adjacent(device1->second, device2->second,
                                       const_cast<tvm::tirx::IterTreeSplit*>(&(*dev_tree_)->root));
             if (fused_dev_node != nullptr) {
-              // TODO: fuse child1 and child2 in data tree to a new single node, modify coeff,
+              // fuse child1 and child2 in data tree to a new single node, modify coeff,
               // attr_map, split_map accordingly based on fused_dev_node
               // Fuse child1 and child2 in data tree to a new single node
               ICHECK(children_cnt >= 2)
@@ -1161,6 +1161,620 @@ TileLayout Tile(TileLayout outer, TileLayout inner) {
 TVM_REGISTER_GLOBAL("tirx.TileLayoutTile").set_body_typed([](TileLayout outer, TileLayout inner) {
   return Tile(outer, inner);
 });
+
+/******** Tile - Check Inner Layout ********/
+bool CompareSubStructureTrees(const IterTreeSplitNode* tiled_layout_node,
+                              const IterTreeSplitNode* layout_node, arith::Analyzer& analyzer) {
+  if (tiled_layout_node->children.size() != layout_node->children.size()) {
+    return false;
+  }
+
+  for (size_t i = 0; i < tiled_layout_node->children.size(); i++) {
+    const auto* tiled_layout_child = tiled_layout_node->children[i].as<IterTreeSplitNode>();
+    const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
+
+    if (!tiled_layout_child || !layout_child) {
+      return false;
+    }
+
+    if (!analyzer.CanProveEqual(tiled_layout_child->extent, layout_child->extent)) {
+      return false;
+    }
+
+    if (!CompareSubStructureTrees(tiled_layout_child, layout_child, analyzer)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool CompareStride_Inner(const IterTreeSplitNode* tiled_layout_node,
+                         const IterTreeSplitNode* layout_node,
+                         const DataIterTree::CoeffMap& layout_coeff_map,
+                         const DataIterTree::CoeffMap& tiled_layout_coeff_map,
+                         arith::Analyzer& analyzer,
+                         DeviceIterTree::AttrMap* layout_attr_map = nullptr,
+                         DeviceIterTree::AttrMap* tiled_layout_attr_map = nullptr,
+                         TileLayout::SplitMap* layout_split_map = nullptr,
+                         TileLayout::SplitMap* tiled_layout_split_map = nullptr,
+                         Optional<Array<IterTreeBase>> layout_dev_leaves = NullOpt,
+                         Optional<Array<IterTreeBase>> tiled_layout_dev_leaves = NullOpt) {
+  if (tiled_layout_node->children.size() != layout_node->children.size()) {
+    return false;
+  }
+  if (tiled_layout_node->children.size() == 0) {
+    auto tiled_layout_it = tiled_layout_coeff_map.find(GetRef<IterTreeSplit>(tiled_layout_node));
+    auto layout_it = layout_coeff_map.find(GetRef<IterTreeSplit>(layout_node));
+    if (tiled_layout_it == tiled_layout_coeff_map.end() || layout_it == layout_coeff_map.end()) {
+      LOG(FATAL) << "InternalError: Coefficient not found for node";
+    }
+    // search tiled_layout_device and layout_device mapped by tiled_layout_node and
+    // layout_node, respectively, from SplitMap and AttrMap and check two devices are essentially
+    // the same device.
+    if (layout_dev_leaves.defined() && tiled_layout_dev_leaves.defined()) {
+      // device tree exists
+      auto tiled_layout_device_it =
+          tiled_layout_split_map->find(GetRef<IterTreeSplit>(tiled_layout_node));
+      auto layout_device_it = layout_split_map->find(GetRef<IterTreeSplit>(layout_node));
+      bool layout_found = tiled_layout_device_it != tiled_layout_split_map->end();
+      bool tiled_layout_found = tiled_layout_device_it != tiled_layout_split_map->end();
+      if (layout_found == tiled_layout_found && layout_found) {
+        // check if it's the same device
+        const auto& tiled_layout_device = tiled_layout_device_it->second;
+        const auto& layout_device = layout_device_it->second;
+
+        auto tiled_layout_attr_it = tiled_layout_attr_map->find(tiled_layout_device);
+        auto layout_attr_it = layout_attr_map->find(layout_device);
+        // 1. type check
+        if (tiled_layout_attr_it->second->type != layout_attr_it->second->type) {
+          return false;
+        }
+        // 2. extent check
+        const auto& tiled_layout_device_extent =
+            Downcast<IterTreeSplit>(tiled_layout_device)->extent;
+        const auto& layout_device_extent = Downcast<IterTreeSplit>(layout_device)->extent;
+        if (!analyzer.CanProveEqual(tiled_layout_device_extent, layout_device_extent)) {
+          return false;
+        }
+        // 3. position check:
+        // check if tiled_layout_device and layout_device are on the same index of
+        // tiled_layout_dev_leaves and layout_dev_leaves, respectively
+        // PS: since the device structure has been checked before, if device nodes have the same
+        // index they are from the same position of each device tree
+        for (size_t i = 0; i < tiled_layout_dev_leaves.value().size(); i++) {
+          bool tiled_layout_dev_child_found =
+              tiled_layout_dev_leaves.value()[i] == tiled_layout_device;
+          bool layout_dev_child_found = layout_dev_leaves.value()[i] == layout_device;
+          if (layout_dev_child_found != tiled_layout_dev_child_found) return false;
+        }
+      } else if (layout_found != tiled_layout_found) {
+        // mismatch status
+        return false;
+      }
+    }
+    return analyzer.CanProveEqual(tiled_layout_it->second, layout_it->second);
+  } else {
+    for (size_t i = 0; i < tiled_layout_node->children.size(); i++) {
+      const auto* tiled_layout_child = tiled_layout_node->children[i].as<IterTreeSplitNode>();
+      const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
+      if (!CompareStride_Inner(tiled_layout_child, layout_child, layout_coeff_map,
+                               tiled_layout_coeff_map, analyzer, layout_attr_map,
+                               tiled_layout_attr_map, layout_split_map, tiled_layout_split_map,
+                               layout_dev_leaves, tiled_layout_dev_leaves)) {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
+bool CompareExtentAndStride_Inner(const IterTreeSplitNode* tiled_layout_node,
+                                  const IterTreeSplitNode* layout_node,
+                                  const DataIterTree::CoeffMap& layout_coeff_map,
+                                  const DataIterTree::CoeffMap& tiled_layout_coeff_map,
+                                  arith::Analyzer& analyzer,
+                                  DeviceIterTree::AttrMap* layout_attr_map = nullptr,
+                                  DeviceIterTree::AttrMap* tiled_layout_attr_map = nullptr,
+                                  TileLayout::SplitMap* layout_split_map = nullptr,
+                                  TileLayout::SplitMap* tiled_layout_split_map = nullptr,
+                                  Optional<Array<IterTreeBase>> layout_dev_leaves = NullOpt,
+                                  Optional<Array<IterTreeBase>> tiled_layout_dev_leaves = NullOpt) {
+  // Compare extents
+  if (!analyzer.CanProveEqual(tiled_layout_node->extent, layout_node->extent)) {
+    return false;
+  }
+  // Compare strides (coefficients)
+  return CompareStride_Inner(tiled_layout_node, layout_node, layout_coeff_map,
+                             tiled_layout_coeff_map, analyzer, layout_attr_map,
+                             tiled_layout_attr_map, layout_split_map, tiled_layout_split_map,
+                             layout_dev_leaves, tiled_layout_dev_leaves);
+}
+
+bool CheckDataSubtree_Inner(const IterTreeSplitNode* tiled_layout_node,
+                            const IterTreeSplitNode* layout_node,
+                            const DataIterTree::CoeffMap& layout_coeff_map,
+                            const DataIterTree::CoeffMap& tiled_layout_coeff_map,
+                            arith::Analyzer& analyzer,
+                            DeviceIterTree::AttrMap* layout_attr_map = nullptr,
+                            DeviceIterTree::AttrMap* tiled_layout_attr_map = nullptr,
+                            TileLayout::SplitMap* layout_split_map = nullptr,
+                            TileLayout::SplitMap* tiled_layout_split_map = nullptr,
+                            Optional<Array<IterTreeBase>> layout_dev_leaves = NullOpt,
+                            Optional<Array<IterTreeBase>> tiled_layout_dev_leaves = NullOpt) {
+  if (tiled_layout_node->children.size() != layout_node->children.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < layout_node->children.size(); i++) {
+    const auto* tiled_layout_child_root = tiled_layout_node->children[i].as<IterTreeSplitNode>();
+    size_t sub_children_cnt = tiled_layout_child_root->children.size();
+    if (sub_children_cnt < 2) return false;
+    const auto* tiled_layout_child =
+        tiled_layout_child_root->children[sub_children_cnt - 1].as<IterTreeSplitNode>();
+    const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
+    if (!tiled_layout_child || !layout_child ||
+        !CompareExtentAndStride_Inner(
+            tiled_layout_child, layout_child, layout_coeff_map, tiled_layout_coeff_map, analyzer,
+            layout_attr_map, tiled_layout_attr_map, layout_split_map, tiled_layout_split_map,
+            layout_dev_leaves, tiled_layout_dev_leaves)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool CheckTileDataSubtree_Inner(const IterTreeBase& tiled_layout_node,
+                                const IterTreeBase& layout_node,
+                                const DataIterTree::CoeffMap& layout_coeff_map,
+                                const DataIterTree::CoeffMap& tiled_layout_coeff_map,
+                                arith::Analyzer& analyzer,
+                                DeviceIterTree::AttrMap* layout_attr_map = nullptr,
+                                DeviceIterTree::AttrMap* tiled_layout_attr_map = nullptr,
+                                TileLayout::SplitMap* layout_split_map = nullptr,
+                                TileLayout::SplitMap* tiled_layout_split_map = nullptr,
+                                Optional<Array<IterTreeBase>> layout_dev_leaves = NullOpt,
+                                Optional<Array<IterTreeBase>> tiled_layout_dev_leaves = NullOpt) {
+  if (const auto* tiled_layout_split = tiled_layout_node.as<IterTreeSplitNode>()) {
+    if (const auto* layout_split = layout_node.as<IterTreeSplitNode>()) {
+      if (CheckDataSubtree_Inner(tiled_layout_split, layout_split, layout_coeff_map,
+                                 tiled_layout_coeff_map, analyzer, layout_attr_map,
+                                 tiled_layout_attr_map, layout_split_map, tiled_layout_split_map,
+                                 layout_dev_leaves, tiled_layout_dev_leaves)) {
+        return true;
+      }
+      for (const auto& child : tiled_layout_split->children) {
+        if (CheckTileDataSubtree_Inner(child, layout_node, layout_coeff_map, tiled_layout_coeff_map,
+                                       analyzer, layout_attr_map, tiled_layout_attr_map,
+                                       layout_split_map, tiled_layout_split_map, layout_dev_leaves,
+                                       tiled_layout_dev_leaves)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+std::vector<int> PrimeFactorize(int n) {
+  std::vector<int> factors;
+
+  while (n % 2 == 0) {
+    factors.push_back(2);
+    n /= 2;
+  }
+
+  int sqrt_n = static_cast<int>(std::sqrt(n));  // Cast to int to ensure integer comparison
+
+  for (int i = 3; i <= sqrt_n; i += 2) {
+    while (n % i == 0) {
+      factors.push_back(i);
+      n /= i;
+    }
+  }
+
+  if (n > 2) {
+    factors.push_back(n);
+  }
+
+  return factors;
+}
+
+void partitionHelper(const std::vector<int>& factors, size_t n, size_t index,
+                     std::vector<std::vector<int>>& current,
+                     std::vector<std::vector<int>>& result) {
+  if (index == factors.size()) {
+    std::vector<int> partitionProducts;
+    for (const auto& bucket : current) {
+      int product = 1;
+      for (const auto& factor : bucket) {
+        product *= factor;
+      }
+      partitionProducts.push_back(product);
+    }
+    result.push_back(partitionProducts);
+    return;
+  }
+
+  for (size_t i = 0; i < n; ++i) {
+    current[i].push_back(factors[index]);
+    partitionHelper(factors, n, index + 1, current, result);
+    current[i].pop_back();
+  }
+}
+
+std::vector<std::vector<int>> GetFactorPartitions(const std::vector<int>& factors, size_t n) {
+  std::vector<std::vector<int>> result;
+  std::vector<std::vector<int>> current(n);
+  partitionHelper(factors, n, 0, current, result);
+  return result;
+}
+
+void generate_strides(const std::vector<PrimExpr>& extent, PrimExpr init_stride_expr,
+                      int current_index, std::vector<PrimExpr>& current_stride,
+                      std::vector<bool>& used, std::vector<std::vector<PrimExpr>>& result) {
+  if (std::all_of(used.begin(), used.end(), [](bool v) { return v; })) {
+    result.push_back(current_stride);
+    return;
+  }
+
+  // Calculate the product for the next stride
+  PrimExpr product = current_stride[current_index] * extent[current_index];
+
+  for (size_t i = 0; i <= extent.size() - 1; ++i) {
+    if (!used[i]) {
+      used[i] = true;
+      current_stride[i] = product;
+      generate_strides(extent, init_stride_expr, i, current_stride, used, result);
+      used[i] = false;
+    }
+  }
+}
+
+std::vector<std::vector<PrimExpr>> generate_all_strides(const std::vector<PrimExpr>& extent,
+                                                        PrimExpr init_stride_expr) {
+  int n = extent.size();
+  std::vector<std::vector<PrimExpr>> result;
+  std::vector<PrimExpr> current_stride(n);
+  std::vector<bool> used(n, false);
+  for (size_t i = 0; i <= extent.size() - 1; ++i) {
+    used[i] = true;
+    current_stride[i] = init_stride_expr;
+    generate_strides(extent, init_stride_expr, i, current_stride, used, result);
+    used[i] = false;
+  }
+  return result;
+}
+
+bool Factorization_Inner(TileLayout tiled_layout, TileLayout inner, arith::Analyzer& analyzer,
+                         size_t inner_children_size = 0, size_t tile_children_size = 0,
+                         size_t unit_inner_size = 0) {
+  const auto* tiled_layout_node = tiled_layout->data_tree->root.as<IterTreeSplitNode>();
+  const auto* inner_node = inner->data_tree->root.as<IterTreeSplitNode>();
+  PrimExpr cosize_inner = inner->GetCosize();
+  auto tiled_extent_expr = tiled_layout_node->extent;
+  auto inner_product_expr = inner_node->extent;
+
+  if (tile_children_size == inner_children_size) {
+    // fast check
+    std::vector<PrimExpr> new_extents;
+    std::vector<IterTreeBase> new_children;
+    DataIterTree::CoeffMap new_coeff_map;
+    auto tilelayout_coeff_map = tiled_layout->data_tree.GetCoeffMap();
+    for (size_t i = 0; i < tiled_layout_node->children.size(); ++i) {
+      auto* tile_child = tiled_layout_node->children[i].as<IterTreeSplitNode>();
+      auto tile_child_root = GetRef<IterTreeSplit>(tile_child);
+      auto* inner_child = inner_node->children[i].as<IterTreeSplitNode>();
+      auto inner_child_root = GetRef<IterTreeSplit>(inner_child);
+      PrimExpr inner_child_extent = inner_child_root->extent;
+      PrimExpr tile_child_extent = tile_child_root->extent;
+      PrimExpr factor_extent_expr = tile_child_extent / inner_child_extent;
+      const int64_t* factor = as_const_int(factor_extent_expr);
+      if (!factor) {
+        return false;
+      }
+      auto new_tile_child = IterTreeSplit(factor_extent_expr, {});
+      new_children.push_back(new_tile_child);
+      new_extents.push_back(factor_extent_expr);
+    }
+    PrimExpr init_stride_expr = make_const(tiled_extent_expr->dtype, 1);  // must be continuous
+    std::vector<std::vector<PrimExpr>> all_strides =
+        generate_all_strides(new_extents, init_stride_expr);
+    for (const auto& one_strides : all_strides) {
+      PrimExpr combined_extent = 1;
+      for (const auto& extent : new_extents) {
+        combined_extent = combined_extent * extent;
+      }
+      auto root = IterTreeSplit(combined_extent, new_children);
+      DataIterTree::CoeffMap new_coeff_map;
+      for (size_t i = 0; i < new_children.size(); ++i) {
+        new_coeff_map[new_children[i]] = one_strides[i];
+      }
+      DataIterTree new_data_tree(root, Array<PrimExpr>(one_strides.begin(), one_strides.end()));
+      Optional<DeviceIterTree> device_tree = NullOpt;
+      TileLayout new_outer =
+          TileLayout::FromMaps(root, NullOpt, new_coeff_map, {}, {}, NullOpt, NullOpt);
+      TileLayout new_tile_layout = Tile(new_outer, inner);
+      new_tile_layout = NormalizeTileLayout(new_tile_layout);
+      if (StructuralEqual()(new_tile_layout, tiled_layout)) {
+        return true;
+      }
+    }
+  } else {
+    PrimExpr factor_expr = tiled_extent_expr / inner_product_expr;
+    const int64_t* factor = as_const_int(factor_expr);
+    if (!factor) {
+      return false;
+    }
+    auto factors = PrimeFactorize(*factor);
+    auto partitions = GetFactorPartitions(factors, inner_node->children.size());
+    PrimExpr init_stride_expr = make_const(tiled_extent_expr->dtype, 1);  // must be continuous
+    // assume outer must be continuous
+    for (const auto& partition : partitions) {
+      std::vector<PrimExpr> new_extents;
+      for (const auto& part : partition) {
+        new_extents.push_back(part);
+      }
+      std::vector<std::vector<PrimExpr>> all_strides =
+          generate_all_strides(new_extents, init_stride_expr);
+      for (const auto& one_strides : all_strides) {
+        // reconstruct a layout based on one_strides and new_extents using
+        // Create a vector to hold the new children nodes
+        std::vector<IterTreeBase> new_children;
+        for (size_t i = 0; i < new_extents.size(); ++i) {
+          auto child = IterTreeSplit(new_extents[i], {});
+          new_children.push_back(child);
+        }
+        PrimExpr combined_extent = 1;
+        for (const auto& extent : new_extents) {
+          combined_extent = combined_extent * extent;
+        }
+        auto root = IterTreeSplit(combined_extent, new_children);
+        DataIterTree::CoeffMap new_coeff_map;
+        for (size_t i = 0; i < new_children.size(); ++i) {
+          new_coeff_map[new_children[i]] = one_strides[i];
+        }
+        DataIterTree new_data_tree(root, Array<PrimExpr>(one_strides.begin(), one_strides.end()));
+        Optional<DeviceIterTree> device_tree = NullOpt;  // Adjust as necessary
+        TileLayout new_outer =
+            TileLayout::FromMaps(root, NullOpt, new_coeff_map, {}, {}, NullOpt, NullOpt);
+        TileLayout new_tile_layout = Tile(new_outer, inner);
+        new_tile_layout = NormalizeTileLayout(new_tile_layout);
+        if (StructuralEqual()(new_tile_layout, tiled_layout)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+bool CheckTileDataSubtree_Inner_Extended(TileLayout tiled_layout, TileLayout inner,
+                                         arith::Analyzer& analyzer) {
+  TileLayout inner_removed = RemoveUnitIter(inner);
+  TileLayout tiled_layout_norm = NormalizeTileLayout(tiled_layout);
+  const IterTreeBase& tiled_layout_norm_node = tiled_layout_norm->data_tree->root;
+  const IterTreeBase& inner_node = inner->data_tree->root;
+  const IterTreeBase& inner_removed_node = inner_removed->data_tree->root;
+  if (const auto* tiled_layout_norm_node_split = tiled_layout_norm_node.as<IterTreeSplitNode>()) {
+    if (const auto* inner_node_split = inner_node.as<IterTreeSplitNode>()) {
+      if (const auto* inner_removed_node_split = inner_removed_node.as<IterTreeSplitNode>()) {
+        size_t tile_children_size = tiled_layout_norm_node_split->children.size();
+        size_t inner_children_size = inner_node_split->children.size();
+        size_t unit_inner_size = inner_children_size - inner_removed_node_split->children.size();
+        if (tile_children_size == 1 ||
+            (tile_children_size >= inner_children_size - unit_inner_size &&
+             tile_children_size <= inner_children_size)) {
+          return Factorization_Inner(tiled_layout_norm, inner, analyzer, inner_children_size,
+                                     tile_children_size, unit_inner_size);
+        } else {
+          return false;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+bool IsTileLayout_Inner(TileLayout tiled_layout, TileLayout layout) {
+  auto* layout_n = layout.operator->();
+  auto* tiled_layout_n = tiled_layout.operator->();
+  auto layout_coeff_map = layout_n->data_tree.GetCoeffMap();
+  auto tiled_layout_coeff_map = tiled_layout_n->data_tree.GetCoeffMap();
+  arith::Analyzer analyzer;
+  if (!tiled_layout->device_tree.defined() && !layout->device_tree.defined()) {
+    // no device tree defined
+    if (CheckTileDataSubtree_Inner(tiled_layout->data_tree->root, layout->data_tree->root,
+                                   layout_coeff_map, tiled_layout_coeff_map, analyzer)) {
+      return true;
+    }
+    return CheckTileDataSubtree_Inner_Extended(tiled_layout, layout, analyzer);
+  } else if (tiled_layout->device_tree.defined() && layout->device_tree.defined()) {
+    // device tree defined
+    // 1. check device tree structure
+    const auto& layout_dev_tree = layout->device_tree.value();
+    const auto& layout_device_root = layout_dev_tree->root;
+    const auto& layout_dev_leaves = layout_dev_tree.GetLeaves();
+    const auto& layout_data_tree = layout->data_tree;
+    const auto& layout_data_leaves = layout_data_tree.GetLeaves();
+    const auto& tiled_layout_dev_tree = tiled_layout->device_tree.value();
+    const auto& tiled_layout_device_root = tiled_layout_dev_tree->root;
+    const auto& tiled_layout_dev_leaves = tiled_layout_dev_tree.GetLeaves();
+    const auto& tiled_layout_data_tree = tiled_layout->data_tree;
+    const auto& tiled_layout_data_leaves = tiled_layout_data_tree.GetLeaves();
+    if (!CompareSubStructureTrees(tiled_layout_device_root.operator->(),
+                                  layout_device_root.operator->(), analyzer)) {
+      return false;
+    }
+    // 2. check data tree structure and mapping
+    auto layout_split_map = layout.GetSplitMap(layout_data_leaves, layout_dev_leaves);
+    auto tiled_layout_split_map =
+        tiled_layout.GetSplitMap(tiled_layout_data_leaves, tiled_layout_dev_leaves);
+    DeviceIterTree::AttrMap layout_attr_map = layout_dev_tree.GetAttrMap(layout_dev_leaves);
+    DeviceIterTree::AttrMap tiled_layout_attr_map =
+        tiled_layout_dev_tree.GetAttrMap(tiled_layout_dev_leaves);
+    if (CheckTileDataSubtree_Inner(tiled_layout->data_tree->root, layout->data_tree->root,
+                                   layout_coeff_map, tiled_layout_coeff_map, analyzer,
+                                   &layout_attr_map, &tiled_layout_attr_map, &layout_split_map,
+                                   &tiled_layout_split_map, layout_dev_leaves,
+                                   tiled_layout_dev_leaves)) {
+      return true;
+    }
+    return CheckTileDataSubtree_Inner_Extended(tiled_layout, layout, analyzer);
+  } else {
+    // device tree status mismatch
+    return false;
+  }
+}
+
+TVM_REGISTER_GLOBAL("tir.IsTileLayout_Inner")
+    .set_body_typed([](TileLayout tiled_layout, TileLayout layout) {
+      return IsTileLayout_Inner(tiled_layout, layout);
+    });
+
+/******** Tile - Check Outer Layout ********/
+bool CompareStride_Outer(const IterTreeSplitNode* tiled_layout_node,
+                         const IterTreeSplitNode* layout_node,
+                         const DataIterTree::CoeffMap& layout_coeff_map,
+                         const DataIterTree::CoeffMap& tiled_layout_coeff_map,
+                         PrimExpr cumulative_cosize, arith::Analyzer& analyzer,
+                         TileLayout::SplitMap* tiled_layout_split_map = nullptr) {
+  if (tiled_layout_node->children.size() != layout_node->children.size()) {
+    return false;
+  }
+
+  if (tiled_layout_node->children.size() == 0) {
+    auto tiled_layout_it = tiled_layout_coeff_map.find(GetRef<IterTreeSplit>(tiled_layout_node));
+    auto layout_it = layout_coeff_map.find(GetRef<IterTreeSplit>(layout_node));
+    if (tiled_layout_it == tiled_layout_coeff_map.end() || layout_it == layout_coeff_map.end()) {
+      LOG(FATAL) << "InternalError: Coefficient not found for node";
+    }
+    return analyzer.CanProveEqual(tiled_layout_it->second / cumulative_cosize, layout_it->second);
+  } else {
+    for (size_t i = 0; i < tiled_layout_node->children.size(); i++) {
+      const auto* tiled_layout_child = tiled_layout_node->children[i].as<IterTreeSplitNode>();
+      const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
+      if (!CompareStride_Outer(tiled_layout_child, layout_child, layout_coeff_map,
+                               tiled_layout_coeff_map, cumulative_cosize, analyzer)) {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
+bool CompareExtent_Outer(const IterTreeSplitNode* tiled_layout_node,
+                         const IterTreeSplitNode* layout_node, arith::Analyzer& analyzer) {
+  // Compare extents
+  if (!analyzer.CanProveEqual(tiled_layout_node->extent, layout_node->extent)) {
+    return false;
+  }
+  return true;
+}
+
+bool CheckDataSubtree_Outer(const IterTreeSplitNode* tiled_layout_node,
+                            const IterTreeSplitNode* layout_node,
+                            const DataIterTree::CoeffMap& layout_coeff_map,
+                            const DataIterTree::CoeffMap& tiled_layout_coeff_map,
+                            arith::Analyzer& analyzer,
+                            TileLayout::SplitMap* tiled_layout_split_map = nullptr) {
+  if (tiled_layout_node->children.size() != layout_node->children.size()) {
+    return false;
+  }
+  PrimExpr cumulative_cosize = 1;
+  for (size_t i = 0; i < layout_node->children.size(); i++) {
+    const auto* tiled_layout_child_root = tiled_layout_node->children[i].as<IterTreeSplitNode>();
+    size_t sub_children_cnt = tiled_layout_child_root->children.size();
+    if (sub_children_cnt < 2) return false;
+    const auto* last_tiled_layout_child =
+        tiled_layout_child_root->children[sub_children_cnt - 1].as<IterTreeSplitNode>();
+    // only the first sub-child will belong to the original outer layout
+    const auto* tiled_layout_child = tiled_layout_child_root->children[0].as<IterTreeSplitNode>();
+    const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
+    if (!tiled_layout_child || !layout_child ||
+        !CompareExtent_Outer(tiled_layout_child, layout_child, analyzer)) {
+      return false;
+    }
+
+    // Retrieve all child leaves of last_tiled_layout_child and calculate cosize for each leaf
+    auto last_child_leaves = GetRef<IterTreeSplit>(last_tiled_layout_child).GetLeaves();
+    for (const auto& leaf : last_child_leaves) {
+      if (tiled_layout_split_map &&
+          tiled_layout_split_map->find(leaf) != tiled_layout_split_map->end()) {
+        continue;
+      }
+      auto coeff_it = tiled_layout_coeff_map.find(Downcast<IterTreeSplit>(leaf));
+      if (coeff_it != tiled_layout_coeff_map.end()) {
+        cumulative_cosize += coeff_it->second * (Downcast<IterTreeSplit>(leaf)->extent - 1);
+      }
+    }
+  }
+
+  for (size_t i = 0; i < layout_node->children.size(); i++) {
+    const auto* tiled_layout_child_root = tiled_layout_node->children[i].as<IterTreeSplitNode>();
+    const auto* tiled_layout_child = tiled_layout_child_root->children[0].as<IterTreeSplitNode>();
+    const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
+    if (!CompareStride_Outer(tiled_layout_child, layout_child, layout_coeff_map,
+                             tiled_layout_coeff_map, cumulative_cosize, analyzer,
+                             tiled_layout_split_map)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool CheckTileDataSubtree_Outer(const IterTreeBase& tiled_layout_node,
+                                const IterTreeBase& layout_node,
+                                const DataIterTree::CoeffMap& layout_coeff_map,
+                                const DataIterTree::CoeffMap& tiled_layout_coeff_map,
+                                arith::Analyzer& analyzer,
+                                TileLayout::SplitMap* tiled_layout_split_map = nullptr) {
+  if (const auto* tiled_layout_split = tiled_layout_node.as<IterTreeSplitNode>()) {
+    if (const auto* layout_split = layout_node.as<IterTreeSplitNode>()) {
+      if (CheckDataSubtree_Outer(tiled_layout_split, layout_split, layout_coeff_map,
+                                 tiled_layout_coeff_map, analyzer, tiled_layout_split_map)) {
+        return true;
+      }
+      for (const auto& child : tiled_layout_split->children) {
+        if (CheckTileDataSubtree_Outer(child, layout_node, layout_coeff_map, tiled_layout_coeff_map,
+                                       analyzer, tiled_layout_split_map)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+bool IsTileLayout_Outer(TileLayout tiled_layout, TileLayout layout) {
+  auto* layout_n = layout.operator->();
+  auto* tiled_layout_n = tiled_layout.operator->();
+  auto layout_coeff_map = layout_n->data_tree.GetCoeffMap();
+  auto tiled_layout_coeff_map = tiled_layout_n->data_tree.GetCoeffMap();
+  arith::Analyzer analyzer;
+  if (!tiled_layout->device_tree.defined() && !layout->device_tree.defined()) {
+    return CheckTileDataSubtree_Outer(tiled_layout_n->data_tree->root, layout_n->data_tree->root,
+                                      layout_coeff_map, tiled_layout_coeff_map, analyzer);
+  } else if (tiled_layout->device_tree.defined() && !layout->device_tree.defined()) {
+    const auto& tiled_layout_dev_tree = tiled_layout->device_tree.value();
+    const auto& tiled_layout_dev_leaves = tiled_layout_dev_tree.GetLeaves();
+    const auto& tiled_layout_data_tree = tiled_layout->data_tree;
+    const auto& tiled_layout_data_leaves = tiled_layout_data_tree.GetLeaves();
+    auto tiled_layout_split_map =
+        tiled_layout.GetSplitMap(tiled_layout_data_leaves, tiled_layout_dev_leaves);
+    return CheckTileDataSubtree_Outer(tiled_layout->data_tree->root, layout->data_tree->root,
+                                      layout_coeff_map, tiled_layout_coeff_map, analyzer,
+                                      &tiled_layout_split_map);
+
+  } else {
+    // outer must not have device tree
+    return false;
+  }
+}
+
+TVM_REGISTER_GLOBAL("tir.IsTileLayout_Outer")
+    .set_body_typed([](TileLayout tiled_layout, TileLayout layout) {
+      return IsTileLayout_Outer(tiled_layout, layout);
+    });
 
 /******** Shard ********/
 std::vector<DeviceIterAttr> ParseStrategy(String strategy) {
