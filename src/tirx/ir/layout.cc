@@ -18,6 +18,7 @@
  */
 #include <tvm/arith/analyzer.h>
 #include <tvm/node/serialization.h>
+#include <tvm/node/structural_equal.h>
 #include <tvm/tirx/layout.h>
 #include <tvm/tirx/op.h>
 
@@ -56,7 +57,7 @@ bool IsTrivialLayout(const TLayout& layout) {
   return true;
 }
 
-TVM_REGISTER_GLOBAL("tir.IsTrivialLayout").set_body_typed(IsTrivialLayout);
+TVM_REGISTER_GLOBAL("tirx.IsTrivialLayout").set_body_typed(IsTrivialLayout);
 
 /**************** TLayout ****************/
 TVM_REGISTER_GLOBAL("tirx.TLayoutGetSize").set_body_typed([](TLayout layout) {
@@ -1626,7 +1627,7 @@ bool IsTileLayout_Inner(TileLayout tiled_layout, TileLayout layout) {
   }
 }
 
-TVM_REGISTER_GLOBAL("tir.IsTileLayout_Inner")
+TVM_REGISTER_GLOBAL("tirx.IsTileLayout_Inner")
     .set_body_typed([](TileLayout tiled_layout, TileLayout layout) {
       return IsTileLayout_Inner(tiled_layout, layout);
     });
@@ -1771,10 +1772,96 @@ bool IsTileLayout_Outer(TileLayout tiled_layout, TileLayout layout) {
   }
 }
 
-TVM_REGISTER_GLOBAL("tir.IsTileLayout_Outer")
+TVM_REGISTER_GLOBAL("tirx.IsTileLayout_Outer")
     .set_body_typed([](TileLayout tiled_layout, TileLayout layout) {
       return IsTileLayout_Outer(tiled_layout, layout);
     });
+
+/******* Vector Length ********/
+PrimExpr ComputeGCD(PrimExpr a, PrimExpr b, arith::Analyzer* ana) {
+  while (!ana->CanProveEqual(b, 0)) {
+    PrimExpr temp = b;
+    b = floormod(a, b);
+    a = temp;
+  }
+  return a;
+}
+
+std::pair<int, int> GetMajorDimension(const Array<PrimExpr>& strides) {
+  arith::Analyzer analyzer;
+  int major_dim = 0;
+  PrimExpr min_stride = strides[0];
+  PrimExpr gcd = strides[0];
+  PrimExpr argmin_stride = strides[0];
+  for (size_t i = 0; i < strides.size(); ++i) {
+    gcd = ComputeGCD(gcd, strides[i], &analyzer);
+    if (as_const_int(strides[i])[0] < as_const_int(min_stride)[0]) {
+      major_dim = static_cast<int>(i);
+      min_stride = strides[i];
+    }
+  }
+  int min_stride_int = as_const_int(min_stride) ? static_cast<int>(*as_const_int(min_stride)) : 0;
+  return {(strides.size() - major_dim) - 1, min_stride_int};
+}
+
+std::tuple<int, int, PrimExpr> ExtractLayout(TileLayout layout) {
+  arith::Analyzer analyzer;
+  // Get the data dimensions and strides from the layout
+  auto data_tree = layout->data_tree;
+  auto data_leaves = data_tree.GetLeaves();
+  Array<PrimExpr> strides = data_tree->coeff;
+
+  // Get the major dimension (dimension with the largest stride)
+  auto [major_dim, min_stride] = GetMajorDimension(strides);
+
+  // Create new strides for the transposed layout
+  std::vector<PrimExpr> transposed_strides(strides.size());
+  transposed_strides[strides.size() - 1] = 1;  // innermost stride is min_stride
+  for (int i = (int)strides.size() - 2; i >= 0; --i) {
+    transposed_strides[i] =
+        transposed_strides[i + 1] * Downcast<IterTreeSplit>(data_leaves[i + 1])->extent;
+  }
+
+  return {major_dim, min_stride,
+          Downcast<IterTreeSplit>(data_leaves[strides.size() - major_dim - 1])->extent};
+}
+
+int Vec_Len(TileLayout Ls, TileLayout Ld) {
+  // Constants initialization
+  arith::Analyzer analyzer;
+  std::vector<int> optimal_vec_len = {1, 2, 4, 8};
+  auto Ls_node = Ls->data_tree->root;
+  auto Ld_node = Ld->data_tree->root;
+  PrimExpr Ls_extent = Ls_node->extent;
+  PrimExpr Ld_extent = Ld_node->extent;
+
+  // Remove unit dimensions and extract strides
+  TileLayout Lsn = RemoveUnitIter(Ls);
+  TileLayout Ldn = RemoveUnitIter(Ld);
+  auto [major_s, min_stride_s, argmin_s] = ExtractLayout(Lsn);
+  auto [major_d, min_stride_d, argmin_d] = ExtractLayout(Ldn);
+
+  // Check if normalized layouts are structurally equal
+  if (analyzer.CanProveEqual(Ls_extent, Ld_extent)) {
+    if ((min_stride_s != 1) || (min_stride_d != 1) || (major_s != major_d)) {
+      // Case 1 & 2: Layouts are not contiguous or min strides don't match; different major-dim
+      return 1;
+    } else {
+      // Case 3: the same dim-major, and the same stride, return major dimension in terms of
+      // optimal vector length based on extent
+      return *std::lower_bound(
+          optimal_vec_len.begin(), optimal_vec_len.end() - 1,
+          static_cast<int>(as_const_int(ComputeGCD(argmin_s, argmin_d, &analyzer))[0]));
+    }
+  } else {
+    // Case4: Structure doesn't match, then return the minimum of GCD stride, normally 1
+    LOG(FATAL) << "Source and Destination extents don't match!";
+  }
+}
+
+TVM_REGISTER_GLOBAL("tirx.Vec_Len").set_body_typed([](TileLayout tiled_layout, TileLayout layout) {
+  return Vec_Len(tiled_layout, layout);
+});
 
 /******** Shard ********/
 std::vector<DeviceIterAttr> ParseStrategy(String strategy) {
@@ -1943,6 +2030,6 @@ PrimExpr SwizzleLayoutNode::Apply(const Array<PrimExpr>& coord) const {
   return analyzer.Simplify((f(floordiv(input, base)) << per_element) + floormod(input, base));
 }
 
-}  // namespace tirx
+}  // namespace tirxx
 
 }  // namespace tvm

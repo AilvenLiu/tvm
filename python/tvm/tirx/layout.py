@@ -299,6 +299,10 @@ class TileLayout(TLayout):
     def is_tile_outer(tile_layout: "TileLayout", outer: "TileLayout") -> bool:
         return get_global_func("tir.IsTileLayout_Outer")(tile_layout, outer)
 
+    @staticmethod
+    def find_optimal_vec_len(layout_A: "TileLayout", layout_B: "TileLayout") -> int:
+        return get_global_func("tir.Vec_Len")(layout_A, layout_B)
+
 
 @register_object("tir.SwizzleLayout")
 class SwizzleLayout(TLayout):
