@@ -249,7 +249,7 @@ def test_normalize_tile_layout():
     )
     assert_structural_equal(layout_expected, normalize_tile_layout(layout))
 
-    # only device tree #3
+    # only data tree #3
     layout = T.TileLayout.from_nested_tuple(
         data=((8, 8), (1, 1, (1, 4, 1, 1))),
         strides=((512, 64), (1, 1, (1, 2, 1, 1))),
@@ -293,6 +293,61 @@ def test_normalize_tile_layout():
     )
     assert_structural_equal(layout_expected, normalize_tile_layout(layout))
 
+    # only data tree (partial norm - back) #7
+    layout = T.TileLayout.from_nested_tuple(
+        data=(8, (2, 3, 6)),
+        strides=(6, (24, 6, 1)),
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=(8, (2, 18)),
+        strides=(6, (24, 1)),
+    )
+    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+
+    # only data tree (partial norm - front) #8
+    layout = T.TileLayout.from_nested_tuple(
+        data=((8, 2, 4), (2, 3, 6)),
+        strides=((2, 1, 4), (24, 6, 1)),
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=((16, 4), (2, 18)),
+        strides=((1, 4), (24, 1)),
+    )
+    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+
+    # only data tree (partial norm - middle) #9
+    layout = T.TileLayout.from_nested_tuple(
+        data=(3, 4, 5, 2),
+        strides=(20, 5, 1, 60),
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=(60, 2),
+        strides=(1, 60),
+    )
+    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+
+    # only data tree (partial norm - middle) #10
+    layout = T.TileLayout.from_nested_tuple(
+        data=((18, 8, 2, 4), (2, 3, 6)),
+        strides=((4, 2, 1, 4), (24, 6, 1)),
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=((18, 16, 4), (2, 18)),
+        strides=((4, 1, 4), (24, 1)),
+    )
+    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+
+    # only data tree (partial norm - middle) #11
+    layout = T.TileLayout.from_nested_tuple(
+        data=(3, 4, 5, 2, 3, 4),
+        strides=(20, 5, 1, 60, 20, 5),
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=(60, 24),
+        strides=(1, 5),
+    )
+    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+
     # no normalization case
     layout_normalized = T.TileLayout.from_nested_tuple(
         data=((8, T.S(0)), (8, (T.S(1), 2))),
@@ -320,7 +375,7 @@ def test_normalize_tile_layout():
     )
     assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
 
-    # both data and device tree #3
+    # both data and device tree (both fused) #3
     layout = T.TileLayout.from_nested_tuple(
         data=((8, T.S(0)), (8, (1, T.S(1), 2, 1))),
         strides=((16, -1), (2, (1, -1, 1, -1))),
@@ -329,8 +384,8 @@ def test_normalize_tile_layout():
         from_to=("thread", "warp"),
     )
     layout_normalized = T.TileLayout.from_nested_tuple(
-        data=((8, T.S(0)), (8, 2)),
-        strides=((16, -1), (2, 1)),
+        data=((8, T.S(0)), 16),
+        strides=((16, -1), 1),
         device=(8, 4),
         exclusive=[(1, 0)],
         from_to=("thread", "warp"),
@@ -489,6 +544,57 @@ def test_normalize_tile_layout():
         from_to=("thread", "warp"),
     )
     assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+
+    # both data and device tree #13 (Fuse-mixed with partial)
+    layout = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), T.S(1), 4, 8, 8), 8),
+        strides=((-1, -1, 16, 2, 8), 8),
+        device=(8, 4),
+        exclusive=[],
+        from_to=("thread", "warp"),
+    )
+    layout_normalized = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), 32, 8), 8),
+        strides=((-1, 2, 8), 8),
+        device=(32),
+        exclusive=[],
+        from_to=("thread", "warp"),
+    )
+    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+
+    # both data and device tree #14 (Fuse-mixed with partial)
+    layout = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), T.S(1), 4, 8, 8), (4, 4, 16, 8)),
+        strides=((-1, -1, 16, 2, 8), (2, 16, 1, 4)),
+        device=(8, 4),
+        exclusive=[],
+        from_to=("thread", "warp"),
+    )
+    layout_normalized = T.TileLayout.from_nested_tuple(
+        data=((T.S(0), 32, 8), (4, 64, 8)),
+        strides=((-1, 2, 8), (2, 1, 4)),
+        device=(32),
+        exclusive=[],
+        from_to=("thread", "warp"),
+    )
+    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+
+    # only data tree (partial norm - middle) #15
+    layout = T.TileLayout.from_nested_tuple(
+        data=(T.S(0), 3, 4, 5, 2, 3, 4),
+        strides=(-1, 20, 5, 1, 60, 20, 5),
+        device=(8),
+        exclusive=[],
+        from_to=("thread", "warp"),
+    )
+    layout_expected = T.TileLayout.from_nested_tuple(
+        data=(T.S(0), 60, 24),
+        strides=(-1, 1, 5),
+        device=(8),
+        exclusive=[],
+        from_to=("thread", "warp"),
+    )
+    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
 
     # unit layout case#1
     layout = T.TileLayout.from_nested_tuple(

@@ -918,59 +918,107 @@ class EquivIterFuser : public IterTreeMutator {
           new_children.push_back(new_child.value());
           changed |= (!new_child.same_as(child));
         }
-
-        PrimExpr gcd_coeff;
-        PrimExpr min_coeff;
-        if (all_leaves) {
-          // compute GCD of coefficients of all leaves
-          auto it = coeff_map_->find(Downcast<IterTreeSplit>(new_children[0]));
-          ICHECK(it != coeff_map_->end()) << "InternalError: Coefficient not found for child";
-          gcd_coeff = it->second;
-          min_coeff = it->second;
-          for (size_t i = 1; i < new_children.size(); ++i) {
-            it = coeff_map_->find(Downcast<IterTreeSplit>(new_children[i]));
-            ICHECK(it != coeff_map_->end()) << "InternalError: Coefficient not found for child";
-            gcd_coeff = ComputeGCD(gcd_coeff, it->second, &ana_);
-            min_coeff = tvm::min(it->second, min_coeff);
-          }
-          // check if normalize requirement is satisfied by coeff and extents
-          fused = CheckEquiv(min_coeff, gcd_coeff, &ana_);
-          PrimExpr divider_product = gcd_coeff;
-          for (int i = (int)new_children.size() - 1; i >= 0; --i) {
-            // reversal order to check mod and coeff
-            const auto& child = Downcast<IterTreeSplit>(new_children[i]);
-            auto coeff_it = coeff_map_->find(child);
-            ICHECK(coeff_it != coeff_map_->end())
-                << "InternalError: Coefficient not found for child";
-            if (!ana_.CanProveEqual(divider_product, coeff_it->second)) {
-              fused = false;
-              break;
+        PrimExpr* prev_product = NULL;
+        std::vector<IterTreeBase> fused_children;
+        std::vector<std::vector<IterTreeBase>> fused_children_list;
+        for (int itr = 0; itr < (int)new_children.size(); ++itr) {
+          int i = (int)(new_children.size() - itr - 1);
+          auto it = coeff_map_->find(Downcast<IterTreeSplit>(new_children[i]));
+          if (it == coeff_map_->end()) {
+            // Not a leaf
+            prev_product = NULL;
+            if (fused_children.size() > 0) {
+              fused_children_list.push_back(fused_children);
+              fused_children.clear();
             }
-            divider_product *= Downcast<IterTreeSplit>(new_children[i])->extent;
+            fused_children.push_back(new_children[i]);
+            fused_children_list.push_back(fused_children);
+            fused_children.clear();
+          } else {
+            // Leaf
+            PrimExpr curr_stride = it->second;
+            if (prev_product == NULL) {
+              // prev_product not set up
+              prev_product = new PrimExpr;
+              *prev_product = curr_stride * (Downcast<IterTreeSplit>(new_children[i])->extent);
+              ICHECK((fused_children.size() == 0) || (itr == 0))
+                  << "InternalError: fused_children not pushed back";
+              fused_children.push_back(new_children[i]);
+            } else {
+              // prev_product already set up
+              if (CheckEquiv(curr_stride, *prev_product, &ana_)) {
+                // no consecutive device nodes at this point, so no need to check device mapping
+                fused_children.push_back(new_children[i]);
+                fused = true;
+              } else {
+                // push to list and clear all contents
+                if (fused_children.size() > 0) {
+                  fused_children_list.push_back(fused_children);
+                }
+                fused_children.clear();
+                fused_children.push_back(new_children[i]);
+              }
+              *prev_product = curr_stride * (Downcast<IterTreeSplit>(new_children[i])->extent);
+            }
           }
         }
+        if (fused_children.size() > 0) {
+          fused_children_list.push_back(fused_children);
+          fused_children.clear();
+        }
         if (fused) {
-          // fuse all children into the current node
+          // fuse some adjacent children into the current node
+          Array<IterTreeBase> new_array;
+          for (int itr = 0; itr < (int)fused_children_list.size(); ++itr) {
+            int i = (int)(fused_children_list.size() - itr - 1);
+            fused_children = fused_children_list[i];
+            if (fused_children.size() > 1) {
+              PrimExpr extent = 1;
+              PrimExpr stride = 1;
+              for (size_t j = 0; j < fused_children.size(); ++j) {
+                auto child = fused_children[j];
+                extent = (Downcast<IterTreeSplit>(child)->extent) * extent;
+                if (j == 0) {
+                  auto it = coeff_map_->find(Downcast<IterTreeSplit>(child));
+                  ICHECK(it != coeff_map_->end()) << "InternalError: stride of a leaf not found!";
+                  stride = it->second;
+                }
+                coeff_map_->erase(GetRef<IterTreeSplit>(child.as<IterTreeSplitNode>()));
+              }
+              IterTreeSplit new_fused_node = IterTreeSplit(extent, {});
+              coeff_map_->insert({new_fused_node, stride});
+              new_array.push_back(Downcast<IterTreeBase>(new_fused_node));
+            } else {
+              auto child = fused_children[0];
+              new_array.push_back(child);
+            }
+          }
           if (!is_root_) {
-            for (int i = (int)new_children.size() - 1; i >= 0; --i) {
-              coeff_map_->erase(GetRef<IterTreeSplit>(new_children[i].as<IterTreeSplitNode>()));
+            if (new_array.size() == 1) {
+              coeff_map_->erase(root);
+              IterTreeSplitNode* tmp_node =
+                  const_cast<IterTreeSplitNode*>(new_array[0].as<IterTreeSplitNode>());
+              tmp_node->children = {};
+              return GetRef<IterTreeBase>(tmp_node);
+            } else {
+              auto* n = root.CopyOnWrite();
+              n->children = new_array;
+              return GetRef<IterTreeBase>(n);
             }
-            coeff_map_->erase(root);
-            auto* n = root.CopyOnWrite();
-            n->children = {};
-            coeff_map_->insert({GetRef<IterTreeSplit>(n), gcd_coeff});
-            return GetRef<IterTreeBase>(n);
           } else {
-            // add a dummy leaf if normalizing root
-            for (int i = (int)new_children.size() - 1; i >= 0; --i) {
-              coeff_map_->erase(GetRef<IterTreeSplit>(new_children[i].as<IterTreeSplitNode>()));
+            if (new_array.size() == 1) {
+              // add a dummy leaf if normalizing root
+              coeff_map_->erase(root);
+              auto* n = root.CopyOnWrite();
+              auto unit = IterTreeSplit(1, {});
+              coeff_map_->insert({unit, 1});
+              n->children = {unit, new_array[0]};
+              return GetRef<IterTreeBase>(n);
+            } else {
+              auto* n = root.CopyOnWrite();
+              n->children = new_array;
+              return GetRef<IterTreeBase>(n);
             }
-            coeff_map_->erase(root);
-            auto* n = root.CopyOnWrite();
-            auto unit = IterTreeSplit(root->extent, {});
-            coeff_map_->insert({unit, gcd_coeff});
-            n->children = {unit};
-            return GetRef<IterTreeBase>(n);
           }
         } else {
           // no fuse happened
@@ -1081,7 +1129,7 @@ TileLayout FuseEquivIter(TileLayout layout) {
   if (!layout->device_tree.defined()) {
     auto new_data_root = EquivIterFuser::FuseEquivIter(data_tree->root, true, &coeff_map);
     ICHECK(new_data_root.defined()) << "InternalError: The data tree should be defined";
-    return TileLayout::FromMaps(new_data_root.value(), NullOpt, coeff_map, {}, {});
+    return RemoveUnitIter(TileLayout::FromMaps(new_data_root.value(), NullOpt, coeff_map, {}, {}));
   } else {
     // Both data tree and device tree are defined
     const auto& dev_tree = layout->device_tree.value();
@@ -1090,11 +1138,26 @@ TileLayout FuseEquivIter(TileLayout layout) {
     TileLayout::SplitMap split_map = layout.GetSplitMap(data_leaves, dev_leaves);
     auto new_data_root = EquivIterFuser::FuseEquivIter(data_tree->root, false, &coeff_map,
                                                        &attr_map, &split_map, &dev_tree);
-    // auto new_dev_root = GetRef<IterTreeSplit>(dev_tree->root);
-    ICHECK(new_data_root.defined() && dev_tree->root.defined())
+    TileLayout fused_device_layout =
+        RemoveUnitIter(TileLayout::FromMaps(new_data_root.value(), dev_tree->root, coeff_map,
+                                            attr_map, split_map, layout->from, layout->to));
+    ICHECK(new_data_root.defined() && dev_tree->root.defined());
+    const auto& fused_dev_tree = fused_device_layout->device_tree.value();
+    const auto& fused_dev_leaves = fused_dev_tree.GetLeaves();
+    DeviceIterTree::AttrMap fused_attr_map = fused_dev_tree.GetAttrMap(fused_dev_leaves);
+    const auto& fused_data_tree = fused_device_layout->data_tree;
+    const auto& fused_data_leaves = fused_data_tree.GetLeaves();
+    DataIterTree::CoeffMap fused_coeff_map = fused_data_tree.GetCoeffMap(fused_data_leaves);
+    TileLayout::SplitMap fused_split_map =
+        fused_device_layout.GetSplitMap(fused_data_leaves, fused_dev_leaves);
+    new_data_root =
+        EquivIterFuser::FuseEquivIter(fused_data_tree->root, true, &fused_coeff_map,
+                                      &fused_attr_map, &fused_split_map, &fused_dev_tree);
+    ICHECK(new_data_root.defined() && fused_dev_tree->root.defined())
         << "InternalError: The data tree and device tree should be both defined";
-    return RemoveUnitIter(TileLayout::FromMaps(new_data_root.value(), dev_tree->root, coeff_map,
-                                               attr_map, split_map, layout->from, layout->to));
+    return RemoveUnitIter(TileLayout::FromMaps(new_data_root.value(), fused_dev_tree->root,
+                                               fused_coeff_map, fused_attr_map, fused_split_map,
+                                               layout->from, layout->to));
   }
 }
 
