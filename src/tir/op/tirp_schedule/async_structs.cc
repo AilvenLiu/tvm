@@ -54,18 +54,17 @@ Stmt BarrierOpScheduler(const Op& op, Array<ObjectRef> args, ScheduleContext con
   if (op.same_as(barrier_init())) {
     CHECK_EQ(args.size(), 3U) << "ValueError: barrier_init expects 2 arguments";
     return CallBuiltinOp(builtin::cuda_barrier_init(),
-                         {Downcast<IntImm>(args[1]), barrier->index, Downcast<IntImm>(args[2])});
+                         {ToIntImm(args[1]), barrier->index, ToIntImm(args[2])});
   } else if (op.same_as(barrier_arrive())) {
     CHECK_EQ(args.size(), 2U) << "ValueError: barrier_arrive expects 1 argument";
-    return CallBuiltinOp(builtin::cuda_barrier_arrive(),
-                         {barrier->index, Downcast<IntImm>(args[1])});
+    return CallBuiltinOp(builtin::cuda_barrier_arrive(), {barrier->index, ToIntImm(args[1])});
   } else if (op.same_as(barrier_wait())) {
     CHECK_EQ(args.size(), 2U) << "ValueError: barrier_wait expects 1 argument";
-    return CallBuiltinOp(builtin::cuda_barrier_wait(), {barrier->index, Downcast<IntImm>(args[1])});
+    return CallBuiltinOp(builtin::cuda_barrier_wait(), {barrier->index, ToIntImm(args[1])});
   } else if (op.same_as(barrier_arrive_and_wait())) {
     CHECK_EQ(args.size(), 2U) << "ValueError: barrier_arrive_and_wait expects 1 argument";
     return CallBuiltinOp(builtin::cuda_barrier_arrive_and_wait(),
-                         {barrier->index, Downcast<IntImm>(args[1])});
+                         {barrier->index, ToIntImm(args[1])});
   }
   LOG(FATAL) << "ValueError: Unsupported BarrierOp " << op;
   throw;
@@ -118,7 +117,7 @@ Stmt PipelineOpScheduler(const Op& op, Array<ObjectRef> args, ScheduleContext co
       } else if (op.same_as(pipeline_consumer_wait())) {
         // consumer_wait
         CHECK_EQ(args.size(), 2U) << "ValueError: pipeline_consumer_wait expects 2 arguments";
-        return wrap(SeqStmt({CallBuiltinOp(builtin::ptx_wait_group(), {Downcast<IntImm>(args[1])}),
+        return wrap(SeqStmt({CallBuiltinOp(builtin::ptx_wait_group(), {ToIntImm(args[1])}),
                              CallBuiltinOp(builtin::tvm_storage_sync(), {StringImm("shared")})}));
       } else if (op.same_as(pipeline_consumer_release())) {
         // consumer_release is a no-op

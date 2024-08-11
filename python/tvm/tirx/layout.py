@@ -214,8 +214,11 @@ class TileLayout(TLayout):
             leaf_cnt += 1
             return leaf_cnt - 1
 
-        if not isinstance(data, tuple):
+        if isinstance(data, list):
+            data = tuple(data)
+        elif not isinstance(data, tuple):
             data = (data,)
+
         if strides is None:
             # get the default strides from the data
             strides, _ = TileLayout._get_default_strides(data, 1)

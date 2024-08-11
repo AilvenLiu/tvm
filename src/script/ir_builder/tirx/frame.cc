@@ -71,7 +71,8 @@ void PrimFuncFrameNode::ExitWithScope() {
       /*body=*/AsStmt(stmts),
       /*ret_type=*/ret_type.value_or(TupleType::Empty()),
       /*buffer_map=*/buffer_map,
-      /*attrs=*/attrs.defined() ? DictAttrs(attrs) : NullValue<DictAttrs>());
+      /*attrs=*/attrs.defined() ? DictAttrs(attrs) : NullValue<DictAttrs>(),
+      /*span=*/tvm::Span());
   func = tvm::tirx::ScriptComplete(func, root_alloc_buffers, is_tirp);
   IRBuilder builder = IRBuilder::Current();
   if (builder->frames.empty()) {
@@ -218,7 +219,7 @@ void ElseFrameNode::ExitWithScope() {
   FindIfFrame("T.else_")->else_stmts = stmts;
 }
 
-}  // namespace tirxxxxxx
+}  // namespace tirxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

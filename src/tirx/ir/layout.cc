@@ -121,9 +121,9 @@ TVM_REGISTER_GLOBAL("tirx.IterTree").set_body_typed([](IterTreeSplit root) {
 });
 
 std::pair<IterTree, std::vector<IterTreeBase>> IterTreeFromTupleImpl(const ObjectRef& device) {
-  if (auto leaf_ptr = device.as<PrimExprNode>()) {
-    auto leaf = GetRef<PrimExpr>(leaf_ptr);
-    auto root = IterTreeSplit(leaf, {});
+  if (auto leaf_ptr = device.as<runtime::Int::ContainerType>()) {
+    auto leaf = leaf_ptr->value;
+    auto root = IterTreeSplit(IntImm(DataType::Int(32), leaf), {});
     return {IterTree({root}), {root}};
   }
   auto tuple = device.as<ArrayNode>();

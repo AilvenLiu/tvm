@@ -52,6 +52,13 @@ from tvm.tirx.layout import (
     S,
     SwizzleLayout,
 )
+from tvm.ir.tensormap_type import (
+    TensorMapInterleaveKind,
+    TensorMapSwizzleKind,
+    TensorMapL2PromotionKind,
+    TensorMapOOBFillKind,
+    TensorMapType,
+)
 
 # import tirx.expr for direct ir construction to pass structural_equal comparison
 from tvm.tirx.expr import (
@@ -97,6 +104,16 @@ from . import _ffi_api, frame
 from .external_kernel import call_kernel
 
 # pylint: enable=unused-import
+
+
+def _get_layout(layout: Optional[Union[str, TLayout]], shape: List[PrimExpr]) -> Optional[TLayout]:
+    if layout is None:
+        return None
+    if isinstance(layout, str):
+        assert layout == "default"
+        return TileLayout.from_nested_tuple(shape)
+    assert isinstance(layout, TLayout)
+    return layout
 
 
 _block_name_suffix = threading.local()
@@ -199,7 +216,7 @@ def buffer(
         buffer_type,
         axis_separators,
         logical_scope,
-        layout,
+        _get_layout(layout, shape),
     )
 
 
@@ -299,7 +316,7 @@ def match_buffer(
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
     logical_scope: str = "",
-    layout: TLayout | None = None,
+    layout: str | TLayout | None = None,
 ) -> Buffer:
     """The buffer match function.
 
@@ -357,7 +374,7 @@ def match_buffer(
     logical_scope : str
         The logical scope of the buffer.
 
-    layout : Optional[TLayout]
+    layout: Optional[Union[str, TLayout]]
         The layout of the buffer.
 
     Returns
@@ -390,7 +407,7 @@ def match_buffer(
         buffer_type,
         axis_separators,
         logical_scope,
-        layout,
+        _get_layout(layout, shape),
     )
 
 
@@ -666,7 +683,7 @@ def sblock_alloc_buffer(
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
     logical_scope: str = "",
-    layout: TLayout | None = None,
+    layout: str | TLayout | None = None,
 ) -> Buffer:
     """SBlock-level buffer allocation function.
 
@@ -698,7 +715,7 @@ def sblock_alloc_buffer(
     logical_scope : str
         The logical scope of the buffer.
 
-    layout : Optional[TLayout]
+    layout: Optional[Union[str, TLayout]]
         The layout of the buffer.
 
     Returns
@@ -723,7 +740,7 @@ def sblock_alloc_buffer(
         buffer_type,
         axis_separators,
         logical_scope,
-        layout,
+        _get_layout(layout, shape),
     )
 
 
@@ -2124,6 +2141,12 @@ cuda_barrier_init = _op_wrapper(_tir_op.cuda_barrier_init)
 cuda_barrier_arrive = _op_wrapper(_tir_op.cuda_barrier_arrive)
 cuda_barrier_wait = _op_wrapper(_tir_op.cuda_barrier_wait)
 cuda_barrier_arrive_and_wait = _op_wrapper(_tir_op.cuda_barrier_arrive_and_wait)
+cuda_fence_proxy_async = _op_wrapper(_tir_op.cuda_fence_proxy_async)
+cp_async_bulk_tensor_global_to_cluster = _op_wrapper(_tir_op.cp_async_bulk_tensor_global_to_cluster)
+cp_async_bulk_tensor_shared_to_global = _op_wrapper(_tir_op.cp_async_bulk_tensor_shared_to_global)
+mbarrier_init = _op_wrapper(_tir_op.mbarrier_init)
+mbarrier_arrive_expect_tx = _op_wrapper(_tir_op.mbarrier_arrive_expect_tx)
+mbarrier_wait = _op_wrapper(_tir_op.mbarrier_wait)
 make_filled_simdgroup_matrix = _op_wrapper(_tir_op.make_filled_simdgroup_matrix)
 simdgroup_load = _op_wrapper(_tir_op.simdgroup_load)
 simdgroup_store = _op_wrapper(_tir_op.simdgroup_store)
@@ -2420,6 +2443,12 @@ __all__ = float_types + [
     "cuda_barrier_arrive",
     "cuda_barrier_wait",
     "cuda_barrier_arrive_and_wait",
+    "cuda_fence_proxy_async",
+    "mbarrier_init",
+    "mbarrier_arrive_expect_tx",
+    "mbarrier_wait",
+    "cp_async_bulk_tensor_global_to_cluster",
+    "cp_async_bulk_tensor_shared_to_global",
     "make_filled_simdgroup_matrix",
     "simdgroup_load",
     "simdgroup_store",

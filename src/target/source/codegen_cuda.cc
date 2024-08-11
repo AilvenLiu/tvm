@@ -309,6 +309,7 @@ std::string CodeGenCUDA::Finish() {
     decl_stream << "}\n";
   }
 
+  decl_stream << "#include <cuda.h>";
   decl_stream << "\n#if (((__CUDACC_VER_MAJOR__ == 11) && (__CUDACC_VER_MINOR__ >= 4)) || \\\n";
   decl_stream << "     (__CUDACC_VER_MAJOR__ > 11))\n";
   decl_stream << "#define TVM_ENABLE_L2_PREFETCH 1\n";
@@ -1563,6 +1564,38 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier_arr = cuda_barrier_name_ + "_" + std::to_string(barrier_arr_id);
     this->PrintIndent();
     this->stream << barrier_arr << "[" << barrier_id << "].arrive_and_wait();\n";
+  } else if (op->op.same_as(builtin::cuda_fence_proxy_async())) {
+    std::string scope = Downcast<StringImm>(op->args[0])->value;
+    print(PrintCudaFenceProxyAsyncAssembly(scope));
+  } else if (op->op.same_as(builtin::mbarrier_init())) {
+    need_cast_smem_ptr_to_int_ = true;
+    std::string mbarrier = this->PrintExpr(op->args[0]);
+    std::string num_threads = this->PrintExpr(op->args[1]);
+    print(PrintMbarrierInitAssembly(mbarrier, num_threads));
+  } else if (op->op.same_as(builtin::mbarrier_arrive_expect_tx())) {
+    need_cast_smem_ptr_to_int_ = true;
+    std::string mbarrier = this->PrintExpr(op->args[0]);
+    std::string byte_count = this->PrintExpr(op->args[1]);
+    print(PrintMbarrierArriveExpectTxAssembly(mbarrier, byte_count));
+  } else if (op->op.same_as(builtin::mbarrier_wait())) {
+    need_cast_smem_ptr_to_int_ = true;
+    std::string mbarrier = this->PrintExpr(op->args[0]);
+    std::string phase = this->PrintExpr(op->args[1]);
+    print(PrintMbarrierWaitAssembly(mbarrier, phase));
+  } else if (op->op.same_as(builtin::cp_async_bulk_tensor_global_to_cluster())) {
+    need_cast_smem_ptr_to_int_ = true;
+    int dim = Downcast<IntImm>(op->args[0])->value;
+    std::string dst = this->PrintExpr(op->args[1]);
+    std::string bar = this->PrintExpr(op->args[2]);
+    std::string tensormap = this->PrintExpr(op->args[3]);
+    int cta_mask = Downcast<IntImm>(op->args[4])->value;
+    std::vector<int> coords;
+    for (int i = 0; i < dim; ++i) {
+      coords.push_back(Downcast<IntImm>(op->args[5 + i])->value);
+    }
+    print(
+        PrintCpAsyncBulkTensorGlobalToClusterAssembly(dim, dst, bar, tensormap, cta_mask, coords));
+  } else if (op->op.same_as(builtin::cp_async_bulk_tensor_shared_to_global())) {
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {
@@ -1626,6 +1659,13 @@ void CodeGenCUDA::VisitStmt_(const AllocBufferNode* op) {
     PrintWmmaScope(scope, dtype, buffer, stream);
   } else {
     PrintStorageScope(scope, stream);
+    if (scope != "shared.dyn") {
+      auto it = op->annotations.find(tvm::tir::attr::buffer_data_alignment);
+      if (it != op->annotations.end()) {
+        int align = Downcast<IntImm>((*it).second)->value;
+        stream << " alignas(" << align << ") ";
+      }
+    }
     PrintType(dtype, stream);
   }
 

@@ -40,7 +40,9 @@ def test_gemm_ampere():
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
 
-    target = tvm.target.Target("nvidia/geforce-rtx-4090")
+    target = tvm.target.Target.from_device(DEV)
+    print(target)
+
     # fmt: off
     @T.prim_func(tirp=True)
     def raw(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
@@ -91,7 +93,8 @@ def test_gemm_ampere():
                             acc_local[i, j, vec] = 0
 
                 for k in T.serial(T.ceildiv(K, BLK_K)):
-                    T.tvm_storage_sync("shared")
+                    with T.thread():
+                        T.tvm_storage_sync("shared")
                     T.static_assert(M % BLK_M == 0, f"M={M}, BLK_M={BLK_M}")
                     T.static_assert(N % BLK_N == 0, f"N={N}, BLK_N={BLK_N}")
                     T.static_assert(K % BLK_K == 0, f"K={K}, BLK_K={BLK_K}")
@@ -108,7 +111,7 @@ def test_gemm_ampere():
                             col = T.meta_var(tid % thread_col * VEC)
                             for vec in T.vectorized(VEC):
                                 A_smem[row, col + vec] = A[bx * BLK_M + row, k * BLK_K + col + vec]
-                    T.tvm_storage_sync("shared")
+                        T.tvm_storage_sync("shared")
 
                     # T.load(B_smem, B[k * BLK_K: k * BLK_K + BLK_K, by * BLK_N: by * BLK_N + BLK_N])
                     with T.thread():
@@ -123,7 +126,7 @@ def test_gemm_ampere():
                             col = T.meta_var(tid % thread_col * VEC)
                             for vec in T.vectorized(VEC):
                                 B_smem[row, col + vec] = B[by * BLK_N + row, k * BLK_K + col + vec]
-                    T.tvm_storage_sync("shared")
+                        T.tvm_storage_sync("shared")
 
                     # acc += A_smem @ B_smem
                     with T.warp():
@@ -266,7 +269,8 @@ def test_gemm_ampere():
                             acc_local[i, j, vec] = 0
 
                 for k in T.serial(T.ceildiv(K, BLK_K)):
-                    T.tvm_storage_sync("shared")
+                    with T.thread():
+                        T.tvm_storage_sync("shared")
                     T.static_assert(M % BLK_M == 0, f"M={M}, BLK_M={BLK_M}")
                     T.static_assert(N % BLK_N == 0, f"N={N}, BLK_N={BLK_N}")
                     T.static_assert(K % BLK_K == 0, f"K={K}, BLK_K={BLK_K}")
@@ -370,7 +374,7 @@ def test_gemm_ampere():
         A = T.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=T.TileLayout.from_nested_tuple((M, K)))
         B = T.match_buffer(B_ptr, (N, K), "float16", scope="global", layout=T.TileLayout.from_nested_tuple((N, K)))
         C = T.match_buffer(C_ptr, (M, N), "float32", scope="global", layout=T.TileLayout.from_nested_tuple((M, N)))
-
+            
         with T.kernel():
             bx, by = T.cta_id([M // BLK_M, N // BLK_N], parent="kernel")
             warp_id = T.warp_id([4], parent="cta")
@@ -428,7 +432,8 @@ def test_gemm_ampere():
                 for k in T.serial(T.ceildiv(K, BLK_K) - (DEPTH - 1)):
                     k_load = T.meta_var(k + DEPTH - 1)
 
-                    T.tvm_storage_sync("shared")
+                    with T.thread():
+                        T.tvm_storage_sync("shared")
                     T.static_assert(M % BLK_M == 0, f"M={M}, BLK_M={BLK_M}")
                     T.static_assert(N % BLK_N == 0, f"N={N}, BLK_N={BLK_N}")
                     T.static_assert(K % BLK_K == 0, f"K={K}, BLK_K={BLK_K}")
@@ -446,7 +451,7 @@ def test_gemm_ampere():
 
                         for k_inner in T.serial(BLK_K // 16):
                             st_m = T.meta_var((warp_id // 2) * (BLK_M // 2))
-                            # T.load(A_warp, A_smem[st_m: st_m + BLK_M // 2, k_inner * 16: k_inner * 16 + 16])
+                            # T.copy(A_warp, A_smem[st_m: st_m + BLK_M // 2, k_inner * 16: k_inner * 16 + 16])
                             with T.warp():
                                 T.static_assert(BLK_M % 32 == 0, "BLK_M should be multiple of 32")
                                 for i in T.serial(BLK_M // 32):
@@ -465,7 +470,7 @@ def test_gemm_ampere():
                                         )
 
                             st_n = T.meta_var((warp_id % 2) * (BLK_N // 2))
-                            # T.load(B_warp, B_smem[st_n: st_n + BLK_N // 2, k_inner * 16: k_inner * 16 + 16]) 
+                            # T.copy(B_warp, B_smem[st_n: st_n + BLK_N // 2, k_inner * 16: k_inner * 16 + 16]) 
                             with T.warp():
                                 T.static_assert(BLK_N % 32 == 0, "BLK_N should be multiple of 32")
                                 for i in T.serial(BLK_N // 32):
@@ -652,5 +657,4 @@ def test_gemm_ampere():
 
 
 if __name__ == "__main__":
-
     test_gemm_ampere()

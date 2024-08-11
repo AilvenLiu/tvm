@@ -19,6 +19,7 @@
 #ifndef TVM_SCRIPT_IR_BUILDER_TIR_IR_H_
 #define TVM_SCRIPT_IR_BUILDER_TIR_IR_H_
 
+#include <tvm/ir/tensormap_type.h>
 #include <tvm/script/ir_builder/base.h>
 #include <tvm/script/ir_builder/tir/frame.h>
 #include <tvm/tirx/async_structs.h>

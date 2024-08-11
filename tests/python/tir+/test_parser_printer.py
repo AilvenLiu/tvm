@@ -458,6 +458,21 @@ def test_roundtrip_pipeline_specialize_sync_depth():
     assert_structural_equal(test, from_source(code))
 
 
+def test_roundtrip_tensormap():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def func1(A_ptr: T.handle):
+        T.func_attr({"global_symbol": "func"})
+        A = T.match_buffer(A_ptr, [128], "float32")
+    
+        A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        T.call_packed("runtime.tensormap_init", A_map, A_ptr)
+    # fmt: on
+    code = func1.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(func1, from_source(code))
+
+
 if __name__ == "__main__":
     test_roundtrip_scopeid()
     test_roundtrip_exec_scope()
@@ -472,3 +487,4 @@ if __name__ == "__main__":
     test_roundtrip_barrier_array()
     test_roundtrip_pipeline_no_specialize_async_no_depth()
     test_roundtrip_pipeline_specialize_sync_depth()
+    test_roundtrip_tensormap()

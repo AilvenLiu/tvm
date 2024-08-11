@@ -79,7 +79,7 @@ def verify_cuda_code(func, dim_num, dtype, *dims):
 
 def test_print():
     DEV = tvm.cuda()
-    target = tvm.target.Target("nvidia/geforce-rtx-4090")
+    target = tvm.target.Target.from_device(DEV)
 
     def vector_add_1D(dtype, dtype_str):
         M = 6

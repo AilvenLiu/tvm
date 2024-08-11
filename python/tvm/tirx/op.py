@@ -1696,6 +1696,152 @@ def cuda_barrier_arrive_and_wait(barrier_id, barrier_arr_id):
     return call_intrin("", "tir.cuda_barrier_arrive_and_wait", barrier_id, barrier_arr_id)
 
 
+def cuda_fence_proxy_async(scope: str):
+    """TVM intrinsic to call cuda::ptx::fence_proxy_async
+
+    Parameters
+    ----------
+    scope : str
+        The scope of the fence.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_fence_proxy_async", scope)
+
+
+def mbarrier_init(bar, thread_count):
+    """TVM intrinsic to call mbarrier.init.shared::cta.b64
+
+    Parameters
+    ----------
+    bar : Var
+        The pointer to barrier variable.
+
+    thread_count : int
+        The number of threads expected to arrive at the barrier.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.mbarrier_init", bar, thread_count)
+
+
+def mbarrier_arrive_expect_tx(bar, byte_count):
+    """TVM intrinsic to call mbarrier.arrive.and.expect_tx.shared::cta.b64
+
+    Parameters
+    ----------
+    bar : Var
+        The pointer to barrier variable.
+
+    byte_count : int
+        Increases the tx count of the mbarrier object to track completion of
+        addtional async transactions.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.mbarrier_arrive_expect_tx", bar, byte_count)
+
+
+def mbarrier_wait(bar, phase):
+    """TVM intrinsic to call mbarrier.try_wait.parity repeatedly until it returns true
+
+    Parameters
+    ----------
+    bar : Var
+        The pointer to barrier variable.
+
+    phase : int
+        The phase of the barrier.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.mbarrier_wait", bar, phase)
+
+
+def cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *coords, cta_mask=0):
+    """TVM intrinsic to call cp.async.bulk.tensor.dim.shared::cluster.global.tile.mbarrier::complete_tx::bytes
+
+    Parameters
+    ----------
+    dim : int
+        The dimension of the copy tensor.
+
+    dst_ptr : Var
+        The destination pointer to the shared memory.
+
+    bar : Var
+        The pointer to mbarrier variable.
+
+    tensormap: Var
+        The tensor map.
+
+    cta_mask : int
+        The mask of the cta for multicast.
+
+    coords : list
+        specifies the starting coordinates in the tensor data in the global memory
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "",
+        "tir.cp_async_bulk_tensor_global_to_cluster",
+        dim,
+        dst_ptr,
+        bar,
+        tensormap,
+        cta_mask,
+        *coords,
+    )
+
+
+def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
+    """TVM intrinsic to call cp.async.bulk.tensor.dim.global.shared::cta.tile.bulk_group
+
+    Parameters
+    ----------
+    dim : int
+        The dimension of the copy tensor.
+
+    src_ptr : Var
+        The source pointer to the shared memory.
+
+    tensormap: Var
+        The tensor map.
+
+    coords : list
+        specifies the starting coordinates in the tensor data in the global memory
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "",
+        "tir.cp_async_bulk_tensor_shared_to_global",
+        dim,
+        src_ptr,
+        tensormap,
+        *coords,
+    )
+
+
 def make_filled_simdgroup_matrix(
     d: Var,
     index: PrimExpr,

@@ -26,7 +26,7 @@ def test_root_scope():
     def test1() -> None:
         with T.thread():
             pass
-    
+
     @T.prim_func(tirp=True, check_well_formed=False)
     def test2() -> None:
         with T.warp():
@@ -79,7 +79,7 @@ def test_nested_scope():
                         pass
                 with T.thread():
                     pass
-    
+
     @T.prim_func(tirp=True, check_well_formed=False)
     def test2() -> None:
         with T.kernel():
@@ -148,7 +148,7 @@ def test_invalid_stmt():
 def test_inconsistent_scope_id():
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test1(): 
+    def test1():
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
             wid = T.warp_id([4], parent="cta")
@@ -158,7 +158,7 @@ def test_inconsistent_scope_id():
                 pass
 
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test2(): 
+    def test2():
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
             wid = T.warp_id([4], parent="cta")
@@ -169,7 +169,7 @@ def test_inconsistent_scope_id():
                 pass
 
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test3(): 
+    def test3():
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
             wid = T.warp_id([2], parent="cta")
@@ -190,7 +190,7 @@ def test_layout():
     ### TileLayout
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test1(): 
+    def test1():
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
             wid = T.warp_id([4], parent="cta")
@@ -200,9 +200,9 @@ def test_layout():
                 A = T.alloc_buffer((2,), layout=T.TileLayout.from_nested_tuple(2, 1))
 
                 A[0] = 0
-    
+
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test2(): 
+    def test2():
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
             wid = T.warp_id([4], parent="cta")
@@ -213,7 +213,7 @@ def test_layout():
 
                 A[0] = 0
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test3(): 
+    def test3():
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
             wid = T.warp_id([4], parent="cta")
@@ -234,7 +234,7 @@ def test_layout():
     ### SwizzleLayout
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test4(): 
+    def test4():
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
             wid = T.warp_id([4], parent="cta")
@@ -245,7 +245,7 @@ def test_layout():
 
                 A[0] = 0
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test5(): 
+    def test5():
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
             wid = T.warp_id([4], parent="cta")
@@ -261,9 +261,39 @@ def test_layout():
         verify(test5)
 
 
+def test_host():
+    # fmt: off
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test1(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (16, 16), dtype="float32", align=16, logical_scope="kernel")
+
+        A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        T.call_packed("runtime.cuTensorMapInit", A_map, "float32", 2, A.data, 16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0)
+
+        with T.kernel():
+            for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
+                for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
+                    with T.thread():
+                        bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
+                        phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+                        A_smem = T.alloc_buffer((16, 16), "float32", scope="shared", logical_scope="cta", align=128)
+
+                        phase[0] = 0
+                        if threadIdx == 0:
+                            T.mbarrier_init(bar.data, 1)
+                            T.cuda_fence_proxy_async("shared")
+                            T.cp_async_bulk_tensor_global_to_cluster(2, A_smem.data, bar.data, A_map, 0, 0)
+                            T.mbarrier_arrive_expect_tx(bar.data, 16*16*4)
+                        T.mbarrier_wait(bar.data, phase[0])
+                        T.print_buffer(A_smem.data, "float32", 2, 16*16)
+    # fmt: on
+    verify(test1)
+
+
 if __name__ == "__main__":
     test_root_scope()
     test_nested_scope()
     test_invalid_stmt()
     test_inconsistent_scope_id()
     test_layout()
+    test_host()

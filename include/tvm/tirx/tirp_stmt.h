@@ -66,6 +66,9 @@ class OpCallNode : public StmtNode {
 class OpCall : public Stmt {
  public:
   TVM_DLL OpCall(tvm::Op op, Array<ObjectRef> args);
+
+  static bool IsValidOpCallArgType(const ObjectRef& arg);
+
   TVM_DEFINE_OBJECT_REF_METHODS(OpCall, Stmt, OpCallNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(OpCallNode);
 };

@@ -27,8 +27,9 @@
 
 #include <tvm/ir/name_supply.h>
 #include <tvm/target/codegen.h>
-#include <tvm/tirx/expr.h>
-#include <tvm/tirx/op.h>
+#include <tvm/tir/expr.h>
+#include <tvm/tir/op.h>
+#include <tvm/ir/tensormap_type.h>
 
 #include <functional>
 #include <string>

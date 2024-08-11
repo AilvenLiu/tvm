@@ -856,5 +856,174 @@ std::string PrintWaitBarrierAsm(const std::string& barrier) {
   return predicated_asm_code;
 }
 
+std::string PrintCudaFenceProxyAsyncAssembly(std::string scope) {
+  std::string asm_code = R"(// T.cuda_fence_proxy_async()
+{
+  __asm__ __volatile__ (
+    "{\n\t"
+    "fence.proxy.async.{scope_name}; \n"
+    "}"
+    ::);
+}
+)";
+  CHECK(scope == "global" || scope == "shared") << "Only support global/shared scope for fence.";
+  if (scope == "shared") {
+    scope = "shared::cta";
+  }
+  Replacer replacer;
+  replacer.register_rule("{scope_name}", scope);
+  asm_code = replacer.rewrite(asm_code);
+  return asm_code;
+}
+
+std::string PrintMbarrierInitAssembly(const std::string& barrier, const std::string& thread_count) {
+  std::string asm_code = R"(// T.mbarrier_init()
+{
+  unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+  int thread_count = {thread_count};
+  __asm__ __volatile__(
+    "mbarrier.init.shared.b64 [%0], %1;"
+    :: "r"(barrier_addr_int), "r"(thread_count)
+  );
+}
+)";
+
+  Replacer replacer;
+  replacer.register_rule("{barrier}", barrier);
+  replacer.register_rule("{thread_count}", thread_count);
+  asm_code = replacer.rewrite(asm_code);
+  return asm_code;
+}
+
+std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
+                                                const std::string& byte_count) {
+  std::string asm_code = R"(// T.mbarrier_arrive_expect_tx()
+{
+  unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+  int byte_count = {byte_count};
+  __asm__ __volatile__(
+    "mbarrier.arrive.expect_tx.shared.b64 _, [%0], %1;"
+    :: "r"(barrier_addr_int), "r"(byte_count) 
+  );
+}
+)";
+
+  Replacer replacer;
+  replacer.register_rule("{barrier}", barrier);
+  replacer.register_rule("{byte_count}", byte_count);
+  return replacer.rewrite(asm_code);
+}
+
+std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::string& dst,
+                                                          const std::string& bar,
+                                                          const std::string& tensormap,
+                                                          int cta_mask, std::vector<int> coords) {
+  std::string asm_code = R"(// T.cp_async_bulk_tensor_global_to_cluster()
+{
+  uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&{tensormap});
+  unsigned int dst_addr = cast_smem_ptr_to_int({dst});
+  unsigned int bar_addr = cast_smem_ptr_to_int({bar});
+  )";
+  if (dim == 1) {
+    asm_code += R"(
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.1d.shared::cluster.global.mbarrier::complete_tx::bytes"
+    " [%0], [%1, {%3}], [%2];"
+    :
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
+      "r"({crd0})
+    : "memory"
+  );
+}
+)";
+  } else if (dim == 2) {
+    asm_code += R"(
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.2d.shared::cluster.global.mbarrier::complete_tx::bytes"
+    " [%0], [%1, {%3, %4}], [%2];"
+    :
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
+      "r"({crd0}), "r"({crd1})
+    : "memory"
+  );
+}
+)";
+  } else if (dim == 3) {
+    asm_code += R"(
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.3d.shared::cluster.global.mbarrier::complete_tx::bytes"
+    " [%0], [%1, {%3, %4, %5}], [%2];"
+    :
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
+      "r"({crd0}), "r"({crd1}), "r"({crd2})
+    : "memory"
+  );
+}
+)";
+  } else if (dim == 4) {
+    asm_code += R"(
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.4d.shared::cluster.global.mbarrier::complete_tx::bytes"
+    " [%0], [%1, {%3, %4, %5, %6}], [%2];"
+    :
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
+      "r"({crd0}), "r"({crd1}), "r"({crd2}), "r"({crd3})
+    : "memory"
+  );
+}
+)";
+  } else if (dim == 5) {
+    asm_code += R"(
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.5d.shared::cluster.global.mbarrier::complete_tx::bytes"
+    " [%0], [%1, {%3, %4, %5, %6, %7}], [%2];"
+    :
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
+      "r"({crd0}), "r"({crd1}), "r"({crd2}), "r"({crd3}), "r"({crd4})
+    : "memory"
+  );
+}
+)";
+  } else {
+    LOG(FATAL) << "Only support 1D to 5D tensor copy.";
+  }
+
+  Replacer replacer;
+  replacer.register_rule("{dst}", dst);
+  replacer.register_rule("{bar}", bar);
+  replacer.register_rule("{tensormap}", tensormap);
+  for (int i = 0; i < dim; ++i) {
+    replacer.register_rule("{crd" + std::to_string(i) + "}", std::to_string(coords[i]));
+  }
+  return replacer.rewrite(asm_code);
+}
+
+std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase) {
+  std::string asm_code = R"(// T.mbarrier_wait()
+{
+  unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+  asm volatile (
+      "{\n"
+      ".reg .pred                P1;\n"
+      "LAB_WAIT:\n"
+      "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1;\n"
+      "@P1                       bra.uni DONE;\n"
+      "bra.uni                   LAB_WAIT;\n"
+      "DONE:\n"
+      "}\n"
+      ::
+      "r"(barrier_addr_int),
+      "r"({phase})
+  );
+  {phase} = 1 - {phase};
+}
+)";
+
+  Replacer replacer;
+  replacer.register_rule("{barrier}", barrier);
+  replacer.register_rule("{phase}", phase);
+  return replacer.rewrite(asm_code);
+}
+
 }  // namespace codegen
 }  // namespace tvm

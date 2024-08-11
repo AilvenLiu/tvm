@@ -41,6 +41,16 @@ bool IsGlobal(const Buffer& buffer);
 
 bool IsShared(const Buffer& buffer);
 
+bool IsInt(const ObjectRef& obj);
+
+bool IsFloat(const ObjectRef& obj);
+
+bool IsIntOrFloat(const ObjectRef& obj);
+
+IntImm ToIntImm(const ObjectRef& obj);
+
+FloatImm ToFloatImm(const ObjectRef& obj);
+
 /********************* Copy Ops **********************/
 enum class CopyInstType { kBufferLoad, kCUDAcpasync };
 

@@ -30,6 +30,7 @@
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirp_op.h>
+#include <tvm/ir/tensormap_type.h>
 
 #include <string>
 #include <unordered_map>
@@ -135,7 +136,7 @@ inline IdDoc DefineBarrierArray(const tirx::BarrierArray& barrier_array, const F
  * \param d The IRDocsifier
  * \return The IdDoc corresponding to the pipeline
  */
-inline IdDoc DefinePipeline(const tir::Pipeline& pipeline, const Frame& frame,
+inline IdDoc DefinePipeline(const tirx::Pipeline& pipeline, const Frame& frame,
                             const IRDocsifier& d) {
   return d->Define(pipeline, frame, pipeline->name_hint.empty() ? "pipeline" : pipeline->name_hint);
 }

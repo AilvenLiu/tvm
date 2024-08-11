@@ -55,7 +55,8 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
              obj->IsInstance<BlockRealizeNode>() || obj->IsInstance<SeqStmtNode>() ||
              obj->IsInstance<tirp::OpCallNode>())
           << "TIRpError: Stmt at " << path << " is not under a thread scope and has type "
-          << obj->GetTypeKey();
+          << obj->GetTypeKey() << "\n"
+          << obj;
     }
     Verifier::Visit(obj, path);
   }
@@ -83,6 +84,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     }
     scope_stack_.push_back(scope);
     Verifier::VisitStmt_(op, path);
+    scope_stack_.pop_back();
   }
 
   void VisitStmt_(const tirp::OpCallNode* op, ObjectPath path) override {

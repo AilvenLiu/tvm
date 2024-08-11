@@ -1050,6 +1050,84 @@ constexpr const char* storage_alignment = "storage_alignment";
 constexpr const char* thread_extent = "thread_extent";
 /*! \brief Annotation key on AllocBuffer marking the allocation as volatile. */
 constexpr const char* kVolatile = "tirx.volatile";
+/*!
+ * \brief Marks production of double buffer data
+ */
+constexpr const char* double_buffer_scope = "double_buffer_scope";
+/*!
+ * \brief Marks region used by double buffer write
+ */
+constexpr const char* double_buffer_write = "double_buffer_write";
+/*! \brief Mark of scan update scope */
+constexpr const char* scan_update_scope = "scan_update_scope";
+/*! \brief Mark of scan init scope */
+constexpr const char* scan_init_scope = "scan_init_scope";
+/*! \brief Mark buffer initial addr alignment in bytes */
+constexpr const char* buffer_data_alignment = "buffer_data_alignment";
+/*!
+ * \brief Bind the buffer specification to the region of the op
+ *  When this scope occurs, the stmt.node is a ffi::Array<NodeRef> = [buffer, tensor]
+ *  stmt.value is a tvm_tuple(min0, extent0, min1, extent1, ...).
+ *  The scope represents that we need to bind the storage region of tensor to buffer.
+ *  This will affect replacement of some variables inside the scope that
+ *  corresponds to field of buffer to be the actual expressions of tensor during
+ *  storage flattening phase.
+ */
+constexpr const char* buffer_bind_scope = "buffer_bind_scope";
+// Pipeline related attributes
+/*! \brief channel read scope */
+constexpr const char* channel_read_scope = "channel_read_scope";
+/*! \brief Advance step of channel after end of scope */
+constexpr const char* channel_read_advance = "channel_read_advance";
+/*! \brief channel write scope */
+constexpr const char* channel_write_scope = "channel_write_scope";
+/*! \brief Advance step of channel after end of scope */
+constexpr const char* channel_write_advance = "channel_write_advance";
+/*! \brief pipeline stage scope, implies always execution */
+constexpr const char* pipeline_stage_scope = "pipeline_stage_scope";
+/*! \brief pipeline execution scope, implies the scope can be pipelined. */
+constexpr const char* pipeline_exec_scope = "pipeline_exec_scope";
+
+/*!
+ * \brief Mark that the attached statement runs asynchronously.
+ */
+constexpr const char* async_scope = "async_scope";
+
+/*!
+ * \brief Annotations for invoking and synchronizing asynchronous operations.
+
+ * Synchronization is done in terms of "queue": It is an abstract entity associated
+ * with each asynchronous unit, and it tracks invocations and completions of asynchronous
+ * operations in the FIFO order.
+ *
+ * Similarly to PTX instructions commit_group and wait_group, these annotations express
+ * synchronization by "counting":
+ *
+ * async_commit_queue(i): Group one or more invocations of async operations in the given scope,
+ * and "commit" (or push) them to the queue i. A group of operations committed together is
+ * awaited as one chunk. Groups committed to the same queue complete in the FIFO order.
+ *
+ * async_wait_queue(i, N): Block until only N most recent committed groups are still in-flight at
+ * the queue i. N does not have to be a constant, but some backends may require a constant count.
+*/
+constexpr const char* async_commit_queue_scope = "async_commit_queue_scope";
+constexpr const char* async_wait_queue_scope = "async_wait_queue_scope";
+constexpr const char* async_wait_inflight_count = "async_wait_inflight_count";
+
+/*!
+ * \brief Mark that the shape of TensorCore fragment
+ */
+constexpr const char* fragment_shape = "fragment_shape";
+
+/*!
+ * \brief Mark that the layout of TensorCore fragment
+ */
+constexpr const char* fragment_layout = "fragment_layout";
+
+/*!
+ * \brief Mark that the loop should be partitioned.
+ */
+constexpr const char* pragma_loop_partition_hint = "pragma_loop_partition_hint";
 
 /*!
  * \brief Check if attr_key is a pragma key extension
@@ -1090,6 +1168,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

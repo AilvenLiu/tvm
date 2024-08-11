@@ -158,6 +158,23 @@ std::string PrintArriveBarrierExpectTxAsm(const std::string& barrier,
  */
 std::string PrintWaitBarrierAsm(const std::string& barrier);
 
+/*!
+ * \brief Print ptx fence.proxy.async.{global, shared::cta, shared::cluster}
+ */
+std::string PrintCudaFenceProxyAsyncAssembly(std::string scope);
+
+std::string PrintMbarrierInitAssembly(const std::string& barrier, const std::string& thread_count);
+
+std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
+                                                const std::string& byte_count);
+
+std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::string& dst,
+                                                          const std::string& bar,
+                                                          const std::string& tensormap,
+                                                          int cta_mask, std::vector<int> coords);
+
+std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase);
+
 }  // namespace codegen
 }  // namespace tvm
 

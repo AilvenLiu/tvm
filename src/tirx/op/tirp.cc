@@ -32,6 +32,32 @@ namespace tvm {
 namespace tirx {
 namespace tirp {
 
+/********************* Utils **********************/
+
+bool IsInt(const ObjectRef& obj) { return obj.as<runtime::Int>() || obj.as<IntImmNode>(); }
+
+bool IsFloat(const ObjectRef& obj) { return obj.as<runtime::Float>() || obj.as<FloatImmNode>(); }
+
+bool IsIntOrFloat(const ObjectRef& obj) { return IsInt(obj) || IsFloat(obj); }
+
+IntImm ToIntImm(const ObjectRef& obj) {
+  ICHECK(IsInt(obj)) << "ValueError: Cannot convert to IntImm";
+  if (const auto* int_node = obj.as<runtime::Int::ContainerType>()) {
+    return IntImm(DataType::Int(32), int_node->value);
+  } else {
+    return Downcast<IntImm>(obj);
+  }
+}
+
+FloatImm ToFloatImm(const ObjectRef& obj) {
+  ICHECK(IsFloat(obj)) << "ValueError: Cannot convert to FloatImm";
+  if (const auto* float_node = obj.as<runtime::Float::ContainerType>()) {
+    return FloatImm(DataType::Float(32), float_node->value);
+  } else {
+    return Downcast<FloatImm>(obj);
+  }
+}
+
 #define TVM_TIRP_REGISTER_OP(OpName) \
   TVM_REGISTER_OP("tirp." OpName).set_attr<TScriptPrinterName>("TScriptPrinterName", OpName)
 
@@ -100,7 +126,7 @@ TIRP_DEFINE_SCHEDULE_OP(fill).set_num_inputs(2).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
       ICHECK_EQ(args.size(), 2U) << "fill() expects 2 arguments";
       ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of fill() must be BufferRegion";
-      ICHECK(args[1].as<PrimExprNode>()) << "arg[1] of fill() must be PrimExpr";
+      ICHECK(IsIntOrFloat(args[1])) << "arg[1] of fill() must be int or float";
     });
 
 TIRP_DEFINE_SCHEDULE_OP(gemm).set_num_inputs(6).set_attr<FArgSanitizer>(
@@ -110,8 +136,8 @@ TIRP_DEFINE_SCHEDULE_OP(gemm).set_num_inputs(6).set_attr<FArgSanitizer>(
       ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of gemm() must be BufferRegion";
       ICHECK(args[2].as<BufferRegionNode>()) << "arg[2] of gemm() must be BufferRegion";
       ICHECK(args[3].as<BufferRegionNode>()) << "arg[3] of gemm() must be BufferRegion";
-      ICHECK(args[4].as<PrimExprNode>()) << "arg[4] of gemm() must be PrimExpr";
-      ICHECK(args[5].as<PrimExprNode>()) << "arg[5] of gemm() must be PrimExpr";
+      ICHECK(IsIntOrFloat(args[4])) << "arg[4] of gemm() must be int or float";
+      ICHECK(IsIntOrFloat(args[5])) << "arg[5] of gemm() must be int or float";
     });
 
 /********************* Barrier Ops **********************/
@@ -125,8 +151,7 @@ TIRP_DEFINE_BARRIER_OP(barrier_init)
                                ICHECK_EQ(args.size(), 2U) << "barrier_init() expects 2 arguments";
                                ICHECK(args[0].as<BarrierNode>())
                                    << "arg[0] of barrier_init() must be Barrier";
-                               ICHECK(args[1].as<PrimExprNode>())
-                                   << "arg[1] of barrier_init() must be PrimExpr";
+                               ICHECK(IsInt(args[1])) << "arg[1] of barrier_init() must be int";
                              })
     .set_attr<FOpScheduler>("FOpScheduler", BarrierOpScheduler);
 
@@ -211,8 +236,8 @@ TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_wait)
                                    << "pipeline_consumer_wait() expects 2 arguments";
                                ICHECK(args[0].as<PipelineNode>())
                                    << "arg[0] of pipeline_consumer_wait() must be Pipeline";
-                               ICHECK(args[1].as<PrimExprNode>())
-                                   << "arg[1] of pipeline_consumer_wait() must be PrimExpr";
+                               ICHECK(IsInt(args[1]))
+                                   << "arg[1] of pipeline_consumer_wait() must be int";
                              })
     .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
 

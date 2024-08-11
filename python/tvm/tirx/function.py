@@ -86,13 +86,7 @@ class PrimFunc(BaseFunc, Scriptable):
             attrs = tvm.ir.make_node("ir.DictAttrs")
 
         self.__init_handle_by_constructor__(
-            _ffi_api.PrimFunc,
-            param_list,
-            body,
-            ret_type,
-            buffer_map,
-            attrs,
-            span,
+            _ffi_api.PrimFunc, param_list, body, ret_type, buffer_map, attrs, span
         )  # type: ignore
 
     def with_body(self, new_body, span=None):

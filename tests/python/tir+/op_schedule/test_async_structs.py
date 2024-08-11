@@ -148,7 +148,7 @@ def test_pipeline_no_specialize_cta():
                     with T.thread():
                         for k in range(32):
                             O_smem[k, tx] += A_smem[i % N_STAGES, k, tx]
-                    T.tvm_storage_sync("shared")
+                        T.tvm_storage_sync("shared")
 
                 Tp.copy(B[bx * 32 : (bx + 1) * 32, 0:128], O_smem)
 
@@ -192,7 +192,7 @@ def test_pipeline_no_specialize_cta():
                                 with T.thread():
                                     for k in range(32):
                                         O_smem[k * 128 + threadIdx] = O_smem[k * 128 + threadIdx] + A_smem[j * 4096 + k * 128 + threadIdx]
-                                T.tvm_storage_sync("shared")
+                                    T.tvm_storage_sync("shared")
                             with T.thread():
                                 for s in range(8):
                                     for vec in T.vectorized(4):
@@ -201,8 +201,8 @@ def test_pipeline_no_specialize_cta():
                                 T.tvm_storage_sync("shared")
     # fmt: on
 
-    target = tvm.target.Target("nvidia/geforce-rtx-4090")
     DEV = tvm.cuda(0)
+    target = tvm.target.Target.from_device(DEV)
 
     with target:
         mod = tvm.IRModule({"main": test})
