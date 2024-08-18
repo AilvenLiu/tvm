@@ -1770,7 +1770,9 @@ def mbarrier_wait(bar, phase):
     return call_intrin("", "tir.mbarrier_wait", bar, phase)
 
 
-def cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *coords, cta_mask=0):
+def cp_async_bulk_tensor_global_to_cluster(
+    dim, dst_ptr, dst_offset, bar, tensormap, *coords, cta_mask=0
+):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.shared::cluster.global.tile.mbarrier::complete_tx::bytes
 
     Parameters
@@ -1780,6 +1782,9 @@ def cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *coords
 
     dst_ptr : Var
         The destination pointer to the shared memory.
+
+    dst_offset : PrimExpr
+        The offset of the destination pointer (in terms of elements).
 
     bar : Var
         The pointer to mbarrier variable.
@@ -1803,10 +1808,11 @@ def cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *coords
         "tir.cp_async_bulk_tensor_global_to_cluster",
         dim,
         dst_ptr,
+        dst_offset,
         bar,
         tensormap,
-        cta_mask,
         *coords,
+        cta_mask,
     )
 
 

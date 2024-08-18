@@ -212,17 +212,29 @@ struct ThreadScope {
     } else if (s.compare(0, 10, "threadIdx.") == 0) {
       r.rank = 1;
       r.dim_index = static_cast<int>(s[10] - 'x');
+    } else if (s.compare(0, 14, "clusterCtaIdx.") == 0) {
+      r.rank = 2;
+      r.dim_index = static_cast<int>(s[14] - 'x');
     } else {
       TVM_FFI_THROW(InternalError) << "Unknown threadscope " << s;
     }
     return r;
   }
+
+  /*! \brief Whether the thread scope is a virtual thread */
+  bool IsVirtualThread() const { return rank == 1 && dim_index == -1; }
+  /*! \brief Whether the thread scope is a block */
+  bool IsBlockIdx() const { return rank == 0; }
+  /*! \brief Whether the thread scope is a thread */
+  bool IsThreadIdx() const { return rank == 1 && dim_index != -1; }
+  /*! \brief Whether the thread scope is a cluster */
+  bool IsClusterCtaIdx() const { return rank == 2; }
 };
 
 /*! \brief workload specification */
 struct ThreadWorkLoad {
   // array, first three are thread configuration.
-  size_t work_size[6];
+  size_t work_size[9];
   // Dynamic shared memory allocation size in bytes.
   size_t dyn_shmem_size{0};
   /*!
@@ -235,13 +247,19 @@ struct ThreadWorkLoad {
    * \return i-th grid dim
    */
   inline size_t grid_dim(size_t i) const { return work_size[i]; }
+  /*!
+   * \param i The cluster dimension.
+   * \return i-th thread dim
+   */
+  inline size_t cluster_dim(size_t i) const { return work_size[i + 6]; }
 };
+
 /*! \brief Launch parameters configuration */
 class LaunchParamConfig {
  public:
   void Init(size_t base, const ffi::Array<ffi::String>& launch_param_tags) {
     base_ = base;
-    std::vector<bool> filled(6, false);
+    std::vector<bool> filled(9, false);
     for (size_t i = 0; i < launch_param_tags.size(); ++i) {
       std::string tag(launch_param_tags[i]);
       if (tag == launch_param::kUseDynamicSharedMemoryTag) {
@@ -268,7 +286,7 @@ class LaunchParamConfig {
   // extract workload from arguments.
   ThreadWorkLoad Extract(ffi::PackedArgs args) const {
     ThreadWorkLoad w;
-    std::fill(w.work_size, w.work_size + 6, 1);
+    std::fill(w.work_size, w.work_size + 9, 1);
     const TVMFFIAny* raw_args = reinterpret_cast<const TVMFFIAny*>(args.data());
 
     for (size_t i = 0; i < arg_index_map_.size(); ++i) {

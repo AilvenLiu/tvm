@@ -93,6 +93,8 @@ class CodeGenCUDA final : public CodeGenC {
   std::string vid_global_barrier_expect_;
   // whether enable cuda::barrier
   bool enable_cuda_barrier_{false};
+  // whether enable cooperative_group
+  bool enable_cooperative_groups_{false};
   // whether enable fp16
   bool enable_fp16_{false};
   // whether enable bf16

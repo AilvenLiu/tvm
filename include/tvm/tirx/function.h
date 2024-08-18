@@ -302,6 +302,12 @@ namespace attr {
  *
  *   Defined as "tirx.use_dyn_shared_memory".
  *
+ * - "clusterCtaIdx.x", "clusterCtaIdx.y", "clusterCtaIdx.z"
+ *
+ *  The extent of the cluster iterators, to be used when launching the
+ * compute kernel on the device.  For example, the clusterDimX/Y/Z parameters
+ * passed to cuLaunchKernel when launching a CUDA kernel.
+ *
  * \sa tvm::CallingConv::kDeviceKernelLaunch
  */
 constexpr const char* kKernelLaunchParams = "tirx.kernel_launch_params";

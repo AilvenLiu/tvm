@@ -34,7 +34,8 @@
 #include <utility>
 #include <vector>
 
-#include "../../tirx/transform/ir_utils.h"
+#include "../../runtime/thread_storage_scope.h"
+#include "../../tir/transform/ir_utils.h"
 #include "literal/cuda_half_t.h"
 #include "literal/cuda_int8_t.h"
 #include "ptx.h"
@@ -195,7 +196,7 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
 }
 
 std::string CodeGenCUDA::Finish() {
-  if (enable_cuda_barrier_) {
+  if (enable_cuda_barrier_ || enable_cooperative_groups_) {
     decl_stream << "#include <cuda/barrier>\n";
     decl_stream << "#include <cooperative_groups.h>\n";
   }
@@ -341,7 +342,16 @@ void CodeGenCUDA::VisitStmt_(const tirx::ForNode* op) {
 
 void CodeGenCUDA::BindThreadIndex(const IterVar& iv) {
   TVM_FFI_ICHECK(!var_idmap_.count(iv->var.get()));
-  var_idmap_[iv->var.get()] = CastFromTo(iv->thread_tag, DataType::UInt(32), iv->var.dtype());
+  const auto& scope = runtime::ThreadScope::Create(iv->thread_tag);
+  if (scope.IsClusterCtaIdx()) {
+    enable_cooperative_groups_ = true;
+    std::ostringstream os;
+    os << "cooperative_groups::this_grid().block_index().";
+    os << static_cast<char>('x' + scope.dim_index);
+    var_idmap_[iv->var.get()] = CastFromTo(os.str(), DataType::UInt(32), iv->var.dtype());
+  } else {
+    var_idmap_[iv->var.get()] = CastFromTo(iv->thread_tag, DataType::UInt(32), iv->var.dtype());
+  }
 }
 
 void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
@@ -1586,13 +1596,14 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
     std::string dst = this->PrintExpr(op->args[1]);
-    std::string bar = this->PrintExpr(op->args[2]);
-    std::string tensormap = this->PrintExpr(op->args[3]);
-    int cta_mask = Downcast<IntImm>(op->args[4])->value;
+    dst = dst + " + " + this->PrintExpr(op->args[2]);
+    std::string bar = this->PrintExpr(op->args[3]);
+    std::string tensormap = this->PrintExpr(op->args[4]);
     std::vector<int> coords;
     for (int i = 0; i < dim; ++i) {
       coords.push_back(Downcast<IntImm>(op->args[5 + i])->value);
     }
+    int cta_mask = Downcast<IntImm>(op->args[5 + dim])->value;
     print(
         PrintCpAsyncBulkTensorGlobalToClusterAssembly(dim, dst, bar, tensormap, cta_mask, coords));
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_shared_to_global())) {
@@ -1630,6 +1641,7 @@ void CodeGenCUDA::VisitStmt_(const AttrStmtNode* op) {
     TVM_FFI_ICHECK(inner);
     this->VisitStmt(inner->body);
     return;
+  } else if (op->attr_key == tir::attr::thread_extent) {
   }
   CodeGenC::VisitStmt_(op);
 }

@@ -121,6 +121,10 @@ class ScopeIdDefRemover : public StmtExprMutator {
     ICHECK(!scope.Is("world")) << "Internal Error: world scope is not supported at the moment";
     if (auto opt_kernel = scope.as<KernelScope>()) {
       auto kernel = opt_kernel.value();
+      if (kernel->scope_id_def.empty()) {
+        // No ScopeIdDef to resolve
+        return std::move(block);
+      }
       ICHECK(resolve_queue_.empty()) << "Internal Error: resolve_queue_ is not empty";
       id_fused_map_.clear();
       replace_map_.clear();

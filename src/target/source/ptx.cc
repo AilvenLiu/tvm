@@ -923,78 +923,61 @@ std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::st
   uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&{tensormap});
   unsigned int dst_addr = cast_smem_ptr_to_int({dst});
   unsigned int bar_addr = cast_smem_ptr_to_int({bar});
+  uint16_t cta_mask = static_cast<uint16_t>({cta_mask});
   )";
-  if (dim == 1) {
+  if (cta_mask != 0) {
+    // multicast
     asm_code += R"(
   __asm__ __volatile__(
-    "cp.async.bulk.tensor.1d.shared::cluster.global.mbarrier::complete_tx::bytes"
-    " [%0], [%1, {%3}], [%2];"
+    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster"
+    " [%0], [%1, {arg_template}], [%2], %3;"
     :
-    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
-      "r"({crd0})
-    : "memory"
-  );
-}
-)";
-  } else if (dim == 2) {
-    asm_code += R"(
-  __asm__ __volatile__(
-    "cp.async.bulk.tensor.2d.shared::cluster.global.mbarrier::complete_tx::bytes"
-    " [%0], [%1, {%3, %4}], [%2];"
-    :
-    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
-      "r"({crd0}), "r"({crd1})
-    : "memory"
-  );
-}
-)";
-  } else if (dim == 3) {
-    asm_code += R"(
-  __asm__ __volatile__(
-    "cp.async.bulk.tensor.3d.shared::cluster.global.mbarrier::complete_tx::bytes"
-    " [%0], [%1, {%3, %4, %5}], [%2];"
-    :
-    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
-      "r"({crd0}), "r"({crd1}), "r"({crd2})
-    : "memory"
-  );
-}
-)";
-  } else if (dim == 4) {
-    asm_code += R"(
-  __asm__ __volatile__(
-    "cp.async.bulk.tensor.4d.shared::cluster.global.mbarrier::complete_tx::bytes"
-    " [%0], [%1, {%3, %4, %5, %6}], [%2];"
-    :
-    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
-      "r"({crd0}), "r"({crd1}), "r"({crd2}), "r"({crd3})
-    : "memory"
-  );
-}
-)";
-  } else if (dim == 5) {
-    asm_code += R"(
-  __asm__ __volatile__(
-    "cp.async.bulk.tensor.5d.shared::cluster.global.mbarrier::complete_tx::bytes"
-    " [%0], [%1, {%3, %4, %5, %6, %7}], [%2];"
-    :
-    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
-      "r"({crd0}), "r"({crd1}), "r"({crd2}), "r"({crd3}), "r"({crd4})
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr), "h"(cta_mask)
+      {coord_list}
     : "memory"
   );
 }
 )";
   } else {
-    LOG(FATAL) << "Only support 1D to 5D tensor copy.";
+    // unicast
+    asm_code += R"(
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes"
+    " [%0], [%1, {arg_template}], [%2];"
+    :
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
+      {coord_list}
+    : "memory"
+  );
+}
+)";
   }
-
+  std::string arg_template, coord_list;
+  {
+    // arg template
+    int base = cta_mask != 0 ? 4 : 3;
+    ICHECK_GT(dim, 0);
+    arg_template = "{%" + std::to_string(base);
+    for (int i = 1; i < dim; ++i) {
+      arg_template += ", %" + std::to_string(base + i);
+    }
+    arg_template += "}";
+  }
+  {
+    // coord list
+    coord_list = "\"r\"(" + std::to_string(coords[0]) + ")";
+    for (int i = 1; i < dim; ++i) {
+      coord_list += ", \"r\"(" + std::to_string(coords[i]) + ")";
+    }
+  }
   Replacer replacer;
   replacer.register_rule("{dst}", dst);
   replacer.register_rule("{bar}", bar);
   replacer.register_rule("{tensormap}", tensormap);
-  for (int i = 0; i < dim; ++i) {
-    replacer.register_rule("{crd" + std::to_string(i) + "}", std::to_string(coords[i]));
-  }
+  replacer.register_rule("{dim}", std::to_string(dim));
+  replacer.register_rule("{arg_template}", arg_template);
+  replacer.register_rule("{coord_list}", coord_list);
+  replacer.register_rule("{cta_mask}", std::to_string(cta_mask));
   return replacer.rewrite(asm_code);
 }
 
