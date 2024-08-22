@@ -359,6 +359,9 @@ TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_global_to_cluster)
 TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_shared_to_global)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(ptx_fetch_register)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
+
 TIR_DEFINE_BUILTIN_FUNC(mma_store)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque))
     .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",

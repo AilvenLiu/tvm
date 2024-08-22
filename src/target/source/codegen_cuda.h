@@ -62,6 +62,7 @@ class CodeGenCUDA final : public CodeGenC {
   void BindThreadIndex(const IterVar& iv) final;  // NOLINT(*)
   void PrintVecElemLoadExpr(DataType t, int i, const std::string& value, std::ostream& os) final;
   std::string CastFromTo(std::string value, DataType from, DataType target) final;
+  void AddUtilFunction(const std::string& name, const std::string& code);
   // overload visitor
   void VisitExpr_(const RampNode* op, std::ostream& os) final;       // NOLINT(*)
   void VisitExpr_(const SelectNode* op, std::ostream& os) final;     // NOLINT(*)
@@ -125,6 +126,8 @@ class CodeGenCUDA final : public CodeGenC {
   // The alignment of the barrier array in shared memory
   // Set to 16 to maintain minimum alignment requirements for async bulk copy
   const int barrier_alignment_bytes_ = 16;
+  // Functions to be added to the util functions during codegen
+  std::unordered_map<std::string, std::string> util_funcs_;
 
   // The name prefix of the cuda::barrier array in shared memory
   const std::string cuda_barrier_name_ = "cubar";

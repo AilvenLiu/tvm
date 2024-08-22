@@ -76,35 +76,19 @@ FloatImm ToFloatImm(const ObjectRef& obj) {
 /********************* ScheduleContext **********************/
 TVM_REGISTER_NODE_TYPE(ScheduleContextNode);
 
-ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope, ThreadVarMap thread_var_map,
-                                 ScopeExtentMap scope_extent_map) {
+ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
+                                 Map<String, PrimExpr> launch_params) {
   auto n = make_object<ScheduleContextNode>();
-  n->target = target;
-  n->exec_scope = exec_scope;
-  n->thread_var_map = thread_var_map;
-  n->scope_extent_map = scope_extent_map;
+  n->target = std::move(target);
+  n->exec_scope = std::move(exec_scope);
+  n->launch_params = std::move(launch_params);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
-    .set_body_typed([](Target target, ExecScope exec_scope, ThreadVarMap thread_var_map,
-                       ScopeExtentMap scope_extent_map) {
-      return ScheduleContext(target, exec_scope, thread_var_map, scope_extent_map);
+    .set_body_typed([](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params) {
+      return ScheduleContext(target, exec_scope, launch_params);
     });
-
-PrimExpr ScheduleContext::GetScopeExtent(const ScopeIdDef& scope_id) const {
-  std::unordered_map<ScopeIdDef, PrimExpr, ScopeIdDef::ScopeHash, ScopeIdDef::ScopeEqual> map(
-      get()->scope_extent_map.begin(), get()->scope_extent_map.end());
-  auto it = map.find(scope_id);
-  ICHECK(it != map.end()) << "ValueError: Cannot find scope id " << scope_id;
-  return it->second;
-}
-
-Var ScheduleContext::GetThreadVar(const String& name) const {
-  auto it = get()->thread_var_map.find(name);
-  ICHECK(it != get()->thread_var_map.end()) << "ValueError: Cannot find thread variable " << name;
-  return (*it).second;
-}
 
 /********************* Schedule Ops **********************/
 #define TIRP_DEFINE_SCHEDULE_OP(OpName) \

@@ -787,6 +787,13 @@ TVM_DLL const Op& cp_async_bulk_tensor_global_to_cluster();
 TVM_DLL const Op& cp_async_bulk_tensor_shared_to_global();
 
 /*!
+ * \brief tvm instrinsics to fetch PTX pre-defined registers
+ *
+ * ptx_fetch_register(int bits, string reg_name)
+ */
+TVM_DLL const Op& ptx_fetch_register();
+
+/*!
  * \brief tvm intrinsic for storing the result of PTX MMA into a destination pointer.
  *        For example, if each thread in a warp of size 32 has 4 elements from the result of
  *        m16xn8xk16 MMA in its registers, this intrinsic can be used to store the result in a

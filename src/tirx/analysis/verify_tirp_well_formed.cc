@@ -53,7 +53,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     if (!scope_stack_.empty() && !scope_stack_.back().Is("thread")) {
       Verify(obj->IsInstance<BlockNode>() || obj->IsInstance<ForNode>() ||
              obj->IsInstance<BlockRealizeNode>() || obj->IsInstance<SeqStmtNode>() ||
-             obj->IsInstance<tirp::OpCallNode>())
+             obj->IsInstance<tirp::OpCallNode>() || obj->IsInstance<AttrStmtNode>())
           << "TIRpError: Stmt at " << path << " is not under a thread scope and has type "
           << obj->GetTypeKey() << "\n"
           << obj;
@@ -109,31 +109,9 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
         << "InternalError: exec_scope is not defined for block at " << path;
     const auto& scope = op->exec_scope.value();
     if (auto opt_kernel = scope.as<KernelScope>()) {
-      const auto& kernel = opt_kernel.value();
-      std::unordered_map<ScopeIdDef, ScopeIdDef, ScopeIdDef::ScopeHash, ScopeIdDef::ScopeEqual>
-          scope_id_map;
-      for (const auto& def : kernel->scope_id_def) {
-        Verify(ExecScope::Valid(def->parent))
-            << "TIRpError: ScopeIdDef at " << path << " has unknown exec scope " << def->parent;
-        Verify(ExecScope::Valid(def->cur))
-            << "TIRpError: ScopeIdDef at " << path << " has unknown exec scope " << def->cur;
-        scope_id_map[ScopeIdDef{def->parent, def->cur}] = def;
-      }
-      for (const auto& [_, def1] : scope_id_map) {
-        for (const auto& [_, def2] : scope_id_map) {
-          if (auto composed_opt = Compose(def1, def2)) {
-            auto composed = composed_opt.value();
-            auto it = scope_id_map.find(composed);
-            if (it != scope_id_map.end()) {
-              Verify(ana_.CanProveEqual(it->second.fused_extent(),
-                                        def1.fused_extent() * def2.fused_extent()))
-                  << "TIRpError: Kernel at " << path << " has invalid scope_id_def between scope "
-                  << def1 << " and scope " << def2;
-            }
-          }
-        }
-      }
-      Verifier::VisitStmt_(op, path);
+      ScopeIdDefVerifier verifier;
+      Verify(verifier.Verify(opt_kernel.value()->scope_id_def))
+          << "TIRpError: Kernel at " << path << " has invalid scope_id_def";
     }
   }
 

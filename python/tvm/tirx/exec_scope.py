@@ -25,20 +25,14 @@ from .expr import PrimExpr, Var
 from ..ir import Range
 
 
-@register_object("tirx.ScopeId")
-class ScopeId(Var):
-    def __init__(self, name: str):
-        self.__init_handle_by_constructor__(_ffi_api.ScopeId, name)
-
-
 @register_object("tirx.ScopeIdDef")
 class ScopeIdDef(Object):
-    def_ids: List[ScopeId]
+    def_ids: List[Var]
     extents: List[PrimExpr]
     parent: str
     cur: str
 
-    def __init__(self, def_ids: List[ScopeId], extents: List[PrimExpr], parent: str, cur: str):
+    def __init__(self, def_ids: List[Var], extents: List[PrimExpr], parent: str, cur: str):
         self.__init_handle_by_constructor__(_ffi_api.ScopeIdDef, def_ids, extents, parent, cur)
 
 
@@ -72,7 +66,7 @@ class KernelScope(ExecScope):
 
 @register_object("tirx.ExecScopeSlice")
 class ExecScopeSlice(ExecScope):
-    def_ids: List[ScopeId]
+    def_ids: List[Var]
     ranges: List[Range]
 
     def __init__(self, ids: List[PrimExpr], ranges: List[Range], name: str):

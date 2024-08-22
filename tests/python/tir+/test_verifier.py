@@ -182,7 +182,7 @@ def test_inconsistent_scope_id():
 
     verify(test1)
     verify(test2)
-    with pytest.raises(Exception, match="invalid scope_id_def between"):
+    with pytest.raises(Exception, match="Inconsistent extents for scope"):
         verify(test3)
 
 

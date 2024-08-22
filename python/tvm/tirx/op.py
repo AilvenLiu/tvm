@@ -1848,6 +1848,25 @@ def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
     )
 
 
+def ptx_fetch_register(bits, reg_name):
+    """TVM intrinsic to tvm instrinsics to fetch PTX pre-defined registers
+
+    Parameters
+    ----------
+    bits : int
+        The number of bits of the register.
+
+    reg_name : str
+        The name of the register.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("int" + str(bits), "tir.ptx_fetch_register", bits, reg_name)
+
+
 def make_filled_simdgroup_matrix(
     d: Var,
     index: PrimExpr,

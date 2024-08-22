@@ -263,8 +263,7 @@ BlockFrame Warp() { return Block("", false, "warp"); }
 
 BlockFrame Thread() { return Block("", false, "thread"); }
 
-BlockFrame ScopeSlice(ffi::Array<tvm::tirx::ScopeId> vars, ffi::Array<Range> ranges,
-                      ffi::String cur) {
+BlockFrame ScopeSlice(ffi::Array<tvm::tirx::Var> vars, ffi::Array<Range> ranges, ffi::String cur) {
   ObjectPtr<BlockFrameNode> n = ffi::make_object<BlockFrameNode>();
   n->name = cur;
   n->iter_vars.clear();
@@ -281,41 +280,42 @@ BlockFrame ScopeSlice(ffi::Array<tvm::tirx::ScopeId> vars, ffi::Array<Range> ran
   return BlockFrame(n);
 }
 
-tvm::tirx::ScopeId KernelId(PrimExpr extent) {
+tvm::tirx::Var KernelId(PrimExpr extent) {
   BlockFrame frame = FindBlockFrame("T.kernel_id");
   TVM_FFI_ICHECK(frame->exec_scope.defined()) << "InternalError: exec_scope is not defined.";
   TVM_FFI_ICHECK(frame->exec_scope->IsInstance<tvm::tirx::WorldScopeNode>())
       << "InternalError: exec_scope is not WorldScope.";
-  tvm::tirx::ScopeId scope_id("");
-  frame->exec_scope =
-      tvm::tirx::WorldScope(tvm::tirx::ScopeIdDef({scope_id}, {extent}, "world", "kernel"));
+  tvm::tirx::Var scope_id("");
+  frame->exec_scope = tvm::tirx::WorldScope(
+      tvm::tirx::ScopeIdDef({scope_id}, {extent}, tvm::tirx::ScopePair("world", "kernel")));
   return scope_id;
 }
 
-ffi::Array<tvm::tirx::ScopeId> KernelScopeId(ffi::Array<PrimExpr> extents, ffi::String parent,
-                                            ffi::String name, ffi::String cur) {
+ffi::Array<tvm::tirx::Var> KernelScopeId(ffi::Array<PrimExpr> extents, ffi::String parent,
+                                        ffi::String name, ffi::String cur) {
   BlockFrame frame = FindBlockFrame(name);
   TVM_FFI_ICHECK(frame->exec_scope.defined()) << "InternalError: exec_scope is not defined.";
   TVM_FFI_ICHECK(frame->exec_scope->IsInstance<tvm::tirx::KernelScopeNode>())
       << "InternalError: exec_scope is not KernelScope.";
-  ffi::Array<tvm::tirx::ScopeId> scope_ids;
+  ffi::Array<tvm::tirx::Var> scope_ids;
   for (size_t i = 0; i < extents.size(); ++i) {
-    scope_ids.push_back(tvm::tirx::ScopeId(""));
+    scope_ids.push_back(tvm::tirx::Var(""));
   }
   const_cast<tvm::tirx::KernelScopeNode*>(frame->exec_scope.as<tvm::tirx::KernelScopeNode>())
-      ->scope_id_def.push_back(tvm::tirx::ScopeIdDef(scope_ids, extents, parent, cur));
+      ->scope_id_def.push_back(
+          tvm::tirx::ScopeIdDef(scope_ids, extents, tvm::tirx::ScopePair(parent, cur)));
   return scope_ids;
 }
 
-ffi::Array<tvm::tirx::ScopeId> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent) {
+ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   return KernelScopeId(extents, parent, "T.cta_id", "cta");
 }
 
-ffi::Array<tvm::tirx::ScopeId> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent) {
+ffi::Array<tvm::tirx::Var> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   return KernelScopeId(extents, parent, "T.warp_id", "warp");
 }
 
-ffi::Array<tvm::tirx::ScopeId> ThreadId(ffi::Array<PrimExpr> extents, ffi::String parent) {
+ffi::Array<tvm::tirx::Var> ThreadId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   return KernelScopeId(extents, parent, "T.thread_id", "thread");
 }
 
@@ -1109,7 +1109,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

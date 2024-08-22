@@ -329,6 +329,10 @@ std::string CodeGenCUDA::Finish() {
   decl_stream << "using uchar = unsigned char;\n";
   decl_stream << "using ushort = unsigned short;\n\n";
 
+  for (const auto& [name, code] : util_funcs_) {
+    decl_stream << code;
+  }
+
   return CodeGenC::Finish();
 }
 
@@ -345,10 +349,8 @@ void CodeGenCUDA::BindThreadIndex(const IterVar& iv) {
   const auto& scope = runtime::ThreadScope::Create(iv->thread_tag);
   if (scope.IsClusterCtaIdx()) {
     enable_cooperative_groups_ = true;
-    std::ostringstream os;
-    os << "cooperative_groups::this_grid().block_index().";
-    os << static_cast<char>('x' + scope.dim_index);
-    var_idmap_[iv->var.get()] = CastFromTo(os.str(), DataType::UInt(32), iv->var.dtype());
+    std::string reg_name = std::string("cluster_ctaid.") + static_cast<char>('x' + scope.dim_index);
+    var_idmap_[iv->var.get()] = PrintPtxFetchRegisterAssembly(this, 32, reg_name);
   } else {
     var_idmap_[iv->var.get()] = CastFromTo(iv->thread_tag, DataType::UInt(32), iv->var.dtype());
   }
@@ -828,6 +830,10 @@ std::string CodeGenCUDA::CastFromTo(std::string value, DataType from, DataType t
   }
   os << value << ")";
   return os.str();
+}
+
+void CodeGenCUDA::AddUtilFunction(const std::string& func_name, const std::string& code) {
+  this->util_funcs_.insert({func_name, code});
 }
 
 void CodeGenCUDA::VisitExpr_(const CastNode* op, std::ostream& os) {
@@ -1607,6 +1613,10 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(
         PrintCpAsyncBulkTensorGlobalToClusterAssembly(dim, dst, bar, tensormap, cta_mask, coords));
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_shared_to_global())) {
+  } else if (op->op.same_as(builtin::ptx_fetch_register())) {
+    int bits = Downcast<IntImm>(op->args[0])->value;
+    std::string reg = Downcast<StringImm>(op->args[1])->value;
+    os << PrintPtxFetchRegisterAssembly(this, bits, reg);
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {

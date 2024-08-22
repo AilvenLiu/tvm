@@ -68,7 +68,6 @@ ffi::Module BuildCUDA(IRModule mod, Target target) {
   for (auto [gvar, prim_func] : functions) {
     cg.AddFunction(gvar, prim_func);
   }
-
   std::string code = cg.Finish();
 
   if (auto f = ffi::Function::GetGlobal("tvm_callback_cuda_postproc")) {

@@ -43,10 +43,10 @@ def test_lower_view_get():
         with T.kernel():
             bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
             warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")            
+            lane_id = T.thread_id([32], parent="warp")
 
             with T.thread():
-                A = T.alloc_buffer([2], dtype="float16", scope="local", 
+                A = T.alloc_buffer([2], dtype="float16", scope="local",
                                    layout=T.TileLayout.from_nested_tuple((2,), (1,)))
                 B_layout = T.TileLayout.shard((64,), (32,), "S0", inner=A.layout, from_to=("thread", "warp"))
                 """
@@ -77,18 +77,20 @@ def test_lower_view_get():
     @T.prim_func(private=True, tirp=True)
     def after1(in_buf: T.Buffer(64, "float32"), out: T.Buffer(64, "float32")) -> None:
         with T.kernel():
-            for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
-                for threadIdx in T.thread_binding(32, thread="threadIdx.x"):
+            blockIdx_x = T.launch_thread("blockIdx.x", 1)
+            threadIdx_x = T.launch_thread("threadIdx.x", 32)
+            blockIdx_y = T.launch_thread("blockIdx.y", 1)
+            blockIdx_z = T.launch_thread("blockIdx.z", 1)
+            with T.thread():
+                A = T.alloc_buffer((2,), "float16", scope="local")
+                with T.warp():
                     with T.thread():
-                        A = T.alloc_buffer((2,), "float16", scope="local")
-                        with T.warp():
-                            with T.thread():
-                                for i in T.vectorized(2):
-                                    A[i] = T.Cast("float16", in_buf[threadIdx * 2 + i])
-                        with T.warp():
-                            with T.thread():
-                                for i in T.vectorized(2):
-                                    out[threadIdx * 2 + i] = T.Cast("float32", A[i])
+                        for i in T.vectorized(2):
+                            A[i] = T.Cast("float16", in_buf[threadIdx_x * 2 + i])
+                with T.warp():
+                    with T.thread():
+                        for i in T.vectorized(2):
+                            out[threadIdx_x * 2 + i] = T.Cast("float32", A[i])
     # fmt: on
 
     compare(before1, after1, LowerTIRp)
@@ -137,21 +139,23 @@ def test_lower_view_get():
     @T.prim_func(private=True, tirp=True)
     def after2(in_buf: T.Buffer((16, 16), "float32"), out: T.Buffer((16, 16), "float32")):
         with T.kernel():
-            for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
-                for threadIdx in T.thread_binding(32, thread="threadIdx.x"):
+            blockIdx_x = T.launch_thread("blockIdx.x", 1)
+            threadIdx_x = T.launch_thread("threadIdx.x", 32)
+            blockIdx_y = T.launch_thread("blockIdx.y", 1)
+            blockIdx_z = T.launch_thread("blockIdx.z", 1)
+            with T.thread():
+                A = T.alloc_buffer((8,), scope="local", logical_scope="thread")
+                with T.warp():
                     with T.thread():
-                        A = T.alloc_buffer((8,), scope="local", logical_scope="thread")
-                        with T.warp():
-                            with T.thread():
-                                for i in T.unroll(4):
-                                    for j in T.vectorized(2):
-                                        in_buf_1 = T.Buffer((256,), data=in_buf.data, logical_scope="kernel")
-                                        A[i * 2 + j] = in_buf_1[i // 2 * 128 + threadIdx % 32 // 4 * 16 + i % 2 * 8 + j + threadIdx % 4]
-                        with T.warp():
-                            with T.thread():
-                                for i in T.vectorized(2):
-                                    out_1 = T.Buffer((256,), data=out.data, logical_scope="kernel")
-                                    out_1[threadIdx % 32 // 4 * 128 + i // 2 * 128 + threadIdx % 4 * 18 + i % 2] = A[i]
+                        for i in T.unroll(4):
+                            for j in T.vectorized(2):
+                                in_buf_1 = T.Buffer((256,), data=in_buf.data, logical_scope="kernel")
+                                A[i * 2 + j] = in_buf_1[i // 2 * 128 + threadIdx_x % 32 // 4 * 16 + i % 2 * 8 + j + threadIdx_x % 4]
+                with T.warp():
+                    with T.thread():
+                        for i in T.vectorized(2):
+                            out_1 = T.Buffer((256,), data=out.data, logical_scope="kernel")
+                            out_1[threadIdx_x % 32 // 4 * 128 + i // 2 * 128 + threadIdx_x % 4 * 18 + i % 2] = A[i]
 
     # fmt: on
 
@@ -161,28 +165,53 @@ def test_lower_view_get():
 def test_lower_scope_id():
     # fmt: off
     @T.prim_func(private=True, tirp=True)
-    def before() -> None:
+    def before1() -> None:
         with T.kernel():
             bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")            
+            tx = T.thread_id([32], parent="cta")
 
             with T.thread():
-                T.evaluate(bx + by + bz)
+                T.evaluate(bx + by + bz + tx)
+
+    @T.prim_func(private=True, tirp=True)
+    def after1() -> None:
+        with T.kernel():
+            blockIdx_x = T.launch_thread("blockIdx.x", 3)
+            threadIdx_x = T.launch_thread("threadIdx.x", 32)
+            blockIdx_y = T.launch_thread("blockIdx.y", 4)
+            blockIdx_z = T.launch_thread("blockIdx.z", 5)
+            with T.thread():
+                T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x)
+    # fmt: on
+    compare(before1, after1, LowerTIRp)
 
     # fmt: off
     @T.prim_func(private=True, tirp=True)
-    def after() -> None:
+    def before2() -> None:
         with T.kernel():
-            for blockIdx in T.thread_binding(60, thread="blockIdx.x"):
-                for threadIdx in T.thread_binding(32, thread="threadIdx.x"):
-                    with T.thread():
-                        T.reads()
-                        T.writes()
-                        T.evaluate(blockIdx % 3 + blockIdx % 12 // 3 + blockIdx % 60 // 12)
-    # fmt: on
+            cbx, cby, cbz = T.cta_id([2, 2, 2], parent="cluster")
+            bx, by, bz = T.cta_id([8, 8, 8], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
 
-    compare(before, after, LowerTIRp)
+            with T.thread():
+                T.evaluate(bx + by + bz + warp_id + lane_id + cbx + cby + cbz)
+
+    @T.prim_func(private=True, tirp=True)
+    def after2() -> None:
+        with T.kernel():
+            clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
+            clusterCtaIdx_y = T.launch_thread("clusterCtaIdx.y", 2)
+            clusterCtaIdx_z = T.launch_thread("clusterCtaIdx.z", 2)
+            blockIdx_x = T.launch_thread("blockIdx.x", 8)
+            threadIdx_x = T.launch_thread("threadIdx.x", 128)
+            blockIdx_y = T.launch_thread("blockIdx.y", 8)
+            blockIdx_z = T.launch_thread("blockIdx.z", 8)
+            with T.thread():
+                T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x // 32 + threadIdx_x % 32 + clusterCtaIdx_x + clusterCtaIdx_y + clusterCtaIdx_z)
+
+    # fmt: on
+    compare(before2, after2, LowerTIRp)
 
 
 def test_lower_layout():
@@ -194,11 +223,11 @@ def test_lower_layout():
             warp_id = T.warp_id([4], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
             tid = T.thread_id([128], parent="cta")
-        
+
             with T.cta():
                 A_smem = T.alloc_buffer([128, 32], dtype="float16", scope="shared",
                                         layout=T.SwizzleLayout(3, 3, 3))
-                
+
                 with T.thread():
                     thread_col = T.meta_var(4)
                     thread_row = T.meta_var(32)
@@ -208,20 +237,21 @@ def test_lower_layout():
                         col = T.meta_var(tid % thread_col * 8)
                         for vec in T.vectorized(8):
                             A_smem[row, col + vec] = A[bx * 128 + row, col + vec]
-    
+
     @T.prim_func(private=True, tirp=True)
     def after(A: T.Buffer((128, 32), "float16")) -> None:
         with T.kernel():
-            for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
-                for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
-                    with T.cta():
-                        A_smem = T.alloc_buffer((4096,), "float16", scope="shared", logical_scope="cta")
-                        with T.thread():
-                            for tile in range(4):
-                                for vec in T.vectorized(8):
-                                    A_1 = T.Buffer((4096,), "float16", data=A.data, logical_scope="kernel")
-                                    coord = T.meta_var(tile * 128 + threadIdx)
-                                    A_smem[((coord ^ ((coord & 56) >> 3)) << 3) + vec] = A_1[tile * 1024 + threadIdx * 8 + vec]
+            blockIdx_x = T.launch_thread("blockIdx.x", 1)
+            threadIdx_x = T.launch_thread("threadIdx.x", 128)
+            blockIdx_y = T.launch_thread("blockIdx.y", 1)
+            blockIdx_z = T.launch_thread("blockIdx.z", 1)
+            with T.cta():
+                A_smem = T.alloc_buffer((4096,), "float16", scope="shared", logical_scope="cta")
+                with T.thread():
+                    for tile in range(4):
+                        for vec in T.vectorized(8):
+                            A_1 = T.Buffer((4096,), "float16", data=A.data, logical_scope="kernel")
+                            A_smem[T.shift_left(T.bitwise_xor(tile * 128 + threadIdx_x, T.shift_right(T.bitwise_and(tile * 128 + threadIdx_x, 56), 3)), 3) + vec] = A_1[tile * 1024 + threadIdx_x * 8 + vec]
     # fmt: on
 
     compare(before, after, LowerTIRp)

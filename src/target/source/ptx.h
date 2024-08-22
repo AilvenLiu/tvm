@@ -29,6 +29,8 @@
 #include <string>
 #include <tuple>
 
+#include "codegen_cuda.h"
+
 namespace tvm {
 namespace codegen {
 
@@ -174,6 +176,13 @@ std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::st
                                                           int cta_mask, std::vector<int> coords);
 
 std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase);
+
+/*!
+ * \brief Print predefined, read-only variables, which are visible as special registers in PTX.
+ * \param bits: The number of bits of the register.
+ * \param reg: The name of the register.
+ */
+std::string PrintPtxFetchRegisterAssembly(CodeGenCUDA* cg, int bits, const std::string& reg);
 
 }  // namespace codegen
 }  // namespace tvm

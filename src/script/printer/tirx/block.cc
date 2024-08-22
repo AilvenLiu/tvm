@@ -61,13 +61,13 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
           lhs.push_back(DefineVar(scope_id, *frame, d));
         }
         ExprDoc rhs =
-            TIR(d, scope_id_def->cur + "_id")
+            TIR(d, scope_id_def->scope->cur + "_id")
                 ->Call({d->AsDoc<ExprDoc>(
                            scope_id_def->extents,
                            block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("extents"))},
                        {"parent"},
                        {LiteralDoc::Str(
-                           scope_id_def->parent,
+                           scope_id_def->scope->parent,
                            block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("parent"))});
         (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, NullOpt));
       }
@@ -404,21 +404,21 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       Doc doc = TIR(d, "ScopeIdDef")
                     ->Call({d->AsDoc<ExprDoc>(def->def_ids, p->Attr("def_ids")),
                             d->AsDoc<ExprDoc>(def->extents, p->Attr("extents")),
-                            LiteralDoc::Str(def->parent, p->Attr("parent")),
-                            LiteralDoc::Str(def->cur, p->Attr("cur"))});
+                            LiteralDoc::Str(def->scope->parent, p->Attr("parent")),
+                            LiteralDoc::Str(def->scope->cur, p->Attr("cur"))});
       return doc;
     });
 TVM_SCRIPT_REPR(tir::ScopeIdDefNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::ScopeId>("", [](tir::ScopeId id, ObjectPath p, IRDocsifier d) -> Doc {
-      if (Optional<ExprDoc> doc = d->GetVarDoc(id)) {
-        return doc.value();
-      }
-      Doc doc = TIR(d, "ScopeId")->Call({d->AsDoc<ExprDoc>(id->name_hint, p->Attr("name_hint"))});
+    .set_dispatch<tir::ScopePair>("", [](tir::ScopePair pair, ObjectPath p, IRDocsifier d) -> Doc {
+      Doc doc = TIR(d, "ScopePair")
+                    ->Call({d->AsDoc<ExprDoc>(pair->parent, p->Attr("parent")),
+                            d->AsDoc<ExprDoc>(pair->cur, p->Attr("cur"))});
       return doc;
     });
-TVM_SCRIPT_REPR(tir::ScopeIdNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tir::ScopePairNode, ReprPrintTIR);
+
 }  // namespace printer
 }  // namespace script
 }  // namespace tvm

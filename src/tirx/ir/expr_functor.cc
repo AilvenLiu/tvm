@@ -121,10 +121,6 @@ PrimExpr ExprMutator::VisitExpr_(const SizeVarNode* op) {
   return this->VisitExpr_(static_cast<const VarNode*>(op));
 }
 
-PrimExpr ExprMutator::VisitExpr_(const ScopeIdNode* op) {
-  return this->VisitExpr_(static_cast<const VarNode*>(op));
-}
-
 PrimExpr ExprMutator::VisitExpr_(const BufferLoadNode* op) {
   auto fmutate = [this](const PrimExpr& e) { return this->VisitExpr(e); };
   ffi::Array<PrimExpr> indices = op->indices.Map(fmutate);

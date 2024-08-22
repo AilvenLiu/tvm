@@ -41,16 +41,6 @@ namespace tirp {
 using FArgSanitizer = runtime::TypedPackedFunc<void(tvm::Op, Array<ObjectRef>)>;
 
 /*!
- * \brief The map from the scope id (defined by two scopes) to the extent of the scope id
- */
-using ScopeExtentMap = Map<ScopeIdDef, PrimExpr>;
-
-/*!
- * \brief The map from the thread variable name to the variable.
- */
-using ThreadVarMap = Map<String, Var>;
-
-/*!
  * \brief The context information of the kernel required by op schedule.
  */
 class ScheduleContextNode : public Object {
@@ -59,34 +49,18 @@ class ScheduleContextNode : public Object {
   Target target;
   /*! \brief The exec scope of the operator*/
   ExecScope exec_scope;
-  /*! \brief The thread variables. */
-  ThreadVarMap thread_var_map;
-  /*! \brief The scope extent map. */
-  ScopeExtentMap scope_extent_map;
+  /*! \brief The kernel launch parameters. */
+  Map<String, PrimExpr> launch_params;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("target", &target);
     v->Visit("exec_scope", &exec_scope);
-    v->Visit("thread_var_map", &thread_var_map);
-    v->Visit("scope_extent_map", &scope_extent_map);
-  }
-
-  bool SEqualReduce(const ScheduleContextNode* other, SEqualReducer equal) const {
-    return equal(target, other->target) && equal(exec_scope, other->exec_scope) &&
-           equal(thread_var_map, other->thread_var_map) &&
-           equal(scope_extent_map, other->scope_extent_map);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(target);
-    hash_reduce(exec_scope);
-    hash_reduce(thread_var_map);
-    hash_reduce(scope_extent_map);
+    v->Visit("launch_params", &launch_params);
   }
 
   static constexpr const char* _type_key = "tir.ScheduleContext";
-  static constexpr bool _type_has_method_sequal_reduce = true;
-  static constexpr bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_sequal_reduce = false;
+  static constexpr bool _type_has_method_shash_reduce = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScheduleContextNode, Object);
 };
 
@@ -99,25 +73,9 @@ class ScheduleContext : public ObjectRef {
    * \brief Constructor.
    * \param target The target of the kernel.
    * \param exec_scope The exec scope of the operator.
-   * \param thread_var_map The thread variables.
-   * \param scope_extent_map The scope extent map.
+   * \param launch_params The kernel launch parameters.
    */
-  TVM_DLL ScheduleContext(Target target, ExecScope exec_scope, ThreadVarMap thread_var_map,
-                          ScopeExtentMap scope_extent_map);
-
-  /*!
-   * \brief Get the extent of the scope.
-   * \param scope_id The scope defined by two exec scopes.
-   * \return The extent of the scope.
-   */
-  PrimExpr GetScopeExtent(const ScopeIdDef& scope_id) const;
-
-  /*!
-   * \brief Get the thread variable.
-   * \param name The name of the thread variable.
-   * \return The thread variable.
-   */
-  Var GetThreadVar(const String& name) const;
+  TVM_DLL ScheduleContext(Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ScheduleContext, ObjectRef, ScheduleContextNode);
 };

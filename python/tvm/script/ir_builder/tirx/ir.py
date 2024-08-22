@@ -40,7 +40,7 @@ from tvm.target.codegen import llvm_lookup_intrinsic_id
 from tvm.tirx import Buffer, BufferRegion, IndexMap, PrimExpr
 from tvm.tirx import op as _tir_op
 from tvm.tirx import type_annotation
-from tvm.tirx.exec_scope import ExecScope, ScopeIdDef, ScopeId, WorldScope, KernelScope
+from tvm.tirx.exec_scope import ExecScope, ScopeIdDef, Var, WorldScope, KernelScope
 from tvm.tirx.layout import (
     TLayout,
     TileLayout,
@@ -459,7 +459,7 @@ def world() -> frame.BlockFrame:
 
 
 def kernel(
-    vars: Optional[List[ScopeId]] = None,
+    vars: Optional[List[Var]] = None,
     ranges: Optional[List[ir.Range]] = None,
 ) -> frame.BlockFrame:
     """The block declaration statement.
@@ -475,7 +475,7 @@ def kernel(
 
 
 def cta(
-    vars: Optional[List[ScopeId]] = None,
+    vars: Optional[List[Var]] = None,
     ranges: Optional[List[ir.Range]] = None,
 ) -> frame.BlockFrame:
     """The block declaration statement.
@@ -491,7 +491,7 @@ def cta(
 
 
 def warp(
-    vars: Optional[List[ScopeId]] = None,
+    vars: Optional[List[Var]] = None,
     ranges: Optional[List[ir.Range]] = None,
 ) -> frame.BlockFrame:
     """The block declaration statement.
@@ -507,7 +507,7 @@ def warp(
 
 
 def thread(
-    vars: Optional[List[ScopeId]] = None,
+    vars: Optional[List[Var]] = None,
     ranges: Optional[List[ir.Range]] = None,
 ) -> frame.BlockFrame:
     """The block declaration statement.
@@ -522,29 +522,29 @@ def thread(
     return _ffi_api.Thread()  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def scope_slice(vars: List[ScopeId], ranges: List[ir.Range], cur: str) -> frame.BlockFrame:
+def scope_slice(vars: List[Var], ranges: List[ir.Range], cur: str) -> frame.BlockFrame:
     return _ffi_api.ScopeSlice(vars, ranges, cur)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def kernel_id(extent: Union[PrimExpr, int]) -> ScopeId:
+def kernel_id(extent: Union[PrimExpr, int]) -> Var:
     return _ffi_api.KernelId(extent)
 
 
-def cta_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[ScopeId]:
+def cta_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
     ret = _ffi_api.CtaId(extents, parent)
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def warp_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[ScopeId]:
+def warp_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
     ret = _ffi_api.WarpId(extents, parent)
     if len(ret) == 1:
         return ret[0]
     return ret
 
 
-def thread_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[ScopeId]:
+def thread_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
     ret = _ffi_api.ThreadId(extents, parent)
     if len(ret) == 1:
         return ret[0]
@@ -2144,6 +2144,7 @@ cuda_barrier_arrive_and_wait = _op_wrapper(_tir_op.cuda_barrier_arrive_and_wait)
 cuda_fence_proxy_async = _op_wrapper(_tir_op.cuda_fence_proxy_async)
 cp_async_bulk_tensor_global_to_cluster = _op_wrapper(_tir_op.cp_async_bulk_tensor_global_to_cluster)
 cp_async_bulk_tensor_shared_to_global = _op_wrapper(_tir_op.cp_async_bulk_tensor_shared_to_global)
+ptx_fetch_register = _op_wrapper(_tir_op.ptx_fetch_register)
 mbarrier_init = _op_wrapper(_tir_op.mbarrier_init)
 mbarrier_arrive_expect_tx = _op_wrapper(_tir_op.mbarrier_arrive_expect_tx)
 mbarrier_wait = _op_wrapper(_tir_op.mbarrier_wait)
@@ -2449,6 +2450,7 @@ __all__ = float_types + [
     "mbarrier_wait",
     "cp_async_bulk_tensor_global_to_cluster",
     "cp_async_bulk_tensor_shared_to_global",
+    "ptx_fetch_register",
     "make_filled_simdgroup_matrix",
     "simdgroup_load",
     "simdgroup_store",
@@ -2541,7 +2543,7 @@ __all__ += [
     "KernelScope",
     "ExecScope",
     "ScopeIdDef",
-    "ScopeId",
+    "Var",
     "TLayout",
     "TileLayout",
     "DeviceIterTree",

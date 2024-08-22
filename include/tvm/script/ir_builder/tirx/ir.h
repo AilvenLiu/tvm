@@ -156,16 +156,15 @@ BlockFrame Warp();
 
 BlockFrame Thread();
 
-BlockFrame ScopeSlice(ffi::Array<tvm::tirx::ScopeId> vars, ffi::Array<Range> ranges,
-                      ffi::String cur);
+BlockFrame ScopeSlice(ffi::Array<tvm::tirx::Var> vars, ffi::Array<Range> ranges, ffi::String cur);
 
-tvm::tirx::ScopeId KernelId(PrimExpr extent);
+tvm::tirx::Var KernelId(PrimExpr extent);
 
-ffi::Array<tvm::tirx::ScopeId> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent);
+ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
-ffi::Array<tvm::tirx::ScopeId> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent);
+ffi::Array<tvm::tirx::Var> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
-ffi::Array<tvm::tirx::ScopeId> ThreadId(ffi::Array<PrimExpr> extents, ffi::String parent);
+ffi::Array<tvm::tirx::Var> ThreadId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
 /*!
  * \brief The block initialization statement.
@@ -588,7 +587,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

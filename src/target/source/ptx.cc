@@ -1008,5 +1008,30 @@ std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::str
   return replacer.rewrite(asm_code);
 }
 
+std::string PrintPtxFetchRegisterAssembly(codegen::CodeGenCUDA* cg, int bits,
+                                          const std::string& reg) {
+  std::string func_code = R"(
+__forceinline__ __device__ int{bits}_t {func_name}() {
+  uint{bits}_t x;
+  asm volatile("mov.u{bits} %0, %{reg};\n" : "=r"(x) : );
+  return (int{bits}_t)x;
+}
+)";
+  CHECK(bits == 32 || bits == 64) << "Only support 32/64 bits for ptx_fetch_register.";
+
+  std::string reg_rp = reg;
+  std::replace(reg_rp.begin(), reg_rp.end(), '.', '_');
+  std::string func_name = "ptx_" + reg_rp;
+
+  Replacer replacer;
+  replacer.register_rule("{bits}", std::to_string(bits));
+  replacer.register_rule("{func_name}", func_name);
+  replacer.register_rule("{reg}", reg);
+  func_code = replacer.rewrite(func_code);
+
+  cg->AddUtilFunction(func_name, func_code);
+  return func_name + "()";
+}
+
 }  // namespace codegen
 }  // namespace tvm

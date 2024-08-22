@@ -92,7 +92,7 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
   for (const auto& region : src_region) {
     n_elements *= region->extent;
   }
-  const auto& thread_cnt = context.GetScopeExtent(ScopeIdDef{String("cta"), String("thread")});
+  const auto& thread_cnt = context->launch_params["threadIdx.x"];
   CHECK(ana.CanProveEqual(FloorMod(n_elements, thread_cnt), 0)) << "ValueError: n_elements must be "
                                                                 << "a multiple of cta thread size";
   // Select vector length, need to verify the alignment
@@ -135,7 +135,7 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
   CHECK(vec_len.defined()) << "ValueError: Cannot find a valid vector length";
   // Create stmts for vectorized copy
   // TODO(@bohan): consider using schedule langauge here?
-  Var s("s"), vec("vec"), threadIdx = context.GetThreadVar("threadIdx.x");
+  Var s("s"), vec("vec"), threadIdx("threadIdx");
   PrimExpr s_extent = ana.Simplify(FloorDiv(n_elements, thread_cnt * vec_len.value()));
   ana.Bind(vec, Range::FromMinExtent(0, vec_len.value()));
   ana.Bind(s, Range::FromMinExtent(0, s_extent));
@@ -174,6 +174,9 @@ Stmt VectorizedCopy(const BufferRegion& src_buffer_region, const BufferRegion& d
     body = SeqStmt({body, CallBuiltinOp(builtin::tvm_storage_sync(), {StringImm("shared")})});
   }
   body = BlockRealize({}, Bool(true), Block("copy", body, ExecScope::Create("thread")));
+  body = LetStmt(threadIdx,
+                 Call(DataType::Int(32), builtin::ptx_fetch_register(), {32, StringImm("tid.x")}),
+                 body);
   return body;
 }
 

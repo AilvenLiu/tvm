@@ -30,58 +30,79 @@
 namespace tvm {
 namespace tirx {
 
-class ScopeIdNode : public VarNode {
+/******** Definition of ScopeId ********/
+class ScopePairNode : public Object {
  public:
-  void VisitAttrs(AttrVisitor* v) { VarNode::VisitAttrs(v); }
+  /*! \brief The parent scope */
+  String parent;
+  /*! \brief The current scope */
+  String cur;
 
-  bool SEqualReduce(const ScopeIdNode* other, SEqualReducer equal) const {
-    return VarNode::SEqualReduce(other, equal);
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("parent", &parent);
+    v->Visit("cur", &cur);
   }
 
-  void SHashReduce(SHashReducer hash_reduce) const { VarNode::SHashReduce(hash_reduce); }
+  bool SEqualReduce(const ScopePairNode* other, SEqualReducer equal) const {
+    return equal(parent, other->parent) && equal(cur, other->cur);
+  }
 
-  static constexpr const char* _type_key = "tirx.ScopeId";
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(parent);
+    hash_reduce(cur);
+  }
+
+  static constexpr const char* _type_key = "tirx.ScopePair";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
-  TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdNode, VarNode);
+  TVM_DECLARE_FINAL_OBJECT_INFO(ScopePairNode, Object);
 };
 
-class ScopeId : public Var {
+class ScopePair : public ObjectRef {
  public:
-  TVM_DLL explicit ScopeId(String name = "");
+  TVM_DLL explicit ScopePair(String parent, String cur);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ScopeId, Var, ScopeIdNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopeIdNode);
+  struct ScopePairEqual {
+    bool operator()(const ScopePair& a, const ScopePair& b) const {
+      return tvm::runtime::ObjectEqual()(a->parent, b->parent) &&
+             tvm::runtime::ObjectEqual()(a->cur, b->cur);
+    }
+  };
+
+  struct ScopePairHash {
+    size_t operator()(const ScopePair& a) const {
+      return tvm::runtime::ObjectHash()(a->parent) ^ tvm::runtime::ObjectHash()(a->cur);
+    }
+  };
+
+  TVM_DEFINE_OBJECT_REF_METHODS(ScopePair, ObjectRef, ScopePairNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopePairNode);
 };
 
 class ScopeIdDefNode : public Object {
  public:
   /*! \brief The ScopeId defined */
-  Array<ScopeId> def_ids;
+  Array<Var> def_ids;
   /*! \brief The extents of the ScopeId */
   Array<PrimExpr> extents;
-  /*! \brief Parent ExecScope name */
-  String parent;
-  /*! \brief Current ExecScope name */
-  String cur;
+  /*! \brief The scope of the scope id */
+  ScopePair scope;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("def_ids", &def_ids);
     v->Visit("extents", &extents);
-    v->Visit("parent", &parent);
-    v->Visit("cur", &cur);
+    v->Visit("scope", &scope);
   }
 
   bool SEqualReduce(const ScopeIdDefNode* other, SEqualReducer equal) const {
     return equal.DefEqual(def_ids, other->def_ids) && equal(extents, other->extents) &&
-           equal(parent, other->parent) && equal(cur, other->cur);
+           equal(scope, other->scope);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(def_ids);
     hash_reduce(extents);
-    hash_reduce(parent);
-    hash_reduce(cur);
+    hash_reduce(scope);
   }
 
   static constexpr const char* _type_key = "tirx.ScopeIdDef";
@@ -92,24 +113,9 @@ class ScopeIdDefNode : public Object {
 
 class ScopeIdDef : public ObjectRef {
  public:
-  TVM_DLL explicit ScopeIdDef(Array<ScopeId> def_ids, Array<PrimExpr> extents, String parent,
-                              String cur);
-
-  explicit ScopeIdDef(String parent, String cur);
+  TVM_DLL explicit ScopeIdDef(Array<Var> def_ids, Array<PrimExpr> extents, ScopePair scope);
 
   PrimExpr fused_extent() const;
-
-  // Hash and Equal for only scope comparison
-  struct ScopeHash {
-    size_t operator()(const ScopeIdDef& lhs) const {
-      return std::hash<String>()(lhs->parent) ^ std::hash<String>()(lhs->cur);
-    }
-  };
-  struct ScopeEqual {
-    bool operator()(const ScopeIdDef& lhs, const ScopeIdDef& rhs) const {
-      return lhs->parent == rhs->parent && lhs->cur == rhs->cur;
-    }
-  };
 
   TVM_DEFINE_OBJECT_REF_METHODS(ScopeIdDef, ObjectRef, ScopeIdDefNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopeIdDefNode);
@@ -121,6 +127,60 @@ Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
 /*! \brief Compliment two scope id definitions */
 Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
 
+class ScopeIdDefVerifier {
+ public:
+  using ScopeIdSet = std::unordered_map<ScopePair, ScopeIdDef, ScopePair::ScopePairHash,
+                                        ScopePair::ScopePairEqual>;
+
+  /*! \brief Verify the scope id definitions are well formed */
+  bool Verify(const Array<ScopeIdDef>& defs);
+
+  /*! \brief The resovled scope id set */
+  ScopeIdSet id_set;
+};
+
+class ScopeIdResolveTable {
+ public:
+  using ScopeIdSet = ScopeIdDefVerifier::ScopeIdSet;
+  using LaunchParams = std::unordered_map<String, IterVar, ObjectHash, ObjectEqual>;
+
+  typedef Array<PrimExpr> (*ResolveFunc)(const ScopeIdDef& def, const LaunchParams& params);
+
+  static ScopeIdResolveTable* Global() {
+    static ScopeIdResolveTable inst;
+    return &inst;
+  }
+
+  class Registry {
+   public:
+    Registry& set(ResolveFunc func) {
+      this->func_ = func;
+      return *this;
+    }
+
+   private:
+    friend class ScopeIdResolveTable;
+    ResolveFunc func_;
+  };
+
+  /*! \brief Register a ScopeIdDef resolve rule */
+  static Registry& Register(String parent, String cur, String target_kind);
+
+  /*! \brief Resolve a ScopeIdDef */
+  static Array<PrimExpr> Resolve(const ScopeIdDef& def, String target_kind,
+                                 const LaunchParams& params);
+
+ private:
+  static std::string GetKey(const ScopePair& scope, const String& target_kind) {
+    return scope->parent.operator std::string() + "__##__" + scope->cur.operator std::string() +
+           "__##__" + target_kind.operator std::string();
+  }
+
+  /*! \brief The registered scope id definitions */
+  std::unordered_map<std::string, Registry> resolve_map_;
+};
+
+/******** Definition of Execution Scope ********/
 class ExecScopeNode : public Object {
  public:
   /*! \brief scope name, used when printing */
@@ -233,7 +293,7 @@ class KernelScope : public ExecScope {
 class ExecScopeSliceNode : public ExecScopeNode {
  public:
   /*! \brief defining threading vars */
-  Array<ScopeId> def_ids;
+  Array<Var> def_ids;
   /*! \brief subrange of each threading vars */
   Array<Range> ranges;
 
@@ -262,14 +322,13 @@ class ExecScopeSliceNode : public ExecScopeNode {
 
 class ExecScopeSlice : public ExecScope {
  public:
-  TVM_DLL explicit ExecScopeSlice(Array<ScopeId> vars, Array<Range> ranges, String name);
+  TVM_DLL explicit ExecScopeSlice(Array<Var> vars, Array<Range> ranges, String name);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeSliceNode);
 };
 
 /******** Helper functions ********/
-
 /*! \brief ExecScope order from highest to lowest */
 static const std::unordered_map<String, int> ScopeOrder = {
     {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"cta", 3},
@@ -285,7 +344,7 @@ bool IsStorageBuffer(const String& storage, const String& logical);
 /*! \brief Return the belonging logical scope of some storage scope */
 String StorageToLogicalScope(const String& storage);
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_EXEC_SCOPE_H_
