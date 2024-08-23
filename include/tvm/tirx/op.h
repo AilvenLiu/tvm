@@ -25,8 +25,8 @@
  *   when the type is int32 or int64 for simplifying the index expressions.
  */
 // Acknowledgement: Most operator APIs originate from Halide.
-#ifndef TVM_TIR_OP_H_
-#define TVM_TIR_OP_H_
+#ifndef TVM_TIRX_OP_H_
+#define TVM_TIRX_OP_H_
 
 #include <tvm/ir/expr.h>
 #include <tvm/ir/op.h>
@@ -34,6 +34,7 @@
 #include <tvm/tirx/builtin.h>
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/stmt.h>
+#include <tvm/tirx/target_builtin/cuda.h>
 
 #include <algorithm>
 #include <limits>
@@ -41,7 +42,7 @@
 
 namespace tvm {
 
-#define TVM_TIR_REGISTER_OP(OpName) \
+#define TVM_TIRX_REGISTER_OP(OpName) \
   TVM_REGISTER_OP("tirx." OpName).set_attr<TScriptPrinterName>("TScriptPrinterName", OpName)
 
 // Most common operators can be overloaded by argument type(PrimExpr).
@@ -1031,7 +1032,7 @@ inline PrimExpr make_zero(DataType t, Span span) {
   return make_const(t, 0, span);
 }
 
-}  // namespace tirx
+}  // namespace tirxx
 
 // additional const expression overloading
 #define TVM_DEFINE_ASSIGN_OP_OVERLOAD(Name, OpFunc) \
@@ -1179,4 +1180,4 @@ inline PrimExpr operator%(const PrimExpr& a, const TB& b) {
   return a;
 }
 }  // namespace tvm
-#endif  // TVM_TIR_OP_H_
+#endif  // TVM_TIRX_OP_H_
