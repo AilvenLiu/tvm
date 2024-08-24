@@ -139,6 +139,12 @@ TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_global_to_cluster)
 TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_shared_to_global)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_commit_group)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_wait_group)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(ptx_fetch_register)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
 

@@ -2144,6 +2144,8 @@ cuda_barrier_arrive_and_wait = _op_wrapper(_tir_op.cuda_barrier_arrive_and_wait)
 cuda_fence_proxy_async = _op_wrapper(_tir_op.cuda_fence_proxy_async)
 cp_async_bulk_tensor_global_to_cluster = _op_wrapper(_tir_op.cp_async_bulk_tensor_global_to_cluster)
 cp_async_bulk_tensor_shared_to_global = _op_wrapper(_tir_op.cp_async_bulk_tensor_shared_to_global)
+cp_async_bulk_tensor_commit_group = _op_wrapper(_tir_op.cp_async_bulk_tensor_commit_group)
+cp_async_bulk_tensor_wait_group = _op_wrapper(_tir_op.cp_async_bulk_tensor_wait_group)
 ptx_fetch_register = _op_wrapper(_tir_op.ptx_fetch_register)
 mbarrier_init = _op_wrapper(_tir_op.mbarrier_init)
 mbarrier_arrive_expect_tx = _op_wrapper(_tir_op.mbarrier_arrive_expect_tx)
@@ -2450,6 +2452,8 @@ __all__ = float_types + [
     "mbarrier_wait",
     "cp_async_bulk_tensor_global_to_cluster",
     "cp_async_bulk_tensor_shared_to_global",
+    "cp_async_bulk_tensor_commit_group",
+    "cp_async_bulk_tensor_wait_group",
     "ptx_fetch_register",
     "make_filled_simdgroup_matrix",
     "simdgroup_load",

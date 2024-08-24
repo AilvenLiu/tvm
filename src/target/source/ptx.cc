@@ -859,11 +859,7 @@ std::string PrintWaitBarrierAsm(const std::string& barrier) {
 std::string PrintCudaFenceProxyAsyncAssembly(std::string scope) {
   std::string asm_code = R"(// T.cuda_fence_proxy_async()
 {
-  __asm__ __volatile__ (
-    "{\n\t"
-    "fence.proxy.async.{scope_name}; \n"
-    "}"
-    ::);
+  __asm__ __volatile__ ("fence.proxy.async.{scope_name};");
 }
 )";
   CHECK(scope == "global" || scope == "shared") << "Only support global/shared scope for fence.";
@@ -911,6 +907,33 @@ std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
   Replacer replacer;
   replacer.register_rule("{barrier}", barrier);
   replacer.register_rule("{byte_count}", byte_count);
+  return replacer.rewrite(asm_code);
+}
+
+std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase) {
+  std::string asm_code = R"(// T.mbarrier_wait()
+{
+  unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+  asm volatile (
+      "{\n"
+      ".reg .pred                P1;\n"
+      "LAB_WAIT:\n"
+      "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1;\n"
+      "@P1                       bra.uni DONE;\n"
+      "bra.uni                   LAB_WAIT;\n"
+      "DONE:\n"
+      "}\n"
+      ::
+      "r"(barrier_addr_int),
+      "r"({phase})
+  );
+  {phase} = 1 - {phase};
+}
+)";
+
+  Replacer replacer;
+  replacer.register_rule("{barrier}", barrier);
+  replacer.register_rule("{phase}", phase);
   return replacer.rewrite(asm_code);
 }
 
@@ -981,30 +1004,71 @@ std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::st
   return replacer.rewrite(asm_code);
 }
 
-std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase) {
-  std::string asm_code = R"(// T.mbarrier_wait()
+std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(int dim, const std::string& src,
+                                                         const std::string& tensormap,
+                                                         std::vector<int> coords) {
+  std::string asm_code = R"(// T.cp_async_bulk_tensor_shared_to_global()
 {
-  unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
-  asm volatile (
-      "{\n"
-      ".reg .pred                P1;\n"
-      "LAB_WAIT:\n"
-      "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1;\n"
-      "@P1                       bra.uni DONE;\n"
-      "bra.uni                   LAB_WAIT;\n"
-      "DONE:\n"
-      "}\n"
-      ::
-      "r"(barrier_addr_int),
-      "r"({phase})
+  uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&{tensormap});
+  unsigned int src_addr = cast_smem_ptr_to_int({src});
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.{dim}d.global.shared::cta.tile.bulk_group"
+    "[%0, {arg_template}], [%1];"
+    :
+    : "l"(tensormap_addr), "r"(src_addr),
+      {coord_list}
+    : "memory"
   );
-  {phase} = 1 - {phase};
 }
 )";
-
+  std::string arg_template, coord_list;
+  {
+    // arg template
+    int base = 2;
+    arg_template = "{%" + std::to_string(base);
+    for (int i = 1; i < dim; ++i) {
+      arg_template += ", %" + std::to_string(base + i);
+    }
+    arg_template += "}";
+  }
+  {
+    // coord list
+    coord_list = "\"r\"(" + std::to_string(coords[0]) + ")";
+    for (int i = 1; i < dim; ++i) {
+      coord_list += ", \"r\"(" + std::to_string(coords[i]) + ")";
+    }
+  }
   Replacer replacer;
-  replacer.register_rule("{barrier}", barrier);
-  replacer.register_rule("{phase}", phase);
+  replacer.register_rule("{src}", src);
+  replacer.register_rule("{tensormap}", tensormap);
+  replacer.register_rule("{dim}", std::to_string(dim));
+  replacer.register_rule("{arg_template}", arg_template);
+  replacer.register_rule("{coord_list}", coord_list);
+  return replacer.rewrite(asm_code);
+}
+
+std::string PrintCpAsyncBulkTensorCommitGroupAssembly() {
+  std::string asm_code = R"(// T.cp_async_bulk_tensor_commit_group()
+{
+  asm volatile("cp.async.bulk.commit_group;");
+}
+)";
+  return asm_code;
+}
+
+std::string PrintCpAsyncBulkTensorWaitGroupAssembly(const std::string& N, bool read) {
+  std::string asm_code = R"(// T.cp_async_bulk_tensor_wait_group()
+{
+  asm volatile(
+    "cp.async.bulk.wait_group{.read} %0;"
+    :
+    : "n"({N})
+    : "memory");
+}
+)";
+  Replacer replacer;
+  replacer.register_rule("{N}", N);
+  replacer.register_rule("{.read}", read ? ".read" : "");
   return replacer.rewrite(asm_code);
 }
 

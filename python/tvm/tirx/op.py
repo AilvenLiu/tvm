@@ -1816,7 +1816,7 @@ def cp_async_bulk_tensor_global_to_cluster(
     )
 
 
-def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
+def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, src_offset, tensormap, *coords):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.global.shared::cta.tile.bulk_group
 
     Parameters
@@ -1826,6 +1826,9 @@ def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
 
     src_ptr : Var
         The source pointer to the shared memory.
+
+    src_offset : PrimExpr
+        The offset of the source pointer (in terms of elements).
 
     tensormap: Var
         The tensor map.
@@ -1843,9 +1846,40 @@ def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
         "tir.cp_async_bulk_tensor_shared_to_global",
         dim,
         src_ptr,
+        src_offset,
         tensormap,
         *coords,
     )
+
+
+def cp_async_bulk_tensor_commit_group():
+    """TVM intrinsic to call cp.async.bulk.tensor.commit_group
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cp_async_bulk_tensor_commit_group")
+
+
+def cp_async_bulk_tensor_wait_group(n, read = True):
+    """TVM intrinsic to call cp.async.bulk.tensor.wait_group
+
+    Parameters
+    ----------
+    n : int
+        The number of the most recent uncommitted pending cp.async groups to wait.
+
+    read : bool
+        Whether the wait is for read.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cp_async_bulk_tensor_wait_group", n, read)
 
 
 def ptx_fetch_register(bits, reg_name):

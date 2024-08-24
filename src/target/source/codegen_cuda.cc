@@ -1613,6 +1613,22 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(
         PrintCpAsyncBulkTensorGlobalToClusterAssembly(dim, dst, bar, tensormap, cta_mask, coords));
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_shared_to_global())) {
+    need_cast_smem_ptr_to_int_ = true;
+    int dim = Downcast<IntImm>(op->args[0])->value;
+    std::string src = this->PrintExpr(op->args[1]);
+    src = src + " + " + this->PrintExpr(op->args[2]);
+    std::string tensormap = this->PrintExpr(op->args[3]);
+    std::vector<int> coords;
+    for (int i = 0; i < dim; ++i) {
+      coords.push_back(Downcast<IntImm>(op->args[4 + i])->value);
+    }
+    print(PrintCpAsyncBulkTensorSharedToGlobalAssembly(dim, src, tensormap, coords));
+  } else if (op->op.same_as(builtin::cp_async_bulk_tensor_commit_group())) {
+    print(PrintCpAsyncBulkTensorCommitGroupAssembly());
+  } else if (op->op.same_as(builtin::cp_async_bulk_tensor_wait_group())) {
+    std::string wait_cnt = this->PrintExpr(op->args[0]);
+    bool read = Downcast<Bool>(op->args[1])->value;
+    print(PrintCpAsyncBulkTensorWaitGroupAssembly(wait_cnt, read));
   } else if (op->op.same_as(builtin::ptx_fetch_register())) {
     int bits = Downcast<IntImm>(op->args[0])->value;
     std::string reg = Downcast<StringImm>(op->args[1])->value;

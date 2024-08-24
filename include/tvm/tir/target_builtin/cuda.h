@@ -306,13 +306,40 @@ TVM_DLL const Op& mbarrier_wait();
  * \brief tvm instrinsics to call
  * cp.async.bulk.tensor.dim.shared::cluster.global.tile.mbarrier::complete_tx::bytes
  *
+ * TMA alignment requirement:
+ * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#table-alignment-multi-dim-tma
+ *
  * cp_async_bulk_tensor_global_to_cluster(int dim, Var dst_ptr, PrimExpr dst_offset,
  *                                        Var bar_ptr, Var tensormap_ptr,
  *                                        int cta_mask, int...coords)
  */
 TVM_DLL const Op& cp_async_bulk_tensor_global_to_cluster();
 
+/*!
+ * \brief tvm instrinsics to call
+ * cp.async.bulk.tensor.dim.global.shared::cta.tile。bulk_group
+ *
+ * TMA alignment requirement:
+ * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#table-alignment-multi-dim-tma
+ *
+ * cp_async_bulk_tensor_shared_to_global(int dim, Var src_ptr, PrimExpr src_offset,
+ *                                       Var tensormap_ptr, int...coords)
+ */
 TVM_DLL const Op& cp_async_bulk_tensor_shared_to_global();
+
+/*!
+ * \brief tvm instrinsics to call cp.async.bulk.commit_group
+ *
+ * cp_async_bulk_tensor_commit_group()
+ */
+TVM_DLL const Op& cp_async_bulk_tensor_commit_group();
+
+/*!
+ * \brief tvm instrinsics to call cp.async.bulk.wait_group{.read} N
+ *
+ * cp_async_bulk_tensor_wait_group(int N, bool read)
+ */
+TVM_DLL const Op& cp_async_bulk_tensor_wait_group();
 
 /*!
  * \brief tvm instrinsics to fetch PTX pre-defined registers

@@ -53,17 +53,33 @@ def test_fence_proxy_async():
     assert "fence.proxy.async.shared::cta" in src
 
 
-def test_cp_async_bulk_tensor_global_to_shared_unicast():
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        ((128,), [128, 128, 1, 0, 0, 0, 0]),
+        ((16, 16), [16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0]),
+        ((4, 4, 4), [4, 4, 4, 16, 64, 4, 4, 4, 1, 1, 1, 0, 0, 0, 0]),
+        ((4, 4, 4, 4), [4, 4, 4, 4, 16, 64, 256, 4, 4, 4, 4, 1, 1, 1, 1, 0, 0, 0, 0]),
+        (
+            (4, 2, 2, 2, 2),
+            [4, 2, 2, 2, 2, 16, 32, 64, 128, 4, 2, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+        ),
+    ],
+)
+def test_cp_async_bulk_tensor_global_to_shared_unicast(inputs):
     def get_ir(shape, tma_args):
         total_bytes = 4 * math.prod(shape)
         coord = [0 for _ in shape]
         # fmt: off
         @T.prim_func(tirp=True)
-        def main(A_ptr: T.handle):
+        def main(A_ptr: T.handle, B_ptr: T.handle):
             A = T.match_buffer(A_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
+            B = T.match_buffer(B_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
             
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
             T.call_packed("runtime.cuTensorMapInit", A_map, "float32", len(shape), A.data, *tma_args)
+            B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+            T.call_packed("runtime.cuTensorMapInit", B_map, "float32", len(shape), B.data, *tma_args)
 
             with T.kernel():
                 for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
@@ -80,8 +96,14 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast():
                                 T.cp_async_bulk_tensor_global_to_cluster(len(shape), A_smem.data, 0, bar.data, A_map, *coord)
                                 T.mbarrier_arrive_expect_tx(bar.data, total_bytes)
                             T.mbarrier_wait(bar.data, phase[0])
+                            
                             T.tvm_storage_sync("shared")
-                            T.print_buffer(A_smem.data, "float32", len(shape), total_bytes // 4)
+                            T.cuda_fence_proxy_async("shared")
+                            
+                            if threadIdx == 0:
+                                T.cp_async_bulk_tensor_shared_to_global(len(shape), A_smem.data, 0, B_map, *coord)
+                                T.cp_async_bulk_tensor_commit_group()
+                                T.cp_async_bulk_tensor_wait_group(0)
         # fmt: on
 
         return main
@@ -89,7 +111,25 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast():
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
     _skip_test(target)
-    for shape, tma_args in [
+    shape, tma_args = inputs
+    mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
+    mod = tvm.build(mod, target=target)
+    src = mod.imported_modules[0].get_source()
+    assert "const __grid_constant__ CUtensorMap" in src
+
+    DEV = tvm.cuda(0)
+    A_np = [i for i in range(math.prod(shape))]
+    A_np = np.array(A_np, dtype="float32").reshape(shape)
+    B_np = np.zeros(shape, dtype="float32")
+    A = tvm.nd.array(A_np, device=DEV)
+    B = tvm.nd.array(B_np, device=DEV)
+    mod(A, B)
+    assert np.allclose(A.asnumpy(), B.asnumpy())
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [
         ((128,), [128, 128, 1, 0, 0, 0, 0]),
         ((16, 16), [16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0]),
         ((4, 4, 4), [4, 4, 4, 16, 64, 4, 4, 4, 1, 1, 1, 0, 0, 0, 0]),
@@ -98,31 +138,23 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast():
             (4, 2, 2, 2, 2),
             [4, 2, 2, 2, 2, 16, 32, 64, 128, 4, 2, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0],
         ),
-    ]:
-        mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-        mod = tvm.build(mod, target=target)
-        src = mod.imported_modules[0].get_source()
-        assert "const __grid_constant__ CUtensorMap" in src
-
-        DEV = tvm.cuda(0)
-        A_np = [i for i in range(math.prod(shape))]
-        A_np = np.array(A_np, dtype="float32").reshape(shape)
-        A = tvm.nd.array(A_np, device=DEV)
-        mod(A)
-
-
-def test_cp_async_bulk_tensor_global_to_shared_multicast1():
+    ],
+)
+def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
     # 1 CTA does the copy, and then multicast to all CTAs in the cluster
     def get_ir(shape, tma_args):
         total_bytes = 4 * math.prod(shape)
         coord = [0 for _ in shape]
         # fmt: off
         @T.prim_func(tirp=True)
-        def main(A_ptr: T.handle):
+        def main(A_ptr: T.handle, B_ptr: T.handle):
             A = T.match_buffer(A_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
+            B = T.match_buffer(B_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
             
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
             T.call_packed("runtime.cuTensorMapInit", A_map, "float32", len(shape), A.data, *tma_args)
+            B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+            T.call_packed("runtime.cuTensorMapInit", B_map, "float32", len(shape), A.data, *tma_args)
 
             with T.kernel():
                 for clusterCtaIdx in T.thread_binding(4, thread="clusterCtaIdx.x"):
@@ -146,9 +178,13 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1():
                                 # wait for the copy to finish
                                 T.mbarrier_wait(bar.data, phase[0])
                                 T.tvm_storage_sync("shared")
+                                T.cuda_fence_proxy_async("shared")
 
                                 if bx == 2:
-                                    T.print_buffer(A_smem.data, "float32", len(shape), total_bytes // 4)
+                                    if tx == 0:
+                                        T.cp_async_bulk_tensor_shared_to_global(len(shape), A_smem.data, 0, B_map, *coord)
+                                        T.cp_async_bulk_tensor_commit_group()
+                                        T.cp_async_bulk_tensor_wait_group(0)
         # fmt: on
 
         return main
@@ -156,29 +192,30 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1():
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
     _skip_test(target)
-    for shape, tma_args in [
-        ((128,), [128, 128, 1, 0, 0, 0, 0]),
-        ((16, 16), [16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0]),
-        ((4, 4, 4), [4, 4, 4, 16, 64, 4, 4, 4, 1, 1, 1, 0, 0, 0, 0]),
-        ((4, 4, 4, 4), [4, 4, 4, 4, 16, 64, 256, 4, 4, 4, 4, 1, 1, 1, 1, 0, 0, 0, 0]),
-        (
-            (4, 2, 2, 2, 2),
-            [4, 2, 2, 2, 2, 16, 32, 64, 128, 4, 2, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0],
-        ),
-    ]:
-        mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-        mod = tvm.build(mod, target=target)
-        src = mod.imported_modules[0].get_source()
-        assert "const __grid_constant__ CUtensorMap" in src
+    shape, tma_args = inputs
+    mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
+    mod = tvm.build(mod, target=target)
+    src = mod.imported_modules[0].get_source()
+    assert "const __grid_constant__ CUtensorMap" in src
 
-        DEV = tvm.cuda(0)
-        A_np = [i for i in range(math.prod(shape))]
-        A_np = np.array(A_np, dtype="float32").reshape(shape)
-        A = tvm.nd.array(A_np, device=DEV)
-        mod(A)
+    DEV = tvm.cuda(0)
+    A_np = [i for i in range(math.prod(shape))]
+    A_np = np.array(A_np, dtype="float32").reshape(shape)
+    B_np = np.zeros(shape, dtype="float32")
+    A = tvm.nd.array(A_np, device=DEV)
+    B = tvm.nd.array(B_np, device=DEV)
+    mod(A, B)
 
 
-def test_cp_async_bulk_tensor_global_to_shared_multicast2():
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        ((128,), [128, 32, 1, 0, 0, 0, 0]),
+        ((16, 16), [16, 16, 64, 16, 4, 1, 1, 0, 0, 0, 0]),
+        ((16, 16, 4), [16, 16, 4, 64, 64 * 16, 16, 16, 1, 1, 1, 1, 0, 0, 0, 0]),
+    ],
+)
+def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     # 4 CTAs in the cluster do the copy of separate chunks, and then multicast to all CTAs in the cluster
     def get_ir(shape, tma_args):
         assert shape[0] % 4 == 0
@@ -188,13 +225,19 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2():
         coord2 = [0 for _ in shape[:-1]] + [shape[-1] // 2]
         coord3 = [0 for _ in shape[:-1]] + [3 * shape[-1] // 4]
 
+        tma_store_args = tma_args.copy()
+        tma_store_args[3 * len(shape) - 2] = shape[-1]
+
         # fmt: off
         @T.prim_func(tirp=True)
-        def main(A_ptr: T.handle):
+        def main(A_ptr: T.handle, B_ptr: T.handle):
             A = T.match_buffer(A_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
-            
+            B = T.match_buffer(B_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
+
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
             T.call_packed("runtime.cuTensorMapInit", A_map, "float32", len(shape), A.data, *tma_args)
+            B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+            T.call_packed("runtime.cuTensorMapInit", B_map, "float32", len(shape), B.data, *tma_store_args)
 
             with T.kernel():
                 for clusterCtaIdx in T.thread_binding(4, thread="clusterCtaIdx.x"):
@@ -228,7 +271,10 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2():
                                 T.tvm_storage_sync("shared")
 
                                 if bx == 1:
-                                    T.print_buffer(A_smem.data, "float32", len(shape), total_bytes // 4)
+                                    if tx == 0:
+                                        T.cp_async_bulk_tensor_shared_to_global(len(shape), A_smem.data, 0, B_map, *coord0)
+                                        T.cp_async_bulk_tensor_commit_group()
+                                        T.cp_async_bulk_tensor_wait_group(0)
         # fmt: on
 
         return main
@@ -236,31 +282,86 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2():
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
     _skip_test(target)
-    for shape, tma_args in [
-        ((128,), [128, 32, 1, 0, 0, 0, 0]),
-        ((16, 16), [16, 16, 64, 16, 4, 1, 1, 0, 0, 0, 0]),
-        ((16, 16, 4), [16, 16, 4, 64, 64 * 16, 16, 16, 1, 1, 1, 1, 0, 0, 0, 0]),
-    ]:
-        mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-        with target:
-            mod = LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
-        src = mod.imported_modules[0].get_source()
-        assert "const __grid_constant__ CUtensorMap" in src
+    shape, tma_args = inputs
+    mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
+    with target:
+        mod = LowerTIRp()(mod)
+    mod = tvm.build(mod, target=target)
+    src = mod.imported_modules[0].get_source()
+    assert "const __grid_constant__ CUtensorMap" in src
 
-        DEV = tvm.cuda(0)
-        A_np = [i for i in range(math.prod(shape))]
-        A_np = np.array(A_np, dtype="float32").reshape(shape)
-        A = tvm.nd.array(A_np, device=DEV)
-        mod(A)
+    DEV = tvm.cuda(0)
+    A_np = [i for i in range(math.prod(shape))]
+    A_np = np.array(A_np, dtype="float32").reshape(shape)
+    B_np = np.zeros(shape, dtype="float32")
+    A = tvm.nd.array(A_np, device=DEV)
+    B = tvm.nd.array(B_np, device=DEV)
+    mod(A, B)
+    assert np.allclose(A.asnumpy(), B.asnumpy())
 
 
-def test_cp_async_bulk_tensor_shared_to_global():
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def func():
-        pass
-    # fmt: on
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        ((128,), [128, 128, 1, 0, 0, 0, 0]),
+        ((16, 16), [16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0]),
+        ((16, 16, 4), [16, 16, 4, 64, 64 * 16, 16, 16, 4, 1, 1, 1, 0, 0, 0, 0]),
+    ],
+)
+def test_cp_async_bulk_tensor_shared_to_global(inputs):
+    def get_ir(shape, tma_args):
+        assert shape[0] % 4 == 0
+        elems = math.prod(shape)
+        coord = [0 for _ in shape]
+
+        # fmt: off
+        @T.prim_func(tirp=True)
+        def main(A_ptr: T.handle):
+            A = T.match_buffer(A_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
+            
+            A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+            T.call_packed("runtime.cuTensorMapInit", A_map, "float32", len(shape), A.data, *tma_args)
+
+            with T.kernel():
+                bx = T.cta_id([1], parent="kernel")
+                tx = T.thread_id([128], parent="cta")
+
+                with T.thread():
+                    A_smem = T.alloc_buffer(elems, "float32", scope="shared", logical_scope="cta", align=128)
+
+                    if tx == 0:
+                        for i in T.serial(0, elems):
+                            A_smem[i] = i
+                    T.cuda_fence_proxy_async("shared")
+                    T.tvm_storage_sync("shared")
+                    
+                    if tx == 0:
+                        T.cp_async_bulk_tensor_shared_to_global(len(shape), A_smem.data, 0, A_map, *coord)
+                        T.cp_async_bulk_tensor_commit_group()
+                        T.cp_async_bulk_tensor_wait_group(0)
+        # fmt: on
+
+        return main
+
+    DEV = tvm.cuda(0)
+    target = tvm.target.Target("cuda")
+    _skip_test(target)
+    shape, tma_args = inputs
+    mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
+    with target:
+        mod = LowerTIRp()(mod)
+    mod = tvm.build(mod, target=target)
+    src = mod.imported_modules[0].get_source()
+    assert "const __grid_constant__ CUtensorMap" in src
+
+    DEV = tvm.cuda(0)
+    A_np = np.zeros(shape, dtype="float32")
+    A = tvm.nd.array(A_np, device=DEV)
+    mod(A)
+
+    A_ref = [i for i in range(math.prod(shape))]
+    A_ref = np.array(A_ref, dtype="float32").reshape(shape)
+    np.testing.assert_allclose(A.asnumpy(), A_ref)
 
 
 if __name__ == "__main__":
@@ -268,4 +369,4 @@ if __name__ == "__main__":
     test_cp_async_bulk_tensor_global_to_shared_unicast()
     test_cp_async_bulk_tensor_global_to_shared_multicast1()
     test_cp_async_bulk_tensor_global_to_shared_multicast2()
-    # test_cp_async_bulk_tensor_shared_to_global()
+    test_cp_async_bulk_tensor_shared_to_global()

@@ -162,20 +162,69 @@ std::string PrintWaitBarrierAsm(const std::string& barrier);
 
 /*!
  * \brief Print ptx fence.proxy.async.{global, shared::cta, shared::cluster}
+ * \param scope: The scope of the fence.
  */
 std::string PrintCudaFenceProxyAsyncAssembly(std::string scope);
 
+/*!
+ * \brief Print ptx mbarrier.init.shared.b64
+ * \param barrier: The name of the barrier in shared memory.
+ * \param thread_count: The number of threads expected to arrive at the barrier.
+ */
 std::string PrintMbarrierInitAssembly(const std::string& barrier, const std::string& thread_count);
 
+/*!
+ * \brief Print ptx mbarrier.arrive.expect_tx.shared::cta.b64
+ * \param barrier: The name of the barrier in shared memory.
+ * \param byte_count: Increases the tx count of the mbarrier object to track completion of
+ */
 std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
                                                 const std::string& byte_count);
 
+/*!
+ * \brief Print ptx mbarrier.try_wait.parity repeatedly until it returns true
+ * \param barrier: The name of the barrier in shared memory.
+ * \param phase: The phase bit to wait for.
+ */
+std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase);
+
+/*!
+ * \brief Print ptx cp.async.bulk.tensor.{dim}.shared::cluster.global.mbarrier::complete_tx::bytes
+ * \param dim: The dimension of the tensor.
+ * \param dst: The pointer to the destination shared memory.
+ * \param bar: The pointer to the barrier in shared memory.
+ * \param tensormap: The pointer to the CUtensorMap object.
+ * \param cta_mask: The mask for the CTA.
+ * \param coords: The coordinates of the tensor.
+ */
 std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::string& dst,
                                                           const std::string& bar,
                                                           const std::string& tensormap,
                                                           int cta_mask, std::vector<int> coords);
 
-std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase);
+/*!
+ * \brief Print ptx cp.async.bulk.tensor.dim.global.shared::cta.tile。bulk_group
+ * \param dim: The dimension of the tensor.
+ * \param src: The pointer to the source shared memory.
+ * \param tensormap: The pointer to the CUtensorMap object.
+ * \param coords: The coordinates of the tensor.
+ */
+std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(int dim, const std::string& src,
+                                                         const std::string& tensormap,
+                                                         std::vector<int> coords);
+
+/*!
+ * \brief Print ptx cp.async.bulk.tensor.commit_group
+ */
+std::string PrintCpAsyncBulkTensorCommitGroupAssembly();
+
+/*!
+ * \brief Print ptx cp.async.bulk.tensor.wait_group{.read} N
+ * \param N: The number of groups to wait for.
+ * \param read: Whether to wait for read or write groups.
+ */
+
+std::string PrintCpAsyncBulkTensorWaitGroupAssembly(const std::string& N, bool read);
 
 /*!
  * \brief Print predefined, read-only variables, which are visible as special registers in PTX.
