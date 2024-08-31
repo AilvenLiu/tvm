@@ -20,16 +20,11 @@ import numpy as np
 
 import tvm
 from tvm.script import tir as T, ir as I
+import tvm.testing
 from tvm.tir.transform import LowerTIRp
 
 
-def _skip_test(target: tvm.target.Target):
-    arch = target.arch
-    assert arch.startswith("sm_")
-    if int(arch.split("sm_")[1]) < 90:
-        pytest.xfail("Test requires sm_90 or higher")
-
-
+@tvm.testing.requires_cuda_compute_version(9)
 def test_fence_proxy_async():
     # fmt: off
     @T.prim_func(tirp=True)
@@ -44,7 +39,6 @@ def test_fence_proxy_async():
 
     # fmt: on
     target = tvm.target.Target("cuda")
-    _skip_test(target)
     with target:
         mod = LowerTIRp()(tvm.IRModule({"main": func}))
     mod = tvm.build(mod, target=target)
@@ -53,33 +47,195 @@ def test_fence_proxy_async():
     assert "fence.proxy.async.shared::cta" in src
 
 
+@tvm.testing.requires_cuda_compute_version(9)
+def test_wgmma():
+    def get_ir(
+        shapeA,
+        shapeB,
+        shapeC,
+        A_tma_args,
+        B_tma_args,
+        in_dtype,
+        out_dtype,
+        A_encode_args,
+        B_encode_args,
+    ):
+        coordA = [0 for _ in shapeA]
+        coordB = [0 for _ in shapeB]
+        A_bytes = tvm.DataType(in_dtype).bits // 8 * math.prod(shapeA)
+        B_bytes = tvm.DataType(in_dtype).bits // 8 * math.prod(shapeB)
+
+        C_elems = math.prod(shapeC) // 128
+
+        M, K = shapeA if not transA else shapeA[::-1]
+        N, _ = shapeB if not transB else shapeB[::-1]
+
+        def get_init_value(dtype):
+            if dtype == "float32":
+                return T.float32(0.0)
+            elif dtype == "float16x2":
+                return T.float16x2(0.0)
+            assert False, f"Unsupported dtype {dtype}"
+
+        # fmt: off
+        def get_accum_list(C, C_elems):
+            return [C[i] for i in range(C_elems)]
+
+        @T.prim_func(tirp=True)
+        def main(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle):
+            A = T.match_buffer(A_ptr, shapeA, dtype=in_dtype, align=16)
+            B = T.match_buffer(B_ptr, shapeB, dtype=in_dtype, align=16)
+            C = T.match_buffer(C_ptr, shapeC, dtype=out_dtype, align=16)
+
+            A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+            T.call_packed("runtime.cuTensorMapInit", A_map, in_dtype, len(shapeA), A.data, *A_tma_args)
+            B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+            T.call_packed("runtime.cuTensorMapInit", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)
+
+            with T.kernel():
+                bx = T.cta_id([1], parent="kernel")
+                tx = T.thread_id([128], parent="cta") # A warpgroup is 128 threads
+
+                with T.thread():
+                    A_smem = T.alloc_buffer(shapeA, in_dtype, scope="shared", align=128)
+                    B_smem = T.alloc_buffer(shapeB, in_dtype, scope="shared", align=128)
+                    bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+                    descA = T.alloc_buffer((1,), "uint64", scope="local")
+                    descB = T.alloc_buffer((1,), "uint64", scope="local")
+                    phase = T.alloc_buffer((1,), "int32", scope="local")
+                    C_local = T.alloc_buffer((C_elems,), out_dtype, scope="local")
+
+                    # load A, B to A_smem, B_smem
+                    if tx == 0:
+                        T.mbarrier_init(bar.data, 1)
+                        T.cuda_fence_proxy_async("shared")
+                        T.cp_async_bulk_tensor_global_to_cluster(len(shapeA), A_smem.data, 0, bar.data, A_map, *coordA)
+                        T.cp_async_bulk_tensor_global_to_cluster(len(shapeB), B_smem.data, 0, bar.data, B_map, *coordB)
+                        T.mbarrier_arrive_expect_tx(bar.data, A_bytes + B_bytes)
+                    T.mbarrier_wait(bar.data, phase[0])
+                    T.tvm_storage_sync("shared")
+
+                    # init C_local
+                    for i in T.serial(0, C_elems):
+                        C_local[i] = T.Cast(out_dtype, get_init_value(out_dtype))
+                        T.wgmma_fence_operand(C_local[i])
+                    
+                    # do wgmma
+                    T.encode_matrix_decriptor(descA.data, A_smem.data, *A_encode_args)
+                    T.encode_matrix_decriptor(descB.data, B_smem.data, *B_encode_args)
+                    T.wgmma_arrive()
+                    T.wgmma_mma_sync_ss(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False, 
+                                        descA[0], descB[0], *get_accum_list(C_local, C_elems))
+                    T.wgmma_commit_group()
+                    T.wgmma_wait_group(0)
+                    
+                    for i in T.serial(0, C_elems):
+                        T.wgmma_fence_operand(C_local[i])
+                    
+                    # store C_local to C
+                    for i in T.serial(0, C_elems // 4):
+                        row = T.meta_var((tx % 32) // 4 + (tx // 32) * 16)
+                        col = T.meta_var(i * 8 + tx % 4 * 2)
+                        C[row, col] = C_local[i * 4]
+                        C[row, col + 1] = C_local[i * 4 + 1]
+                        C[row + 8, col] = C_local[i * 4 + 2]
+                        C[row + 8, col + 1] = C_local[i * 4 + 3]
+        # fmt: on
+
+        return main
+
+    in_dtype = "float16"
+    out_dtype = "float32"
+    transA = transB = True
+    swizzleA = swizzleB = 3
+
+    t_in_dtype = tvm.DataType(in_dtype)
+    elem_bytes = t_in_dtype.bits // 8
+
+    DEV = tvm.cuda(0)
+    target = tvm.target.Target("nvidia/nvidia-h100")
+    M = 64
+    N = 64
+    K = 256 // t_in_dtype.bits
+    shapeA = (M, K) if not transA else (K, M)
+    shapeB = (N, K) if not transB else (K, N)
+    shapeC = (M, N)
+
+    # A tma args
+    A_outer, A_inner = shapeA
+    A_tma_args = [A_inner, A_outer, A_inner * elem_bytes, A_inner, A_outer, 1, 1, 0, swizzleA, 0, 0]
+    # B tma args
+    B_outer, B_inner = shapeB
+    B_tma_args = [B_inner, B_outer, B_inner * elem_bytes, B_inner, B_outer, 1, 1, 0, swizzleB, 0, 0]
+    # A encode args
+    A_encode_args = [8, 64, swizzleA]
+    B_encode_args = [8, 64, swizzleB]
+
+    func = get_ir(
+        shapeA,
+        shapeB,
+        shapeC,
+        A_tma_args,
+        B_tma_args,
+        in_dtype,
+        out_dtype,
+        A_encode_args,
+        B_encode_args,
+    )
+    mod = tvm.IRModule({"main": func})
+    with target:
+        mod = LowerTIRp()(mod)
+        mod.show()
+        mod = tvm.build(mod, target=target)
+
+    np.random.seed(0)
+    A_np = np.random.randn(*shapeA).astype(in_dtype)
+    B_np = np.random.randn(*shapeB).astype(in_dtype)
+    C_np = np.zeros(shapeC).astype(out_dtype)
+
+    A_tvm = tvm.nd.array(A_np, device=DEV)
+    B_tvm = tvm.nd.array(B_np, device=DEV)
+    C_tvm = tvm.nd.array(C_np, device=DEV)
+    mod(A_tvm, B_tvm, C_tvm)
+
+    C_ref = np.dot(A_np.T, B_np).astype(out_dtype)
+    tvm.testing.assert_allclose(C_tvm.asnumpy(), C_ref, rtol=1e-3, atol=1e-3)
+
+
+@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize("dtype", ["float16", "float32"])
 @pytest.mark.parametrize(
     "inputs",
     [
         ((128,), [128, 128, 1, 0, 0, 0, 0]),
-        ((16, 16), [16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0]),
-        ((4, 4, 4), [4, 4, 4, 16, 64, 4, 4, 4, 1, 1, 1, 0, 0, 0, 0]),
-        ((4, 4, 4, 4), [4, 4, 4, 4, 16, 64, 256, 4, 4, 4, 4, 1, 1, 1, 1, 0, 0, 0, 0]),
+        ((16, 16), [16, 16, 16, 16, 16, 1, 1, 0, 0, 0, 0]),
+        ((16, 64), [64, 16, 64, 64, 16, 1, 1, 0, 0, 0, 0]),
+        ((4, 4, 8), [8, 4, 4, 8, 32, 8, 4, 4, 1, 1, 1, 0, 0, 0, 0]),
+        ((4, 4, 4, 8), [8, 4, 4, 4, 8, 32, 128, 8, 4, 4, 4, 1, 1, 1, 1, 0, 0, 0, 0]),
         (
-            (4, 2, 2, 2, 2),
-            [4, 2, 2, 2, 2, 16, 32, 64, 128, 4, 2, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0],
+            (2, 2, 2, 2, 8),
+            [8, 2, 2, 2, 2, 8, 16, 32, 64, 8, 2, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0],
         ),
     ],
 )
-def test_cp_async_bulk_tensor_global_to_shared_unicast(inputs):
+def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     def get_ir(shape, tma_args):
-        total_bytes = 4 * math.prod(shape)
+        t_dtype = tvm.DataType(dtype)
+        total_bytes = math.prod(shape) * t_dtype.bits // 8
         coord = [0 for _ in shape]
+        tma_args_copy = tma_args.copy()
+        for i in range(len(shape) - 1):
+            tma_args_copy[len(shape) + i] *= t_dtype.bits // 8
         # fmt: off
         @T.prim_func(tirp=True)
         def main(A_ptr: T.handle, B_ptr: T.handle):
-            A = T.match_buffer(A_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
-            B = T.match_buffer(B_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
-            
+            A = T.match_buffer(A_ptr, shape, dtype=dtype, align=16, logical_scope="kernel")
+            B = T.match_buffer(B_ptr, shape, dtype=dtype, align=16, logical_scope="kernel")
+
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", A_map, "float32", len(shape), A.data, *tma_args)
+            T.call_packed("runtime.cuTensorMapInit", A_map, dtype, len(shape), A.data, *tma_args_copy)
             B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", B_map, "float32", len(shape), B.data, *tma_args)
+            T.call_packed("runtime.cuTensorMapInit", B_map, dtype, len(shape), B.data, *tma_args_copy)
 
             with T.kernel():
                 for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
@@ -87,7 +243,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(inputs):
                         with T.thread():
                             bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
                             phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
-                            A_smem = T.alloc_buffer(shape[::-1], "float32", scope="shared", logical_scope="cta", align=128)
+                            A_smem = T.alloc_buffer(shape, dtype, scope="shared", logical_scope="cta", align=128)
 
                             phase[0] = 0
                             if threadIdx == 0:
@@ -96,10 +252,10 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(inputs):
                                 T.cp_async_bulk_tensor_global_to_cluster(len(shape), A_smem.data, 0, bar.data, A_map, *coord)
                                 T.mbarrier_arrive_expect_tx(bar.data, total_bytes)
                             T.mbarrier_wait(bar.data, phase[0])
-                            
+
                             T.tvm_storage_sync("shared")
                             T.cuda_fence_proxy_async("shared")
-                            
+
                             if threadIdx == 0:
                                 T.cp_async_bulk_tensor_shared_to_global(len(shape), A_smem.data, 0, B_map, *coord)
                                 T.cp_async_bulk_tensor_commit_group()
@@ -110,21 +266,106 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(inputs):
 
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
-    _skip_test(target)
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.build(mod, target=target)
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
-    DEV = tvm.cuda(0)
     A_np = [i for i in range(math.prod(shape))]
-    A_np = np.array(A_np, dtype="float32").reshape(shape)
-    B_np = np.zeros(shape, dtype="float32")
+    A_np = np.array(A_np, dtype=dtype).reshape(shape)
+    B_np = np.zeros(shape, dtype=dtype)
     A = tvm.nd.array(A_np, device=DEV)
     B = tvm.nd.array(B_np, device=DEV)
     mod(A, B)
     assert np.allclose(A.asnumpy(), B.asnumpy())
+
+
+@pytest.mark.parametrize("swizzle", [1, 2, 3])
+@pytest.mark.parametrize("dtype", ["uint8", "float16", "float32"])
+@tvm.testing.requires_cuda_compute_version(9)
+def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
+    def get_ir(swizzle, dtype):
+        dtype = tvm.DataType(dtype)
+        elem_bytes = dtype.bits // 8
+
+        shape = [16, 64]
+        tma_args = [16, 64, 16, 16, 64, 1, 1, 0, 0, 0, 0]  # 8x16B, atom for WGMMA
+        shape[0] = shape[0] * (1 << swizzle) // elem_bytes
+        tma_args[0] = tma_args[0] * (1 << swizzle) // elem_bytes
+        tma_args[2] = tma_args[2] * (1 << swizzle)
+        tma_args[3] = tma_args[3] * (1 << swizzle) // elem_bytes
+
+        load_args = tma_args.copy()
+        load_args[-3] = swizzle
+        store_args = tma_args.copy()
+
+        shape = tuple(shape)
+        total_elems = math.prod(shape)
+        total_bytes = total_elems * elem_bytes
+        coord = [0 for _ in shape]
+
+        # fmt: off
+        @T.prim_func(tirp=True)
+        def main(A_ptr: T.handle, B_ptr: T.handle):
+            A = T.match_buffer(A_ptr, total_elems, dtype=dtype, align=16, logical_scope="kernel")
+            B = T.match_buffer(B_ptr, total_elems, dtype=dtype, align=16, logical_scope="kernel")
+
+            A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+            T.call_packed("runtime.cuTensorMapInit", A_map, dtype, len(shape), A.data, *load_args)
+            B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+            T.call_packed("runtime.cuTensorMapInit", B_map, dtype, len(shape), B.data, *store_args)
+
+            with T.kernel():
+                for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
+                    for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
+                        with T.thread():
+                            A_smem = T.alloc_buffer((total_elems,), dtype, scope="shared", logical_scope="cta", align=128)
+                            bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
+                            phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+
+                            phase[0] = 0
+                            if threadIdx == 0:
+                                T.mbarrier_init(bar.data, 1)
+                                T.cuda_fence_proxy_async("shared")
+                                T.cp_async_bulk_tensor_global_to_cluster(len(shape), A_smem.data, 0, bar.data, A_map, *coord)
+                                T.mbarrier_arrive_expect_tx(bar.data, total_bytes)
+                            T.mbarrier_wait(bar.data, phase[0])
+
+                            T.tvm_storage_sync("shared")
+                            T.cuda_fence_proxy_async("shared")
+
+                            if threadIdx == 0:
+                                T.cp_async_bulk_tensor_shared_to_global(len(shape), A_smem.data, 0, B_map, *coord)
+                                T.cp_async_bulk_tensor_commit_group()
+                                T.cp_async_bulk_tensor_wait_group(0)
+        # fmt: on
+
+        return main, shape
+
+    DEV = tvm.cuda(0)
+    target = tvm.target.Target("cuda")
+    func, shape = get_ir(swizzle, dtype)
+    mod = tvm.IRModule({"main": func})
+    mod = tvm.build(mod, target=target)
+    src = mod.imported_modules[0].get_source()
+    assert "const __grid_constant__ CUtensorMap" in src
+
+    total_elems = math.prod(shape)
+    A_np = [i for i in range(total_elems)]
+    A_np = np.array(A_np).astype(dtype)
+    B_np = np.zeros((total_elems,)).astype(dtype)
+    A = tvm.nd.array(A_np, device=DEV)
+    B = tvm.nd.array(B_np, device=DEV)
+    mod(A, B)
+    dtype = tvm.DataType(dtype)
+    layout = T.SwizzleLayout(
+        per_element=int(math.log2(128 // dtype.bits)), swizzle_len=swizzle, atom_len=3
+    )
+    B_np = B.asnumpy()
+    B_swizzle = [B_np[int(layout.apply(i))] for i in range(total_elems)]
+    B_swizzle = np.array(B_swizzle).astype(str(dtype))
+    assert np.allclose(A.asnumpy(), B_swizzle)
 
 
 @pytest.mark.parametrize(
@@ -140,6 +381,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(inputs):
         ),
     ],
 )
+@tvm.testing.requires_cuda_compute_version(9)
 def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
     # 1 CTA does the copy, and then multicast to all CTAs in the cluster
     def get_ir(shape, tma_args):
@@ -150,7 +392,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
         def main(A_ptr: T.handle, B_ptr: T.handle):
             A = T.match_buffer(A_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
             B = T.match_buffer(B_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
-            
+
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
             T.call_packed("runtime.cuTensorMapInit", A_map, "float32", len(shape), A.data, *tma_args)
             B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
@@ -173,7 +415,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
                                     T.mbarrier_arrive_expect_tx(bar.data, total_bytes)
                                     if clusterCtaIdx == 0:
                                         # only the first CTA in the cluster does the copy, and then multicast
-                                        T.cp_async_bulk_tensor_global_to_cluster(len(shape), A_smem.data, 0, 
+                                        T.cp_async_bulk_tensor_global_to_cluster(len(shape), A_smem.data, 0,
                                                                                  bar.data, A_map, *coord, cta_mask=int("1111", 2))
                                 # wait for the copy to finish
                                 T.mbarrier_wait(bar.data, phase[0])
@@ -191,14 +433,12 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
 
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
-    _skip_test(target)
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.build(mod, target=target)
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
-    DEV = tvm.cuda(0)
     A_np = [i for i in range(math.prod(shape))]
     A_np = np.array(A_np, dtype="float32").reshape(shape)
     B_np = np.zeros(shape, dtype="float32")
@@ -215,6 +455,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
         ((16, 16, 4), [16, 16, 4, 64, 64 * 16, 16, 16, 1, 1, 1, 1, 0, 0, 0, 0]),
     ],
 )
+@tvm.testing.requires_cuda_compute_version(9)
 def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     # 4 CTAs in the cluster do the copy of separate chunks, and then multicast to all CTAs in the cluster
     def get_ir(shape, tma_args):
@@ -255,7 +496,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
                                     T.cuda_fence_proxy_async("shared")
                                     T.mbarrier_arrive_expect_tx(bar.data, total_bytes)
                                     if clusterCtaIdx == 0:
-                                        T.cp_async_bulk_tensor_global_to_cluster(len(shape), A_smem.data, A_smem.offset_of_p(coord0[::-1]), 
+                                        T.cp_async_bulk_tensor_global_to_cluster(len(shape), A_smem.data, A_smem.offset_of_p(coord0[::-1]),
                                                                                  bar.data, A_map, *coord0, cta_mask=int("1111", 2))
                                     if clusterCtaIdx == 1:
                                         T.cp_async_bulk_tensor_global_to_cluster(len(shape), A_smem.data, A_smem.offset_of_p(coord1[::-1]),
@@ -281,7 +522,6 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
 
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
-    _skip_test(target)
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     with target:
@@ -290,7 +530,6 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
-    DEV = tvm.cuda(0)
     A_np = [i for i in range(math.prod(shape))]
     A_np = np.array(A_np, dtype="float32").reshape(shape)
     B_np = np.zeros(shape, dtype="float32")
@@ -308,6 +547,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
         ((16, 16, 4), [16, 16, 4, 64, 64 * 16, 16, 16, 4, 1, 1, 1, 0, 0, 0, 0]),
     ],
 )
+@tvm.testing.requires_cuda_compute_version(9)
 def test_cp_async_bulk_tensor_shared_to_global(inputs):
     def get_ir(shape, tma_args):
         assert shape[0] % 4 == 0
@@ -345,7 +585,6 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
 
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
-    _skip_test(target)
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     with target:
@@ -354,7 +593,6 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
-    DEV = tvm.cuda(0)
     A_np = np.zeros(shape, dtype="float32")
     A = tvm.nd.array(A_np, device=DEV)
     mod(A)
@@ -367,6 +605,8 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
 if __name__ == "__main__":
     test_fence_proxy_async()
     test_cp_async_bulk_tensor_global_to_shared_unicast()
+    test_cp_async_bulk_tensor_global_to_shared_swizzle()
     test_cp_async_bulk_tensor_global_to_shared_multicast1()
     test_cp_async_bulk_tensor_global_to_shared_multicast2()
     test_cp_async_bulk_tensor_shared_to_global()
+    test_wgmma()

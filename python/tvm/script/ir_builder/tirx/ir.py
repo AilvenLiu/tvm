@@ -1544,6 +1544,10 @@ int8 = func_gen(("Int8"))
 int16 = func_gen(("Int16"))
 int32 = func_gen(("Int32"))
 int64 = func_gen(("Int64"))
+int8x2 = func_gen(("Int8x2"))
+int16x2 = func_gen(("Int16x2"))
+int32x2 = func_gen(("Int32x2"))
+int64x2 = func_gen(("Int64x2"))
 int8x4 = func_gen(("Int8x4"))
 int16x4 = func_gen(("Int16x4"))
 int32x4 = func_gen(("Int32x4"))
@@ -1569,6 +1573,10 @@ uint8 = func_gen(("UInt8"))
 uint16 = func_gen(("UInt16"))
 uint32 = func_gen(("UInt32"))
 uint64 = func_gen(("UInt64"))
+uint8x2 = func_gen(("UInt8x2"))
+uint16x2 = func_gen(("UInt16x2"))
+uint32x2 = func_gen(("UInt32x2"))
+uint64x2 = func_gen(("UInt64x2"))
 uint8x4 = func_gen(("UInt8x4"))
 uint16x4 = func_gen(("UInt16x4"))
 uint32x4 = func_gen(("UInt32x4"))
@@ -2150,6 +2158,12 @@ ptx_fetch_register = _op_wrapper(_tir_op.ptx_fetch_register)
 mbarrier_init = _op_wrapper(_tir_op.mbarrier_init)
 mbarrier_arrive_expect_tx = _op_wrapper(_tir_op.mbarrier_arrive_expect_tx)
 mbarrier_wait = _op_wrapper(_tir_op.mbarrier_wait)
+encode_matrix_decriptor = _op_wrapper(_tir_op.encode_matrix_decriptor)
+wgmma_fence_operand = _op_wrapper(_tir_op.wgmma_fence_operand)
+wgmma_mma_sync_ss = _op_wrapper(_tir_op.wgmma_mma_sync_ss)
+wgmma_arrive = _op_wrapper(_tir_op.wgmma_arrive)
+wgmma_commit_group = _op_wrapper(_tir_op.wgmma_commit_group)
+wgmma_wait_group = _op_wrapper(_tir_op.wgmma_wait_group)
 make_filled_simdgroup_matrix = _op_wrapper(_tir_op.make_filled_simdgroup_matrix)
 simdgroup_load = _op_wrapper(_tir_op.simdgroup_load)
 simdgroup_store = _op_wrapper(_tir_op.simdgroup_store)
@@ -2239,6 +2253,10 @@ __all__ = float_types + [
     "int16",
     "int32",
     "int64",
+    "int8x2",
+    "int16x2",
+    "int32x2",
+    "int64x2",
     "int8x4",
     "int16x4",
     "int32x4",
@@ -2263,6 +2281,10 @@ __all__ = float_types + [
     "uint16",
     "uint32",
     "uint64",
+    "uint8x2",
+    "uint16x2",
+    "uint32x2",
+    "uint64x2",
     "uint8x4",
     "uint16x4",
     "uint32x4",
@@ -2283,6 +2305,46 @@ __all__ = float_types + [
     "uint16x64",
     "uint32x64",
     "uint64x64",
+    "float8_e4m3fn",
+    "float8_e5m2",
+    "float4_e2m1fn",
+    "float16",
+    "float32",
+    "float64",
+    "float4_e2m1fnx2",
+    "float8_e4m3fnx4",
+    "float8_e5m2x4",
+    "float4_e2m1fnx4",
+    "float16x2",
+    "float32x2",
+    "float64x2",
+    "float16x4",
+    "float32x4",
+    "float64x4",
+    "float8_e4m3fnx8",
+    "float8_e5m2x8",
+    "float4_e2m1fnx8",
+    "float16x8",
+    "float32x8",
+    "float64x8",
+    "float8_e4m3fnx16",
+    "float8_e5m2x16",
+    "float4_e2m1fnx16",
+    "float16x16",
+    "float32x16",
+    "float64x16",
+    "float8_e4m3fnx32",
+    "float8_e5m2x32",
+    "float4_e2m1fnx32",
+    "float16x32",
+    "float32x32",
+    "float64x32",
+    "float8_e4m3fnx64",
+    "float8_e5m2x64",
+    "float4_e2m1fnx64",
+    "float16x64",
+    "float32x64",
+    "float64x64",
     "bfloat16",
     "buffer",
     "buffer_decl",
@@ -2450,6 +2512,12 @@ __all__ = float_types + [
     "mbarrier_init",
     "mbarrier_arrive_expect_tx",
     "mbarrier_wait",
+    "encode_matrix_decriptor",
+    "wgmma_fence_operand",
+    "wgmma_mma_sync_ss",
+    "wgmma_arrive",
+    "wgmma_commit_group",
+    "wgmma_wait_group",
     "cp_async_bulk_tensor_global_to_cluster",
     "cp_async_bulk_tensor_shared_to_global",
     "cp_async_bulk_tensor_commit_group",

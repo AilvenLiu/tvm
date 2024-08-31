@@ -1097,5 +1097,144 @@ __forceinline__ __device__ int{bits}_t {func_name}() {
   return func_name + "()";
 }
 
+std::string PrintWGMMAFenceOpearandAssembly(const std::string& reg) {
+  std::string asm_code = R"(// T.wgmma_fence()
+{
+  asm volatile("" : "+r"(*(uint32_t*)(&{reg})) :: "memory");
+}
+)";
+  Replacer replacer;
+  replacer.register_rule("{reg}", reg);
+  return replacer.rewrite(asm_code);
+}
+
+std::string PrintWGMMAmmasyncSSAssembly(int M, int N, int K, const std::string& in_dtype,
+                                        const std::string& out_dtype, bool transA, bool transB,
+                                        float scaleA, float scaleB, bool scaleD,
+                                        const std::string& descA, const std::string& descB,
+                                        const std::vector<std::string>& accums) {
+  std::string asm_code = R"(// T.wgmma_ammasync_ss()
+{
+  asm volatile(
+    "{\n"
+    ".reg .pred p;\n"
+    "setp.ne.b32 p, {scaleD_r}, 0;\n"
+    "wgmma.mma_async.sync.aligned.m{M}n{N}k{K}{otype}{itype}{itype} "
+    "{{accum_r_list}},"
+    "{descA_r}, {descB_r},"
+    "p, {scaleA_r}, {scaleB_r}, {transA_r}, {transB_r};\n"
+    "}\n"
+    : {accum_list}
+    : "l"({descA}), "l"({descB}), "r"(int32_t({scaleD})), "n"(int32_t({scaleA})),
+      "n"(int32_t({scaleB})), "n"(int32_t({transA})), "n"(int32_t({transB}))
+  );
+}
+)";
+  Replacer replacer;
+  auto itype = ptx::DTypeToString(ptx::DTypeFromString(in_dtype));
+  auto otype = ptx::DTypeToString(ptx::DTypeFromString(out_dtype));
+  std::string accum_r_list = "%" + std::to_string(0);
+  for (size_t i = 1; i < accums.size(); ++i) {
+    accum_r_list += ", %" + std::to_string(i);
+  }
+  std::string accum_list = "\"+r\"((*(uint32_t*)(&" + accums[0] + ")))";
+  for (size_t i = 1; i < accums.size(); ++i) {
+    accum_list += ", \"+r\"((*(uint32_t*)(&" + accums[i] + ")))";
+  }
+  std::string descA_r = "%" + std::to_string(accums.size());
+  std::string descB_r = "%" + std::to_string(accums.size() + 1);
+  std::string scaleD_r = "%" + std::to_string(accums.size() + 2);
+  std::string scaleA_r = "%" + std::to_string(accums.size() + 3);
+  std::string scaleB_r = "%" + std::to_string(accums.size() + 4);
+  std::string transA_r = "%" + std::to_string(accums.size() + 5);
+  std::string transB_r = "%" + std::to_string(accums.size() + 6);
+
+  replacer.register_rule("{M}", std::to_string(M));
+  replacer.register_rule("{N}", std::to_string(N));
+  replacer.register_rule("{K}", std::to_string(K));
+  replacer.register_rule("{itype}", itype);
+  replacer.register_rule("{otype}", otype);
+  replacer.register_rule("{descA_r}", descA_r);
+  replacer.register_rule("{descB_r}", descB_r);
+  replacer.register_rule("{scaleA_r}", scaleA_r);
+  replacer.register_rule("{scaleB_r}", scaleB_r);
+  replacer.register_rule("{scaleD_r}", scaleD_r);
+  replacer.register_rule("{transA_r}", transA_r);
+  replacer.register_rule("{transB_r}", transB_r);
+  replacer.register_rule("{descA}", descA);
+  replacer.register_rule("{descB}", descB);
+  replacer.register_rule("{scaleA}", std::to_string(scaleA));
+  replacer.register_rule("{scaleB}", std::to_string(scaleB));
+  replacer.register_rule("{scaleD}", scaleD ? "1" : "0");
+  replacer.register_rule("{transA}", transA ? "1" : "0");
+  replacer.register_rule("{transB}", transB ? "1" : "0");
+  replacer.register_rule("{accum_r_list}", accum_r_list);
+  replacer.register_rule("{accum_list}", accum_list);
+
+  return replacer.rewrite(asm_code);
+}
+
+std::string PrintWGMMAArriveAssembly() {
+  std::string asm_code = R"(// T.wgmma_arrive()
+{
+  asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
+}
+)";
+  return asm_code;
+}
+
+std::string PrintWGMMACommitGroupAssembly() {
+  std::string asm_code = R"(// T.wgmma_commit_group()
+{
+  asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
+}
+)";
+  return asm_code;
+}
+
+std::string PrintWGMMAWaitGroupAssembly(const std::string& N) {
+  std::string asm_code = R"(// T.wgmma_wait_group()
+{
+  asm volatile ("wgmma.wait_group.sync.aligned %0;" : : "n"({N}) : "memory");
+}
+)";
+  Replacer replacer;
+  replacer.register_rule("{N}", N);
+  return replacer.rewrite(asm_code);
+}
+
+std::string PrintEncodeMatrixDescriptor(const std::string& desc, const std::string& addr,
+                                        const std::string& ldo, const std::string& sdo,
+                                        int swizzle) {
+  std::string cuda_code = R"(// T.encode_matrix_descriptor
+{
+  GmmaDescriptor* desc = reinterpret_cast<GmmaDescriptor*>({desc});
+
+  switch ({swizzle}) {
+    case 0: desc->bitfield.layout_type_ = uint8_t(0); break; // No swizzle
+    case 1: desc->bitfield.layout_type_ = uint8_t(3); break; // 128B swizzle
+    case 2: desc->bitfield.layout_type_ = uint8_t(2); break; // 64B swizzle
+    case 3: desc->bitfield.layout_type_ = uint8_t(1); break; // 32B swizzle
+  }
+
+  uint32_t start_address = cast_smem_ptr_to_int({addr});
+  desc->bitfield.start_address_ = static_cast<uint16_t>(start_address >> 4);
+
+  constexpr uint8_t base_offset = 0;
+  desc->bitfield.base_offset_ = base_offset;
+
+  desc->bitfield.stride_byte_offset_  = static_cast<uint32_t>({sdo});
+  desc->bitfield.leading_byte_offset_ = static_cast<uint32_t>({lbo});
+}
+)";
+  Replacer replacer;
+  replacer.register_rule("{desc}", desc);
+  replacer.register_rule("{addr}", addr);
+  replacer.register_rule("{lbo}", ldo);
+  replacer.register_rule("{sdo}", sdo);
+  replacer.register_rule("{swizzle}", std::to_string(swizzle));
+  return replacer.rewrite(cuda_code);
+}
+
 }  // namespace codegen
 }  // namespace tvm

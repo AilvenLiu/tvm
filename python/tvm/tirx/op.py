@@ -1863,7 +1863,7 @@ def cp_async_bulk_tensor_commit_group():
     return call_intrin("", "tir.cp_async_bulk_tensor_commit_group")
 
 
-def cp_async_bulk_tensor_wait_group(n, read = True):
+def cp_async_bulk_tensor_wait_group(n, read=True):
     """TVM intrinsic to call cp.async.bulk.tensor.wait_group
 
     Parameters
@@ -1899,6 +1899,148 @@ def ptx_fetch_register(bits, reg_name):
         The call expression.
     """
     return call_intrin("int" + str(bits), "tir.ptx_fetch_register", bits, reg_name)
+
+
+def encode_matrix_decriptor(desc, addr, ldo, sdo, swizzle):
+    """TVM intrinsic to create shared memory descriptor for matrix
+
+    Parameters
+    ----------
+    desc : PrimExpr
+        The pointer to the shared memory descriptor.
+
+    addr : PrimExpr
+        The address of the matrix.
+
+    ldo : PrimExpr
+        The leading dimension offset.
+
+    sdo : PrimExpr
+        The stride dimension offset.
+
+    swizzle : int
+        The swizzle value (CUtensorMapSwizzle_enum).
+    """
+    return call_intrin("", "tir.encode_matrix_decriptor", desc, addr, ldo, sdo, swizzle)
+
+
+def wgmma_fence_operand(reg):
+    """TVM intrinsic to call wgmma.fence.operand
+
+    Parameters
+    ----------
+    reg : PrimExpr
+        The register to fence.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.wgmma_fence_operand", reg)
+
+
+def wgmma_mma_sync_ss(
+    M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB, scaleD, descA, descB, *accums
+):
+    """TVM intrinsic to call wgmma.mma.sync.aligned
+
+    Parameters
+    ----------
+    M : int
+        The number of rows in matrix A and D.
+
+    N : int
+        The number of columns in matrix B and D.
+
+    K : int
+        The number of columns in matrix A and rows in matrix B.
+
+    in_dtype : str
+        The data type of the input matrices.
+
+    out_type : str
+        The data type of the output matrices.
+
+    transA : bool
+        True for M/N major, False for K major.
+
+    transB : bool
+        True for M/N major, False for K major.
+
+    scaleA : float
+        The scaling factor for matrix A.
+
+    scaleB : float
+        The scaling factor for matrix B.
+
+    scaleD : bool
+        True: D = A * B + D, False: D = A * B.
+
+    descA : PrimExpr
+        The SMEM descriptor of matrix A
+
+    descB : PrimExpr
+        The SMEM descriptor of matrix B
+
+    accums : list
+        The accumulators registers.
+    """
+    return call_intrin(
+        "",
+        "tir.wgmma_mma_sync_ss",
+        M,
+        N,
+        K,
+        in_dtype,
+        out_dtype,
+        transA,
+        transB,
+        scaleA,
+        scaleB,
+        scaleD,
+        descA,
+        descB,
+        *accums,
+    )
+
+
+def wgmma_arrive():
+    """TVM intrinsic to call wgmma.fence.sync.aligned
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.wgmma_arrive")
+
+
+def wgmma_commit_group():
+    """TVM intrinsic to call wgmma.commit_group.sync.aligned
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.wgmma_commit_group")
+
+
+def wgmma_wait_group(n):
+    """TVM intrinsic to call wgmma.wait_group.sync.aligned
+
+    Parameters
+    ----------
+    n : int
+        The number of the most recent uncommitted pending wgmma groups to wait.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.wgmma_wait_group", n)
 
 
 def make_filled_simdgroup_matrix(

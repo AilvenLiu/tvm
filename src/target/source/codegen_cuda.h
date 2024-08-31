@@ -116,6 +116,8 @@ class CodeGenCUDA final : public CodeGenC {
   bool need_mma_h_{false};
   // whether need cast_smem_ptr_to_int helper function
   bool need_cast_smem_ptr_to_int_{false};
+  // whether need shared memory descriptor
+  bool need_smem_descriptor_{false};
   // Op attribute map
   OpAttrMap<bool> op_need_warp_shuffle_ = Op::GetAttrMap<bool>("cuda.need_warp_shuffle");
 

@@ -543,6 +543,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST_SIZES(UInt, DataType::UInt);
 TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST_SIZES(Int, DataType::Int);
 
 #define TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST_LANES(FuncName, FDType, Size) \
+  TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(FuncName##x2, FDType(Size, 2))      \
   TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(FuncName##x4, FDType(Size, 4));     \
   TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(FuncName##x8, FDType(Size, 8));     \
   TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(FuncName##x16, FDType(Size, 16));   \
@@ -562,6 +563,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST_SIZES_LANES(Int, DataType::Int);
 
 #define TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST_LANES_FIXED_SIZE(DType, FDType) \
   TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(DType, FDType(1));                    \
+  TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(DType##x2, FDType(2));                \
   TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(DType##x4, FDType(4));                \
   TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(DType##x8, FDType(8));                \
   TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(DType##x16, FDType(16));              \
@@ -587,7 +589,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

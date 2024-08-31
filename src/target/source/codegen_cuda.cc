@@ -329,6 +329,64 @@ std::string CodeGenCUDA::Finish() {
   decl_stream << "using uchar = unsigned char;\n";
   decl_stream << "using ushort = unsigned short;\n\n";
 
+  if (need_smem_descriptor_) {
+    decl_stream << R"(
+#define HOST_DEVICE __forceinline__ __host__ __device__
+union GmmaDescriptor
+{
+  HOST_DEVICE constexpr
+  GmmaDescriptor() noexcept : desc_(0) {}
+  HOST_DEVICE constexpr
+  GmmaDescriptor(uint64_t desc) noexcept : desc_(desc) {}
+  HOST_DEVICE constexpr
+  GmmaDescriptor(GmmaDescriptor const& t) noexcept : desc_(t.desc_) {}
+  HOST_DEVICE constexpr
+  GmmaDescriptor(GmmaDescriptor && t) noexcept : desc_(t.desc_) {}
+
+  HOST_DEVICE constexpr
+  GmmaDescriptor& operator=(GmmaDescriptor const& t) noexcept {
+    desc_ = t.desc_;
+    return *this;
+  }
+
+  HOST_DEVICE constexpr
+  GmmaDescriptor& operator=(GmmaDescriptor && t) noexcept {
+    desc_ = t.desc_;
+    return *this;
+  }
+
+  uint64_t desc_;
+  uint32_t reg32_[2];
+  uint16_t reg16_[4];
+
+  // Bitfield implementation avoids the need for shifts in assignment
+  struct {
+    // start_address, bit [0,14), 4LSB not included
+    uint16_t start_address_ : 14, : 2;        // 14 bits [0,14), 2 bits unused
+    // leading dimension byte offset, bit [16,30), 4LSB not included
+    // For N: This is the stride from the first col to the second col of the 8x2 brick in INTERLEAVED
+    //   Unused for all SWIZZLE_* layouts (and assumed to be 1)
+    // For T: This is the stride from the first 8 rows to the next 8 rows.
+    uint16_t leading_byte_offset_ : 14, : 2;  // 14 bits [0,14), 2 bits unused
+    // stride dimension byte offset, bit [32,46), 4LSB not included
+    // For N: This is the stride from the first 8 rows to the next 8 rows.
+    // For T: This is the stride fro mthe first 8 cols to the next 8 cols.
+    uint16_t stride_byte_offset_ : 14, : 2;   // 14 bits [0,14), 2 bits unused
+    // base_offset, bit [49,52)
+    // Valid only for SWIZZLE_128B and SWIZZLE_64B
+    uint8_t : 1, base_offset_ : 3, : 4;       // 1 bit unused, 3 bits [1,4), 4 bits unused
+    // layout type, bit [62,64)
+    // SWIZZLE_NONE = 0, SWIZZLE_32B = 3, SWIZZLE_64B = 2, SWIZZLE_128B = 1
+    uint8_t : 6, layout_type_ : 2;            // 6 bits unused, 2 bits [6,8)
+  } bitfield;
+
+  // Decay to a uint64_t
+  HOST_DEVICE constexpr
+  operator uint64_t() const noexcept { return desc_; }
+};
+)";
+  }
+
   for (const auto& [name, code] : util_funcs_) {
     decl_stream << code;
   }
@@ -1442,7 +1500,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
           std::string index_calculation = indices[0];
           for (size_t i = 1; i < indices.size(); ++i) {
             index_calculation = indices[i] + " + " +
-                                std::to_string(shape[i - 1].as<IntImmNode>()->value) + " * (" +
+                                std::to_string(shape[i].as<IntImmNode>()->value) + " * (" +
                                 index_calculation + ")";
           }
           oss << "  int idx = " << index_calculation << ";\n";
@@ -1633,6 +1691,51 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int bits = Downcast<IntImm>(op->args[0])->value;
     std::string reg = Downcast<StringImm>(op->args[1])->value;
     os << PrintPtxFetchRegisterAssembly(this, bits, reg);
+  } else if (op->op.same_as(builtin::encode_matrix_decriptor())) {
+    need_smem_descriptor_ = true;
+    need_cast_smem_ptr_to_int_ = true;
+    std::string desc = this->PrintExpr(op->args[0]);
+    std::string addr = this->PrintExpr(op->args[1]);
+    std::string ldo = this->PrintExpr(op->args[2]);
+    std::string sdo = this->PrintExpr(op->args[3]);
+    int swizzle = Downcast<IntImm>(op->args[4])->value;
+    print(PrintEncodeMatrixDescriptor(desc, addr, ldo, sdo, swizzle));
+  } else if (op->op.same_as(builtin::wgmma_fence_operand())) {
+    std::string fence = this->PrintExpr(op->args[0]);
+    print(PrintWGMMAFenceOpearandAssembly(fence));
+  } else if (op->op.same_as(builtin::wgmma_mma_sync_ss())) {
+    int M = Downcast<IntImm>(op->args[0])->value;
+    int N = Downcast<IntImm>(op->args[1])->value;
+    int K = Downcast<IntImm>(op->args[2])->value;
+    std::string in_dtype = Downcast<StringImm>(op->args[3])->value;
+    std::string out_dtype = Downcast<StringImm>(op->args[4])->value;
+    bool transA = Downcast<Bool>(op->args[5])->value;
+    bool transB = Downcast<Bool>(op->args[6])->value;
+    float scaleA = Downcast<FloatImm>(op->args[7])->value;
+    float scaleB = Downcast<FloatImm>(op->args[8])->value;
+    bool scaleD = Downcast<Bool>(op->args[9])->value;
+    std::string descA = this->PrintExpr(op->args[10]);
+    std::string descB = this->PrintExpr(op->args[11]);
+    size_t expected_accm_cnt = M * N / 128;
+    if (out_dtype == "float16") {
+      // float16x2 is used for float16
+      expected_accm_cnt = expected_accm_cnt / 2;
+    }
+    CHECK_EQ(12 + expected_accm_cnt, op->args.size())
+        << "The number of arguments for wgmma_mma_sync_ss is incorrect";
+    std::vector<std::string> accum;
+    for (size_t i = 0; i < expected_accm_cnt; ++i) {
+      accum.push_back(this->PrintExpr(op->args[12 + i]));
+    }
+    print(PrintWGMMAmmasyncSSAssembly(M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB,
+                                      scaleD, descA, descB, accum));
+  } else if (op->op.same_as(builtin::wgmma_arrive())) {
+    print(PrintWGMMAArriveAssembly());
+  } else if (op->op.same_as(builtin::wgmma_commit_group())) {
+    print(PrintWGMMACommitGroupAssembly());
+  } else if (op->op.same_as(builtin::wgmma_wait_group())) {
+    std::string wait_cnt = this->PrintExpr(op->args[0]);
+    print(PrintWGMMAWaitGroupAssembly(wait_cnt));
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {

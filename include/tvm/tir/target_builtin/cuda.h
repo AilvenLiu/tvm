@@ -375,6 +375,48 @@ TVM_DLL const Op& mma_store();
  */
 TVM_DLL const Op& mma_fill();
 
+/*!
+ * \brief tvm intrinsic to encode shared memory matrix descriptor.
+ *
+ * encode_matrix_decriptor(PrimExpr ptr, PrimExpr ldo, PrimExpr sdo, int swizzle)
+ */
+TVM_DLL const Op& encode_matrix_decriptor();
+
+/*!
+ * \brief tvm intrinsic to call "" : "+r"(reg) :: "memory"
+ *
+ * wgmma_fence_operand()
+ */
+TVM_DLL const Op& wgmma_fence_operand();
+
+/*!
+ * \brief tvm intrinsic to call wgmma.mma_async.sync.aligned.shape.dtype.atype.btype
+ *
+ * wgmma_mma_sync_ss()
+ */
+TVM_DLL const Op& wgmma_mma_sync_ss();
+
+/*!
+ * \brief tvm intrinsic to call wgmma.fence.sync.aligned;
+ *
+ * wgmma_arrive()
+ */
+TVM_DLL const Op& wgmma_arrive();
+
+/*!
+ * \brief tvm intrinsic to call wgmma.commit_group.sync.aligned;
+ *
+ * wgmma_commit_group()
+ */
+TVM_DLL const Op& wgmma_commit_group();
+
+/*!
+ * \brief tvm intrinsic to call wgmma.wait_group.sync.aligned;
+ *
+ * wgmma_wait_group(int N)
+ */
+TVM_DLL const Op& wgmma_wait_group();
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

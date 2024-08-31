@@ -233,6 +233,62 @@ std::string PrintCpAsyncBulkTensorWaitGroupAssembly(const std::string& N, bool r
  */
 std::string PrintPtxFetchRegisterAssembly(CodeGenCUDA* cg, int bits, const std::string& reg);
 
+/*!
+ * \brief Print "" : "+r"(reg) :: "memory"
+ * \param reg: The register to print.
+ */
+std::string PrintWGMMAFenceOpearandAssembly(const std::string& reg);
+
+/*!
+ * \brief Print wgmma.mma.sync.aligned where both A and B are in shared memory.
+ * \param M: The number of rows in the matrix.
+ * \param N: The number of columns in the matrix.
+ * \param K: The number of columns in the matrix.
+ * \param in_dtype: The data type of the input matrix.
+ * \param out_dtype: The data type of the output matrix.
+ * \param transA: Whether the input matrix A is K major or M/N major.
+ * \param transB: Whether the input matrix B is K major or M/N major.
+ * \param scaleA: The scaling factor for matrix A.
+ * \param scaleB: The scaling factor for matrix B.
+ * \param scaleD: True: D = A * B + D, False: D = A * B.
+ * \param descA: The descriptor for matrix A.
+ * \param descB: The descriptor for matrix B.
+ * \param accums: The accumulator matrix descriptors.
+ */
+std::string PrintWGMMAmmasyncSSAssembly(int M, int N, int K, const std::string& in_dtype,
+                                        const std::string& out_dtype, bool transA, bool transB,
+                                        float scaleA, float scaleB, bool scaleD,
+                                        const std::string& descA, const std::string& descB,
+                                        const std::vector<std::string>& accums);
+
+/*!
+ * \brief Print wgmma.fence.sync.aligned;
+ */
+std::string PrintWGMMAArriveAssembly();
+
+/*!
+ * \brief Print wgmma.commit_group.sync.aligned;
+ */
+std::string PrintWGMMACommitGroupAssembly();
+
+/*!
+ * \brief Print wgmma.wait_group.sync.aligned;
+ * \param N: The number of groups to wait for.
+ */
+std::string PrintWGMMAWaitGroupAssembly(const std::string& N);
+
+/*!
+ * \brief Print shared memory matrix descriptor encoding.
+ * \param desc: The pointer to the shared memory descriptor.
+ * \param addr: The address of the matrix.
+ * \param ldo: The leading dimension offset.
+ * \param sdo: The stride dimension offset.
+ * \param swizzle: The swizzle value (CUtensorMapSwizzle_enum).
+ */
+std::string PrintEncodeMatrixDescriptor(const std::string& desc, const std::string& addr,
+                                        const std::string& ldo, const std::string& sdo,
+                                        int swizzle);
+
 }  // namespace codegen
 }  // namespace tvm
 
