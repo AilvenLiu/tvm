@@ -88,13 +88,13 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   }
 
   void VisitStmt_(const tirp::OpCallNode* op, ObjectPath path) override {
+    static const tvm::OpAttrMap<Bool>& tirp_op_map_ = Op::GetAttrMap<Bool>("TIsTIRpOp");
     Verify(tirp_op_map_.count(op->op))
         << "TIRpError: OpCall at " << path << " has unknown TIR+ op " << op->op;
   }
 
   Optional<ExecScope> cur_roof_ = NullOpt;
   std::vector<ExecScope> scope_stack_;
-  const tvm::OpAttrMap<Bool>& tirp_op_map_ = Op::GetAttrMap<Bool>("TIsTIRpOp");
 };
 
 class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
