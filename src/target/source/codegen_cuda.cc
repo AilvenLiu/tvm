@@ -1646,39 +1646,54 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string num_threads = this->PrintExpr(op->args[1]);
     print(PrintMbarrierInitAssembly(mbarrier, num_threads));
+  } else if (op->op.same_as(builtin::mbarrier_arrive())) {
+    need_cast_smem_ptr_to_int_ = true;
+    CHECK(op->args.size() == 1 || op->args.size() == 3) << "mbarrier_arrive() expects 1 or 3 args";
+    std::string mbarrier = this->PrintExpr(op->args[0]);
+    bool remote = op->args.size() == 3;
+    std::string cta_id = remote ? this->PrintExpr(op->args[1]) : "";
+    std::string pred = remote ? this->PrintExpr(op->args[2]) : "";
+    print(PrintMbarrierArriveAssembly(mbarrier, remote, cta_id, pred));
   } else if (op->op.same_as(builtin::mbarrier_arrive_expect_tx())) {
     need_cast_smem_ptr_to_int_ = true;
+    CHECK(op->args.size() == 2 || op->args.size() == 4) << "mbarrier_arrive_expect_tx() expects 2 "
+                                                           "or 4 args";
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string byte_count = this->PrintExpr(op->args[1]);
-    print(PrintMbarrierArriveExpectTxAssembly(mbarrier, byte_count));
+    bool remote = op->args.size() == 4;
+    std::string cta_id = remote ? this->PrintExpr(op->args[2]) : "";
+    std::string pred = remote ? this->PrintExpr(op->args[3]) : "";
+    print(PrintMbarrierArriveExpectTxAssembly(mbarrier, byte_count, remote, cta_id, pred));
   } else if (op->op.same_as(builtin::mbarrier_wait())) {
     need_cast_smem_ptr_to_int_ = true;
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string phase = this->PrintExpr(op->args[1]);
     print(PrintMbarrierWaitAssembly(mbarrier, phase));
+  } else if (op->op.same_as(builtin::named_barrier_sync())) {
+    std::string name_bar_id = this->PrintExpr(op->args[0]);
+    std::string thread_count = this->PrintExpr(op->args[1]);
+    print(PrintNamedBarrierSyncAssembly(name_bar_id, thread_count));
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_global_to_cluster())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
     std::string dst = this->PrintExpr(op->args[1]);
-    dst = dst + " + " + this->PrintExpr(op->args[2]);
-    std::string bar = this->PrintExpr(op->args[3]);
-    std::string tensormap = this->PrintExpr(op->args[4]);
-    std::vector<int> coords;
+    std::string bar = this->PrintExpr(op->args[2]);
+    std::string tensormap = this->PrintExpr(op->args[3]);
+    std::vector<std::string> coords;
     for (int i = 0; i < dim; ++i) {
-      coords.push_back(Downcast<IntImm>(op->args[5 + i])->value);
+      coords.push_back(this->PrintExpr(op->args[4 + i]));
     }
-    int cta_mask = Downcast<IntImm>(op->args[5 + dim])->value;
+    int cta_mask = Downcast<IntImm>(op->args[4 + dim])->value;
     print(
         PrintCpAsyncBulkTensorGlobalToClusterAssembly(dim, dst, bar, tensormap, cta_mask, coords));
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_shared_to_global())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
     std::string src = this->PrintExpr(op->args[1]);
-    src = src + " + " + this->PrintExpr(op->args[2]);
-    std::string tensormap = this->PrintExpr(op->args[3]);
-    std::vector<int> coords;
+    std::string tensormap = this->PrintExpr(op->args[2]);
+    std::vector<std::string> coords;
     for (int i = 0; i < dim; ++i) {
-      coords.push_back(Downcast<IntImm>(op->args[4 + i])->value);
+      coords.push_back(this->PrintExpr(op->args[3 + i]));
     }
     print(PrintCpAsyncBulkTensorSharedToGlobalAssembly(dim, src, tensormap, coords));
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_commit_group())) {
@@ -1687,6 +1702,19 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string wait_cnt = this->PrintExpr(op->args[0]);
     bool read = Downcast<Bool>(op->args[1])->value;
     print(PrintCpAsyncBulkTensorWaitGroupAssembly(wait_cnt, read));
+  } else if (op->op.same_as(builtin::barrier_cluster_arrive())) {
+    std::string sem = Downcast<StringImm>(op->args[0])->value;
+    bool aligned = Downcast<Bool>(op->args[1])->value;
+    print(PrintBarrierClusterArriveAssembly(sem, aligned));
+  } else if (op->op.same_as(builtin::barrier_cluster_wait())) {
+    bool acquire = Downcast<Bool>(op->args[0])->value;
+    bool aligned = Downcast<Bool>(op->args[1])->value;
+    print(PrintBarrierClusterWaitAssembly(acquire, aligned));
+  } else if (op->op.same_as(builtin::elect_sync())) {
+    uint32_t mask = Downcast<IntImm>(op->args[0])->value;
+    os << PrintElectSyncAssembly(this, mask);
+  } else if (op->op.same_as(builtin::fence_mbarrier_init_release_cluster())) {
+    print(PrintFenceMbarrierInitReleaseClusterAssembly());
   } else if (op->op.same_as(builtin::ptx_fetch_register())) {
     int bits = Downcast<IntImm>(op->args[0])->value;
     std::string reg = Downcast<StringImm>(op->args[1])->value;
@@ -1717,10 +1745,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string descA = this->PrintExpr(op->args[10]);
     std::string descB = this->PrintExpr(op->args[11]);
     size_t expected_accm_cnt = M * N / 128;
-    if (out_dtype == "float16") {
-      // float16x2 is used for float16
-      expected_accm_cnt = expected_accm_cnt / 2;
-    }
+    CHECK(out_dtype == "float32") << "Now codegen only support float32 output";
     CHECK_EQ(12 + expected_accm_cnt, op->args.size())
         << "The number of arguments for wgmma_mma_sync_ss is incorrect";
     std::vector<std::string> accum;

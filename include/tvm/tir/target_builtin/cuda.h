@@ -289,7 +289,20 @@ TVM_DLL const Op& cuda_fence_proxy_async();
 TVM_DLL const Op& mbarrier_init();
 
 /*!
- * \brief tvm instrinsics to call mbarrier.arrive.expect_tx.shared::cta.b64
+ * \brief tvm instrinsics to call
+ *             mbarrier.arrive.shared::cta.b64
+ * or
+ *             @p mapa.shared::cluster.u32
+ *             @p mbarrier.arrive.shared::cluster.b64
+ */
+TVM_DLL const Op& mbarrier_arrive();
+
+/*!
+ * \brief tvm instrinsics to call
+ *              mbarrier.arrive.expect_tx.shared.b64
+ * or
+ *             @p mapa.shared::cluster.u32
+ *             @p mbarrier.arrive.expect_tx.shared.b64
  *
  * mbarrier_arrive_expect_tx(uint64_t* bar_ptr, int byte_count)
  */
@@ -303,15 +316,21 @@ TVM_DLL const Op& mbarrier_arrive_expect_tx();
 TVM_DLL const Op& mbarrier_wait();
 
 /*!
+ * \brief tvm instrinsics to call bar.sync a, {b}
+ *
+ * bar_sync(int name_bar_id, int thread_count)
+ */
+TVM_DLL const Op& named_barrier_sync();
+
+/*!
  * \brief tvm instrinsics to call
  * cp.async.bulk.tensor.dim.shared::cluster.global.tile.mbarrier::complete_tx::bytes
  *
  * TMA alignment requirement:
  * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#table-alignment-multi-dim-tma
  *
- * cp_async_bulk_tensor_global_to_cluster(int dim, Var dst_ptr, PrimExpr dst_offset,
- *                                        Var bar_ptr, Var tensormap_ptr,
- *                                        int cta_mask, int...coords)
+ * cp_async_bulk_tensor_global_to_cluster(int dim, PrimExpr dst_ptr, PrimExpr bar_ptr, Var
+ * tensormap_ptr, int cta_mask, int...coords)
  */
 TVM_DLL const Op& cp_async_bulk_tensor_global_to_cluster();
 
@@ -322,8 +341,7 @@ TVM_DLL const Op& cp_async_bulk_tensor_global_to_cluster();
  * TMA alignment requirement:
  * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#table-alignment-multi-dim-tma
  *
- * cp_async_bulk_tensor_shared_to_global(int dim, Var src_ptr, PrimExpr src_offset,
- *                                       Var tensormap_ptr, int...coords)
+ * cp_async_bulk_tensor_shared_to_global(int dim, PrimExpr src_ptr, Var tensormap_ptr, int...coords)
  */
 TVM_DLL const Op& cp_async_bulk_tensor_shared_to_global();
 
@@ -340,6 +358,34 @@ TVM_DLL const Op& cp_async_bulk_tensor_commit_group();
  * cp_async_bulk_tensor_wait_group(int N, bool read)
  */
 TVM_DLL const Op& cp_async_bulk_tensor_wait_group();
+
+/*!
+ * \brief tvm instrinsics to call barrier.cluster.arrive{.sem}{.aligned}
+ *
+ * barrier_cluster_arrive(string sem, bool aligned)
+ */
+TVM_DLL const Op& barrier_cluster_arrive();
+
+/*!
+ * \brief tvm instrinsics to call barrier.cluster.wait.{acquire}{.aligned}
+ *
+ * barrier_cluster_wait(bool acquire, bool aligned)
+ */
+TVM_DLL const Op& barrier_cluster_wait();
+
+/*!
+ * \brief tvm instrinsics to call elect.sync _|p, membermask and return the predicate
+ *
+ * elect_sync(membermask)
+ */
+TVM_DLL const Op& elect_sync();
+
+/*!
+ * \brief tvm instrinsics to call fence.mbarrier_init.release.cluster
+ *
+ * fence_mbarrier_init_release_cluster()
+ */
+TVM_DLL const Op& fence_mbarrier_init_release_cluster();
 
 /*!
  * \brief tvm instrinsics to fetch PTX pre-defined registers

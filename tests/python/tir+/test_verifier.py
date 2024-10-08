@@ -285,6 +285,7 @@ def test_host():
                             T.cp_async_bulk_tensor_global_to_cluster(2, A_smem.data, bar.data, A_map, 0, 0)
                             T.mbarrier_arrive_expect_tx(bar.data, 16*16*4)
                         T.mbarrier_wait(bar.data, phase[0])
+                        phase[0] = phase[0] ^ 1
                         T.print_buffer(A_smem.data, "float32", 2, 16*16)
     # fmt: on
     verify(test1)

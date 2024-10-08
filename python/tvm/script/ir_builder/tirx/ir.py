@@ -2154,10 +2154,16 @@ cp_async_bulk_tensor_global_to_cluster = _op_wrapper(_tir_op.cp_async_bulk_tenso
 cp_async_bulk_tensor_shared_to_global = _op_wrapper(_tir_op.cp_async_bulk_tensor_shared_to_global)
 cp_async_bulk_tensor_commit_group = _op_wrapper(_tir_op.cp_async_bulk_tensor_commit_group)
 cp_async_bulk_tensor_wait_group = _op_wrapper(_tir_op.cp_async_bulk_tensor_wait_group)
+barrier_cluster_arrive = _op_wrapper(_tir_op.barrier_cluster_arrive)
+barrier_cluster_wait = _op_wrapper(_tir_op.barrier_cluster_wait)
+elect_sync = _op_wrapper(_tir_op.elect_sync)
+fence_mbarrier_init_release_cluster = _op_wrapper(_tir_op.fence_mbarrier_init_release_cluster)
 ptx_fetch_register = _op_wrapper(_tir_op.ptx_fetch_register)
 mbarrier_init = _op_wrapper(_tir_op.mbarrier_init)
+mbarrier_arrive = _op_wrapper(_tir_op.mbarrier_arrive)
 mbarrier_arrive_expect_tx = _op_wrapper(_tir_op.mbarrier_arrive_expect_tx)
 mbarrier_wait = _op_wrapper(_tir_op.mbarrier_wait)
+named_barrier_sync = _op_wrapper(_tir_op.named_barrier_sync)
 encode_matrix_decriptor = _op_wrapper(_tir_op.encode_matrix_decriptor)
 wgmma_fence_operand = _op_wrapper(_tir_op.wgmma_fence_operand)
 wgmma_mma_sync_ss = _op_wrapper(_tir_op.wgmma_mma_sync_ss)
@@ -2510,8 +2516,10 @@ __all__ = float_types + [
     "cuda_barrier_arrive_and_wait",
     "cuda_fence_proxy_async",
     "mbarrier_init",
+    "mbarrier_arrive",
     "mbarrier_arrive_expect_tx",
     "mbarrier_wait",
+    "named_barrier_sync",
     "encode_matrix_decriptor",
     "wgmma_fence_operand",
     "wgmma_mma_sync_ss",
@@ -2522,6 +2530,10 @@ __all__ = float_types + [
     "cp_async_bulk_tensor_shared_to_global",
     "cp_async_bulk_tensor_commit_group",
     "cp_async_bulk_tensor_wait_group",
+    "barrier_cluster_arrive",
+    "barrier_cluster_wait",
+    "elect_sync",
+    "fence_mbarrier_init_release_cluster",
     "ptx_fetch_register",
     "make_filled_simdgroup_matrix",
     "simdgroup_load",

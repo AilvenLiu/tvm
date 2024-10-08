@@ -174,12 +174,27 @@ std::string PrintCudaFenceProxyAsyncAssembly(std::string scope);
 std::string PrintMbarrierInitAssembly(const std::string& barrier, const std::string& thread_count);
 
 /*!
+ * \brief Print ptx mbarrier.arrive.shared.b64
+ * \param barrier: The name of the barrier in shared memory.
+ * \param remote: Whether the barrier is remote.
+ * \param cta_id: The id of the target CTA.
+ * \param pred: The predicate value.
+ */
+std::string PrintMbarrierArriveAssembly(const std::string& barrier, bool remote,
+                                        const std::string& cta_id, const std::string& pred);
+
+/*!
  * \brief Print ptx mbarrier.arrive.expect_tx.shared::cta.b64
  * \param barrier: The name of the barrier in shared memory.
  * \param byte_count: Increases the tx count of the mbarrier object to track completion of
+ * addtional async transactions.
+ * \param remote: Whether the barrier is remote.
+ * \param cta_id: The id of the target CTA.
+ * \param pred: The predicate value.
  */
 std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
-                                                const std::string& byte_count);
+                                                const std::string& byte_count, bool remote,
+                                                const std::string& cta_id, const std::string& pred);
 
 /*!
  * \brief Print ptx mbarrier.try_wait.parity repeatedly until it returns true
@@ -187,6 +202,14 @@ std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
  * \param phase: The phase bit to wait for.
  */
 std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase);
+
+/*!
+ * \brief Print bar.sync a, {b}
+ * \param name_bar_id: The name of the barrier.
+ * \param thread_count: The number of threads expected to arrive at the barrier.
+ */
+std::string PrintNamedBarrierSyncAssembly(const std::string& name_bar_id,
+                                          const std::string& thread_count);
 
 /*!
  * \brief Print ptx cp.async.bulk.tensor.{dim}.shared::cluster.global.mbarrier::complete_tx::bytes
@@ -200,7 +223,8 @@ std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::str
 std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::string& dst,
                                                           const std::string& bar,
                                                           const std::string& tensormap,
-                                                          int cta_mask, std::vector<int> coords);
+                                                          int cta_mask,
+                                                          std::vector<std::string> coords);
 
 /*!
  * \brief Print ptx cp.async.bulk.tensor.dim.global.shared::cta.tile。bulk_group
@@ -211,7 +235,7 @@ std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::st
  */
 std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(int dim, const std::string& src,
                                                          const std::string& tensormap,
-                                                         std::vector<int> coords);
+                                                         std::vector<std::string> coords);
 
 /*!
  * \brief Print ptx cp.async.bulk.tensor.commit_group
@@ -289,7 +313,31 @@ std::string PrintEncodeMatrixDescriptor(const std::string& desc, const std::stri
                                         const std::string& ldo, const std::string& sdo,
                                         int swizzle);
 
+/*!
+ * \brief Print barrier.cluster.arrive{.sem}{.aligned};
+ * \param sem: Either release or relaxed or empty string.
+ * \param aligned: Whether all threads in the warp must execute the same instruction.
+ */
+std::string PrintBarrierClusterArriveAssembly(const std::string& sem, bool aligned);
+
+/*!
+ * \brief Print barrier.cluster.wait{.acquire}{.aligned};
+ * \param acquire: The memory synchronization
+ * \param aligned: Whether all threads in the warp must execute the same instruction.
+ */
+std::string PrintBarrierClusterWaitAssembly(bool acquire, bool aligned);
+
+/*!
+ * \brief Print elec.sync _|p membermask
+ * \param membermask: The mask for the synchronization.
+ */
+std::string PrintElectSyncAssembly(CodeGenCUDA* cg, uint32_t membermask);
+
+/*!
+ * \brief Print fence_mbarrier_init_release_cluster
+ */
+std::string PrintFenceMbarrierInitReleaseClusterAssembly();
+
 }  // namespace codegen
 }  // namespace tvm
-
 #endif  // TVM_TARGET_SOURCE_PTX_H_

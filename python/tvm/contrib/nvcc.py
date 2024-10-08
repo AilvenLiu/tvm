@@ -192,7 +192,6 @@ def _compile_cuda_nvcc(
     # correctly by default.
     # if cxx_compiler_path != "":
     #    cmd += ["-ccbin", cxx_compiler_path]
-
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
     (out, _) = proc.communicate()

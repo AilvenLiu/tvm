@@ -127,10 +127,16 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_fence_proxy_async)
 TIR_DEFINE_BUILTIN_FUNC(mbarrier_init)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(mbarrier_arrive)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(mbarrier_arrive_expect_tx)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(mbarrier_wait)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(named_barrier_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_global_to_cluster)
@@ -143,6 +149,18 @@ TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_commit_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_wait_group)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(barrier_cluster_arrive)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(barrier_cluster_wait)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(elect_sync)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(fence_mbarrier_init_release_cluster)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(ptx_fetch_register)

@@ -632,7 +632,7 @@ std::string PrintLoadMatrixAssembly(bool trans, int num, const std::string& type
       << "ldmatrix only accept matrix with type .b16.";
   std::string asm_code = R"(
   {
-    unsigned int addr = cast_smem_ptr_to_int({smem_addr});
+    unsigned int addr = __cvta_generic_to_shared({smem_addr});
     __asm__ __volatile__(
       "ldmatrix.sync.aligned{.shape}{.num}{.trans}{.ss}{.type}"
       "{templates};\n"
@@ -662,7 +662,7 @@ std::string PrintCpAsyncAssembly(const std::string& shared_ptr,
                                  const std::string& global_elem_offset, const std::string& bytes) {
   std::string asm_code = R"(// T.ptx_cp_async()
 {
-  unsigned int addr = cast_smem_ptr_to_int({smem_addr});
+  unsigned int addr = __cvta_generic_to_shared({smem_addr});
   __asm__ __volatile__(
     #if TVM_ENABLE_L2_PREFETCH
       "cp.async.{cg_or_ca}.shared.global.L2::128B [%0], [%1], %2;"
@@ -693,7 +693,7 @@ std::string PrintPredicatedCpAsyncAssembly(const std::string& shared_ptr,
       << "Only support 16, 12, 8, 4, 2, 1 bytes for predicated cp.async";
   std::string predicated_asm_code = R"(
   {
-    unsigned int addr = cast_smem_ptr_to_int({smem_addr});
+    unsigned int addr = __cvta_generic_to_shared({smem_addr});
     int pred_guard = (int){pred_guard};
     __asm__ __volatile__(
         "{  .reg .pred p;"
@@ -745,8 +745,8 @@ std::string PrintCpAsyncBulkAsm(const std::string& shared_ptr,
                                 const std::string& barrier) {
   std::string asm_code = R"(
   {
-    unsigned int smem_addr_int = cast_smem_ptr_to_int({smem_addr});
-    unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+    unsigned int smem_addr_int = __cvta_generic_to_shared({smem_addr});
+    unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
     __asm__ __volatile__(
       "cp.async.bulk.shared::cluster.global.mbarrier::complete_tx::bytes [%0], [%1], %2, [%3];"
       :: "r"(smem_addr_int), "l"({global_ptr}), "r"({bytes}), "r"(barrier_addr_int)
@@ -767,7 +767,7 @@ std::string PrintCpAsyncBulkAsm(const std::string& shared_ptr,
 std::string PrintCpAsyncBarrierAsm(const std::string& barrier) {
   std::string predicated_asm_code = R"(
   {
-    unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+    unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
     __asm__ __volatile__(
       "cp.async.mbarrier.arrive.shared.b64 [%0];"
       :: "r" (barrier_addr_int)
@@ -785,7 +785,7 @@ std::string PrintInitBarrierThreadCountAsm(const std::string& barrier,
                                            const std::string& thread_count) {
   std::string predicated_asm_code = R"(
   {
-    unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+    unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
     int thread_count = {thread_count};
     __asm__ __volatile__(
       "mbarrier.init.shared.b64 [%0], %1;"
@@ -804,7 +804,7 @@ std::string PrintInitBarrierThreadCountAsm(const std::string& barrier,
 std::string PrintArriveBarrierAsm(const std::string& barrier) {
   std::string predicated_asm_code = R"(
   {
-    unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+    unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
     __asm__ __volatile__(
       "{ .reg .b64 state; mbarrier.arrive.shared.b64 state, [%0]; }"
       :: "r"(barrier_addr_int)
@@ -822,7 +822,7 @@ std::string PrintArriveBarrierExpectTxAsm(const std::string& barrier,
                                           const std::string& byte_count) {
   std::string predicated_asm_code = R"(
   {
-    unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+    unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
     int byte_count = {byte_count};
     __asm__ __volatile__(
       "mbarrier.arrive.expect_tx.shared.b64 _, [%0], %1;"
@@ -841,7 +841,7 @@ std::string PrintArriveBarrierExpectTxAsm(const std::string& barrier,
 std::string PrintWaitBarrierAsm(const std::string& barrier) {
   std::string predicated_asm_code = R"(
   {
-    unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+    unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
     constexpr int phase_bit = 0;
     __asm__ __volatile__(
       "{ .reg .pred P; WAIT: mbarrier.try_wait.parity.shared.b64 P, [%0], %1; @P bra.uni DONE; bra.uni WAIT; DONE: }"
@@ -875,7 +875,7 @@ std::string PrintCudaFenceProxyAsyncAssembly(std::string scope) {
 std::string PrintMbarrierInitAssembly(const std::string& barrier, const std::string& thread_count) {
   std::string asm_code = R"(// T.mbarrier_init()
 {
-  unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+  unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
   int thread_count = {thread_count};
   __asm__ __volatile__(
     "mbarrier.init.shared.b64 [%0], %1;"
@@ -891,11 +891,52 @@ std::string PrintMbarrierInitAssembly(const std::string& barrier, const std::str
   return asm_code;
 }
 
-std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
-                                                const std::string& byte_count) {
-  std::string asm_code = R"(// T.mbarrier_arrive_expect_tx()
+std::string PrintMbarrierArriveAssembly(const std::string& barrier, bool remote,
+                                        const std::string& cta_id, const std::string& pred) {
+  if (!remote) {
+    std::string asm_code = R"(// T.mbarrier_arrive()
 {
-  unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+  unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
+  __asm__ __volatile__(
+    "mbarrier.arrive.shared.b64 _, [%0];"
+    :: "r"(barrier_addr_int)
+  );
+)";
+    Replacer replacer;
+    replacer.register_rule("{barrier}", barrier);
+    return replacer.rewrite(asm_code);
+  } else {
+    std::string asm_code = R"(// T.mbarrier_arrive()
+{
+  unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
+  asm volatile(
+      "{\n\t"
+      ".reg .pred p;\n\t"
+      ".reg .b32 remAddr32;\n\t"
+      "setp.eq.u32 p, %2, 1;\n\t"
+      "@p mapa.shared::cluster.u32  remAddr32, %0, %1;\n\t"
+      "@p mbarrier.arrive.shared::cluster.b64  _, [remAddr32];\n\t"
+      "}"
+      :
+      : "r"(barrier_addr_int), "r"({cta_id}), "r"({pred}));
+}
+)";
+    Replacer replacer;
+    replacer.register_rule("{barrier}", barrier);
+    replacer.register_rule("{cta_id}", cta_id);
+    replacer.register_rule("{pred}", pred);
+    return replacer.rewrite(asm_code);
+  }
+}
+
+std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
+                                                const std::string& byte_count, bool remote,
+                                                const std::string& cta_id,
+                                                const std::string& pred) {
+  if (!remote) {
+    std::string asm_code = R"(// T.mbarrier_arrive_expect_tx()
+{
+  unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
   int byte_count = {byte_count};
   __asm__ __volatile__(
     "mbarrier.arrive.expect_tx.shared.b64 _, [%0], %1;"
@@ -903,17 +944,40 @@ std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
   );
 }
 )";
-
-  Replacer replacer;
-  replacer.register_rule("{barrier}", barrier);
-  replacer.register_rule("{byte_count}", byte_count);
-  return replacer.rewrite(asm_code);
+    Replacer replacer;
+    replacer.register_rule("{barrier}", barrier);
+    replacer.register_rule("{byte_count}", byte_count);
+    return replacer.rewrite(asm_code);
+  } else {
+    std::string asm_code = R"(// T.mbarrier_arrive_expect_tx()
+{
+  unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
+  asm volatile(
+      "{\n\t"
+      ".reg .pred p;\n\t"
+      ".reg .b32 remAddr32;\n\t"
+      "setp.eq.u32 p, %2, 1;\n\t"
+      "@p mapa.shared::cluster.u32  remAddr32, %0, %1;\n\t"
+      "@p mbarrier.arrive.expect_tx.shared::cluster.b64  _, [remAddr32], "
+      "%3;\n\t"
+      "}"
+      :
+      : "r"(barrier_addr_int), "r"({cta_id}), "r"({pred}), "r"({byte_count}));
+}
+)";
+    Replacer replacer;
+    replacer.register_rule("{barrier}", barrier);
+    replacer.register_rule("{byte_count}", byte_count);
+    replacer.register_rule("{cta_id}", cta_id);
+    replacer.register_rule("{pred}", pred);
+    return replacer.rewrite(asm_code);
+  }
 }
 
 std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase) {
   std::string asm_code = R"(// T.mbarrier_wait()
 {
-  unsigned int barrier_addr_int = cast_smem_ptr_to_int({barrier});
+  unsigned int barrier_addr_int = __cvta_generic_to_shared({barrier});
   asm volatile (
       "{\n"
       ".reg .pred                P1;\n"
@@ -927,7 +991,6 @@ std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::str
       "r"(barrier_addr_int),
       "r"({phase})
   );
-  {phase} = 1 - {phase};
 }
 )";
 
@@ -937,15 +1000,30 @@ std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::str
   return replacer.rewrite(asm_code);
 }
 
+std::string PrintNamedBarrierSyncAssembly(const std::string& name_bar_id,
+                                          const std::string& thread_count) {
+  std::string asm_code = R"(// T.named_barrier_sync()
+{
+  asm volatile("bar.sync %0, %1;" : : "r"({name_bar_id}), "r"({num_threads}));
+}
+)";
+
+  Replacer replacer;
+  replacer.register_rule("{name_bar_id}", name_bar_id);
+  replacer.register_rule("{num_threads}", thread_count);
+  return replacer.rewrite(asm_code);
+}
+
 std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::string& dst,
                                                           const std::string& bar,
                                                           const std::string& tensormap,
-                                                          int cta_mask, std::vector<int> coords) {
+                                                          int cta_mask,
+                                                          std::vector<std::string> coords) {
   std::string asm_code = R"(// T.cp_async_bulk_tensor_global_to_cluster()
 {
   uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&{tensormap});
-  unsigned int dst_addr = cast_smem_ptr_to_int({dst});
-  unsigned int bar_addr = cast_smem_ptr_to_int({bar});
+  unsigned int dst_addr = __cvta_generic_to_shared({dst});
+  unsigned int bar_addr = __cvta_generic_to_shared({bar});
   uint16_t cta_mask = static_cast<uint16_t>({cta_mask});
   )";
   if (cta_mask != 0) {
@@ -988,9 +1066,9 @@ std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::st
   }
   {
     // coord list
-    coord_list = "\"r\"(" + std::to_string(coords[0]) + ")";
+    coord_list = "\"r\"(" + coords[0] + ")";
     for (int i = 1; i < dim; ++i) {
-      coord_list += ", \"r\"(" + std::to_string(coords[i]) + ")";
+      coord_list += ", \"r\"(" + coords[i] + ")";
     }
   }
   Replacer replacer;
@@ -1006,11 +1084,11 @@ std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::st
 
 std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(int dim, const std::string& src,
                                                          const std::string& tensormap,
-                                                         std::vector<int> coords) {
+                                                         std::vector<std::string> coords) {
   std::string asm_code = R"(// T.cp_async_bulk_tensor_shared_to_global()
 {
   uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&{tensormap});
-  unsigned int src_addr = cast_smem_ptr_to_int({src});
+  unsigned int src_addr = __cvta_generic_to_shared({src});
   __asm__ __volatile__(
     "cp.async.bulk.tensor.{dim}d.global.shared::cta.tile.bulk_group"
     "[%0, {arg_template}], [%1];"
@@ -1033,9 +1111,9 @@ std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(int dim, const std::str
   }
   {
     // coord list
-    coord_list = "\"r\"(" + std::to_string(coords[0]) + ")";
+    coord_list = "\"r\"(" + coords[0] + ")";
     for (int i = 1; i < dim; ++i) {
-      coord_list += ", \"r\"(" + std::to_string(coords[i]) + ")";
+      coord_list += ", \"r\"(" + coords[i] + ")";
     }
   }
   Replacer replacer;
@@ -1100,7 +1178,7 @@ __forceinline__ __device__ int{bits}_t {func_name}() {
 std::string PrintWGMMAFenceOpearandAssembly(const std::string& reg) {
   std::string asm_code = R"(// T.wgmma_fence()
 {
-  asm volatile("" : "+r"(*(uint32_t*)(&{reg})) :: "memory");
+  asm volatile("" : "+f"({reg})::"memory");
 }
 )";
   Replacer replacer;
@@ -1137,9 +1215,11 @@ std::string PrintWGMMAmmasyncSSAssembly(int M, int N, int K, const std::string& 
   for (size_t i = 1; i < accums.size(); ++i) {
     accum_r_list += ", %" + std::to_string(i);
   }
-  std::string accum_list = "\"+r\"((*(uint32_t*)(&" + accums[0] + ")))";
+  CHECK(out_dtype == "float32")
+      << "ValueError: codegen only support float32 as output dtype for WGMMMA.";
+  std::string accum_list = "\"+f\"(" + accums[0] + ")";
   for (size_t i = 1; i < accums.size(); ++i) {
-    accum_list += ", \"+r\"((*(uint32_t*)(&" + accums[i] + ")))";
+    accum_list += ", \"+f\"(" + accums[i] + ")";
   }
   std::string descA_r = "%" + std::to_string(accums.size());
   std::string descB_r = "%" + std::to_string(accums.size() + 1);
@@ -1208,23 +1288,25 @@ std::string PrintEncodeMatrixDescriptor(const std::string& desc, const std::stri
                                         int swizzle) {
   std::string cuda_code = R"(// T.encode_matrix_descriptor
 {
-  GmmaDescriptor* desc = reinterpret_cast<GmmaDescriptor*>({desc});
+  GmmaDescriptor _desc;
 
   switch ({swizzle}) {
-    case 0: desc->bitfield.layout_type_ = uint8_t(0); break; // No swizzle
-    case 1: desc->bitfield.layout_type_ = uint8_t(3); break; // 128B swizzle
-    case 2: desc->bitfield.layout_type_ = uint8_t(2); break; // 64B swizzle
-    case 3: desc->bitfield.layout_type_ = uint8_t(1); break; // 32B swizzle
+    case 0: _desc.bitfield.layout_type_ = uint8_t(0); break; // No swizzle
+    case 1: _desc.bitfield.layout_type_ = uint8_t(3); break; // 32B swizzle
+    case 2: _desc.bitfield.layout_type_ = uint8_t(2); break; // 64B swizzle
+    case 3: _desc.bitfield.layout_type_ = uint8_t(1); break; // 128B swizzle
   }
 
-  uint32_t start_address = cast_smem_ptr_to_int({addr});
-  desc->bitfield.start_address_ = static_cast<uint16_t>(start_address >> 4);
+  uint32_t start_address = __cvta_generic_to_shared({addr});
+  _desc.bitfield.start_address_ = static_cast<uint16_t>(start_address >> 4);
 
   constexpr uint8_t base_offset = 0;
-  desc->bitfield.base_offset_ = base_offset;
+  _desc.bitfield.base_offset_ = base_offset;
 
-  desc->bitfield.stride_byte_offset_  = static_cast<uint32_t>({sdo});
-  desc->bitfield.leading_byte_offset_ = static_cast<uint32_t>({lbo});
+  _desc.bitfield.stride_byte_offset_  = static_cast<uint32_t>({sdo});
+  _desc.bitfield.leading_byte_offset_ = static_cast<uint32_t>({lbo});
+
+  *{desc} = (uint64_t)_desc;
 }
 )";
   Replacer replacer;
@@ -1234,6 +1316,70 @@ std::string PrintEncodeMatrixDescriptor(const std::string& desc, const std::stri
   replacer.register_rule("{sdo}", sdo);
   replacer.register_rule("{swizzle}", std::to_string(swizzle));
   return replacer.rewrite(cuda_code);
+}
+
+std::string PrintBarrierClusterArriveAssembly(const std::string& sem, bool aligned) {
+  std::string asm_code = R"(// T.barrier_cluster_arrive()
+{
+  asm volatile("barrier.cluster.arrive{sem}{aligned};\n" : :);
+}
+)";
+  Replacer replacer;
+  replacer.register_rule("{sem}", sem.empty() ? "" : "." + sem);
+  replacer.register_rule("{aligned}", aligned ? ".aligned" : "");
+  return replacer.rewrite(asm_code);
+}
+
+std::string PrintBarrierClusterWaitAssembly(bool acquire, bool aligned) {
+  std::string asm_code = R"(// T.barrier_cluster_wait()
+{
+  asm volatile("barrier.cluster.wait{acquire}{aligned};\n" : :);
+}
+)";
+  Replacer replacer;
+  replacer.register_rule("{acquire}", acquire ? ".acquire" : "");
+  replacer.register_rule("{aligned}", aligned ? ".aligned" : "");
+  return replacer.rewrite(asm_code);
+}
+
+std::string PrintElectSyncAssembly(CodeGenCUDA* cg, uint32_t mask) {
+  std::string func_code = R"(
+__forceinline__ __device__ uint32_t {func_name}(uint32_t mask) {
+  uint32_t pred = 0;
+  uint32_t laneid = 0;
+  asm volatile(
+      "{\n"
+      ".reg .b32 %rx;\n"
+      ".reg .pred %px;\n"
+      "     elect.sync %rx|%px, %2;\n"
+      "@%px mov.s32 %1, 1;\n"
+      "     mov.s32 %0, %rx;\n"
+      "}\n"
+      : "+r"(laneid), "+r"(pred)
+      : "r"(mask));
+  return pred;
+}  
+)";
+  std::string func_name = "elect_one_sync";
+
+  Replacer replacer;
+  replacer.register_rule("{func_name}", func_name);
+  func_code = replacer.rewrite(func_code);
+
+  cg->AddUtilFunction(func_name, func_code);
+  return func_name + "(" + std::to_string(mask) + ")";
+}
+
+std::string PrintFenceMbarrierInitReleaseClusterAssembly() {
+  std::string asm_code = R"(// T.fence_mbarrier_init_release_cluster()
+{
+  asm volatile(
+      "{\n\t"
+      "fence.mbarrier_init.release.cluster; \n"
+      "}" ::);
+}
+)";
+  return asm_code;
 }
 
 }  // namespace codegen

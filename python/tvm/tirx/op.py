@@ -1731,8 +1731,37 @@ def mbarrier_init(bar, thread_count):
     return call_intrin("", "tir.mbarrier_init", bar, thread_count)
 
 
-def mbarrier_arrive_expect_tx(bar, byte_count):
-    """TVM intrinsic to call mbarrier.arrive.and.expect_tx.shared::cta.b64
+def mbarrier_arrive(bar, cta_id=None, pred=None):
+    """TVM intrinsic to call
+        mbarrier.arrive.shared::cta.b64
+    or
+        @p mapa.shared::cluster.u32
+        @p mbarrier.arrive.shared::cluster.b64
+
+    Parameters
+    ----------
+    bar : Var
+        The pointer to barrier variable.
+
+    cta_id : Optional[PrimExpr]
+        The cta id.
+
+    pred : Optional[PrimExpr]
+        The predicate to guard the operation.
+    """
+    if cta_id is None and pred is None:
+        return call_intrin("", "tir.mbarrier_arrive", bar)
+    else:
+        assert cta_id is not None and pred is not None
+        return call_intrin("", "tir.mbarrier_arrive", bar, cta_id, pred)
+
+
+def mbarrier_arrive_expect_tx(bar, byte_count, cta_id=None, pred=None):
+    """TVM intrinsic to call
+        mbarrier.arrive_expect_tx.shared::cta.b64
+    or
+        @p mapa.shared::cluster.u32
+        @p mbarrier.arrive_expect_tx.shared::cluster.b64
 
     Parameters
     ----------
@@ -1743,12 +1772,22 @@ def mbarrier_arrive_expect_tx(bar, byte_count):
         Increases the tx count of the mbarrier object to track completion of
         addtional async transactions.
 
+    cta_id : Optional[PrimExpr]
+        The cta id.
+
+    pred : Optional[PrimExpr]
+        The predicate to guard the operation.
+
     Returns
     -------
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.mbarrier_arrive_expect_tx", bar, byte_count)
+    if cta_id is None and pred is None:
+        return call_intrin("", "tir.mbarrier_arrive_expect_tx", bar, byte_count)
+    else:
+        assert cta_id is not None and pred is not None
+        return call_intrin("", "tir.mbarrier_arrive_expect_tx", bar, byte_count, cta_id, pred)
 
 
 def mbarrier_wait(bar, phase):
@@ -1770,9 +1809,26 @@ def mbarrier_wait(bar, phase):
     return call_intrin("", "tir.mbarrier_wait", bar, phase)
 
 
-def cp_async_bulk_tensor_global_to_cluster(
-    dim, dst_ptr, dst_offset, bar, tensormap, *coords, cta_mask=0
-):
+def named_barrier_sync(name_bar_id, thread_count):
+    """TVM intrinsic to call bar.sync a, {b}
+
+    Parameters
+    ----------
+    name_bar_id : int
+        The ID of the named barrier.
+
+    thread_count : int
+        The number of threads expected to arrive at the barrier.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.named_barrier_sync", name_bar_id, thread_count)
+
+
+def cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *coords, cta_mask=0):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.shared::cluster.global.tile.mbarrier::complete_tx::bytes
 
     Parameters
@@ -1780,23 +1836,20 @@ def cp_async_bulk_tensor_global_to_cluster(
     dim : int
         The dimension of the copy tensor.
 
-    dst_ptr : Var
+    dst_ptr : PrimExpr
         The destination pointer to the shared memory.
 
-    dst_offset : PrimExpr
-        The offset of the destination pointer (in terms of elements).
-
-    bar : Var
+    bar : PrimExpr
         The pointer to mbarrier variable.
 
     tensormap: Var
         The tensor map.
 
+    coords : List[PrimExpr]
+        specifies the starting coordinates in the tensor data in the global memory
+
     cta_mask : int
         The mask of the cta for multicast.
-
-    coords : list
-        specifies the starting coordinates in the tensor data in the global memory
 
     Returns
     -------
@@ -1808,7 +1861,6 @@ def cp_async_bulk_tensor_global_to_cluster(
         "tir.cp_async_bulk_tensor_global_to_cluster",
         dim,
         dst_ptr,
-        dst_offset,
         bar,
         tensormap,
         *coords,
@@ -1816,7 +1868,7 @@ def cp_async_bulk_tensor_global_to_cluster(
     )
 
 
-def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, src_offset, tensormap, *coords):
+def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.global.shared::cta.tile.bulk_group
 
     Parameters
@@ -1824,16 +1876,13 @@ def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, src_offset, tensormap, *
     dim : int
         The dimension of the copy tensor.
 
-    src_ptr : Var
+    src_ptr : PrimExpr
         The source pointer to the shared memory.
-
-    src_offset : PrimExpr
-        The offset of the source pointer (in terms of elements).
 
     tensormap: Var
         The tensor map.
 
-    coords : list
+    coords : List[PrimExpr]
         specifies the starting coordinates in the tensor data in the global memory
 
     Returns
@@ -1846,7 +1895,6 @@ def cp_async_bulk_tensor_shared_to_global(dim, src_ptr, src_offset, tensormap, *
         "tir.cp_async_bulk_tensor_shared_to_global",
         dim,
         src_ptr,
-        src_offset,
         tensormap,
         *coords,
     )
@@ -1880,6 +1928,56 @@ def cp_async_bulk_tensor_wait_group(n, read=True):
         The call expression.
     """
     return call_intrin("", "tir.cp_async_bulk_tensor_wait_group", n, read)
+
+
+def barrier_cluster_arrive(sem="", aligned=True):
+    """TVM intrinsic to call barrier.cluster.arrive{.sem}{.aligned}
+
+    Parameters
+    ----------
+    sem : str
+        Either release or relaxed or empty string.
+
+    aligned : bool
+        Whether all threads in the warp must execute the same instruction.
+    """
+    return call_intrin("", "tir.barrier_cluster_arrive", sem, aligned)
+
+
+def barrier_cluster_wait(acquire=False, aligned=True):
+    """TVM intrinsic to call barrier.cluster.wait{.acquire}{.aligned}
+
+    Parameters
+    ----------
+    acquire : bool
+        The memory synchronization
+
+    aligned : bool
+        Whether all threads in the warp must execute the same instruction.
+    """
+    return call_intrin("", "tir.barrier_cluster_wait", acquire, aligned)
+
+
+def elect_sync(membermask=0xFFFFFFFF):
+    """TVM intrinsic to call elect.sync
+
+    Parameters
+    ----------
+    membermask : PrimExpr
+        The mask of the member threads in the warp.
+    """
+    return call_intrin("uint32", "tir.elect_sync", membermask)
+
+
+def fence_mbarrier_init_release_cluster():
+    """TVM intrinsic to call fence.mbarrier_init.release.cluster;
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.fence_mbarrier_init_release_cluster")
 
 
 def ptx_fetch_register(bits, reg_name):
