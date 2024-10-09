@@ -650,10 +650,10 @@ def test_gemm_hopper():
                 # tensor stroage
                 A_smem = T.alloc_buffer([STAGES_MMA, BLK_M * BLK_K], "float16", scope="shared.dyn", align=128)
                 B_smem = T.alloc_buffer([STAGES_MMA, BLK_K * BLK_N], "float16", scope="shared.dyn", align=128)
-                C_smem = T.alloc_buffer([STAGES_EPI, BLK_M * 32], "float32", scope="shared.dyn", align=128)
+                C_smem = T.alloc_buffer([STAGES_EPI, BLK_M * 32], "float32", scope="shared.dyn", align=1024)
                 # mainloop pipeline barriers, note that these are cluster-wide barriers
-                full = T.alloc_buffer([STAGES_MMA * 2], "uint64", scope="shared.dyn", layout=T.TileLayout.from_nested_tuple(STAGES_MMA * 2), align=8)
-                empty = T.alloc_buffer([STAGES_MMA * 2], "uint64", scope="shared.dyn", layout=T.TileLayout.from_nested_tuple(STAGES_MMA * 2), align=8)
+                full = T.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=T.TileLayout.from_nested_tuple(STAGES_MMA), align=8)
+                empty = T.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=T.TileLayout.from_nested_tuple(STAGES_MMA), align=8)
 
                 with T.thread():
                     wg_id = int_var()
@@ -803,7 +803,7 @@ def test_gemm_hopper():
                                 T.named_barrier_sync(0, 256)
                                 for reg in T.serial(4):
                                     col_id = T.meta_var(quad_lane // 2 + reg * 2)
-                                    col_swizzle[0] = (((quad_id + 1) % 8) ^ col_id) * 4 + quad_lane % 2 * 2
+                                    col_swizzle[0] = (quad_id ^ col_id) * 4 + quad_lane % 2 * 2
                                     C_smem[r2S_stage, smem_offset[0] + col_swizzle[0]] = accum[16 * i + reg * 4]
                                     C_smem[r2S_stage, smem_offset[0] + col_swizzle[0] + 1] = accum[16 * i + reg * 4 + 1]
                                     C_smem[r2S_stage, smem_offset[0] + 8*32 + col_swizzle[0]] = accum[16 * i + reg * 4 + 2]
@@ -829,15 +829,10 @@ def test_gemm_hopper():
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
             mod(A_tvm, B_tvm, C_tvm)
-
-            timer = mod.time_evaluator(mod.entry_name, DEV, number=100, repeat=10)
+            timer = mod.time_evaluator(mod.entry_name, DEV, number=20, repeat=3)
             res = timer(A_tvm, B_tvm, C_tvm)
             print("tvm tir time: ")
             print(res)
-            np.set_printoptions(precision=2)
-            np.set_printoptions(suppress=True)
-            np.set_printoptions(linewidth=np.inf)
-            np.set_printoptions(threshold=np.inf)
 
         return C_tvm
 
@@ -852,7 +847,7 @@ def test_gemm_hopper():
         mod_cublaslt = tvm.build(s, [A, B, C], target)
         mod_cublaslt(A_tvm, B_tvm, C_tvm)
 
-        timer = mod_cublaslt.time_evaluator(mod_cublaslt.entry_name, DEV, number=100, repeat=10)
+        timer = mod_cublaslt.time_evaluator(mod_cublaslt.entry_name, DEV, number=20, repeat=3)
         res = timer(A_tvm, B_tvm, C_tvm)
         print("cublas time: ")
         print(res)

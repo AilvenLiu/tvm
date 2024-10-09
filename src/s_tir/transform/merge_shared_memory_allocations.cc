@@ -327,9 +327,17 @@ class SharedMemoryRewriter : public StmtExprMutator {
           for (const VarNode* buffer : e->allocs[i]) {
             const Buffer& buf = shmem_allocs_.at(buffer);
             ffi::Array<PrimExpr> alloc_shape = GetBufferAllocationShape(buf);
+            int align_bytes = std::max(align[i], buf->dtype.bytes());
+            if (buf->data_alignment > 0) {
+              TVM_FFI_CHECK(buf->data_alignment % align_bytes == 0)
+                  << "The alignment of the buffer is not a multiple of the data type size.";
+              align_bytes = buf->data_alignment;
+            }
+            PrimExpr buffer_bytes = alloc_shape[0] * buf->dtype.bytes();
+            inner_offset += indexmod(align_bytes - indexmod(merged_alloc_size_ + inner_offset, align_bytes),
+                                     align_bytes);
             buffer_byte_offsets_[buffer] = merged_alloc_size_ + inner_offset;
-            inner_offset += alloc_shape[0] * buf->dtype.bytes();
-            inner_offset += indexmod(align[i] - indexmod(inner_offset, align[i]), align[i]);
+            inner_offset += buffer_bytes;
           }
           max_inner_offset = max(max_inner_offset, inner_offset);
         }
