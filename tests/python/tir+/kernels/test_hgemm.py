@@ -520,6 +520,7 @@ def test_gemm_hopper():
     WGMMA_M, WGMMA_N, WGMMA_K = 64, 256, 16
     CLUSTER_M, CLUSTER_N, CLUSTER_K = 2, 1, 1
     swizzleA = swizzleB = swizzleC = 3  # 128B swizzle
+    GROUP_SIZE = 8
     STAGES_MMA = 4
     STAGES_EPI = 2
     WG_SIZE = 128
@@ -547,13 +548,17 @@ def test_gemm_hopper():
             IRBuilder.current().name(prefix + "_linear_idx", self.linear_idx)
 
         def get_current_m_n_idx(self, linear_idx):
+            clusters_per_row = self.n_blocks // CLUSTER_N
+
             div_cluster_x = linear_idx // CLUSTER_M
             mod_cluster_x = linear_idx % CLUSTER_M
             div_cluster_xy = div_cluster_x // CLUSTER_N
             mod_cluster_xy = div_cluster_x % CLUSTER_N
-            clusters_per_row = self.n_blocks // CLUSTER_N
-            cluster_row = div_cluster_xy // clusters_per_row
-            cluster_col = div_cluster_xy % clusters_per_row
+
+            group_row_outer = div_cluster_xy // (GROUP_SIZE * clusters_per_row)
+            group_row_inner = div_cluster_xy % GROUP_SIZE
+            cluster_row = group_row_outer * GROUP_SIZE + group_row_inner
+            cluster_col = div_cluster_xy // GROUP_SIZE % clusters_per_row
             return cluster_row * CLUSTER_M + mod_cluster_x, cluster_col * CLUSTER_N + mod_cluster_xy
 
         @T.macro
@@ -829,7 +834,7 @@ def test_gemm_hopper():
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
             mod(A_tvm, B_tvm, C_tvm)
-            timer = mod.time_evaluator(mod.entry_name, DEV, number=20, repeat=3)
+            timer = mod.time_evaluator(mod.entry_name, DEV, number=100, repeat=5)
             res = timer(A_tvm, B_tvm, C_tvm)
             print("tvm tir time: ")
             print(res)
@@ -847,7 +852,7 @@ def test_gemm_hopper():
         mod_cublaslt = tvm.build(s, [A, B, C], target)
         mod_cublaslt(A_tvm, B_tvm, C_tvm)
 
-        timer = mod_cublaslt.time_evaluator(mod_cublaslt.entry_name, DEV, number=20, repeat=3)
+        timer = mod_cublaslt.time_evaluator(mod_cublaslt.entry_name, DEV, number=100, repeat=5)
         res = timer(A_tvm, B_tvm, C_tvm)
         print("cublas time: ")
         print(res)
