@@ -1382,5 +1382,40 @@ std::string PrintFenceMbarrierInitReleaseClusterAssembly() {
   return asm_code;
 }
 
+std::string PrintStmatrixSyncAlignedAssembly(int num, bool trans, const std::string& ptr,
+                                             const std::vector<std::string>& vars) {
+  std::string asm_code = R"(// T.store_matrix_sync_aligned()
+{
+  unsigned int addr = __cvta_generic_to_shared({ptr});
+  half2 half_pairs[{num}];
+{assign_half_code}
+  asm volatile("stmatrix.sync.aligned.m8n8.x{num}{trans}.shared.b16 [%0], {{half_pairs_r}};\n" : : "r"(addr){half_pairs});
+}
+)";
+  Replacer replacer;
+  replacer.register_rule("{ptr}", ptr);
+  replacer.register_rule("{num}", std::to_string(num));
+  replacer.register_rule("{trans}", trans ? ".trans" : "");
+
+  std::string assign_half_code;
+  ICHECK_EQ(vars.size(), 2 * num);
+  for (size_t i = 0; i < num; ++i) {
+    assign_half_code += "   half_pairs[" + std::to_string(i) + "] = {" + vars[2 * i] + ", " +
+                        vars[2 * i + 1] + "};\n";
+  }
+  replacer.register_rule("{assign_half_code}", assign_half_code);
+  std::string half_pairs_r = "%1";
+  for (size_t i = 1; i < num; ++i) {
+    half_pairs_r += ", %" + std::to_string(i + 1);
+  }
+  replacer.register_rule("{half_pairs_r}", half_pairs_r);
+  std::string half_pairs;
+  for (size_t i = 0; i < num; ++i) {
+    half_pairs += ", \"r\"(*(uint32_t *)&half_pairs[" + std::to_string(i) + "])";
+  }
+  replacer.register_rule("{half_pairs}", half_pairs);
+  return replacer.rewrite(asm_code);
+}
+
 }  // namespace codegen
 }  // namespace tvm

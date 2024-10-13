@@ -338,6 +338,16 @@ std::string PrintElectSyncAssembly(CodeGenCUDA* cg, uint32_t membermask);
  */
 std::string PrintFenceMbarrierInitReleaseClusterAssembly();
 
+/*!
+ * \brief Print stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r;
+ * \param num: The number of 8x8 matrices to store.
+ * \param trans: true if the matrix is stored in col-major format.
+ * \param ptr: The pointer to the destination shared memory.
+ * \param vars: The registers to store.
+ */
+std::string PrintStmatrixSyncAlignedAssembly(int num, bool trans, const std::string& ptr,
+                                             const std::vector<std::string>& vars);
+
 }  // namespace codegen
 }  // namespace tvm
 #endif  // TVM_TARGET_SOURCE_PTX_H_

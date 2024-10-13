@@ -2141,6 +2141,26 @@ def wgmma_wait_group(n):
     return call_intrin("", "tir.wgmma_wait_group", n)
 
 
+def stmatrix_sync_aligned(num, trans, ptr, *regs):
+    """TVM intrinsic to call stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r
+
+    Parameters
+    ----------
+    num : int
+        The number of 8x8 matrices to store.
+
+    trans: bool
+        True indicates the matrix is stored in column-major format.
+
+    ptr : PrimExpr
+        The shared memory pointer.
+
+    regs : list
+        The registers to store.
+    """
+    return call_intrin("", "tir.stmatrix_sync_aligned", num, trans, ptr, *regs)
+
+
 def make_filled_simdgroup_matrix(
     d: Var,
     index: PrimExpr,

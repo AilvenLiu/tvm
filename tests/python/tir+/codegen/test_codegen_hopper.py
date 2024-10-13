@@ -35,6 +35,69 @@ def _get_source(func: tvm.tir.PrimFunc) -> str:
     return src
 
 
+@pytest.mark.parametrize("trans", [False, True])
+@tvm.testing.requires_cuda_compute_version(9)
+def test_stmatrix_sync_aligned(trans):
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def func(A: T.Buffer((16, 16), "float16")):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([32], parent="cta")
+            with T.cta():
+                A_smem = T.alloc_buffer((16, 16), "float16", scope="shared", align=16)
+                with T.thread():
+                    reg = T.alloc_buffer((8,), "float16", scope="local")
+                    for i in range(8):
+                        reg[i] = tx * 8 + i
+                    T.stmatrix_sync_aligned(4, trans, 
+                                            A_smem.access_ptr("w", offset=A_smem.offset_of_p([tx % 16, tx // 16 * 8])), 
+                                            reg[0], reg[1], reg[2], reg[3], 
+                                            reg[4], reg[5], reg[6], reg[7])
+                    if tx == 0:
+                        for i, j in T.grid(16, 16):
+                            A[i, j] = A_smem[i, j]
+    # fmt: on
+
+    DEV = tvm.cuda(0)
+    target = tvm.target.Target("cuda")
+    mod = tvm.IRModule({"main": func})
+    with target:
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.build(mod, target=target)
+        src = mod.imported_modules[0].get_source()
+        if not trans:
+            assert "stmatrix.sync.aligned.m8n8.x4.shared.b16" in src
+        else:
+            assert "stmatrix.sync.aligned.m8n8.x4.trans.shared.b16" in src
+        A_np = np.zeros((16, 16), dtype="float16")
+        A = tvm.nd.array(A_np, device=DEV)
+        mod(A)
+        A_ref = np.zeros((16, 16), dtype="float16")
+        for tx in range(32):
+            row = tx // 4
+            col = tx % 4 * 2
+            if not trans:
+                A_ref[row, col] = tx * 8
+                A_ref[row, col + 1] = tx * 8 + 1
+                A_ref[row + 8, col] = tx * 8 + 2
+                A_ref[row + 8, col + 1] = tx * 8 + 3
+                A_ref[row, col + 8] = tx * 8 + 4
+                A_ref[row, col + 9] = tx * 8 + 5
+                A_ref[row + 8, col + 8] = tx * 8 + 6
+                A_ref[row + 8, col + 9] = tx * 8 + 7
+            else:
+                A_ref[col, row] = tx * 8
+                A_ref[col + 1, row] = tx * 8 + 1
+                A_ref[col + 8, row] = tx * 8 + 2
+                A_ref[col + 9, row] = tx * 8 + 3
+                A_ref[col, row + 8] = tx * 8 + 4
+                A_ref[col + 1, row + 8] = tx * 8 + 5
+                A_ref[col + 8, row + 8] = tx * 8 + 6
+                A_ref[col + 9, row + 8] = tx * 8 + 7
+        np.testing.assert_allclose(A.asnumpy(), A_ref)
+
+
 @tvm.testing.requires_cuda_compute_version(9)
 def test_bar_sync():
     # fmt: off
@@ -454,7 +517,6 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
         mod.show()
     mod = tvm.build(mod, target=target)
     src = mod.imported_modules[0].get_source()
-    print(src)
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = [i for i in range(math.prod(shape))]
@@ -687,6 +749,7 @@ def test_wgmma():
 
 
 if __name__ == "__main__":
+    test_stmatrix_sync_aligned()
     test_bar_sync()
     test_elect_sync()
     test_barrier_cluster()

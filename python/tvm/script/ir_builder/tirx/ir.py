@@ -2170,6 +2170,7 @@ wgmma_mma_sync_ss = _op_wrapper(_tir_op.wgmma_mma_sync_ss)
 wgmma_arrive = _op_wrapper(_tir_op.wgmma_arrive)
 wgmma_commit_group = _op_wrapper(_tir_op.wgmma_commit_group)
 wgmma_wait_group = _op_wrapper(_tir_op.wgmma_wait_group)
+stmatrix_sync_aligned = _op_wrapper(_tir_op.stmatrix_sync_aligned)
 make_filled_simdgroup_matrix = _op_wrapper(_tir_op.make_filled_simdgroup_matrix)
 simdgroup_load = _op_wrapper(_tir_op.simdgroup_load)
 simdgroup_store = _op_wrapper(_tir_op.simdgroup_store)
@@ -2526,6 +2527,7 @@ __all__ = float_types + [
     "wgmma_arrive",
     "wgmma_commit_group",
     "wgmma_wait_group",
+    "stmatrix_sync_aligned",
     "cp_async_bulk_tensor_global_to_cluster",
     "cp_async_bulk_tensor_shared_to_global",
     "cp_async_bulk_tensor_commit_group",

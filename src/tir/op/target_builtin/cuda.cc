@@ -194,6 +194,9 @@ TIR_DEFINE_BUILTIN_FUNC(wgmma_commit_group)
 TIR_DEFINE_BUILTIN_FUNC(wgmma_wait_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(stmatrix_sync_aligned)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

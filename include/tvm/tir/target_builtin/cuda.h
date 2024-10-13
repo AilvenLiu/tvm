@@ -463,6 +463,13 @@ TVM_DLL const Op& wgmma_commit_group();
  */
 TVM_DLL const Op& wgmma_wait_group();
 
+/*!
+ * \brief tvm intrinsic to call stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r;
+ *
+ * stmatrix_sync_aligned(int num, bool trans, PrimExpr ptr, PrimExpr... vars)
+ */
+TVM_DLL const Op& stmatrix_sync_aligned();
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

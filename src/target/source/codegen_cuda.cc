@@ -1761,6 +1761,18 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::wgmma_wait_group())) {
     std::string wait_cnt = this->PrintExpr(op->args[0]);
     print(PrintWGMMAWaitGroupAssembly(wait_cnt));
+  } else if (op->op.same_as(builtin::stmatrix_sync_aligned())) {
+    int num = Downcast<IntImm>(op->args[0])->value;
+    bool trans = Downcast<Bool>(op->args[1])->value;
+    std::string ptr = this->PrintExpr(op->args[2]);
+    ICHECK_EQ(op->args.size(), 3 + num * 2) << "The number of arguments for stmatrix_sync_aligned "
+                                               "is incorrect, expected "
+                                            << 3 + num * 2 << ", got " << op->args.size();
+    std::vector<std::string> regs;
+    for (int i = 0; i < 2 * num; ++i) {
+      regs.push_back(this->PrintExpr(op->args[3 + i]));
+    }
+    print(PrintStmatrixSyncAlignedAssembly(num, trans, ptr, regs));
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {
