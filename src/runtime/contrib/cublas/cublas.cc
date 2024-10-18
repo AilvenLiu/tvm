@@ -152,7 +152,7 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
   auto compute_type = CUBLAS_COMPUTE_32F;
   auto scale_type = CUDA_R_32F;
   cudaDataType_t ab_type = CUDA_R_32F;
-  cudaDataType_t c_type = CUDA_R_32F;
+  cudaDataType_t d_type = CUDA_R_32F;
   float one_fp32 = 1.0;
   float zero_fp32 = 0.0;
   int32_t one_i32 = 1;
@@ -175,15 +175,17 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
   }
 
   if (TypeMatch(C->dtype, kDLFloat, 16)) {
-    c_type = CUDA_R_16F;
+    d_type = CUDA_R_16F;
   } else if (TypeMatch(C->dtype, kDLBfloat, 16)) {
     c_type = CUDA_R_16BF;
   } else if (TypeMatch(C->dtype, kDLInt, 32)) {
-    c_type = CUDA_R_32I;
+    d_type = CUDA_R_32I;
     compute_type = CUBLAS_COMPUTE_32I;
     scale_type = CUDA_R_32I;
     alpha = &one_i32;
     beta = &zero_i32;
+  } else if (TypeMatch(C->dtype, DataType::TypeCode::kE4M3Float, 8)) {
+    d_type = CUDA_R_8F_E4M3;
   }
 
   cublasLtMatmulDesc_t op_desc;
@@ -217,6 +219,10 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
                                                       &epilogue, sizeof(epilogue)));
   }
 
+  int8_t fastAccum = 1;
+  CHECK_CUBLAS_ERROR(cublasLtMatmulDescSetAttribute(op_desc, CUBLASLT_MATMUL_DESC_FAST_ACCUM,
+                                                    &fastAccum, sizeof(fastAccum)));
+
   int batch_offset_A = A->ndim - 2;
   int batch_offset_B = B->ndim - 2;
 
@@ -242,12 +248,13 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
   int ldb = transa ? N : K;
   int ldc = M;
 
-  cublasLtMatrixLayout_t A_desc, B_desc, C_desc;
+  cublasLtMatrixLayout_t A_desc, B_desc, C_desc, D_desc;
   CHECK_CUBLAS_ERROR(
       cublasLtMatrixLayoutCreate(&A_desc, ab_type, !transb ? M : K, !transb ? K : M, lda));
   CHECK_CUBLAS_ERROR(
       cublasLtMatrixLayoutCreate(&B_desc, ab_type, !transa ? K : N, !transa ? N : K, ldb));
-  CHECK_CUBLAS_ERROR(cublasLtMatrixLayoutCreate(&C_desc, c_type, M, N, ldc));
+  CHECK_CUBLAS_ERROR(cublasLtMatrixLayoutCreate(&C_desc, CUDA_R_16F, M, N, ldc));
+  CHECK_CUBLAS_ERROR(cublasLtMatrixLayoutCreate(&D_desc, d_type, M, N, ldc));
 
   if (use_batched_gemm) {
     auto get_batch_count = [](int64_t* shape, int batch_offset) {
@@ -278,19 +285,19 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
 
     set_batch(A_desc, batch_count_A, batch_stride_A);
     set_batch(B_desc, batch_count_B, batch_stride_B);
-    set_batch(C_desc, batch_count_C, batch_stride_C);
+    set_batch(D_desc, batch_count_C, batch_stride_C);
   }
 
   auto A_data = static_cast<char*>(A->data) + A->byte_offset;
   auto B_data = static_cast<char*>(B->data) + B->byte_offset;
-  auto C_data = static_cast<char*>(C->data) + C->byte_offset;
+  auto D_data = static_cast<char*>(C->data) + C->byte_offset;
 
   cublasLtMatmulPreferenceSetAttribute(matmul_pref_desc, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
                                        &workspace_size, sizeof(size_t));
 
   cublasLtMatmulHeuristicResult_t heuristic_result = {};
   int returned_result = 0;
-  CHECK_CUBLAS_ERROR(cublasLtMatmulAlgoGetHeuristic(hdl, op_desc, A_desc, B_desc, C_desc, C_desc,
+  CHECK_CUBLAS_ERROR(cublasLtMatmulAlgoGetHeuristic(hdl, op_desc, A_desc, B_desc, C_desc, D_desc,
                                                     matmul_pref_desc, 1, &heuristic_result,
                                                     &returned_result));
   if (returned_result == 0) {
@@ -298,13 +305,14 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
   }
 
   CHECK_CUBLAS_ERROR(cublasLtMatmul(hdl, op_desc, alpha, B_data, A_desc, A_data, B_desc, beta,
-                                    C_data, C_desc, C_data, C_desc, &heuristic_result.algo,
+                                    nullptr, C_desc, D_data, D_desc, &heuristic_result.algo,
                                     workspace_ptr, workspace_size, stream));
 
   cublasLtMatmulDescDestroy(op_desc);
   cublasLtMatrixLayoutDestroy(A_desc);
   cublasLtMatrixLayoutDestroy(B_desc);
   cublasLtMatrixLayoutDestroy(C_desc);
+  cublasLtMatrixLayoutDestroy(D_desc);
 }
 
 inline void CallLtIgemm(ffi::PackedArgs args, ffi::Any* ret, cublasLtHandle_t hdl,

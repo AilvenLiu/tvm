@@ -877,7 +877,7 @@ def test_hgemm_hopper_no_ws():
     WGMMA_M, WGMMA_N, WGMMA_K = 64, 256, 16
 
     swizzleA = swizzleB = 3  # 128B swizzle
-    swizzleC = 3 # 128B swizzle
+    swizzleC = 3  # 128B swizzle
     GROUP_SIZE = 16
     STAGES_TMA = 4
     STAGES_WGMMA = 2
@@ -1089,9 +1089,8 @@ def test_hgemm_hopper_no_ws():
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
 
-    import triton
-
-    FLOPS = 2 * M * N * K
+    import triton.profiler as proton
+    import triton.profiler.viewer as proton_viewer
 
     def tir_gemm():
         C_np = -np.ones((M, N), dtype=np.float16)
@@ -1101,8 +1100,9 @@ def test_hgemm_hopper_no_ws():
             mod = tvm.IRModule({"main": manual})
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
-            res = triton.testing.do_bench(lambda: mod(A_tvm, B_tvm, C_tvm), rep=20, warmup=5)
-            print(f"tvm tir time: {res} ms, {FLOPS / (res * 1e-3) / 1e12} TFLOPS")
+            with proton.scope("tir"):
+                for _ in range(20):
+                    mod(A_tvm, B_tvm, C_tvm)
 
         return C_tvm
 
@@ -1112,16 +1112,25 @@ def test_hgemm_hopper_no_ws():
         torch_dev = torch.device("cuda")
         A_torch = torch.tensor(A_np, device=torch_dev)
         B_torch = torch.tensor(B_np, device=torch_dev)
-        res = triton.testing.do_bench(lambda: torch.matmul(A_torch, B_torch.T), rep=20, warmup=5)
-        print(f"cublas time: {res} ms, {FLOPS / (res * 1e-3) / 1e12} TFLOPS")
+        C_torch = torch.zeros((M, N), device=torch_dev)
+        with proton.scope("cublas"):
+            for _ in range(20):
+                C_torch = torch.matmul(A_torch, B_torch.T)
 
-        return torch.matmul(A_torch, B_torch.T).cpu().numpy()
+        return C_torch.cpu().numpy()
+
+    proton.start("matmul", hook="triton")
+    proton.activate(0)
 
     C_tvm = tir_gemm().asnumpy()
     C_cublas = cublas_gemm()
-
     tvm.testing.assert_allclose(C_tvm, C_cublas, rtol=2e-2, atol=1e-4)
-    
+
+    proton.deactivate(0)
+    proton.finalize()
+
+    proton_viewer.parse(["time/ms"], "matmul.hatchet", depth=100)
+
 
 if __name__ == "__main__":
     test_hgemm_ampere()

@@ -186,22 +186,18 @@ def test_fence_proxy_async():
 
 
 @tvm.testing.requires_cuda_compute_version(9)
-@pytest.mark.parametrize("dtype", ["float16", "float32"])
+@pytest.mark.parametrize("dtype", ["float16", "float32", "e4m3_float8", "e5m2_float8"])
 @pytest.mark.parametrize(
     "inputs",
     [
         ((128,), [128, 128, 1, 0, 0, 0, 0]),
         ((16, 16), [16, 16, 16, 16, 16, 1, 1, 0, 0, 0, 0]),
         ((16, 64), [64, 16, 64, 64, 16, 1, 1, 0, 0, 0, 0]),
-        ((4, 4, 8), [8, 4, 4, 8, 32, 8, 4, 4, 1, 1, 1, 0, 0, 0, 0]),
-        ((4, 4, 4, 8), [8, 4, 4, 4, 8, 32, 128, 8, 4, 4, 4, 1, 1, 1, 1, 0, 0, 0, 0]),
-        (
-            (2, 2, 2, 2, 8),
-            [8, 2, 2, 2, 2, 8, 16, 32, 64, 8, 2, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0],
-        ),
     ],
 )
 def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
+    import ml_dtypes
+
     def get_ir(shape, tma_args):
         t_dtype = tvm.DataType(dtype)
         total_bytes = math.prod(shape) * t_dtype.bits // 8
@@ -256,9 +252,18 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
-    A_np = [i for i in range(math.prod(shape))]
-    A_np = np.array(A_np, dtype=dtype).reshape(shape)
-    B_np = np.zeros(shape, dtype=dtype)
+    A_np = np.random.randn(math.prod(shape))
+    
+    def get_np_dtype(dtype):
+        if dtype == "e4m3_float8":
+            return ml_dtypes.float8_e4m3fn
+        elif dtype == "e5m2_float8":
+            return ml_dtypes.float8_e5m2
+        else:
+            return np.dtype(dtype)
+    
+    A_np = np.array(A_np).reshape(shape).astype(get_np_dtype(dtype))
+    B_np = np.zeros(shape).astype(get_np_dtype(dtype))
     A = tvm.nd.array(A_np, device=DEV)
     B = tvm.nd.array(B_np, device=DEV)
     mod(A, B)

@@ -126,6 +126,10 @@ inline DataType DTypeFromString(const std::string str) {
     return DataType::kBit32;
   } else if (str == ".b64") {
     return DataType::kBit64;
+  } else if (str == "e4m3_float8") {
+    return DataType::kE4M3;
+  } else if (str == "e5m2_float8") {
+    return DataType::kE5M2;
   } else {
     TVM_FFI_THROW(InternalError) << "Unrecognized PTX data type " << str;
   }
@@ -1200,20 +1204,29 @@ std::string PrintWGMMAmmasyncSSAssembly(int M, int N, int K, const std::string& 
     "wgmma.mma_async.sync.aligned.m{M}n{N}k{K}{otype}{itype}{itype} "
     "{{accum_r_list}},"
     "{descA_r}, {descB_r},"
-    "p, {scaleA_r}, {scaleB_r}, {transA_r}, {transB_r};\n"
+    "p, {scaleA_r}, {scaleB_r}{transpose_r_code};\n"
     "}\n"
     : {accum_list}
     : "l"({descA}), "l"({descB}), "r"(int32_t({scaleD})), "n"(int32_t({scaleA})),
-      "n"(int32_t({scaleB})), "n"(int32_t({transA})), "n"(int32_t({transB}))
+      "n"(int32_t({scaleB})){transpose_code}
   );
 }
 )";
+  std::string transpose_r_code = ", {transA_r}, {transB_r}";
+  std::string transpose_code = ", \"n\"(int32_t({transA})), \"n\"(int32_t({transB}))";
   Replacer replacer;
   auto itype = ptx::DTypeToString(ptx::DTypeFromString(in_dtype));
   auto otype = ptx::DTypeToString(ptx::DTypeFromString(out_dtype));
   std::string accum_r_list = "%" + std::to_string(0);
   for (size_t i = 1; i < accums.size(); ++i) {
     accum_r_list += ", %" + std::to_string(i);
+  }
+  bool allow_transpose = in_dtype == "float16" || in_dtype == "bfloat16";
+  if (!allow_transpose) {
+    CHECK(transA == false && transB == false)
+        << "Matrices A and B are stored in row-major and column-major format respectively. The "
+           "transpose operation is only supported for the wgmma.mma_async variants with .f16/ "
+           ".bf16 types on matrices accessed from shared memory using matrix descriptors.";
   }
   CHECK(out_dtype == "float32")
       << "ValueError: codegen only support float32 as output dtype for WGMMMA.";
@@ -1250,6 +1263,11 @@ std::string PrintWGMMAmmasyncSSAssembly(int M, int N, int K, const std::string& 
   replacer.register_rule("{transB}", transB ? "1" : "0");
   replacer.register_rule("{accum_r_list}", accum_r_list);
   replacer.register_rule("{accum_list}", accum_list);
+
+  transpose_r_code = allow_transpose ? replacer.rewrite(transpose_r_code) : "";
+  transpose_code = allow_transpose ? replacer.rewrite(transpose_code) : "";
+  replacer.register_rule("{transpose_r_code}", transpose_r_code);
+  replacer.register_rule("{transpose_code}", transpose_code);
 
   return replacer.rewrite(asm_code);
 }
