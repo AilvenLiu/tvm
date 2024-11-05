@@ -281,8 +281,38 @@ def test_lower_opcall_fail():
         LowerTIRp()(tvm.IRModule({"main": test}))
 
 
+def test_lower_decl_buffer_access_ptr():
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before():
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([128], parent="cta")
+            with T.cta():
+                buf = T.alloc_buffer([1024], "uint8", scope="shared.dyn")
+                A = T.decl_buffer([128], "float16", buf.data, elem_offset=32)
+
+                with T.thread():
+                    T.evaluate(A.access_ptr("rw", offset=A.offset_of_p([64])))
+
+    @T.prim_func(private=True, tirp=True)
+    def after():
+        with T.kernel():
+            blockIdx_x = T.launch_thread("blockIdx.x", 1)
+            threadIdx_x = T.launch_thread("threadIdx.x", 128)
+            with T.cta():
+                buf = T.alloc_buffer((1024,), "uint8", scope="shared.dyn", logical_scope="cta")
+                A = T.decl_buffer((128,), "float16", data=buf.data, elem_offset=32, scope="shared.dyn")
+                with T.thread():
+                    T.tvm_access_ptr(T.type_annotation("float16"), buf.data, T.Add(32, 64), T.Sub(128, 64), 3)
+    # fmt: on
+
+    compare(before, after, LowerTIRp)
+
+
 if __name__ == "__main__":
     test_lower_view_get()
     test_lower_scope_id()
     test_lower_layout()
     test_lower_opcall_fail()
+    test_lower_decl_buffer_access_ptr()

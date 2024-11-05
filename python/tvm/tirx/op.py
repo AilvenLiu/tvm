@@ -735,6 +735,32 @@ def tvm_warp_shuffle_down(mask, value, offset, width, warp_size):
     )
 
 
+def tvm_warp_shuffle_xor(mask, value, lane_mask, width, warp_size):
+    """Copy value from a lane with index computed by `src_lane_idx ^ lane_mask`.
+
+    Parameters
+    ----------
+    mask : PrimExpr
+        The warp mask indicates active threads inside warp.
+    value : PrimExpr
+        The value to exchange.
+    lane_mask : PrimExpr
+        The mask to compute source lane index:
+    width : PrimExpr
+        The width of sub-sections to perform warp shuffle.
+    warp_size : PrimExpr
+        The warp size.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        value.dtype, "tir.tvm_warp_shuffle_xor", mask, value, lane_mask, width, warp_size
+    )
+
+
 def tvm_warp_activemask():
     """Return a 32-bit mask indicates currently active threads in a calling warp.
 
@@ -1809,6 +1835,25 @@ def mbarrier_wait(bar, phase):
     return call_intrin("", "tir.mbarrier_wait", bar, phase)
 
 
+def named_barrier_arrive(name_bar_id, thread_count):
+    """TVM intrinsic to call bar.arrive a, b
+
+    Parameters
+    ----------
+    name_bar_id : int
+        The ID of the named barrier.
+
+    thread_count : int
+        The number of threads expected to arrive at the barrier.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.named_barrier_arrive", name_bar_id, thread_count)
+
+
 def named_barrier_sync(name_bar_id, thread_count):
     """TVM intrinsic to call bar.sync a, {b}
 
@@ -1999,7 +2044,7 @@ def ptx_fetch_register(bits, reg_name):
     return call_intrin("int" + str(bits), "tir.ptx_fetch_register", bits, reg_name)
 
 
-def encode_matrix_decriptor(desc, addr, ldo, sdo, swizzle):
+def encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
     """TVM intrinsic to create shared memory descriptor for matrix
 
     Parameters
@@ -2019,7 +2064,7 @@ def encode_matrix_decriptor(desc, addr, ldo, sdo, swizzle):
     swizzle : int
         The swizzle value (CUtensorMapSwizzle_enum).
     """
-    return call_intrin("", "tir.encode_matrix_decriptor", desc, addr, ldo, sdo, swizzle)
+    return call_intrin("", "tir.encode_matrix_descriptor", desc, addr, ldo, sdo, swizzle)
 
 
 def wgmma_fence_operand(reg):
@@ -2038,10 +2083,10 @@ def wgmma_fence_operand(reg):
     return call_intrin("", "tir.wgmma_fence_operand", reg)
 
 
-def wgmma_mma_sync_ss(
+def wgmma_mma_async_ss(
     M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB, scaleD, descA, descB, *accums
 ):
-    """TVM intrinsic to call wgmma.mma.sync.aligned
+    """TVM intrinsic to call wgmma.mma_async.sync.aligned.shape.dtype.atype.btype over 2 smem operators
 
     Parameters
     ----------
@@ -2072,7 +2117,7 @@ def wgmma_mma_sync_ss(
     scaleB : float
         The scaling factor for matrix B.
 
-    scaleD : bool
+    scaleD : PrimExpr
         True: D = A * B + D, False: D = A * B.
 
     descA : PrimExpr
@@ -2086,7 +2131,7 @@ def wgmma_mma_sync_ss(
     """
     return call_intrin(
         "",
-        "tir.wgmma_mma_sync_ss",
+        "tir.wgmma_mma_async_ss",
         M,
         N,
         K,
@@ -2100,6 +2145,68 @@ def wgmma_mma_sync_ss(
         descA,
         descB,
         *accums,
+    )
+
+
+def wgmma_mma_async_rs(
+    M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB, scaleD, descB, *reg_list
+):
+    """TVM intrinsic to call wgmma.mma_async.sync.aligned.shape.dtype.atype.btype
+        When A is in register and B is in shared memory
+
+    Parameters
+    ----------
+    M : int
+        The number of rows in matrix A and D.
+
+    N : int
+        The number of columns in matrix B and D.
+
+    K : int
+        The number of columns in matrix A and rows in matrix B.
+
+    in_dtype : str
+        The data type of the input matrices.
+
+    out_type : str
+        The data type of the output matrices.
+
+    transA : bool
+        True for M/N major, False for K major.
+
+    transB : bool
+        True for M/N major, False for K major.
+
+    scaleA : float
+        The scaling factor for matrix A.
+
+    scaleB : float
+        The scaling factor for matrix B.
+
+    scaleD : PrimExpr
+        True: D = A * B + D, False: D = A * B.
+
+    descB : PrimExpr
+        The SMEM descriptor of matrix B
+
+    reg_list : list
+        The A registers and accumulators registers.
+    """
+    return call_intrin(
+        "",
+        "tir.wgmma_mma_async_rs",
+        M,
+        N,
+        K,
+        in_dtype,
+        out_dtype,
+        transA,
+        transB,
+        scaleA,
+        scaleB,
+        scaleD,
+        descB,
+        *reg_list,
     )
 
 
@@ -2159,6 +2266,20 @@ def stmatrix_sync_aligned(num, trans, ptr, *regs):
         The registers to store.
     """
     return call_intrin("", "tir.stmatrix_sync_aligned", num, trans, ptr, *regs)
+
+
+def setmaxnreg(inc: bool, reg_count):
+    """TVM intrinsic to call setmaxnreg.action.sync.aligned.u32 imm-reg-count
+
+    Parameters
+    ----------
+    inc : bool
+        True to increase the register count, False to decrease.
+
+    reg_count : int
+        The register count.
+    """
+    return call_intrin("", "tir.setmaxnreg", inc, reg_count)
 
 
 def make_filled_simdgroup_matrix(

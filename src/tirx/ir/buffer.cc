@@ -259,7 +259,7 @@ ffi::Array<PrimExpr> Buffer::OffsetOf(ffi::Array<PrimExpr> input_indices) const 
 // The buffer offset in convention of number of elements of
 // original data ignoring number of lanes.
 // We also perform optimization to simplify the indexing expression.
-ffi::Array<PrimExpr> BufferNode::ElemOffset(ffi::Array<PrimExpr> input_indices) const {
+ffi::Array<PrimExpr> BufferNode::ElemOffset(ffi::Array<PrimExpr> input_indices, bool inner) const {
   TVM_FFI_ICHECK_EQ(shape.size(), input_indices.size())
       << "Buffer " << this->name << " is " << shape.size()
       << "-dimensional, cannot be indexed with the " << input_indices.size()
@@ -275,7 +275,7 @@ ffi::Array<PrimExpr> BufferNode::ElemOffset(ffi::Array<PrimExpr> input_indices) 
   // than one output index.  Currently, this only allows elem_offset
   // to be non-zero for flat memory allocations.
   ffi::Array<PrimExpr> elem_offsets = {};
-  if (elem_offset.defined() && !is_zero(elem_offset)) {
+  if (elem_offset.defined() && !is_zero(elem_offset) && !inner) {
     elem_offsets = {elem_offset};
   }
 

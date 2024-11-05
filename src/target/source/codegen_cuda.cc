@@ -39,7 +39,6 @@
 #include "literal/cuda_half_t.h"
 #include "literal/cuda_int8_t.h"
 #include "ptx.h"
-
 namespace tvm {
 namespace codegen {
 
@@ -891,6 +890,11 @@ std::string CodeGenCUDA::CastFromTo(std::string value, DataType from, DataType t
 }
 
 void CodeGenCUDA::AddUtilFunction(const std::string& func_name, const std::string& code) {
+  auto it = this->util_funcs_.find(func_name);
+  if (it != this->util_funcs_.end()) {
+    CHECK_EQ(it->second, code) << "Function " << func_name << " already exists with different code";
+    return;
+  }
   this->util_funcs_.insert({func_name, code});
 }
 
@@ -951,6 +955,7 @@ void CodeGenCUDA::VisitExpr_(const CastNode* op, std::ostream& os) {
 
 void CodeGenCUDA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
                                   const ffi::Array<PrimExpr>& args, bool skip_first_arg,
+
                                   std::ostream& os) {  // NOLINT(*)
   DataType ret_dtype = GetRuntimeDataType(ret_type);
   if (ret_dtype.is_fixed_length_vector()) {
@@ -1203,8 +1208,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     // in its registers. So conceptually, a warp memory is organized as a 32x8 block.
     // A map from a 16x16 tile to a 32x8 block of memory is specified by the index map below.
 
-    // To store the 32x8 output back to a 16x16 tile in shared or global memory, we invert this map
-    // to determine the output location for each 8 element.
+    // To store the 32x8 output back to a 16x16 tile in shared or global memory, we invert this
+    // map to determine the output location for each 8 element.
 
     const auto index_map_func =
         tvm::ffi::Function::GetGlobal("tirx.index_map.shared_16x16_to_ldmatrix_32x8_layout");
@@ -1215,9 +1220,9 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
         IndexMap::FromFunc(2, *index_map_func).Inverse({Range(0, m), Range(0, n)}, &analyzer);
     auto indices_16x16 = inverse_index_map->final_indices;
 
-    // "//" and "%" in the index map are translated to FloorDiv/Mod, but the plain Div/Mod are fine.
-    // FloorDiv/Mod are supposed to be lowered before they reach codegen, so manually replace them
-    // to the plain ones here.
+    // "//" and "%" in the index map are translated to FloorDiv/Mod, but the plain Div/Mod are
+    // fine. FloorDiv/Mod are supposed to be lowered before they reach codegen, so manually
+    // replace them to the plain ones here.
     class LowerFloorDivMod : public ExprMutator {
      public:
       PrimExpr VisitExpr_(const FloorDivNode* op) {
@@ -1640,12 +1645,12 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->stream << barrier_arr << "[" << barrier_id << "].arrive_and_wait();\n";
   } else if (op->op.same_as(builtin::cuda_fence_proxy_async())) {
     std::string scope = Downcast<StringImm>(op->args[0])->value;
-    print(PrintCudaFenceProxyAsyncAssembly(scope));
+    print(PrintCudaFenceProxyAsyncAssembly(this, scope));
   } else if (op->op.same_as(builtin::mbarrier_init())) {
     need_cast_smem_ptr_to_int_ = true;
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string num_threads = this->PrintExpr(op->args[1]);
-    print(PrintMbarrierInitAssembly(mbarrier, num_threads));
+    print(PrintMbarrierInitAssembly(this, mbarrier, num_threads));
   } else if (op->op.same_as(builtin::mbarrier_arrive())) {
     need_cast_smem_ptr_to_int_ = true;
     CHECK(op->args.size() == 1 || op->args.size() == 3) << "mbarrier_arrive() expects 1 or 3 args";
@@ -1653,7 +1658,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     bool remote = op->args.size() == 3;
     std::string cta_id = remote ? this->PrintExpr(op->args[1]) : "";
     std::string pred = remote ? this->PrintExpr(op->args[2]) : "";
-    print(PrintMbarrierArriveAssembly(mbarrier, remote, cta_id, pred));
+    print(PrintMbarrierArriveAssembly(this, mbarrier, remote, cta_id, pred));
   } else if (op->op.same_as(builtin::mbarrier_arrive_expect_tx())) {
     need_cast_smem_ptr_to_int_ = true;
     CHECK(op->args.size() == 2 || op->args.size() == 4) << "mbarrier_arrive_expect_tx() expects 2 "
@@ -1663,12 +1668,16 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     bool remote = op->args.size() == 4;
     std::string cta_id = remote ? this->PrintExpr(op->args[2]) : "";
     std::string pred = remote ? this->PrintExpr(op->args[3]) : "";
-    print(PrintMbarrierArriveExpectTxAssembly(mbarrier, byte_count, remote, cta_id, pred));
+    print(PrintMbarrierArriveExpectTxAssembly(this, mbarrier, byte_count, remote, cta_id, pred));
   } else if (op->op.same_as(builtin::mbarrier_wait())) {
     need_cast_smem_ptr_to_int_ = true;
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string phase = this->PrintExpr(op->args[1]);
-    print(PrintMbarrierWaitAssembly(mbarrier, phase));
+    print(PrintMbarrierWaitAssembly(this, mbarrier, phase));
+  } else if (op->op.same_as(builtin::named_barrier_arrive())) {
+    std::string name_bar_id = this->PrintExpr(op->args[0]);
+    std::string thread_count = this->PrintExpr(op->args[1]);
+    print(PrintNamedBarrierArriveAssembly(name_bar_id, thread_count));
   } else if (op->op.same_as(builtin::named_barrier_sync())) {
     std::string name_bar_id = this->PrintExpr(op->args[0]);
     std::string thread_count = this->PrintExpr(op->args[1]);
@@ -1676,6 +1685,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_global_to_cluster())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
+    CHECK_EQ(op->args.size(), 5 + dim);
     std::string dst = this->PrintExpr(op->args[1]);
     std::string bar = this->PrintExpr(op->args[2]);
     std::string tensormap = this->PrintExpr(op->args[3]);
@@ -1684,24 +1694,25 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       coords.push_back(this->PrintExpr(op->args[4 + i]));
     }
     int cta_mask = Downcast<IntImm>(op->args[4 + dim])->value;
-    print(
-        PrintCpAsyncBulkTensorGlobalToClusterAssembly(dim, dst, bar, tensormap, cta_mask, coords));
+    print(PrintCpAsyncBulkTensorGlobalToClusterAssembly(this, dim, dst, bar, tensormap, cta_mask,
+                                                        coords));
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_shared_to_global())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
+    CHECK_EQ(op->args.size(), 3 + dim);
     std::string src = this->PrintExpr(op->args[1]);
     std::string tensormap = this->PrintExpr(op->args[2]);
     std::vector<std::string> coords;
     for (int i = 0; i < dim; ++i) {
       coords.push_back(this->PrintExpr(op->args[3 + i]));
     }
-    print(PrintCpAsyncBulkTensorSharedToGlobalAssembly(dim, src, tensormap, coords));
+    print(PrintCpAsyncBulkTensorSharedToGlobalAssembly(this, dim, src, tensormap, coords));
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_commit_group())) {
-    print(PrintCpAsyncBulkTensorCommitGroupAssembly());
+    print(PrintCpAsyncBulkTensorCommitGroupAssembly(this));
   } else if (op->op.same_as(builtin::cp_async_bulk_tensor_wait_group())) {
     std::string wait_cnt = this->PrintExpr(op->args[0]);
     bool read = Downcast<Bool>(op->args[1])->value;
-    print(PrintCpAsyncBulkTensorWaitGroupAssembly(wait_cnt, read));
+    print(PrintCpAsyncBulkTensorWaitGroupAssembly(this, wait_cnt, read));
   } else if (op->op.same_as(builtin::barrier_cluster_arrive())) {
     std::string sem = Downcast<StringImm>(op->args[0])->value;
     bool aligned = Downcast<Bool>(op->args[1])->value;
@@ -1714,12 +1725,12 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     uint32_t mask = Downcast<IntImm>(op->args[0])->value;
     os << PrintElectSyncAssembly(this, mask);
   } else if (op->op.same_as(builtin::fence_mbarrier_init_release_cluster())) {
-    print(PrintFenceMbarrierInitReleaseClusterAssembly());
+    print(PrintFenceMbarrierInitReleaseClusterAssembly(this));
   } else if (op->op.same_as(builtin::ptx_fetch_register())) {
     int bits = Downcast<IntImm>(op->args[0])->value;
     std::string reg = Downcast<StringImm>(op->args[1])->value;
     os << PrintPtxFetchRegisterAssembly(this, bits, reg);
-  } else if (op->op.same_as(builtin::encode_matrix_decriptor())) {
+  } else if (op->op.same_as(builtin::encode_matrix_descriptor())) {
     need_smem_descriptor_ = true;
     need_cast_smem_ptr_to_int_ = true;
     std::string desc = this->PrintExpr(op->args[0]);
@@ -1727,11 +1738,12 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string ldo = this->PrintExpr(op->args[2]);
     std::string sdo = this->PrintExpr(op->args[3]);
     int swizzle = Downcast<IntImm>(op->args[4])->value;
-    print(PrintEncodeMatrixDescriptor(desc, addr, ldo, sdo, swizzle));
+    print(PrintEncodeMatrixDescriptor(this, desc, addr, ldo, sdo, swizzle));
   } else if (op->op.same_as(builtin::wgmma_fence_operand())) {
     std::string fence = this->PrintExpr(op->args[0]);
-    print(PrintWGMMAFenceOpearandAssembly(fence));
-  } else if (op->op.same_as(builtin::wgmma_mma_sync_ss())) {
+    print(PrintWGMMAFenceOpearandAssembly(this, fence, op->args[0]->dtype));
+  } else if (op->op.same_as(builtin::wgmma_mma_async_ss())) {
+    CHECK_LE(12, op->args.size()) << "The number of arguments for wgmma_mma_async_ss is incorrect";
     int M = Downcast<IntImm>(op->args[0])->value;
     int N = Downcast<IntImm>(op->args[1])->value;
     int K = Downcast<IntImm>(op->args[2])->value;
@@ -1741,26 +1753,57 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     bool transB = Downcast<Bool>(op->args[6])->value;
     float scaleA = Downcast<FloatImm>(op->args[7])->value;
     float scaleB = Downcast<FloatImm>(op->args[8])->value;
-    bool scaleD = Downcast<Bool>(op->args[9])->value;
+    std::string scaleD = this->PrintExpr(op->args[9]);
     std::string descA = this->PrintExpr(op->args[10]);
     std::string descB = this->PrintExpr(op->args[11]);
     size_t expected_accm_cnt = M * N / 128;
     CHECK(out_dtype == "float32") << "Now codegen only support float32 output";
     CHECK_EQ(12 + expected_accm_cnt, op->args.size())
-        << "The number of arguments for wgmma_mma_sync_ss is incorrect";
+        << "The number of arguments for wgmma_mma_async_ss is incorrect";
     std::vector<std::string> accum;
     for (size_t i = 0; i < expected_accm_cnt; ++i) {
       accum.push_back(this->PrintExpr(op->args[12 + i]));
     }
-    print(PrintWGMMAmmasyncSSAssembly(M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB,
-                                      scaleD, descA, descB, accum));
+    print(PrintWGMMAasyncSSAssembly(M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB,
+                                    scaleD, descA, descB, accum));
+  } else if (op->op.same_as(builtin::wgmma_mma_async_rs())) {
+    int M = Downcast<IntImm>(op->args[0])->value;
+    int N = Downcast<IntImm>(op->args[1])->value;
+    int K = Downcast<IntImm>(op->args[2])->value;
+    std::string in_dtype = Downcast<StringImm>(op->args[3])->value;
+    std::string out_dtype = Downcast<StringImm>(op->args[4])->value;
+    CHECK(out_dtype == "float32") << "Now codegen only support float32 output";
+    bool transA = Downcast<Bool>(op->args[5])->value;
+    bool transB = Downcast<Bool>(op->args[6])->value;
+    float scaleA = Downcast<FloatImm>(op->args[7])->value;
+    float scaleB = Downcast<FloatImm>(op->args[8])->value;
+    std::string scaleD = this->PrintExpr(op->args[9]);
+    std::string descB = this->PrintExpr(op->args[10]);
+    // A_regs + accum
+    runtime::DataType in_dtype_tvm = runtime::DataType(runtime::String2DLDataType(in_dtype));
+    size_t expected_A_cnt = M * K / 128 / (32 / in_dtype_tvm.bits());
+    size_t expected_accm_cnt = M * N / 128;
+    CHECK_EQ(11 + expected_A_cnt + expected_accm_cnt, op->args.size())
+        << "wgmma_mma_async_rs with shape " << M << "x" << N << "x" << K << " and input dtype "
+        << in_dtype << " expects " << 11 + expected_A_cnt + expected_accm_cnt << " arguments, got "
+        << op->args.size();
+    std::vector<std::string> A_regs_str;
+    for (size_t i = 0; i < expected_A_cnt; ++i) {
+      A_regs_str.push_back(this->PrintExpr(op->args[11 + i]));
+    }
+    std::vector<std::string> accum;
+    for (size_t i = 0; i < expected_accm_cnt; ++i) {
+      accum.push_back(this->PrintExpr(op->args[11 + expected_A_cnt + i]));
+    }
+    print(PrintWGMMAasyncRSAssembly(M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB,
+                                    scaleD, A_regs_str, descB, accum));
   } else if (op->op.same_as(builtin::wgmma_arrive())) {
-    print(PrintWGMMAArriveAssembly());
+    print(PrintWGMMAArriveAssembly(this));
   } else if (op->op.same_as(builtin::wgmma_commit_group())) {
-    print(PrintWGMMACommitGroupAssembly());
+    print(PrintWGMMACommitGroupAssembly(this));
   } else if (op->op.same_as(builtin::wgmma_wait_group())) {
     std::string wait_cnt = this->PrintExpr(op->args[0]);
-    print(PrintWGMMAWaitGroupAssembly(wait_cnt));
+    print(PrintWGMMAWaitGroupAssembly(this, wait_cnt));
   } else if (op->op.same_as(builtin::stmatrix_sync_aligned())) {
     int num = Downcast<IntImm>(op->args[0])->value;
     bool trans = Downcast<Bool>(op->args[1])->value;
@@ -1773,6 +1816,10 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       regs.push_back(this->PrintExpr(op->args[3 + i]));
     }
     print(PrintStmatrixSyncAlignedAssembly(num, trans, ptr, regs));
+  } else if (op->op.same_as(builtin::setmaxnreg())) {
+    bool inc = Downcast<Bool>(op->args[0])->value;
+    int nregs = Downcast<IntImm>(op->args[1])->value;
+    print(PrintSetMaxNRegAssembly(inc, nregs));
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {
@@ -1841,7 +1888,7 @@ void CodeGenCUDA::VisitStmt_(const AllocBufferNode* op) {
       auto it = op->annotations.find(tvm::tir::attr::buffer_data_alignment);
       if (it != op->annotations.end()) {
         int align = Downcast<IntImm>((*it).second)->value;
-        stream << " alignas(" << align << ") ";
+        stream << "alignas(" << align << ") ";
       }
     }
     PrintType(dtype, stream);

@@ -26,13 +26,34 @@ from tvm.tir.transform import LowerTIRp
 
 
 def _get_source(func: tvm.tir.PrimFunc) -> str:
-    target = tvm.target.Target("cuda")
+    target = tvm.target.Target("nvidia/nvidia-h100")
     print(target)
     with target:
         mod = LowerTIRp()(tvm.IRModule({"main": func}))
     mod = tvm.build(mod, target=target)
     src = mod.imported_modules[0].get_source()
     return src
+
+
+@pytest.mark.parametrize("inc", [False, True])
+@tvm.testing.requires_cuda_compute_version(9)
+def test_setmaxnreg(inc):
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def func(A: T.Buffer((1))):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([128], parent="cta")
+            with T.thread():
+                T.setmaxnreg(inc, 32)
+    # fmt: on
+
+    src = _get_source(func)
+    assert "setmaxnreg" in src
+    if inc:
+        assert "inc" in src
+    else:
+        assert "dec" in src
 
 
 @pytest.mark.parametrize("trans", [False, True])
@@ -96,6 +117,22 @@ def test_stmatrix_sync_aligned(trans):
                 A_ref[col + 8, row + 8] = tx * 8 + 6
                 A_ref[col + 9, row + 8] = tx * 8 + 7
         np.testing.assert_allclose(A.asnumpy(), A_ref)
+
+
+@tvm.testing.requires_cuda_compute_version(9)
+def test_bar_arrive():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def func(A: T.Buffer((1))):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([128], parent="cta")
+            with T.thread():
+                T.named_barrier_arrive(0, 128)
+    # fmt: on
+
+    src = _get_source(func)
+    assert 'bar.arrive %0, %1;" : : "r"(0), "r"(128)' in src
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -253,7 +290,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = np.random.randn(math.prod(shape))
-    
+
     def get_np_dtype(dtype):
         if dtype == "e4m3_float8":
             return ml_dtypes.float8_e4m3fn
@@ -261,7 +298,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
             return ml_dtypes.float8_e5m2
         else:
             return np.dtype(dtype)
-    
+
     A_np = np.array(A_np).reshape(shape).astype(get_np_dtype(dtype))
     B_np = np.zeros(shape).astype(get_np_dtype(dtype))
     A = tvm.nd.array(A_np, device=DEV)
@@ -597,7 +634,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
 
 
 @tvm.testing.requires_cuda_compute_version(9)
-def test_wgmma():
+def test_wgmma_ss_nt():
     def get_ir(
         shapeA,
         shapeB,
@@ -622,14 +659,12 @@ def test_wgmma():
         def get_init_value(dtype):
             if dtype == "float32":
                 return T.float32(0.0)
-            elif dtype == "float16x2":
-                return T.float16x2(0.0)
             assert False, f"Unsupported dtype {dtype}"
 
-        # fmt: off
         def get_accum_list(C, C_elems):
             return [C[i] for i in range(C_elems)]
 
+        # fmt: off
         @T.prim_func(tirp=True)
         def main(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle):
             A = T.match_buffer(A_ptr, shapeA, dtype=in_dtype, align=16)
@@ -646,8 +681,8 @@ def test_wgmma():
                 tx = T.thread_id([128], parent="cta") # A warpgroup is 128 threads
 
                 with T.thread():
-                    A_smem = T.alloc_buffer(shapeA, in_dtype, scope="shared", align=128)
-                    B_smem = T.alloc_buffer(shapeB, in_dtype, scope="shared", align=128)
+                    A_smem = T.alloc_buffer(shapeA, in_dtype, scope="shared", align=1024)
+                    B_smem = T.alloc_buffer(shapeB, in_dtype, scope="shared", align=1024)
                     bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
                     phase = T.alloc_buffer((1,), "int32", scope="local")
                     
@@ -673,10 +708,10 @@ def test_wgmma():
                         T.wgmma_fence_operand(C_local[i])
                     
                     # do wgmma
-                    T.encode_matrix_decriptor(descA.data, A_smem.data, *A_encode_args)
-                    T.encode_matrix_decriptor(descB.data, B_smem.data, *B_encode_args)
+                    T.encode_matrix_descriptor(descA.data, A_smem.data, *A_encode_args)
+                    T.encode_matrix_descriptor(descB.data, B_smem.data, *B_encode_args)
                     T.wgmma_arrive()
-                    T.wgmma_mma_sync_ss(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False, 
+                    T.wgmma_mma_async_ss(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False, 
                                         descA[0], descB[0], *get_accum_list(C_local, C_elems))
                     T.wgmma_commit_group()
                     T.wgmma_wait_group(0)
@@ -753,6 +788,214 @@ def test_wgmma():
     tvm.testing.assert_allclose(C_tvm.asnumpy(), C_ref, rtol=1e-3, atol=1e-3)
 
 
+@tvm.testing.requires_cuda_compute_version(9)
+def test_wgmma_rs_nt():
+    def get_ir(
+        shapeA,
+        shapeB,
+        shapeC,
+        B_tma_args,
+        in_dtype,
+        in_dtype_bits,
+        out_dtype,
+        B_encode_args,
+    ):
+        coordB = [0 for _ in shapeB]
+        B_bytes = tvm.DataType(in_dtype).bits // 8 * math.prod(shapeB)
+
+        A_elems = math.prod(shapeA) // 128
+        C_elems = math.prod(shapeC) // 128
+
+        M, K = shapeA if not transA else shapeA[::-1]
+        N, _ = shapeB if not transB else shapeB[::-1]
+
+        def get_init_value(dtype):
+            if dtype == "float32":
+                return T.float32(0.0)
+            assert False, f"Unsupported dtype {dtype}"
+
+        def get_A_list(A_local, A_elems):
+            return [A_local[i] for i in range(A_elems)]
+
+        def get_accum_list(C, C_elems):
+            return [C[i] for i in range(C_elems)]
+
+        # fmt: off
+        @T.prim_func(tirp=True)
+        def main(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle):
+            A = T.match_buffer(A_ptr, shapeA, dtype=in_dtype, align=16)
+            B = T.match_buffer(B_ptr, shapeB, dtype=in_dtype, align=16)
+            C = T.match_buffer(C_ptr, shapeC, dtype=out_dtype, align=16)
+
+            B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+            T.call_packed("runtime.cuTensorMapInit", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)
+
+            with T.kernel():
+                bx = T.cta_id([1], parent="kernel")
+                tx = T.thread_id([128], parent="cta") # A warpgroup is 128 threads
+
+                with T.thread():
+                    B_smem = T.alloc_buffer(shapeB, in_dtype, scope="shared", align=1024)
+                    bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+
+                    descB = T.alloc_buffer((1,), "uint64", scope="local")
+                    A_local = T.alloc_buffer((A_elems,), in_dtype, scope="local")
+                    C_local = T.alloc_buffer((C_elems,), out_dtype, scope="local")
+                    
+                    A_elems_b32 = T.meta_var(A_elems // (32 // in_dtype_bits))
+                    A_local_b32 = T.decl_buffer((A_elems_b32,), "int32", data=A_local.data)
+
+                    # load A to regs
+                    for i in T.serial(0, A_elems // 4):
+                        row = T.meta_var((tx % 32) // 4 + (tx // 32) * 16)
+                        col = T.meta_var(i * 8 + tx % 4 * 2)
+                        A_local[i * 4] = A[row, col]
+                        A_local[i * 4 + 1] = A[row, col + 1]
+                        A_local[i * 4 + 2] = A[row + 8, col]
+                        A_local[i * 4 + 3] = A[row + 8, col + 1]
+                    T.tvm_storage_sync("shared")
+
+                    # load B to smem
+                    if tx == 0:
+                        T.mbarrier_init(bar.data, 1)
+                        T.cuda_fence_proxy_async("shared")
+                        T.cp_async_bulk_tensor_global_to_cluster(len(shapeB), B_smem.data, bar.data, B_map, *coordB)
+                        T.mbarrier_arrive_expect_tx(bar.data, B_bytes)
+                    T.mbarrier_wait(bar.data, 0)
+                    T.tvm_storage_sync("shared")
+
+                    # init C_local
+                    for i in T.serial(0, C_elems):
+                        C_local[i] = T.Cast(out_dtype, get_init_value(out_dtype))
+
+                    # fence A_local and C_local
+                    for i in T.serial(0, A_elems_b32):
+                        T.wgmma_fence_operand(A_local_b32[i])
+                    for i in T.serial(0, C_elems):
+                        T.wgmma_fence_operand(C_local[i]) 
+                    # do wgmma
+                    T.encode_matrix_descriptor(descB.data, B_smem.data, *B_encode_args)
+                    T.wgmma_arrive()
+                    T.wgmma_mma_async_rs(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False, 
+                                        descB[0], *(get_A_list(A_local_b32, A_elems_b32) + get_accum_list(C_local, C_elems)))
+                    T.wgmma_commit_group()
+                    T.wgmma_wait_group(0)
+
+                    # fence A_local
+                    for i in T.serial(0, A_elems_b32):
+                        T.wgmma_fence_operand(A_local_b32[i])
+                    # fence C_local
+                    for i in T.serial(0, C_elems):
+                        T.wgmma_fence_operand(C_local[i])
+
+                    # store C_local to C
+                    for i in T.serial(0, C_elems // 4):
+                        row = T.meta_var((tx % 32) // 4 + (tx // 32) * 16)
+                        col = T.meta_var(i * 8 + tx % 4 * 2)
+                        C[row, col] = C_local[i * 4]
+                        C[row, col + 1] = C_local[i * 4 + 1]
+                        C[row + 8, col] = C_local[i * 4 + 2]
+                        C[row + 8, col + 1] = C_local[i * 4 + 3]
+        # fmt: on
+
+        return main
+
+    in_dtype = "float16"
+    in_dtype_bits = 16
+    out_dtype = "float32"
+    transA = False
+    transB = True
+    swizzleA = swizzleB = 3
+
+    t_in_dtype = tvm.DataType(in_dtype)
+    elem_bytes = t_in_dtype.bits // 8
+
+    DEV = tvm.cuda(0)
+    target = tvm.target.Target("nvidia/nvidia-h100")
+    M = 64
+    N = 64
+    K = 256 // t_in_dtype.bits
+    shapeA = (M, K) if not transA else (K, M)
+    shapeB = (N, K) if not transB else (K, N)
+    shapeC = (M, N)
+
+    # B tma args
+    B_outer, B_inner = shapeB
+    B_tma_args = [B_inner, B_outer, B_inner * elem_bytes, B_inner, B_outer, 1, 1, 0, swizzleB, 0, 0]
+    # B encode args
+    B_encode_args = [1, 64, swizzleB]
+
+    func = get_ir(
+        shapeA,
+        shapeB,
+        shapeC,
+        B_tma_args,
+        in_dtype,
+        in_dtype_bits,
+        out_dtype,
+        B_encode_args,
+    )
+    mod = tvm.IRModule({"main": func})
+    with target:
+        mod = LowerTIRp()(mod)
+        mod = tvm.build(mod, target=target)
+
+    np.random.seed(0)
+    A_np = np.random.randn(*shapeA).astype(in_dtype)
+    B_np = np.random.randn(*shapeB).astype(in_dtype)
+    C_np = np.zeros(shapeC).astype(out_dtype)
+
+    A_tvm = tvm.nd.array(A_np, device=DEV)
+    B_tvm = tvm.nd.array(B_np, device=DEV)
+    C_tvm = tvm.nd.array(C_np, device=DEV)
+    mod(A_tvm, B_tvm, C_tvm)
+
+    np.printoptions(threshold=np.inf)
+    np.printoptions(linewidth=np.inf)
+    np.printoptions(precision=2)
+
+    C_ref = np.dot(A_np, B_np).astype(out_dtype)
+    tvm.testing.assert_allclose(C_tvm.asnumpy(), C_ref, rtol=1e-3, atol=1e-3)
+
+
+def test_warp_shuffle_xor_sync():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def func(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (32,), dtype="float32", align=16)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            warp_id = T.warp_id([1], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+
+            with T.thread():
+                A_local = T.alloc_buffer([1], "float32", scope="local")
+                i = T.alloc_buffer([1], "int32", scope="local")
+
+                A_local[0] = T.float32(31 - lane_id)
+                i[0] = 16
+                while i[0] >= 1:
+                    A_local[0] += T.tvm_warp_shuffle_xor(0xFFFFFFFF, A_local[0], i[0], 32, 32)
+                    i[0] = i[0] // 2
+
+                A[lane_id] = A_local[0]
+    # fmt: on
+
+    DEV = tvm.cuda(0)
+    target = tvm.target.Target("cuda")
+    mod = tvm.IRModule({"main": func})
+    with target:
+        mod = LowerTIRp()(mod)
+        mod = tvm.build(mod, target=target)
+        A_np = np.zeros(32, dtype="float32")
+        A = tvm.nd.array(A_np, device=DEV)
+        mod(A)
+        assert "__shfl_xor_sync" in mod.imported_modules[0].get_source()
+        A_ref = np.ones(32, dtype="float32") * 496
+        np.testing.assert_allclose(A.asnumpy(), A_ref)
+
+
 if __name__ == "__main__":
     test_stmatrix_sync_aligned()
     test_bar_sync()
@@ -764,4 +1007,6 @@ if __name__ == "__main__":
     test_cp_async_bulk_tensor_global_to_shared_multicast1()
     test_cp_async_bulk_tensor_global_to_shared_multicast2()
     test_cp_async_bulk_tensor_shared_to_global()
-    test_wgmma()
+    test_wgmma_ss_nt()
+    test_wgmma_rs_nt()
+    test_warp_shuffle_xor_sync()

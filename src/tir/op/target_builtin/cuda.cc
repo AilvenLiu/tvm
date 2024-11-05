@@ -136,6 +136,9 @@ TIR_DEFINE_BUILTIN_FUNC(mbarrier_arrive_expect_tx)
 TIR_DEFINE_BUILTIN_FUNC(mbarrier_wait)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(named_barrier_arrive)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(named_barrier_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
@@ -176,13 +179,16 @@ TIR_DEFINE_BUILTIN_FUNC(mma_fill)
     .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
                                          Integer(ScriptDtypePrintLocation::kFirst));
 
-TIR_DEFINE_BUILTIN_FUNC(encode_matrix_decriptor)
+TIR_DEFINE_BUILTIN_FUNC(encode_matrix_descriptor)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(wgmma_fence_operand)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(wgmma_mma_sync_ss)
+TIR_DEFINE_BUILTIN_FUNC(wgmma_mma_async_ss)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(wgmma_mma_async_rs)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(wgmma_arrive)
@@ -195,6 +201,9 @@ TIR_DEFINE_BUILTIN_FUNC(wgmma_wait_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(stmatrix_sync_aligned)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(setmaxnreg)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 }  // namespace builtin

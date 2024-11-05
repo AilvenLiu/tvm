@@ -250,6 +250,9 @@ TIR_DEFINE_BUILTIN_FUNC(tvm_warp_shuffle_up)
 TIR_DEFINE_BUILTIN_FUNC(tvm_warp_shuffle_down)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(tvm_warp_shuffle_xor)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(tvm_warp_activemask)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

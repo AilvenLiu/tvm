@@ -145,8 +145,11 @@ class BufferNode : public Object {
    * Returns the buffer offset, in number of elements of type dtype,
    * without adjusting for number of lanes.  (e.g. The number of
    * float16x4 elements in a buffer of type float16x4.)
+   *
+   * \param index The index to be accessed.
+   * \param inner Ignore the elem_offset, return inner offset only
    */
-  ffi::Array<PrimExpr> ElemOffset(ffi::Array<PrimExpr> index) const;
+  ffi::Array<PrimExpr> ElemOffset(ffi::Array<PrimExpr> index, bool inner = false) const;
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
 

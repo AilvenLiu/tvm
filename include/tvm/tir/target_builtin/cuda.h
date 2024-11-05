@@ -316,6 +316,13 @@ TVM_DLL const Op& mbarrier_arrive_expect_tx();
 TVM_DLL const Op& mbarrier_wait();
 
 /*!
+ * \brief tvm instrinsics to call bar.arrive a, b
+ *
+ * bar_arrive(int name_bar_id, int thread_count)
+ */
+TVM_DLL const Op& named_barrier_arrive();
+
+/*!
  * \brief tvm instrinsics to call bar.sync a, {b}
  *
  * bar_sync(int name_bar_id, int thread_count)
@@ -424,9 +431,9 @@ TVM_DLL const Op& mma_fill();
 /*!
  * \brief tvm intrinsic to encode shared memory matrix descriptor.
  *
- * encode_matrix_decriptor(PrimExpr ptr, PrimExpr ldo, PrimExpr sdo, int swizzle)
+ * encode_matrix_descriptor(PrimExpr ptr, PrimExpr ldo, PrimExpr sdo, int swizzle)
  */
-TVM_DLL const Op& encode_matrix_decriptor();
+TVM_DLL const Op& encode_matrix_descriptor();
 
 /*!
  * \brief tvm intrinsic to call "" : "+r"(reg) :: "memory"
@@ -437,10 +444,19 @@ TVM_DLL const Op& wgmma_fence_operand();
 
 /*!
  * \brief tvm intrinsic to call wgmma.mma_async.sync.aligned.shape.dtype.atype.btype
+ * where both A and B are in shared memory.
  *
- * wgmma_mma_sync_ss()
+ * wgmma_mma_async_ss()
  */
-TVM_DLL const Op& wgmma_mma_sync_ss();
+TVM_DLL const Op& wgmma_mma_async_ss();
+
+/*!
+ * \brief tvm intrinsic to call wgmma.mma_async.sync.aligned.shape.dtype.atype.btype
+ * where A is in register and B is in shared memory.
+ * 
+ * wgmma_mma_async_rs()
+ */
+TVM_DLL const Op& wgmma_mma_async_rs();
 
 /*!
  * \brief tvm intrinsic to call wgmma.fence.sync.aligned;
@@ -469,6 +485,11 @@ TVM_DLL const Op& wgmma_wait_group();
  * stmatrix_sync_aligned(int num, bool trans, PrimExpr ptr, PrimExpr... vars)
  */
 TVM_DLL const Op& stmatrix_sync_aligned();
+
+/*!
+ * \brief tvm intrinsic to call setmaxnreg.action.sync.aligned.u32 imm-reg-count
+ */
+TVM_DLL const Op& setmaxnreg();
 
 }  // namespace builtin
 }  // namespace tir

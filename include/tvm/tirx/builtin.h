@@ -486,6 +486,8 @@ TVM_DLL const Op& tvm_storage_sync();
  *    return (value passed in by warp indicated by this_warp_id + offset);
  *  }
  *
+ *  Type tvm_warp_shuffle_xor(mask, Type value, laneMask, width, warp_size) {
+ *
  *  unsigned tvm_warp_activemask() {
  *    return (32-bit mask of currently active threads in the calling warp);
  *  }
@@ -496,7 +498,7 @@ TVM_DLL const Op& tvm_storage_sync();
  *
  *  Parameter width indicates the number of threads involved in one
  *  shuffle. See CUDA document for __shfl_sync, __shfl_up_sync,
- *  __shfl_down_sync and __activemask.
+ *  __shfl_down_sync, __shfl_xor_sync and __activemask.
  *
  *  Parameter warp_size is the size of a warp, which helps a backend
  *  to determine whether the width parameter is legal.
@@ -505,6 +507,7 @@ TVM_DLL const Op& tvm_storage_sync();
 TVM_DLL const Op& tvm_warp_shuffle();
 TVM_DLL const Op& tvm_warp_shuffle_up();
 TVM_DLL const Op& tvm_warp_shuffle_down();
+TVM_DLL const Op& tvm_warp_shuffle_xor();
 TVM_DLL const Op& tvm_warp_activemask();
 
 /*!

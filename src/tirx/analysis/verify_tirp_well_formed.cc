@@ -53,7 +53,8 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     if (!scope_stack_.empty() && !scope_stack_.back().Is("thread")) {
       Verify(obj->IsInstance<BlockNode>() || obj->IsInstance<ForNode>() ||
              obj->IsInstance<BlockRealizeNode>() || obj->IsInstance<SeqStmtNode>() ||
-             obj->IsInstance<tirp::OpCallNode>() || obj->IsInstance<AttrStmtNode>())
+             obj->IsInstance<tirp::OpCallNode>() || obj->IsInstance<AttrStmtNode>() ||
+             obj->IsInstance<DeclBufferNode>())
           << "TIRpError: Stmt at " << path << " is not under a thread scope and has type "
           << obj->GetTypeKey() << "\n"
           << obj;

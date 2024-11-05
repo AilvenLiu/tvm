@@ -484,7 +484,7 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
   }
 
   Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer, const Array<PrimExpr>& indices) {
-    auto flattened_indices = buffer->ElemOffset(indices);
+    auto flattened_indices = buffer->ElemOffset(indices, true);
     flattened_indices = this->IterMapSimplifyWithContext(flattened_indices, false);
     ICHECK_EQ(flattened_indices.size(), 1) << "Expected a single element offset";
     if (buffer->layout.defined()) {

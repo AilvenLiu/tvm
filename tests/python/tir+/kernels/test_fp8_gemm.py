@@ -19,10 +19,8 @@ import ml_dtypes
 
 import tvm
 import tvm.testing
-from tvm import te
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
-from tvm.script import tirp as Tp
 from tvm.tir.transform import LowerTIRp
 
 
@@ -110,9 +108,9 @@ def test_fp8_gemm_hopper_no_ws():
         for inner_k in T.serial(BLK_K // WGMMA_K):
             A_offset = T.meta_var(wg_id * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)
             B_offset = T.meta_var(inner_k * WGMMA_K)
-            T.encode_matrix_decriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
-            T.encode_matrix_decriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
-            T.wgmma_mma_sync_ss(WGMMA_M, WGMMA_N, WGMMA_K, "e4m3_float8", "float32", False, False, 1.0, 1.0, True,
+            T.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
+            T.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
+            T.wgmma_mma_async_ss(WGMMA_M, WGMMA_N, WGMMA_K, "e4m3_float8", "float32", False, False, 1.0, 1.0, True,
                                 descA[0], descB[0], *get_accum_list(accum, 128))
         T.wgmma_commit_group()
 

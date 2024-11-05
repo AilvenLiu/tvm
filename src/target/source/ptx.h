@@ -164,14 +164,15 @@ std::string PrintWaitBarrierAsm(const std::string& barrier);
  * \brief Print ptx fence.proxy.async.{global, shared::cta, shared::cluster}
  * \param scope: The scope of the fence.
  */
-std::string PrintCudaFenceProxyAsyncAssembly(std::string scope);
+std::string PrintCudaFenceProxyAsyncAssembly(CodeGenCUDA* cg, std::string scope);
 
 /*!
  * \brief Print ptx mbarrier.init.shared.b64
  * \param barrier: The name of the barrier in shared memory.
  * \param thread_count: The number of threads expected to arrive at the barrier.
  */
-std::string PrintMbarrierInitAssembly(const std::string& barrier, const std::string& thread_count);
+std::string PrintMbarrierInitAssembly(CodeGenCUDA* cg, const std::string& barrier,
+                                      const std::string& thread_count);
 
 /*!
  * \brief Print ptx mbarrier.arrive.shared.b64
@@ -180,8 +181,9 @@ std::string PrintMbarrierInitAssembly(const std::string& barrier, const std::str
  * \param cta_id: The id of the target CTA.
  * \param pred: The predicate value.
  */
-std::string PrintMbarrierArriveAssembly(const std::string& barrier, bool remote,
-                                        const std::string& cta_id, const std::string& pred);
+std::string PrintMbarrierArriveAssembly(codegen::CodeGenCUDA* cg, const std::string& barrier,
+                                        bool remote, const std::string& cta_id,
+                                        const std::string& pred);
 
 /*!
  * \brief Print ptx mbarrier.arrive.expect_tx.shared::cta.b64
@@ -192,7 +194,7 @@ std::string PrintMbarrierArriveAssembly(const std::string& barrier, bool remote,
  * \param cta_id: The id of the target CTA.
  * \param pred: The predicate value.
  */
-std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
+std::string PrintMbarrierArriveExpectTxAssembly(CodeGenCUDA* cg, const std::string& barrier,
                                                 const std::string& byte_count, bool remote,
                                                 const std::string& cta_id, const std::string& pred);
 
@@ -201,7 +203,16 @@ std::string PrintMbarrierArriveExpectTxAssembly(const std::string& barrier,
  * \param barrier: The name of the barrier in shared memory.
  * \param phase: The phase bit to wait for.
  */
-std::string PrintMbarrierWaitAssembly(const std::string& barrier, const std::string& phase);
+std::string PrintMbarrierWaitAssembly(codegen::CodeGenCUDA* cg, const std::string& barrier,
+                                      const std::string& phase);
+
+/*!
+ * \brief Print bar.arrive a, b
+ * \param name_bar_id: The name of the barrier.
+ * \param thread_count The number of threads expected to arrive at the barrier.
+ */
+std::string PrintNamedBarrierArriveAssembly(const std::string& name_bar_id,
+                                            const std::string& thread_count);
 
 /*!
  * \brief Print bar.sync a, {b}
@@ -220,11 +231,9 @@ std::string PrintNamedBarrierSyncAssembly(const std::string& name_bar_id,
  * \param cta_mask: The mask for the CTA.
  * \param coords: The coordinates of the tensor.
  */
-std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::string& dst,
-                                                          const std::string& bar,
-                                                          const std::string& tensormap,
-                                                          int cta_mask,
-                                                          std::vector<std::string> coords);
+std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(
+    CodeGenCUDA* cg, int dim, const std::string& dst, const std::string& bar,
+    const std::string& tensormap, int cta_mask, std::vector<std::string> coords);
 
 /*!
  * \brief Print ptx cp.async.bulk.tensor.dim.global.shared::cta.tile。bulk_group
@@ -233,22 +242,22 @@ std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(int dim, const std::st
  * \param tensormap: The pointer to the CUtensorMap object.
  * \param coords: The coordinates of the tensor.
  */
-std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(int dim, const std::string& src,
+std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(codegen::CodeGenCUDA* cg, int dim, const std::string& src,
                                                          const std::string& tensormap,
                                                          std::vector<std::string> coords);
 
 /*!
  * \brief Print ptx cp.async.bulk.tensor.commit_group
  */
-std::string PrintCpAsyncBulkTensorCommitGroupAssembly();
+std::string PrintCpAsyncBulkTensorCommitGroupAssembly(codegen::CodeGenCUDA* cg);
 
 /*!
  * \brief Print ptx cp.async.bulk.tensor.wait_group{.read} N
  * \param N: The number of groups to wait for.
  * \param read: Whether to wait for read or write groups.
  */
-
-std::string PrintCpAsyncBulkTensorWaitGroupAssembly(const std::string& N, bool read);
+std::string PrintCpAsyncBulkTensorWaitGroupAssembly(codegen::CodeGenCUDA* cg, const std::string& N,
+                                                    bool read);
 
 /*!
  * \brief Print predefined, read-only variables, which are visible as special registers in PTX.
@@ -260,11 +269,13 @@ std::string PrintPtxFetchRegisterAssembly(CodeGenCUDA* cg, int bits, const std::
 /*!
  * \brief Print "" : "+r"(reg) :: "memory"
  * \param reg: The register to print.
+ * \param dtype: The data type of the register.
  */
-std::string PrintWGMMAFenceOpearandAssembly(const std::string& reg);
+std::string PrintWGMMAFenceOpearandAssembly(CodeGenCUDA* cg, const std::string& reg,
+                                            tvm::DataType dtype);
 
 /*!
- * \brief Print wgmma.mma.sync.aligned where both A and B are in shared memory.
+ * \brief Print wgmma.mma_async.sync.aligned where both A and B are in shared memory.
  * \param M: The number of rows in the matrix.
  * \param N: The number of columns in the matrix.
  * \param K: The number of columns in the matrix.
@@ -275,31 +286,54 @@ std::string PrintWGMMAFenceOpearandAssembly(const std::string& reg);
  * \param scaleA: The scaling factor for matrix A.
  * \param scaleB: The scaling factor for matrix B.
  * \param scaleD: True: D = A * B + D, False: D = A * B.
- * \param descA: The descriptor for matrix A.
- * \param descB: The descriptor for matrix B.
- * \param accums: The accumulator matrix descriptors.
+ * \param descA: The SMEM descriptor for matrix A.
+ * \param descB: The SMEM descriptor for matrix B.
+ * \param accums: The registers to store the accumulators.
  */
-std::string PrintWGMMAmmasyncSSAssembly(int M, int N, int K, const std::string& in_dtype,
-                                        const std::string& out_dtype, bool transA, bool transB,
-                                        float scaleA, float scaleB, bool scaleD,
-                                        const std::string& descA, const std::string& descB,
-                                        const std::vector<std::string>& accums);
+std::string PrintWGMMAasyncSSAssembly(int M, int N, int K, const std::string& in_dtype,
+                                      const std::string& out_dtype, bool transA, bool transB,
+                                      float scaleA, float scaleB, const std::string& scaleD,
+                                      const std::string& descA, const std::string& descB,
+                                      const std::vector<std::string>& accums);
+
+/*!
+ * \brief Print wgmma.mma_async.sync.aligned where A is in register and B is in shared memory.
+ * \param M: The number of rows in the matrix.
+ * \param N: The number of columns in the matrix.
+ * \param K: The number of columns in the matrix.
+ * \param in_dtype: The data type of the input matrix.
+ * \param out_dtype: The data type of the output matrix.
+ * \param transA: Whether the input matrix A is K major or M/N major.
+ * \param transB: Whether the input matrix B is K major or M/N major.
+ * \param scaleA: The scaling factor for matrix A.
+ * \param scaleB: The scaling factor for matrix B.
+ * \param scaleD: True: D = A * B + D, False: D = A * B.
+ * \param A_regs: The registers to store matrix A.
+ * \param descB: The descriptor for matrix B.
+ * \param accums: The registers to store the accumulators.
+ */
+std::string PrintWGMMAasyncRSAssembly(int M, int N, int K, const std::string& in_dtype,
+                                      const std::string& out_dtype, bool transA, bool transB,
+                                      float scaleA, float scaleB, const std::string& scaleD,
+                                      const std::vector<std::string>& A_regs,
+                                      const std::string& descB,
+                                      const std::vector<std::string>& accums);
 
 /*!
  * \brief Print wgmma.fence.sync.aligned;
  */
-std::string PrintWGMMAArriveAssembly();
+std::string PrintWGMMAArriveAssembly(CodeGenCUDA* cg);
 
 /*!
  * \brief Print wgmma.commit_group.sync.aligned;
  */
-std::string PrintWGMMACommitGroupAssembly();
+std::string PrintWGMMACommitGroupAssembly(CodeGenCUDA* cg);
 
 /*!
  * \brief Print wgmma.wait_group.sync.aligned;
  * \param N: The number of groups to wait for.
  */
-std::string PrintWGMMAWaitGroupAssembly(const std::string& N);
+std::string PrintWGMMAWaitGroupAssembly(CodeGenCUDA* cg, const std::string& N);
 
 /*!
  * \brief Print shared memory matrix descriptor encoding.
@@ -309,9 +343,9 @@ std::string PrintWGMMAWaitGroupAssembly(const std::string& N);
  * \param sdo: The stride dimension offset.
  * \param swizzle: The swizzle value (CUtensorMapSwizzle_enum).
  */
-std::string PrintEncodeMatrixDescriptor(const std::string& desc, const std::string& addr,
-                                        const std::string& ldo, const std::string& sdo,
-                                        int swizzle);
+std::string PrintEncodeMatrixDescriptor(codegen::CodeGenCUDA* cg, const std::string& desc,
+                                        const std::string& addr, const std::string& ldo,
+                                        const std::string& sdo, int swizzle);
 
 /*!
  * \brief Print barrier.cluster.arrive{.sem}{.aligned};
@@ -336,7 +370,7 @@ std::string PrintElectSyncAssembly(CodeGenCUDA* cg, uint32_t membermask);
 /*!
  * \brief Print fence_mbarrier_init_release_cluster
  */
-std::string PrintFenceMbarrierInitReleaseClusterAssembly();
+std::string PrintFenceMbarrierInitReleaseClusterAssembly(codegen::CodeGenCUDA* cg);
 
 /*!
  * \brief Print stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r;
@@ -347,6 +381,13 @@ std::string PrintFenceMbarrierInitReleaseClusterAssembly();
  */
 std::string PrintStmatrixSyncAlignedAssembly(int num, bool trans, const std::string& ptr,
                                              const std::vector<std::string>& vars);
+
+/*!
+ * \brief Print setmaxnreg.action.sync.aligned.u32 imm-reg-count
+ * \param inc: true if the register count should be incremented.
+ * \param reg_count: The number of registers to set.
+ */
+std::string PrintSetMaxNRegAssembly(bool inc, int reg_count);
 
 }  // namespace codegen
 }  // namespace tvm

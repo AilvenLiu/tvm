@@ -2136,6 +2136,7 @@ tvm_storage_sync = _tir_op.tvm_storage_sync
 tvm_warp_shuffle = _tir_op.tvm_warp_shuffle
 tvm_warp_shuffle_up = _tir_op.tvm_warp_shuffle_up
 tvm_warp_shuffle_down = _tir_op.tvm_warp_shuffle_down
+tvm_warp_shuffle_xor = _tir_op.tvm_warp_shuffle_xor
 tvm_warp_activemask = _tir_op.tvm_warp_activemask
 ptx_wait_group = _op_wrapper(_tir_op.ptx_wait_group)
 ptx_commit_group = _op_wrapper(_tir_op.ptx_commit_group)
@@ -2163,14 +2164,17 @@ mbarrier_init = _op_wrapper(_tir_op.mbarrier_init)
 mbarrier_arrive = _op_wrapper(_tir_op.mbarrier_arrive)
 mbarrier_arrive_expect_tx = _op_wrapper(_tir_op.mbarrier_arrive_expect_tx)
 mbarrier_wait = _op_wrapper(_tir_op.mbarrier_wait)
+named_barrier_arrive = _op_wrapper(_tir_op.named_barrier_arrive)
 named_barrier_sync = _op_wrapper(_tir_op.named_barrier_sync)
-encode_matrix_decriptor = _op_wrapper(_tir_op.encode_matrix_decriptor)
+encode_matrix_descriptor = _op_wrapper(_tir_op.encode_matrix_descriptor)
 wgmma_fence_operand = _op_wrapper(_tir_op.wgmma_fence_operand)
-wgmma_mma_sync_ss = _op_wrapper(_tir_op.wgmma_mma_sync_ss)
+wgmma_mma_async_ss = _op_wrapper(_tir_op.wgmma_mma_async_ss)
+wgmma_mma_async_rs = _op_wrapper(_tir_op.wgmma_mma_async_rs)
 wgmma_arrive = _op_wrapper(_tir_op.wgmma_arrive)
 wgmma_commit_group = _op_wrapper(_tir_op.wgmma_commit_group)
 wgmma_wait_group = _op_wrapper(_tir_op.wgmma_wait_group)
 stmatrix_sync_aligned = _op_wrapper(_tir_op.stmatrix_sync_aligned)
+setmaxnreg = _op_wrapper(_tir_op.setmaxnreg)
 make_filled_simdgroup_matrix = _op_wrapper(_tir_op.make_filled_simdgroup_matrix)
 simdgroup_load = _op_wrapper(_tir_op.simdgroup_load)
 simdgroup_store = _op_wrapper(_tir_op.simdgroup_store)
@@ -2497,6 +2501,7 @@ __all__ = float_types + [
     "tvm_warp_shuffle",
     "tvm_warp_shuffle_up",
     "tvm_warp_shuffle_down",
+    "tvm_warp_shuffle_xor",
     "tvm_warp_activemask",
     "ptx_mma",
     "ptx_mma_sp",
@@ -2520,14 +2525,17 @@ __all__ = float_types + [
     "mbarrier_arrive",
     "mbarrier_arrive_expect_tx",
     "mbarrier_wait",
+    "named_barrier_arrive",
     "named_barrier_sync",
-    "encode_matrix_decriptor",
+    "encode_matrix_descriptor",
     "wgmma_fence_operand",
-    "wgmma_mma_sync_ss",
+    "wgmma_mma_async_ss",
+    "wgmma_mma_async_rs",
     "wgmma_arrive",
     "wgmma_commit_group",
     "wgmma_wait_group",
     "stmatrix_sync_aligned",
+    "setmaxnreg",
     "cp_async_bulk_tensor_global_to_cluster",
     "cp_async_bulk_tensor_shared_to_global",
     "cp_async_bulk_tensor_commit_group",
