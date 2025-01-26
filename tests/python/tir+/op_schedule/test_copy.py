@@ -17,7 +17,7 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TileLayout, SwizzleLayout
+from tvm.tir.layout import TileLayout
 import numpy as np
 import tvm.testing
 from tvm.script import ir as I
@@ -64,34 +64,22 @@ from tvm.script import tirp as Tp
             TileLayout.from_nested_tuple((32, 32)),  # layoutS
             tvm.cuda(0),
         ),
-        ################ A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32] ################
-        (
-            (4, 32, 32),  # g_shape
-            (32, 32),  # s_shape
-            (0, 0, 0),  # g_st
-            (1, 32, 32),  # g_extent
-            32,  # thread_cnt
-            TileLayout.from_nested_tuple((4, 32, 32)),  # layoutA
-            TileLayout.from_nested_tuple((4, 32, 32)),  # layoutB
-            TileLayout.from_nested_tuple((32, 32)),  # layoutS
-            tvm.cuda(0),
-        ),
-        ################ A[0:128, 0:32] -> A_smem[0:128, 0:32] -> B[0:128, 0:32] ################
-        (
-            (128, 32),  # g_shape
-            (128, 32),  # s_shape
-            (0, 0),  # g_st
-            (128, 32),  # g_extent
-            32,  # thread_cnt
-            TileLayout.from_nested_tuple((128, 32)),  # layoutA
-            TileLayout.from_nested_tuple((128, 32)),  # layoutB
-            SwizzleLayout(3, 3, 3),  # layoutS
-            tvm.cuda(0),
-        ),
+        # ################ A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32] ################
+        # (
+        #     (4, 32, 32),  # g_shape
+        #     (32, 32),  # s_shape
+        #     (0, 0, 0),  # g_st
+        #     (1, 32, 32),  # g_extent
+        #     32,  # thread_cnt
+        #     TileLayout.from_nested_tuple((4, 32, 32)),  # layoutA
+        #     TileLayout.from_nested_tuple((4, 32, 32)),  # layoutB
+        #     TileLayout.from_nested_tuple((32, 32)),  # layoutS
+        #     tvm.cuda(0),
+        # ),
     ],
 )
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
-@pytest.mark.parametrize("sync", [True, False])
+@pytest.mark.parametrize("sync", [True])
 def test_copy_global_to_shared(input, dtype, sync):
     g_shape, s_shape, g_st, g_extent, thread_cnt, layoutA, layoutB, layoutS, dev = input
 

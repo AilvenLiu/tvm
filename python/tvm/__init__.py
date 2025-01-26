@@ -48,8 +48,8 @@ from . import ir
 # tvm.tirx
 from . import tirx
 
-# tvm.s_tir
-from . import s_tir
+# tvm.tirp
+from . import tirp
 
 # tvm.target
 from . import target

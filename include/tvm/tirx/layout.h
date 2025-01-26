@@ -50,7 +50,7 @@ class TLayoutNode : public Object {
   /*! \brief Get the cosize of the layout */
   virtual PrimExpr GetCosize() const = 0;
 
-  /*! \breif Apply the input coordinate and get the mapped output */
+  /*! \brief Apply the input coordinate and get the mapped output */
   virtual PrimExpr Apply(const Array<PrimExpr>& coord) const = 0;
 
   static constexpr const char* _type_key = "tirx.TLayout";
@@ -351,7 +351,7 @@ class TileLayoutNode : public TLayoutNode {
   /*! \brief Get the cosize of the layout */
   PrimExpr GetCosize() const final;
 
-  /*! \breif Apply the input coordinate and get the mapped output */
+  /*! \brief Apply the input coordinate and get the mapped output */
   PrimExpr Apply(const Array<PrimExpr>& coord) const final;
 
   static constexpr const char* _type_key = "tirx.TileLayout";
@@ -446,7 +446,7 @@ class SwizzleLayoutNode : public TLayoutNode {
   /*! \brief Get the cosize of the layout */
   PrimExpr GetCosize() const final;
 
-  /*! \breif Apply the input coordinate and get the mapped output */
+  /*! \brief Apply the input coordinate and get the mapped output */
   PrimExpr Apply(const Array<PrimExpr>& coord) const final;
 
   static constexpr const char* _type_key = "tirx.SwizzleLayout";

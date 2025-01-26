@@ -44,6 +44,14 @@ class TLayout(Object):
     def apply(self, *coord: List[PrimExpr]) -> PrimExpr:
         return get_global_func("tir.TLayoutApply")(self, coord)
 
+    def is_trivial(self) -> bool:
+        """Check if the layout is trivial."""
+        return get_global_func("tir.IsTrivialLayout")(self)
+
+    def is_swizzle(self) -> bool:
+        """Check if the layout is swizzle."""
+        return isinstance(self, SwizzleLayout)
+
 
 @register_object("tirx.IterTreeBase")
 class IterTreeBase(Object):
@@ -309,6 +317,8 @@ class TileLayout(TLayout):
 
 @register_object("tir.SwizzleLayout")
 class SwizzleLayout(TLayout):
+    """A memory layout that swizzles elements to improve memory access patterns."""
+
     per_element: int
     swizzle_len: int
     atom_len: int
@@ -318,5 +328,9 @@ class SwizzleLayout(TLayout):
         self, per_element: int, swizzle_len: int, atom_len: int, swizzle_inner: bool = True
     ):
         self.__init_handle_by_constructor__(
-            _ffi_api.SwizzleLayout, per_element, swizzle_len, atom_len, swizzle_inner
+            _ffi_api.SwizzleLayout,  # pylint: disable=no-member
+            per_element,
+            swizzle_len,
+            atom_len,
+            swizzle_inner,
         )

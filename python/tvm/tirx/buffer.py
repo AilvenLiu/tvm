@@ -17,6 +17,7 @@
 """Abstraction for array data structures."""
 
 from numbers import Integral
+from typing import Optional
 
 import tvm_ffi
 

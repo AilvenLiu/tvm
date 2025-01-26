@@ -51,14 +51,6 @@ IntImm ToIntImm(const ObjectRef& obj);
 
 FloatImm ToFloatImm(const ObjectRef& obj);
 
-/********************* Copy Ops **********************/
-enum class CopyInstType { kBufferLoad, kCUDAcpasync };
-
-Stmt VectorizedCopy(const BufferRegion& src, const BufferRegion& dst, ScheduleContext context,
-                    CopyInstType inst_type);
-
-Stmt CopyOpScheduler(const Op& op, Array<ObjectRef> args, ScheduleContext context);
-
 /********************* Barrier Ops **********************/
 Stmt BarrierOpScheduler(const Op& op, Array<ObjectRef> args, ScheduleContext context);
 

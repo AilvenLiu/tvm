@@ -94,17 +94,12 @@ TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
 #define TIRP_DEFINE_SCHEDULE_OP(OpName) \
   TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsScheduleOp", Bool(true))
 
-TIRP_DEFINE_SCHEDULE_OP(copy)
-    .set_num_inputs(2)
-    .set_attr<FArgSanitizer>("FArgSanitizer",
-                             [](tvm::Op op, Array<ObjectRef> args) {
-                               ICHECK_EQ(args.size(), 2U) << "copy() expects 2 arguments";
-                               ICHECK(args[0].as<BufferRegionNode>())
-                                   << "arg[0] of copy() must be BufferRegion";
-                               ICHECK(args[1].as<BufferRegionNode>())
-                                   << "arg[1] of copy() must be BufferRegion";
-                             })
-    .set_attr<FOpScheduler>("FOpScheduler", CopyOpScheduler);
+TIRP_DEFINE_SCHEDULE_OP(copy).set_num_inputs(2).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 2U) << "copy() expects 2 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of copy() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of copy() must be BufferRegion";
+    });
 
 TIRP_DEFINE_SCHEDULE_OP(fill).set_num_inputs(2).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {

@@ -108,7 +108,7 @@ Stmt PipelineOpScheduler(const Op& op, Array<ObjectRef> args, ScheduleContext co
         CHECK_EQ(args.size(), 3U) << "ValueError: pipeline_producer_copy_async expects 3 arguments";
         const auto& dst = Downcast<BufferRegion>(args[1]);
         const auto& src = Downcast<BufferRegion>(args[2]);
-        return VectorizedCopy(src, dst, context, CopyInstType::kCUDAcpasync);
+        LOG(FATAL) << "not implemented";
       } else if (op.same_as(pipeline_producer_commit_stage())) {
         // producer_commit_stage
         CHECK_EQ(args.size(), 1U)

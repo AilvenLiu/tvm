@@ -269,13 +269,12 @@ class TIRpOpScheduler : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const tirp::OpCallNode* op) final {
-    static const auto& op_scheduler_map = Op::GetAttrMap<tirp::FOpScheduler>("FOpScheduler");
-    ICHECK(op_scheduler_map.count(op->op)) << "Internal Error: Unsupported OpCall " << op->op;
-    tirp::FOpScheduler scheduler = op_scheduler_map[op->op];
-    ICHECK(!exec_scope_stack_.empty()) << "Internal Error: exec_scope_stack_ is empty";
-    return scheduler(
-        op->op, op->args,
-        tirp::ScheduleContext(Target::Current(false), exec_scope_stack_.back(), launch_params_));
+    tirp::ScheduleContext sctx(Target::Current(false), exec_scope_stack_.back(), launch_params_);
+    static auto f_op_scheduler_ = tvm::runtime::Registry::Get("tirp.f_op_scheduler");
+    ICHECK(f_op_scheduler_ != nullptr) << "Internal Error: tirp.f_op_scheduler is not registered";
+    PrimFunc res = (*f_op_scheduler_)(op->op, op->args, sctx);
+    ICHECK(res.defined()) << "Internal Error: tirp.f_op_scheduler returned an undefined PrimFunc";
+    return res->body;
   }
 
   std::vector<ExecScope> exec_scope_stack_;
@@ -406,6 +405,9 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
   }
 
  private:
+  using IRMutatorWithAnalyzer::VisitExpr_;
+  using IRMutatorWithAnalyzer::VisitStmt_;
+
   explicit StorageLower(arith::Analyzer* analyzer) : arith::IRMutatorWithAnalyzer(analyzer) {}
 
   Stmt VisitStmt_(const BlockNode* op) final {
