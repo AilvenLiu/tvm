@@ -271,7 +271,11 @@ def visit_assign(self: Parser, node: doc.Assign) -> None:
         if isinstance(lhs.slice, doc.Tuple):
             indices = []
             for index in lhs.slice.elts:
-                indices.append(self.eval_expr(index))
+                if isinstance(index, doc.Starred):
+                    # x[*y]
+                    indices.extend(self.eval_expr(index.value))
+                else:
+                    indices.append(self.eval_expr(index))
         else:
             indices = self.eval_expr(lhs.slice)
         T.buffer_store(self.eval_expr(lhs.value), rhs, indices)
@@ -324,7 +328,11 @@ def visit_aug_assign(self: Parser, node: doc.AugAssign) -> None:
         if isinstance(lhs.slice, doc.Tuple):
             indices = []
             for index in lhs.slice.elts:
-                indices.append(self.eval_expr(index))
+                if isinstance(index, doc.Starred):
+                    # x[*y]
+                    indices.extend(self.eval_expr(index.value))
+                else:
+                    indices.append(self.eval_expr(index))
         else:
             indices = [self.eval_expr(lhs.slice)]
         T.buffer_store(self.eval_expr(lhs.value), rhs, indices)

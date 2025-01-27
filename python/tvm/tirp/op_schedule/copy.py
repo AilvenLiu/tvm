@@ -51,68 +51,73 @@ def copy_cuda_g2s_s2g_2d_sync_cta_vec_load(
     dst_buffer_region: BufferRegion, src_buffer_region: BufferRegion, sctx: ScheduleContext
 ) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
-    if not sctx.is_cuda():
-        return None
-    if not sctx.exec_scope.name == "cta":
-        return None
-    src = src_buffer_region.buffer
-    dst = dst_buffer_region.buffer
-    if (src.layout is None or dst.layout is None) or (src.dtype != dst.dtype):
+    # Basic validation checks
+    if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
         return None
 
-    src_region = src_buffer_region.region
-    dst_region = dst_buffer_region.region
-    dim = len(src_region)
-    # TODO(@bohan): support arbitrary dimension
-    if dim != len(dst_region) or dim != 2:
-        return None
-
-    analyzer = Analyzer()
-    src_st = [src_region[i].min for i in range(dim)]
-    dst_st = [dst_region[i].min for i in range(dim)]
-    src_extent = [src_region[i].extent for i in range(dim)]
-    dst_extent = [dst_region[i].extent for i in range(dim)]
-
-    # The copy region must be the same
-    for i in range(dim):
-        if not analyzer.can_prove_equal(src_extent[i], dst_extent[i]):
-            return None
-
-    # Only support global to shared and shared to global
-    if not (src.scope() == "global" and dst.scope() == "shared") and not (
-        src.scope() == "shared" and dst.scope() == "global"
+    src, dst = src_buffer_region.buffer, dst_buffer_region.buffer
+    if not all(
+        [
+            src.layout and dst.layout,
+            src.dtype == dst.dtype,
+            src.layout.is_trivial() or dst.layout.is_trivial(),
+            (src.scope() == "global" and dst.scope() == "shared")
+            or (src.scope() == "shared" and dst.scope() == "global"),
+        ]
     ):
         return None
-    # only support trivial layout
-    if not (src.layout.is_trivial() or dst.layout.is_trivial()):
+
+    # Extract regions and validate dimensions
+    analyzer = Analyzer()
+    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
+    src_st = [r.min for r in src_region]
+    dst_st = [r.min for r in dst_region]
+    src_extent = [r.extent for r in src_region]
+    dst_extent = [r.extent for r in dst_region]
+
+    # Validate non-unit dimensions match
+    src_extent_ = [e for e in src_extent if e != 1]
+    dst_extent_ = [e for e in dst_extent if e != 1]
+    if not (
+        len(src_extent_) == len(dst_extent_)
+        and all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent_, dst_extent_))
+    ):
         return None
-    # TODO(@bohan): support 3D threadIdx
+
+    # Thread and vectorization setup
     tx = sctx.launch_params["threadIdx.x"]
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
     elem_size = DataType(src.dtype).bits // 8
     n_elements = functools.reduce(operator.mul, src_extent, 1)
-    # Convert byte sizes to element counts and filter for alignment constraints
-    vec_len_candidates = [16, 8, 4, 1]  # bytes
-    vec_len_candidates = list(map(lambda size: size // elem_size, vec_len_candidates))  # elements
 
-    def filter_vec_len(vec_len):
-        # Check alignment of source/dest addresses and total elements
-        return (
-            vec_len > 0
-            and analyzer.can_prove_equal(src_st[-1] % vec_len, 0)
-            and analyzer.can_prove_equal(dst_st[-1] % vec_len, 0)
-            and analyzer.can_prove_equal(src.shape[-1] % vec_len, 0)
-            and analyzer.can_prove_equal(dst.shape[-1] % vec_len, 0)
-            and analyzer.can_prove_equal(src_extent[-1] % vec_len, 0)
-            and analyzer.can_prove_equal(dst_extent[-1] % vec_len, 0)
-            and analyzer.can_prove_equal(n_elements % (tx * vec_len), 0)
-        )
-
-    vec_len_candidates = list(filter(filter_vec_len, vec_len_candidates))
-    if not vec_len_candidates:
+    # Find valid vector length
+    if n_elements % tx != 0:
         return None
-    vec_len = vec_len_candidates[0]
+    for vec_len in [16 // elem_size, 8 // elem_size, 4 // elem_size, 1]:
+        if vec_len > 0 and all(
+            analyzer.can_prove_equal(x % vec_len, 0)
+            for x in [
+                src_st[-1],
+                dst_st[-1],
+                src.shape[-1],
+                dst.shape[-1],
+                src_extent[-1],
+                dst_extent[-1],
+                n_elements // tx,
+            ]
+        ):
+            break
+    else:
+        return None
+
+    def get_indices(st, extent, fused):
+        indices = []
+        product = 1
+        for i in reversed(range(len(extent))):
+            indices.append(st[i] + (fused // product) % extent[i])
+            product *= extent[i]
+        return reversed(indices)
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -121,7 +126,9 @@ def copy_cuda_g2s_s2g_2d_sync_cta_vec_load(
             for tid_x in T.thread_binding(tx, "threadIdx.x"):
                 for vec in T.vectorized(vec_len):
                     fused = T.meta_var((s * tx + tid_x) * vec_len + vec)
-                    dst[dst_st[0] + fused // dst_extent[1], dst_st[1] + fused % dst_extent[1]] = src[src_st[0] + fused // src_extent[1], src_st[1] + fused % src_extent[1]]
+                    dst_indices = T.meta_var(get_indices(dst_st, dst_extent, fused))
+                    src_indices = T.meta_var(get_indices(src_st, src_extent, fused))
+                    dst[*dst_indices] = src[*src_indices]
         if dst.scope() == "shared":
             T.tvm_storage_sync("shared")
     # fmt: on

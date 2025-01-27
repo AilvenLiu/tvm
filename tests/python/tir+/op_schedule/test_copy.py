@@ -64,18 +64,18 @@ from tvm.script import tirp as Tp
             TileLayout.from_nested_tuple((32, 32)),  # layoutS
             tvm.cuda(0),
         ),
-        # ################ A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32] ################
-        # (
-        #     (4, 32, 32),  # g_shape
-        #     (32, 32),  # s_shape
-        #     (0, 0, 0),  # g_st
-        #     (1, 32, 32),  # g_extent
-        #     32,  # thread_cnt
-        #     TileLayout.from_nested_tuple((4, 32, 32)),  # layoutA
-        #     TileLayout.from_nested_tuple((4, 32, 32)),  # layoutB
-        #     TileLayout.from_nested_tuple((32, 32)),  # layoutS
-        #     tvm.cuda(0),
-        # ),
+        ################ A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32] ################
+        (
+            (4, 32, 32),  # g_shape
+            (32, 32),  # s_shape
+            (0, 0, 0),  # g_st
+            (1, 32, 32),  # g_extent
+            32,  # thread_cnt
+            TileLayout.from_nested_tuple((4, 32, 32)),  # layoutA
+            TileLayout.from_nested_tuple((4, 32, 32)),  # layoutB
+            TileLayout.from_nested_tuple((32, 32)),  # layoutS
+            tvm.cuda(0),
+        ),
     ],
 )
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
