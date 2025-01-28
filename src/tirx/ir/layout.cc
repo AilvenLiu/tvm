@@ -39,20 +39,19 @@ bool IsTrivialLayout(const TLayout& layout) {
   if (tile_layout == nullptr) {
     return false;
   }
-  if (tile_layout->device_tree.defined()) {
+  if (!tile_layout->device_iter_array.empty()) {
     return false;
   }
-  ICHECK(tile_layout->data_tree.defined()) << "InternalError: The data tree should be defined";
-  const auto& leaves = tile_layout->data_tree.GetLeaves();
-  ICHECK_EQ(leaves.size(), tile_layout->data_tree->coeff.size())
-      << "InternalError: The number of leaves and coefficients should be the same";
+  ICHECK(!tile_layout->data_iter_array.empty())
+      << "InternalError: The data iter array should be defined";
   arith::Analyzer ana;
   PrimExpr expected_stride = 1;
-  for (int i = leaves.size() - 1; i >= 0; --i) {
-    if (!ana.CanProveEqual(tile_layout->data_tree->coeff[i], expected_stride)) {
+  int data_iter_size = tile_layout->data_iter_array.size();
+  for (int i = data_iter_size - 1; i >= 0; --i) {
+    if (!ana.CanProveEqual(tile_layout->data_iter_array[i]->stride, expected_stride)) {
       return false;
     }
-    expected_stride = expected_stride * Downcast<IterTreeSplit>(leaves[i])->extent;
+    expected_stride = expected_stride * tile_layout->data_iter_array[i]->extent;
   }
   return true;
 }
@@ -60,6 +59,21 @@ bool IsTrivialLayout(const TLayout& layout) {
 TVM_REGISTER_GLOBAL("tirx.IsTrivialLayout").set_body_typed(IsTrivialLayout);
 
 /**************** TLayout ****************/
+bool TLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const {
+  arith::Analyzer analyzer;
+  return analyzer.CanProveEqual(FloorMod(ReduceMul(shape), this->GetSize()), 0);
+}
+
+PrimExpr TLayoutNode::Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const {
+  ICHECK_EQ(coord.size(), shape.size())
+      << "ValueError: The size of coord and shape should be equal";
+  PrimExpr flattened_coord = 0;
+  for (size_t i = 0; i < coord.size(); i++) {
+    flattened_coord = flattened_coord * shape[i] + coord[i];
+  }
+  return Apply(flattened_coord);
+}
+
 TVM_REGISTER_GLOBAL("tirx.TLayoutGetSize").set_body_typed([](TLayout layout) {
   return layout->GetSize();
 });
@@ -68,209 +82,30 @@ TVM_REGISTER_GLOBAL("tirx.TLayoutGetCosize").set_body_typed([](TLayout layout) {
   return layout->GetCosize();
 });
 
-TVM_REGISTER_GLOBAL("tirx.TLayoutApply").set_body_typed([](TLayout layout, Array<PrimExpr> coord) {
-  return layout->Apply(coord);
-});
-
-/**************** IterTree ****************/
-IterTreeSplit::IterTreeSplit(PrimExpr extent, Array<IterTreeBase> children) {
-  auto n = make_object<IterTreeSplitNode>();
-  n->extent = std::move(extent);
-  n->children = std::move(children);
-  data_ = std::move(n);
-}
-
-TVM_REGISTER_NODE_TYPE(IterTreeSplitNode);
-
-TVM_REGISTER_GLOBAL("tirx.IterTreeSplit")
-    .set_body_typed([](PrimExpr extent, Array<IterTreeBase> children) {
-      return IterTreeSplit(extent, children);
+TVM_REGISTER_GLOBAL("tirx.TLayoutApply")
+    .set_body_typed([](TLayout layout, Array<PrimExpr> coord, Array<PrimExpr> shape) {
+      return layout->Apply(coord, shape);
     });
 
-bool IterTreeSplit::IsLeaf() const { return this->get()->children.size() == 0; }
-
-Array<IterTreeBase> IterTreeSplit::GetLeaves() const {
-  std::vector<IterTreeBase> leaves;
-  std::function<void(const IterTreeBase&)> visit = [&](const IterTreeBase& node) {
-    if (auto* split = node.as<IterTreeSplitNode>()) {
-      if (GetRef<IterTreeSplit>(split).IsLeaf()) {
-        leaves.push_back(node);
-      }
-      for (const auto& child : split->children) {
-        visit(child);
-      }
-    } else {
-      LOG(FATAL) << "InternalError: Expect IterTreeSplit but get " << node->GetTypeKey();
-    }
-  };
-  visit(*this);
-  return Array<IterTreeBase>(leaves);
-}
-
-/**************** IterTree ****************/
-IterTree::IterTree(IterTreeSplit root) {
-  auto n = make_object<IterTreeNode>();
-  n->root = std::move(root);
+/**************** DataIterAttr ****************/
+DataIterAttr::DataIterAttr(PrimExpr extent, PrimExpr stride) {
+  auto n = make_object<DataIterAttrNode>();
+  n->extent = extent;
+  n->stride = stride;
   data_ = std::move(n);
 }
 
-TVM_REGISTER_NODE_TYPE(IterTreeNode);
+TVM_REGISTER_NODE_TYPE(DataIterAttrNode);
 
-TVM_REGISTER_GLOBAL("tirx.IterTree").set_body_typed([](IterTreeSplit root) {
-  return IterTree(root);
+TVM_REGISTER_GLOBAL("tirx.DataIterAttr").set_body_typed([](PrimExpr extent, PrimExpr stride) {
+  return DataIterAttr(extent, stride);
 });
-
-std::pair<IterTree, std::vector<IterTreeBase>> IterTreeFromTupleImpl(const ObjectRef& device) {
-  if (auto leaf_ptr = device.as<runtime::Int::ContainerType>()) {
-    auto leaf = leaf_ptr->value;
-    auto root = IterTreeSplit(IntImm(DataType::Int(32), leaf), {});
-    return {IterTree({root}), {root}};
-  }
-  auto tuple = device.as<ArrayNode>();
-  ICHECK(tuple != nullptr) << "ValueError: Expect a tuple while get " << device->GetTypeKey();
-
-  std::vector<IterTreeBase> children;
-  std::vector<IterTreeBase> leaves;
-  std::vector<PrimExpr> extents;
-  for (auto d : *tuple) {
-    auto [child, child_leaves] = IterTreeFromTupleImpl(d);
-    children.push_back(child->root);
-    leaves.insert(leaves.end(), child_leaves.begin(), child_leaves.end());
-    extents.push_back(child->root->extent);
-  }
-  auto root = IterTreeSplit(ReduceMul(extents), Array<IterTreeBase>(children));
-  return {IterTree(root), leaves};
-}
-
-Array<ObjectRef> IterTree::FromTuple(const ObjectRef& device) {
-  auto [tree, leaves] = IterTreeFromTupleImpl(device);
-  return {tree, Array<IterTreeBase>(leaves)};
-}
-
-TVM_REGISTER_GLOBAL("tirx.IterTreeFromTuple").set_body_typed(IterTree::FromTuple);
-
-Array<IterTreeBase> IterTree::GetLeaves() const { return this->get()->root.GetLeaves(); }
-
-IterTree::LeafIndexMap IterTree::GetLeafIndexMap(Optional<Array<IterTreeBase>> opt_leaves) const {
-  Array<IterTreeBase> leaves = opt_leaves.defined() ? opt_leaves.value() : GetLeaves();
-  LeafIndexMap leaf_to_index;
-  for (size_t i = 0; i < leaves.size(); i++) {
-    auto it = leaf_to_index.find(leaves[i]);
-    ICHECK(it == leaf_to_index.end()) << "ValueError: Duplicate leaf node in the tree";
-    leaf_to_index[leaves[i]] = i;
-  }
-  return std::move(leaf_to_index);
-}
-
-class IterTreeVisitor {
- public:
-  virtual ~IterTreeVisitor() = default;
-
-  virtual void Visit(const IterTreeBase& node) {
-    if (auto* split = node.as<IterTreeSplitNode>()) {
-      VisitIterSplit(split);
-    } else {
-      LOG(FATAL) << "InternalError: Expect IterTreeSplit but get " << node->GetTypeKey();
-    }
-  }
-
-  virtual void VisitIterSplit(const IterTreeSplitNode* node) = 0;
-};
-
-class IterTreeMutator {
- public:
-  virtual ~IterTreeMutator() = default;
-
-  virtual Optional<IterTreeBase> Visit(IterTreeBase node) {
-    if (auto* split = node.as<IterTreeSplitNode>()) {
-      return VisitIterSplit(split);
-    } else {
-      LOG(FATAL) << "InternalError: Expect IterTreeSplit but get " << node->GetTypeKey();
-      return IterTreeBase();
-    }
-  }
-
-  virtual Optional<IterTreeBase> VisitIterSplit(const IterTreeSplitNode* node) {
-    bool changed = false;
-    std::vector<IterTreeBase> new_children;
-    for (const auto& child : node->children) {
-      auto new_child = Visit(child);
-      if (new_child.defined()) {
-        new_children.push_back(new_child.value());
-        changed |= (!new_child.same_as(child));
-      } else {
-        changed = true;
-      }
-    }
-    if (changed) {
-      auto* n = GetRef<IterTreeSplit>(node).CopyOnWrite();
-      n->children = new_children;
-      return GetRef<IterTreeBase>(n);
-    } else {
-      return GetRef<IterTreeBase>(node);
-    }
-  }
-};
-
-class IterTreeVerifier : public IterTreeVisitor {
- public:
-  IterTreeVerifier() = default;
-
-  static bool VerifyWellFormed(const IterTreeBase& node) {
-    IterTreeVerifier verifier;
-    verifier.Visit(node);
-    return verifier.result_;
-  }
-
-  void VisitIterSplit(const IterTreeSplitNode* node) final {
-    if (node->children.empty()) return;
-    PrimExpr extent = 1;
-    for (const auto& child : node->children) {
-      this->Visit(child);
-      extent = extent * Downcast<IterTreeSplit>(child)->extent;
-    }
-    if (!ana_.CanProveEqual(extent, node->extent)) {
-      result_ = false;
-    }
-  }
-
- private:
-  bool result_{true};
-  arith::Analyzer ana_;
-};
-
-/**************** DataIterTree ****************/
-DataIterTree::DataIterTree(IterTreeSplit root, Array<PrimExpr> coeff) {
-  auto n = make_object<DataIterTreeNode>();
-  n->root = std::move(root);
-  n->coeff = std::move(coeff);
-  data_ = std::move(n);
-}
-
-TVM_REGISTER_NODE_TYPE(DataIterTreeNode);
-
-TVM_REGISTER_GLOBAL("tirx.DataIterTree")
-    .set_body_typed([](IterTreeSplit root, Array<PrimExpr> coeff) {
-      return DataIterTree(root, coeff);
-    });
-
-DataIterTree::CoeffMap DataIterTree::GetCoeffMap(Optional<Array<IterTreeBase>> opt_leaves) const {
-  auto leaves = opt_leaves.defined() ? opt_leaves.value() : GetLeaves();
-  ICHECK_EQ(leaves.size(), this->get()->coeff.size())
-      << "ValueError: The number of leaves and coefficients must be the same";
-  CoeffMap coeff_map;
-  for (size_t i = 0; i < leaves.size(); i++) {
-    auto it = coeff_map.find(leaves[i]);
-    ICHECK(it == coeff_map.end()) << "ValueError: Duplicate leaf node in the tree";
-    coeff_map[leaves[i]] = this->get()->coeff[i];
-  }
-  return std::move(coeff_map);
-}
 
 /**************** DeviceIterAttr ****************/
-DeviceIterAttr::DeviceIterAttr(ScopeIdType type, Optional<PrimExpr> bound,
+DeviceIterAttr::DeviceIterAttr(PrimExpr extent, ScopeIdType type, Optional<PrimExpr> bound,
                                Optional<PrimExpr> owner) {
   auto n = make_object<DeviceIterAttrNode>();
+  n->extent = extent;
   n->type = type;
   n->bound = bound;
   n->owner = owner;
@@ -280,16 +115,21 @@ DeviceIterAttr::DeviceIterAttr(ScopeIdType type, Optional<PrimExpr> bound,
 TVM_REGISTER_NODE_TYPE(DeviceIterAttrNode);
 
 TVM_REGISTER_GLOBAL("tirx.DeviceIterAttr")
-    .set_body_typed([](int type, Optional<PrimExpr> bound, Optional<PrimExpr> owner) {
-      return DeviceIterAttr(static_cast<ScopeIdType>(type), bound, owner);
+    .set_body_typed([](PrimExpr extent, int type, Optional<PrimExpr> bound,
+                       Optional<PrimExpr> owner) {
+      return DeviceIterAttr(extent, static_cast<ScopeIdType>(type), bound, owner);
     });
 
-DeviceIterAttr DeviceIterAttr::Replicate() { return DeviceIterAttr(kReplicate, NullOpt, NullOpt); }
+DeviceIterAttr DeviceIterAttr::Replicate(PrimExpr extent) {
+  return DeviceIterAttr(extent, kReplicate, NullOpt, NullOpt);
+}
 
-DeviceIterAttr DeviceIterAttr::Split(PrimExpr bound) { return DeviceIterAttr(kSplit, bound); }
+DeviceIterAttr DeviceIterAttr::Split(PrimExpr extent, PrimExpr bound) {
+  return DeviceIterAttr(extent, kSplit, bound);
+}
 
-DeviceIterAttr DeviceIterAttr::Exclusive(PrimExpr owner) {
-  return DeviceIterAttr(kExclusive, NullOpt, owner);
+DeviceIterAttr DeviceIterAttr::Exclusive(PrimExpr extent, PrimExpr owner) {
+  return DeviceIterAttr(extent, kExclusive, NullOpt, owner);
 }
 
 bool DeviceIterAttr::IsReplicate() const { return this->get()->type == kReplicate; }
@@ -307,169 +147,70 @@ size_t DeviceIterAttr::GetIntBound() const {
   return n->value;
 }
 
-/**************** DeviceIterTree ****************/
-DeviceIterTree::DeviceIterTree(IterTreeSplit root, Array<DeviceIterAttr> attrs) {
-  auto n = make_object<DeviceIterTreeNode>();
-  n->root = std::move(root);
-  n->attrs = std::move(attrs);
-  data_ = std::move(n);
-}
-
-TVM_REGISTER_NODE_TYPE(DeviceIterTreeNode);
-
-TVM_REGISTER_GLOBAL("tirx.DeviceIterTree")
-    .set_body_typed([](IterTreeSplit root, Array<DeviceIterAttr> attrs) {
-      return DeviceIterTree(root, attrs);
-    });
-
-DeviceIterTree::AttrMap DeviceIterTree::GetAttrMap(Optional<Array<IterTreeBase>> opt_leaves) const {
-  auto leaves = opt_leaves.defined() ? opt_leaves.value() : GetLeaves();
-  ICHECK_EQ(leaves.size(), this->get()->attrs.size())
-      << "ValueError: The number of leaves and attributes must be the same";
-  AttrMap attr_map;
-  for (size_t i = 0; i < leaves.size(); i++) {
-    auto it = attr_map.find(leaves[i]);
-    ICHECK(it == attr_map.end()) << "ValueError: Duplicate leaf node in the tree";
-    attr_map[leaves[i]] = this->get()->attrs[i];
+PrimExpr TileLayoutNode::GetSize() const {
+  PrimExpr result = data_iter_array[0]->extent;
+  for (size_t i = 1; i < data_iter_array.size(); i++) {
+    result = result * data_iter_array[i]->extent;
   }
-  return std::move(attr_map);
+  return result;
 }
-
-/**************** TileLayout ****************/
-Array<PrimExpr> TileLayoutNode::GetDefaultShape() const {
-  std::vector<PrimExpr> shape;
-  for (const auto& child : this->data_tree->root->children) {
-    shape.push_back(Downcast<IterTreeSplit>(child)->extent);
-  }
-  return Array<PrimExpr>(shape);
-}
-
-bool TileLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const {
-  arith::Analyzer analyzer;
-  return analyzer.CanProveEqual(FloorMod(ReduceMul(shape), this->GetSize()), 0);
-}
-
-PrimExpr TileLayoutNode::GetSize() const { return this->data_tree->root->extent; }
 
 PrimExpr TileLayoutNode::GetCosize() const {
-  auto data_leaves = this->data_tree.GetLeaves();
-  auto split_map = GetRef<TileLayout>(this).GetSplitMap(data_leaves);
+  auto split_map = GetRef<TileLayout>(this).GetSplitMap();
   arith::Analyzer analyzer;
   PrimExpr cosize = 1;
-  for (size_t i = 0; i < data_leaves.size(); ++i) {
-    if (split_map.find(data_leaves[i]) != split_map.end()) {
+  for (size_t i = 0; i < data_iter_array.size(); ++i) {
+    if (split_map.find(i) != split_map.end()) {
       continue;
     }
     // Check if the coefficient is non-negative
-    ICHECK(analyzer.CanProveGreaterEqual(this->data_tree->coeff[i], 0))
-        << "ValueError: The coefficient of a non-bound leaf must be non-negative";
-    cosize += this->data_tree->coeff[i] * (Downcast<IterTreeSplit>(data_leaves[i])->extent - 1);
+    ICHECK(analyzer.CanProveGreaterEqual(data_iter_array[i]->stride, 0))
+        << "ValueError: GetCosize cannot handle case where the coefficient of a non-bound leaf is "
+           "negative";
+    cosize += data_iter_array[i]->stride * (data_iter_array[i]->extent - 1);
   }
   return cosize;
 }
 
 bool TileLayoutNode::VerifyWellFormed() const {
   arith::Analyzer analyzer;
-  // Verify the data tree
-  bool result = IterTreeVerifier::VerifyWellFormed(data_tree->root);
-  if (device_tree.defined()) {
-    // Verify the device tree if it is defined
-    result &= IterTreeVerifier::VerifyWellFormed(device_tree.value()->root);
-  }
   // Verify the split map
-  auto data_leaves = data_tree.GetLeaves();
-  const auto& split_map = GetRef<TileLayout>(this).GetSplitMap(data_leaves);
+  const auto& split_map = GetRef<TileLayout>(this).GetSplitMap();
+  bool result = true;
   for (const auto& kv : split_map) {
-    ICHECK(analyzer.CanProveEqual(Downcast<IterTreeSplit>(kv.first)->extent,
-                                  Downcast<IterTreeSplit>(kv.second)->extent))
-        << "ValueError: The extents of the data and device leaves must be the same";
-  }
-  // Verify coefficients are non-negative for non-bound leaves in the data tree
-  const auto& coeff_map = data_tree.GetCoeffMap(data_leaves);
-  for (const auto& kv : coeff_map) {
-    auto it = split_map.find(kv.first);
-    if (it == split_map.end()) {
-      ICHECK(analyzer.CanProveGreaterEqual(kv.second, 0))
-          << "ValueError: The coefficient of a non-bound leaf must be non-negative";
-    }
+    // The extents of the data and device iter array must be the same
+    result &= analyzer.CanProveEqual(data_iter_array[kv.first]->extent,
+                                     device_iter_array[kv.second]->extent);
   }
   return result;
 }
 
-class TileLayoutApplier : public IterTreeVisitor {
- public:
-  static Array<PrimExpr> Apply(PrimExpr input, IterTree data_tree) {
-    TileLayoutApplier applier(input);
-    applier.Visit(data_tree->root);
-    std::reverse(applier.result_.begin(), applier.result_.end());
-    return std::move(applier.result_);
-  }
-
-  explicit TileLayoutApplier(PrimExpr input) : cur_input_{input}, result_{} {}
-
-  void VisitIterSplit(const IterTreeSplitNode* node) final {
-    if (node->children.empty()) {
-      result_.push_back(cur_input_);
-      return;
-    }
-    for (int i = node->children.size() - 1; i >= 0; i--) {
-      auto* child = node->children[i].as<IterTreeSplitNode>();
-      ICHECK(child != nullptr) << "InternalError: Expect IterTreeSplit but get "
-                               << node->children[i]->GetTypeKey();
-      PrimExpr tmp = FloorDiv(cur_input_, child->extent);
-      cur_input_ = FloorMod(cur_input_, child->extent);
-      VisitIterSplit(child);
-      cur_input_ = tmp;
-    }
-  }
-
- private:
-  PrimExpr cur_input_;
-  std::vector<PrimExpr> result_;
-};
-
-PrimExpr TileLayoutNode::Apply(const Array<PrimExpr>& coord) const {
-  PrimExpr input;
+PrimExpr TileLayoutNode::Apply(const PrimExpr& coord) const {
   arith::Analyzer analyzer;
-  if (coord.size() == 1) {
-    input = coord[0];
-  } else {
-    const auto& shape = GetDefaultShape();
-    ICHECK_EQ(coord.size(), shape.size())
-        << "ValueError: The number of coordinates must be the same as the number of dimensions";
-    input = 0;
-    for (size_t i = 0; i < coord.size(); i++) {
-      input = input * shape[i] + coord[i];
-    }
-  }
-  input = analyzer.Simplify(input);
+  PrimExpr input = analyzer.Simplify(coord);
   const auto& size = GetSize();
   const auto& cosize = GetCosize();
-  const auto& inner = analyzer.Simplify(floormod(input, size));
+  auto inner = analyzer.Simplify(floormod(input, size));
   const auto& outer = analyzer.Simplify(floordiv(input, size));
 
-  auto data_leaves = this->data_tree.GetLeaves();
-  auto leaf_coord = TileLayoutApplier::Apply(input, this->data_tree);
-
-  ICHECK_EQ(leaf_coord.size(), data_leaves.size())
-      << "ValueError: The number of coordinates must be the same as the number of leaves";
-  auto split_map = GetRef<TileLayout>(this).GetSplitMap(data_leaves);
+  auto split_map = GetRef<TileLayout>(this).GetSplitMap();
   PrimExpr result = 0;
-  for (size_t i = 0; i < leaf_coord.size(); i++) {
-    if (split_map.find(data_leaves[i]) != split_map.end()) {
+  for (int i = static_cast<int>(data_iter_array.size()) - 1; i >= 0; i--) {
+    if (split_map.find(i) != split_map.end()) {
       continue;
     }
-    result += leaf_coord[i] * this->data_tree->coeff[i];
+    result += data_iter_array[i]->stride * floormod(inner, data_iter_array[i]->extent);
+    inner = floordiv(inner, data_iter_array[i]->extent);
   }
   return analyzer.Simplify(outer * cosize + result);
 }
 
 /**************** TileLayout ****************/
-TileLayout::TileLayout(DataIterTree data_tree, Optional<DeviceIterTree> device_tree,
+TileLayout::TileLayout(Array<DataIterAttr> data_iter_array, Array<DeviceIterAttr> device_iter_array,
                        Optional<ExecScope> from, Optional<ExecScope> to) {
   auto n = make_object<TileLayoutNode>();
-  n->data_tree = std::move(data_tree);
-  n->device_tree = std::move(device_tree);
+  n->data_iter_array = std::move(data_iter_array);
+  n->device_iter_array = std::move(device_iter_array);
   n->from = std::move(from);
   n->to = std::move(to);
   if (n->from.defined()) {
@@ -483,89 +224,27 @@ TileLayout::TileLayout(DataIterTree data_tree, Optional<DeviceIterTree> device_t
 TVM_REGISTER_NODE_TYPE(TileLayoutNode);
 
 TVM_REGISTER_GLOBAL("tirx.TileLayout")
-    .set_body_typed([](DataIterTree data_tree, Optional<DeviceIterTree> device_tree,
+    .set_body_typed([](Array<DataIterAttr> data_iter_array, Array<DeviceIterAttr> device_iter_array,
                        Optional<ExecScope> from, Optional<ExecScope> to) {
-      return TileLayout(data_tree, device_tree, from, to);
+      return TileLayout(data_iter_array, device_iter_array, from, to);
     });
 
-TileLayout TileLayout::FromMaps(IterTreeSplit data_root, Optional<IterTreeSplit> device_root,
-                                const DataIterTree::CoeffMap& coeff_map,
-                                const DeviceIterTree::AttrMap& attr_map, const SplitMap& split_map,
-                                Optional<ExecScope> from, Optional<ExecScope> to) {
-  // Construct the coefficient array
-  std::vector<PrimExpr> coeff;
-  auto data_leaves = data_root.GetLeaves();
-  ICHECK_EQ(data_leaves.size(), coeff_map.size())
-      << "ValueError: The number of leaves and coefficients must be the same";
-  for (const auto& leaf : data_leaves) {
-    auto it = coeff_map.find(leaf);
-    ICHECK(it != coeff_map.end()) << "ValueError: The coefficient of the leaf is not found";
-    coeff.push_back(it->second);
-  }
-  DataIterTree data_tree(data_root, Array<PrimExpr>(coeff));
-  if (!device_root.defined()) {
-    ICHECK(attr_map.empty() && split_map.empty())
-        << "ValueError: The attribute map and split map must be empty";
-    // Only data tree
-    return TileLayout(data_tree);
-  } else {
-    // Get the inverse split map
-    SplitMap inv_split_map;
-    for (const auto& kv : split_map) {
-      ICHECK(inv_split_map.find(kv.second) == inv_split_map.end())
-          << "ValueError: A device leaf is mapped to multiple data leaves";
-      inv_split_map[kv.second] = kv.first;
-    }
-    // Construct the new device attrs array
-    auto data_leaf2idx = data_tree.GetLeafIndexMap(data_leaves);
-    std::vector<DeviceIterAttr> attrs;
-    auto device_leaves = device_root.value().GetLeaves();
-    ICHECK_EQ(device_leaves.size(), attr_map.size())
-        << "InternalError: The number of leaves and attributes must be the same";
-    for (const auto& leaf : device_leaves) {
-      auto it = attr_map.find(leaf);
-      ICHECK(it != attr_map.end()) << "ValueError: The attribute of the leaf is not found";
-      if (it->second.IsSplit()) {
-        auto split_it = inv_split_map.find(leaf);
-        ICHECK(split_it != inv_split_map.end())
-            << "InternalEror: A device leaf with Split attr is not mapped to any data leaf";
-        auto data_it = data_leaf2idx.find(split_it->second);
-        ICHECK(data_it != data_leaf2idx.end())
-            << "InternalError: A data leaf is not found in the data tree";
-        attrs.push_back(DeviceIterAttr::Split(data_it->second));
-      } else {
-        attrs.push_back(it->second);
-      }
-    }
-    DeviceIterTree device_tree(device_root.value(), Array<DeviceIterAttr>(attrs));
-    return TileLayout(data_tree, device_tree, from, to);
-  }
-}
-
-TileLayout::SplitMap TileLayout::GetSplitMap(
-    Optional<Array<IterTreeBase>> opt_data_leaves,
-    Optional<Array<IterTreeBase>> opt_device_leaves) const {
+TileLayout::SplitMap TileLayout::GetSplitMap() const {
   auto* n = operator->();
-  auto data_leaves = opt_data_leaves.defined() ? opt_data_leaves.value() : n->data_tree.GetLeaves();
-  if (!n->device_tree.defined()) {
-    // No device tree is defined, return an empty map
+  if (n->device_iter_array.empty()) {
+    // No device array is defined, return an empty map
     return {};
   }
-  const auto& device_tree = n->device_tree.value();
-  auto device_leaves =
-      opt_device_leaves.defined() ? opt_device_leaves.value() : device_tree.GetLeaves();
-  ICHECK_EQ(n->device_tree.value()->attrs.size(), device_leaves.size())
-      << "ValueError: The number of leaves and attributes must be the same for the device tree";
   SplitMap split_map;
-  for (size_t i = 0; i < device_leaves.size(); i++) {
-    auto it = split_map.find(device_leaves[i]);
-    ICHECK(it == split_map.end()) << "ValueError: Duplicate leaf node in the tree";
-    auto attr = device_tree->attrs[i];
+  for (size_t i = 0; i < n->device_iter_array.size(); i++) {
+    auto attr = n->device_iter_array[i];
     if (attr.IsSplit()) {
       size_t bound = attr.GetIntBound();
-      ICHECK(bound < data_leaves.size())
+      ICHECK(bound < n->data_iter_array.size())
           << "ValueError: The bound of the split attribute is out of range";
-      split_map[data_leaves[bound]] = device_leaves[i];
+      auto it = split_map.find(bound);
+      ICHECK(it == split_map.end()) << "ValueError: Duplicate split bound for the same data iter";
+      split_map[bound] = i;
     }
   }
   return std::move(split_map);
@@ -573,1271 +252,461 @@ TileLayout::SplitMap TileLayout::GetSplitMap(
 
 /******** Normalization ********/
 
-using NodeSet = std::unordered_set<IterTreeBase, ObjectPtrHash, ObjectPtrEqual>;
-
-class DeepCopyMutator : public IterTreeMutator {
- public:
-  static IterTreeBase DeepCopy(const IterTreeBase& node) {
-    auto res = DeepCopyMutator().Visit(node);
-    ICHECK(res.defined()) << "InternalError: The result should not be null";
-    return res.value();
-  }
-
-  Optional<IterTreeBase> VisitIterSplit(const IterTreeSplitNode* node) final {
-    std::vector<IterTreeBase> new_children;
-    for (const auto& child : node->children) {
-      auto new_child = Visit(child);
-      ICHECK(new_child.defined()) << "InternalError: The child should not be null";
-      new_children.push_back(new_child.value());
+TileLayout SimplifyTileLayout(TileLayout layout) {
+  arith::Analyzer analyzer;
+  Array<DataIterAttr> new_data_iter_array;
+  auto split_map = layout.GetSplitMap();
+  for (const auto& data_iter : layout->data_iter_array) {
+    PrimExpr new_extent = analyzer.Simplify(data_iter->extent);
+    PrimExpr new_stride = analyzer.Simplify(data_iter->stride);
+    if (split_map.find(new_data_iter_array.size()) != split_map.end()) {
+      new_stride = -1;
     }
-    return IterTreeSplit(node->extent, Array<IterTreeBase>(new_children));
+    new_data_iter_array.push_back(DataIterAttr(new_extent, new_stride));
   }
-};
-
-class DeduplicateMutator : public IterTreeMutator {
- public:
-  explicit DeduplicateMutator(NodeSet* node_set = nullptr) : node_set_(node_set) {}
-
-  static IterTreeBase Deduplicate(const IterTreeBase& node, NodeSet* node_set) {
-    auto res = DeduplicateMutator(node_set).Visit(node);
-    ICHECK(res.defined()) << "InternalError: The result should not be null";
-    return res.value();
+  Array<DeviceIterAttr> new_device_iter_array;
+  for (const auto& device_iter : layout->device_iter_array) {
+    PrimExpr new_extent = analyzer.Simplify(device_iter->extent);
+    new_device_iter_array.push_back(
+        DeviceIterAttr(new_extent, device_iter->type, device_iter->bound, device_iter->owner));
   }
+  return TileLayout(new_data_iter_array, new_device_iter_array, layout->from, layout->to);
+}
 
-  Optional<IterTreeBase> VisitIterSplit(const IterTreeSplitNode* node) final {
-    if (node_set_->count(GetRef<IterTreeBase>(node)) != 0) {
-      return DeepCopyMutator::DeepCopy(GetRef<IterTreeBase>(node));
+void FuseNeighborShardAxis(TileLayout layout, std::unordered_set<int>* fused_data_iters,
+                           std::unordered_set<int>* fused_device_iters) {
+  // if both (i, j) and (i+1, j+1) exist in the split map, then we can fuse them
+  auto split_map = layout.GetSplitMap();
+  for (auto it = split_map.begin(); it != split_map.end(); it++) {
+    auto other_it = split_map.find(it->first + 1);
+    if (other_it != split_map.end() && other_it->second == it->second + 1) {
+      fused_data_iters->insert(it->first);
+      fused_device_iters->insert(it->second);
     }
-    node_set_->insert(GetRef<IterTreeBase>(node));
-    bool changed = false;
-    std::vector<IterTreeBase> new_children;
-    for (const auto& child : node->children) {
-      auto new_child = Visit(child);
-      ICHECK(new_child.defined()) << "InternalError: The child should not be null";
-      new_children.push_back(new_child.value());
-      changed |= (!new_children.back().same_as(child));
-    }
-    if (changed) {
-      auto* n = GetRef<IterTreeSplit>(node).CopyOnWrite();
-      n->children = new_children;
-      return GetRef<IterTreeBase>(n);
-    } else {
-      return GetRef<IterTreeBase>(node);
-    }
-  }
-
- private:
-  NodeSet* node_set_;
-};
-
-template <typename T>
-T DeduplicateTree(T tree, NodeSet* visited) {
-  auto new_root = DeduplicateMutator::Deduplicate(tree->root, visited);
-  if (!new_root.same_as(tree->root)) {
-    auto n = make_object<typename T::ContainerType>(*(tree.operator->()));
-    n->root = Downcast<IterTreeSplit>(new_root);
-    return T(n);
-  } else {
-    return tree;
   }
 }
 
-std::vector<ObjectRef> Deduplicate(std::vector<ObjectRef> inputs) {
-  std::unordered_set<IterTreeBase, ObjectPtrHash, ObjectPtrEqual> visited;
-
-  std::vector<ObjectRef> res;
-  for (auto& input : inputs) {
-    if (auto opt_layout = input.as<TileLayout>()) {
-      auto layout = opt_layout.value();
-      auto data_tree = DeduplicateTree<DataIterTree>(layout->data_tree, &visited);
-      if (!layout->device_tree.defined()) {
-        // Only data tree is defined
-        if (data_tree.same_as(layout->data_tree)) {
-          res.push_back(layout);
-        } else {
-          auto* n = layout.CopyOnWrite();
-          n->data_tree = data_tree;
-          res.push_back(GetRef<TileLayout>(n));
-        }
-      } else {
-        // Both data tree and device tree are defined
-        auto device_tree = DeduplicateTree<DeviceIterTree>(layout->device_tree.value(), &visited);
-        if (data_tree.same_as(layout->data_tree) &&
-            device_tree.same_as(layout->device_tree.value())) {
-          res.push_back(layout);
-        } else {
-          auto* n = layout.CopyOnWrite();
-          n->data_tree = Downcast<DataIterTree>(data_tree);
-          n->device_tree = Downcast<DeviceIterTree>(device_tree);
-          res.push_back(GetRef<TileLayout>(n));
-        }
-      }
-    } else if (auto opt_iter_tree = input.as<DataIterTree>()) {
-      res.push_back(DeduplicateTree<DataIterTree>(opt_iter_tree.value(), &visited));
-    } else if (auto opt_iter_tree = input.as<DeviceIterTree>()) {
-      res.push_back(DeduplicateTree<DeviceIterTree>(opt_iter_tree.value(), &visited));
-    } else if (auto opt_iter_tree = input.as<IterTree>()) {
-      res.push_back(DeduplicateTree<IterTree>(opt_iter_tree.value(), &visited));
-    } else {
-      LOG(FATAL) << "InternalError: Expect TileLayout or IterTree but get " << input->GetTypeKey();
+void FuseEquivDataIter(TileLayout layout, std::unordered_set<int>* fused_data_iters,
+                       std::unordered_set<int>* fused_device_iters) {
+  // if the stride of data(i) is equal to the extent of data(i+1) times the stride of data(i+1),
+  // then fuse them
+  arith::Analyzer analyzer;
+  auto split_map = layout.GetSplitMap();
+  for (int i = 0; i < static_cast<int>(layout->data_iter_array.size()) - 1; i++) {
+    if (split_map.find(i) != split_map.end()) {
+      continue;
     }
-  }
-  return std::move(res);
-}
-
-class UnitIterRemover : public IterTreeMutator {
- public:
-  explicit UnitIterRemover(bool is_data, DataIterTree::CoeffMap* coeff_map,
-                           DeviceIterTree::AttrMap* attr_map = nullptr,
-                           TileLayout::SplitMap* split_map = nullptr)
-      : is_data_(is_data), coeff_map_(coeff_map), attr_map_(attr_map), split_map_(split_map) {}
-
-  static Optional<IterTreeSplit> RemoveUnitIter(IterTreeBase root, bool is_data,
-                                                DataIterTree::CoeffMap* coeff_map,
-                                                DeviceIterTree::AttrMap* attr_map = nullptr,
-                                                TileLayout::SplitMap* split_map = nullptr) {
-    auto res = UnitIterRemover(is_data, coeff_map, attr_map, split_map).Visit(root);
-    return res.as<IterTreeSplit>();
-  }
-
-  Optional<IterTreeBase> VisitIterSplit(const IterTreeSplitNode* node) final {
-    auto root = GetRef<IterTreeSplit>(node);
-    if (root.IsLeaf()) {
-      if (is_one(root->extent)) {
-        if (is_data_) {
-          // Clear the coeff in data tree
-          coeff_map_->erase(root);
-          if (attr_map_ != nullptr) {
-            // Clear the attr in device tree
-            ICHECK(split_map_ != nullptr) << "InternalError: The split map should be defined";
-            auto dev_it = split_map_->find(root);
-            if (dev_it != split_map_->end()) {
-              split_map_->erase(dev_it);
-            }
-          }
-        } else {
-          attr_map_->erase(root);
-        }
-        // remove this iter
-        return NullOpt;
-      } else {
-        return root;
-      }
-    } else {
-      bool changed = false;
-      std::vector<IterTreeBase> new_children;
-      for (const auto& child : root->children) {
-        bool is_root_cur = is_root_;
-        is_root_ = false;
-        auto new_child = Visit(child);
-        is_root_ = is_root_cur;
-        if (new_child.defined()) {
-          new_children.push_back(new_child.value());
-          changed |= (!new_child.same_as(child));
-        } else {
-          changed = true;
-        }
-      }
-      // Case 1: all children are removed
-      if (new_children.size() == 0) {
-        ICHECK(is_one(root->extent)) << "InternalError: The extent of the root should be 1";
-        if (!is_root_) {
-          return NullOpt;
-        } else {
-          // return root -> 1
-          auto unit = IterTreeSplit(1, {});
-          if (is_data_) {
-            coeff_map_->insert({unit, 1});
-            auto* n = root.CopyOnWrite();
-            n->children = {unit};
-            return GetRef<IterTreeBase>(n);
-          } else {
-            attr_map_->insert({unit, DeviceIterAttr::Replicate()});
-          }
-          auto* n = root.CopyOnWrite();
-          n->children = {unit};
-          return GetRef<IterTreeBase>(n);
-        }
-      }
-      // Case 2: only one child is kept and the node is not root
-      if (new_children.size() == 1 && !is_root_) {
-        const auto& split = new_children[0].as<IterTreeSplit>();
-        ICHECK(split != nullptr) << "InternalError: Expect IterTreeSplit but get "
-                                 << new_children[0]->GetTypeKey();
-        return split.value();
-      }
-      // Case 3: multiple children are kept or the node is root
-      if (changed) {
-        auto* n = root.CopyOnWrite();
-        n->children = new_children;
-        return GetRef<IterTreeBase>(n);
-      } else {
-        return root;
-      }
+    PrimExpr this_stride = layout->data_iter_array[i]->stride;
+    PrimExpr next_extent = layout->data_iter_array[i + 1]->extent;
+    PrimExpr next_stride = layout->data_iter_array[i + 1]->stride;
+    if (analyzer.CanProveEqual(this_stride, next_extent * next_stride)) {
+      fused_data_iters->insert(i);
     }
-  }
-
- private:
-  bool is_data_;
-  bool is_root_{true};
-  DataIterTree::CoeffMap* coeff_map_;
-  DeviceIterTree::AttrMap* attr_map_;
-  TileLayout::SplitMap* split_map_;
-};
-
-TileLayout RemoveUnitIter(TileLayout layout) {
-  const auto& data_tree = layout->data_tree;
-  const auto& data_leaves = data_tree.GetLeaves();
-  DataIterTree::CoeffMap coeff_map = data_tree.GetCoeffMap(data_leaves);
-  if (!layout->device_tree.defined()) {
-    // Only data tree is defined
-
-    auto new_data_root = UnitIterRemover::RemoveUnitIter(data_tree->root, true, &coeff_map);
-    ICHECK(new_data_root.defined()) << "InternalError: The data tree should be defined";
-    ICHECK_GT(new_data_root.value()->children.size(), 0)
-        << "InternalError: The root of the data tree should have at least one child";
-    return TileLayout::FromMaps(new_data_root.value(), NullOpt, coeff_map, {}, {});
-  } else {
-    // Both data tree and device tree are defined
-    const auto& dev_tree = layout->device_tree.value();
-    const auto& dev_leaves = dev_tree.GetLeaves();
-    DeviceIterTree::AttrMap attr_map = dev_tree.GetAttrMap(dev_leaves);
-    TileLayout::SplitMap split_map = layout.GetSplitMap(data_leaves, dev_leaves);
-
-    auto new_data_root =
-        UnitIterRemover::RemoveUnitIter(data_tree->root, true, &coeff_map, &attr_map, &split_map);
-    auto new_dev_root =
-        UnitIterRemover::RemoveUnitIter(dev_tree->root, false, &coeff_map, &attr_map, &split_map);
-    ICHECK(new_data_root.defined() && new_dev_root.defined())
-        << "InternalError: The data tree and device tree should be both defined";
-    return TileLayout::FromMaps(new_data_root.value(), new_dev_root.value(), coeff_map, attr_map,
-                                split_map, layout->from, layout->to);
   }
 }
 
-class EquivIterFuser : public IterTreeMutator {
- public:
-  explicit EquivIterFuser(bool only_data, DataIterTree::CoeffMap* coeff_map,
-                          DeviceIterTree::AttrMap* attr_map = nullptr,
-                          TileLayout::SplitMap* split_map = nullptr,
-                          const DeviceIterTree* dev_tree = nullptr)
-      : only_data_(only_data),
-        coeff_map_(coeff_map),
-        attr_map_(attr_map),
-        split_map_(split_map),
-        dev_tree_(dev_tree),
-        ana_() {}
-
-  static Optional<IterTreeSplit> FuseEquivIter(IterTreeBase root, bool only_data,
-                                               DataIterTree::CoeffMap* coeff_map,
-                                               DeviceIterTree::AttrMap* attr_map = nullptr,
-                                               TileLayout::SplitMap* split_map = nullptr,
-                                               const DeviceIterTree* dev_tree = nullptr) {
-    auto res = EquivIterFuser(only_data, coeff_map, attr_map, split_map, dev_tree).Visit(root);
-    return res.as<IterTreeSplit>();
+void EliminateUnitIter(TileLayout layout, std::unordered_set<int>* fused_data_iters,
+                       std::unordered_set<int>* fused_device_iters) {
+  // if the extent of data(i) is 1, then fuse it
+  for (int i = 0; i < static_cast<int>(layout->data_iter_array.size()); i++) {
+    if (is_one(layout->data_iter_array[i]->extent)) {
+      fused_data_iters->insert(i);
+    }
   }
-
-  PrimExpr ComputeGCD(PrimExpr a, PrimExpr b, arith::Analyzer* ana) {
-    while (!ana->CanProveEqual(b, 0)) {
-      PrimExpr temp = b;
-      b = floormod(a, b);
-      a = temp;
+  for (int i = 0; i < static_cast<int>(layout->device_iter_array.size()); i++) {
+    if (is_one(layout->device_iter_array[i]->extent)) {
+      fused_device_iters->insert(i);
     }
-    return a;
   }
+}
 
-  bool CheckEquiv(PrimExpr a, PrimExpr b, arith::Analyzer* ana) { return ana->CanProveEqual(a, b); }
-
-  IterTreeSplit* Check_device_adjacent(const IterTreeBase& device1, const IterTreeBase& device2,
-                                       IterTreeSplit* dev_node) {
-    if (dev_node->IsLeaf()) {
-      return nullptr;
+TileLayout FuseIters(TileLayout layout, std::unordered_set<int> fused_data_iters,
+                     std::unordered_set<int> fused_device_iters) {
+  Array<DataIterAttr> new_data_iter_array;
+  std::unordered_map<int, int> data_index_map;
+  PrimExpr fused_extent = 1;
+  for (int i = 0; i < static_cast<int>(layout->data_iter_array.size()); i++) {
+    fused_extent = fused_extent * layout->data_iter_array[i]->extent;
+    if (fused_data_iters.find(i) != fused_data_iters.end()) {
+      continue;
     }
-    // add recursive check for device leaf nodes
-    tvm::tirx::IterTreeSplit* curr_res = nullptr;
-    std::vector<IterTreeBase> dev_children;
-    for (const auto& child : (*dev_node)->children) {
-      // recursively check all device leaf nodes
-      auto* child_node = child.as<IterTreeSplitNode>();
-      auto input_child_node = GetRef<IterTreeSplit>(child_node);
-      auto new_curr_res = Check_device_adjacent(device1, device2, &input_child_node);
-      ICHECK(!(curr_res != nullptr && new_curr_res != nullptr))
-          << "InternalError: device nodes can only be fused once!";
-      curr_res = new_curr_res == nullptr ? curr_res : new_curr_res;
-      dev_children.push_back(((Optional<IterTreeBase>)input_child_node).value());
+    DataIterAttr new_data_attr = DataIterAttr(fused_extent, layout->data_iter_array[i]->stride);
+    new_data_iter_array.push_back(new_data_attr);
+    fused_extent = 1;
+    data_index_map[i] = new_data_iter_array.size() - 1;
+  }
+  if (new_data_iter_array.empty()) {
+    new_data_iter_array.push_back(DataIterAttr(1, 1));
+  }
+  Array<DeviceIterAttr> new_device_iter_array;
+  PrimExpr fused_device_extent = 1;
+  for (int i = 0; i < static_cast<int>(layout->device_iter_array.size()); i++) {
+    fused_device_extent = fused_device_extent * layout->device_iter_array[i]->extent;
+    if (fused_device_iters.find(i) != fused_device_iters.end()) {
+      continue;
     }
-    if (curr_res == nullptr) {
-      for (int i = (int)dev_children.size() - 1; i >= 1; --i) {
-        const auto& dev_child1 = Downcast<IterTreeSplit>(dev_children[i]);
-        const auto& dev_child2 = Downcast<IterTreeSplit>(dev_children[i - 1]);
-        if (dev_child1.defined() && dev_child2.defined() && dev_child1.IsLeaf() &&
-            dev_child2.IsLeaf() && dev_child1.same_as(device1) && dev_child2.same_as(device2)) {
-          // Fuse device 1 and device 2 to one device leaf node with the new extent equal to
-          // the product of the two
-          auto new_extent = dev_child1->extent * dev_child2->extent;
-          curr_res = new IterTreeSplit();
-          *curr_res = IterTreeSplit(new_extent, {});
-          // Replace the old dev_child1 and dev_child2 with *curr_res
-          dev_children.erase(dev_children.begin() + i);
-          dev_children[i - 1] = GetRef<IterTreeBase>((*curr_res).get());
-          auto* n = (*dev_node).CopyOnWrite();
-          n->children = dev_children;
-          return curr_res;
-        }
-      }
+    DeviceIterAttr old_device_attr = layout->device_iter_array[i];
+    int bound = -1;
+    if (old_device_attr.IsSplit()) {
+      bound = data_index_map[old_device_attr.GetIntBound()];
+      new_device_iter_array.push_back(DeviceIterAttr::Split(fused_device_extent, bound));
     } else {
-      // If changed at the bottom, update children at the top recursively
-      auto* n = (*dev_node).CopyOnWrite();
-      n->children = dev_children;
-      return curr_res;
+      new_device_iter_array.push_back(DeviceIterAttr(fused_device_extent, old_device_attr->type,
+                                                     old_device_attr->bound,
+                                                     old_device_attr->owner));
     }
-    return curr_res;
+    fused_device_extent = 1;
   }
-
-  Optional<IterTreeBase> VisitIterSplit(const IterTreeSplitNode* node) final {
-    auto root = GetRef<IterTreeSplit>(node);
-    if (only_data_) {
-      if (root.IsLeaf()) {
-        // if it's a leaf, keep it
-        return root;
-      } else {
-        // if it's a node, use bottom-up recursion
-        std::vector<IterTreeBase> new_children;
-        bool all_leaves = true;
-        bool changed = false;
-        bool fused = false;
-        for (const auto& child : root->children) {
-          // only normalize consider all-children-leaves case
-          bool is_root_cur = is_root_;
-          is_root_ = false;
-          auto new_child = Visit(child);
-          is_root_ = is_root_cur;
-          auto new_child_node = GetRef<IterTreeSplit>(new_child.as<IterTreeSplitNode>());
-          ICHECK(new_child.defined()) << "InternalError: New child must be valid";
-          all_leaves = new_child_node.IsLeaf() ? all_leaves : false;
-          new_children.push_back(new_child.value());
-          changed |= (!new_child.same_as(child));
-        }
-        PrimExpr* prev_product = NULL;
-        std::vector<IterTreeBase> fused_children;
-        std::vector<std::vector<IterTreeBase>> fused_children_list;
-        for (int itr = 0; itr < (int)new_children.size(); ++itr) {
-          int i = (int)(new_children.size() - itr - 1);
-          auto it = coeff_map_->find(Downcast<IterTreeSplit>(new_children[i]));
-          if (it == coeff_map_->end()) {
-            // Not a leaf
-            prev_product = NULL;
-            if (fused_children.size() > 0) {
-              fused_children_list.push_back(fused_children);
-              fused_children.clear();
-            }
-            fused_children.push_back(new_children[i]);
-            fused_children_list.push_back(fused_children);
-            fused_children.clear();
-          } else {
-            // Leaf
-            PrimExpr curr_stride = it->second;
-            if (prev_product == NULL) {
-              // prev_product not set up
-              prev_product = new PrimExpr;
-              *prev_product = curr_stride * (Downcast<IterTreeSplit>(new_children[i])->extent);
-              ICHECK((fused_children.size() == 0) || (itr == 0))
-                  << "InternalError: fused_children not pushed back";
-              fused_children.push_back(new_children[i]);
-            } else {
-              // prev_product already set up
-              if (CheckEquiv(curr_stride, *prev_product, &ana_)) {
-                // no consecutive device nodes at this point, so no need to check device mapping
-                fused_children.push_back(new_children[i]);
-                fused = true;
-              } else {
-                // push to list and clear all contents
-                if (fused_children.size() > 0) {
-                  fused_children_list.push_back(fused_children);
-                }
-                fused_children.clear();
-                fused_children.push_back(new_children[i]);
-              }
-              *prev_product = curr_stride * (Downcast<IterTreeSplit>(new_children[i])->extent);
-            }
-          }
-        }
-        if (fused_children.size() > 0) {
-          fused_children_list.push_back(fused_children);
-          fused_children.clear();
-        }
-        if (fused) {
-          // fuse some adjacent children into the current node
-          Array<IterTreeBase> new_array;
-          for (int itr = 0; itr < (int)fused_children_list.size(); ++itr) {
-            int i = (int)(fused_children_list.size() - itr - 1);
-            fused_children = fused_children_list[i];
-            if (fused_children.size() > 1) {
-              PrimExpr extent = 1;
-              PrimExpr stride = 1;
-              for (size_t j = 0; j < fused_children.size(); ++j) {
-                auto child = fused_children[j];
-                extent = (Downcast<IterTreeSplit>(child)->extent) * extent;
-                if (j == 0) {
-                  auto it = coeff_map_->find(Downcast<IterTreeSplit>(child));
-                  ICHECK(it != coeff_map_->end()) << "InternalError: stride of a leaf not found!";
-                  stride = it->second;
-                }
-                coeff_map_->erase(GetRef<IterTreeSplit>(child.as<IterTreeSplitNode>()));
-              }
-              IterTreeSplit new_fused_node = IterTreeSplit(extent, {});
-              coeff_map_->insert({new_fused_node, stride});
-              new_array.push_back(Downcast<IterTreeBase>(new_fused_node));
-            } else {
-              auto child = fused_children[0];
-              new_array.push_back(child);
-            }
-          }
-          if (!is_root_) {
-            if (new_array.size() == 1) {
-              coeff_map_->erase(root);
-              IterTreeSplitNode* tmp_node =
-                  const_cast<IterTreeSplitNode*>(new_array[0].as<IterTreeSplitNode>());
-              tmp_node->children = {};
-              return GetRef<IterTreeBase>(tmp_node);
-            } else {
-              auto* n = root.CopyOnWrite();
-              n->children = new_array;
-              return GetRef<IterTreeBase>(n);
-            }
-          } else {
-            if (new_array.size() == 1) {
-              // add a dummy leaf if normalizing root
-              coeff_map_->erase(root);
-              auto* n = root.CopyOnWrite();
-              auto unit = IterTreeSplit(1, {});
-              coeff_map_->insert({unit, 1});
-              n->children = {unit, new_array[0]};
-              return GetRef<IterTreeBase>(n);
-            } else {
-              auto* n = root.CopyOnWrite();
-              n->children = new_array;
-              return GetRef<IterTreeBase>(n);
-            }
-          }
-        } else {
-          // no fuse happened
-          if (changed) {
-            auto* n = root.CopyOnWrite();
-            n->children = new_children;
-            return GetRef<IterTreeBase>(n);
-          } else {
-            return root;
-          }
-        }
-      }
-    } else {
-      // Fuse the cases when both device tree and data tree are defined as follows:
-      // For any two of data leaf nodes that share the same parent and adjacent to each other,
-      // If two data nodes are mapped to two device nodes that are adjacent to each other,
-      // then fuse those two data leaf nodes to one single data node with the extent of the new
-      // node equal to the product of the extents of the two rest of data tree structure
-      // unchanged, and fuse those two device nodes to one single node with the value being the
-      // product of those two device nodes
-      if (root.IsLeaf()) {
-        // if it's a leaf, keep it
-        return root;
-      } else {
-        // if it's a node, use bottom-up recursion
-        std::vector<IterTreeBase> new_children;
-        bool changed = false;
-        for (const auto& child : root->children) {
-          // only normalize consider all-children-leaves case
-          bool is_root_cur = is_root_;
-          is_root_ = false;
-          auto new_child = Visit(child);
-          is_root_ = is_root_cur;
-          auto new_child_node = GetRef<IterTreeSplit>(new_child.as<IterTreeSplitNode>());
-          ICHECK(new_child.defined()) << "InternalError: New child must be valid";
-          new_children.push_back(new_child.value());
-          changed |= (!new_child.same_as(child));
-        }
-        int children_cnt = (int)new_children.size();
-        for (int i = children_cnt - 1; i >= 1; --i) {
-          // reversal order to check mod and coeff
-          const auto& child1 = Downcast<IterTreeSplit>(new_children[i]);
-          const auto& child2 = Downcast<IterTreeSplit>(new_children[i - 1]);
-          auto device1 = split_map_->find(child1);
-          auto device2 = split_map_->find(child2);
-
-          if (device1 != split_map_->end() && device2 != split_map_->end()) {
-            const tvm::tirx::IterTreeSplit* fused_dev_node =
-                Check_device_adjacent(device1->second, device2->second,
-                                      const_cast<tvm::tirx::IterTreeSplit*>(&(*dev_tree_)->root));
-            if (fused_dev_node != nullptr) {
-              // fuse child1 and child2 in data tree to a new single node, modify coeff,
-              // attr_map, split_map accordingly based on fused_dev_node
-              // Fuse child1 and child2 in data tree to a new single node
-              ICHECK(children_cnt >= 2)
-                  << "InterError: Data nodes cannot fall below zero after fusing";
-              PrimExpr new_extent = child1->extent * child2->extent;
-              IterTreeSplit new_data_node = IterTreeSplit(new_extent, {});
-              IterTreeSplit unit_data_node = IterTreeSplit(1, {});
-              // Update coeff_map
-              coeff_map_->erase(child1);
-              coeff_map_->erase(child2);
-              coeff_map_->insert({new_data_node, -1});
-              coeff_map_->insert({unit_data_node, -1});
-              // Update attr_map
-              attr_map_->erase(device1->second);
-              attr_map_->erase(device2->second);
-              attr_map_->insert({*fused_dev_node, DeviceIterAttr::Split(new_extent)});
-              // Update split_map
-              split_map_->erase(child1);
-              split_map_->erase(child2);
-              split_map_->insert({new_data_node, *fused_dev_node});
-              // Replace the old children with the new fused node
-              // new_children.erase(new_children.begin() + i);
-              new_children[i - 1] = new_data_node;
-              new_children[i] = unit_data_node;
-              children_cnt -= 1;
-              changed = true;
-            }
-          }
-        }
-        if (changed) {
-          auto* n = root.CopyOnWrite();
-          n->children = new_children;
-          return GetRef<IterTreeBase>(n);
-        } else {
-          return root;
-        }
-      }
-    }
+  if (new_device_iter_array.empty() && !layout->device_iter_array.empty()) {
+    new_device_iter_array.push_back(DeviceIterAttr::Replicate(1));
   }
-
- private:
-  bool only_data_;  // if true, only data tree is defined;
-                    // otherwise, both data&device trees are defined
-  bool is_root_{true};
-  DataIterTree::CoeffMap* coeff_map_;
-  DeviceIterTree::AttrMap* attr_map_;
-  TileLayout::SplitMap* split_map_;
-  const DeviceIterTree* dev_tree_;
-  arith::Analyzer ana_;  // Analyzer to simplify and check expressions
-};
-
-TileLayout FuseEquivIter(TileLayout layout) {
-  const auto& data_tree = layout->data_tree;
-  const auto& data_leaves = data_tree.GetLeaves();
-  DataIterTree::CoeffMap coeff_map = data_tree.GetCoeffMap(data_leaves);
-  if (!layout->device_tree.defined()) {
-    auto new_data_root = EquivIterFuser::FuseEquivIter(data_tree->root, true, &coeff_map);
-    ICHECK(new_data_root.defined()) << "InternalError: The data tree should be defined";
-    return RemoveUnitIter(TileLayout::FromMaps(new_data_root.value(), NullOpt, coeff_map, {}, {}));
-  } else {
-    // Both data tree and device tree are defined
-    const auto& dev_tree = layout->device_tree.value();
-    const auto& dev_leaves = dev_tree.GetLeaves();
-    DeviceIterTree::AttrMap attr_map = dev_tree.GetAttrMap(dev_leaves);
-    TileLayout::SplitMap split_map = layout.GetSplitMap(data_leaves, dev_leaves);
-    auto new_data_root = EquivIterFuser::FuseEquivIter(data_tree->root, false, &coeff_map,
-                                                       &attr_map, &split_map, &dev_tree);
-    TileLayout fused_device_layout =
-        RemoveUnitIter(TileLayout::FromMaps(new_data_root.value(), dev_tree->root, coeff_map,
-                                            attr_map, split_map, layout->from, layout->to));
-    ICHECK(new_data_root.defined() && dev_tree->root.defined());
-    const auto& fused_dev_tree = fused_device_layout->device_tree.value();
-    const auto& fused_dev_leaves = fused_dev_tree.GetLeaves();
-    DeviceIterTree::AttrMap fused_attr_map = fused_dev_tree.GetAttrMap(fused_dev_leaves);
-    const auto& fused_data_tree = fused_device_layout->data_tree;
-    const auto& fused_data_leaves = fused_data_tree.GetLeaves();
-    DataIterTree::CoeffMap fused_coeff_map = fused_data_tree.GetCoeffMap(fused_data_leaves);
-    TileLayout::SplitMap fused_split_map =
-        fused_device_layout.GetSplitMap(fused_data_leaves, fused_dev_leaves);
-    new_data_root =
-        EquivIterFuser::FuseEquivIter(fused_data_tree->root, true, &fused_coeff_map,
-                                      &fused_attr_map, &fused_split_map, &fused_dev_tree);
-    ICHECK(new_data_root.defined() && fused_dev_tree->root.defined())
-        << "InternalError: The data tree and device tree should be both defined";
-    return RemoveUnitIter(TileLayout::FromMaps(new_data_root.value(), fused_dev_tree->root,
-                                               fused_coeff_map, fused_attr_map, fused_split_map,
-                                               layout->from, layout->to));
-  }
+  return TileLayout(new_data_iter_array, new_device_iter_array, layout->from, layout->to);
 }
 
 TileLayout NormalizeTileLayout(TileLayout layout) {
-  TileLayout res = Downcast<TileLayout>(Deduplicate({layout})[0]);
-  res = RemoveUnitIter(res);
-  res = FuseEquivIter(res);
-  return std::move(res);
+  std::unordered_set<int> fused_data_iters;
+  std::unordered_set<int> fused_device_iters;
+  EliminateUnitIter(layout, &fused_data_iters, &fused_device_iters);
+  layout = FuseIters(layout, fused_data_iters, fused_device_iters);
+  layout = SimplifyTileLayout(layout);
+  fused_data_iters.clear();
+  fused_device_iters.clear();
+  FuseNeighborShardAxis(layout, &fused_data_iters, &fused_device_iters);
+  FuseEquivDataIter(layout, &fused_data_iters, &fused_device_iters);
+  layout = FuseIters(layout, fused_data_iters, fused_device_iters);
+  return SimplifyTileLayout(layout);
 }
 
 TVM_REGISTER_GLOBAL("tirx.NormalizeTileLayout").set_body_typed(NormalizeTileLayout);
 
 /******** Tile ********/
-TileLayout Tile(TileLayout outer, TileLayout inner) {
-  auto dedup = Deduplicate({outer, inner});
-  outer = Downcast<TileLayout>(dedup[0]);
-  inner = Downcast<TileLayout>(dedup[1]);
-  // check the data tree roots of inner and outer layouts have the same number of children
-  auto* inner_n = inner.operator->();
-  auto* outer_n = outer.operator->();
-  const auto& inner_children = inner_n->data_tree->root->children;
-  ICHECK_EQ(inner_children.size(), outer_n->data_tree->root->children.size())
-      << "ValueError: The number of children of the data tree root must be the same";
-  ICHECK(!outer->device_tree.defined() && !outer->from.defined() && !outer->to.defined())
-      << "ValueError: The outer layout must not have device tree or scope";
+
+std::pair<TileLayout, std::vector<int>> TileLayoutGroupByLogicalShape(TileLayout layout,
+                                                                      Array<PrimExpr> shape) {
+  size_t shape_match_dim = 0;
+  arith::Analyzer analyzer;
+  PrimExpr prod = 1;
+  std::vector<int> seps;
+  seps.push_back(0);
+  Array<DataIterAttr> new_data_iter_array;
+  Array<DeviceIterAttr> new_device_iter_array;
+  auto split_map = layout.GetSplitMap();
+  std::unordered_map<int, std::vector<int>> split_device_iter;
+  for (int i = 0; i < static_cast<int>(layout->data_iter_array.size()); i++) {
+    auto split_map_it = split_map.find(i);
+    prod *= layout->data_iter_array[i]->extent;
+    PrimExpr cur_extent = layout->data_iter_array[i]->extent;
+    PrimExpr stride = layout->data_iter_array[i]->stride;
+    while (shape_match_dim < shape.size() &&
+           analyzer.CanProveEqual(floormod(prod, shape[shape_match_dim]), 0)) {
+      if (!analyzer.CanProveEqual(floormod(cur_extent, floordiv(prod, shape[shape_match_dim])),
+                                  0)) {
+        return std::make_pair(TileLayout(), std::vector<int>());
+      }
+      PrimExpr split_extent = floordiv(cur_extent, floordiv(prod, shape[shape_match_dim]));
+      new_data_iter_array.push_back(
+          DataIterAttr(split_extent, stride * floordiv(cur_extent, split_extent)));
+      cur_extent = floordiv(prod, shape[shape_match_dim]);
+      if (split_map_it != split_map.end()) {
+        split_device_iter[split_map_it->second].push_back(new_data_iter_array.size() - 1);
+      }
+      prod = floordiv(prod, shape[shape_match_dim]);
+      shape_match_dim++;
+      seps.push_back(new_data_iter_array.size());
+    }
+    if (!analyzer.CanProveEqual(cur_extent, 1)) {
+      new_data_iter_array.push_back(DataIterAttr(cur_extent, stride));
+      if (split_map_it != split_map.end()) {
+        split_device_iter[split_map_it->second].push_back(new_data_iter_array.size() - 1);
+      }
+    }
+  }
+  if (shape_match_dim != shape.size()) {
+    return std::make_pair(TileLayout(), std::vector<int>());
+  }
+  for (int i = 0; i < static_cast<int>(layout->device_iter_array.size()); i++) {
+    if (!layout->device_iter_array[i].IsSplit()) {
+      new_device_iter_array.push_back(layout->device_iter_array[i]);
+      continue;
+    }
+    auto split_device_iter_it = split_device_iter.find(i);
+    ICHECK(split_device_iter_it != split_device_iter.end())
+        << "ValueError: The split device iter must have a corresponding data iter";
+    for (auto data_iter_index : split_device_iter_it->second) {
+      new_device_iter_array.push_back(
+          DeviceIterAttr::Split(new_data_iter_array[data_iter_index]->extent, data_iter_index));
+    }
+  }
+  ICHECK(seps.size() == shape.size() + 1);
+  return std::make_pair(
+      TileLayout(new_data_iter_array, new_device_iter_array, layout->from, layout->to), seps);
+}
+
+TileLayout Tile(TileLayout outer, TileLayout inner, Array<PrimExpr> outer_shape,
+                Array<PrimExpr> inner_shape) {
+  outer = NormalizeTileLayout(outer);
+  inner = NormalizeTileLayout(inner);
+
+  ICHECK_EQ(outer_shape.size(), inner_shape.size())
+      << "ValueError: The dimension of logical view shapes must be the same";
+  auto [grouped_outer, outer_seps] = TileLayoutGroupByLogicalShape(outer, outer_shape);
+  auto [grouped_inner, inner_seps] = TileLayoutGroupByLogicalShape(inner, inner_shape);
+  outer = grouped_outer;
+  inner = grouped_inner;
+
+  ICHECK(!outer_seps.empty()) << "ValueError: The outer layout must be able to transform from "
+                                 "logical view shape only with split and reorder";
+  ICHECK(!inner_seps.empty())
+      << "ValueError: The inner layout must be able to transform from logical view shape only with "
+         "split and reorder";
+  ICHECK(outer->device_iter_array.empty()) << "ValueError: The outer layout must not have device "
+                                              "iterators";
+  int shape_dim = static_cast<int>(outer_shape.size());
+
   // Get the stride in the inner layout
   arith::Analyzer analyzer;
   PrimExpr inner_stride = inner->GetCosize();
-  // Update the coeff of the outer layout
-  std::vector<PrimExpr> coeff;
-  for (const auto& stride : outer_n->data_tree->coeff) {
-    coeff.push_back(stride * inner_stride);
+  Array<DataIterAttr> fused_data_iter_array;
+  std::unordered_map<int, int> index_map;
+  auto inner_split_map = inner.GetSplitMap();
+  for (int i = 0; i < shape_dim; i++) {
+    for (int j = outer_seps[i]; j < outer_seps[i + 1]; j++) {
+      PrimExpr new_stride = inner_stride * outer->data_iter_array[j]->stride;
+      fused_data_iter_array.push_back(DataIterAttr(outer->data_iter_array[j]->extent, new_stride));
+    }
+    for (int j = inner_seps[i]; j < inner_seps[i + 1]; j++) {
+      fused_data_iter_array.push_back(inner->data_iter_array[j]);
+      if (inner_split_map.find(j) != inner_split_map.end()) {
+        index_map[inner_split_map[j]] = fused_data_iter_array.size() - 1;
+      }
+    }
   }
-  auto* outer_n_cow = outer.CopyOnWrite();
-  outer_n_cow->data_tree = DataIterTree(outer_n->data_tree->root, Array<PrimExpr>(coeff));
-  TileLayout new_outer = GetRef<TileLayout>(outer_n_cow);
-  // Construct the tiled layout
-  PrimExpr extent = 1;
-  std::vector<IterTreeBase> children;
-  for (size_t i = 0; i < inner_children.size(); i++) {
-    const auto* inner = inner_children[i].as<IterTreeSplitNode>();
-    const auto* outer = outer_n->data_tree->root->children[i].as<IterTreeSplitNode>();
-    ICHECK(inner != nullptr) << "InternalError: Expect IterTreeSplit but get "
-                             << inner_children[i]->GetTypeKey();
-    ICHECK(outer != nullptr) << "InternalError: Expect IterTreeSplit but get "
-                             << outer_n->data_tree->root->children[i]->GetTypeKey();
-    PrimExpr child_extent = analyzer.Simplify(inner->extent * outer->extent);
-    children.push_back(
-        IterTreeSplit(child_extent, {GetRef<IterTreeBase>(outer), GetRef<IterTreeBase>(inner)}));
-    extent = extent * child_extent;
+  Array<DeviceIterAttr> new_device_iter_array;
+  for (int i = 0; i < static_cast<int>(inner->device_iter_array.size()); i++) {
+    if (inner->device_iter_array[i].IsSplit()) {
+      int bound = index_map[i];
+      new_device_iter_array.push_back(
+          DeviceIterAttr::Split(inner->device_iter_array[i]->extent, bound));
+    } else {
+      new_device_iter_array.push_back(inner->device_iter_array[i]);
+    }
   }
-  IterTreeSplit root(analyzer.Simplify(extent), children);
-  auto coeff_map = inner_n->data_tree.GetCoeffMap();
-  auto coeff_map_outer = new_outer->data_tree.GetCoeffMap();
-  coeff_map.insert(coeff_map_outer.begin(), coeff_map_outer.end());
-  auto attr_map = inner_n->device_tree.defined() ? inner_n->device_tree.value().GetAttrMap()
-                                                 : tvm::tirx::DeviceIterTree::AttrMap();
-  auto split_map = inner.GetSplitMap();
-  return TileLayout::FromMaps(root,
-                              inner_n->device_tree.defined() ? inner_n->device_tree.value()->root
-                                                             : Optional<IterTreeSplit>(),
-                              coeff_map, attr_map, split_map, inner_n->from, inner_n->to);
+
+  return SimplifyTileLayout(
+      TileLayout(fused_data_iter_array, new_device_iter_array, inner->from, inner->to));
 }
 
-TVM_REGISTER_GLOBAL("tirx.TileLayoutTile").set_body_typed([](TileLayout outer, TileLayout inner) {
-  return Tile(outer, inner);
-});
+TVM_REGISTER_GLOBAL("tirx.TileLayoutTile")
+    .set_body_typed([](TileLayout outer, TileLayout inner, Array<PrimExpr> outer_shape,
+                       Array<PrimExpr> inner_shape) {
+      return Tile(outer, inner, outer_shape, inner_shape);
+    });
 
 /******** Tile - Check Inner Layout ********/
-bool CompareSubStructureTrees(const IterTreeSplitNode* tiled_layout_node,
-                              const IterTreeSplitNode* layout_node, arith::Analyzer& analyzer) {
-  if (tiled_layout_node->children.size() != layout_node->children.size()) {
+
+bool CheckTileLayoutDeviceExtentEqual(TileLayout layout1, TileLayout layout2) {
+  // check if two layouts have the same device extent
+  if (layout1->device_iter_array.size() != layout2->device_iter_array.size()) {
     return false;
   }
-
-  for (size_t i = 0; i < tiled_layout_node->children.size(); i++) {
-    const auto* tiled_layout_child = tiled_layout_node->children[i].as<IterTreeSplitNode>();
-    const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
-
-    if (!tiled_layout_child || !layout_child) {
-      return false;
-    }
-
-    if (!analyzer.CanProveEqual(tiled_layout_child->extent, layout_child->extent)) {
-      return false;
-    }
-
-    if (!CompareSubStructureTrees(tiled_layout_child, layout_child, analyzer)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-bool CompareStride_Inner(const IterTreeSplitNode* tiled_layout_node,
-                         const IterTreeSplitNode* layout_node,
-                         const DataIterTree::CoeffMap& layout_coeff_map,
-                         const DataIterTree::CoeffMap& tiled_layout_coeff_map,
-                         arith::Analyzer& analyzer,
-                         DeviceIterTree::AttrMap* layout_attr_map = nullptr,
-                         DeviceIterTree::AttrMap* tiled_layout_attr_map = nullptr,
-                         TileLayout::SplitMap* layout_split_map = nullptr,
-                         TileLayout::SplitMap* tiled_layout_split_map = nullptr,
-                         Optional<Array<IterTreeBase>> layout_dev_leaves = NullOpt,
-                         Optional<Array<IterTreeBase>> tiled_layout_dev_leaves = NullOpt) {
-  if (tiled_layout_node->children.size() != layout_node->children.size()) {
-    return false;
-  }
-  if (tiled_layout_node->children.size() == 0) {
-    auto tiled_layout_it = tiled_layout_coeff_map.find(GetRef<IterTreeSplit>(tiled_layout_node));
-    auto layout_it = layout_coeff_map.find(GetRef<IterTreeSplit>(layout_node));
-    if (tiled_layout_it == tiled_layout_coeff_map.end() || layout_it == layout_coeff_map.end()) {
-      LOG(FATAL) << "InternalError: Coefficient not found for node";
-    }
-    // search tiled_layout_device and layout_device mapped by tiled_layout_node and
-    // layout_node, respectively, from SplitMap and AttrMap and check two devices are essentially
-    // the same device.
-    if (layout_dev_leaves.defined() && tiled_layout_dev_leaves.defined()) {
-      // device tree exists
-      auto tiled_layout_device_it =
-          tiled_layout_split_map->find(GetRef<IterTreeSplit>(tiled_layout_node));
-      auto layout_device_it = layout_split_map->find(GetRef<IterTreeSplit>(layout_node));
-      bool layout_found = tiled_layout_device_it != tiled_layout_split_map->end();
-      bool tiled_layout_found = tiled_layout_device_it != tiled_layout_split_map->end();
-      if (layout_found == tiled_layout_found && layout_found) {
-        // check if it's the same device
-        const auto& tiled_layout_device = tiled_layout_device_it->second;
-        const auto& layout_device = layout_device_it->second;
-
-        auto tiled_layout_attr_it = tiled_layout_attr_map->find(tiled_layout_device);
-        auto layout_attr_it = layout_attr_map->find(layout_device);
-        // 1. type check
-        if (tiled_layout_attr_it->second->type != layout_attr_it->second->type) {
-          return false;
-        }
-        // 2. extent check
-        const auto& tiled_layout_device_extent =
-            Downcast<IterTreeSplit>(tiled_layout_device)->extent;
-        const auto& layout_device_extent = Downcast<IterTreeSplit>(layout_device)->extent;
-        if (!analyzer.CanProveEqual(tiled_layout_device_extent, layout_device_extent)) {
-          return false;
-        }
-        // 3. position check:
-        // check if tiled_layout_device and layout_device are on the same index of
-        // tiled_layout_dev_leaves and layout_dev_leaves, respectively
-        // PS: since the device structure has been checked before, if device nodes have the same
-        // index they are from the same position of each device tree
-        for (size_t i = 0; i < tiled_layout_dev_leaves.value().size(); i++) {
-          bool tiled_layout_dev_child_found =
-              tiled_layout_dev_leaves.value()[i] == tiled_layout_device;
-          bool layout_dev_child_found = layout_dev_leaves.value()[i] == layout_device;
-          if (layout_dev_child_found != tiled_layout_dev_child_found) return false;
-        }
-      } else if (layout_found != tiled_layout_found) {
-        // mismatch status
-        return false;
-      }
-    }
-    return analyzer.CanProveEqual(tiled_layout_it->second, layout_it->second);
-  } else {
-    for (size_t i = 0; i < tiled_layout_node->children.size(); i++) {
-      const auto* tiled_layout_child = tiled_layout_node->children[i].as<IterTreeSplitNode>();
-      const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
-      if (!CompareStride_Inner(tiled_layout_child, layout_child, layout_coeff_map,
-                               tiled_layout_coeff_map, analyzer, layout_attr_map,
-                               tiled_layout_attr_map, layout_split_map, tiled_layout_split_map,
-                               layout_dev_leaves, tiled_layout_dev_leaves)) {
-        return false;
-      }
-    }
-    return true;
-  }
-}
-
-bool CompareExtentAndStride_Inner(const IterTreeSplitNode* tiled_layout_node,
-                                  const IterTreeSplitNode* layout_node,
-                                  const DataIterTree::CoeffMap& layout_coeff_map,
-                                  const DataIterTree::CoeffMap& tiled_layout_coeff_map,
-                                  arith::Analyzer& analyzer,
-                                  DeviceIterTree::AttrMap* layout_attr_map = nullptr,
-                                  DeviceIterTree::AttrMap* tiled_layout_attr_map = nullptr,
-                                  TileLayout::SplitMap* layout_split_map = nullptr,
-                                  TileLayout::SplitMap* tiled_layout_split_map = nullptr,
-                                  Optional<Array<IterTreeBase>> layout_dev_leaves = NullOpt,
-                                  Optional<Array<IterTreeBase>> tiled_layout_dev_leaves = NullOpt) {
-  // Compare extents
-  if (!analyzer.CanProveEqual(tiled_layout_node->extent, layout_node->extent)) {
-    return false;
-  }
-  // Compare strides (coefficients)
-  return CompareStride_Inner(tiled_layout_node, layout_node, layout_coeff_map,
-                             tiled_layout_coeff_map, analyzer, layout_attr_map,
-                             tiled_layout_attr_map, layout_split_map, tiled_layout_split_map,
-                             layout_dev_leaves, tiled_layout_dev_leaves);
-}
-
-bool CheckDataSubtree_Inner(const IterTreeSplitNode* tiled_layout_node,
-                            const IterTreeSplitNode* layout_node,
-                            const DataIterTree::CoeffMap& layout_coeff_map,
-                            const DataIterTree::CoeffMap& tiled_layout_coeff_map,
-                            arith::Analyzer& analyzer,
-                            DeviceIterTree::AttrMap* layout_attr_map = nullptr,
-                            DeviceIterTree::AttrMap* tiled_layout_attr_map = nullptr,
-                            TileLayout::SplitMap* layout_split_map = nullptr,
-                            TileLayout::SplitMap* tiled_layout_split_map = nullptr,
-                            Optional<Array<IterTreeBase>> layout_dev_leaves = NullOpt,
-                            Optional<Array<IterTreeBase>> tiled_layout_dev_leaves = NullOpt) {
-  if (tiled_layout_node->children.size() != layout_node->children.size()) {
-    return false;
-  }
-  for (size_t i = 0; i < layout_node->children.size(); i++) {
-    const auto* tiled_layout_child_root = tiled_layout_node->children[i].as<IterTreeSplitNode>();
-    size_t sub_children_cnt = tiled_layout_child_root->children.size();
-    if (sub_children_cnt < 2) return false;
-    const auto* tiled_layout_child =
-        tiled_layout_child_root->children[sub_children_cnt - 1].as<IterTreeSplitNode>();
-    const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
-    if (!tiled_layout_child || !layout_child ||
-        !CompareExtentAndStride_Inner(
-            tiled_layout_child, layout_child, layout_coeff_map, tiled_layout_coeff_map, analyzer,
-            layout_attr_map, tiled_layout_attr_map, layout_split_map, tiled_layout_split_map,
-            layout_dev_leaves, tiled_layout_dev_leaves)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool CheckTileDataSubtree_Inner(const IterTreeBase& tiled_layout_node,
-                                const IterTreeBase& layout_node,
-                                const DataIterTree::CoeffMap& layout_coeff_map,
-                                const DataIterTree::CoeffMap& tiled_layout_coeff_map,
-                                arith::Analyzer& analyzer,
-                                DeviceIterTree::AttrMap* layout_attr_map = nullptr,
-                                DeviceIterTree::AttrMap* tiled_layout_attr_map = nullptr,
-                                TileLayout::SplitMap* layout_split_map = nullptr,
-                                TileLayout::SplitMap* tiled_layout_split_map = nullptr,
-                                Optional<Array<IterTreeBase>> layout_dev_leaves = NullOpt,
-                                Optional<Array<IterTreeBase>> tiled_layout_dev_leaves = NullOpt) {
-  if (const auto* tiled_layout_split = tiled_layout_node.as<IterTreeSplitNode>()) {
-    if (const auto* layout_split = layout_node.as<IterTreeSplitNode>()) {
-      if (CheckDataSubtree_Inner(tiled_layout_split, layout_split, layout_coeff_map,
-                                 tiled_layout_coeff_map, analyzer, layout_attr_map,
-                                 tiled_layout_attr_map, layout_split_map, tiled_layout_split_map,
-                                 layout_dev_leaves, tiled_layout_dev_leaves)) {
-        return true;
-      }
-      for (const auto& child : tiled_layout_split->children) {
-        if (CheckTileDataSubtree_Inner(child, layout_node, layout_coeff_map, tiled_layout_coeff_map,
-                                       analyzer, layout_attr_map, tiled_layout_attr_map,
-                                       layout_split_map, tiled_layout_split_map, layout_dev_leaves,
-                                       tiled_layout_dev_leaves)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-std::vector<int> PrimeFactorize(int n) {
-  std::vector<int> factors;
-
-  while (n % 2 == 0) {
-    factors.push_back(2);
-    n /= 2;
-  }
-
-  int sqrt_n = static_cast<int>(std::sqrt(n));  // Cast to int to ensure integer comparison
-
-  for (int i = 3; i <= sqrt_n; i += 2) {
-    while (n % i == 0) {
-      factors.push_back(i);
-      n /= i;
-    }
-  }
-
-  if (n > 2) {
-    factors.push_back(n);
-  }
-
-  return factors;
-}
-
-void partitionHelper(const std::vector<int>& factors, size_t n, size_t index,
-                     std::vector<std::vector<int>>& current,
-                     std::vector<std::vector<int>>& result) {
-  if (index == factors.size()) {
-    std::vector<int> partitionProducts;
-    for (const auto& bucket : current) {
-      int product = 1;
-      for (const auto& factor : bucket) {
-        product *= factor;
-      }
-      partitionProducts.push_back(product);
-    }
-    result.push_back(partitionProducts);
-    return;
-  }
-
-  for (size_t i = 0; i < n; ++i) {
-    current[i].push_back(factors[index]);
-    partitionHelper(factors, n, index + 1, current, result);
-    current[i].pop_back();
-  }
-}
-
-std::vector<std::vector<int>> GetFactorPartitions(const std::vector<int>& factors, size_t n) {
-  std::vector<std::vector<int>> result;
-  std::vector<std::vector<int>> current(n);
-  partitionHelper(factors, n, 0, current, result);
-  return result;
-}
-
-void generate_strides(const std::vector<PrimExpr>& extent, PrimExpr init_stride_expr,
-                      int current_index, std::vector<PrimExpr>& current_stride,
-                      std::vector<bool>& used, std::vector<std::vector<PrimExpr>>& result) {
-  if (std::all_of(used.begin(), used.end(), [](bool v) { return v; })) {
-    result.push_back(current_stride);
-    return;
-  }
-
-  // Calculate the product for the next stride
-  PrimExpr product = current_stride[current_index] * extent[current_index];
-
-  for (size_t i = 0; i <= extent.size() - 1; ++i) {
-    if (!used[i]) {
-      used[i] = true;
-      current_stride[i] = product;
-      generate_strides(extent, init_stride_expr, i, current_stride, used, result);
-      used[i] = false;
-    }
-  }
-}
-
-std::vector<std::vector<PrimExpr>> generate_all_strides(const std::vector<PrimExpr>& extent,
-                                                        PrimExpr init_stride_expr) {
-  int n = extent.size();
-  std::vector<std::vector<PrimExpr>> result;
-  std::vector<PrimExpr> current_stride(n);
-  std::vector<bool> used(n, false);
-  for (size_t i = 0; i <= extent.size() - 1; ++i) {
-    used[i] = true;
-    current_stride[i] = init_stride_expr;
-    generate_strides(extent, init_stride_expr, i, current_stride, used, result);
-    used[i] = false;
-  }
-  return result;
-}
-
-bool Factorization_Inner(TileLayout tiled_layout, TileLayout inner, arith::Analyzer& analyzer,
-                         size_t inner_children_size = 0, size_t tile_children_size = 0,
-                         size_t unit_inner_size = 0) {
-  const auto* tiled_layout_node = tiled_layout->data_tree->root.as<IterTreeSplitNode>();
-  const auto* inner_node = inner->data_tree->root.as<IterTreeSplitNode>();
-  PrimExpr cosize_inner = inner->GetCosize();
-  auto tiled_extent_expr = tiled_layout_node->extent;
-  auto inner_product_expr = inner_node->extent;
-
-  if (tile_children_size == inner_children_size) {
-    // fast check
-    std::vector<PrimExpr> new_extents;
-    std::vector<IterTreeBase> new_children;
-    DataIterTree::CoeffMap new_coeff_map;
-    auto tilelayout_coeff_map = tiled_layout->data_tree.GetCoeffMap();
-    for (size_t i = 0; i < tiled_layout_node->children.size(); ++i) {
-      auto* tile_child = tiled_layout_node->children[i].as<IterTreeSplitNode>();
-      auto tile_child_root = GetRef<IterTreeSplit>(tile_child);
-      auto* inner_child = inner_node->children[i].as<IterTreeSplitNode>();
-      auto inner_child_root = GetRef<IterTreeSplit>(inner_child);
-      PrimExpr inner_child_extent = inner_child_root->extent;
-      PrimExpr tile_child_extent = tile_child_root->extent;
-      PrimExpr factor_extent_expr = tile_child_extent / inner_child_extent;
-      const int64_t* factor = as_const_int(factor_extent_expr);
-      if (!factor) {
-        return false;
-      }
-      auto new_tile_child = IterTreeSplit(factor_extent_expr, {});
-      new_children.push_back(new_tile_child);
-      new_extents.push_back(factor_extent_expr);
-    }
-    PrimExpr init_stride_expr = make_const(tiled_extent_expr->dtype, 1);  // must be continuous
-    std::vector<std::vector<PrimExpr>> all_strides =
-        generate_all_strides(new_extents, init_stride_expr);
-    for (const auto& one_strides : all_strides) {
-      PrimExpr combined_extent = 1;
-      for (const auto& extent : new_extents) {
-        combined_extent = combined_extent * extent;
-      }
-      auto root = IterTreeSplit(combined_extent, new_children);
-      DataIterTree::CoeffMap new_coeff_map;
-      for (size_t i = 0; i < new_children.size(); ++i) {
-        new_coeff_map[new_children[i]] = one_strides[i];
-      }
-      DataIterTree new_data_tree(root, Array<PrimExpr>(one_strides.begin(), one_strides.end()));
-      Optional<DeviceIterTree> device_tree = NullOpt;
-      TileLayout new_outer =
-          TileLayout::FromMaps(root, NullOpt, new_coeff_map, {}, {}, NullOpt, NullOpt);
-      TileLayout new_tile_layout = Tile(new_outer, inner);
-      new_tile_layout = NormalizeTileLayout(new_tile_layout);
-      if (StructuralEqual()(new_tile_layout, tiled_layout)) {
-        return true;
-      }
-    }
-  } else {
-    PrimExpr factor_expr = tiled_extent_expr / inner_product_expr;
-    const int64_t* factor = as_const_int(factor_expr);
-    if (!factor) {
-      return false;
-    }
-    auto factors = PrimeFactorize(*factor);
-    auto partitions = GetFactorPartitions(factors, inner_node->children.size());
-    PrimExpr init_stride_expr = make_const(tiled_extent_expr->dtype, 1);  // must be continuous
-    // assume outer must be continuous
-    for (const auto& partition : partitions) {
-      std::vector<PrimExpr> new_extents;
-      for (const auto& part : partition) {
-        new_extents.push_back(part);
-      }
-      std::vector<std::vector<PrimExpr>> all_strides =
-          generate_all_strides(new_extents, init_stride_expr);
-      for (const auto& one_strides : all_strides) {
-        // reconstruct a layout based on one_strides and new_extents using
-        // Create a vector to hold the new children nodes
-        std::vector<IterTreeBase> new_children;
-        for (size_t i = 0; i < new_extents.size(); ++i) {
-          auto child = IterTreeSplit(new_extents[i], {});
-          new_children.push_back(child);
-        }
-        PrimExpr combined_extent = 1;
-        for (const auto& extent : new_extents) {
-          combined_extent = combined_extent * extent;
-        }
-        auto root = IterTreeSplit(combined_extent, new_children);
-        DataIterTree::CoeffMap new_coeff_map;
-        for (size_t i = 0; i < new_children.size(); ++i) {
-          new_coeff_map[new_children[i]] = one_strides[i];
-        }
-        DataIterTree new_data_tree(root, Array<PrimExpr>(one_strides.begin(), one_strides.end()));
-        Optional<DeviceIterTree> device_tree = NullOpt;  // Adjust as necessary
-        TileLayout new_outer =
-            TileLayout::FromMaps(root, NullOpt, new_coeff_map, {}, {}, NullOpt, NullOpt);
-        TileLayout new_tile_layout = Tile(new_outer, inner);
-        new_tile_layout = NormalizeTileLayout(new_tile_layout);
-        if (StructuralEqual()(new_tile_layout, tiled_layout)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-bool CheckTileDataSubtree_Inner_Extended(TileLayout tiled_layout, TileLayout inner,
-                                         arith::Analyzer& analyzer) {
-  TileLayout inner_removed = RemoveUnitIter(inner);
-  TileLayout tiled_layout_norm = NormalizeTileLayout(tiled_layout);
-  const IterTreeBase& tiled_layout_norm_node = tiled_layout_norm->data_tree->root;
-  const IterTreeBase& inner_node = inner->data_tree->root;
-  const IterTreeBase& inner_removed_node = inner_removed->data_tree->root;
-  if (const auto* tiled_layout_norm_node_split = tiled_layout_norm_node.as<IterTreeSplitNode>()) {
-    if (const auto* inner_node_split = inner_node.as<IterTreeSplitNode>()) {
-      if (const auto* inner_removed_node_split = inner_removed_node.as<IterTreeSplitNode>()) {
-        size_t tile_children_size = tiled_layout_norm_node_split->children.size();
-        size_t inner_children_size = inner_node_split->children.size();
-        size_t unit_inner_size = inner_children_size - inner_removed_node_split->children.size();
-        if (tile_children_size == 1 ||
-            (tile_children_size >= inner_children_size - unit_inner_size &&
-             tile_children_size <= inner_children_size)) {
-          return Factorization_Inner(tiled_layout_norm, inner, analyzer, inner_children_size,
-                                     tile_children_size, unit_inner_size);
-        } else {
-          return false;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-bool IsTileLayout_Inner(TileLayout tiled_layout, TileLayout layout) {
-  auto* layout_n = layout.operator->();
-  auto* tiled_layout_n = tiled_layout.operator->();
-  auto layout_coeff_map = layout_n->data_tree.GetCoeffMap();
-  auto tiled_layout_coeff_map = tiled_layout_n->data_tree.GetCoeffMap();
   arith::Analyzer analyzer;
-  if (!tiled_layout->device_tree.defined() && !layout->device_tree.defined()) {
-    // no device tree defined
-    if (CheckTileDataSubtree_Inner(tiled_layout->data_tree->root, layout->data_tree->root,
-                                   layout_coeff_map, tiled_layout_coeff_map, analyzer)) {
-      return true;
-    }
-    return CheckTileDataSubtree_Inner_Extended(tiled_layout, layout, analyzer);
-  } else if (tiled_layout->device_tree.defined() && layout->device_tree.defined()) {
-    // device tree defined
-    // 1. check device tree structure
-    const auto& layout_dev_tree = layout->device_tree.value();
-    const auto& layout_device_root = layout_dev_tree->root;
-    const auto& layout_dev_leaves = layout_dev_tree.GetLeaves();
-    const auto& layout_data_tree = layout->data_tree;
-    const auto& layout_data_leaves = layout_data_tree.GetLeaves();
-    const auto& tiled_layout_dev_tree = tiled_layout->device_tree.value();
-    const auto& tiled_layout_device_root = tiled_layout_dev_tree->root;
-    const auto& tiled_layout_dev_leaves = tiled_layout_dev_tree.GetLeaves();
-    const auto& tiled_layout_data_tree = tiled_layout->data_tree;
-    const auto& tiled_layout_data_leaves = tiled_layout_data_tree.GetLeaves();
-    if (!CompareSubStructureTrees(tiled_layout_device_root.operator->(),
-                                  layout_device_root.operator->(), analyzer)) {
+  for (size_t i = 0; i < layout1->device_iter_array.size(); i++) {
+    auto extent1 = layout1->device_iter_array[i]->extent;
+    auto extent2 = layout2->device_iter_array[i]->extent;
+    if (!analyzer.CanProveEqual(extent1, extent2)) {
       return false;
     }
-    // 2. check data tree structure and mapping
-    auto layout_split_map = layout.GetSplitMap(layout_data_leaves, layout_dev_leaves);
-    auto tiled_layout_split_map =
-        tiled_layout.GetSplitMap(tiled_layout_data_leaves, tiled_layout_dev_leaves);
-    DeviceIterTree::AttrMap layout_attr_map = layout_dev_tree.GetAttrMap(layout_dev_leaves);
-    DeviceIterTree::AttrMap tiled_layout_attr_map =
-        tiled_layout_dev_tree.GetAttrMap(tiled_layout_dev_leaves);
-    if (CheckTileDataSubtree_Inner(tiled_layout->data_tree->root, layout->data_tree->root,
-                                   layout_coeff_map, tiled_layout_coeff_map, analyzer,
-                                   &layout_attr_map, &tiled_layout_attr_map, &layout_split_map,
-                                   &tiled_layout_split_map, layout_dev_leaves,
-                                   tiled_layout_dev_leaves)) {
-      return true;
+  }
+  return true;
+}
+
+Array<PrimExpr> TileShape(Array<PrimExpr> shape, Array<PrimExpr> factor, bool is_inner) {
+  int tiled_shape_dim = static_cast<int>(shape.size());
+  int factor_shape_dim = static_cast<int>(factor.size());
+  ICHECK(tiled_shape_dim == factor_shape_dim)
+      << "ValueError: The dimension of logical view shapes must be the same";
+  for (int i = 0; i < tiled_shape_dim; i++) {
+    ICHECK(arith::Analyzer().CanProveEqual(floormod(shape[i], factor[i]), 0))
+        << "ValueError: The shape must be divisible by the factor";
+  }
+  Array<PrimExpr> new_shape;
+  if (is_inner) {
+    for (int i = 0; i < factor_shape_dim; i++) {
+      new_shape.push_back(floordiv(shape[i], factor[i]));
+      new_shape.push_back(factor[i]);
     }
-    return CheckTileDataSubtree_Inner_Extended(tiled_layout, layout, analyzer);
   } else {
-    // device tree status mismatch
+    for (int i = 0; i < factor_shape_dim; i++) {
+      new_shape.push_back(factor[i]);
+      new_shape.push_back(floordiv(shape[i], factor[i]));
+    }
+  }
+  return new_shape;
+}
+
+std::vector<int> GetEvenSeps(std::vector<int> seps) {
+  std::vector<int> even_seps;
+  for (int i = 0; i < static_cast<int>(seps.size()); i++) {
+    if (i % 2 == 0) {
+      even_seps.push_back(seps[i]);
+    }
+  }
+  return even_seps;
+}
+
+bool IsTileLayout_Inner(TileLayout tiled_layout, TileLayout layout, Array<PrimExpr> tiled_shape,
+                        Array<PrimExpr> inner_shape) {
+  tiled_layout = NormalizeTileLayout(tiled_layout);
+  layout = NormalizeTileLayout(layout);
+  int tiled_shape_dim = static_cast<int>(tiled_shape.size());
+  int inner_shape_dim = static_cast<int>(inner_shape.size());
+  if (tiled_shape_dim != inner_shape_dim) {
     return false;
   }
+  auto factored_tiled_shape = TileShape(tiled_shape, inner_shape, true);
+  auto [grouped_tiled_layout, tiled_seps] =
+      TileLayoutGroupByLogicalShape(tiled_layout, factored_tiled_shape);
+  tiled_seps = GetEvenSeps(tiled_seps);
+  auto [grouped_layout, inner_seps] = TileLayoutGroupByLogicalShape(layout, inner_shape);
+  tiled_layout = grouped_tiled_layout;
+  layout = grouped_layout;
+
+  // 1. check whether device iter extent are same
+  if (!CheckTileLayoutDeviceExtentEqual(tiled_layout, layout)) {
+    return false;
+  }
+  // 2. check data iter match
+  ICHECK(!tiled_seps.empty()) << "ValueError: The tiled layout must be able to transform from "
+                                 "logical view shape only with split and reorder";
+  ICHECK(!inner_seps.empty())
+      << "ValueError: The inner layout must be able to transform from logical view shape only with "
+         "split and reorder";
+  arith::Analyzer analyzer;
+  std::unordered_map<int, int> index_map;
+  auto inner_split_map = layout.GetSplitMap();
+  for (int i = 0; i < tiled_shape_dim; i++) {
+    int inner_sep_range = inner_seps[i + 1] - inner_seps[i];
+    int tiled_sep_range = tiled_seps[i + 1] - tiled_seps[i];
+    if (inner_sep_range > tiled_sep_range) {
+      return false;
+    }
+    for (int j = 0; j < inner_sep_range; j++) {
+      DataIterAttr inner_attr = layout->data_iter_array[inner_seps[i] + j];
+      DataIterAttr tiled_attr =
+          tiled_layout->data_iter_array[tiled_seps[i + 1] - inner_sep_range + j];
+      index_map[inner_seps[i] + j] = tiled_seps[i + 1] - inner_sep_range + j;
+      // extent and stride of inner layout and the corresponding part in tiled layout must be the
+      // same
+      if (!analyzer.CanProveEqual(inner_attr->extent, tiled_attr->extent) ||
+          (!analyzer.CanProveEqual(inner_attr->stride, tiled_attr->stride) &&
+           inner_split_map.find(inner_seps[i] + j) == inner_split_map.end() &&
+           !analyzer.CanProveEqual(inner_attr->extent, 1))) {
+        return false;
+      }
+    }
+  }
+  // 3. check split map match
+  auto tiled_split_map = tiled_layout.GetSplitMap();
+  if (tiled_split_map.size() != inner_split_map.size()) {
+    return false;
+  }
+  for (const auto& kv : inner_split_map) {
+    auto it = tiled_split_map.find(index_map[kv.first]);
+    if (it == tiled_split_map.end() || it->second != kv.second) {
+      return false;
+    }
+  }
+  return true;
 }
 
 TVM_REGISTER_GLOBAL("tirx.IsTileLayout_Inner")
-    .set_body_typed([](TileLayout tiled_layout, TileLayout layout) {
-      return IsTileLayout_Inner(tiled_layout, layout);
+    .set_body_typed([](TileLayout tiled_layout, TileLayout layout, Array<PrimExpr> tiled_shape,
+                       Array<PrimExpr> inner_shape) {
+      return IsTileLayout_Inner(tiled_layout, layout, tiled_shape, inner_shape);
     });
 
 /******** Tile - Check Outer Layout ********/
-bool CompareStride_Outer(const IterTreeSplitNode* tiled_layout_node,
-                         const IterTreeSplitNode* layout_node,
-                         const DataIterTree::CoeffMap& layout_coeff_map,
-                         const DataIterTree::CoeffMap& tiled_layout_coeff_map,
-                         PrimExpr cumulative_cosize, arith::Analyzer& analyzer,
-                         TileLayout::SplitMap* tiled_layout_split_map = nullptr) {
-  if (tiled_layout_node->children.size() != layout_node->children.size()) {
-    return false;
+
+bool IsTileLayout_Outer(TileLayout tiled_layout, TileLayout layout, Array<PrimExpr> tiled_shape,
+                        Array<PrimExpr> outer_shape) {
+  tiled_layout = NormalizeTileLayout(tiled_layout);
+  layout = NormalizeTileLayout(layout);
+  int tiled_shape_dim = static_cast<int>(tiled_shape.size());
+  int outer_shape_dim = static_cast<int>(outer_shape.size());
+  ICHECK(tiled_shape_dim == outer_shape_dim)
+      << "ValueError: The dimension of logical view shapes must be the same";
+  for (int i = 0; i < tiled_shape_dim; i++) {
+    if (!arith::Analyzer().CanProveEqual(floormod(tiled_shape[i], outer_shape[i]), 0)) {
+      return false;
+    }
   }
 
-  if (tiled_layout_node->children.size() == 0) {
-    auto tiled_layout_it = tiled_layout_coeff_map.find(GetRef<IterTreeSplit>(tiled_layout_node));
-    auto layout_it = layout_coeff_map.find(GetRef<IterTreeSplit>(layout_node));
-    if (tiled_layout_it == tiled_layout_coeff_map.end() || layout_it == layout_coeff_map.end()) {
-      LOG(FATAL) << "InternalError: Coefficient not found for node";
+  // 1. outer layout must not have device iter
+  if (!layout->device_iter_array.empty()) {
+    return false;
+  }
+  // 2. check data iter match
+  auto factored_tiled_shape = TileShape(tiled_shape, outer_shape, false);
+  auto [grouped_tiled_layout, tiled_seps] =
+      TileLayoutGroupByLogicalShape(tiled_layout, factored_tiled_shape);
+  tiled_seps = GetEvenSeps(tiled_seps);
+  auto [grouped_layout, outer_seps] = TileLayoutGroupByLogicalShape(layout, outer_shape);
+  tiled_layout = grouped_tiled_layout;
+  layout = grouped_layout;
+  ICHECK(!tiled_seps.empty()) << "ValueError: The tiled layout must be able to transform from "
+                                 "logical view shape only with split and reorder";
+  ICHECK(!outer_seps.empty())
+      << "ValueError: The outer layout must be able to transform from logical view shape only with "
+         "split and reorder";
+  arith::Analyzer analyzer;
+  Array<DataIterAttr> inner_data_iter_array;
+  auto tiled_split_map = tiled_layout.GetSplitMap();
+
+  for (int i = 0; i < tiled_shape_dim; i++) {
+    int outer_sep_range = outer_seps[i + 1] - outer_seps[i];
+    int tiled_sep_range = tiled_seps[i + 1] - tiled_seps[i];
+    if (outer_sep_range > tiled_sep_range) {
+      return false;
     }
-    return analyzer.CanProveEqual(tiled_layout_it->second / cumulative_cosize, layout_it->second);
-  } else {
-    for (size_t i = 0; i < tiled_layout_node->children.size(); i++) {
-      const auto* tiled_layout_child = tiled_layout_node->children[i].as<IterTreeSplitNode>();
-      const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
-      if (!CompareStride_Outer(tiled_layout_child, layout_child, layout_coeff_map,
-                               tiled_layout_coeff_map, cumulative_cosize, analyzer)) {
+    for (int j = 0; j < outer_sep_range; j++) {
+      DataIterAttr outer_attr = layout->data_iter_array[outer_seps[i] + j];
+      DataIterAttr tiled_attr = tiled_layout->data_iter_array[tiled_seps[i] + j];
+      // data iter in outer layout cannot be bound
+      if (tiled_split_map.find(tiled_seps[i] + j) != tiled_split_map.end()) {
+        return false;
+      }
+      // extent of outer layout and the corresponding part in tiled layout must be the same
+      if (!analyzer.CanProveEqual(outer_attr->extent, tiled_attr->extent)) {
         return false;
       }
     }
-    return true;
-  }
-}
-
-bool CompareExtent_Outer(const IterTreeSplitNode* tiled_layout_node,
-                         const IterTreeSplitNode* layout_node, arith::Analyzer& analyzer) {
-  // Compare extents
-  if (!analyzer.CanProveEqual(tiled_layout_node->extent, layout_node->extent)) {
-    return false;
-  }
-  return true;
-}
-
-bool CheckDataSubtree_Outer(const IterTreeSplitNode* tiled_layout_node,
-                            const IterTreeSplitNode* layout_node,
-                            const DataIterTree::CoeffMap& layout_coeff_map,
-                            const DataIterTree::CoeffMap& tiled_layout_coeff_map,
-                            arith::Analyzer& analyzer,
-                            TileLayout::SplitMap* tiled_layout_split_map = nullptr) {
-  if (tiled_layout_node->children.size() != layout_node->children.size()) {
-    return false;
-  }
-  PrimExpr cumulative_cosize = 1;
-  for (size_t i = 0; i < layout_node->children.size(); i++) {
-    const auto* tiled_layout_child_root = tiled_layout_node->children[i].as<IterTreeSplitNode>();
-    size_t sub_children_cnt = tiled_layout_child_root->children.size();
-    if (sub_children_cnt < 2) return false;
-    const auto* last_tiled_layout_child =
-        tiled_layout_child_root->children[sub_children_cnt - 1].as<IterTreeSplitNode>();
-    // only the first sub-child will belong to the original outer layout
-    const auto* tiled_layout_child = tiled_layout_child_root->children[0].as<IterTreeSplitNode>();
-    const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
-    if (!tiled_layout_child || !layout_child ||
-        !CompareExtent_Outer(tiled_layout_child, layout_child, analyzer)) {
-      return false;
-    }
-
-    // Retrieve all child leaves of last_tiled_layout_child and calculate cosize for each leaf
-    auto last_child_leaves = GetRef<IterTreeSplit>(last_tiled_layout_child).GetLeaves();
-    for (const auto& leaf : last_child_leaves) {
-      if (tiled_layout_split_map &&
-          tiled_layout_split_map->find(leaf) != tiled_layout_split_map->end()) {
+    for (int j = tiled_seps[i] + outer_sep_range; j < tiled_seps[i + 1]; j++) {
+      if (tiled_split_map.find(j) != tiled_split_map.end()) {
         continue;
       }
-      auto coeff_it = tiled_layout_coeff_map.find(Downcast<IterTreeSplit>(leaf));
-      if (coeff_it != tiled_layout_coeff_map.end()) {
-        cumulative_cosize += coeff_it->second * (Downcast<IterTreeSplit>(leaf)->extent - 1);
-      }
+      inner_data_iter_array.push_back(tiled_layout->data_iter_array[j]);
     }
   }
-
-  for (size_t i = 0; i < layout_node->children.size(); i++) {
-    const auto* tiled_layout_child_root = tiled_layout_node->children[i].as<IterTreeSplitNode>();
-    const auto* tiled_layout_child = tiled_layout_child_root->children[0].as<IterTreeSplitNode>();
-    const auto* layout_child = layout_node->children[i].as<IterTreeSplitNode>();
-    if (!CompareStride_Outer(tiled_layout_child, layout_child, layout_coeff_map,
-                             tiled_layout_coeff_map, cumulative_cosize, analyzer,
-                             tiled_layout_split_map)) {
-      return false;
+  TileLayout inner_layout = TileLayout(inner_data_iter_array, {});
+  auto inner_cosize = inner_layout->GetCosize();
+  for (int i = 0; i < tiled_shape_dim; i++) {
+    int outer_sep_range = outer_seps[i + 1] - outer_seps[i];
+    for (int j = 0; j < outer_sep_range; j++) {
+      DataIterAttr outer_attr = layout->data_iter_array[outer_seps[i] + j];
+      DataIterAttr tiled_attr = tiled_layout->data_iter_array[tiled_seps[i] + j];
+      // outer layout's stride will be multipled with inner cosize after tiling
+      if (!analyzer.CanProveEqual(outer_attr->stride * inner_cosize, tiled_attr->stride)) {
+        return false;
+      }
     }
   }
   return true;
-}
-
-bool CheckTileDataSubtree_Outer(const IterTreeBase& tiled_layout_node,
-                                const IterTreeBase& layout_node,
-                                const DataIterTree::CoeffMap& layout_coeff_map,
-                                const DataIterTree::CoeffMap& tiled_layout_coeff_map,
-                                arith::Analyzer& analyzer,
-                                TileLayout::SplitMap* tiled_layout_split_map = nullptr) {
-  if (const auto* tiled_layout_split = tiled_layout_node.as<IterTreeSplitNode>()) {
-    if (const auto* layout_split = layout_node.as<IterTreeSplitNode>()) {
-      if (CheckDataSubtree_Outer(tiled_layout_split, layout_split, layout_coeff_map,
-                                 tiled_layout_coeff_map, analyzer, tiled_layout_split_map)) {
-        return true;
-      }
-      for (const auto& child : tiled_layout_split->children) {
-        if (CheckTileDataSubtree_Outer(child, layout_node, layout_coeff_map, tiled_layout_coeff_map,
-                                       analyzer, tiled_layout_split_map)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-bool IsTileLayout_Outer(TileLayout tiled_layout, TileLayout layout) {
-  auto* layout_n = layout.operator->();
-  auto* tiled_layout_n = tiled_layout.operator->();
-  auto layout_coeff_map = layout_n->data_tree.GetCoeffMap();
-  auto tiled_layout_coeff_map = tiled_layout_n->data_tree.GetCoeffMap();
-  arith::Analyzer analyzer;
-  if (!tiled_layout->device_tree.defined() && !layout->device_tree.defined()) {
-    return CheckTileDataSubtree_Outer(tiled_layout_n->data_tree->root, layout_n->data_tree->root,
-                                      layout_coeff_map, tiled_layout_coeff_map, analyzer);
-  } else if (tiled_layout->device_tree.defined() && !layout->device_tree.defined()) {
-    const auto& tiled_layout_dev_tree = tiled_layout->device_tree.value();
-    const auto& tiled_layout_dev_leaves = tiled_layout_dev_tree.GetLeaves();
-    const auto& tiled_layout_data_tree = tiled_layout->data_tree;
-    const auto& tiled_layout_data_leaves = tiled_layout_data_tree.GetLeaves();
-    auto tiled_layout_split_map =
-        tiled_layout.GetSplitMap(tiled_layout_data_leaves, tiled_layout_dev_leaves);
-    return CheckTileDataSubtree_Outer(tiled_layout->data_tree->root, layout->data_tree->root,
-                                      layout_coeff_map, tiled_layout_coeff_map, analyzer,
-                                      &tiled_layout_split_map);
-
-  } else {
-    // outer must not have device tree
-    return false;
-  }
 }
 
 TVM_REGISTER_GLOBAL("tirx.IsTileLayout_Outer")
-    .set_body_typed([](TileLayout tiled_layout, TileLayout layout) {
-      return IsTileLayout_Outer(tiled_layout, layout);
+    .set_body_typed([](TileLayout tiled_layout, TileLayout layout, Array<PrimExpr> tiled_shape,
+                       Array<PrimExpr> outer_shape) {
+      return IsTileLayout_Outer(tiled_layout, layout, tiled_shape, outer_shape);
     });
 
 /******* Vector Length ********/
@@ -1854,10 +723,8 @@ std::pair<int, int> GetMajorDimension(const Array<PrimExpr>& strides) {
   arith::Analyzer analyzer;
   int major_dim = 0;
   PrimExpr min_stride = strides[0];
-  PrimExpr gcd = strides[0];
   PrimExpr argmin_stride = strides[0];
   for (size_t i = 0; i < strides.size(); ++i) {
-    gcd = ComputeGCD(gcd, strides[i], &analyzer);
     if (as_const_int(strides[i])[0] < as_const_int(min_stride)[0]) {
       major_dim = static_cast<int>(i);
       min_stride = strides[i];
@@ -1870,42 +737,30 @@ std::pair<int, int> GetMajorDimension(const Array<PrimExpr>& strides) {
 std::tuple<int, int, PrimExpr> ExtractLayout(TileLayout layout) {
   arith::Analyzer analyzer;
   // Get the data dimensions and strides from the layout
-  auto data_tree = layout->data_tree;
-  auto data_leaves = data_tree.GetLeaves();
-  Array<PrimExpr> strides = data_tree->coeff;
+  Array<PrimExpr> strides;
+  for (auto& iter : layout->data_iter_array) {
+    strides.push_back(iter->stride);
+  }
 
   // Get the major dimension (dimension with the largest stride)
   auto [major_dim, min_stride] = GetMajorDimension(strides);
-
-  // Create new strides for the transposed layout
-  std::vector<PrimExpr> transposed_strides(strides.size());
-  transposed_strides[strides.size() - 1] = 1;  // innermost stride is min_stride
-  for (int i = (int)strides.size() - 2; i >= 0; --i) {
-    transposed_strides[i] =
-        transposed_strides[i + 1] * Downcast<IterTreeSplit>(data_leaves[i + 1])->extent;
-  }
-
-  return {major_dim, min_stride,
-          Downcast<IterTreeSplit>(data_leaves[strides.size() - major_dim - 1])->extent};
+  return {major_dim, min_stride, layout->data_iter_array[strides.size() - major_dim - 1]->extent};
 }
 
 int Vec_Len(TileLayout Ls, TileLayout Ld) {
   // Constants initialization
   arith::Analyzer analyzer;
   std::vector<int> optimal_vec_len = {1, 2, 4, 8};
-  auto Ls_node = Ls->data_tree->root;
-  auto Ld_node = Ld->data_tree->root;
-  PrimExpr Ls_extent = Ls_node->extent;
-  PrimExpr Ld_extent = Ld_node->extent;
+  Ls = NormalizeTileLayout(Ls);
+  Ld = NormalizeTileLayout(Ld);
 
-  // Remove unit dimensions and extract strides
-  TileLayout Lsn = RemoveUnitIter(Ls);
-  TileLayout Ldn = RemoveUnitIter(Ld);
-  auto [major_s, min_stride_s, argmin_s] = ExtractLayout(Lsn);
-  auto [major_d, min_stride_d, argmin_d] = ExtractLayout(Ldn);
+  PrimExpr Ls_size = Ls->GetSize();
+  PrimExpr Ld_size = Ld->GetSize();
+  auto [major_s, min_stride_s, argmin_s] = ExtractLayout(Ls);
+  auto [major_d, min_stride_d, argmin_d] = ExtractLayout(Ld);
 
   // Check if normalized layouts are structurally equal
-  if (analyzer.CanProveEqual(Ls_extent, Ld_extent)) {
+  if (analyzer.CanProveEqual(Ls_size, Ld_size)) {
     if ((min_stride_s != 1) || (min_stride_d != 1) || (major_s != major_d)) {
       // Case 1 & 2: Layouts are not contiguous or min strides don't match; different major-dim
       return 1;
@@ -1927,7 +782,7 @@ TVM_REGISTER_GLOBAL("tirx.Vec_Len").set_body_typed([](TileLayout tiled_layout, T
 });
 
 /******** Shard ********/
-std::vector<DeviceIterAttr> ParseStrategy(String strategy) {
+std::vector<DeviceIterAttr> ParseStrategy(String strategy, Array<PrimExpr> mesh) {
   std::vector<DeviceIterAttr> attrs;
   size_t cur = 0;
   auto f_parse_number_with_bracket = [&cur, &strategy]() {
@@ -1938,13 +793,14 @@ std::vector<DeviceIterAttr> ParseStrategy(String strategy) {
     ICHECK_GT(number.size(), 0) << "ValueError: Invalid strategy " << strategy;
     return atoi(number.c_str());
   };
-  for (; cur < strategy.size();) {
+  size_t mesh_dim = 0;
+  for (; cur < strategy.size() && mesh_dim < mesh.size();) {
     if (strategy.at(cur) == 'S') {
-      attrs.push_back(DeviceIterAttr::Split(f_parse_number_with_bracket()));
+      attrs.push_back(DeviceIterAttr::Split(mesh[mesh_dim++], f_parse_number_with_bracket()));
     } else if (strategy.at(cur) == 'E') {
-      attrs.push_back(DeviceIterAttr::Exclusive(f_parse_number_with_bracket()));
+      attrs.push_back(DeviceIterAttr::Exclusive(mesh[mesh_dim++], f_parse_number_with_bracket()));
     } else if (strategy.at(cur) == 'R') {
-      attrs.push_back(DeviceIterAttr::Replicate());
+      attrs.push_back(DeviceIterAttr::Replicate(mesh[mesh_dim++]));
       ++cur;
     } else {
       LOG(FATAL) << "ValueError: Invalid strategy " << strategy;
@@ -1953,91 +809,70 @@ std::vector<DeviceIterAttr> ParseStrategy(String strategy) {
   return std::move(attrs);
 }
 
-TileLayout Shard(Array<PrimExpr> shape, IterTree mesh, String strategy, TileLayout inner,
+TileLayout Shard(Array<PrimExpr> shape, Array<PrimExpr> mesh, String strategy, TileLayout inner,
                  ExecScope from, ExecScope to) {
-  auto res = Deduplicate({mesh, inner});
-  mesh = Downcast<IterTree>(res[0]);
-  inner = Downcast<TileLayout>(res[1]);
-  arith::Analyzer analyzer;
-  auto coeff_map = inner->data_tree.GetCoeffMap();
-  auto attr_map = inner->device_tree.defined() ? inner->device_tree.value().GetAttrMap()
-                                               : tvm::tirx::DeviceIterTree::AttrMap();
-  auto split_map = inner.GetSplitMap();
-  std::unordered_map<int, IterTreeSplit> outer_leaves;
   // Parse the strategy
-  Array<IterTreeBase> mesh_leaves = mesh.GetLeaves();
-  auto attrs = ParseStrategy(strategy);
-  ICHECK_EQ(attrs.size(), mesh_leaves.size())
+  auto attrs = ParseStrategy(strategy, mesh);
+  ICHECK_EQ(attrs.size(), mesh.size())
       << "ValueError: The number of attributes must be the same as the number of mesh leaves";
-  // Construct the split map and attr map
-  for (size_t i = 0; i < mesh_leaves.size(); i++) {
-    auto leaf = mesh_leaves[i];
-    auto attr = attrs[i];
-    if (attr.IsSplit()) {
-      auto bound = attr.GetIntBound();
-      ICHECK_LT(bound, shape.size())
-          << "ValueError: The bound of the split attribute is out of range";
-      ICHECK(outer_leaves.find(bound) == outer_leaves.end())
-          << "ValueError: The " << bound << "-th outer leaf is already mapped to a device leaf";
-      auto outer_leaf = IterTreeSplit(Downcast<IterTreeSplit>(leaf)->extent, {});
-      split_map[outer_leaf] = leaf;
-      outer_leaves[bound] = outer_leaf;
+  Array<PrimExpr> inner_shape(shape);
+  for (int i = 0; i < static_cast<int>(mesh.size()); i++) {
+    if (attrs[i].IsSplit()) {
+      auto bound = attrs[i].GetIntBound();
+      inner_shape.Set(bound, floordiv(inner_shape[bound], mesh[i]));
     }
-    attr_map[leaf] = attr;
   }
-  // Create the new data tree
-  ICHECK_EQ(shape.size(), inner->data_tree->root->children.size())
-      << "ValueError: The number of shape dimensions must be the same as the number of mesh "
-         "children";
-  PrimExpr data_extent = 1;
-  std::vector<IterTreeBase> new_roots;
-  for (size_t i = 0; i < shape.size(); i++) {
-    const auto& inner_leaf = inner->data_tree->root->children[i];
-    auto extent = analyzer.Simplify(shape[i]);
-    auto it = outer_leaves.find(i);
-    if (it == outer_leaves.end()) {
-      // The axis is not bound to any device leaf
-      new_roots.push_back(inner_leaf);
-      ICHECK(analyzer.CanProveEqual(extent, Downcast<IterTreeSplit>(inner_leaf)->extent))
-          << "ValueError: Shape mismatch for the " << i << "-th axis";
+  auto [grouped_inner, inner_seps] = TileLayoutGroupByLogicalShape(inner, inner_shape);
+  inner = grouped_inner;
+  ICHECK(!inner_seps.empty())
+      << "ValueError: The inner layout must be able to transform from logical view shape only with "
+         "split and reorder";
+
+  Array<DataIterAttr> new_data_iter_array;
+  std::unordered_map<int, int> index_map;
+  auto split_map = inner.GetSplitMap();
+  for (int i = 0; i < static_cast<int>(inner_seps.size()) - 1; i++) {
+    for (size_t j = 0; j < attrs.size(); j++) {
+      auto attr = attrs[j];
+      if (attr.IsSplit() && static_cast<int>(attr.GetIntBound()) == i) {
+        new_data_iter_array.push_back(DataIterAttr(attr->extent, -1));
+        attrs[j] =
+            DeviceIterAttr::Split(attr->extent, static_cast<int>(new_data_iter_array.size()) - 1);
+      }
+    }
+    for (int j = inner_seps[i]; j < inner_seps[i + 1]; j++) {
+      new_data_iter_array.push_back(inner->data_iter_array[j]);
+      if (split_map.find(j) != split_map.end()) {
+        index_map[j] = new_data_iter_array.size() - 1;
+      }
+    }
+  }
+  Array<DeviceIterAttr> new_device_iter_array;
+  new_device_iter_array.insert(new_device_iter_array.end(), attrs.begin(), attrs.end());
+  for (size_t i = 0; i < inner->device_iter_array.size(); i++) {
+    auto device_iter = inner->device_iter_array[i];
+    if (device_iter.IsSplit()) {
+      new_device_iter_array.push_back(
+          DeviceIterAttr::Split(device_iter->extent, index_map[device_iter.GetIntBound()]));
     } else {
-      // The axis is bound to a device leaf
-      const auto& outer_leaf = it->second;
-      ICHECK(analyzer.CanProveEqual(
-          extent, outer_leaf->extent * Downcast<IterTreeSplit>(inner_leaf)->extent))
-          << "ValueError: Shape mismatch for the " << i << "-th axis";
-      auto new_root = IterTreeSplit(extent, {outer_leaf, inner_leaf});
-      new_roots.push_back(new_root);
-      coeff_map[outer_leaf] = -1;
+      new_device_iter_array.push_back(device_iter);
     }
-    data_extent = data_extent * extent;
-  }
-  auto data_root = IterTreeSplit(data_extent, new_roots);
-  // Construct the new mesh tree
-  auto mesh_root = mesh->root;
-  if (inner->device_tree.defined()) {
-    std::vector<IterTreeBase> new_children;
-    new_children.insert(new_children.end(), mesh->root->children.begin(),
-                        mesh->root->children.end());
-    new_children.insert(new_children.end(), inner->device_tree.value()->root->children.begin(),
-                        inner->device_tree.value()->root->children.end());
-    mesh_root = IterTreeSplit(mesh->root->extent * inner->device_tree.value()->root->extent,
-                              Array<IterTreeBase>(new_children));
   }
   // Construct the from and to scopes
-  if (inner->device_tree.defined()) {
+  if (!inner->device_iter_array.empty()) {
     ICHECK(inner->to.defined()) << "ValueError: The inner layout must have the to scope";
     ICHECK(inner->to.value().Is((from)))
         << "ValueError: The from scope of the inner layout must be the same as the to scope of "
            "the outer layout";
   }
-  return TileLayout::FromMaps(data_root, mesh_root, coeff_map, attr_map, split_map,
-                              inner->device_tree.defined() ? inner->from : from, to);
+
+  return TileLayout(new_data_iter_array, new_device_iter_array,
+                    !inner->device_iter_array.empty() ? inner->from : from, to);
 }
 
 TVM_REGISTER_GLOBAL("tirx.TileLayoutShard")
-    .set_body_typed([](Array<PrimExpr> shape, IterTree mesh, String strategy, TileLayout inner,
-                       ExecScope from,
+    .set_body_typed([](Array<PrimExpr> shape, Array<PrimExpr> mesh, String strategy,
+                       TileLayout inner, ExecScope from,
                        ExecScope to) { return Shard(shape, mesh, strategy, inner, from, to); });
 
 /**************** SwizzleLayout ****************/
@@ -2061,13 +896,6 @@ TVM_REGISTER_GLOBAL("tirx.SwizzleLayout")
       return SwizzleLayout(per_element, swizzle_len, atom_len, swizzle_inner);
     });
 
-Array<PrimExpr> SwizzleLayoutNode::GetDefaultShape() const { return {GetSize()}; }
-
-bool SwizzleLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const {
-  arith::Analyzer analyzer;
-  return analyzer.CanProveEqual(FloorMod(ReduceMul(shape), GetSize()), 0);
-}
-
 bool SwizzleLayoutNode::VerifyWellFormed() const {
   return per_element >= 0 && swizzle_len >= 0 && atom_len >= swizzle_len;
 }
@@ -2076,9 +904,8 @@ PrimExpr SwizzleLayoutNode::GetSize() const { return 1 << (per_element + swizzle
 
 PrimExpr SwizzleLayoutNode::GetCosize() const { return GetSize(); }
 
-PrimExpr SwizzleLayoutNode::Apply(const Array<PrimExpr>& coord) const {
-  ICHECK_EQ(coord.size(), 1) << "ValueError: The number of coordinates must be 1";
-  PrimExpr input = coord[0];
+PrimExpr SwizzleLayoutNode::Apply(const PrimExpr& coord) const {
+  PrimExpr input = coord;
   auto f = [&](const PrimExpr& x) -> PrimExpr {
     if (swizzle_inner) {
       return x ^ ((x & outer_mask) >> atom_len);
@@ -2093,6 +920,6 @@ PrimExpr SwizzleLayoutNode::Apply(const Array<PrimExpr>& coord) const {
   return analyzer.Simplify((f(floordiv(input, base)) << per_element) + floormod(input, base));
 }
 
-}  // namespace tirxx
+}  // namespace tirxxx
 
 }  // namespace tvm

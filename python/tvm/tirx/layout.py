@@ -41,8 +41,11 @@ class TLayout(Object):
     def cosize(self):
         return get_global_func("tir.TLayoutGetCosize")(self)
 
-    def apply(self, *coord: List[PrimExpr]) -> PrimExpr:
-        return get_global_func("tir.TLayoutApply")(self, coord)
+    def apply(self, *coord: List[PrimExpr], shape: List[PrimExpr] = None) -> PrimExpr:
+        if shape is None:
+            assert len(coord) == 1, "shape must be provided if coord is not a single element"
+            shape = [1]
+        return get_global_func("tir.TLayoutApply")(self, coord, shape)
 
     def is_trivial(self) -> bool:
         """Check if the layout is trivial."""
@@ -51,71 +54,47 @@ class TLayout(Object):
     def is_swizzle(self) -> bool:
         """Check if the layout is swizzle."""
         return isinstance(self, SwizzleLayout)
-
-
-@register_object("tirx.IterTreeBase")
-class IterTreeBase(Object):
-    def __init__(self):
-        self.__init_handle_by_constructor__(_ffi_api.IterTreeBase)
-
-
-@register_object("tirx.IterTreeSplit")
-class IterTreeSplit(Object):
-    extent: PrimExpr
-    children: List[IterTreeBase]
-
-    def __init__(self, extent: PrimExpr, children: List[IterTreeBase]):
-        self.__init_handle_by_constructor__(_ffi_api.IterTreeSplit, extent, children)
-
-
-@register_object("tirx.IterTree")
-class IterTree(Object):
-    root: IterTreeSplit
-
-    def __init__(self, root: IterTreeSplit):
-        self.__init_handle_by_constructor__(_ffi_api.IterTree, root)
-
-
-@register_object("tirx.DataIterTree")
-class DataIterTree(IterTree):
-    coeff: List[PrimExpr]
-
-    def __init__(self, root: IterTreeSplit, coeff: List[PrimExpr]):
-        self.__init_handle_by_constructor__(_ffi_api.DataIterTree, root, coeff)
-
-
+    
 @register_object("tirx.DeviceIterAttr")
 class DeviceIterAttr(Object):
     Split = 0
     Replicate = 1
     Exclusive = 2
 
+    extent: PrimExpr
     type: int
     bound: Optional[PrimExpr]
     owner: Optional[PrimExpr]
 
-    def __init__(self, type: int, bound: Optional[Var] = None, owner: Optional[PrimExpr] = None):
-        self.__init_handle_by_constructor__(_ffi_api.DeviceIterAttr, type, bound, owner)
+    def __init__(
+        self,
+        extent: PrimExpr,
+        type: int,
+        bound: Optional[Var] = None,
+        owner: Optional[PrimExpr] = None,
+    ):
+        self.__init_handle_by_constructor__(_ffi_api.DeviceIterAttr, extent, type, bound, owner)
 
     @staticmethod
-    def replicate():
-        return DeviceIterAttr(type=DeviceIterAttr.Replicate)
+    def replicate(extent: PrimExpr):
+        return DeviceIterAttr(extent=extent, type=DeviceIterAttr.Replicate)
 
     @staticmethod
-    def split(bound: PrimExpr):
-        return DeviceIterAttr(type=DeviceIterAttr.Split, bound=bound)
+    def split(extent: PrimExpr, bound: PrimExpr):
+        return DeviceIterAttr(extent=extent, type=DeviceIterAttr.Split, bound=bound)
 
     @staticmethod
-    def exclusive(owner: PrimExpr):
-        return DeviceIterAttr(type=DeviceIterAttr.Exclusive, owner=owner)
+    def exclusive(extent: PrimExpr, owner: PrimExpr):
+        return DeviceIterAttr(extent=extent, type=DeviceIterAttr.Exclusive, owner=owner)
 
 
-@register_object("tirx.DeviceIterTree")
-class DeviceIterTree(IterTree):
-    attrs: List[DeviceIterAttr]
+@register_object("tirx.DataIterAttr")
+class DataIterAttr(Object):
+    extent: PrimExpr
+    stride: PrimExpr
 
-    def __init__(self, root: IterTreeSplit, attrs: List[DeviceIterAttr]):
-        self.__init_handle_by_constructor__(_ffi_api.DeviceIterTree, root, attrs)
+    def __init__(self, extent: PrimExpr, stride: PrimExpr):
+        self.__init_handle_by_constructor__(_ffi_api.DataIterAttr, extent, stride)
 
 
 @dataclass
@@ -125,91 +104,59 @@ class S:
 
 @register_object("tirx.TileLayout")
 class TileLayout(TLayout):
-    data_tree: DataIterTree
-    device_tree: Optional[DeviceIterTree]
+    data_iter_array: List[DataIterAttr]
+    device_iter_array: List[DeviceIterAttr]
     from_scope: Optional[ExecScope]
     to_scope: Optional[ExecScope]
 
     def __init__(
         self,
-        data_tree: DataIterTree,
-        device_tree: Optional[DeviceIterTree] = None,
+        data_iter_array: List[DataIterAttr],
+        device_iter_array: Optional[List[DeviceIterAttr]] = None,
         from_scope: Optional[ExecScope] = None,
         to_scope: Optional[ExecScope] = None,
     ):
+        device_iter_array = device_iter_array or []
         self.__init_handle_by_constructor__(
-            _ffi_api.TileLayout, data_tree, device_tree, from_scope, to_scope
+            _ffi_api.TileLayout, data_iter_array, device_iter_array, from_scope, to_scope
         )
 
     @staticmethod
-    def _get_default_strides(data: Tuple[Union[Tuple, int]], stride: int) -> Tuple:
+    def _get_default_strides(data: Tuple[int], stride: int) -> Tuple:
         assert isinstance(data, tuple), "data must be a tuple"
         res = list()
         for t in reversed(data):
-            if isinstance(t, tuple):
-                res_t, stride = TileLayout._get_default_strides(t, stride)
-                res.append(res_t)
-            else:
-                assert isinstance(t, (int, PrimExpr)), "data must be int or PrimExpr"
-                res.append(stride)
-                stride *= t
-        return tuple(reversed(res)), stride
+            assert isinstance(t, (int, PrimExpr)), "data must be int or PrimExpr"
+            res.append(stride)
+            stride *= t
+        return tuple(reversed(res))
 
     @staticmethod
-    def _construct_device_iter_tree(
-        device: Union[Tuple, int, PrimExpr]
-    ) -> Tuple[DeviceIterTree, List[int]]:
-        f = get_global_func("tir.IterTreeFromTuple")
-        iter_tree, leaves = f(convert_to_object(device))
-        attrs = [DeviceIterAttr(type=DeviceIterAttr.Replicate) for _ in leaves]
-        device_iter_tree = DeviceIterTree(root=iter_tree.root, attrs=attrs)
-        return device_iter_tree, leaves
+    def _construct_device_iter_tree(device: Union[int, PrimExpr]) -> List[DeviceIterAttr]:
+        return [DeviceIterAttr.replicate(e) for e in device]
 
     @staticmethod
-    def _construct_data_iter_tree(
-        data: Union[Tuple, int, PrimExpr, S],
-        strides: Union[Tuple, int, PrimExpr],
-        device_attrs: Optional[List[DeviceIterAttr]],
-        device_leaves: Optional[List[IterTreeBase]],
-        inc_leaf_cnt: callable,
-    ) -> Tuple[DataIterTree, List[IterTreeBase]]:
-        if isinstance(data, (int, PrimExpr)):
-            inc_leaf_cnt()
-            assert isinstance(
-                strides, (int, PrimExpr)
-            ), "the leaf of strides must be int or PrimExpr"
-            node = IterTreeSplit(extent=data, children=[])
-            return DataIterTree(root=node, coeff=[strides]), [node]
-        if isinstance(data, S):
-            assert data.device_index < len(device_leaves), "device index out of bound"
-            device_axis = device_leaves[data.device_index]
-            node = IterTreeSplit(extent=device_axis.extent, children=[])
-            assert (
-                device_attrs[data.device_index].type == DeviceIterAttr.Replicate
-            ), "device axis {} can only be bound once".format(data.device_index)
-            device_attrs[data.device_index] = DeviceIterAttr.split(bound=inc_leaf_cnt())
-            return DataIterTree(root=node, coeff=[strides]), [node]
+    def _construct_data_device_iter_array(
+        data: Tuple[int, PrimExpr, S], strides: Tuple[int, PrimExpr], devices: Tuple[int, PrimExpr]
+    ) -> List[DataIterAttr]:
+        device_iter_array = [DeviceIterAttr.replicate(e) for e in devices]
+        data_iter_array = []
+        for i, (d, s) in enumerate(zip(data, strides)):
+            extent = d
+            if isinstance(d, S):
+                assert d.device_index < len(device_iter_array), "device index out of bound"
+                assert (
+                    device_iter_array[d.device_index].type == DeviceIterAttr.Replicate
+                ), "device axis {} can be bound for only one time".format(d.device_index)
+                extent = device_iter_array[d.device_index].extent
+                device_iter_array[d.device_index] = DeviceIterAttr.split(extent, i)
+            data_iter_array.append(DataIterAttr(extent=extent, stride=s))
 
-        children = []
-        leaves = []
-        coeff = []
-        if isinstance(data, tuple):
-            assert len(data) == len(strides), "data and strides do not match"
-            for d, s in zip(data, strides):
-                child, sub_leaves = TileLayout._construct_data_iter_tree(
-                    d, s, device_attrs, device_leaves, inc_leaf_cnt
-                )
-                children.append(child.root)
-                leaves.extend(sub_leaves)
-                coeff.extend(child.coeff)
-
-        extent = functools.reduce(operator.mul, [c.extent for c in children], 1)
-        node = IterTreeSplit(extent=extent, children=children)
-        return DataIterTree(root=node, coeff=coeff), leaves
+        return data_iter_array, device_iter_array
 
     @staticmethod
     def from_nested_tuple(
-        data: Union[Tuple, int, PrimExpr],
+        data: Union[Tuple, int, PrimExpr, S],
         strides: Optional[Union[Tuple, int, PrimExpr]] = None,
         device: Optional[Union[Tuple, int, PrimExpr]] = None,
         exclusive: Optional[Tuple] = None,
@@ -229,51 +176,50 @@ class TileLayout(TLayout):
 
         if strides is None:
             # get the default strides from the data
-            strides, _ = TileLayout._get_default_strides(data, 1)
+            strides = TileLayout._get_default_strides(data, 1)
 
         if not isinstance(strides, tuple):
             strides = (strides,)
+        assert len(data) == len(strides), "data and strides must have the same length"
 
         if device is None:
+            device = tuple()
             assert exclusive is None, "exclusive must be None if device is None"
             assert from_to is None, "from_to must be None if device is None"
-
-            data_tree, _ = TileLayout._construct_data_iter_tree(
-                data, strides, None, None, lambda: 0
-            )
-            return TileLayout(data_tree=data_tree)
-
         else:
-            if not isinstance(device, tuple):
-                device = (device,)
-
             assert from_to is not None, "from_to must be provided if device is provided"
             assert isinstance(from_to, tuple) and len(from_to) == 2, "from_to must be a tuple of 2"
 
-            device_tree, device_leaves = TileLayout._construct_device_iter_tree(device)
-            device_attrs = list(device_tree.attrs)
-
-            data_tree, _ = TileLayout._construct_data_iter_tree(
-                data, strides, device_attrs, device_leaves, inc_leaf_cnt
-            )
-            if exclusive:
-                for e in exclusive:
-                    axis, owner = e
-                    assert axis < len(device_attrs), "device index out of bound"
-                    assert (
-                        device_attrs[axis].type == DeviceIterAttr.Replicate
-                    ), "device axis {} can only either be S or E".format(axis)
-                    device_attrs[axis] = DeviceIterAttr.exclusive(owner)
-            return TileLayout(
-                data_tree=data_tree,
-                device_tree=DeviceIterTree(device_tree.root, device_attrs),
-                from_scope=ExecScope.create(from_to[0]) if from_to else None,
-                to_scope=ExecScope.create(from_to[1]) if from_to else None,
-            )
+        if not isinstance(device, tuple):
+            device = (device,)
+        data_iter_array, device_iter_array = TileLayout._construct_data_device_iter_array(
+            data, strides, device
+        )
+        if exclusive:
+            for e in exclusive:
+                axis, owner = e
+                assert axis < len(device_iter_array), "device index out of bound"
+                assert (
+                    device_iter_array[axis].type == DeviceIterAttr.Replicate
+                ), "device axis {} can only either be S or E".format(axis)
+                device_iter_array[axis] = DeviceIterAttr.exclusive(
+                    device_iter_array[axis].extent, owner
+                )
+        return TileLayout(
+            data_iter_array=data_iter_array,
+            device_iter_array=device_iter_array,
+            from_scope=ExecScope.create(from_to[0]) if from_to else None,
+            to_scope=ExecScope.create(from_to[1]) if from_to else None,
+        )
 
     @staticmethod
-    def tile(outer: "TileLayout", inner: "TileLayout") -> "TileLayout":
-        return get_global_func("tir.TileLayoutTile")(outer, inner)
+    def tile(
+        outer: "TileLayout",
+        inner: "TileLayout",
+        outer_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> "TileLayout":
+        return get_global_func("tir.TileLayoutTile")(outer, inner, outer_shape, inner_shape)
 
     @staticmethod
     def shard(
@@ -285,12 +231,9 @@ class TileLayout(TLayout):
     ) -> "TileLayout":
         assert from_to is not None, "from_to must be provided if device is provided"
         assert isinstance(from_to, tuple) and len(from_to) == 2, "from_to must be a tuple of 2"
-
-        f = get_global_func("tir.IterTreeFromTuple")
-        iter_tree, _ = f(convert_to_object(mesh))
         return get_global_func("tir.TileLayoutShard")(
             shape,
-            iter_tree,
+            mesh,
             strategy,
             inner,
             ExecScope.create(from_to[0]) if from_to else None,
@@ -302,20 +245,34 @@ class TileLayout(TLayout):
         return get_global_func("tir.NormalizeTileLayout")(layout)
 
     @staticmethod
-    def is_tile_inner(tile_layout: "TileLayout", inner: "TileLayout") -> bool:
+    def is_tile_inner(
+        tile_layout: "TileLayout",
+        inner: "TileLayout",
+        tiled_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> bool:
         # assume outer must be continuous with exactly one layer
-        return get_global_func("tir.IsTileLayout_Inner")(tile_layout, inner)
+        return get_global_func("tir.IsTileLayout_Inner")(
+            tile_layout, inner, tiled_shape, inner_shape
+        )
 
     @staticmethod
-    def is_tile_outer(tile_layout: "TileLayout", outer: "TileLayout") -> bool:
-        return get_global_func("tir.IsTileLayout_Outer")(tile_layout, outer)
+    def is_tile_outer(
+        tile_layout: "TileLayout",
+        outer: "TileLayout",
+        tiled_shape: List[PrimExpr],
+        outer_shape: List[PrimExpr],
+    ) -> bool:
+        return get_global_func("tir.IsTileLayout_Outer")(
+            tile_layout, outer, tiled_shape, outer_shape
+        )
 
     @staticmethod
     def find_optimal_vec_len(layout_A: "TileLayout", layout_B: "TileLayout") -> int:
         return get_global_func("tir.Vec_Len")(layout_A, layout_B)
 
 
-@register_object("tir.SwizzleLayout")
+@register_object("tirx.SwizzleLayout")
 class SwizzleLayout(TLayout):
     """A memory layout that swizzles elements to improve memory access patterns."""
 
