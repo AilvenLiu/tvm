@@ -408,8 +408,8 @@ def match_buffer(
     )
 
 
-def view(src_buffer: Buffer, layout: TLayout) -> Buffer:
-    return _ffi_api.BufferView(src_buffer, layout)
+def view(src_buffer: Buffer, layout: TLayout, shape: List[PrimExpr]) -> Buffer:
+    return _ffi_api.BufferView(src_buffer, layout, shape)
 
 
 def get(src_buffer: Buffer) -> Buffer:

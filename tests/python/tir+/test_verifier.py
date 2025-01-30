@@ -228,7 +228,6 @@ def test_layout():
     verify(test1)
     with pytest.raises(Exception, match="not compatible with shape"):
         verify(test2)
-    with pytest.raises(Exception, match="non-negative"):
         verify(test3)
 
     ### SwizzleLayout

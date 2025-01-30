@@ -77,7 +77,7 @@ def test_hgemm_ampere():
                 tiling = T.TileLayout.from_nested_tuple(
                     data=(BLK_M // 16, BLK_N // 16), strides=(BLK_N // 16, 1)
                 )
-                acc_layout_cta = T.TileLayout.tile(tiling, acc_layout_cta_atom)
+                acc_layout_cta = T.TileLayout.tile(tiling, acc_layout_cta_atom, (BLK_M // 16, BLK_N // 16), (16, 16))
 
                 acc_storage = T.alloc_buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local")
                 A_smem = T.alloc_buffer([BLK_M, BLK_K], dtype="float16", scope="shared", 
@@ -85,7 +85,7 @@ def test_hgemm_ampere():
                 B_smem = T.alloc_buffer([BLK_N, BLK_K], dtype="float16", scope="shared",
                                         layout=T.SwizzleLayout(3, 3, 3))
 
-                acc = T.view(acc_storage, layout=acc_layout_cta)
+                acc = T.view(acc_storage, layout=acc_layout_cta, shape=(BLK_M, BLK_N))
 
                 # T.fill(acc, 0)
                 with T.thread():
@@ -136,12 +136,12 @@ def test_hgemm_ampere():
                         B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local")
                         
                         tiling_AB = T.TileLayout.from_nested_tuple(data=(BLK_M // 16, 2), strides=(2, 1))
-                        AB_layout = T.TileLayout.tile(tiling_AB, mma_layout_atom)
-                        A_warp = T.view(A_storage, layout=AB_layout)
-                        B_warp = T.view(B_storage, layout=AB_layout)
+                        AB_layout = T.TileLayout.tile(tiling_AB, mma_layout_atom, (BLK_M // 16, 2), (8, 8))
+                        A_warp = T.view(A_storage, layout=AB_layout, shape=(BLK_M // 16 * 8, 16))
+                        B_warp = T.view(B_storage, layout=AB_layout, shape=(BLK_M // 16 * 8, 16))
 
-                        acc_warp_layout = T.TileLayout.tile(tiling, mma_layout_atom)
-                        acc_warp = T.view(acc_storage, layout=acc_warp_layout)
+                        acc_warp_layout = T.TileLayout.tile(tiling, mma_layout_atom, (BLK_M // 16, BLK_N // 16), (8, 8))
+                        acc_warp = T.view(acc_storage, layout=acc_warp_layout, shape=(BLK_M // 16 * 8, BLK_N // 16 * 8))
 
                         for k_inner in T.serial(BLK_K // 16):
                             st_m = T.meta_var((warp_id // 2) * (BLK_M // 2))
@@ -253,9 +253,9 @@ def test_hgemm_ampere():
                 tiling = T.TileLayout.from_nested_tuple(
                     data=(BLK_M // 16, BLK_N // 16), strides=(BLK_N // 16, 1)
                 )
-                acc_layout_cta = T.TileLayout.tile(tiling, acc_layout_cta_atom)
+                acc_layout_cta = T.TileLayout.tile(tiling, acc_layout_cta_atom, (BLK_M // 16, BLK_N // 16), (16, 16))
                 acc_storage = T.alloc_buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local")
-                acc = T.view(acc_storage, layout=acc_layout_cta)
+                acc = T.view(acc_storage, layout=acc_layout_cta, shape=(BLK_M, BLK_N))
 
                 A_smem = T.alloc_buffer([DEPTH, BLK_M, BLK_K], dtype="float16", scope="shared", 
                                         layout=T.SwizzleLayout(3, 3, 3))
@@ -267,7 +267,7 @@ def test_hgemm_ampere():
                 B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local")
                 
                 tiling_AB = T.TileLayout.from_nested_tuple(data=(BLK_M // 16, 2), strides=(2, 1))
-                AB_layout = T.TileLayout.tile(tiling_AB, mma_layout_atom)
+                AB_layout = T.TileLayout.tile(tiling_AB, mma_layout_atom, (BLK_M // 16, 2), (8, 8))
 
                 # T.fill(acc, 0)
                 with T.thread():
@@ -297,10 +297,10 @@ def test_hgemm_ampere():
                     pipeline.consumer_wait(DEPTH - 1)
                     # acc += A_smem @ B_smem
                     with T.warp():
-                        A_warp = T.view(A_storage, layout=AB_layout)
-                        B_warp = T.view(B_storage, layout=AB_layout)
-                        acc_warp_layout = T.TileLayout.tile(tiling, mma_layout_atom)
-                        acc_warp = T.view(acc_storage, layout=acc_warp_layout)
+                        A_warp = T.view(A_storage, layout=AB_layout, shape=(BLK_M // 16 * 8, 16))
+                        B_warp = T.view(B_storage, layout=AB_layout, shape=(BLK_M // 16 * 8, 16))
+                        acc_warp_layout = T.TileLayout.tile(tiling, mma_layout_atom, (BLK_M // 16, BLK_N // 16), (8, 8))
+                        acc_warp = T.view(acc_storage, layout=acc_warp_layout, shape=(BLK_M // 16 * 8, BLK_N // 16 * 8))
 
                         for k_inner in T.serial(BLK_K // 16):
                             st_m = T.meta_var((warp_id // 2) * (BLK_M // 2))
@@ -378,10 +378,10 @@ def test_hgemm_ampere():
                 for k_ in T.serial(DEPTH - 1):
                     k = T.meta_var(k_ + T.ceildiv(K, BLK_K) - (DEPTH - 1))
                     with T.warp():
-                        A_warp = T.view(A_storage, layout=AB_layout)
-                        B_warp = T.view(B_storage, layout=AB_layout)
-                        acc_warp_layout = T.TileLayout.tile(tiling, mma_layout_atom)
-                        acc_warp = T.view(acc_storage, layout=acc_warp_layout)
+                        A_warp = T.view(A_storage, layout=AB_layout, shape=(BLK_M // 16 * 8, 16))
+                        B_warp = T.view(B_storage, layout=AB_layout, shape=(BLK_M // 16 * 8, 16))
+                        acc_warp_layout = T.TileLayout.tile(tiling, mma_layout_atom, (BLK_M // 16, BLK_N // 16), (8, 8))
+                        acc_warp = T.view(acc_storage, layout=acc_warp_layout, shape=(BLK_M // 16 * 8, BLK_N // 16 * 8))
 
                         for k_inner in T.serial(BLK_K // 16):
                             st_m = T.meta_var((warp_id // 2) * (BLK_M // 2))

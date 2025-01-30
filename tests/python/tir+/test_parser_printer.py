@@ -83,16 +83,16 @@ def test_roundtrip_exec_scope():
 def test_roundtrip_layout():
     def get_layout1():
         return T.TileLayout.from_nested_tuple(
-            data=((8, T.S(0)), (8, (T.S(1), 2))),
-            strides=((16, -1), (2, (-1, 1))),
+            data=(8, T.S(0), 8, T.S(1), 2),
+            strides=(6, -1, 2, -1, 1),
             device=(8, 4),
             from_to=("thread", "warp"),
         )
 
     def get_layout2():
         return T.TileLayout.from_nested_tuple(
-            data=((8, T.S(0)), (8, (4, 2))),
-            strides=((64, -1), (8, (2, 1))),
+            data=(8, T.S(0), 8, 4, 2),
+            strides=(64, -1, 8, 2, 1),
             device=(8, 4),
             exclusive=[(1, 0)],
             from_to=("thread", "warp"),
@@ -100,8 +100,8 @@ def test_roundtrip_layout():
 
     def get_layout3():
         return T.TileLayout.from_nested_tuple(
-            data=((8, 16), (8, 16)),
-            strides=((1024, 16), (128, 1)),
+            data=(8, 16, 8, 16),
+            strides=(1024, 16, 128, 1),
         )
 
     def get_layout4():
@@ -144,7 +144,7 @@ def test_roundtrip_buffer_view_get1():
                 A_warp_layout = T.TileLayout.shard(
                     (8, 8), (8, 4), "S0S1", inner=A_layout, from_to=("thread", "warp")
                 )
-                A_warp = T.view(A, layout=A_warp_layout)
+                A_warp = T.view(A, layout=A_warp_layout, shape=(8, 8))
 
                 with T.thread():
                     A_local = T.get(A_warp)
@@ -174,7 +174,7 @@ def test_roundtrip_buffer_view_get2():
                 B_layout = T.TileLayout.shard(
                     (8, 8), (8, 4), "S0S1", inner=A_layout, from_to=("thread", "warp")
                 )
-                B = T.view(A, layout=B_layout)
+                B = T.view(A, layout=B_layout, shape=(8, 8))
                 D = T.get(B)
 
                 with T.thread():

@@ -131,7 +131,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
                    ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
                    ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt);
 
-Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout);
+Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Array<PrimExpr> shape);
 
 Buffer BufferGet(tvm::tirx::Buffer buffer);
 
@@ -589,7 +589,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

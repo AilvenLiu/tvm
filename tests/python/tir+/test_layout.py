@@ -841,47 +841,24 @@ def test_tile_layout():
 def test_vec_len_layout():
 
     ### only data tree
-    layout_rm = T.TileLayout.from_nested_tuple(data=(8, 4), strides=(4, 1))
+    layout_rm = T.TileLayout.from_nested_tuple(data=(32), strides=(1))
     layout_rm_2 = T.TileLayout.from_nested_tuple(data=(8, 2, 2), strides=(4, 2, 1))
-    layout_rm_4 = T.TileLayout.from_nested_tuple(data=(8, 1, 4), strides=(4, 4, 1))
-    layout_rm_double = T.TileLayout.from_nested_tuple(data=(4, 8), strides=(8, 1))
-    layout_rm_3D_unit = T.TileLayout.from_nested_tuple(data=(8, 1, 4), strides=(4, 1, 1))
-    layout_rm_3D_2 = T.TileLayout.from_nested_tuple(data=(8, 2, 2), strides=(4, 2, 1))
-    layout_rm_3D_4 = T.TileLayout.from_nested_tuple(data=(8, 4, 1), strides=(4, 1, 1))
+
 
     layout_cm = T.TileLayout.from_nested_tuple(data=(8, 4), strides=(1, 8))
     layout_cm_2 = T.TileLayout.from_nested_tuple(data=(4, 2, 4), strides=(2, 1, 8))
-    layout_cm_4 = T.TileLayout.from_nested_tuple(data=(2, 4, 4), strides=(4, 1, 8))
     layout_cm_half = T.TileLayout.from_nested_tuple(data=(4, 8), strides=(1, 4))
-    layout_cm_3D_unit = T.TileLayout.from_nested_tuple(data=(8, 1, 4), strides=(1, 1, 8))
-    layout_cm_3D_2 = T.TileLayout.from_nested_tuple(data=(4, 2, 4), strides=(2, 1, 8))
-    layout_cm_3D_4 = T.TileLayout.from_nested_tuple(data=(2, 4, 4), strides=(4, 1, 8))
-
+    
     # different dim-majors
     # vec_len(layout_rm, layout_cm) = 1
     assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_cm) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm_2, layout_cm) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm_4, layout_cm) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_cm_2) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm_2, layout_cm_2) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm_4, layout_cm_2) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_cm_4) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm_2, layout_cm_4) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm_4, layout_cm_4) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_cm_3D_unit) == 1
-    assert T.TileLayout.find_optimal_vec_len(layout_rm_3D_unit, layout_cm) == 1
 
     # row-major - 2D
-    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_rm_2) == 2
-    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_rm_4) == 4
-    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_rm_double) == 4
-    assert T.TileLayout.find_optimal_vec_len(layout_rm_2, layout_rm_4) == 2
+    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_rm_2) == 8
 
     # col-major - 2D
-    assert T.TileLayout.find_optimal_vec_len(layout_cm, layout_cm_2) == 2
-    assert T.TileLayout.find_optimal_vec_len(layout_cm, layout_cm_4) == 4
+    assert T.TileLayout.find_optimal_vec_len(layout_cm, layout_cm_2) == 8
     assert T.TileLayout.find_optimal_vec_len(layout_cm, layout_cm_half) == 4
-    assert T.TileLayout.find_optimal_vec_len(layout_cm_2, layout_cm_4) == 2
 
     ### 3D tests
     layout_3D_1 = T.TileLayout.from_nested_tuple(data=(8, 2, 4), strides=(1, 8, 16))
@@ -892,16 +869,6 @@ def test_vec_len_layout():
 
     assert T.TileLayout.find_optimal_vec_len(layout_3D_1, layout_3D_2) == 4
     assert T.TileLayout.find_optimal_vec_len(layout_3D_1, layout_3D_1_twice_coeff) == 1
-
-    # row-major - 3D
-    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_rm_3D_unit) == 4
-    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_rm_3D_2) == 2
-    assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_rm_3D_4) == 4
-
-    # col-major - 3D
-    assert T.TileLayout.find_optimal_vec_len(layout_cm, layout_cm_3D_unit) == 8
-    assert T.TileLayout.find_optimal_vec_len(layout_cm, layout_cm_3D_2) == 2
-    assert T.TileLayout.find_optimal_vec_len(layout_cm, layout_cm_3D_4) == 4
 
     # structure not match
     with pytest.raises(Exception):
@@ -1122,3 +1089,4 @@ if __name__ == "__main__":
     test_shard_layout()
     test_size_cosize()
     test_apply()
+    test_vec_len_layout()

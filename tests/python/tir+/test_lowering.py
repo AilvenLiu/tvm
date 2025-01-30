@@ -54,7 +54,7 @@ def test_lower_view_get():
                 """
                 with T.warp():
                     # warp view of this load
-                    B = T.view(A, layout=B_layout) # TODO(@bohan): consider making view API directly accepts shard parameters
+                    B = T.view(A, layout=B_layout, shape=(64, )) # TODO(@bohan): consider making view API directly accepts shard parameters
                     # B[i] = in_buf[i]
                     with T.thread():
                         # done by each thread
@@ -66,7 +66,7 @@ def test_lower_view_get():
                 """
                 with T.warp():
                     # warp view of this write
-                    B = T.view(A, layout=B_layout)
+                    B = T.view(A, layout=B_layout, shape=(64, ))
                     # out[i] = B[i]
                     with T.thread():
                         # done by each thread
@@ -110,14 +110,14 @@ def test_lower_view_get():
                     (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
                 )
                 A = T.alloc_buffer([4, 2], dtype="float32", scope="local",
-                                   layout=T.TileLayout.tile(tile, atom))
-                B_layout = T.TileLayout.tile(tile, warp_atom)
+                                   layout=T.TileLayout.tile(tile, atom, (2, 2), (1, 2)))
+                B_layout = T.TileLayout.tile(tile, warp_atom, (2, 2), (8, 8))
                 """
                 load in_buf into A
                 """
                 with T.warp():
                     # warp view of this load
-                    B = T.view(A, layout=B_layout)
+                    B = T.view(A, layout=B_layout, shape=(16, 16))
                     with T.thread():
                         # done by each thread
                         A_local = T.get(B)
@@ -129,7 +129,7 @@ def test_lower_view_get():
                 """
                 with T.warp():
                     # warp view of this write
-                    B = T.view(A, layout=B_layout)
+                    B = T.view(A, layout=B_layout, shape=(16, 16))
                     with T.thread():
                         # done by each thread
                         A_local = T.get(B)

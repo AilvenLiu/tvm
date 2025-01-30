@@ -170,7 +170,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
   return buffer;
 }
 
-Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout) {
+Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Array<PrimExpr> shape) {
   SBlockFrame frame = FindSBlockFrame("T.View");
 
   String logical_scope = buffer.logical_scope();
@@ -183,7 +183,7 @@ Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout) {
       logical_scope = tile_layout->to.value()->name;
     }
   }
-  Buffer dst_buffer = BufferDecl(buffer->shape, buffer->dtype, "", NullOpt, NullOpt, NullOpt, buffer.scope(),
+  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", NullOpt, NullOpt, NullOpt, buffer.scope(),
                                  1, 1, "auto", NullOpt, logical_scope, layout);
 
   frame->buffer_views.push_back(tvm::tirx::BufferView(buffer, layout, dst_buffer));
@@ -1109,7 +1109,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
