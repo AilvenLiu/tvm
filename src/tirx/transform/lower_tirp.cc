@@ -490,7 +490,7 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     flattened_indices = this->IterMapSimplifyWithContext(flattened_indices, false);
     ICHECK_EQ(flattened_indices.size(), 1) << "Expected a single element offset";
     if (buffer->layout.defined()) {
-      return {analyzer_->Simplify(buffer->layout.value()->Apply({flattened_indices[0]}))};
+      return {analyzer_->Simplify(buffer->layout.value()->Apply(flattened_indices[0])[0])};
     }
     return flattened_indices;
   }

@@ -22,7 +22,7 @@ from typing import List, Optional, Tuple, Union, Dict
 
 from . import _ffi_api
 from tvm._ffi import register_object, get_global_func
-from tvm.runtime import Object, convert_to_object
+from tvm.runtime import Object, convert_to_object, ShapeTuple
 
 from .expr import Var, PrimExpr
 from .exec_scope import ExecScope
@@ -41,7 +41,7 @@ class TLayout(Object):
     def cosize(self):
         return get_global_func("tir.TLayoutGetCosize")(self)
 
-    def apply(self, *coord: List[PrimExpr], shape: List[PrimExpr] = None) -> PrimExpr:
+    def apply(self, *coord: List[PrimExpr], shape: List[PrimExpr] = None) -> List[PrimExpr]:
         if shape is None:
             assert len(coord) == 1, "shape must be provided if coord is not a single element"
             shape = [1]
@@ -54,7 +54,7 @@ class TLayout(Object):
     def is_swizzle(self) -> bool:
         """Check if the layout is swizzle."""
         return isinstance(self, SwizzleLayout)
-    
+
 @register_object("tirx.DeviceIterAttr")
 class DeviceIterAttr(Object):
     Split = 0
@@ -162,13 +162,6 @@ class TileLayout(TLayout):
         exclusive: Optional[Tuple] = None,
         from_to: Optional[Tuple[str]] = None,
     ) -> "TileLayout":
-        leaf_cnt = 0
-
-        def inc_leaf_cnt():
-            nonlocal leaf_cnt
-            leaf_cnt += 1
-            return leaf_cnt - 1
-
         if isinstance(data, list):
             data = tuple(data)
         elif not isinstance(data, tuple):
@@ -291,3 +284,35 @@ class SwizzleLayout(TLayout):
             atom_len,
             swizzle_inner,
         )
+
+@register_object("tirx.TrainiumLayout")
+class TrainiumLayout(TLayout):
+
+    Partition=0
+    Free=1
+
+    dimension_types: Tuple[int]
+    combined_1d_layout: TileLayout
+
+    def __init__(
+        self,
+        dimension_types: Union[Tuple[int], str],
+        combined_1d_layout: TileLayout,
+    ):
+        if isinstance(dimension_types, str):
+            for c in dimension_types:
+                assert c in ['P', 'F'], "dimension_types must be a string of 'P' and 'F'"
+            dimension_types = [TrainiumLayout.Partition if c == 'P' else TrainiumLayout.Free for c in dimension_types]
+        self.__init_handle_by_constructor__(
+            _ffi_api.TrainiumLayout, ShapeTuple(dimension_types), combined_1d_layout
+        )
+
+    @property
+    def partition_size(self):
+        return get_global_func("tir.TrainiumLayoutGetPartitionSize")(self)
+    
+    
+
+    @staticmethod
+    def normalize(layout: "TrainiumLayout") -> "TrainiumLayout":
+        return get_global_func("tir.NormalizeTrainiumLayout")(layout)

@@ -409,6 +409,19 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
                                    });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
+    .set_dispatch<tirx::TrainiumLayout>("",
+                                       [](tirx::TrainiumLayout layout, ObjectPath p,
+                                          IRDocsifier d) -> Doc {
+                                         Array<String> keys;
+                                         Array<ExprDoc> values;
+                                          keys.push_back("dimension_types");
+                                          values.push_back(d->AsDoc<ExprDoc>(layout->dimension_types, p->Attr("dimension_types")));
+                                          keys.push_back("combined_1d_layout");
+                                          values.push_back(d->AsDoc<ExprDoc>(layout->combined_1d_layout, p->Attr("combined_1d_layout")));
+                                          return TIR(d, "TrainiumLayout")->Call({}, keys, values);
+                                       });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::SwizzleLayout>(
         "", [](tirx::SwizzleLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
           return TIR(d, "SwizzleLayout")
@@ -479,6 +492,7 @@ TVM_SCRIPT_REPR(tirx::BufferLoadNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferStoreNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::TileLayoutNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::TrainiumLayoutNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::SwizzleLayoutNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::DeviceIterAttrNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::DataIterAttrNode, ReprPrintTIR);

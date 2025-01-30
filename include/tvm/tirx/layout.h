@@ -47,10 +47,10 @@ class TLayoutNode : public Object {
   virtual PrimExpr GetCosize() const = 0;
 
   /*! \brief Apply layout on the input coordinate and get the mapped output */
-  PrimExpr Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
+  virtual Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
 
   /*! \brief Apply layout on the flattened coordinate and get the mapped output */
-  virtual PrimExpr Apply(const PrimExpr& coord) const = 0;
+  virtual Array<PrimExpr> Apply(const PrimExpr& coord) const = 0;
 
   static constexpr const char* _type_key = "tirx.TLayout";
   static constexpr const bool _type_has_method_sequal_reduce = false;
@@ -210,7 +210,7 @@ class TileLayoutNode : public TLayoutNode {
   PrimExpr GetCosize() const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  PrimExpr Apply(const PrimExpr& coord) const final;
+  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
 
   static constexpr const char* _type_key = "tirx.TileLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -292,7 +292,7 @@ class SwizzleLayoutNode : public TLayoutNode {
   PrimExpr GetCosize() const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  PrimExpr Apply(const PrimExpr& coord) const final;
+  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
 
   static constexpr const char* _type_key = "tirx.SwizzleLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -314,6 +314,63 @@ class SwizzleLayout : public TLayout {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SwizzleLayoutNode);
 };
 
+// Trainium Layout
+
+enum PhysicalDimensionType : int {
+  kPartition = 0,
+  kFree = 1,
+};
+
+
+class TrainiumLayoutNode: public TLayoutNode {
+  public:
+
+  ShapeTuple dimension_types;
+  TileLayout combined_1d_layout;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("dimension_types", &dimension_types);
+    v->Visit("combined_1d_layout", &combined_1d_layout);
+  }
+
+  bool SEqualReduce(const TrainiumLayoutNode* other, SEqualReducer equal) const {
+    return equal(dimension_types, other->dimension_types) && equal(combined_1d_layout, other->combined_1d_layout);
+  }
+
+  void SHashReduce(SHashReducer hash_reducer) const {
+    hash_reducer(dimension_types);
+    hash_reducer(combined_1d_layout);
+  }
+  /*! \brief Verify if the layout is well-formed */
+  bool VerifyWellFormed() const final;
+
+  /*! \brief Get the size of the layout */
+  PrimExpr GetSize() const final;
+
+  /*! \brief Get the cosize of the layout */
+  PrimExpr GetCosize() const final;
+
+  /*! \brief Get the partition dimension size */
+  PrimExpr GetPartitionSize() const;
+
+  /*! \brief Apply the input coordinate and get the mapped output */
+  Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const final;
+
+  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
+
+  static constexpr const char* _type_key = "tir.TrainiumLayout";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  TVM_DECLARE_FINAL_OBJECT_INFO(TrainiumLayoutNode, TLayoutNode);
+};
+
+class TrainiumLayout : public TLayout {
+  public:
+  TVM_DLL explicit TrainiumLayout(ShapeTuple dimension_types, TileLayout combined_1d_layout);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(TrainiumLayout, TLayout, TrainiumLayoutNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(TrainiumLayoutNode);
+};
 /********************* Utils *********************/
 bool IsTrivialLayout(const TLayout& layout);
 

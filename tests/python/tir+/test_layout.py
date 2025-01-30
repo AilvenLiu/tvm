@@ -981,30 +981,48 @@ def test_size_cosize():
     layout = T.SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
     assert layout.cosize == 1024
 
+    # TrainiumLayout
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    layout = T.TrainiumLayout(dimension_types="PF", combined_1d_layout=layout)
+    assert layout.partition_size == 8
+    assert layout.size == 8
+
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8, 8), strides=(64, 1, 1))
+    layout = T.TrainiumLayout(dimension_types="FPF", combined_1d_layout=layout)
+    assert layout.partition_size == 8
+    assert layout.size == 64
+    assert layout.cosize == 456
+
+    layout = T.TileLayout.from_nested_tuple(data=(8), strides=(1))
+    layout_partition = T.TrainiumLayout(dimension_types="P", combined_1d_layout=layout)
+    assert layout_partition.partition_size == 8 and layout_partition.size == 1
+    layout_free = T.TrainiumLayout(dimension_types="F", combined_1d_layout=layout)
+    assert layout_free.partition_size == 1 and layout_free.size == 8
+
 
 def test_apply():
     ################ TileLayout
     def test0():
         layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i * 8 + j) == i * 8 + j * 1
+            assert layout.apply(i * 8 + j)[0] == i * 8 + j * 1
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i, j, shape=(8, 8)) == i * 8 + j * 1
+            assert layout.apply(i, j, shape=(8, 8))[0] == i * 8 + j * 1
         # apply can accept coord larger than size
         for p in range(1024):
             outer = p // 64
             inner = p % 64
             i, j = inner // 8, inner % 8
-            assert layout.apply(p) == outer * 64 + i * 8 + j * 1
+            assert layout.apply(p)[0] == outer * 64 + i * 8 + j * 1
         with pytest.raises(Exception):
             layout.apply(1, 1, 1)
 
     def test1():
         layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(10, 1))
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i * 8 + j) == i * 10 + j * 1
+            assert layout.apply(i * 8 + j)[0] == i * 10 + j * 1
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i, j, shape=(8, 8)) == i * 10 + j * 1
+            assert layout.apply(i, j, shape=(8, 8))[0] == i * 10 + j * 1
 
         # apply can accept coord larger than size
         for p in range(1024):
@@ -1014,7 +1032,7 @@ def test_apply():
             assert (
                 layout.apply(
                     p,
-                )
+                )[0]
                 == outer * 78 + i * 10 + j * 1
             )
 
@@ -1028,7 +1046,7 @@ def test_apply():
             leaf4 = (i1 % 4) // 2
             leaf5 = i1 % 2
             assert (
-                layout.apply(i0, i1, shape=(6, 16))
+                layout.apply(i0, i1, shape=(6, 16))[0]
                 == leaf1 * 1 + leaf2 * 2 + leaf3 * 12 + leaf4 * 6 + leaf5 * 48
             )
 
@@ -1045,32 +1063,59 @@ def test_apply():
             from_to=("thread", "warp"),
         )
         for i0, i1 in itertools.product(range(8), range(8)):
-            assert layout.apply(i0, i1, shape=(8, 8)) == i1 % 2
+            assert layout.apply(i0, i1, shape=(8, 8))[0] == i1 % 2
 
     ################ Swizzle Layout
     def test4():
         layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3)
         assert layout.size == 64
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i * 8 + j) == i * 8 + i ^ j
+            assert layout.apply(i * 8 + j)[0] == i * 8 + i ^ j
 
     def test5():
         layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
         assert layout.size == 512
         for i, j, k in itertools.product(range(8), range(8), range(8)):
-            assert layout.apply((i * 8 + j) * 8 + k) == (i * 8 + (i ^ j)) * 8 + k
+            assert layout.apply((i * 8 + j) * 8 + k)[0] == (i * 8 + (i ^ j)) * 8 + k
         # apply can accept coord larger than size
         for p in range(4096):
             outer = p // 512
             inner = p % 512
             i, j, k = inner // 64, (inner % 64) // 8, inner % 8
-            assert layout.apply(p) == outer * 512 + (i * 8 + (i ^ j)) * 8 + k
+            assert layout.apply(p)[0] == outer * 512 + (i * 8 + (i ^ j)) * 8 + k
 
     def test6():
         layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3, swizzle_inner=False)
         assert layout.size == 64
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i * 8 + j) == (i ^ j) * 8 + j
+            assert layout.apply(i * 8 + j)[0] == (i ^ j) * 8 + j
+
+    ################ Trainium Layout
+    def test7():
+        layout = T.TrainiumLayout(dimension_types="FP", combined_1d_layout=T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1)))
+        for i, j in itertools.product(range(8), range(8)):
+            coord = layout.apply(i, j, shape=(8, 8)) 
+            assert coord[0] == j
+            assert coord[1] == i*8
+            
+    def test8():
+        layout = T.TileLayout.from_nested_tuple(data=(2, 3, 4, 2, 2), strides=(1, 2, 12, 6, 48))
+        layout = T.TrainiumLayout(dimension_types="FPFPF", combined_1d_layout=layout)
+        def f(i0, i1):
+            leaf1 = i0 // 3
+            leaf2 = i0 % 3
+            leaf3 = i1 // 4
+            leaf4 = (i1 % 4) // 2
+            leaf5 = i1 % 2
+            coord = layout.apply(i0, i1, shape=(6, 16))
+            assert coord[0] == leaf2 * 2 + leaf4 * 6
+            assert coord[1] == leaf1 * 1 +  leaf3 * 12 + leaf5 * 48
+
+        for i0, i1 in itertools.product(range(6), range(16)):
+            f(i0, i1)
+        for i in range(6 * 16):
+            f(i // 16, i % 16)
+
 
     test0()
     test1()
@@ -1079,7 +1124,38 @@ def test_apply():
     test4()
     test5()
     test6()
+    test7()
+    test8()
 
+
+def normalize_trainium_layout(layout):
+    return T.TrainiumLayout.normalize(layout)
+
+def test_normalize_trainium_layout():
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    layout = T.TrainiumLayout(dimension_types="PF", combined_1d_layout=layout)
+    assert_structural_equal(layout, normalize_trainium_layout(layout))
+
+    layout = T.TileLayout.from_nested_tuple(data=(8, 1, 8), strides=(8, 1, 1))
+    layout = T.TrainiumLayout(dimension_types="FPF", combined_1d_layout=layout)
+    layout_expected = T.TrainiumLayout(
+        dimension_types="F",
+        combined_1d_layout=T.TileLayout.from_nested_tuple(data=(64), strides=(1)),
+    )
+    assert_structural_equal(layout_expected, normalize_trainium_layout(layout))
+
+    # cannot fuse P and F
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8, 8), strides=(8, 1, 1))
+    layout = T.TrainiumLayout(dimension_types="FPF", combined_1d_layout=layout)
+    assert_structural_equal(layout, normalize_trainium_layout(layout))
+
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8, 8, 8), strides=(8, 8, 1, 1))
+    layout = T.TrainiumLayout(dimension_types="FPPF", combined_1d_layout=layout)
+    layout_expected = T.TrainiumLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_nested_tuple(data=(8, 64, 8), strides=(8, 1, 1)),
+    )
+    assert_structural_equal(layout_expected, normalize_trainium_layout(layout))
 
 if __name__ == "__main__":
     test_constructor_nested_tuple_no_device()
