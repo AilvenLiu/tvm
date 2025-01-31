@@ -76,19 +76,37 @@ TVM_REGISTER_GLOBAL("tirx.BarrierArrayElem").set_body_typed([](BarrierArray arr,
 /*************************** Pipeline ***************************/
 TVM_REGISTER_NODE_TYPE(PipelineNode);
 
-Pipeline::Pipeline(ExecScope thread_scope, size_t depth, bool specialize, String name_hint) {
+Pipeline::Pipeline(ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint) {
   auto n = make_object<PipelineNode>();
   n->thread_scope = std::move(thread_scope);
   n->name_hint = std::move(name_hint);
   n->depth = depth;
-  n->specialize = specialize;
+  n->separate_pc = separate_pc;
   data_ = std::move(n);
 }
 
 TVM_REGISTER_GLOBAL("tirx.Pipeline")
-    .set_body_typed([](ExecScope thread_scope, size_t depth, bool specialize, String name_hint) {
-      return Pipeline(thread_scope, depth, specialize, name_hint);
+    .set_body_typed([](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint) {
+      return Pipeline(thread_scope, depth, separate_pc, name_hint);
     });
 
-}  // namespace tirxxx
+/*************************** CopyPipeline ***************************/
+TVM_REGISTER_NODE_TYPE(CopyPipelineNode);
+
+CopyPipeline::CopyPipeline(ExecScope thread_scope, size_t depth, bool separate_pc,
+                           String name_hint) {
+  auto n = make_object<CopyPipelineNode>();
+  n->thread_scope = std::move(thread_scope);
+  n->name_hint = std::move(name_hint);
+  n->depth = depth;
+  n->separate_pc = separate_pc;
+  data_ = std::move(n);
+}
+
+TVM_REGISTER_GLOBAL("tirx.CopyPipeline")
+    .set_body_typed([](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint) {
+      return CopyPipeline(thread_scope, depth, separate_pc, name_hint);
+    });
+
+}  // namespace tirxxxx
 }  // namespace tvm

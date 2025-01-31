@@ -58,7 +58,7 @@ class ScheduleContextNode : public Object {
     v->Visit("launch_params", &launch_params);
   }
 
-  static constexpr const char* _type_key = "tir.ScheduleContext";
+  static constexpr const char* _type_key = "tirx.ScheduleContext";
   static constexpr bool _type_has_method_sequal_reduce = false;
   static constexpr bool _type_has_method_shash_reduce = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScheduleContextNode, Object);
@@ -147,16 +147,9 @@ TVM_DLL const Op& pipeline_producer_acquire();
 /*!
  * \brief See pesudo code below:
  *
- *  pipe.producer_copy_async(BufferRegion dst, BufferRegion src)
+ *  pipe.producer_commit()
  */
-TVM_DLL const Op& pipeline_producer_copy_async();
-
-/*!
- * \brief See pesudo code below:
- *
- *  pipe.producer_commit_stage()
- */
-TVM_DLL const Op& pipeline_producer_commit_stage();
+TVM_DLL const Op& pipeline_producer_commit();
 
 /*!
  * \brief See pesudo code below:
@@ -172,8 +165,15 @@ TVM_DLL const Op& pipeline_consumer_wait();
  */
 TVM_DLL const Op& pipeline_consumer_release();
 
-}  // namespace tirxxp
-}  // namespace tirxx
+/*!
+ * \brief See pesudo code below:
+ *
+ *  pipe.copy(BufferRegion dst, BufferRegion src)
+ */
+TVM_DLL const Op& pipeline_copy();
+
+}  // namespace tirxp
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_TIRP_OP_H_

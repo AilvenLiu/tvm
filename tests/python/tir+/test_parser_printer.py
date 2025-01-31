@@ -397,13 +397,13 @@ def test_roundtrip_pipeline_no_specialize_async_no_depth():
             
             with T.cta():
                 A_smem = T.alloc_buffer([4096], dtype="float32", scope="shared")
-                pipe = Tp.alloc_pipeline(thread_scope="cta", depth=0, specialize=False)
-                pipe.producer_copy_async(A_smem[0:128], A[0:128])
-                pipe.producer_commit_stage()
+                pipe = Tp.alloc_copy_pipeline(thread_scope="cta", depth=0, separate_pc=False)
+                pipe.copy(A_smem[0:128], A[0:128])
+                pipe.producer_commit()
 
                 for i in range(1, 16):
-                    pipe.producer_copy_async(A_smem[i * 128 : (i + 1) * 128], A[i * 128 : (i + 1) * 128])
-                    pipe.producer_commit_stage()
+                    pipe.copy(A_smem[i * 128 : (i + 1) * 128], A[i * 128 : (i + 1) * 128])
+                    pipe.producer_commit()
 
                     pipe.consumer_wait(num_stages=1)
                     Tp.fill(A_smem[(i - 1) * 128 : i * 128], T.float32(0))
@@ -415,6 +415,7 @@ def test_roundtrip_pipeline_no_specialize_async_no_depth():
     # fmt: on
 
     code = test.script()
+    print(code)
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
@@ -437,7 +438,7 @@ def test_roundtrip_pipeline_specialize_sync_depth():
                 B_smem = T.alloc_buffer([DEPTH, 128, 32], dtype="float32", scope="shared")
                 C_local = T.alloc_buffer([32, 32], dtype="float32", scope="local")
 
-                pipe = Tp.alloc_pipeline(thread_scope="cta", depth=DEPTH, specialize=True)
+                pipe = Tp.alloc_copy_pipeline(thread_scope="cta", depth=DEPTH, separate_pc=True)
                 
                 with T.thread([tid], [T.Range(0, 64)]):
                     for i in range(32):
@@ -445,7 +446,7 @@ def test_roundtrip_pipeline_specialize_sync_depth():
                         j = T.meta_var(i % DEPTH)
                         Tp.copy(A_smem[j, 0:32, 0:128], A[i*32, 0:128])
                         Tp.copy(B_smem[j, 0:32, 0:128], B[i*32, 0:128])
-                        pipe.producer_commit_stage()
+                        pipe.producer_commit()
                 with T.thread([tid], [T.Range(64, 128)]):
                     for i in range(32):
                         pipe.consumer_wait()

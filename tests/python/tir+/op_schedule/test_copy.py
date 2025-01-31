@@ -114,9 +114,9 @@ def test_copy_global_to_shared(input, dtype, sync):
             with T.cta():
                 A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
 
-                pipeline = Tp.alloc_pipeline("cta", depth=0, specialize=False)
-                pipeline.producer_copy_async(A_smem[*r_smem], A[*r_gmem])
-                pipeline.producer_commit_stage()
+                pipeline = Tp.alloc_copy_pipeline("cta", depth=0, separate_pc=False)
+                pipeline.copy(A_smem[*r_smem], A[*r_gmem])
+                pipeline.producer_commit()
                 pipeline.consumer_wait(0)
                 Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on

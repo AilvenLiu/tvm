@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import numpy as np
+import os
 
 import tvm
 import tvm.testing
@@ -24,6 +25,10 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.transform import LowerTIRp
 from tvm.contrib import cublas
+
+
+def is_running_under_pytest():
+    return "PYTEST_CURRENT_TEST" in os.environ
 
 
 @tvm.testing.requires_cuda_compute_version(8)
@@ -261,7 +266,7 @@ def test_hgemm_ampere():
                                         layout=T.SwizzleLayout(3, 3, 3))
                 B_smem = T.alloc_buffer([DEPTH, BLK_N, BLK_K], dtype="float16", scope="shared",
                                         layout=T.SwizzleLayout(3, 3, 3))
-                pipeline = Tp.alloc_pipeline("cta", depth=0, specialize=False)
+                pipeline = Tp.alloc_copy_pipeline("cta", depth=0, separate_pc=False)
 
                 A_storage = T.alloc_buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local")
                 B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local")
@@ -278,9 +283,9 @@ def test_hgemm_ampere():
 
                 # prologue
                 for k in T.serial(DEPTH - 1):
-                    pipeline.producer_copy_async(A_smem[k, :, :], A[bx * BLK_M: bx * BLK_M + BLK_M, k * BLK_K: k * BLK_K + BLK_K])
-                    pipeline.producer_copy_async(B_smem[k, :, :], B[by * BLK_N: by * BLK_N + BLK_N, k * BLK_K: k * BLK_K + BLK_K])
-                    pipeline.producer_commit_stage()
+                    pipeline.copy(A_smem[k, :, :], A[bx * BLK_M: bx * BLK_M + BLK_M, k * BLK_K: k * BLK_K + BLK_K])
+                    pipeline.copy(B_smem[k, :, :], B[by * BLK_N: by * BLK_N + BLK_N, k * BLK_K: k * BLK_K + BLK_K])
+                    pipeline.producer_commit()
 
                 for k in T.serial(T.ceildiv(K, BLK_K) - (DEPTH - 1)):
                     k_load = T.meta_var(k + DEPTH - 1)
@@ -290,11 +295,13 @@ def test_hgemm_ampere():
                     T.static_assert(M % BLK_M == 0, f"M={M}, BLK_M={BLK_M}")
                     T.static_assert(N % BLK_N == 0, f"N={N}, BLK_N={BLK_N}")
                     T.static_assert(K % BLK_K == 0, f"K={K}, BLK_K={BLK_K}")
-                    pipeline.producer_copy_async(A_smem[k_load % DEPTH, :, :], A[bx * BLK_M: bx * BLK_M + BLK_M, k_load * BLK_K: k_load * BLK_K + BLK_K])
-                    pipeline.producer_copy_async(B_smem[k_load % DEPTH, :, :], B[by * BLK_N: by * BLK_N + BLK_N, k_load * BLK_K: k_load * BLK_K + BLK_K])
-                    pipeline.producer_commit_stage()
+                    pipeline.copy(A_smem[k_load % DEPTH, :, :], A[bx * BLK_M: bx * BLK_M + BLK_M, k_load * BLK_K: k_load * BLK_K + BLK_K])
+                    pipeline.copy(B_smem[k_load % DEPTH, :, :], B[by * BLK_N: by * BLK_N + BLK_N, k_load * BLK_K: k_load * BLK_K + BLK_K])
+                    pipeline.producer_commit()
                     
                     pipeline.consumer_wait(DEPTH - 1)
+                    with T.thread():
+                        T.tvm_storage_sync("shared")
                     # acc += A_smem @ B_smem
                     with T.warp():
                         A_warp = T.view(A_storage, layout=AB_layout, shape=(BLK_M // 16 * 8, 16))
@@ -375,6 +382,8 @@ def test_hgemm_ampere():
 
                 # epilogue
                 pipeline.consumer_wait(0)
+                with T.thread():
+                    T.tvm_storage_sync("shared")
                 for k_ in T.serial(DEPTH - 1):
                     k = T.meta_var(k_ + T.ceildiv(K, BLK_K) - (DEPTH - 1))
                     with T.warp():
@@ -1119,17 +1128,18 @@ def test_hgemm_hopper_no_ws():
 
         return C_torch.cpu().numpy()
 
-    proton.start("matmul", hook="triton")
-    proton.activate(0)
+    if not is_running_under_pytest():
+        proton.start("matmul", hook="triton")
+        proton.activate(0)
 
     C_tvm = tir_gemm().asnumpy()
     C_cublas = cublas_gemm()
     tvm.testing.assert_allclose(C_tvm, C_cublas, rtol=2e-2, atol=1e-4)
 
-    proton.deactivate(0)
-    proton.finalize()
-
-    proton_viewer.parse(["time/ms"], "matmul.hatchet", depth=100)
+    if not is_running_under_pytest():
+        proton.deactivate(0)
+        proton.finalize()
+        proton_viewer.parse(["time/ms"], "matmul.hatchet", depth=100)
 
 
 if __name__ == "__main__":

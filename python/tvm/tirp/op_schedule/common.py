@@ -14,120 +14,130 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from typing import Dict
 
-from tvm._ffi import register_object, register_func
-from tvm.ir import Op
-from tvm.tir import _ffi_api
-from tvm.runtime import Object, Scriptable
-from tvm.target import Target
-from tvm.tir.expr import PrimExpr
-from tvm.tir.exec_scope import ExecScope
+"""Common utilities for operator scheduling."""
 
+from enum import Enum
+from typing import Optional
+import functools
+import operator
 
-def _get_tirp_op(op_name: str):
-    """Get TIRp operator by name.
-
-    Parameters
-    ----------
-    op_name : str
-        Name of the TIRp operator
-    """
-    assert isinstance(op_name, str)
-    return Op.get("tirp." + op_name)
+from tvm.script import tir as T
+from tvm.tirp.op_schedule import ScheduleContext
+from tvm.runtime import DataType
+from tvm.arith.analyzer import Analyzer
+from tvm.tir import BufferRegion, PrimFunc, Buffer
 
 
-@register_object("tir.ScheduleContext")
-class ScheduleContext(Object, Scriptable):
-    """ScheduleContext node.
+class InstType(Enum):
+    """Enumeration of instruction types for memory operations."""
 
-    Parameters
-    ----------
-    target : Target
-        The target of the schedule context.
-
-    exec_scope : ExecScope
-        The execution scope of the schedule context.
-
-    launch_params : Dict[str, PrimExpr]
-        The launch parameters of the schedule context.
-    """
-
-    target: Target
-    exec_scope: ExecScope
-    launch_params: Dict[str, PrimExpr]
-
-    def __init__(
-        self, target: Target, exec_scope: ExecScope, launch_params: Dict[str, PrimExpr]
-    ) -> None:
-        self.__init_handle_by_constructor__(
-            _ffi_api.ScheduleContext, target, exec_scope, launch_params  # pylint: disable=no-member
-        )
-
-    def is_cuda(self) -> bool:
-        """Check if the target is CUDA."""
-        return self.target.kind.name == "cuda"
+    NORMAL = 0
+    CP_ASYNC = 1
 
 
-# Global registry to store operator implementations and their selectors
-_OP_REGISTRY = {}
+def copy_cuda_g2s_s2g_2d_cta_vec_load_impl(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    sctx: ScheduleContext,
+    inst_type: InstType,
+) -> Optional[PrimFunc]:
+    """Schedule copy operation between global and shared memory on CUDA."""
+    # Basic validation checks
+    if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
+        return None
 
+    src: Buffer = src_buffer_region.buffer
+    dst: Buffer = dst_buffer_region.buffer
+    if not all(
+        [
+            src.layout and dst.layout,
+            src.dtype == dst.dtype,
+            src.layout.is_trivial() or dst.layout.is_trivial(),
+            (src.scope() == "global" and dst.scope().startswith("shared"))
+            or (src.scope().startswith("shared") and dst.scope() == "global"),
+        ]
+    ):
+        return None
 
-def register_schedule(op_name: str):
-    """Decorator function to register operator implementations with their selectors.
+    # Extract regions and validate dimensions
+    analyzer = Analyzer()
+    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
+    src_st = [r.min for r in src_region]
+    dst_st = [r.min for r in dst_region]
+    src_extent = [r.extent for r in src_region]
+    dst_extent = [r.extent for r in dst_region]
 
-    Parameters
-    ----------
-    op_name : str
-        The operator to be registered.
+    # Validate non-unit dimensions match
+    src_extent_ = [e for e in src_extent if e != 1]
+    dst_extent_ = [e for e in dst_extent if e != 1]
+    if not (
+        len(src_extent_) == len(dst_extent_)
+        and all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent_, dst_extent_))
+    ):
+        return None
 
-    impl_func : Callable[..., Optional[PrimFunc]]
-        The implementation function.
+    # Thread and vectorization setup
+    tx = sctx.launch_params["threadIdx.x"]
+    assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
-    Returns
-    -------
-    Callable
-        A decorator function that registers the implementation.
-    """
+    elem_size = DataType(src.dtype).bits // 8
+    n_elements = functools.reduce(operator.mul, src_extent, 1)
 
-    def decorator(impl_func):
-        # Register the implementation
-        op = _get_tirp_op(op_name)
-        if op not in _OP_REGISTRY:
-            _OP_REGISTRY[op] = []
-        _OP_REGISTRY[op].append(impl_func)
-        return impl_func
+    # Find valid vector length
+    if n_elements % tx != 0:
+        return None
+    for vec_len in [16 // elem_size, 8 // elem_size, 4 // elem_size, 1]:
+        if vec_len > 0 and all(
+            analyzer.can_prove_equal(x % vec_len, 0)
+            for x in [
+                src_st[-1],
+                dst_st[-1],
+                src.shape[-1],
+                dst.shape[-1],
+                src_extent[-1],
+                dst_extent[-1],
+                n_elements // tx,
+            ]
+        ):
+            break
+    else:
+        return None
 
-    return decorator
+    # cp-size (the size of data in bytes) can only be 4, 8 and 16 for cp.async
+    if inst_type == InstType.CP_ASYNC:
+        cp_size = vec_len * elem_size
+        if cp_size not in [4, 8, 16]:
+            return None
 
+    def get_indices(st, extent, fused):
+        indices = []
+        product = 1
+        for i in reversed(range(len(extent))):
+            indices.append(st[i] + (fused // product) % extent[i])
+            product *= extent[i]
+        return reversed(indices)
 
-@register_func("tirp.f_op_scheduler")
-def f_op_scheduler(op: Op, args, sctx: ScheduleContext):
-    """Find and return a schedule for the operator.
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def impl():
+        """Implement copy operation with vectorized loads/stores."""
+        for s in T.serial(0, n_elements // (tx * vec_len)):
+            for tid_x in T.thread_binding(tx, "threadIdx.x"):
+                if inst_type == InstType.NORMAL:
+                    for vec in T.vectorized(vec_len):
+                        fused = T.meta_var((s * tx + tid_x) * vec_len + vec)
+                        dst_indices = T.meta_var(get_indices(dst_st, dst_extent, fused))
+                        src_indices = T.meta_var(get_indices(src_st, src_extent, fused))
+                        dst[*dst_indices] = src[*src_indices]
+                elif inst_type == InstType.CP_ASYNC:
+                    fused = T.meta_var((s * tx + tid_x) * vec_len)
+                    dst_indices = T.meta_var(get_indices(dst_st, dst_extent, fused))
+                    src_indices = T.meta_var(get_indices(src_st, src_extent, fused))
+                    T.evaluate(T.ptx_cp_async(dst.dtype, dst.data, dst.offset_of_p([*dst_indices]),
+                                              src.data, src.offset_of_p([*src_indices]), cp_size))
+        if dst.scope().startswith("shared") and inst_type == InstType.NORMAL:
+            T.tvm_storage_sync("shared")
+    # fmt: on
 
-    Parameters
-    ----------
-    op : Op
-        The operator to be scheduled
-    args : list
-        The operator arguments
-    sctx : ScheduleContext
-        The scheduling context
-
-    Returns
-    -------
-    Optional[PrimFunc]
-        The result of the operator implementation
-    """
-    for impl in _OP_REGISTRY[op]:
-        res = impl(*args, sctx)
-        if res is not None:
-            return res
-    assert False, (
-        "Internal Error: no implementation found for operator "
-        + str(op)
-        + " with args "
-        + str(args)
-        + " and context "
-        + str(sctx)
-    )
+    return impl

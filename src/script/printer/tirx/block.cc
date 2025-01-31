@@ -263,15 +263,21 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   }
   for (size_t i = 0; i < block->pipelines.size(); ++i) {
     tir::Pipeline pipeline = block->pipelines[i];
-    ObjectPath pipeline_p = block_p->Attr("pipelines")->ArrayIndex(i);
-    IdDoc lhs = DefinePipeline(pipeline, *frame, d);
-    ExprDoc rhs =
-        TIRp(d, "alloc_pipeline")
-            ->Call({LiteralDoc::Str(pipeline->thread_scope->name, pipeline_p->Attr("thread_scope")),
-                    LiteralDoc::Int(pipeline->depth, pipeline_p->Attr("depth")),
-                    LiteralDoc::Boolean(pipeline->specialize, pipeline_p->Attr("specialize")),
-                    LiteralDoc::Str(pipeline->name_hint, pipeline_p->Attr("name_hint"))});
-    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+    if (pipeline->IsInstance<tir::CopyPipelineNode>()) {
+      ObjectPath pipeline_p = block_p->Attr("pipelines")->ArrayIndex(i);
+      IdDoc lhs = DefinePipeline(pipeline, *frame, d);
+      ExprDoc rhs =
+          TIRp(d, "alloc_copy_pipeline")
+              ->Call(
+                  {LiteralDoc::Str(pipeline->thread_scope->name, pipeline_p->Attr("thread_scope")),
+                   LiteralDoc::Int(pipeline->depth, pipeline_p->Attr("depth")),
+                   LiteralDoc::Boolean(pipeline->separate_pc, pipeline_p->Attr("separate_pc")),
+                   LiteralDoc::Str(pipeline->name_hint, pipeline_p->Attr("name_hint"))});
+      (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+    } else {
+      LOG(FATAL) << "ValueError: Unknown Pipeline type in block signature: "
+                 << pipeline->GetTypeKey();
+    }
   }
   for (size_t i = 0; i < block->buffer_views.size(); ++i) {
     tir::BufferView buffer_view = block->buffer_views[i];

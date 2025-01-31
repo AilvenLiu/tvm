@@ -18,7 +18,7 @@
 from typing import Union
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
-from tvm.tir.async_structs import Barrier, BarrierArray, Pipeline
+from tvm.tir.async_structs import Barrier, BarrierArray, Pipeline, CopyPipeline
 from tvm.tir.exec_scope import ExecScope
 
 from . import _ffi_api
@@ -155,10 +155,10 @@ def alloc_barrier_array(thread_scope: ExecScope, size: int, name_hint="") -> Bar
     return _ffi_api.AllocBarrierArray(thread_scope, size, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def alloc_pipeline(
-    thread_scope: ExecScope, depth: int, specialize: bool, name_hint: str = ""
-) -> Pipeline:
-    """The pipeline allocation function.
+def alloc_copy_pipeline(
+    thread_scope: ExecScope, depth: int, separate_pc: bool, name_hint: str = ""
+) -> CopyPipeline:
+    """The copy pipeline allocation function.
 
     Parameters
     ----------
@@ -168,22 +168,29 @@ def alloc_pipeline(
     depth : int
         The depth of the pipeline.
 
-    specialize : bool
-        The flag whether the pipeline is specialized.
+    separate_pc : bool
+        The flag whether the pipeline is separate pc.
 
     name_hint : str
         The name hint of the pipeline.
 
     Returns
     -------
-    res : Pipeline
-        The allocated pipeline.
+    res : CopyPipeline
+        The allocated copy pipeline.
     """
     if isinstance(thread_scope, str):
         thread_scope = ExecScope(thread_scope)
     else:
         assert isinstance(thread_scope, ExecScope)
-    return _ffi_api.AllocPipeline(thread_scope, depth, specialize, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.AllocCopyPipeline(thread_scope, depth, separate_pc, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-__all__ = ["copy", "fill", "gemm", "alloc_barrier", "alloc_barrier_array", "alloc_pipeline"]
+__all__ = [
+    "copy",
+    "fill",
+    "gemm",
+    "alloc_barrier",
+    "alloc_barrier_array",
+    "alloc_copy_pipeline",
+]

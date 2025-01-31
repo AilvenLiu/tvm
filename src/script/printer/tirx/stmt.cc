@@ -147,9 +147,33 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                   TIRp(d, "Pipeline")
                       ->Call({
                           LiteralDoc::Int(pipeline->depth, p->Attr("depth")),
-                          LiteralDoc::Boolean(pipeline->specialize, p->Attr("specialize")),
+                          LiteralDoc::Boolean(pipeline->separate_pc, p->Attr("separate_pc")),
                           LiteralDoc::Str(pipeline->name_hint, p->Attr("name_hint")),
 
+                      });
+              opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+            } else {
+              LOG(WARNING) << "Didn't find pipeline definition for: " << pipeline->name_hint;
+            }
+          }
+          if (Optional<ExprDoc> doc = d->GetVarDoc(pipeline)) {
+            return doc.value();
+          }
+          LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << pipeline;
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::CopyPipeline>(
+        "", [](tirx::CopyPipeline pipeline, ObjectPath p, IRDocsifier d) -> Doc {
+          if (!d->IsVarDefined(pipeline)) {
+            if (Optional<Frame> opt_f = FindLowestVarDef(pipeline, d)) {
+              ExprDoc lhs = DefinePipeline(pipeline, opt_f.value(), d);
+              ExprDoc rhs =
+                  TIRp(d, "CopyPipeline")
+                      ->Call({
+                          LiteralDoc::Int(pipeline->depth, p->Attr("depth")),
+                          LiteralDoc::Boolean(pipeline->separate_pc, p->Attr("separate_pc")),
+                          LiteralDoc::Str(pipeline->name_hint, p->Attr("name_hint")),
                       });
               opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
             } else {

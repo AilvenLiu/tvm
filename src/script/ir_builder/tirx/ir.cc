@@ -33,6 +33,7 @@ namespace script {
 namespace ir_builder {
 namespace tirx {
 
+using tvm::tirx::CopyPipeline;
 using tvm::tirx::IterVar;
 using tvm::tirx::TLayout;
 
@@ -183,8 +184,8 @@ Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Array<Pri
       logical_scope = tile_layout->to.value()->name;
     }
   }
-  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", NullOpt, NullOpt, NullOpt, buffer.scope(),
-                                 1, 1, "auto", NullOpt, logical_scope, layout);
+  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", NullOpt, NullOpt, NullOpt,
+                                 buffer.scope(), 1, 1, "auto", NullOpt, logical_scope, layout);
 
   frame->buffer_views.push_back(tvm::tirx::BufferView(buffer, layout, dst_buffer));
   {
@@ -415,8 +416,6 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                          ffi::String storage_scope, int align, int offset_factor,
                          ffi::String buffer_type_str,
                          ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                   ffi::String logical_scope, ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                   ffi::Optional<TLayout> layout) {
                          ffi::String logical_scope, ffi::Optional<TLayout> layout) {
   Buffer buffer =
       BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align, offset_factor,
@@ -458,14 +457,15 @@ BarrierArray AllocBarrierArray(ExecScope thread_scope, size_t size, String name_
   return barrier_array;
 }
 
-Pipeline AllocPipeline(ExecScope thread_scope, size_t depth, bool specialize, String name_hint) {
-  Pipeline pipeline = tvm::tirx::Pipeline(thread_scope, depth, specialize, name_hint);
+CopyPipeline AllocCopyPipeline(ExecScope thread_scope, size_t depth, bool separate_pc,
+                               String name_hint) {
+  CopyPipeline pipeline = tvm::tirx::CopyPipeline(thread_scope, depth, separate_pc, name_hint);
   IRBuilder builder = IRBuilder::Current();
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->pipelines.push_back(pipeline);
   } else {
-    LOG(FATAL) << "ValueError: Block frame not find. Please ensure 'T.alloc_pipeline' is called "
-                  "under T.block()";
+    LOG(FATAL) << "ValueError: Block frame not find. Please ensure 'T.alloc_copy_pipeline' is "
+                  "called under T.block()";
   }
   return pipeline;
 }
@@ -873,12 +873,16 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     .set_dispatch<tvm::tirx::PipelineNode>([](const ObjectRef& node, ffi::String name) -> void {
-
+      using namespace tvm::tir;
+      PipelineNode* pipeline = const_cast<PipelineNode*>(node.as<PipelineNode>());
+      pipeline->name_hint = name;
     });
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<tvm::tirx::PipelineNode>([](const ObjectRef& node, ffi::String name) -> void {
-
+    .set_dispatch<tvm::tirx::CopyPipelineNode>([](const ObjectRef& node, ffi::String name) -> void {
+      using namespace tvm::tir;
+      CopyPipelineNode* pipeline = const_cast<CopyPipelineNode*>(node.as<CopyPipelineNode>());
+      pipeline->name_hint = name;
     });
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
@@ -943,7 +947,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.Writes", Writes)
       .def("script.ir_builder.tir.BlockAttrs", BlockAttrs)
       .def("script.ir_builder.tir.SBlockAllocBuffer", SBlockAllocBuffer)
-      .def("script.ir_builder.tir.AllocPipeline", AllocPipeline)
+      .def("script.ir_builder.tir.AllocCopyPipeline", AllocCopyPipeline)
       .def("script.ir_builder.tir.AxisSpatial", axis::Spatial)
       .def("script.ir_builder.tir.AxisReduce", axis::Reduce)
       .def("script.ir_builder.tir.AxisScan", axis::Scan)
@@ -1109,7 +1113,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

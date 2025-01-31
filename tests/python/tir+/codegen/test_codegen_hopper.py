@@ -294,17 +294,16 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     def get_np_dtype(dtype):
         if dtype == "e4m3_float8":
             return ml_dtypes.float8_e4m3fn
-        elif dtype == "e5m2_float8":
+        if dtype == "e5m2_float8":
             return ml_dtypes.float8_e5m2
-        else:
-            return np.dtype(dtype)
+        return np.dtype(dtype)
 
     A_np = np.array(A_np).reshape(shape).astype(get_np_dtype(dtype))
     B_np = np.zeros(shape).astype(get_np_dtype(dtype))
     A = tvm.nd.array(A_np, device=DEV)
     B = tvm.nd.array(B_np, device=DEV)
     mod(A, B)
-    assert np.allclose(A.asnumpy(), B.asnumpy())
+    assert np.allclose(A.asnumpy().astype("float32"), B.asnumpy().astype("float32"))
 
 
 @pytest.mark.parametrize("swizzle", [1, 2, 3])
@@ -390,7 +389,7 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
         per_element=int(math.log2(128 // dtype.bits)), swizzle_len=swizzle, atom_len=3
     )
     B_np = B.asnumpy()
-    B_swizzle = [B_np[int(layout.apply(i))] for i in range(total_elems)]
+    B_swizzle = [B_np[int(layout.apply(i)[0])] for i in range(total_elems)]
     B_swizzle = np.array(B_swizzle).astype(str(dtype))
     assert np.allclose(A.asnumpy(), B_swizzle)
 

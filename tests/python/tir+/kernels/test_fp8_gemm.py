@@ -14,6 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
+import os
 import numpy as np
 import ml_dtypes
 
@@ -22,6 +24,10 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tir.transform import LowerTIRp
+
+
+def is_running_under_pytest():
+    return "PYTEST_CURRENT_TEST" in os.environ
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -279,18 +285,18 @@ def test_fp8_gemm_hopper_no_ws():
 
         return C_tvm
 
-    proton.start("matmul", hook="triton")
-    proton.activate(0)
+    if not is_running_under_pytest():
+        proton.start("matmul", hook="triton")
+        proton.activate(0)
 
     C_cublas = cublas_gemm()
     C_tir = tir_gemm()
-
-    proton.deactivate(0)
-    proton.finalize()
-
-    proton_viewer.parse(["time/ms"], "matmul.hatchet", depth=100)
-
     tvm.testing.assert_allclose(C_tir.asnumpy(), C_cublas.asnumpy(), rtol=2e-2, atol=1e-4)
+
+    if not is_running_under_pytest():
+        proton.deactivate(0)
+        proton.finalize()
+        proton_viewer.parse(["time/ms"], "matmul.hatchet", depth=100)
 
 
 if __name__ == "__main__":

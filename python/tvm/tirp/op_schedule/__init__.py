@@ -15,7 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .common import ScheduleContext, register_schedule
+from .registry import ScheduleContext, register_schedule
 from .copy import *
+from .async_structs import *
 
 __all__ = ["ScheduleContext", "register_schedule"]

@@ -26,7 +26,7 @@
 
 #include <tvm/ir/module.h>
 #include <tvm/runtime/object.h>
-#include <tvm/tir/exec_scope.h>
+#include <tvm/tirx/exec_scope.h>
 
 namespace tvm {
 namespace tirx {
@@ -150,8 +150,8 @@ class PipelineNode : public Object {
   ExecScope thread_scope;
   /*! \brief The pipeline depth */
   size_t depth;
-  /*! \brief Whether to specialize producer/consumer threads */
-  bool specialize;
+  /*! \brief Whether to separate producer and consumer threads */
+  bool separate_pc;
   /*! \brief The name hint of the pipeline. */
   String name_hint;
 
@@ -159,20 +159,20 @@ class PipelineNode : public Object {
     v->Visit("thread_scope", &thread_scope);
     v->Visit("name_hint", &name_hint);
     v->Visit("depth", &depth);
-    v->Visit("specialize", &specialize);
+    v->Visit("separate_pc", &separate_pc);
   }
 
   bool SEqualReduce(const PipelineNode* other, SEqualReducer equal) const {
     if (!equal(thread_scope, other->thread_scope)) return false;
     if (!equal(depth, other->depth)) return false;
-    if (!equal(specialize, other->specialize)) return false;
+    if (!equal(separate_pc, other->separate_pc)) return false;
     return equal.FreeVarEqualImpl(this, other);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(thread_scope);
     hash_reduce(depth);
-    hash_reduce(specialize);
+    hash_reduce(separate_pc);
     hash_reduce.FreeVarHashImpl(this);
   }
 
@@ -184,10 +184,27 @@ class PipelineNode : public Object {
 
 class Pipeline : public ObjectRef {
  public:
-  TVM_DLL explicit Pipeline(ExecScope thread_scope, size_t depth = 0, bool specialize = false,
+  TVM_DLL explicit Pipeline(ExecScope thread_scope, size_t depth = 0, bool separate_pc = false,
                             String name_hint = "");
 
   TVM_DEFINE_OBJECT_REF_METHODS(Pipeline, ObjectRef, PipelineNode);
+};
+
+// CopyPipeline
+class CopyPipelineNode : public PipelineNode {
+ public:
+  static constexpr const char* _type_key = "tirx.CopyPipeline";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  TVM_DECLARE_FINAL_OBJECT_INFO(CopyPipelineNode, PipelineNode);
+};
+
+class CopyPipeline : public Pipeline {
+ public:
+  TVM_DLL explicit CopyPipeline(ExecScope thread_scope, size_t depth = 0, bool separate_pc = false,
+                                String name_hint = "");
+
+  TVM_DEFINE_OBJECT_REF_METHODS(CopyPipeline, Pipeline, CopyPipelineNode);
 };
 
 }  // namespace tirx

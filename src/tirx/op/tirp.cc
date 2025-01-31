@@ -171,65 +171,44 @@ TIRP_DEFINE_BARRIER_OP(barrier_arrive_and_wait)
 
 TIRP_DEFINE_PIPELINE_OP(pipeline_producer_acquire)
     .set_num_inputs(1)
-    .set_attr<FArgSanitizer>("FArgSanitizer",
-                             [](tvm::Op op, Array<ObjectRef> args) {
-                               ICHECK_EQ(args.size(), 1U)
-                                   << "pipeline_producer_acquire() expects 1 argument";
-                               ICHECK(args[0].as<PipelineNode>())
-                                   << "arg[0] of pipeline_producer_acquire() must be Pipeline";
-                             })
-    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
+    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 1U) << "pipeline_producer_acquire() expects 1 argument";
+      ICHECK(args[0].as<PipelineNode>())
+          << "arg[0] of pipeline_producer_acquire() must be Pipeline";
+    });
 
-TIRP_DEFINE_PIPELINE_OP(pipeline_producer_copy_async)
+TIRP_DEFINE_PIPELINE_OP(pipeline_copy)
     .set_num_inputs(3)
-    .set_attr<FArgSanitizer>(
-        "FArgSanitizer",
-        [](tvm::Op op, Array<ObjectRef> args) {
-          ICHECK_EQ(args.size(), 3U) << "pipeline_producer_copy_async() expects 3 arguments";
-          ICHECK(args[0].as<PipelineNode>())
-              << "arg[0] of pipeline_producer_copy_async() must be Pipeline";
-          ICHECK(args[1].as<BufferRegionNode>())
-              << "arg[1] of pipeline_producer_copy_async() must be BufferRegion";
+    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 3U) << "pipeline_copy() expects 3 arguments";
+      ICHECK(args[0].as<PipelineNode>()) << "arg[0] of pipeline_copy() must be Pipeline";
+      ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of pipeline_copy() must be BufferRegion";
 
-          ICHECK(args[2].as<BufferRegionNode>())
-              << "arg[2] of pipeline_producer_copy_async() must be BufferRegion";
-        })
-    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
+      ICHECK(args[2].as<BufferRegionNode>()) << "arg[2] of pipeline_copy() must be BufferRegion";
+    });
 
-TIRP_DEFINE_PIPELINE_OP(pipeline_producer_commit_stage)
+TIRP_DEFINE_PIPELINE_OP(pipeline_producer_commit)
     .set_num_inputs(1)
-    .set_attr<FArgSanitizer>("FArgSanitizer",
-                             [](tvm::Op op, Array<ObjectRef> args) {
-                               ICHECK_EQ(args.size(), 1U)
-                                   << "pipeline_producer_commit_stage() expects 1 argument";
-                               ICHECK(args[0].as<PipelineNode>())
-                                   << "arg[0] of pipeline_producer_commit_stage() must be Pipeline";
-                             })
-    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
+    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 1U) << "pipeline_producer_commit() expects 1 argument";
+      ICHECK(args[0].as<PipelineNode>()) << "arg[0] of pipeline_producer_commit() must be Pipeline";
+    });
 
 TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_wait)
     .set_num_inputs(2)
-    .set_attr<FArgSanitizer>("FArgSanitizer",
-                             [](tvm::Op op, Array<ObjectRef> args) {
-                               ICHECK_EQ(args.size(), 2U)
-                                   << "pipeline_consumer_wait() expects 2 arguments";
-                               ICHECK(args[0].as<PipelineNode>())
-                                   << "arg[0] of pipeline_consumer_wait() must be Pipeline";
-                               ICHECK(IsInt(args[1]))
-                                   << "arg[1] of pipeline_consumer_wait() must be int";
-                             })
-    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
+    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 2U) << "pipeline_consumer_wait() expects 2 arguments";
+      ICHECK(args[0].as<PipelineNode>()) << "arg[0] of pipeline_consumer_wait() must be Pipeline";
+      ICHECK(IsInt(args[1])) << "arg[1] of pipeline_consumer_wait() must be int";
+    });
 
 TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_release)
     .set_num_inputs(1)
-    .set_attr<FArgSanitizer>("FArgSanitizer",
-                             [](tvm::Op op, Array<ObjectRef> args) {
-                               ICHECK_EQ(args.size(), 1U)
-                                   << "pipeline_consumer_release() expects 1 argument";
-                               ICHECK(args[0].as<PipelineNode>())
-                                   << "arg[0] of pipeline_consumer_release() must be Pipeline";
-                             })
-    .set_attr<FOpScheduler>("FOpScheduler", PipelineOpScheduler);
+    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 1U) << "pipeline_consumer_release() expects 1 argument";
+      ICHECK(args[0].as<PipelineNode>())
+          << "arg[0] of pipeline_consumer_release() must be Pipeline";
+    });
 
 }  // namespace tirxp
 }  // namespace tirx

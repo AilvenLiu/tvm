@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# pylint: disable=no-member
 """Async structures for TIR+"""
 from . import _ffi_api
 import tvm
@@ -90,31 +91,45 @@ class BarrierArray(Object):
 
 @register_object("tirx.Pipeline")
 class Pipeline(Object):
+    """A pipeline object for managing asynchronous operations."""
+
     thread_scope: ExecScope
     name_hint: str
     depth: int
-    specialize: bool
+    separate_pc: bool
 
     def __init__(
-        self, thread_scope: ExecScope, depth: int = 0, specialize: bool = False, name_hint: str = ""
+        self,
+        thread_scope: ExecScope,
+        depth: int = 0,
+        separate_pc: bool = False,
+        name_hint: str = "",
     ):
         self.__init_handle_by_constructor__(
-            _ffi_api.Pipeline, thread_scope, name_hint, depth, specialize
+            _ffi_api.Pipeline, thread_scope, name_hint, depth, separate_pc
         )
 
     def producer_acquire(self):
+        """Acquire the producer stage."""
         return make_op_call("pipeline_producer_acquire", [self])
 
-    def producer_copy_async(
-        self, dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]
-    ):
-        return make_op_call("pipeline_producer_copy_async", [self, dst, src])
-
-    def producer_commit_stage(self):
-        return make_op_call("pipeline_producer_commit_stage", [self])
+    def producer_commit(self):
+        """Commit the producer stage."""
+        return make_op_call("pipeline_producer_commit", [self])
 
     def consumer_wait(self, num_stages: int = -1):
+        """Wait for the consumer stage."""
         return make_op_call("pipeline_consumer_wait", [self, num_stages])
 
     def consumer_release(self):
+        """Release the consumer stage."""
         return make_op_call("pipeline_consumer_release", [self])
+
+
+@register_object("tir.CopyPipeline")
+class CopyPipeline(Pipeline):
+    """A pipeline for copying data asynchronously."""
+
+    def copy(self, dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
+        """Copy data asynchronously from the source to the destination."""
+        return make_op_call("pipeline_copy", [self, dst, src])
