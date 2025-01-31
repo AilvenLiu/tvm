@@ -26,8 +26,6 @@
 #include <tvm/tirx/op_attr_types.h>
 #include <tvm/tirx/tirp_op.h>
 
-#include "tirp_schedule/schedule.h"
-
 namespace tvm {
 namespace tirx {
 namespace tirp {
@@ -118,52 +116,6 @@ TIRP_DEFINE_SCHEDULE_OP(gemm).set_num_inputs(6).set_attr<FArgSanitizer>(
       ICHECK(IsIntOrFloat(args[4])) << "arg[4] of gemm() must be int or float";
       ICHECK(IsIntOrFloat(args[5])) << "arg[5] of gemm() must be int or float";
     });
-
-/********************* Barrier Ops **********************/
-#define TIRP_DEFINE_BARRIER_OP(OpName) \
-  TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsBarrierOp", Bool(true))
-
-TIRP_DEFINE_BARRIER_OP(barrier_init)
-    .set_num_inputs(2)
-    .set_attr<FArgSanitizer>("FArgSanitizer",
-                             [](tvm::Op op, Array<ObjectRef> args) {
-                               ICHECK_EQ(args.size(), 2U) << "barrier_init() expects 2 arguments";
-                               ICHECK(args[0].as<BarrierNode>())
-                                   << "arg[0] of barrier_init() must be Barrier";
-                               ICHECK(IsInt(args[1])) << "arg[1] of barrier_init() must be int";
-                             })
-    .set_attr<FOpScheduler>("FOpScheduler", BarrierOpScheduler);
-
-TIRP_DEFINE_BARRIER_OP(barrier_arrive)
-    .set_num_inputs(1)
-    .set_attr<FArgSanitizer>("FArgSanitizer",
-                             [](tvm::Op op, Array<ObjectRef> args) {
-                               ICHECK_EQ(args.size(), 1U) << "barrier_arrive() expects 1 argument";
-                               ICHECK(args[0].as<BarrierNode>())
-                                   << "arg[0] of barrier_arrive() must be Barrier";
-                             })
-    .set_attr<FOpScheduler>("FOpScheduler", BarrierOpScheduler);
-
-TIRP_DEFINE_BARRIER_OP(barrier_wait)
-    .set_num_inputs(1)
-    .set_attr<FArgSanitizer>("FArgSanitizer",
-                             [](tvm::Op op, Array<ObjectRef> args) {
-                               ICHECK_EQ(args.size(), 1U) << "barrier_wait() expects 1 argument";
-                               ICHECK(args[0].as<BarrierNode>())
-                                   << "arg[0] of barrier_wait() must be Barrier";
-                             })
-    .set_attr<FOpScheduler>("FOpScheduler", BarrierOpScheduler);
-
-TIRP_DEFINE_BARRIER_OP(barrier_arrive_and_wait)
-    .set_num_inputs(1)
-    .set_attr<FArgSanitizer>("FArgSanitizer",
-                             [](tvm::Op op, Array<ObjectRef> args) {
-                               ICHECK_EQ(args.size(), 1U)
-                                   << "barrier_arrive_and_wait() expects 1 argument";
-                               ICHECK(args[0].as<BarrierNode>())
-                                   << "arg[0] of barrier_arrive_and_wait() must be Barrier";
-                             })
-    .set_attr<FOpScheduler>("FOpScheduler", BarrierOpScheduler);
 
 /********************* Pipeline Ops **********************/
 #define TIRP_DEFINE_PIPELINE_OP(OpName) \

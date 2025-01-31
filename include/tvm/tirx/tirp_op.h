@@ -112,34 +112,6 @@ TVM_DLL const Op& gemm();
 /*!
  * \brief See pesudo code below:
  *
- *  barrier.init(count)
- */
-TVM_DLL const Op& barrier_init();
-
-/*!
- * \brief See pesudo code below:
- *
- *  barrier.arrive()
- */
-TVM_DLL const Op& barrier_arrive();
-
-/*!
- * \brief See pesudo code below:
- *
- *  barrier.wait()
- */
-TVM_DLL const Op& barrier_wait();
-
-/*!
- * \brief See pesudo code below:
- *
- * barrier.arrive_and_wait()
- */
-TVM_DLL const Op& barrier_arrive_and_wait();
-
-/*!
- * \brief See pesudo code below:
- *
  *  pipe.producer_acquire()
  */
 TVM_DLL const Op& pipeline_producer_acquire();

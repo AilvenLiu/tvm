@@ -150,93 +150,6 @@ class NoOpCallVerifier : public Verifier<NoOpCallVerifier> {
   }
 };
 
-class BarrierToBarrierArray : public StmtExprMutator {
- public:
-  static Stmt Convert(const Stmt& stmt) { return BarrierToBarrierArray()(stmt); }
-
- private:
-  Stmt VisitStmt_(const BlockNode* op) final {
-    Block block = GetRef<Block>(op);
-    auto* n = block.CopyOnWrite();
-    std::vector<BarrierArray> barrier_arrays(n->barrier_arrays.begin(), n->barrier_arrays.end());
-    for (const auto& barrier : op->barriers) {
-      ICHECK(barrier_map_.find(barrier) == barrier_map_.end())
-          << "Internal Error: Duplicate barrier found";
-      // Create a BarrierArray with a single barrier
-      BarrierArray barrier_array(barrier->thread_scope, 1, barrier->name_hint);
-      barrier_map_[barrier] = barrier_array;
-      barrier_arrays.push_back(std::move(barrier_array));
-    }
-    n->body = VisitStmt(n->body);
-    n->barriers = {};
-    n->barrier_arrays = std::move(barrier_arrays);
-    return std::move(block);
-  }
-
-  Stmt VisitStmt_(const tirp::OpCallNode* op) final {
-    tirp::OpCall opcall = GetRef<tirp::OpCall>(op);
-    auto* n = opcall.CopyOnWrite();
-    n->args.MutateByApply([this](ObjectRef obj) -> ObjectRef {
-      const auto* barrier = obj.as<BarrierNode>();
-      if (barrier) {
-        auto it = barrier_map_.find(GetRef<Barrier>(barrier));
-        if (it != barrier_map_.end()) {
-          return BarrierArrayElem(it->second, 0);
-        }
-      }
-      return obj;
-    });
-    return std::move(opcall);
-  }
-
-  std::unordered_map<Barrier, BarrierArray, ObjectPtrHash, ObjectPtrEqual> barrier_map_;
-};
-
-class CUDABarrierArrayAllocator : public StmtExprMutator {
- public:
-  static Stmt Allocate(const Stmt& stmt) { return CUDABarrierArrayAllocator()(stmt); }
-
- private:
-  Stmt VisitStmt_(const BlockNode* op) final {
-    Block block = GetRef<Block>(op);
-    auto* n = block.CopyOnWrite();
-    ICHECK(op->barriers.empty()) << "Internal Error: Barriers are not removed";
-    if (!op->barrier_arrays.empty()) {
-      std::vector<Stmt> body;
-      for (const auto& barrier_array : op->barrier_arrays) {
-        CHECK(barrier_array->thread_scope.Is("cta")) << "Internal Error: Unsupported thread scope";
-        body.push_back(Evaluate(Call(DataType::Void(), builtin::cuda_barrier_create(),
-                                     {StringImm(barrier_array->thread_scope->name),
-                                      IntImm(DataType::Int(32), barrier_arr_id_),
-                                      IntImm(DataType::Int(32), barrier_array->size)})));
-        barrier_arr_map_[barrier_array] = barrier_arr_id_++;
-      }
-      body.push_back(StmtExprMutator::VisitStmt(n->body));
-      n->body = SeqStmt::Flatten(std::move(body));
-    } else {
-      n->body = StmtExprMutator::VisitStmt(n->body);
-    }
-    return std::move(block);
-  }
-
-  Stmt VisitStmt_(const tirp::OpCallNode* opcall_ptr) final {
-    tirp::OpCall opcall = GetRef<tirp::OpCall>(opcall_ptr);
-    auto* n = opcall.CopyOnWrite();
-    static const auto& barrier_op_map = Op::GetAttrMap<Bool>("TIsBarrierOp");
-    if (bool(barrier_op_map.get(opcall_ptr->op, tvm::Bool(false)))) {
-      auto barrier = opcall_ptr->args[0].as<BarrierArrayElemNode>();
-      ICHECK(barrier) << "Internal Error: Expected BarrierArrayElem";
-      auto it = barrier_arr_map_.find(barrier->arr);
-      ICHECK(it != barrier_arr_map_.end()) << "Internal Error: Cannot find BarrierArray";
-      n->args.push_back(IntImm(DataType::Int(32), it->second));
-    }
-    return std::move(opcall);
-  }
-
-  int barrier_arr_id_{0};
-  std::unordered_map<BarrierArray, int, ObjectPtrHash, ObjectPtrEqual> barrier_arr_map_;
-};
-
 class TIRpOpScheduler : public StmtExprMutator {
  public:
   static Stmt LowerOpCalls(const Stmt& stmt) { return TIRpOpScheduler()(stmt); }
@@ -535,12 +448,6 @@ Pass LowerTIRp() {
     // Lower ScopeIdDef, resolve the scope ids and replace them with target defined special
     // registers Collect the extents of the ScopeIds for OpCall scheduling
     n->body = ScopeIdDefResolver::Resolve(n->body);
-
-    if (target->kind->name == "cuda" && target->kind->default_device_type == kDLCUDA) {
-      // CUDA specific lowering passes
-      n->body = BarrierToBarrierArray::Convert(n->body);
-      n->body = CUDABarrierArrayAllocator::Allocate(n->body);
-    }
 
     // Default Schedule: lower TIRp OpCalls
     while (!NoOpCallVerifier::Verify(n->body, false)) {

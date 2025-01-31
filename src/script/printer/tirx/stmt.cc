@@ -209,7 +209,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 
           static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
           static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
-          static const auto& barrier_op_map = Op::GetAttrMap<Bool>("TIsBarrierOp");
           static const auto& pipeline_op_map = Op::GetAttrMap<Bool>("TIsPipelineOp");
           ICHECK(bool(tirp_op_map.get(op, tvm::Bool(false))))
               << "Only TIR+ ops can be used in tirx::tirp::OpCall";
@@ -221,13 +220,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
             return OpCallDoc(TIRp(d, name), args);
-          } else if (bool(barrier_op_map.get(op, tvm::Bool(false)))) {
-            // Barrier ops
-            ICHECK(op_call->args[0]->IsInstance<tirx::BarrierNode>())
-                << "First argument must be a Barrier";
-            // barrier_method_name
-            std::string method = std::string(name).substr(8);
-            return print_member_function_call(method);
           } else if (bool(pipeline_op_map.get(op, tvm::Bool(false)))) {
             // Pipeline ops
             ICHECK(op_call->args[0]->IsInstance<tirx::PipelineNode>())

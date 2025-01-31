@@ -18,7 +18,7 @@
 from typing import Union
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
-from tvm.tir.async_structs import Barrier, BarrierArray, Pipeline, CopyPipeline
+from tvm.tir.async_structs import CopyPipeline
 from tvm.tir.exec_scope import ExecScope
 
 from . import _ffi_api
@@ -106,55 +106,6 @@ def gemm(
     return _ffi_api.OpCall(_get_tirp_op("gemm"), [D, A, B, C, alpha, beta])
 
 
-def alloc_barrier(thread_scope: ExecScope, name_hint: str = "") -> Barrier:
-    """The barrier allocation function.
-
-    Parameters
-    ----------
-    thread_scope : ExecScope
-        The execution scope of the barrier.
-
-    name_hint : str
-        The name hint of the barrier.
-
-    Returns
-    -------
-    res : Barrier
-        The allocated barrier.
-    """
-    if isinstance(thread_scope, str):
-        thread_scope = ExecScope.create(thread_scope)
-    else:
-        assert isinstance(thread_scope, ExecScope)
-    return _ffi_api.AllocBarrier(thread_scope, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def alloc_barrier_array(thread_scope: ExecScope, size: int, name_hint="") -> BarrierArray:
-    """The barrier array allocation function.
-
-    Parameters
-    ----------
-    thread_scope : ExecScope
-        The execution scope of the barrier array.
-
-    size : int
-        The size of the barrier array.
-
-    name_hint : str
-        The name hint of the barrier array.
-
-    Returns
-    -------
-    res : BarrierArray
-        The allocated barrier array.
-    """
-    if isinstance(thread_scope, str):
-        thread_scope = ExecScope(thread_scope)
-    else:
-        assert isinstance(thread_scope, ExecScope)
-    return _ffi_api.AllocBarrierArray(thread_scope, size, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
 def alloc_copy_pipeline(
     thread_scope: ExecScope, depth: int, separate_pc: bool, name_hint: str = ""
 ) -> CopyPipeline:
@@ -190,7 +141,5 @@ __all__ = [
     "copy",
     "fill",
     "gemm",
-    "alloc_barrier",
-    "alloc_barrier_array",
     "alloc_copy_pipeline",
 ]

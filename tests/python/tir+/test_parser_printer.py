@@ -307,83 +307,6 @@ def test_roundtrip_op3():
     assert_structural_equal(test, from_source(code))
 
 
-def test_roundtrip_barrier():
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def test(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
-
-        with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([4], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            tid = T.thread_id([128], parent="cta")
-
-            with T.cta():
-                A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
-                b = Tp.alloc_barrier(thread_scope="thread")
-                
-                with T.thread():
-                    b.init(128)
-                    if (tid < 64):
-                        # producer
-                        A_smem[tid] = A[tid]
-                        b.arrive()
-                        b.wait()
-                    else:
-                        # consumer
-                        b.arrive()
-                        b.wait()
-                        A[tid] = A_smem[tid] + 1
-    # fmt: on
-
-    code = test.script()
-    assert from_source(code).script() == code
-    assert_structural_equal(test, from_source(code))
-
-
-def test_roundtrip_barrier_array():
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def test(A_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
-
-        with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            tid = T.thread_id([128], parent="cta")
-
-            with T.cta():
-                A_smem = T.alloc_buffer([64], dtype="float32", scope="shared")
-                b = Tp.alloc_barrier_array(thread_scope="thread", size=4, name_hint="b")
-
-                """
-                with T.thread([tid], [T.Range(0, 64)]):
-                    b[0].init(128)
-                    A_smem[tid] = A[tid]
-                    b[0].arrive()
-                    b[0].wait()
-                with T.thread([tid], [T.Range(64, 128)]):
-                    b[0].init(128)
-                    b[0].arrive()
-                    A[tid] = A_smem[tid] + 1
-                """
-
-                with T.thread():
-                    b[0].init(128)
-                    if (tid < 64):
-                        A_smem[tid] = A[tid]
-                        b[0].arrive()
-                        b[0].wait()
-                    else:
-                        b[0].arrive()
-                        b[0].wait()
-                        A[tid] = A_smem[tid] + 1
-
-    code = test.script()
-    assert from_source(code).script() == code
-    assert_structural_equal(test, from_source(code))
-
-
 def test_roundtrip_pipeline_no_specialize_async_no_depth():
     # fmt: off
     @T.prim_func(tirp=True)
@@ -415,7 +338,6 @@ def test_roundtrip_pipeline_no_specialize_async_no_depth():
     # fmt: on
 
     code = test.script()
-    print(code)
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
@@ -484,8 +406,6 @@ if __name__ == "__main__":
     test_roundtrip_op1()
     test_roundtrip_op2()
     test_roundtrip_op3()
-    test_roundtrip_barrier()
-    test_roundtrip_barrier_array()
     test_roundtrip_pipeline_no_specialize_async_no_depth()
     test_roundtrip_pipeline_specialize_sync_depth()
     test_roundtrip_tensormap()
