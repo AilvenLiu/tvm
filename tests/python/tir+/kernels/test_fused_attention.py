@@ -22,6 +22,7 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tir.transform import LowerTIRp
+from utils import is_running_under_pytest
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -748,16 +749,17 @@ def test_fp16_fused_attn():
 
         return o_tvm.asnumpy()
 
-    proton.start("fused_attn", hook="triton")
-    proton.activate(0)
+    if not is_running_under_pytest():
+        proton.start("fused_attn", hook="triton")
+        proton.activate(0)
 
     O_fa3 = fa3()
     O_tir = tir()
 
-    proton.deactivate(0)
-    proton.finalize()
-
-    proton_viewer.parse(["time/ms"], "fused_attn.hatchet", depth=100)
+    if not is_running_under_pytest():
+        proton.deactivate(0)
+        proton.finalize()
+        proton_viewer.parse(["time/ms"], "fused_attn.hatchet", depth=100)
 
     np.testing.assert_allclose(O_fa3, O_tir, rtol=1e-3, atol=1e-3)
 

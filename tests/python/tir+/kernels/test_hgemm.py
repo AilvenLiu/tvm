@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 import numpy as np
-import os
 
 import tvm
 import tvm.testing
@@ -25,10 +24,7 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.transform import LowerTIRp
 from tvm.contrib import cublas
-
-
-def is_running_under_pytest():
-    return "PYTEST_CURRENT_TEST" in os.environ
+from utils import is_running_under_pytest
 
 
 @tvm.testing.requires_cuda_compute_version(8)
@@ -1134,12 +1130,13 @@ def test_hgemm_hopper_no_ws():
 
     C_tvm = tir_gemm().asnumpy()
     C_cublas = cublas_gemm()
-    tvm.testing.assert_allclose(C_tvm, C_cublas, rtol=2e-2, atol=1e-4)
 
     if not is_running_under_pytest():
         proton.deactivate(0)
         proton.finalize()
         proton_viewer.parse(["time/ms"], "matmul.hatchet", depth=100)
+
+    tvm.testing.assert_allclose(C_tvm, C_cublas, rtol=2e-2, atol=1e-4)
 
 
 if __name__ == "__main__":
