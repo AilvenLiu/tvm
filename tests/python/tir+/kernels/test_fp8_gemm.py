@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import os
 import numpy as np
 import ml_dtypes
 
@@ -24,10 +23,7 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tir.transform import LowerTIRp
-
-
-def is_running_under_pytest():
-    return "PYTEST_CURRENT_TEST" in os.environ
+from utils import bench, ProtonContext
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -138,7 +134,7 @@ def test_fp8_gemm_hopper_no_ws():
         T.cuda_fence_proxy_async("shared")
         T.tvm_storage_sync("shared")
         if warp_id == 0 and lane_id == 0:
-            T.cp_async_bulk_tensor_shared_to_global(2, C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0, 0])), 
+            T.cp_async_bulk_tensor_shared_to_global(2, C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
                                                     C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
             T.cp_async_bulk_tensor_commit_group()
             T.cp_async_bulk_tensor_wait_group(1, read=True)
@@ -249,13 +245,13 @@ def test_fp8_gemm_hopper_no_ws():
                         tile_scheduler.next_tile()
     # fmt: on
 
-    import triton.profiler as proton
-    import triton.profiler.viewer as proton_viewer
-
     A_np = np.random.randn(M, K).astype(ml_dtypes.float8_e4m3fn)
     B_np = np.random.randn(N, K).astype(ml_dtypes.float8_e4m3fn)
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
+
+    def flops(ms):
+        return M * N * K * 2 / ms / 1e9
 
     def cublas_gemm():
         C_np = np.empty((M, N)).astype(np.float16)
@@ -265,10 +261,9 @@ def test_fp8_gemm_hopper_no_ws():
         C_tvm = tvm.nd.array(C_np, device=DEV)
         workspace = tvm.nd.empty((32 * 1024 * 1024,), dtype="uint8", device=DEV)
         scale = tvm.nd.array(np.array([1.0], dtype="float32"), device=DEV)
-        with proton.scope("cublas-tir"):
-            for i in range(10):
-                gemm_func(A_tvm, B_tvm, workspace, scale, C_tvm)
-
+        func = lambda: gemm_func(A_tvm, B_tvm, workspace, scale, C_tvm)
+        ms = bench(func, warmup=0, repeat=10, proton_name="cublas")
+        print(f"CUBLAS flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
         return C_tvm
 
     def tir_gemm():
@@ -279,24 +274,17 @@ def test_fp8_gemm_hopper_no_ws():
             mod = tvm.IRModule({"main": manual})
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
-            with proton.scope("tir"):
-                for _ in range(10):
-                    mod(A_tvm, B_tvm, C_tvm)
+            func = lambda: mod(A_tvm, B_tvm, C_tvm)
+            ms = bench(func, warmup=0, repeat=10, proton_name="tir")
+            print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
         return C_tvm
 
-    if not is_running_under_pytest():
-        proton.start("matmul", hook="triton")
-        proton.activate(0)
+    with ProtonContext("matmul"):
+        C_cublas = cublas_gemm()
+        C_tir = tir_gemm()
 
-    C_cublas = cublas_gemm()
-    C_tir = tir_gemm()
     tvm.testing.assert_allclose(C_tir.asnumpy(), C_cublas.asnumpy(), rtol=2e-2, atol=1e-4)
-
-    if not is_running_under_pytest():
-        proton.deactivate(0)
-        proton.finalize()
-        proton_viewer.parse(["time/ms"], "matmul.hatchet", depth=100)
 
 
 if __name__ == "__main__":

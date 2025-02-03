@@ -22,7 +22,7 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tir.transform import LowerTIRp
-from utils import is_running_under_pytest
+from utils import bench, ProtonContext
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -37,7 +37,7 @@ def test_fp16_fused_attn():
     F16_BYTES = 2
     SM_COUNT = DEV.multi_processor_count
     # problem size
-    DIM = 2048
+    DIM = 2048 * 2
     BATCH_SIZE = 2
     QO_LEN = 4096
     KV_LEN = 4096
@@ -46,15 +46,16 @@ def test_fp16_fused_attn():
     QO_SHAPE = BATCH_SIZE, QO_LEN, NHEADS, HEAD_DIM
     KV_SHAPE = BATCH_SIZE, KV_LEN, NHEADS, HEAD_DIM
     # kernel config
+    CAUSAL = True
+    BLK_Q, BLK_KV = 128, 64
+
     INF = 5e4
-    BLK_Q, BLK_KV = 128, 80
     total_qtiles = BATCH_SIZE * NHEADS * ceildiv(QO_LEN, BLK_Q)
-    qtile_per_sm = total_qtiles // SM_COUNT
     KV_STAGES = 2
     STAGES_EPI = 2
     NUM_WARPS = 12
     WG_SIZE = 128
-    CAUSAL = True
+
     SMEM_SIZE = 1024 + BLK_Q * HEAD_DIM * F16_BYTES + 2 * KV_STAGES * BLK_KV * HEAD_DIM * F16_BYTES
     TMA_TILE = 64
     TMA_BYTES_Q = BLK_Q * HEAD_DIM * F16_BYTES
@@ -70,6 +71,12 @@ def test_fp16_fused_attn():
     assert WGMMA_QK_M * CONSUMER_WGS == BLK_Q
     assert BLK_KV % 16 == 0
     SWIZZLE = 3
+
+    def flops(ms):
+        if CAUSAL:
+            return BATCH_SIZE * QO_LEN * QO_LEN * NHEADS * HEAD_DIM * 2 / ms / 1e9
+        else:
+            return BATCH_SIZE * QO_LEN * QO_LEN * NHEADS * HEAD_DIM * 4 / ms / 1e9
 
     # fmt: off
     def int_var():
@@ -289,8 +296,8 @@ def test_fp16_fused_attn():
             for i in T.serial(self.row):
                 row_max = T.meta_var(self.row_max[i])
                 for j in T.serial(BLK_KV // 8):
-                    S_regs[i * 2 + j * 4] = T.exp2((S_regs[i * 2 + j * 4] - row_max) * self.sm_scale_log2)
-                    S_regs[i * 2 + j * 4 + 1] = T.exp2((S_regs[i * 2 + j * 4 + 1] - row_max) * self.sm_scale_log2)
+                    S_regs[i * 2 + j * 4] = T.exp2(S_regs[i * 2 + j * 4] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
+                    S_regs[i * 2 + j * 4 + 1] = T.exp2(S_regs[i * 2 + j * 4 + 1] * self.sm_scale_log2 - row_max * self.sm_scale_log2)
 
         @T.macro
         def reduce_l(self, S_regs):
@@ -339,7 +346,7 @@ def test_fp16_fused_attn():
                 for wgmma_tile in T.serial(TMA_TILE // WGMMA_QK_K):
                     Q_offset = T.meta_var((tma_tile * BLK_Q + consumer_id * BLK_Q // 2) * TMA_TILE + wgmma_tile * WGMMA_QK_K)
                     K_offset = T.meta_var(tma_tile * BLK_KV * TMA_TILE + wgmma_tile * WGMMA_QK_K)
-                    T.encode_matrix_descriptor(desc_Q.data, smem_q.access_ptr("r", offset=Q_offset), 
+                    T.encode_matrix_descriptor(desc_Q.data, smem_q.access_ptr("r", offset=Q_offset),
                                                BLK_Q * 8, 64, SWIZZLE)
                     T.encode_matrix_descriptor(desc_K.data, smem_k.access_ptr("r", offset=smem_k.offset_of_p([k_stage, K_offset])),
                                                BLK_KV * 8, 64, SWIZZLE)
@@ -687,9 +694,6 @@ def test_fp16_fused_attn():
                             tile_scheduler.next_tile()
     # fmt: on
 
-    import triton.profiler as proton
-    import triton.profiler.viewer as proton_viewer
-
     q = np.random.randn(*QO_SHAPE).astype(np.float16)
     k = np.random.randn(*KV_SHAPE).astype(np.float16)
     v = np.random.randn(*KV_SHAPE).astype(np.float16)
@@ -706,11 +710,10 @@ def test_fp16_fused_attn():
         k_torch = torch.from_numpy(k).cuda()
         v_torch = torch.from_numpy(v).cuda()
 
-        with proton.scope("fa3"):
-            for _ in range(10):
-                o_torch = flash_attn_func(q_torch, k_torch, v_torch, causal=CAUSAL)[0]
-        # o_torch = flash_attn_func(q_torch, k_torch, v_torch, causal=CAUSAL)[0]
-
+        func = lambda: flash_attn_func(q_torch, k_torch, v_torch, causal=CAUSAL)[0]
+        ms = bench(func, warmup=0, repeat=10, proton_name="fa3")
+        print(f"FA3 flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
+        o_torch = func()
         return o_torch.cpu().numpy()
 
     def tir():
@@ -742,24 +745,15 @@ def test_fp16_fused_attn():
             mod = tvm.IRModule({"main": manual})
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
-            with proton.scope("tir"):
-                for _ in range(10):
-                    mod(q_tvm, k_tvm, v_tvm, tiles_tvm, tiles_indptr_tvm, o_tvm)
-            # mod(q_tvm, k_tvm, v_tvm, o_tvm)
+            func = lambda: mod(q_tvm, k_tvm, v_tvm, tiles_tvm, tiles_indptr_tvm, o_tvm)
+            ms = bench(func, warmup=0, repeat=10, proton_name="tir")
+            print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
         return o_tvm.asnumpy()
 
-    if not is_running_under_pytest():
-        proton.start("fused_attn", hook="triton")
-        proton.activate(0)
-
-    O_fa3 = fa3()
-    O_tir = tir()
-
-    if not is_running_under_pytest():
-        proton.deactivate(0)
-        proton.finalize()
-        proton_viewer.parse(["time/ms"], "fused_attn.hatchet", depth=100)
+    with ProtonContext("fused_attn"):
+        O_fa3 = fa3()
+        O_tir = tir()
 
     np.testing.assert_allclose(O_fa3, O_tir, rtol=1e-3, atol=1e-3)
 

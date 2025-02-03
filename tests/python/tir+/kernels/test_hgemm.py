@@ -24,7 +24,7 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.transform import LowerTIRp
 from tvm.contrib import cublas
-from utils import is_running_under_pytest
+from utils import bench, ProtonContext
 
 
 @tvm.testing.requires_cuda_compute_version(8)
@@ -81,7 +81,7 @@ def test_hgemm_ampere():
                 acc_layout_cta = T.TileLayout.tile(tiling, acc_layout_cta_atom, (BLK_M // 16, BLK_N // 16), (16, 16))
 
                 acc_storage = T.alloc_buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local")
-                A_smem = T.alloc_buffer([BLK_M, BLK_K], dtype="float16", scope="shared", 
+                A_smem = T.alloc_buffer([BLK_M, BLK_K], dtype="float16", scope="shared",
                                         layout=T.SwizzleLayout(3, 3, 3))
                 B_smem = T.alloc_buffer([BLK_N, BLK_K], dtype="float16", scope="shared",
                                         layout=T.SwizzleLayout(3, 3, 3))
@@ -135,7 +135,7 @@ def test_hgemm_ampere():
                     with T.warp():
                         A_storage = T.alloc_buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local")
                         B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local")
-                        
+
                         tiling_AB = T.TileLayout.from_nested_tuple(data=(BLK_M // 16, 2), strides=(2, 1))
                         AB_layout = T.TileLayout.tile(tiling_AB, mma_layout_atom, (BLK_M // 16, 2), (8, 8))
                         A_warp = T.view(A_storage, layout=AB_layout, shape=(BLK_M // 16 * 8, 16))
@@ -151,7 +151,7 @@ def test_hgemm_ampere():
                                 T.static_assert(BLK_M % 32 == 0, "BLK_M should be multiple of 32")
                                 for i in T.serial(BLK_M // 32):
                                     # 16x16 ptx ldmatrix
-                                    # T.load(A_warp[i * 16 : i * 16 + 16, :], 
+                                    # T.load(A_warp[i * 16 : i * 16 + 16, :],
                                     #        A_smem[st_m + i * 16 : st_m + i * 16 + 16, k_inner * 16 : k_inner * 16 + 16])
                                     with T.thread():
                                         A_local = T.get(A_warp)
@@ -159,12 +159,12 @@ def test_hgemm_ampere():
                                             "float16", False, 4, ".b16",
                                             # TODO: change the signature of ptx_ldmatrix / introduce an op to get data from buffer
                                             A_storage.data, A_local.offset_of_p([i, 0, 0]),
-                                            A_smem.data, A_smem.offset_of_p([st_m + i * 16 + lane_id % 16, 
+                                            A_smem.data, A_smem.offset_of_p([st_m + i * 16 + lane_id % 16,
                                                                            k_inner * 16 + lane_id // 16 * 8])
                                         )
 
                             st_n = T.meta_var((warp_id % 2) * (BLK_N // 2))
-                            # T.load(B_warp, B_smem[st_n: st_n + BLK_N // 2, k_inner * 16: k_inner * 16 + 16]) 
+                            # T.load(B_warp, B_smem[st_n: st_n + BLK_N // 2, k_inner * 16: k_inner * 16 + 16])
                             with T.warp():
                                 T.static_assert(BLK_N % 32 == 0, "BLK_N should be multiple of 32")
                                 for i in T.serial(BLK_N // 32):
@@ -187,7 +187,7 @@ def test_hgemm_ampere():
                                     for tile_n in range(BLK_N // 32):
                                         # 16x16x16 ptx mma
                                         # acc_warp[tile_m * 16 : tile_m * 16 + 16, tile_n * 16 : tile_n * 16 + 16] +=
-                                        #     A_warp[tile_m * 16 : tile_m * 16 + 16, :] @ B_warp[tile_n * 16 : tile_n * 16 + 16, :]    
+                                        #     A_warp[tile_m * 16 : tile_m * 16 + 16, :] @ B_warp[tile_n * 16 : tile_n * 16 + 16, :]
                                         with T.thread():
                                             A_local = T.get(A_warp)
                                             B_local = T.get(B_warp)
@@ -228,7 +228,7 @@ def test_hgemm_ampere():
         A = T.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=T.TileLayout.from_nested_tuple((M, K)))
         B = T.match_buffer(B_ptr, (N, K), "float16", scope="global", layout=T.TileLayout.from_nested_tuple((N, K)))
         C = T.match_buffer(C_ptr, (M, N), "float32", scope="global", layout=T.TileLayout.from_nested_tuple((M, N)))
-            
+
         with T.kernel():
             bx, by = T.cta_id([M // BLK_M, N // BLK_N], parent="kernel")
             warp_id = T.warp_id([4], parent="cta")
@@ -258,7 +258,7 @@ def test_hgemm_ampere():
                 acc_storage = T.alloc_buffer([BLK_N // 16, BLK_M // 16, 2], dtype="float32", scope="local")
                 acc = T.view(acc_storage, layout=acc_layout_cta, shape=(BLK_M, BLK_N))
 
-                A_smem = T.alloc_buffer([DEPTH, BLK_M, BLK_K], dtype="float16", scope="shared", 
+                A_smem = T.alloc_buffer([DEPTH, BLK_M, BLK_K], dtype="float16", scope="shared",
                                         layout=T.SwizzleLayout(3, 3, 3))
                 B_smem = T.alloc_buffer([DEPTH, BLK_N, BLK_K], dtype="float16", scope="shared",
                                         layout=T.SwizzleLayout(3, 3, 3))
@@ -266,7 +266,7 @@ def test_hgemm_ampere():
 
                 A_storage = T.alloc_buffer([BLK_M // 32, 4, 2], dtype="float16", scope="local")
                 B_storage = T.alloc_buffer([BLK_N // 16, 2, 2], dtype="float16", scope="local")
-                
+
                 tiling_AB = T.TileLayout.from_nested_tuple(data=(BLK_M // 16, 2), strides=(2, 1))
                 AB_layout = T.TileLayout.tile(tiling_AB, mma_layout_atom, (BLK_M // 16, 2), (8, 8))
 
@@ -294,7 +294,7 @@ def test_hgemm_ampere():
                     pipeline.copy(A_smem[k_load % DEPTH, :, :], A[bx * BLK_M: bx * BLK_M + BLK_M, k_load * BLK_K: k_load * BLK_K + BLK_K])
                     pipeline.copy(B_smem[k_load % DEPTH, :, :], B[by * BLK_N: by * BLK_N + BLK_N, k_load * BLK_K: k_load * BLK_K + BLK_K])
                     pipeline.producer_commit()
-                    
+
                     pipeline.consumer_wait(DEPTH - 1)
                     with T.thread():
                         T.tvm_storage_sync("shared")
@@ -312,7 +312,7 @@ def test_hgemm_ampere():
                                 T.static_assert(BLK_M % 32 == 0, "BLK_M should be multiple of 32")
                                 for i in T.serial(BLK_M // 32):
                                     # 16x16 ptx ldmatrix
-                                    # T.load(A_warp[i * 16 : i * 16 + 16, :], 
+                                    # T.load(A_warp[i * 16 : i * 16 + 16, :],
                                     #        A_smem[st_m + i * 16 : st_m + i * 16 + 16, k_inner * 16 : k_inner * 16 + 16])
                                     with T.thread():
                                         A_local = T.get(A_warp)
@@ -320,13 +320,13 @@ def test_hgemm_ampere():
                                             "float16", False, 4, ".b16",
                                             # TODO: change the signature of ptx_ldmatrix / introduce an op to get data from buffer
                                             A_storage.data, A_local.offset_of_p([i, 0, 0]),
-                                            A_smem.data, A_smem.offset_of_p([k % DEPTH, 
+                                            A_smem.data, A_smem.offset_of_p([k % DEPTH,
                                                                              st_m + i * 16 + lane_id % 16,
                                                                              k_inner * 16 + lane_id // 16 * 8])
                                         )
 
                             st_n = T.meta_var((warp_id % 2) * (BLK_N // 2))
-                            # T.copy(B_warp, B_smem[st_n: st_n + BLK_N // 2, k_inner * 16: k_inner * 16 + 16]) 
+                            # T.copy(B_warp, B_smem[st_n: st_n + BLK_N // 2, k_inner * 16: k_inner * 16 + 16])
                             with T.warp():
                                 T.static_assert(BLK_N % 32 == 0, "BLK_N should be multiple of 32")
                                 for i in T.serial(BLK_N // 32):
@@ -350,7 +350,7 @@ def test_hgemm_ampere():
                                     for tile_n in range(BLK_N // 32):
                                         # 16x16x16 ptx mma
                                         # acc_warp[tile_m * 16 : tile_m * 16 + 16, tile_n * 16 : tile_n * 16 + 16] +=
-                                        #     A_warp[tile_m * 16 : tile_m * 16 + 16, :] @ B_warp[tile_n * 16 : tile_n * 16 + 16, :]    
+                                        #     A_warp[tile_m * 16 : tile_m * 16 + 16, :] @ B_warp[tile_n * 16 : tile_n * 16 + 16, :]
                                         with T.thread():
                                             A_local = T.get(A_warp)
                                             B_local = T.get(B_warp)
@@ -395,7 +395,7 @@ def test_hgemm_ampere():
                                 T.static_assert(BLK_M % 32 == 0, "BLK_M should be multiple of 32")
                                 for i in T.serial(BLK_M // 32):
                                     # 16x16 ptx ldmatrix
-                                    # T.load(A_warp[i * 16 : i * 16 + 16, :], 
+                                    # T.load(A_warp[i * 16 : i * 16 + 16, :],
                                     #        A_smem[st_m + i * 16 : st_m + i * 16 + 16, k_inner * 16 : k_inner * 16 + 16])
                                     with T.thread():
                                         A_local = T.get(A_warp)
@@ -403,13 +403,13 @@ def test_hgemm_ampere():
                                             "float16", False, 4, ".b16",
                                             # TODO: change the signature of ptx_ldmatrix / introduce an op to get data from buffer
                                             A_storage.data, A_local.offset_of_p([i, 0, 0]),
-                                            A_smem.data, A_smem.offset_of_p([k % DEPTH, 
+                                            A_smem.data, A_smem.offset_of_p([k % DEPTH,
                                                                             st_m + i * 16 + lane_id % 16,
                                                                             k_inner * 16 + lane_id // 16 * 8])
                                         )
 
                             st_n = T.meta_var((warp_id % 2) * (BLK_N // 2))
-                            # T.load(B_warp, B_smem[st_n: st_n + BLK_N // 2, k_inner * 16: k_inner * 16 + 16]) 
+                            # T.load(B_warp, B_smem[st_n: st_n + BLK_N // 2, k_inner * 16: k_inner * 16 + 16])
                             with T.warp():
                                 T.static_assert(BLK_N % 32 == 0, "BLK_N should be multiple of 32")
                                 for i in T.serial(BLK_N // 32):
@@ -433,7 +433,7 @@ def test_hgemm_ampere():
                                     for tile_n in range(BLK_N // 32):
                                         # 16x16x16 ptx mma
                                         # acc_warp[tile_m * 16 : tile_m * 16 + 16, tile_n * 16 : tile_n * 16 + 16] +=
-                                        #     A_warp[tile_m * 16 : tile_m * 16 + 16, :] @ B_warp[tile_n * 16 : tile_n * 16 + 16, :]    
+                                        #     A_warp[tile_m * 16 : tile_m * 16 + 16, :] @ B_warp[tile_n * 16 : tile_n * 16 + 16, :]
                                         with T.thread():
                                             A_local = T.get(A_warp)
                                             B_local = T.get(B_warp)
@@ -817,7 +817,7 @@ def test_hgemm_hopper_ws_cooperative():
                                     C_smem[r2S_stage, smem_offset[0] + col_swizzle[0]] = accum[16 * i + reg * 4]
                                     C_smem[r2S_stage, smem_offset[0] + col_swizzle[0] + 1] = accum[16 * i + reg * 4 + 1]
                                     C_smem[r2S_stage, smem_offset[0] + 8*32 + col_swizzle[0]] = accum[16 * i + reg * 4 + 2]
-                                    C_smem[r2S_stage, smem_offset[0] + 8*32 + col_swizzle[0] + 1] = accum[16 * i + reg * 4 + 3]                             
+                                    C_smem[r2S_stage, smem_offset[0] + 8*32 + col_swizzle[0] + 1] = accum[16 * i + reg * 4 + 3]
                             tma_store(epi_tile_count - 1, C_smem, C_map, m_glb_offset, n_glb_offset, tid)
                             T.cp_async_bulk_tensor_wait_group(n = 0, read=False)
 
@@ -977,7 +977,7 @@ def test_hgemm_hopper_no_ws():
         T.cuda_fence_proxy_async("shared")
         T.tvm_storage_sync("shared")
         if warp_id == 0 and lane_id == 0:
-            T.cp_async_bulk_tensor_shared_to_global(2, C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0, 0])), 
+            T.cp_async_bulk_tensor_shared_to_global(2, C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
                                                     C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
             T.cp_async_bulk_tensor_commit_group()
             T.cp_async_bulk_tensor_wait_group(1, read=True)
@@ -1094,8 +1094,8 @@ def test_hgemm_hopper_no_ws():
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
 
-    import triton.profiler as proton
-    import triton.profiler.viewer as proton_viewer
+    def flops(ms):
+        return M * N * K * 2 / ms / 1e9
 
     def tir_gemm():
         C_np = -np.ones((M, N), dtype=np.float16)
@@ -1105,11 +1105,11 @@ def test_hgemm_hopper_no_ws():
             mod = tvm.IRModule({"main": manual})
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
-            with proton.scope("tir"):
-                for _ in range(20):
-                    mod(A_tvm, B_tvm, C_tvm)
+            func = lambda: mod(A_tvm, B_tvm, C_tvm)
+            ms = bench(func, warmup=0, repeat=10, proton_name="tir")
+            print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
-        return C_tvm
+        return C_tvm.asnumpy()
 
     def cublas_gemm():
         import torch
@@ -1118,23 +1118,15 @@ def test_hgemm_hopper_no_ws():
         A_torch = torch.tensor(A_np, device=torch_dev)
         B_torch = torch.tensor(B_np, device=torch_dev)
         C_torch = torch.zeros((M, N), device=torch_dev)
-        with proton.scope("cublas"):
-            for _ in range(20):
-                C_torch = torch.matmul(A_torch, B_torch.T)
-
+        func = lambda: torch.matmul(A_torch, B_torch.T)
+        ms = bench(func, warmup=0, repeat=10, proton_name="cublas")
+        print(f"CUBLAS flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
+        C_torch = func()
         return C_torch.cpu().numpy()
 
-    if not is_running_under_pytest():
-        proton.start("matmul", hook="triton")
-        proton.activate(0)
-
-    C_tvm = tir_gemm().asnumpy()
-    C_cublas = cublas_gemm()
-
-    if not is_running_under_pytest():
-        proton.deactivate(0)
-        proton.finalize()
-        proton_viewer.parse(["time/ms"], "matmul.hatchet", depth=100)
+    with ProtonContext("matmul"):
+        C_tvm = tir_gemm()
+        C_cublas = cublas_gemm()
 
     tvm.testing.assert_allclose(C_tvm, C_cublas, rtol=2e-2, atol=1e-4)
 
