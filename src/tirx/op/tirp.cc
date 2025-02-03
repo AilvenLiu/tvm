@@ -117,6 +117,13 @@ TIRP_DEFINE_SCHEDULE_OP(gemm).set_num_inputs(6).set_attr<FArgSanitizer>(
       ICHECK(IsIntOrFloat(args[5])) << "arg[5] of gemm() must be int or float";
     });
 
+TIRP_DEFINE_SCHEDULE_OP(reduce).set_num_inputs(4).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+        ICHECK_EQ(args.size(), 4U) << "reduce() expects 4 arguments";
+        ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of reduce() must be BufferRegion";
+        ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of reduce() must be BufferRegion";
+    });
+
 /********************* Pipeline Ops **********************/
 #define TIRP_DEFINE_PIPELINE_OP(OpName) \
   TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsPipelineOp", Bool(true))

@@ -106,6 +106,30 @@ def gemm(
     return _ffi_api.OpCall(_get_tirp_op("gemm"), [D, A, B, C, alpha, beta])
 
 
+def reduce(
+        dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], accum: bool = False, reduce_op: str = "add"
+    ):
+    """Warp-level tree reduction in shared memory.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for reduced result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+
+    accum : bool
+        Whether dst is accumulated.
+
+    op : str
+        The reduction operator.
+    """
+    dst = _to_region(dst)
+    src = _to_region(src)
+    return _ffi_api.OpCall(_get_tirp_op("reduce"), [dst, src, accum, reduce_op])
+
+
 def alloc_copy_pipeline(
     thread_scope: ExecScope, depth: int, separate_pc: bool, name_hint: str = ""
 ) -> CopyPipeline:
@@ -141,5 +165,6 @@ __all__ = [
     "copy",
     "fill",
     "gemm",
+    "reduce",
     "alloc_copy_pipeline",
 ]
