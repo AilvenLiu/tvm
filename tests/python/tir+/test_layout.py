@@ -982,7 +982,7 @@ def test_size_cosize():
     assert layout.cosize == 1024
 
     # TrainiumLayout
-    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(8, 1))
+    layout = T.TileLayout.from_nested_tuple(data=(8, 8), strides=(1, 1))
     layout = T.TrainiumLayout(dimension_types="PF", combined_1d_layout=layout)
     assert layout.partition_size == 8
     assert layout.size == 8
@@ -1099,16 +1099,16 @@ def test_apply():
             assert coord[1] == i*8
             
     def test8():
-        layout = T.TileLayout.from_nested_tuple(data=(2, 3, 4, 2, 2), strides=(1, 2, 12, 6, 48))
+        layout = T.TileLayout.from_nested_tuple(data=(2, 6, 4, 2, 2), strides=(1, 1, 12, 6, 48))
         layout = T.TrainiumLayout(dimension_types="FPFPF", combined_1d_layout=layout)
         def f(i0, i1):
-            leaf1 = i0 // 3
-            leaf2 = i0 % 3
+            leaf1 = i0 // 6
+            leaf2 = i0 % 6
             leaf3 = i1 // 4
             leaf4 = (i1 % 4) // 2
             leaf5 = i1 % 2
-            coord = layout.apply(i0, i1, shape=(6, 16))
-            assert coord[0] == leaf2 * 2 + leaf4 * 6
+            coord = layout.apply(i0, i1, shape=(12, 16))
+            assert coord[0] == leaf2  + leaf4 * 6
             assert coord[1] == leaf1 * 1 +  leaf3 * 12 + leaf5 * 48
 
         for i0, i1 in itertools.product(range(6), range(16)):

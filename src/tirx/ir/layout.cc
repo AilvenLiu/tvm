@@ -389,12 +389,12 @@ TVM_REGISTER_GLOBAL("tirx.NormalizeTileLayout").set_body_typed(NormalizeTileLayo
 
 /******** Tile ********/
 
-std::pair<TileLayout, std::vector<int>> TileLayoutGroupByLogicalShape(TileLayout layout,
-                                                                      Array<PrimExpr> shape) {
+std::pair<TileLayout, std::vector<int64_t>> TileLayoutGroupByLogicalShape(TileLayout layout,
+                                                                      Array<PrimExpr> shape, std::unordered_map<int, int>* index_map) {
   size_t shape_match_dim = 0;
   arith::Analyzer analyzer;
   PrimExpr prod = 1;
-  std::vector<int> seps;
+  std::vector<int64_t> seps;
   seps.push_back(0);
   Array<DataIterAttr> new_data_iter_array;
   Array<DeviceIterAttr> new_device_iter_array;
@@ -409,11 +409,14 @@ std::pair<TileLayout, std::vector<int>> TileLayoutGroupByLogicalShape(TileLayout
            analyzer.CanProveEqual(floormod(prod, shape[shape_match_dim]), 0)) {
       if (!analyzer.CanProveEqual(floormod(cur_extent, floordiv(prod, shape[shape_match_dim])),
                                   0)) {
-        return std::make_pair(TileLayout(), std::vector<int>());
+        return std::make_pair(TileLayout(), std::vector<int64_t>());
       }
       PrimExpr split_extent = floordiv(cur_extent, floordiv(prod, shape[shape_match_dim]));
       new_data_iter_array.push_back(
           DataIterAttr(split_extent, stride * floordiv(cur_extent, split_extent)));
+      if(index_map){
+        (*index_map)[new_data_iter_array.size() - 1] = i;
+      }
       cur_extent = floordiv(prod, shape[shape_match_dim]);
       if (split_map_it != split_map.end()) {
         split_device_iter[split_map_it->second].push_back(new_data_iter_array.size() - 1);
@@ -424,13 +427,16 @@ std::pair<TileLayout, std::vector<int>> TileLayoutGroupByLogicalShape(TileLayout
     }
     if (!analyzer.CanProveEqual(cur_extent, 1)) {
       new_data_iter_array.push_back(DataIterAttr(cur_extent, stride));
+      if (index_map) {
+        (*index_map)[new_data_iter_array.size() - 1] = i;
+      }
       if (split_map_it != split_map.end()) {
         split_device_iter[split_map_it->second].push_back(new_data_iter_array.size() - 1);
       }
     }
   }
   if (shape_match_dim != shape.size()) {
-    return std::make_pair(TileLayout(), std::vector<int>());
+    return std::make_pair(TileLayout(), std::vector<int64_t>());
   }
   for (int i = 0; i < static_cast<int>(layout->device_iter_array.size()); i++) {
     if (!layout->device_iter_array[i].IsSplit()) {
@@ -457,8 +463,8 @@ TileLayout Tile(TileLayout outer, TileLayout inner, Array<PrimExpr> outer_shape,
 
   ICHECK_EQ(outer_shape.size(), inner_shape.size())
       << "ValueError: The dimension of logical view shapes must be the same";
-  auto [grouped_outer, outer_seps] = TileLayoutGroupByLogicalShape(outer, outer_shape);
-  auto [grouped_inner, inner_seps] = TileLayoutGroupByLogicalShape(inner, inner_shape);
+  auto [grouped_outer, outer_seps] = TileLayoutGroupByLogicalShape(outer, outer_shape, nullptr);
+  auto [grouped_inner, inner_seps] = TileLayoutGroupByLogicalShape(inner, inner_shape, nullptr);
   outer = grouped_outer;
   inner = grouped_inner;
 
@@ -552,8 +558,8 @@ Array<PrimExpr> TileShape(Array<PrimExpr> shape, Array<PrimExpr> factor, bool is
   return new_shape;
 }
 
-std::vector<int> GetEvenSeps(std::vector<int> seps) {
-  std::vector<int> even_seps;
+std::vector<int64_t> GetEvenSeps(std::vector<int64_t> seps) {
+  std::vector<int64_t> even_seps;
   for (int i = 0; i < static_cast<int>(seps.size()); i++) {
     if (i % 2 == 0) {
       even_seps.push_back(seps[i]);
@@ -573,9 +579,9 @@ bool IsTileLayout_Inner(TileLayout tiled_layout, TileLayout layout, Array<PrimEx
   }
   auto factored_tiled_shape = TileShape(tiled_shape, inner_shape, true);
   auto [grouped_tiled_layout, tiled_seps] =
-      TileLayoutGroupByLogicalShape(tiled_layout, factored_tiled_shape);
+      TileLayoutGroupByLogicalShape(tiled_layout, factored_tiled_shape, nullptr);
   tiled_seps = GetEvenSeps(tiled_seps);
-  auto [grouped_layout, inner_seps] = TileLayoutGroupByLogicalShape(layout, inner_shape);
+  auto [grouped_layout, inner_seps] = TileLayoutGroupByLogicalShape(layout, inner_shape, nullptr);
   tiled_layout = grouped_tiled_layout;
   layout = grouped_layout;
 
@@ -656,9 +662,9 @@ bool IsTileLayout_Outer(TileLayout tiled_layout, TileLayout layout, Array<PrimEx
   // 2. check data iter match
   auto factored_tiled_shape = TileShape(tiled_shape, outer_shape, false);
   auto [grouped_tiled_layout, tiled_seps] =
-      TileLayoutGroupByLogicalShape(tiled_layout, factored_tiled_shape);
+      TileLayoutGroupByLogicalShape(tiled_layout, factored_tiled_shape, nullptr);
   tiled_seps = GetEvenSeps(tiled_seps);
-  auto [grouped_layout, outer_seps] = TileLayoutGroupByLogicalShape(layout, outer_shape);
+  auto [grouped_layout, outer_seps] = TileLayoutGroupByLogicalShape(layout, outer_shape, nullptr);
   tiled_layout = grouped_tiled_layout;
   layout = grouped_layout;
   ICHECK(!tiled_seps.empty()) << "ValueError: The tiled layout must be able to transform from "
@@ -719,10 +725,15 @@ TVM_REGISTER_GLOBAL("tirx.IsTileLayout_Outer")
 
 /******* Vector Length ********/
 PrimExpr ComputeGCD(PrimExpr a, PrimExpr b, arith::Analyzer* ana) {
-  while (!ana->CanProveEqual(b, 0)) {
+  int max_iter = 100;
+  int iter = 0;
+  while (!ana->CanProveEqual(b, 0) && iter++ < max_iter) {
     PrimExpr temp = b;
     b = floormod(a, b);
     a = temp;
+  }
+  if(iter == max_iter){
+    return 1;
   }
   return a;
 }
@@ -830,7 +841,7 @@ TileLayout Shard(Array<PrimExpr> shape, Array<PrimExpr> mesh, String strategy, T
       inner_shape.Set(bound, floordiv(inner_shape[bound], mesh[i]));
     }
   }
-  auto [grouped_inner, inner_seps] = TileLayoutGroupByLogicalShape(inner, inner_shape);
+  auto [grouped_inner, inner_seps] = TileLayoutGroupByLogicalShape(inner, inner_shape, nullptr);
   inner = grouped_inner;
   ICHECK(!inner_seps.empty())
       << "ValueError: The inner layout must be able to transform from logical view shape only with "
@@ -955,6 +966,7 @@ bool TrainiumLayoutNode::VerifyWellFormed() const {
   }
   auto split_map = combined_1d_layout.GetSplitMap();
   std::vector<DataIterAttr> partition_data_iters;
+  arith::Analyzer analyzer;
   for(size_t i = 0; i < dimension_types.size(); i++){
     // Data Iter must be either partition or free
     if(dimension_types[i] != PhysicalDimensionType::kPartition && dimension_types[i] != PhysicalDimensionType::kFree){
@@ -965,7 +977,9 @@ bool TrainiumLayoutNode::VerifyWellFormed() const {
       if(split_map.find(i) != split_map.end()){
         return false;
       }
-      partition_data_iters.push_back(combined_1d_layout->data_iter_array[i]);
+      if(!analyzer.CanProveEqual(combined_1d_layout->data_iter_array[i]->extent, 1)){
+        partition_data_iters.push_back(combined_1d_layout->data_iter_array[i]);
+      }
     }
   }
 
@@ -976,7 +990,6 @@ bool TrainiumLayoutNode::VerifyWellFormed() const {
     ICHECK(stride_a && stride_b) << "ValueError: The stride must be a constant";
     return stride_a->value < stride_b->value;
   });
-  arith::Analyzer analyzer;
   for(int i = 0; i < static_cast<int>(partition_data_iters.size()) - 1; i++){
     auto this_data_iter = partition_data_iters[i];
     auto next_data_iter = partition_data_iters[i+1];
@@ -1096,6 +1109,32 @@ TrainiumLayout NormalizeTrainiumLayout(TrainiumLayout layout) {
 
 TVM_REGISTER_GLOBAL("tirx.NormalizeTrainiumLayout").set_body_typed(NormalizeTrainiumLayout);
 
-}  // namespace tirx
+std::pair<TrainiumLayout, std::vector<int64_t>> NormalizeTrainiumLayoutWithShape(TrainiumLayout layout, Array<PrimExpr> shape) {
+  layout = NormalizeTrainiumLayout(layout);
+  auto combined_1d_layout = layout->combined_1d_layout;
+  std::unordered_map<int, int> index_map;
+  auto [grouped_combined_1d_layout, seps] = TileLayoutGroupByLogicalShape(combined_1d_layout, shape, &index_map);
+  ICHECK(!seps.empty()) << "ValueError: The layout must be able to transform from logical view "
+                           "shape only with split and reorder";
+  std::vector<int64_t> new_dimension_types;
+  for (size_t i = 0; i < grouped_combined_1d_layout->data_iter_array.size(); i++){
+    new_dimension_types.push_back(layout->dimension_types[index_map[i]]);
+  }
+  return {TrainiumLayout(new_dimension_types, SimplifyTileLayout(grouped_combined_1d_layout)),
+          seps};
+}
+TVM_REGISTER_GLOBAL("tirx.NormalizeTrainiumLayoutWithShape")
+    .set_body_typed([](TrainiumLayout layout, Array<PrimExpr> shape) {
+      auto pr = NormalizeTrainiumLayoutWithShape(layout, shape);
+      return Array<ObjectRef>{pr.first, ShapeTuple(pr.second)};
+});
 
+TVM_REGISTER_GLOBAL("tirx.NormalizeTileLayoutWithShape")
+    .set_body_typed([](TileLayout layout, Array<PrimExpr> shape) {
+      auto pr = TileLayoutGroupByLogicalShape(layout, shape, nullptr);
+      return Array<ObjectRef>{pr.first, ShapeTuple(pr.second)};
+    });
+
+
+}  // namespace tirx
 }  // namespace tvm

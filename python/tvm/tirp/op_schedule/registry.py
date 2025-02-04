@@ -17,8 +17,8 @@
 from typing import Dict
 
 from tvm._ffi import register_object, register_func
-from tvm.ir import Op
-from tvm.tir import _ffi_api
+from tvm.ir import Op, Range
+from tvm.tir import _ffi_api, Var
 from tvm.runtime import Object, Scriptable
 from tvm.target import Target
 from tvm.tir.expr import PrimExpr
@@ -67,6 +67,10 @@ class ScheduleContext(Object, Scriptable):
     def is_cuda(self) -> bool:
         """Check if the target is CUDA."""
         return self.target.kind.name == "cuda"
+    
+    def is_trn(self) -> bool:
+        """Check if the target is Trainium."""
+        return self.target.kind.name == "trn"
 
 
 # Global registry to store operator implementations and their selectors
@@ -102,7 +106,7 @@ def register_schedule(op_name: str):
 
 
 @register_func("tirp.f_op_scheduler")
-def f_op_scheduler(op: Op, args, sctx: ScheduleContext):
+def f_op_scheduler(op: Op, args, sctx: ScheduleContext, var_range_map: Dict[Var, Range]):
     """Find and return a schedule for the operator.
 
     Parameters
@@ -121,7 +125,7 @@ def f_op_scheduler(op: Op, args, sctx: ScheduleContext):
     """
     assert op in _OP_REGISTRY, f"No implementation found for operator {op}"
     for impl in _OP_REGISTRY[op]:
-        res = impl(*args, sctx)
+        res = impl(*args, sctx, var_range_map)
         if res is not None:
             return res
     assert False, (

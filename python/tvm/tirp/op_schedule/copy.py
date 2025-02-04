@@ -44,7 +44,10 @@ def register_copy_schedule(func):
 
 @register_copy_schedule
 def copy_cuda_g2s_s2g_2d_sync_cta_vec_load(
-    dst_buffer_region: BufferRegion, src_buffer_region: BufferRegion, sctx: ScheduleContext
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    sctx: ScheduleContext,
+    _,
 ) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     return copy_cuda_g2s_s2g_2d_cta_vec_load_impl(

@@ -181,15 +181,25 @@ class TIRpOpScheduler : public StmtExprMutator {
     return StmtExprMutator::VisitStmt_(op);
   }
 
+  Stmt VisitStmt_(const ForNode* op) final {
+    // Collect the loop variables
+    auto loop_var = Downcast<Var>(op->loop_var);
+    ICHECK(!var_range_map_.count(loop_var)) << "Internal Error: Duplicate loop variable";
+    var_range_map_.Set(loop_var, Range::FromMinExtent(op->min, op->extent));
+    return StmtExprMutator::VisitStmt_(op);
+  }
+
   Stmt VisitStmt_(const tirp::OpCallNode* op) final {
     tirp::ScheduleContext sctx(Target::Current(false), exec_scope_stack_.back(), launch_params_);
     static auto f_op_scheduler_ = tvm::runtime::Registry::Get("tirp.f_op_scheduler");
     ICHECK(f_op_scheduler_ != nullptr) << "Internal Error: tirp.f_op_scheduler is not registered";
-    PrimFunc res = (*f_op_scheduler_)(op->op, op->args, sctx);
+    PrimFunc res;
+    res = (*f_op_scheduler_)(op->op, op->args, sctx, var_range_map_);
     ICHECK(res.defined()) << "Internal Error: tirp.f_op_scheduler returned an undefined PrimFunc";
     return res->body;
   }
 
+  Map<Var, Range> var_range_map_;
   std::vector<ExecScope> exec_scope_stack_;
   std::unordered_map<String, PrimExpr, ObjectHash, ObjectEqual> launch_params_;
 };
@@ -251,11 +261,20 @@ class ScheduleContextRemover : public StmtExprMutator {
   }
 };
 
-class LogicalTensorRemover : public StmtExprMutator {
+class LogicalTensorRemover : public arith::IRMutatorWithAnalyzer {
  public:
-  static Stmt Remove(const Stmt& stmt) { return LogicalTensorRemover()(stmt); }
+  static Stmt Remove(const Stmt& stmt, const Map<tir::Var, Buffer> buffer_map) {
+    arith::Analyzer ana;
+    LogicalTensorRemover remover(&ana);
+    for(const auto& kv : buffer_map) {
+      remover.storage_map_[kv.second] = kv.second;
+    }
+    return remover(stmt);
+  }
 
  private:
+  explicit LogicalTensorRemover(arith::Analyzer* analyzer)
+      : arith::IRMutatorWithAnalyzer(analyzer) {}
   Stmt VisitStmt_(const BlockNode* op) override {
     for (const auto& alloc : op->alloc_buffers) {
       storage_map_[alloc] = alloc;
@@ -265,6 +284,7 @@ class LogicalTensorRemover : public StmtExprMutator {
       ICHECK(it != storage_map_.end())
           << "Internal Error: Cannot find storage for " << view->src_buffer;
       storage_map_[view->dst_buffer] = it->second;
+      replace_map_[view->dst_buffer] = it->second;
     }
     for (const auto& get : op->buffer_gets) {
       auto it = storage_map_.find(get->src_buffer);
@@ -279,13 +299,30 @@ class LogicalTensorRemover : public StmtExprMutator {
     return std::move(block);
   }
 
+  Array<PrimExpr> RewriteIndices(Array<PrimExpr> indices, Array<PrimExpr> old_shape, Array<PrimExpr> new_shape){
+    PrimExpr indices_prod = 1;
+    for(size_t i = 0; i < indices.size(); i++){
+      indices_prod *= old_shape[i];
+      indices_prod += indices[i];
+    }
+    std::vector<PrimExpr> new_indices;
+    int new_shape_size = new_shape.size();
+    for (int i = new_shape_size - 1; i>=0; i--) {
+      new_indices.push_back(analyzer_->Simplify( floormod(indices_prod, new_shape[i])));
+      indices_prod = floordiv(indices_prod, new_shape[i]);
+    }
+    std::reverse(new_indices.begin(), new_indices.end());
+    return Array<PrimExpr>(new_indices.begin(), new_indices.end());
+  }
+
   Stmt VisitStmt_(const BufferStoreNode* op) override {
     BufferStore store = Downcast<BufferStore>(StmtExprMutator::VisitStmt_(op));
     auto it = replace_map_.find(op->buffer);
     if (it != replace_map_.end()) {
       auto* n = store.CopyOnWrite();
       n->buffer = it->second;
-      ICHECK_EQ(it->second->shape.size(), op->indices.size())
+      n->indices = RewriteIndices(op->indices, op->buffer->shape, it->second->shape);
+      ICHECK_EQ(it->second->shape.size(), n->indices.size())
           << "Internal Error: Inconsistent shape for " << it->second;
     }
     return std::move(store);
@@ -297,7 +334,8 @@ class LogicalTensorRemover : public StmtExprMutator {
     if (it != replace_map_.end()) {
       auto* n = load.CopyOnWrite();
       n->buffer = it->second;
-      ICHECK_EQ(it->second->shape.size(), op->indices.size())
+      n->indices = RewriteIndices(op->indices, op->buffer->shape, it->second->shape);
+      ICHECK_EQ(it->second->shape.size(), n->indices.size())
           << "Internal Error: Inconsistent shape for " << it->second;
     }
     return std::move(load);
@@ -317,7 +355,7 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     return storage_lower(stmt);
   }
 
- private:
+ protected:
   using IRMutatorWithAnalyzer::VisitExpr_;
   using IRMutatorWithAnalyzer::VisitStmt_;
 
@@ -339,14 +377,25 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     return StmtExprMutator::VisitStmt_(block.get());
   }
 
-  Buffer GetFlattenedBuffer(Buffer buf) {
+  virtual Buffer GetFlattenedBuffer(Buffer buf) {
     auto it = buffer_remap_.find(buf);
     if (it != buffer_remap_.end()) {
       return it->second;
     }
-    auto flattened = buf.GetFlattenedBuffer();
-    auto writer = flattened.CopyOnWrite();
-
+    auto trn_layout = buf->layout.as<TrainiumLayoutNode>();
+    Buffer flattened;
+    tir::BufferNode* writer;
+    if (trn_layout) {
+      auto new_shape = {trn_layout->GetPartitionSize(), trn_layout->GetCosize()};
+      flattened = buf;
+      writer = flattened.CopyOnWrite();
+      writer->shape = new_shape;
+      writer->strides = {};
+      writer->axis_separators = {};
+    } else {
+      flattened = buf.GetFlattenedBuffer();
+      writer = flattened.CopyOnWrite();
+    }
     // TODO(Lunderberg): Move the handling of boolean into a
     // dedicated pass.
     if (flattened->dtype == DataType::Bool()) {
@@ -398,7 +447,18 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     }
   }
 
-  Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer, const Array<PrimExpr>& indices) {
+  virtual Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer, const Array<PrimExpr>& indices) {
+    if(buffer->layout.defined() && buffer->layout.value().as<TrainiumLayoutNode>()){
+      auto simplified_indices = this->IterMapSimplifyWithContext(indices, false);
+      if (buffer->layout.defined()) {
+        simplified_indices = buffer->layout.value()->Apply(simplified_indices, buffer->shape);
+        simplified_indices = this->IterMapSimplifyWithContext(simplified_indices, false);
+        for (size_t i = 0; i < simplified_indices.size(); i++) {
+          simplified_indices.Set(i, analyzer_->Simplify(simplified_indices[i]));
+        }
+      }
+      return simplified_indices;
+    }
     auto flattened_indices = buffer->ElemOffset(indices, true);
     flattened_indices = this->IterMapSimplifyWithContext(flattened_indices, false);
     ICHECK_EQ(flattened_indices.size(), 1) << "Expected a single element offset";
@@ -423,6 +483,7 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
   /*! \brief Map of buffers being remapped. */
   std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_remap_;
 };
+
 
 class BufferOffsetRemover : public StmtExprMutator {
  public:
@@ -459,7 +520,7 @@ Pass LowerTIRp() {
 
     // Lower other TIRp aux data structures
     n->body = ScheduleContextRemover::Remove(n->body);
-    n->body = LogicalTensorRemover::Remove(n->body);
+    n->body = LogicalTensorRemover::Remove(n->body, n->buffer_map);
     n->body = StorageLower::Flatten(n->body, n->buffer_map);
     n->body = BufferOffsetRemover::Remove(n->body);
     return f;

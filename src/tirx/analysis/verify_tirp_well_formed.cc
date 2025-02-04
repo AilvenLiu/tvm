@@ -49,19 +49,6 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
  private:
   using Verifier::Visit;
 
-  void Visit(const Stmt& obj, ObjectPath path) override {
-    if (!scope_stack_.empty() && !scope_stack_.back().Is("thread")) {
-      Verify(obj->IsInstance<BlockNode>() || obj->IsInstance<ForNode>() ||
-             obj->IsInstance<BlockRealizeNode>() || obj->IsInstance<SeqStmtNode>() ||
-             obj->IsInstance<tirp::OpCallNode>() || obj->IsInstance<AttrStmtNode>() ||
-             obj->IsInstance<DeclBufferNode>())
-          << "TIRpError: Stmt at " << path << " is not under a thread scope and has type "
-          << obj->GetTypeKey() << "\n"
-          << obj;
-    }
-    Verifier::Visit(obj, path);
-  }
-
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
     Verify(op->exec_scope != nullptr) << "TIRpError: Block at " << path << " has no exec_scope";
     auto scope = op->exec_scope.value();

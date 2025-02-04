@@ -28,6 +28,7 @@ from utils import bench, ProtonContext
 
 
 @tvm.testing.requires_cuda_compute_version(8)
+@tvm.testing.requires_cublas
 def test_hgemm_ampere():
     # no pipeline, no write cache, fully manual impl
     M, N, K = 8192, 8192, 8192

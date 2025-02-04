@@ -127,22 +127,11 @@ def test_invalid_stmt():
                     with T.thread():
                         pass
 
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def test3() -> None:
-        with T.kernel():
-            with T.cta():
-                T.evaluate(1)
-                with T.warp():
-                    with T.thread():
-                        pass
-                with T.thread():
-                    pass
+
     # fmt: on
 
     verify(test1)
     verify(test2)
-    with pytest.raises(Exception, match="is not under a thread scope"):
-        verify(test3)
 
 
 def test_inconsistent_scope_id():

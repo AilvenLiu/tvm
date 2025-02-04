@@ -182,7 +182,7 @@ class TileLayoutNode : public TLayoutNode {
   Optional<ExecScope> to;
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("data_tree", &data_iter_array);
+    v->Visit("data_iter_array", &data_iter_array);
     v->Visit("device_iter_array", &device_iter_array);
     v->Visit("from", &from);
     v->Visit("to", &to);
