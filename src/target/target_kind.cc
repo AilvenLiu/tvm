@@ -505,6 +505,12 @@ TVM_REGISTER_TARGET_KIND("composite", kDLCPU)  // line break
 TVM_REGISTER_TARGET_KIND("test", kDLCPU)  // line break
     .set_target_canonicalizer(TestTargetParser);
 
+TVM_REGISTER_TARGET_KIND("trn", kDLTrn)  // line break
+    .add_attr_option<runtime::Int>("partition_size", runtime::Int(128))
+    .add_attr_option<runtime::Int>("max_sbuf_size_per_partition", runtime::Int(196608))
+    .add_attr_option<runtime::Int>("max_psum_size_per_partition", runtime::Int(16384))
+    .add_attr_option<runtime::Int>("num-cores");
+
 /**********  Registry  **********/
 
 TVM_FFI_STATIC_INIT_BLOCK() {

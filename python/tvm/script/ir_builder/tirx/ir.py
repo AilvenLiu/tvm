@@ -2191,6 +2191,7 @@ anylist_setitem_call_cpacked = _op_wrapper(_tir_op.anylist_setitem_call_cpacked)
 vscale = _op_wrapper(_tir_op.vscale)
 ignore_loop_partition = _op_wrapper(_tir_op.ignore_loop_partition)
 print_buffer = _op_wrapper(_tir_op.print_buffer)
+nki_matmul = _op_wrapper(_tir_op.nki_matmul)
 
 
 def _dtype_forward(func):
@@ -2574,6 +2575,7 @@ __all__ = float_types + [
     "broadcast",
     "ramp",
     "cast",
+    "nki_matmul",
     # tvm.tirx.expr
     "Var",
     "SizeVar",

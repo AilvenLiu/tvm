@@ -4427,3 +4427,27 @@ def print_buffer(buffer_var, dtype, shape_size, *dims):
 sum = comm_reducer(lambda x, y: x + y, lambda t: const(0, dtype=t), name="sum")
 min = comm_reducer(lambda x, y: _ffi_api._OpMin(x, y, None), max_value, name="min")  # type: ignore
 max = comm_reducer(lambda x, y: _ffi_api._OpMax(x, y, None), min_value, name="max")  # type: ignore
+
+def nki_matmul(res, lhs, rhs, accum):
+    """TVM intrinsic to call nki matmul instruction
+
+    Parameters
+    ----------
+    res : BufferLoad
+        The result buffer.
+    
+    lhs: BufferLoad
+        The left hand side buffer.
+        
+    rhs: BufferLoad
+        The right hand side buffer.
+        
+    accum: bool
+        Whether to accumulate the result.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_matmul", res, lhs, rhs, accum)

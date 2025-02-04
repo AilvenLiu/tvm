@@ -336,7 +336,8 @@ static const std::unordered_map<String, int> ScopeOrder = {
 
 /*! \brief Map from storage scope to its belonging logical scope */
 static const std::unordered_map<String, String> StorageToLogical = {
-    {"local", "thread"}, {"shared", "cta"}, {"shared.dyn", "cta"}, {"global", "kernel"}};
+    {"local", "thread"},  {"shared", "cta"},      {"shared.dyn", "cta"},
+    {"global", "kernel"}, {"trn.sbuf", "kernel"}, {"trn.psum", "kernel"}};
 
 /*! \brief Whether the storage scope belongs to the logical scope*/
 bool IsStorageBuffer(const String& storage, const String& logical);

@@ -71,6 +71,10 @@ enum class StorageRank {
   kMMAMatrixC = 11,
   /*! \brief Metal SIMD group memory */
   kMetalSimdGroup = 12,
+  /*! \brief Trainium sbuf */
+  kTrnSbuf = 13,
+  /*! \brief Trainium psum */
+  kTrnPsum = 14,
 };
 
 /*!
@@ -182,6 +186,12 @@ struct StorageScope {
     } else if (s.compare(0, 15, "metal.simdgroup") == 0) {
       r.rank = StorageRank::kMetalSimdGroup;
       r.tag = s.substr(15, std::string::npos);
+    } else if(s.compare(0, 8, "trn.sbuf") == 0) {
+      r.rank = StorageRank::kTrnSbuf;
+      r.tag = s.substr(8, std::string::npos);
+    } else if(s.compare(0, 8, "trn.psum") == 0) {
+      r.rank = StorageRank::kTrnPsum;
+      r.tag = s.substr(8, std::string::npos);
     } else {
       TVM_FFI_THROW(InternalError) << "unknown storage scope " << s;
     }

@@ -35,6 +35,7 @@
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/target_builtin/cuda.h>
+#include <tvm/tirx/target_builtin/trn.h>
 
 #include <algorithm>
 #include <limits>
@@ -1032,7 +1033,7 @@ inline PrimExpr make_zero(DataType t, Span span) {
   return make_const(t, 0, span);
 }
 
-}  // namespace tirxx
+}  // namespace tirxxx
 
 // additional const expression overloading
 #define TVM_DEFINE_ASSIGN_OP_OVERLOAD(Name, OpFunc) \
