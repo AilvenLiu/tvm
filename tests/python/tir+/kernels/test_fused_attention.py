@@ -37,17 +37,17 @@ def test_fp16_fused_attn():
     F16_BYTES = 2
     SM_COUNT = DEV.multi_processor_count
     # problem size
-    DIM = 2048 * 2
+    DIM = 2048
     BATCH_SIZE = 2
     QO_LEN = 4096
     KV_LEN = 4096
-    HEAD_DIM = 256
+    HEAD_DIM = 128
     NHEADS = DIM // HEAD_DIM
     QO_SHAPE = BATCH_SIZE, QO_LEN, NHEADS, HEAD_DIM
     KV_SHAPE = BATCH_SIZE, KV_LEN, NHEADS, HEAD_DIM
     # kernel config
     CAUSAL = True
-    BLK_Q, BLK_KV = 128, 64
+    BLK_Q, BLK_KV = 128, 128
 
     INF = 5e4
     total_qtiles = BATCH_SIZE * NHEADS * ceildiv(QO_LEN, BLK_Q)
@@ -703,7 +703,7 @@ def test_fp16_fused_attn():
     np.set_printoptions(linewidth=np.inf)
 
     def fa3():
-        from hopper.flash_attn_interface import flash_attn_func
+        from flash_attn_interface import flash_attn_func
         import torch
 
         q_torch = torch.from_numpy(q).cuda()
@@ -751,11 +751,49 @@ def test_fp16_fused_attn():
 
         return o_tvm.asnumpy()
 
+    def flashinfer():
+        import flashinfer
+        import torch
+
+        q_torch = torch.from_numpy(q).cuda()
+        k_torch = torch.from_numpy(k).cuda()
+        v_torch = torch.from_numpy(v).cuda()
+
+        q_torch = q_torch.reshape(-1, NHEADS, HEAD_DIM)
+        k_torch = k_torch.reshape(-1, NHEADS, HEAD_DIM)
+        v_torch = v_torch.reshape(-1, NHEADS, HEAD_DIM)
+
+        sm90_wrapper = flashinfer.BatchPrefillWithRaggedKVCacheWrapper(
+            torch.empty(256 * 1024 * 1024, dtype=torch.uint8, device="cuda:0"),
+            kv_layout="NHD",
+            backend="fa3",
+        )
+
+        qo_indptr = torch.arange(0, BATCH_SIZE * QO_LEN + 1, QO_LEN).int()
+        kv_indptr = torch.arange(0, BATCH_SIZE * KV_LEN + 1, KV_LEN).int()
+
+        sm90_wrapper.plan(
+            qo_indptr,
+            kv_indptr,
+            NHEADS,
+            NHEADS,
+            HEAD_DIM,
+            causal=CAUSAL,
+        )
+
+        func = lambda: sm90_wrapper.run(q_torch, k_torch, v_torch)
+        ms = bench(func, warmup=0, repeat=10, proton_name="flashinfer")
+        print(f"FlashInfer flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
+        o_torch = func()
+        return o_torch.reshape(BATCH_SIZE, QO_LEN, NHEADS, HEAD_DIM).cpu().numpy()
+
     with ProtonContext("fused_attn"):
         O_fa3 = fa3()
         O_tir = tir()
+        O_flashinfer = flashinfer()
 
     np.testing.assert_allclose(O_fa3, O_tir, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(O_fa3, O_flashinfer, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":

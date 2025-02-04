@@ -77,3 +77,4 @@ class ProtonContext:
             subprocess.run(
                 ["proton-viewer", "-m", "avg_time/ms", f"{self.name}.hatchet"], check=True
             )
+            os.remove(f"{self.name}.hatchet")
