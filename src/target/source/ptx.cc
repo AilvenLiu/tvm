@@ -1351,14 +1351,14 @@ __forceinline__ __device__ void {func_name}({dtype} reg) {
 )";
   std::string func_name = "ptx_wgmma_fence_{dtype}";
   std::string format, dtype_str;
-  if (dtype == DataType::Int(32)) {
+  if (dtype == DataType::UInt(32)) {
     format = "r";
-    dtype_str = "int";
+    dtype_str = "uint";
   } else if (dtype == DataType::Float(32)) {
     format = "f";
     dtype_str = "float";
   } else {
-    LOG(FATAL) << "Only support int32/fp32 for wgmma_fence.";
+    LOG(FATAL) << "Only support uint32/float32 for wgmma_fence.";
   }
   {
     // func name

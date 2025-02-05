@@ -842,7 +842,7 @@ def test_wgmma_rs_nt():
                     C_local = T.alloc_buffer((C_elems,), out_dtype, scope="local")
                     
                     A_elems_b32 = T.meta_var(A_elems // (32 // in_dtype_bits))
-                    A_local_b32 = T.decl_buffer((A_elems_b32,), "int32", data=A_local.data)
+                    A_local_b32 = T.decl_buffer((A_elems_b32,), "uint32", data=A_local.data)
 
                     # load A to regs
                     for i in T.serial(0, A_elems // 4):

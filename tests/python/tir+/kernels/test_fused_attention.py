@@ -47,7 +47,13 @@ def test_fp16_fused_attn():
     KV_SHAPE = BATCH_SIZE, KV_LEN, NHEADS, HEAD_DIM
     # kernel config
     CAUSAL = True
-    BLK_Q, BLK_KV = 128, 128
+    BLK_Q = 128
+    if HEAD_DIM == 256:
+        BLK_KV = 64
+    elif HEAD_DIM == 128:
+        BLK_KV = 128
+    else:
+        raise ValueError(f"HEAD_DIM {HEAD_DIM} not supported")
 
     INF = 5e4
     total_qtiles = BATCH_SIZE * NHEADS * ceildiv(QO_LEN, BLK_Q)
@@ -94,30 +100,31 @@ def test_fp16_fused_attn():
         EPILOGUE = 3
 
     class TileScheduler:
-        q_blocks = ceildiv(QO_LEN, BLK_Q)
-
-        def __init__(self, prefix: str, tiles, tiles_indptr):
+        def __init__(self, prefix: str, b_indices, h_indices, q_indices, tiles_indptr):
+            self.linear_idx = int_var()
+            self.linear_lim = int_var()
+            self.b_indices = b_indices
+            self.h_indices = h_indices
+            self.q_indices = q_indices
+            self.tiles_indptr = tiles_indptr
             self.q_idx = int_var()
             self.h_idx = int_var()
             self.b_idx = int_var()
-            self.tile_idx = int_var()
-            self.linear_idx = int_var()
-            self.linear_lim = int_var()
-            self.tiles = tiles
-            self.tiles_indptr = tiles_indptr
+            IRBuilder.current().name(prefix + "_linear_idx", self.linear_idx)
+            IRBuilder.current().name(prefix + "_linear_lim", self.linear_lim)
+            IRBuilder.current().name(prefix + "_b_indices", self.b_indices)
+            IRBuilder.current().name(prefix + "_h_indices", self.h_indices)
+            IRBuilder.current().name(prefix + "_q_indices", self.q_indices)
+            IRBuilder.current().name(prefix + "_tiles_indptr", self.tiles_indptr)
             IRBuilder.current().name(prefix + "_q_idx", self.q_idx)
             IRBuilder.current().name(prefix + "_h_idx", self.h_idx)
             IRBuilder.current().name(prefix + "_b_idx", self.b_idx)
-            IRBuilder.current().name(prefix + "_tile_idx", self.tile_idx)
-            IRBuilder.current().name(prefix + "_linear_idx", self.linear_idx)
-            IRBuilder.current().name(prefix + "_linear_lim", self.linear_lim)
 
         @T.macro
         def get_block_coord(self):
-            self.tile_idx[0] = self.tiles[self.linear_idx[0]]
-            self.q_idx[0] = self.tile_idx[0] % self.q_blocks
-            self.h_idx[0] = (self.tile_idx[0] // self.q_blocks) % NHEADS
-            self.b_idx[0] = self.tile_idx[0] // (self.q_blocks * NHEADS)
+            self.q_idx[0] = self.q_indices[self.linear_idx[0]]
+            self.h_idx[0] = self.h_indices[self.linear_idx[0]]
+            self.b_idx[0] = self.b_indices[self.linear_idx[0]]
 
         @T.macro
         def init(self, sm):
@@ -129,7 +136,7 @@ def test_fp16_fused_attn():
         def next_tile(self):
             self.linear_idx[0] = self.linear_idx[0] + 1
             self.get_block_coord()
-
+            
         def valid(self):
             return self.linear_idx[0] < self.linear_lim[0]
 
@@ -342,48 +349,49 @@ def test_fp16_fused_attn():
         with T.thread():
             scaleD = int_var()
             scaleD[0] = 0
+            T.encode_matrix_descriptor(desc_Q.data, smem_q.access_ptr("r", offset=consumer_id * BLK_Q // 2 * TMA_TILE),
+                                       BLK_Q * 8, 64, SWIZZLE)
+            T.encode_matrix_descriptor(desc_K.data, smem_k.access_ptr("r", offset=smem_k.offset_of_p([k_stage, 0])),
+                                       BLK_KV * 8, 64, SWIZZLE)
             for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
                 for wgmma_tile in T.serial(TMA_TILE // WGMMA_QK_K):
-                    Q_offset = T.meta_var((tma_tile * BLK_Q + consumer_id * BLK_Q // 2) * TMA_TILE + wgmma_tile * WGMMA_QK_K)
-                    K_offset = T.meta_var(tma_tile * BLK_KV * TMA_TILE + wgmma_tile * WGMMA_QK_K)
-                    T.encode_matrix_descriptor(desc_Q.data, smem_q.access_ptr("r", offset=Q_offset),
-                                               BLK_Q * 8, 64, SWIZZLE)
-                    T.encode_matrix_descriptor(desc_K.data, smem_k.access_ptr("r", offset=smem_k.offset_of_p([k_stage, K_offset])),
-                                               BLK_KV * 8, 64, SWIZZLE)
                     T.wgmma_mma_async_ss(
                         WGMMA_QK_M, WGMMA_QK_N, WGMMA_QK_K, "float16", "float32", False, False,
                         1.0, 1.0, scaleD[0], desc_Q[0], desc_K[0], *get_elems_list(S_reg, S_REG_COUNT)
                     )
                     scaleD[0] = 1
-
+                    desc_Q[0] = desc_Q[0] + (2 * (WGMMA_QK_K) >> 4)
+                    desc_K[0] = desc_K[0] + (2 * (WGMMA_QK_K) >> 4)
+                desc_Q[0] = desc_Q[0] + (2 * (-TMA_TILE + BLK_Q * TMA_TILE) >> 4)
+                desc_K[0] = desc_K[0] + (2 * (-TMA_TILE + BLK_KV * TMA_TILE) >> 4)
+                
         T.wgmma_commit_group()
         wgmma_fence_operand(S_reg, S_REG_COUNT)
 
     @T.macro
     def gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v):
-        P_reg_int32 = T.decl_buffer([S_REG_COUNT // 2], "int32", data=P_reg.data, elem_offset=0)
-        wgmma_fence_operand(P_reg_int32, S_REG_COUNT // 2)
+        wgmma_fence_operand(P_reg, S_REG_COUNT // 2)
         wgmma_fence_operand(O_reg, O_REG_COUNT)
         T.wgmma_arrive()
 
         v_stage = T.meta_var(consumer_v.index[0])
+        T.encode_matrix_descriptor(desc_V.data, smem_v.access_ptr("r", offset=smem_v.offset_of_p([v_stage, 0])),
+                                   BLK_KV * 8, 64, SWIZZLE)
         for wgmma_tile in T.serial(BLK_KV // WGMMA_PV_K):
             P_offset = T.meta_var(wgmma_tile * WGMMA_PV_K // 4)
-            V_offset = T.meta_var(wgmma_tile * WGMMA_PV_K * TMA_TILE)
-            T.encode_matrix_descriptor(desc_V.data, smem_v.access_ptr("r", offset=smem_v.offset_of_p([v_stage, V_offset])),
-                                       BLK_KV * 8, 64, SWIZZLE)
             T.wgmma_mma_async_rs(
                 WGMMA_PV_M, WGMMA_PV_N, WGMMA_PV_K, "float16", "float32", False, True,
-                1.0, 1.0, True, desc_V[0], *(get_elems_list(P_reg_int32, WGMMA_PV_K // 4, P_offset) + get_elems_list(O_reg, O_REG_COUNT, 0))
+                1.0, 1.0, True, desc_V[0], *(get_elems_list(P_reg, WGMMA_PV_K // 4, P_offset) + get_elems_list(O_reg, O_REG_COUNT, 0))
             )
+            desc_V[0] = desc_V[0] + (2 * (WGMMA_PV_K * TMA_TILE) >> 4)
 
         T.wgmma_commit_group()
-        wgmma_fence_operand(P_reg_int32, S_REG_COUNT // 2)
+        wgmma_fence_operand(P_reg, S_REG_COUNT // 2)
         wgmma_fence_operand(O_reg, O_REG_COUNT)
 
     @T.macro
     def consumer_body(
-        do_masking, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, O_reg,
+        do_masking, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, P_reg_fp16, O_reg,
         wg_id, warp_id_in_wg, lane_id, q_idx, kv_tile_idx_read
     ):
         pipeline_k.consumer_wait(consumer_k)
@@ -412,7 +420,7 @@ def test_fp16_fused_attn():
         consumer_v.advance()
         # copy to P_{i-1} and downcast to float16
         for i in T.serial(S_REG_COUNT):
-            P_reg[i] = T.Cast("float16", S_reg[i])
+            P_reg_fp16[i] = T.Cast("float16", S_reg[i])
 
     @T.macro
     def r2S(warp_id, lane_id, smem_o, O_reg, n_tile):
@@ -450,13 +458,15 @@ def test_fp16_fused_attn():
         s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, HEAD_DIM // TMA_TILE - 1)
 
     @T.prim_func(tirp=True)
-    def manual(Q_ptr: T.handle, K_ptr: T.handle, V_ptr: T.handle, tiles_ptr: T.handle, tiles_indptr_ptr: T.handle, O_ptr: T.handle) -> None:
+    def manual(Q_ptr: T.handle, K_ptr: T.handle, V_ptr: T.handle, b_indices_ptr: T.handle, h_indices_ptr: T.handle, q_indices_ptr: T.handle, tiles_indptr_ptr: T.handle, O_ptr: T.handle) -> None:
         qo_layout = T.meta_var(T.TileLayout.from_nested_tuple(QO_SHAPE))
         kv_layout = T.meta_var(T.TileLayout.from_nested_tuple(KV_SHAPE))
         Q = T.match_buffer(Q_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
         K = T.match_buffer(K_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
         V = T.match_buffer(V_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
-        tiles = T.match_buffer(tiles_ptr, (total_qtiles,), "int32", scope="global")
+        b_indices = T.match_buffer(b_indices_ptr, (total_qtiles,), "int32", scope="global")
+        h_indices = T.match_buffer(h_indices_ptr, (total_qtiles,), "int32", scope="global")
+        q_indices = T.match_buffer(q_indices_ptr, (total_qtiles,), "int32", scope="global")
         tiles_indptr = T.match_buffer(tiles_indptr_ptr, (SM_COUNT + 1,), "int32", scope="global")
         O = T.match_buffer(O_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
 
@@ -507,7 +517,7 @@ def test_fp16_fused_attn():
                     tid_in_wg = int_var()
                     warp_id_in_wg = int_var()
                     # tile scheduler
-                    tile_scheduler = T.meta_var(TileScheduler("tile_scheduler", tiles, tiles_indptr))
+                    tile_scheduler = T.meta_var(TileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr))
                     # pipeline
                     pipeline_k = T.meta_var(Pipeline(full_k, empty_k, TMA_BYTES_K))
                     pipeline_v = T.meta_var(Pipeline(full_v, empty_v, TMA_BYTES_V))
@@ -525,8 +535,9 @@ def test_fp16_fused_attn():
                     desc_V = T.alloc_buffer([1], "uint64", scope="local", align=8)
                     # accums
                     S_reg = T.alloc_buffer([S_REG_COUNT], "float32", scope="local")
-                    P_reg = T.alloc_buffer([S_REG_COUNT], "float16", scope="local")
+                    P_reg = T.alloc_buffer([S_REG_COUNT // 2], "uint32", scope="local")
                     O_reg = T.alloc_buffer([O_REG_COUNT], "float32", scope="local")
+
                     # softmax
                     softmax = T.meta_var(Softmax("softmax"))
                     ############################################################################## INITIALIZATION
@@ -561,6 +572,7 @@ def test_fp16_fused_attn():
                     num_kv_tiles = T.meta_var(ceildiv(attend_kv_len, BLK_KV)) # number of kv tiles to attend
                     is_leader = T.meta_var(T.elect_sync(0xFFFFFFFF))
 
+                    P_reg_fp16 = T.decl_buffer([S_REG_COUNT], "float16", data=P_reg.data, elem_offset=0)
                     if (wg_id[0] == WarpGroupRole.PRODUCER):
                         ############################################################################## PRODUCER
                         # deallocate registers
@@ -645,7 +657,7 @@ def test_fp16_fused_attn():
                                 softmax.init_m_P_l(S_reg)
                                 # copy to P_0 and downcast to float16
                                 for i in T.serial(S_REG_COUNT):
-                                    P_reg[i] = T.Cast("float16", S_reg[i])
+                                    P_reg_fp16[i] = T.Cast("float16", S_reg[i])
                                 with T.thread():
                                     masking_step = int_var()
                                     n_masking_steps = int_var()
@@ -655,7 +667,7 @@ def test_fp16_fused_attn():
                                     # split out tiles of K and V that require masking
                                     while (masking_step[0] < n_masking_steps[0] and kv_tile_idx_read[0] >= 0):
                                         consumer_body(
-                                            True, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, O_reg,
+                                            True, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, P_reg_fp16, O_reg,
                                             wg_id, warp_id_in_wg, lane_id, q_idx, kv_tile_idx_read
                                         )
                                         masking_step[0] = masking_step[0] + 1
@@ -663,7 +675,7 @@ def test_fp16_fused_attn():
                                     # no masking
                                     while kv_tile_idx_read[0] >= 0:
                                         consumer_body(
-                                            False, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, O_reg,
+                                            False, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, P_reg_fp16, O_reg,
                                             wg_id, warp_id_in_wg, lane_id, q_idx, kv_tile_idx_read
                                         )
                                         kv_tile_idx_read[0] = kv_tile_idx_read[0] - 1
@@ -724,28 +736,65 @@ def test_fp16_fused_attn():
 
         from heapq import heappush, heappop
 
-        buckets = [[] for _ in range(SM_COUNT)]
+        def cost(qo_len, kv_len):
+            return 2 * qo_len + kv_len
+
+        q_indices = [[] for _ in range(SM_COUNT)]
+        h_indices = [[] for _ in range(SM_COUNT)]
+        b_indices = [[] for _ in range(SM_COUNT)]
+
         heap = []
-        qblcks = ceildiv(QO_LEN, BLK_Q)
-        for i in range(SM_COUNT):
-            heappush(heap, (i % qblcks, i))
-            buckets[i].append(i)
+        for cta in range(SM_COUNT):
+            heappush(heap, (0.0, cta))
 
-        for i in range(SM_COUNT, total_qtiles):
-            cur_val, sm = heappop(heap)
-            heappush(heap, (cur_val + (i % qblcks), sm))
-            buckets[sm].append(i)
+        num_q_tiles = ceildiv(QO_LEN, BLK_Q)
 
-        tile = np.concatenate(buckets).astype(np.int32)
-        tile_indptr = np.cumsum([0] + [len(b) for b in buckets]).astype(np.int32)
-        tiles_tvm = tvm.nd.array(tile, DEV)
-        tiles_indptr_tvm = tvm.nd.array(tile_indptr, DEV)
+        for h_idx in range(NHEADS):
+            for q_idx in reversed(range(num_q_tiles)):
+                for b_idx in range(BATCH_SIZE):
+                    cur_cost, cta = heappop(heap)
+                    heappush(
+                        heap,
+                        (
+                            cur_cost
+                            + cost(
+                                BLK_Q,
+                                (
+                                    KV_LEN
+                                    if not CAUSAL
+                                    else KV_LEN - (num_q_tiles - q_idx - 1) * BLK_Q
+                                ),
+                            ),
+                            cta,
+                        ),
+                    )
+                    q_indices[cta].append(q_idx)
+                    h_indices[cta].append(h_idx)
+                    b_indices[cta].append(b_idx)
+
+        tiles_indptr = np.cumsum([0] + [len(b) for b in b_indices]).astype(np.int32)
+        q_indices = np.concatenate(q_indices).astype(np.int32)
+        h_indices = np.concatenate(h_indices).astype(np.int32)
+        b_indices = np.concatenate(b_indices).astype(np.int32)
+        tiles_indptr_tvm = tvm.nd.array(tiles_indptr, DEV)
+        q_indices_tvm = tvm.nd.array(q_indices, DEV)
+        h_indices_tvm = tvm.nd.array(h_indices, DEV)
+        b_indices_tvm = tvm.nd.array(b_indices, DEV)
 
         with target:
             mod = tvm.IRModule({"main": manual})
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
-            func = lambda: mod(q_tvm, k_tvm, v_tvm, tiles_tvm, tiles_indptr_tvm, o_tvm)
+            func = lambda: mod(
+                q_tvm,
+                k_tvm,
+                v_tvm,
+                b_indices_tvm,
+                h_indices_tvm,
+                q_indices_tvm,
+                tiles_indptr_tvm,
+                o_tvm,
+            )
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")
             print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
