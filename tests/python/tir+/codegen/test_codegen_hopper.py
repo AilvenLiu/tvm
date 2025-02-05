@@ -71,9 +71,9 @@ def test_stmatrix_sync_aligned(trans):
                     reg = T.alloc_buffer((8,), "float16", scope="local")
                     for i in range(8):
                         reg[i] = tx * 8 + i
-                    T.stmatrix_sync_aligned(4, trans, 
-                                            A_smem.access_ptr("w", offset=A_smem.offset_of_p([tx % 16, tx // 16 * 8])), 
-                                            reg[0], reg[1], reg[2], reg[3], 
+                    T.stmatrix_sync_aligned(4, trans,
+                                            A_smem.access_ptr("w", offset=A_smem.offset_of_p([tx % 16, tx // 16 * 8])),
+                                            reg[0], reg[1], reg[2], reg[3],
                                             reg[4], reg[5], reg[6], reg[7])
                     if tx == 0:
                         for i, j in T.grid(16, 16):
@@ -155,7 +155,7 @@ def test_bar_sync():
 def test_fence_mbarrier_init_release_clsuter():
     # fmt: off
     @T.prim_func(tirp=True)
-    def func(A: T.Buffer((1))): 
+    def func(A: T.Buffer((1))):
         with T.kernel():
             bx = T.cta_id([1], parent="kernel")
             tx = T.thread_id([128], parent="cta")
@@ -689,11 +689,14 @@ def test_wgmma_ss_nt():
                     descB = T.alloc_buffer((1,), "uint64", scope="local")
                     C_local = T.alloc_buffer((C_elems,), out_dtype, scope="local")
 
-                    # load A to smem
+                    # init phase and bar
                     phase[0] = 0
                     if tx == 0:
                         T.mbarrier_init(bar.data, 1)
-                        T.cuda_fence_proxy_async("shared")
+                    T.cuda_fence_proxy_async("shared")
+                    T.tvm_storage_sync("shared")
+                    # load A and B to smem
+                    if tx == 0:
                         T.cp_async_bulk_tensor_global_to_cluster(len(shapeA), A_smem.data, bar.data, A_map, *coordA)
                         T.cp_async_bulk_tensor_global_to_cluster(len(shapeB), B_smem.data, bar.data, B_map, *coordB)
                         T.mbarrier_arrive_expect_tx(bar.data, A_bytes + B_bytes)
@@ -852,12 +855,13 @@ def test_wgmma_rs_nt():
                         A_local[i * 4 + 1] = A[row, col + 1]
                         A_local[i * 4 + 2] = A[row + 8, col]
                         A_local[i * 4 + 3] = A[row + 8, col + 1]
-                    T.tvm_storage_sync("shared")
-
-                    # load B to smem
+                    # init bar, and make sure it's visible to all threads and async proxy
                     if tx == 0:
                         T.mbarrier_init(bar.data, 1)
-                        T.cuda_fence_proxy_async("shared")
+                    T.cuda_fence_proxy_async("shared")
+                    T.tvm_storage_sync("shared")
+                    # load B to smem
+                    if tx == 0:
                         T.cp_async_bulk_tensor_global_to_cluster(len(shapeB), B_smem.data, bar.data, B_map, *coordB)
                         T.mbarrier_arrive_expect_tx(bar.data, B_bytes)
                     T.mbarrier_wait(bar.data, 0)

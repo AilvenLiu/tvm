@@ -1353,7 +1353,7 @@ __forceinline__ __device__ void {func_name}({dtype} reg) {
   std::string format, dtype_str;
   if (dtype == DataType::UInt(32)) {
     format = "r";
-    dtype_str = "uint";
+    dtype_str = "uint32_t";
   } else if (dtype == DataType::Float(32)) {
     format = "f";
     dtype_str = "float";

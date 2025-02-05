@@ -23,7 +23,7 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tir.transform import LowerTIRp
-from utils import bench, ProtonContext
+from ..utils import bench, ProtonContext
 
 
 @tvm.testing.requires_cuda_compute_version(9)
