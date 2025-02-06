@@ -148,11 +148,10 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     src_buffer_region: BufferRegion,
     accum: bool,
     reduce_op: str,
-    sctx: ScheduleContext
+    sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
-
     """Schedule warp-level tree-reduction operation in shared memory on CUDA.
-    
+
     Support reduction along the last D dimensions.
     Warp partition follows the rule below:
         For src tensor [s1, s2, ..., r1, r2, ...], where si are spatial axes and ri are reduction axes.
@@ -163,7 +162,7 @@ def reduction_cuda_shared_nd_sync_cta_impl(
         return None
 
     if reduce_op not in ["add"]:
-        raise None
+        return None
 
     thread_cnt = sctx.launch_params["threadIdx.x"]
     threads_per_warp = 32
@@ -193,7 +192,9 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     analyzer = Analyzer()
     spatial_dims = len(dst_region)
 
-    if not all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent[:spatial_dims], dst_extent)):
+    if not all(
+        analyzer.can_prove_equal(s, d) for s, d in zip(src_extent[:spatial_dims], dst_extent)
+    ):
         return None
 
     spatial_len = functools.reduce(operator.mul, src_extent[:spatial_dims], 1)

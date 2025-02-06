@@ -23,7 +23,7 @@ from tvm.script import tir as T
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.async_structs import CopyPipeline, Pipeline
-from .registry import register_schedule
+from ..registry import register_schedule
 from .common import InstType, copy_cuda_g2s_s2g_2d_cta_vec_load_impl
 
 

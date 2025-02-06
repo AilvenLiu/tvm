@@ -15,19 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Implementation of reduce operator schedules."""
+"""Implementation of copy operator schedules."""
 
 from typing import Optional
 
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
-from .registry import register_schedule
-from .common import reduction_cuda_shared_nd_sync_cta_impl
+from ..registry import register_schedule
+from .common import InstType, copy_cuda_g2s_s2g_2d_cta_vec_load_impl
 
 
-def register_reduce_schedule(func):
-    """Decorator function to register reduce operator implementations.
+def register_copy_schedule(func):
+    """Decorator function to register copy operator implementations.
 
     Parameters
     ----------
@@ -39,24 +39,17 @@ def register_reduce_schedule(func):
     Callable
         The decorated function.
     """
-    return register_schedule("reduce")(func)
+    return register_schedule("copy")(func)
 
-@register_reduce_schedule
-def reduction_cuda_shared_nd_sync_cta(
+
+@register_copy_schedule
+def copy_cuda_g2s_s2g_2d_sync_cta_vec_load(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
-    accum: bool,
-    reduce_op: str,
     sctx: ScheduleContext,
     _,
 ) -> Optional[PrimFunc]:
-    """Schedule warp-level tree-reduction operation in shared memory on CUDA.
-    
-    Support reduction along the last D dimensions.
-    Warp partition follows the rule below:
-        For src tensor [s1, s2, ..., r1, r2, ...], where si are spatial axes and ri are reduction axes.
-        Use one warp (32 threads) for each si for reduction.
-    """
-    return reduction_cuda_shared_nd_sync_cta_impl(
-        dst_buffer_region, src_buffer_region, accum, reduce_op, sctx
-   )
+    """Schedule copy operation between global and shared memory on CUDA."""
+    return copy_cuda_g2s_s2g_2d_cta_vec_load_impl(
+        dst_buffer_region, src_buffer_region, sctx, InstType.NORMAL
+    )
