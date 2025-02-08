@@ -96,23 +96,19 @@ TVM_REGISTER_GLOBAL("tirx.KernelScope").set_body_typed([](Array<ScopeIdDef> def)
 });
 
 // ExecScopeSlice
-ExecScopeSlice::ExecScopeSlice(Array<Var> ids, Array<Range> ranges, String name) {
+ExecScopeSlice::ExecScopeSlice(Array<Range> slices, String parent, String cur) {
   auto n = make_object<ExecScopeSliceNode>();
-  ICHECK(!ids.empty()) << "ExecScopeSlice must have at least one defining Var";
-  if (ranges.defined()) {
-    ICHECK_EQ(ids.size(), ranges.size()) << "Number of dimensions must match";
-  }
-  n->name = name;
-  n->def_ids = std::move(ids);
-  n->ranges = std::move(ranges);
+  n->name = cur;
+  n->parent = parent;
+  n->slices = std::move(slices);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_NODE_TYPE(ExecScopeSliceNode);
 
 TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
-    .set_body_typed([](Array<Var> vars, Array<Range> ranges, String name) {
-      return ExecScopeSlice(vars, ranges, name);
+    .set_body_typed([](Array<Range> slices, String parent, String cur) {
+      return ExecScopeSlice(slices, parent, cur);
     });
 
 /******** Definition of Var ********/
@@ -325,5 +321,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cluster", "cta", "cuda")
       return Trivial3DResolve(def, params, "clusterCtaIdx.");
     });
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm

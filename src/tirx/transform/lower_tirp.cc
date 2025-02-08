@@ -315,6 +315,9 @@ class LogicalTensorRemover : public arith::IRMutatorWithAnalyzer {
     return Array<PrimExpr>(new_indices.begin(), new_indices.end());
   }
 
+  using StmtExprMutator::VisitStmt_;
+  using StmtExprMutator::VisitExpr_;
+
   Stmt VisitStmt_(const BufferStoreNode* op) override {
     BufferStore store = Downcast<BufferStore>(StmtExprMutator::VisitStmt_(op));
     auto it = replace_map_.find(op->buffer);

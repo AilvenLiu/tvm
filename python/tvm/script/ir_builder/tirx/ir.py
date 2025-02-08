@@ -457,8 +457,8 @@ def world() -> frame.BlockFrame:
 
 
 def kernel(
-    vars: Optional[List[Var]] = None,
-    ranges: Optional[List[ir.Range]] = None,
+    slices: Optional[List[ir.Range]] = None,
+    parent: str = "world",
 ) -> frame.BlockFrame:
     """The block declaration statement.
 
@@ -467,14 +467,14 @@ def kernel(
     res : frame.BlockFrame
         The BlockFrame.
     """
-    if vars:
-        return _ffi_api.ScopeSlice(vars, ranges, "kernel")
+    if slices:
+        return _ffi_api.ScopeSlice(slices, parent, "kernel")
     return _ffi_api.Kernel()  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def cta(
-    vars: Optional[List[Var]] = None,
-    ranges: Optional[List[ir.Range]] = None,
+    slices: Optional[List[ir.Range]] = None,
+    parent: str = "kernel",
 ) -> frame.BlockFrame:
     """The block declaration statement.
 
@@ -483,14 +483,14 @@ def cta(
     res : frame.BlockFrame
         The BlockFrame.
     """
-    if vars:
-        return _ffi_api.ScopeSlice(vars, ranges, "cta")
+    if slices:
+        return _ffi_api.ScopeSlice(slices, parent, "cta")
     return _ffi_api.CTA()  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def warp(
-    vars: Optional[List[Var]] = None,
-    ranges: Optional[List[ir.Range]] = None,
+    slices: Optional[List[ir.Range]] = None,
+    parent: str = "cta",
 ) -> frame.BlockFrame:
     """The block declaration statement.
 
@@ -499,14 +499,14 @@ def warp(
     res : frame.BlockFrame
         The BlockFrame.
     """
-    if vars:
-        return _ffi_api.ScopeSlice(vars, ranges, "warp")
+    if slices:
+        return _ffi_api.ScopeSlice(slices, parent, "warp")
     return _ffi_api.Warp()  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def thread(
-    vars: Optional[List[Var]] = None,
-    ranges: Optional[List[ir.Range]] = None,
+    slices: Optional[List[ir.Range]] = None,
+    parent: str = "warp",
 ) -> frame.BlockFrame:
     """The block declaration statement.
 
@@ -515,13 +515,13 @@ def thread(
     res : frame.BlockFrame
         The BlockFrame.
     """
-    if vars:
-        return _ffi_api.ScopeSlice(vars, ranges, "thread")
+    if slices:
+        return _ffi_api.ScopeSlice(slices, parent, "thread")
     return _ffi_api.Thread()  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def scope_slice(vars: List[Var], ranges: List[ir.Range], cur: str) -> frame.BlockFrame:
-    return _ffi_api.ScopeSlice(vars, ranges, cur)  # type: ignore[attr-defined] # pylint: disable=no-member
+def scope_slice(slices: List[ir.Range], parent: str, cur: str) -> frame.BlockFrame:
+    return _ffi_api.ScopeSlice(slices, parent, cur)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def kernel_id(extent: Union[PrimExpr, int]) -> Var:

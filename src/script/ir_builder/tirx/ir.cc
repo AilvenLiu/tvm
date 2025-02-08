@@ -263,7 +263,7 @@ BlockFrame Warp() { return Block("", false, "warp"); }
 
 BlockFrame Thread() { return Block("", false, "thread"); }
 
-BlockFrame ScopeSlice(ffi::Array<tvm::tirx::Var> vars, ffi::Array<Range> ranges, ffi::String cur) {
+BlockFrame ScopeSlice(ffi::Array<Range> slices, ffi::String parent, ffi::String cur) {
   ObjectPtr<BlockFrameNode> n = ffi::make_object<BlockFrameNode>();
   n->name = cur;
   n->iter_vars.clear();
@@ -276,7 +276,7 @@ BlockFrame ScopeSlice(ffi::Array<tvm::tirx::Var> vars, ffi::Array<Range> ranges,
   n->iter_values.clear();
   n->predicate = std::nullopt;
   n->no_realize = false;
-  n->exec_scope = tvm::tirx::ExecScopeSlice(vars, ranges, cur);
+  n->exec_scope = tvm::tirx::ExecScopeSlice(slices, parent, cur);
   return BlockFrame(n);
 }
 
@@ -1113,7 +1113,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

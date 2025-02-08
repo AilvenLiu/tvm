@@ -14,19 +14,23 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# pylint: disable=no-member, super-init-not-called
+
 """Definition of execution scope."""
 from typing import List
 
-from . import _ffi_api
 from tvm._ffi import register_object, get_global_func
 from tvm.runtime import Object
+from tvm.ir import Range
 
+from . import _ffi_api
 from .expr import PrimExpr, Var
-from ..ir import Range
 
 
 @register_object("tirx.ScopeIdDef")
 class ScopeIdDef(Object):
+    """Definition of scope identifiers with their extents and parent-child relationships."""
+
     def_ids: List[Var]
     extents: List[PrimExpr]
     parent: str
@@ -38,6 +42,8 @@ class ScopeIdDef(Object):
 
 @register_object("tirx.ExecScope")
 class ExecScope(Object):
+    """Base class for execution scopes."""
+
     name: str
 
     def __init__(self, name: str):
@@ -45,11 +51,27 @@ class ExecScope(Object):
 
     @staticmethod
     def create(name: str):
+        """Create a new execution scope with the given name.
+        If the name is "world", it will create a WorldScope.
+        If the name is "kernel", it will create a KernelScope.
+
+        Parameters
+        ----------
+        name : str
+            The name of the execution scope.
+
+        Returns
+        -------
+        ExecScope
+            The created execution scope.
+        """
         return get_global_func("tir.ExecScopeCreate")(name)
 
 
 @register_object("tirx.WorldScope")
 class WorldScope(ExecScope):
+    """Top-level execution scope that contains scope identifier definitions."""
+
     scope_id_def: ScopeIdDef
 
     def __init__(self, scope_id_def: ScopeIdDef):
@@ -58,6 +80,8 @@ class WorldScope(ExecScope):
 
 @register_object("tirx.KernelScope")
 class KernelScope(ExecScope):
+    """Execution scope for kernels containing multiple scope identifier definitions."""
+
     scope_id_def: List[ScopeIdDef]
 
     def __init__(self, scope_id_def: List[ScopeIdDef]):
@@ -66,8 +90,11 @@ class KernelScope(ExecScope):
 
 @register_object("tirx.ExecScopeSlice")
 class ExecScopeSlice(ExecScope):
-    def_ids: List[Var]
-    ranges: List[Range]
+    """A slice of an execution scope with their slices and parent scope name."""
 
-    def __init__(self, ids: List[PrimExpr], ranges: List[Range], name: str):
-        self.__init_handle_by_constructor__(_ffi_api.ExecScopeSlice, ids, ranges, name)
+    slices: List[Range]
+    parent: str
+    cur: str
+
+    def __init__(self, slices: List[Range], parent: str, cur: str):
+        self.__init_handle_by_constructor__(_ffi_api.ExecScopeSlice, slices, parent, cur)

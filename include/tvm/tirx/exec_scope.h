@@ -292,25 +292,25 @@ class KernelScope : public ExecScope {
 
 class ExecScopeSliceNode : public ExecScopeNode {
  public:
-  /*! \brief defining threading vars */
-  Array<Var> def_ids;
-  /*! \brief subrange of each threading vars */
-  Array<Range> ranges;
+  /*! \brief slices of the execution scope */
+  Array<Range> slices;
+  /*! \brief parent scope name */
+  String parent;
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("def_vars", &def_ids);
-    v->Visit("ranges", &ranges);
+    v->Visit("slices", &slices);
+    v->Visit("parent", &parent);
     ExecScopeNode::VisitAttrs(v);
   }
 
   bool SEqualReduce(const ExecScopeSliceNode* other, SEqualReducer equal) const {
-    return equal(def_ids, other->def_ids) && equal(ranges, other->ranges) &&
+    return equal(slices, other->slices) && equal(parent, other->parent) &&
            ExecScopeNode::SEqualReduce(other, equal);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(def_ids);
-    hash_reduce(ranges);
+    hash_reduce(slices);
+    hash_reduce(parent);
     ExecScopeNode::SHashReduce(hash_reduce);
   }
 
@@ -322,7 +322,7 @@ class ExecScopeSliceNode : public ExecScopeNode {
 
 class ExecScopeSlice : public ExecScope {
  public:
-  TVM_DLL explicit ExecScopeSlice(Array<Var> vars, Array<Range> ranges, String name);
+  TVM_DLL explicit ExecScopeSlice(Array<Range> slices, String parent, String cur);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeSliceNode);

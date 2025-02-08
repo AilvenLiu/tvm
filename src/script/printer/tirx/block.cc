@@ -321,10 +321,10 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     if (auto scope = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
       return ScopeDoc(NullOpt,
                       TIR(d, block->exec_scope.value()->name)
-                          ->Call({d->AsDoc<ExprDoc>(scope.value()->def_ids,
-                                                    block_p->Attr("exec_scope")->Attr("def_ids")),
-                                  d->AsDoc<ExprDoc>(scope.value()->ranges,
-                                                    block_p->Attr("exec_scope")->Attr("ranges"))}),
+                          ->Call({d->AsDoc<ExprDoc>(scope.value()->slices,
+                                                    block_p->Attr("exec_scope")->Attr("slices")),
+                                  LiteralDoc::Str(scope.value()->parent,
+                                                  block_p->Attr("exec_scope")->Attr("parent"))}),
                       (*frame)->stmts);
     }
     return ScopeDoc(std::nullopt, TIR(d, block->exec_scope.value()->name)->Call({}),

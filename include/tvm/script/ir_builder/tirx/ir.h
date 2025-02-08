@@ -156,7 +156,7 @@ BlockFrame Warp();
 
 BlockFrame Thread();
 
-BlockFrame ScopeSlice(ffi::Array<tvm::tirx::Var> vars, ffi::Array<Range> ranges, ffi::String cur);
+BlockFrame ScopeSlice(ffi::Array<Range> slices, String parent, ffi::String cur);
 
 tvm::tirx::Var KernelId(PrimExpr extent);
 
@@ -589,7 +589,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
