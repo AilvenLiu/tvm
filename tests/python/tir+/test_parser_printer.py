@@ -69,10 +69,10 @@ def test_roundtrip_exec_scope():
                             T.evaluate(0)
                     with T.thread():
                         T.evaluate(0)
-                    with T.warp([T.Range(0, 2)], parent="cta"):
+                    with T.warp()[0:2]:
                         with T.thread():
                             T.evaluate(0)
-                    with T.thread([T.Range(0, 16)], parent="warp"):
+                    with T.thread()[0:2]:
                         T.evaluate(0)
     # fmt: on
 
@@ -362,14 +362,14 @@ def test_roundtrip_pipeline_specialize_sync_depth():
 
                 pipe = Tp.alloc_copy_pipeline(thread_scope="cta", depth=DEPTH, separate_pc=True)
                 
-                with T.thread([T.Range(0, 64)], parent="cta"):
+                with T.thread()[0:64]:
                     for i in range(32):
                         pipe.producer_acquire()
                         j = T.meta_var(i % DEPTH)
                         Tp.copy(A_smem[j, 0:32, 0:128], A[i*32, 0:128])
                         Tp.copy(B_smem[j, 0:32, 0:128], B[i*32, 0:128])
                         pipe.producer_commit()
-                with T.thread([T.Range(64, 128)], parent="cta"):
+                with T.thread()[64:128]:
                     for i in range(32):
                         pipe.consumer_wait()
                         j = T.meta_var(i % DEPTH)

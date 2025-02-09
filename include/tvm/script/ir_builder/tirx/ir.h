@@ -140,23 +140,27 @@ Buffer BufferGet(tvm::tirx::Buffer buffer);
  * \param name The name of the block.
  * \param no_realize The flag whether to construct SBlockRealize or SBlock.
  * \param exec_scope The name of the execution scope.
+ * \param exec_scope_slice_parent The name of the execution scope slice parent.
  * \return The SBlockFrame.
  */
-SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_scope = "");
+SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_scope = "",
+                  ffi::String exec_scope_slice_parent = "");
 
 void OpCall(tvm::Op op, Array<ObjectRef> args);
 
+BlockFrame BlockFrameSlice(BlockFrame block, Array<Range> slices);
+
 BlockFrame World();
 
-BlockFrame Kernel();
+BlockFrame Kernel(ffi::String exec_scope_slice_parent = "");
 
-BlockFrame CTA();
+BlockFrame CTA(ffi::String exec_scope_slice_parent = "");
 
-BlockFrame Warp();
+BlockFrame Warp(ffi::String exec_scope_slice_parent = "");
 
-BlockFrame Thread();
+BlockFrame Thread(ffi::String exec_scope_slice_parent = "");
 
-BlockFrame ScopeSlice(ffi::Array<Range> slices, String parent, ffi::String cur);
+BlockFrame ScopeSlice(ffi::Array<Range> slices, ffi::String parent, ffi::String cur);
 
 tvm::tirx::Var KernelId(PrimExpr extent);
 

@@ -19,8 +19,10 @@
 from tvm_ffi import register_object as _register_object
 
 from tvm.tirx import Var
+from tvm.ir.expr import Range
 
 from ..base import IRBuilderFrame
+from . import _ffi_api
 
 
 @_register_object("script.ir_builder.tirx.TIRFrame")
@@ -33,6 +35,30 @@ class PrimFuncFrame(TIRFrame): ...
 
 @_register_object("script.ir_builder.tirx.SSBlockFrame")
 class SBlockFrame(TIRFrame): ...
+
+    def __getitem__(self, slices) -> "BlockFrame":
+        """Slice operator for block frame.
+        
+        Parameters
+        ----------
+        slices : Union[Range, Tuple[Range, ...]]
+            The slices to apply to the block frame.
+
+        Returns
+        -------
+        BlockFrame
+            A new block frame with the slices applied.
+        """
+        if not isinstance(slices, tuple):
+            slices = (slices,)
+        slices_t = []
+        for s in slices:
+            if isinstance(s, slice):
+                assert s.step is None, "Slice step is not supported"
+                slices_t.append(Range(s.start, s.stop))
+            else:
+                assert False, f"Slice must be a slice, got {type(s)}"
+        return _ffi_api.BlockFrameSlice(self, slices_t) # pylint: disable=no-member
 
 
 @_register_object("script.ir_builder.tirx.SBlockInitFrame")

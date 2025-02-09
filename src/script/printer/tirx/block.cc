@@ -318,14 +318,20 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   }
   // tir+
   if (block->exec_scope.defined()) {
-    if (auto scope = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
-      return ScopeDoc(NullOpt,
-                      TIR(d, block->exec_scope.value()->name)
-                          ->Call({d->AsDoc<ExprDoc>(scope.value()->slices,
-                                                    block_p->Attr("exec_scope")->Attr("slices")),
-                                  LiteralDoc::Str(scope.value()->parent,
-                                                  block_p->Attr("exec_scope")->Attr("parent"))}),
-                      (*frame)->stmts);
+    if (auto scope_slice_opt = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
+      auto scope_slice = scope_slice_opt.value();
+      ExprDoc call = TIR(d, block->exec_scope.value()->name)
+                         ->Call({LiteralDoc::Str(scope_slice->parent,
+                                                 block_p->Attr("exec_scope")->Attr("parent"))});
+      Array<Doc> slices;
+      for (size_t i = 0; i < scope_slice->slices.size(); ++i) {
+        auto path = block_p->Attr("exec_scope")->Attr("slices")->ArrayIndex(i);
+        auto start = d->AsDoc<ExprDoc>(scope_slice->slices[i]->min, path->Attr("min"));
+        auto stop = d->AsDoc<ExprDoc>(scope_slice->slices[i]->extent + scope_slice->slices[i]->min,
+                                      path->Attr("extent"));
+        slices.push_back(SliceDoc(start, stop, NullOpt));
+      }
+      return ScopeDoc(NullOpt, call.operator[](slices), (*frame)->stmts);
     }
     return ScopeDoc(std::nullopt, TIR(d, block->exec_scope.value()->name)->Call({}),
                     (*frame)->stmts);

@@ -110,7 +110,7 @@ def test_scope_slice():
     def test1() -> None:
         with T.kernel():
             with T.cta():
-                with T.warpgroup([T.Range(0, 1)], parent="cta"):
+                with T.warpgroup()[0:1]:
                     with T.thread():
                         pass
 
@@ -118,17 +118,17 @@ def test_scope_slice():
     def test2() -> None:
         with T.kernel():
             with T.cta():
-                with T.warpgroup([T.Range(0, 3)], parent="cta"):
-                    with T.warpgroup([T.Range(1, 2)], parent="cta"):
+                with T.warpgroup()[0:3]:
+                    with T.warpgroup()[1:2]:
                         pass
-                    with T.warpgroup([T.Range(2, 3)], parent="cta"):
+                    with T.warpgroup()[2:3]:
                         pass
     @T.prim_func(tirp=True, check_well_formed=False)
     def test3() -> None:
         with T.kernel():
             with T.cta():
-                with T.warpgroup([T.Range(0, 3)], parent="cta"):
-                    with T.warpgroup([T.Range(1, 5)], parent="cta"):
+                with T.warpgroup()[0:3]:
+                    with T.warpgroup()[1:5]:
                         pass
     # fmt: on
     verify(test1)

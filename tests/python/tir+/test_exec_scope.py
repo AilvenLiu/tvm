@@ -31,7 +31,7 @@ def test_exec_scope_create():
 
     thread = ExecScope.create("thread")
     warp = ExecScope.create("warp")
-    wg = ExecScope.create("warp_group")
+    wg = ExecScope.create("warpgroup")
     cta = ExecScope.create("cta")
     cluster = ExecScope.create("cluster")
     kernel = ExecScope.create("kernel")

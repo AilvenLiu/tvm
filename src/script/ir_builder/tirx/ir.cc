@@ -226,7 +226,8 @@ Buffer BufferGet(tvm::tirx::Buffer buffer) {
   return dst_buffer;
 }
 
-SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope) {
+SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
+                  ffi::String exec_scope_slice_parent) {
   ObjectPtr<SBlockFrameNode> n = ffi::make_object<SBlockFrameNode>();
   n->name = name;
   n->iter_vars.clear();
@@ -244,6 +245,7 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope) {
   } else {
     n->exec_scope = tvm::tirx::ExecScope::Create(exec_scope);
   }
+  n->exec_scope_slice_parent = exec_scope_slice_parent;
   n->buffer_views.clear();
   n->buffer_gets.clear();
   n->barriers.clear();
@@ -253,15 +255,36 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope) {
 
 void OpCall(tvm::Op op, Array<ObjectRef> args) { AddToParent(tvm::tirx::tirp::OpCall(op, args)); }
 
-BlockFrame World() { return Block("", false, "world"); }
+BlockFrame BlockFrameSlice(BlockFrame block, Array<Range> slices) {
+  ICHECK(block->exec_scope.defined()) << "InternalError: Block frame must have an execution scope";
+  ICHECK(block->exec_scope_slice_parent.defined())
+      << "InternalError: Block frame must have an execution scope slice parent";
+  block->exec_scope = tvm::tir::ExecScopeSlice(slices, block->exec_scope_slice_parent,
+                                               block->exec_scope.value()->name);
+  return block;
+}
 
-BlockFrame Kernel() { return Block("", false, "kernel"); }
+BlockFrame World() { return Block("", false, "world", ""); }
 
-BlockFrame CTA() { return Block("", false, "cta"); }
+BlockFrame Kernel(String exec_scope_slice_parent) {
+  return Block("", false, "kernel", exec_scope_slice_parent);
+}
 
-BlockFrame Warp() { return Block("", false, "warp"); }
+BlockFrame WarpGroup(String exec_scope_slice_parent) {
+  return Block("", false, "warpgroup", exec_scope_slice_parent);
+}
 
-BlockFrame Thread() { return Block("", false, "thread"); }
+BlockFrame CTA(String exec_scope_slice_parent) {
+  return Block("", false, "cta", exec_scope_slice_parent);
+}
+
+BlockFrame Warp(String exec_scope_slice_parent) {
+  return Block("", false, "warp", exec_scope_slice_parent);
+}
+
+BlockFrame Thread(String exec_scope_slice_parent) {
+  return Block("", false, "thread", exec_scope_slice_parent);
+}
 
 BlockFrame ScopeSlice(ffi::Array<Range> slices, ffi::String parent, ffi::String cur) {
   ObjectPtr<BlockFrameNode> n = ffi::make_object<BlockFrameNode>();
@@ -929,11 +952,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.MatchBuffer", MatchBuffer)
       .def("script.ir_builder.tir.BufferView", BufferView)
       .def("script.ir_builder.tir.BufferGet", BufferGet)
+      .def("script.ir_builder.tir.BlockFrameSlice", BlockFrameSlice)
       .def("script.ir_builder.tir.Block", Block)
       .def("script.ir_builder.tir.OpCall", OpCall)
       .def("script.ir_builder.tir.World", World)
       .def("script.ir_builder.tir.Kernel", Kernel)
       .def("script.ir_builder.tir.CTA", CTA)
+      .def("script.ir_builder.tir.WarpGroup", WarpGroup)
       .def("script.ir_builder.tir.Warp", Warp)
       .def("script.ir_builder.tir.Thread", Thread)
       .def("script.ir_builder.tir.ScopeSlice", ScopeSlice)
