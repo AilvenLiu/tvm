@@ -332,7 +332,7 @@ class ExecScopeSlice : public ExecScope {
 /*! \brief ExecScope order from highest to lowest */
 static const std::unordered_map<String, int> ScopeOrder = {
     {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"cta", 3},
-    {"warp_group", 4}, {"warp", 5},   {"thread", 6}};
+    {"warpgroup", 4}, {"warp", 5},   {"thread", 6}};
 
 /*! \brief Map from storage scope to its belonging logical scope */
 static const std::unordered_map<String, String> StorageToLogical = {

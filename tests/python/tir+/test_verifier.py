@@ -104,6 +104,39 @@ def test_nested_scope():
         verify(test3)
 
 
+def test_scope_slice():
+    # fmt: off
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test1() -> None:
+        with T.kernel():
+            with T.cta():
+                with T.warpgroup([T.Range(0, 1)], parent="cta"):
+                    with T.thread():
+                        pass
+
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test2() -> None:
+        with T.kernel():
+            with T.cta():
+                with T.warpgroup([T.Range(0, 3)], parent="cta"):
+                    with T.warpgroup([T.Range(1, 2)], parent="cta"):
+                        pass
+                    with T.warpgroup([T.Range(2, 3)], parent="cta"):
+                        pass
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test3() -> None:
+        with T.kernel():
+            with T.cta():
+                with T.warpgroup([T.Range(0, 3)], parent="cta"):
+                    with T.warpgroup([T.Range(1, 5)], parent="cta"):
+                        pass
+    # fmt: on
+    verify(test1)
+    verify(test2)
+    with pytest.raises(Exception, match="is inconsistent with"):
+        verify(test3)
+
+
 def test_invalid_stmt():
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
@@ -126,7 +159,6 @@ def test_invalid_stmt():
                             pass
                     with T.thread():
                         pass
-
 
     # fmt: on
 
@@ -282,6 +314,7 @@ def test_host():
 if __name__ == "__main__":
     test_root_scope()
     test_nested_scope()
+    test_scope_slice()
     test_invalid_stmt()
     test_inconsistent_scope_id()
     test_layout()

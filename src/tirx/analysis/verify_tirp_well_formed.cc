@@ -50,15 +50,19 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
+    // C0: exec_scope is defined
     Verify(op->exec_scope != nullptr) << "TIRpError: Block at " << path << " has no exec_scope";
     auto scope = op->exec_scope.value();
+    // C1: exec_scope is valid
     Verify(ExecScope::Valid(scope->name))
         << "TIRpError: Block at " << path << " has unknown exec_scope " << scope->name;
+    // C2: exec_scope is valid for root
     if (scope_stack_.empty()) {
       Verify(scope.Is("world") || scope.Is("kernel"))
           << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
           << " as root";
     } else {
+      // C3: exec_scope is valid for nested scope
       if (scope_stack_.back().Higher(scope)) {
         cur_roof_ = scope_stack_.back();
       } else if (scope_stack_.back().Is(scope->name)) {
@@ -70,9 +74,48 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
             << " under " << cur_roof_.value()->name;
       }
     }
+    // C4: exec_scope slice is consistent
+    arith::Analyzer ana;
+    auto covered = [&](const Array<Range>& l, const Array<Range>& r) -> bool {
+      // r's range is covered by l's range
+      if (l.size() != r.size()) {
+        return false;
+      }
+      for (size_t i = 0; i < l.size(); ++i) {
+        if (!ana.CanProve(l[i]->min <= r[i]->min &&
+                          l[i]->min + l[i]->extent >= r[i]->min + r[i]->extent)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    if (const auto* slice = scope.as<ExecScopeSliceNode>()) {
+      auto it = scope_slices_.find(slice->name);
+      if (it == scope_slices_.end()) {
+        scope_slices_[slice->name] = {slice->slices};
+      } else {
+        bool consistent = true;
+        for (const auto& s : it->second) {
+          if (!covered(s, slice->slices) && !covered(slice->slices, s)) {
+            consistent = false;
+            break;
+          }
+        }
+        Verify(consistent) << "TIRpError: ExecScopeSlice at " << path << " is inconsistent with "
+                            << it->first;
+        it->second.push_back(slice->slices);
+      }
+    }
     scope_stack_.push_back(scope);
     Verifier::VisitStmt_(op, path);
     scope_stack_.pop_back();
+    // C5: cleanup scope slice when exiting scope
+    if (const auto* slice = scope.as<ExecScopeSliceNode>()) {
+      auto it = scope_slices_.find(slice->name);
+      ICHECK(it != scope_slices_.end() && !it->second.empty())
+          << "TIRpError: ExecScopeSlice at " << path << " is not found in scope_slices_";
+      it->second.pop_back();
+    }
   }
 
   void VisitStmt_(const tirp::OpCallNode* op, ObjectPath path) override {
@@ -83,6 +126,8 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
 
   Optional<ExecScope> cur_roof_ = NullOpt;
   std::vector<ExecScope> scope_stack_;
+  std::unordered_map<std::string, std::vector<Array<Range>>> scope_slices_;
+  std::unordered_map<std::string, std::string> parent_scope_;
 };
 
 class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {

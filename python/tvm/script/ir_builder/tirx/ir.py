@@ -488,6 +488,22 @@ def cta(
     return _ffi_api.CTA()  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
+def warpgroup(
+    slices: Optional[List[ir.Range]] = None,
+    parent: str = "cta",
+) -> frame.BlockFrame:
+    """The warpgroup declaration statement.
+
+    Returns
+    -------
+    res : frame.BlockFrame
+        The BlockFrame.
+    """
+    if slices:
+        return _ffi_api.ScopeSlice(slices, parent, "warpgroup")
+    return _ffi_api.WarpGroup()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
 def warp(
     slices: Optional[List[ir.Range]] = None,
     parent: str = "cta",
@@ -501,7 +517,7 @@ def warp(
     """
     if slices:
         return _ffi_api.ScopeSlice(slices, parent, "warp")
-    return _ffi_api.Warp()  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Warp()  # type: ignore[attr-defined]
 
 
 def thread(
@@ -2628,6 +2644,7 @@ __all__ += [
     "kernel",
     "cta",
     "warp",
+    "warpgroup",
     "thread",
     "kernel_id",
     "cta_id",
