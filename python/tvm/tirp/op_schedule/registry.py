@@ -18,7 +18,7 @@ from typing import Dict
 
 from tvm._ffi import register_object, register_func
 from tvm.ir import Op, Range
-from tvm.tir import _ffi_api, Var
+from tvm.tir import _ffi_api, PrimExpr, Var
 from tvm.runtime import Object, Scriptable
 from tvm.target import Target
 from tvm.tir.expr import PrimExpr
@@ -51,17 +51,21 @@ class ScheduleContext(Object, Scriptable):
 
     launch_params : Dict[str, PrimExpr]
         The launch parameters of the schedule context.
+
+    var_range_map : Dict[Var, Range]
+        A map from loop variables to their ranges.
     """
 
     target: Target
     exec_scope: ExecScope
     launch_params: Dict[str, PrimExpr]
+    var_range_map: Dict[Var, Range]
 
     def __init__(
-        self, target: Target, exec_scope: ExecScope, launch_params: Dict[str, PrimExpr]
+        self, target: Target, exec_scope: ExecScope, launch_params: Dict[str, PrimExpr], var_range_map: Dict[Var, Range]
     ) -> None:
         self.__init_handle_by_constructor__(
-            _ffi_api.ScheduleContext, target, exec_scope, launch_params  # pylint: disable=no-member
+            _ffi_api.ScheduleContext, target, exec_scope, launch_params, var_range_map  # pylint: disable=no-member
         )
 
     def is_cuda(self) -> bool:
@@ -106,7 +110,7 @@ def register_schedule(op_name: str):
 
 
 @register_func("tirp.f_op_scheduler")
-def f_op_scheduler(op: Op, args, sctx: ScheduleContext, var_range_map: Dict[Var, Range]):
+def f_op_scheduler(op: Op, args, sctx: ScheduleContext):
     """Find and return a schedule for the operator.
 
     Parameters
@@ -125,7 +129,7 @@ def f_op_scheduler(op: Op, args, sctx: ScheduleContext, var_range_map: Dict[Var,
     """
     assert op in _OP_REGISTRY, f"No implementation found for operator {op}"
     for impl in _OP_REGISTRY[op]:
-        res = impl(*args, sctx, var_range_map)
+        res = impl(*args, sctx=sctx)
         if res is not None:
             return res
     assert False, (

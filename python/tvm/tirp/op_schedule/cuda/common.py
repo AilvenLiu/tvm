@@ -18,7 +18,7 @@
 """Common utilities for operator scheduling."""
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 import functools
 import operator
 
@@ -27,6 +27,7 @@ from tvm.tirp.op_schedule import ScheduleContext
 from tvm.runtime import DataType
 from tvm.arith.analyzer import Analyzer
 from tvm.tir import BufferRegion, PrimFunc, Buffer
+from tvm.tir.expr import FloatImm
 
 
 class InstType(Enum):
@@ -34,6 +35,15 @@ class InstType(Enum):
 
     NORMAL = 0
     CP_ASYNC = 1
+
+class MapOpType(Enum):
+    """Enumeration of common unary and binary operator types."""
+    ADD = 0
+    SUB = 1
+    MUL = 2
+    FDIV = 3
+    ZERO = 4
+    SQRT = 5
 
 
 def copy_cuda_g2s_s2g_2d_cta_vec_load_impl(
@@ -179,23 +189,38 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     dst_extent = [r.extent for r in dst_region]
     dtype = src.dtype
 
-    # Check dst is first m dimensions of src
+    # Check dst is first m dimensions of src (and the rest dimensions, if exist, are all 1s)
     if not all(
         [
-            src.scope() == "shared",
-            dst.scope() == "shared",
-            len(src_region) > len(dst_region),
+            src.scope().startswith("shared"),
+            dst.scope().startswith("shared"),
+            len(src_region) >= len(dst_region),
         ]
     ):
         return None
 
     analyzer = Analyzer()
-    spatial_dims = len(dst_region)
+    spatial_dims = -1
 
-    if not all(
-        analyzer.can_prove_equal(s, d) for s, d in zip(src_extent[:spatial_dims], dst_extent)
-    ):
-        return None
+    if len(src_extent) == len(dst_extent):
+        for i in range(len(dst_extent)):
+            if src_extent[i] != dst_extent[i]:
+                if dst_extent[i] != 1:
+                    return None
+                if not functools.reduce(operator.mul, dst_extent[i:], 1) == 1:
+                    return None
+                else:
+                    spatial_dims = i
+                    break
+        if spatial_dims == -1:
+            return None
+
+    else:
+        spatial_dims = len(dst_extent)
+        if not all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent[:spatial_dims], dst_extent)):
+            return None
+
+    assert spatial_dims > 0 and spatial_dims < len(src_extent)
 
     spatial_len = functools.reduce(operator.mul, src_extent[:spatial_dims], 1)
     reduction_len = functools.reduce(operator.mul, src_extent[spatial_dims:], 1)
@@ -244,3 +269,248 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     # fmt: on
 
     return impl
+
+
+def unary_map_cuda_shared_nd_sync_cta_impl(
+    _dst: BufferRegion,
+    _src: BufferRegion,
+    unary_op: MapOpType,
+    sctx: ScheduleContext,
+) -> Optional[PrimFunc]:
+    """Schedule unary map operation on CUDA in shared memory.
+
+    Dst and src regions must be the same shape.
+    """
+
+    # Basic validation checks
+    if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
+        return None
+    if not (isinstance(unary_op, MapOpType) and unary_op in [MapOpType.ZERO, MapOpType.SQRT]):
+        return None
+
+    dst, src = _dst.buffer, _src.buffer
+    dst_region, src_region = _dst.region, _src.region
+    dtype = dst.dtype
+
+    dst_st = [r.min for r in dst_region]
+    src_st = [r.min for r in src_region]
+    dst_extent = [r.extent for r in dst_region]
+    src_extent = [r.extent for r in src_region]
+
+    if not all(
+        [
+            dst.layout and src.layout,
+            dst.layout.is_trivial() and src.layout.is_trivial(),
+            dst.scope().startswith("shared"),
+            src.scope().startswith("shared"),
+            src.dtype == dtype,
+        ]
+    ):
+        return None
+
+    # Shape checks
+    analyzer = Analyzer()
+    NUM_ELEMENTS = functools.reduce(operator.mul, src_extent, 1)
+    if not all(
+        [
+            len(src_extent) == len(dst_extent),
+            all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent, dst_extent)),
+        ]
+    ):
+        return None
+
+    # hardware parameters
+    thread_cnt = sctx.launch_params["threadIdx.x"]
+    assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
+
+    def get_lambda_func(op):
+        if op == MapOpType.ZERO:
+            return lambda x: 0.0
+        if op == MapOpType.SQRT:
+            return lambda x: T.sqrt(x)
+        raise NotImplementedError(f"Unsupported unary op: {op}")
+
+    f = get_lambda_func(unary_op)
+
+    def get_indices(nth, st, extent):
+        # example: st: [0, 1], extent: [32, 16], nth: 10
+        relative_idx = []
+        for e in reversed(extent):
+            relative_idx.append(nth % e)
+            nth //= e
+        return [r + s for r, s in zip(reversed(relative_idx), st)]
+
+    def get_impl():
+        # fmt: off
+        @T.prim_func(tirp=True)
+        def impl():
+            for tid_x in T.thread_binding(thread_cnt, "threadIdx.x"):
+                for itr in T.serial(T.ceildiv(NUM_ELEMENTS, thread_cnt)):
+                    idx_fused = T.meta_var(itr * thread_cnt + tid_x)
+                    if idx_fused < NUM_ELEMENTS:
+                        idx_dst = T.meta_var(get_indices(idx_fused, dst_st, dst_extent))
+                        idx_src = T.meta_var(get_indices(idx_fused, src_st, src_extent))
+                        dst[*idx_dst] = T.Cast(dtype, f(src[*idx_src]))
+            T.tvm_storage_sync("shared")
+        # fmt: on
+        return impl
+
+    return get_impl()
+
+
+def binary_map_cuda_shared_nd_sync_cta_impl(
+    _dst: BufferRegion,
+    _src1: Union[BufferRegion, FloatImm],
+    _src2: Union[BufferRegion, FloatImm],
+    binary_op: MapOpType,
+    sctx: ScheduleContext,
+) -> Optional[PrimFunc]:
+    """Schedule binary map operation on CUDA in shared memory.
+
+    For commutative ops like ADD and MUL, support at most one of _src1 and _src2 to be FloatImm,
+      and if both are buffer regions support numpy-style broadcasting.
+    For non-commutative ops like SUB and FDIV, only support _src2 to be FloatImm, and if both
+      are buffer regions only support broadcasting _src2 to _src1.
+    """
+
+    # Basic validation checks
+    if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
+        return None
+    if not (isinstance(binary_op, MapOpType) and binary_op in [MapOpType.ADD, MapOpType.SUB, MapOpType.MUL, MapOpType.FDIV]):
+        return None
+
+    CONST = None
+
+    # Type checks
+    if isinstance(_src1, FloatImm) and isinstance(_src2, FloatImm):
+        return None
+    if isinstance(_src1, FloatImm):
+        if binary_op not in [MapOpType.ADD, MapOpType.MUL]:
+            return None
+        _src1, _src2 = _src2, _src1
+    if isinstance(_src2, FloatImm):
+        CONST = _src2
+
+    # Basic region checks
+    dst, src1, src2 = _dst.buffer, _src1.buffer, None if CONST is not None else _src2.buffer
+    dst_region, src1_region, src2_region = _dst.region, _src1.region, None if CONST is not None else _src2.region
+    dtype = dst.dtype
+
+    dst_st = [r.min for r in dst_region]
+    src1_st = [r.min for r in src1_region]
+    src2_st = [r.min for r in src2_region] if src2_region else None
+    dst_extent = [r.extent for r in dst_region]
+    src1_extent = [r.extent for r in src1_region]
+    src2_extent = [r.extent for r in src2_region] if src2_region else None
+
+    if not all(
+        [
+            dst.layout and src1.layout and (src2.layout if src2 else True),
+            dst.layout.is_trivial() and src1.layout.is_trivial() and (src2.layout.is_trivial() if src2 else True),
+            dst.scope().startswith("shared"),
+            src1.scope().startswith("shared"),
+            (src2.scope().startswith("shared") if src2 else True),
+            src1.dtype == dtype and (src2.dtype == dtype if src2 else CONST.dtype == dtype),
+        ]
+    ):
+        return None
+
+    # Switch broadcasting
+    analyzer = Analyzer()
+    NUM_ELEMENTS = functools.reduce(operator.mul, dst_extent, 1)
+
+    if CONST is None:
+        src2_num = functools.reduce(operator.mul, src2_extent, 1)
+        if NUM_ELEMENTS < src2_num:
+            if binary_op not in [MapOpType.ADD, MapOpType.MUL]:
+                return None
+            _src1, _src2, src1, src2, src1_region, src2_region, src1_st, src2_st, src1_extent, src2_extent = (
+                _src2, _src1, src2, src1, src2_region, src1_region, src2_st, src1_st, src2_extent, src1_extent
+            )
+
+    # Check dst and src1 have the same shape
+    dst_extent_ = [e for e in dst_extent if e != 1]
+    src1_extent_ = [e for e in src1_extent if e != 1]
+    if not all(
+        [
+            len(src1_extent_) == len(dst_extent_),
+            all(analyzer.can_prove_equal(s, d) for s, d in zip(src1_extent_, dst_extent_)),
+        ]
+    ):
+        return None
+
+    # Check src2 is broadcastable to src1
+    if CONST is None:
+        for i in range(1, len(src2_extent) + 1):
+            if src2_extent[-i] != 1 and src2_extent[-i] != src1_extent[-i]:
+                return None
+
+    # hardware parameters
+    thread_cnt = sctx.launch_params["threadIdx.x"]
+    assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
+
+    def get_lambda_func(op):
+        if op == MapOpType.ADD:
+            return lambda a, b: a + b
+        if op == MapOpType.SUB:
+            return lambda a, b: a - b
+        if op == MapOpType.MUL:
+            return lambda a, b: a * b
+        if op == MapOpType.FDIV:
+            return lambda a, b: a / b
+        raise NotImplementedError(f"Unsupported binary op: {op}")
+
+    f = get_lambda_func(binary_op)
+
+    def get_indices(nth, st, extent):
+        # example: st: [0, 1], extent: [32, 16], nth: 10
+        relative_idx = []
+        for e in reversed(extent):
+            relative_idx.append(nth % e)
+            nth //= e
+        return [r + s for r, s in zip(reversed(relative_idx), st)]
+
+    def get_const_impl():
+        # fmt: off
+        @T.prim_func(tirp=True)
+        def impl():
+            for tid_x in T.thread_binding(thread_cnt, "threadIdx.x"):
+                for itr in T.serial(T.ceildiv(NUM_ELEMENTS, thread_cnt)):
+                    idx_fused = T.meta_var(itr * thread_cnt + tid_x)
+                    if idx_fused < NUM_ELEMENTS:
+                        idx_dst = T.meta_var(get_indices(idx_fused, dst_st, dst_extent))
+                        idx_src1 = T.meta_var(get_indices(idx_fused, src1_st, src1_extent))
+                        dst[*idx_dst] = f(src1[*idx_src1], CONST)
+            T.tvm_storage_sync("shared")
+        # fmt: on
+        return impl
+
+    if CONST is not None:
+        return get_const_impl()
+
+    def get_indices_zero_out(indices):
+        # comp src2 indices based on src1 indices
+        src2_indices = []
+        len_diff = len(src1_extent) - len(src2_extent)
+        for i in range(len(src2_extent)):
+            offset = indices[i + len_diff] - src1_st[i + len_diff]
+            src2_indices.append(offset + src2_st[i] if src2_extent[i] != 1 else src2_st[i])
+        return src2_indices
+
+    def get_broadcast_impl():
+        # fmt: off
+        @T.prim_func(tirp=True)
+        def impl():
+            for tid_x in T.thread_binding(thread_cnt, "threadIdx.x"):
+                for itr in T.serial(T.ceildiv(NUM_ELEMENTS, thread_cnt)):
+                    idx_fused = T.meta_var(itr * thread_cnt + tid_x)
+                    if idx_fused < NUM_ELEMENTS:
+                        idx_dst = T.meta_var(get_indices(idx_fused, dst_st, dst_extent))
+                        idx_src1 = T.meta_var(get_indices(idx_fused, src1_st, src1_extent))
+                        idx_src2 = T.meta_var(get_indices_zero_out(idx_src1))
+                        dst[*idx_dst] = f(src1[*idx_src1], src2[*idx_src2])
+            T.tvm_storage_sync("shared")
+        # fmt: on
+        return impl
+
+    return get_broadcast_impl()

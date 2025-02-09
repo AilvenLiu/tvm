@@ -49,7 +49,6 @@ def reduction_cuda_shared_nd_sync_cta(
     accum: bool,
     reduce_op: str,
     sctx: ScheduleContext,
-    _,
 ) -> Optional[PrimFunc]:
     """Schedule warp-level tree-reduction operation in shared memory on CUDA.
 

@@ -16,5 +16,6 @@
 # under the License.
 
 from .copy import *
+from .maps import *
 from .reduction import *
 from .async_structs import *

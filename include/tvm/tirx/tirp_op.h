@@ -51,11 +51,14 @@ class ScheduleContextNode : public Object {
   ExecScope exec_scope;
   /*! \brief The kernel launch parameters. */
   Map<String, PrimExpr> launch_params;
+  /*! \brief A map from loop variables to their ranges. */
+  Map<Var, Range> var_range_map;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("target", &target);
     v->Visit("exec_scope", &exec_scope);
     v->Visit("launch_params", &launch_params);
+    v->Visit("var_range_map", &var_range_map);
   }
 
   static constexpr const char* _type_key = "tirx.ScheduleContext";
@@ -74,8 +77,9 @@ class ScheduleContext : public ObjectRef {
    * \param target The target of the kernel.
    * \param exec_scope The exec scope of the operator.
    * \param launch_params The kernel launch parameters.
+   * \param var_range_map: A map from loop variables to their ranges.
    */
-  TVM_DLL ScheduleContext(Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params);
+  TVM_DLL ScheduleContext(Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ScheduleContext, ObjectRef, ScheduleContextNode);
 };

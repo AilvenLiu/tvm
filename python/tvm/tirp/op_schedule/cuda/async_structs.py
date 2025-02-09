@@ -28,7 +28,7 @@ from .common import InstType, copy_cuda_g2s_s2g_2d_cta_vec_load_impl
 
 
 @register_schedule("pipeline_producer_commit")
-def pipeline_producer_commit(pipeline: Pipeline, sctx: ScheduleContext, _) -> Optional[PrimFunc]:
+def pipeline_producer_commit(pipeline: Pipeline, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule pipeline producer commit."""
     if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
         return None
@@ -46,7 +46,7 @@ def pipeline_producer_commit(pipeline: Pipeline, sctx: ScheduleContext, _) -> Op
 
 @register_schedule("pipeline_consumer_wait")
 def pipeline_consumer_wait(
-    pipeline: Pipeline, num_stages: int, sctx: ScheduleContext, _
+    pipeline: Pipeline, num_stages: int, sctx: ScheduleContext
 ) -> Optional[PrimFunc]:
     """Schedule pipeline consumer wait."""
     if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
@@ -63,7 +63,7 @@ def pipeline_consumer_wait(
 
 @register_schedule("pipeline_copy")
 def pipeline_copy(
-    pipeline: CopyPipeline, dst: BufferRegion, src: BufferRegion, sctx: ScheduleContext, _
+    pipeline: CopyPipeline, dst: BufferRegion, src: BufferRegion, sctx: ScheduleContext
 ) -> Optional[PrimFunc]:
     """Schedule pipeline copy."""
     if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):

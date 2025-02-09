@@ -20,6 +20,7 @@ from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
 from tvm.tir.async_structs import CopyPipeline
 from tvm.tir.exec_scope import ExecScope
+from tvm.tir.expr import FloatImm
 
 from . import _ffi_api
 
@@ -34,6 +35,136 @@ def _to_region(buffer: Union[BufferRegion, Buffer]):
         return buffer.__getitem__([slice(None, None, None) for _ in range(len(buffer.shape))])
     assert isinstance(buffer, BufferRegion)
     return buffer
+
+
+def zero(
+    dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]
+):
+    """Zero out all elements in src and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for zero result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+    """
+    dst = _to_region(dst)
+    src = _to_region(src)
+    return _ffi_api.OpCall(_get_tirp_op("zero"), [dst, src])
+
+
+def sqrt(
+    dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]
+):
+    """Sqrt all elements in src and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for sqrt result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+    """
+    dst = _to_region(dst)
+    src = _to_region(src)
+    return _ffi_api.OpCall(_get_tirp_op("sqrt"), [dst, src])
+
+
+def add(
+    dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, FloatImm], src2: Union[BufferRegion, Buffer, FloatImm]
+):
+    """Add data from src1 and src2, store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for add result.
+
+    src1 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 1, or float.
+
+    src2 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 2, or float.
+    """
+    dst = _to_region(dst)
+    if isinstance(src1, Buffer):
+        src1 = _to_region(src1)
+    if isinstance(src2, Buffer):
+        src2 = _to_region(src2)
+    return _ffi_api.OpCall(_get_tirp_op("add"), [dst, src1, src2])
+
+
+def sub(
+    dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer], src2: Union[BufferRegion, Buffer, FloatImm]
+):
+    """Sub data from src2 to src1, store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for sub result.
+
+    src1 : Union[BufferRegion, Buffer]
+        The source buffer region 1.
+
+    src2 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 2, or float.
+    """
+    dst = _to_region(dst)
+    src1 = _to_region(src1)
+    if isinstance(src2, Buffer):
+        src2 = _to_region(src2)
+    return _ffi_api.OpCall(_get_tirp_op("sub"), [dst, src1, src2])
+
+
+def mul(
+    dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, FloatImm], src2: Union[BufferRegion, Buffer, FloatImm]
+):
+    """Multiply data from src1 and src2, store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for mul result.
+
+    src1 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 1, or float.
+
+    src2 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 2, or float.
+    """
+    dst = _to_region(dst)
+    if isinstance(src1, Buffer):
+        src1 = _to_region(src1)
+    if isinstance(src2, Buffer):
+        src2 = _to_region(src2)
+    return _ffi_api.OpCall(_get_tirp_op("mul"), [dst, src1, src2])
+
+
+def fdiv(
+    dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer], src2: Union[BufferRegion, Buffer, FloatImm]
+):
+    """(Float) Div data from src2 to src1, store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for div result.
+
+    src1 : Union[BufferRegion, Buffer]
+        The source buffer region 1.
+
+    src2 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 2, or float.
+    """
+    dst = _to_region(dst)
+    src1 = _to_region(src1)
+    if isinstance(src2, Buffer):
+        src2 = _to_region(src2)
+    return _ffi_api.OpCall(_get_tirp_op("fdiv"), [dst, src1, src2])
 
 
 def copy(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
@@ -162,6 +293,12 @@ def alloc_copy_pipeline(
 
 
 __all__ = [
+    "zero",
+    "sqrt",
+    "add",
+    "sub",
+    "mul",
+    "fdiv",
     "copy",
     "fill",
     "gemm",

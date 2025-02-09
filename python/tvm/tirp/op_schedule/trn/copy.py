@@ -17,13 +17,12 @@
 
 """Implementation of copy operator schedules."""
 
-from typing import Optional, Set, List, Dict
+from typing import Optional
 import operator
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
-from tvm.tir import BufferRegion, PrimFunc, PrimExpr, Var
-from tvm.ir import Range
+from tvm.tir import BufferRegion, PrimFunc
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
 from functools import reduce
@@ -255,7 +254,6 @@ def copy_trn(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
     sctx: ScheduleContext,
-    var_range_map: Dict[Var, Range],
 ) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
@@ -280,7 +278,7 @@ def copy_trn(
 
     # Extract regions and validate dimensions
     analyzer = Analyzer()
-    for v, r in var_range_map.items():
+    for v, r in sctx.var_range_map.items():
         analyzer.bind(v, r)
     src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
     src_extent = [r.extent for r in src_region]

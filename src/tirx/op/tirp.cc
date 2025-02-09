@@ -75,22 +75,70 @@ FloatImm ToFloatImm(const ObjectRef& obj) {
 TVM_REGISTER_NODE_TYPE(ScheduleContextNode);
 
 ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
-                                 Map<String, PrimExpr> launch_params) {
+                                 Map<String, PrimExpr> launch_params,
+                                 Map<Var, Range> var_range_map) {
   auto n = make_object<ScheduleContextNode>();
   n->target = std::move(target);
   n->exec_scope = std::move(exec_scope);
   n->launch_params = std::move(launch_params);
+  n->var_range_map = std::move(var_range_map);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
-    .set_body_typed([](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params) {
-      return ScheduleContext(target, exec_scope, launch_params);
+    .set_body_typed([](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map) {
+      return ScheduleContext(target, exec_scope, launch_params, var_range_map);
     });
 
 /********************* Schedule Ops **********************/
 #define TIRP_DEFINE_SCHEDULE_OP(OpName) \
   TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsScheduleOp", Bool(true))
+
+TIRP_DEFINE_SCHEDULE_OP(zero).set_num_inputs(2).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 2U) << "zero() expects 2 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of zero() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of zero() must be BufferRegion";
+    });
+
+TIRP_DEFINE_SCHEDULE_OP(sqrt).set_num_inputs(2).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 2U) << "sqrt() expects 2 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of sqrt() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of sqrt() must be BufferRegion";
+    });
+
+TIRP_DEFINE_SCHEDULE_OP(add).set_num_inputs(3).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 3U) << "add() expects 3 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of add() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>() || args[1].as<FloatImmNode>()) << "arg[1] of add() must be BufferRegion or FloatImm";
+      ICHECK(args[2].as<BufferRegionNode>() || args[2].as<FloatImmNode>()) << "arg[2] of add() must be BufferRegion or FloatImm";
+    });
+
+TIRP_DEFINE_SCHEDULE_OP(sub).set_num_inputs(3).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 3U) << "sub() expects 3 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of sub() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of sub() must be BufferRegion";
+      ICHECK(args[2].as<BufferRegionNode>() || args[2].as<FloatImmNode>()) << "arg[2] of sub() must be BufferRegion or FloatImm";
+    });
+
+TIRP_DEFINE_SCHEDULE_OP(mul).set_num_inputs(3).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 3U) << "mul() expects 3 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of mul() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>() || args[1].as<FloatImmNode>()) << "arg[1] of mul() must be BufferRegion or FloatImm";
+      ICHECK(args[2].as<BufferRegionNode>() || args[2].as<FloatImmNode>()) << "arg[2] of mul() must be BufferRegion or FloatImm";
+    });
+
+TIRP_DEFINE_SCHEDULE_OP(fdiv).set_num_inputs(3).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 3U) << "fdiv() expects 3 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of fdiv() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of fdiv() must be BufferRegion";
+      ICHECK(args[2].as<BufferRegionNode>() || args[2].as<FloatImmNode>()) << "arg[2] of fdiv() must be BufferRegion or FloatImm";
+    });
 
 TIRP_DEFINE_SCHEDULE_OP(copy).set_num_inputs(2).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
