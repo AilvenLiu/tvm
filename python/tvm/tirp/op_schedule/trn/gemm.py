@@ -131,16 +131,14 @@ def matmul_trn(
     C_buffer_region: BufferRegion,
     alpha: PrimExpr,
     beta: PrimExpr,
-    sctx: ScheduleContext,
-    var_range_map: Dict[Var, Range],
-) -> Optional[PrimFunc]:
+    sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
 
     analyzer = Analyzer()
-    for v, r in var_range_map.items():
+    for v, r in sctx.var_range_map.items():
         analyzer.bind(v, r)
     A, B, C, D = (
         A_buffer_region.buffer,
