@@ -66,8 +66,6 @@ def test_simple_copy():
         assert_structural_equal(mod["main"], expected)
 
 
-# FIXME: the hbm tensor's layout should be fixed to TileLayout
-# now A will be accessed by [p_loop, b_loop], but it should be [b_loop, p_loop]
 def test_simple_copy_2():
     src_shape = [128, 512]
     src_layout = T.TileLayout.from_nested_tuple((128, 4, 128), (512, 128, 1))

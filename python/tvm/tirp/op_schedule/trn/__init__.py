@@ -16,3 +16,4 @@
 # under the License.
 
 from .copy import *
+from .gemm import *

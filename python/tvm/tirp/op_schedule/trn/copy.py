@@ -27,68 +27,7 @@ from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
 from functools import reduce
 from tvm._ffi import get_global_func
-
-
-f_normalize_trn_layout_with_shape = get_global_func("tir.NormalizeTrainiumLayoutWithShape")
-f_normalize_tile_layout_with_shape = get_global_func("tir.NormalizeTileLayoutWithShape")
-
-
-def normalize_layout_with_shape(layout, shape):
-    if isinstance(layout, T.TrainiumLayout):
-        ret = f_normalize_trn_layout_with_shape(layout, shape)
-        return ret[0], ret[1]
-    elif isinstance(layout, T.TileLayout):
-        ret = f_normalize_tile_layout_with_shape(layout, shape)
-        return ret[0], ret[1]
-    else:
-        raise ValueError("Invalid layout")
-
-
-def get_layout_data_iters(layout):
-    if isinstance(layout, T.TrainiumLayout):
-        return layout.combined_1d_layout.data_iter_array
-    elif isinstance(layout, T.TileLayout):
-        return layout.data_iter_array
-    else:
-        raise ValueError("Invalid layout")
-
-
-def normalize_buffer_region_with_layout(buffer_region: BufferRegion, analyzer: Analyzer):
-    layout = buffer_region.buffer.layout
-    layout, seps = normalize_layout_with_shape(layout, buffer_region.buffer.shape)
-    # (start, extent, dim_in_data_iter, dim_in_shape, dim_type)
-    data_iters = get_layout_data_iters(layout)
-    tiled_range_infos_per_dim = []
-    for i in range(len(seps) - 1):
-        r = buffer_region.region[i]
-        st = r.min
-        ext = r.extent
-        for j in reversed(range(seps[i], seps[i + 1])):
-            dim_type = layout.dimension_types[j] if isinstance(layout, T.TrainiumLayout) else -1
-            if analyzer.can_prove_equal(ext, 1):
-                break
-            if dim_type == T.TrainiumLayout.Partition and (
-                not analyzer.can_prove(st % data_iters[j].extent == 0)
-                or not analyzer.can_prove(ext % data_iters[j].extent == 0)
-            ):
-                assert False, "Invalid layout"
-            if analyzer.can_prove(ext % data_iters[j].extent == 0) and analyzer.can_prove(
-                st % data_iters[j].extent == 0
-            ):
-                st = st // data_iters[j].extent
-                ext = ext // data_iters[j].extent
-                tiled_range_infos_per_dim.append((0, data_iters[j].extent, j, i, dim_type))
-                continue
-            if analyzer.can_prove(st + ext <= data_iters[j].extent):
-                tiled_range_infos_per_dim.append((st, ext, j, i, dim_type))
-                break
-            assert False, "Invalid layout"
-    # put partition axis at the front
-    # then put free axis with lower stride at the front
-    tiled_range_infos_per_dim = sorted(
-        tiled_range_infos_per_dim, key=lambda x: data_iters[x[2]].stride + int(dim_type * 1e9)
-    )
-    return tiled_range_infos_per_dim, layout, seps
+from .common import get_layout_data_iters, normalize_buffer_region_with_layout, generate_axes_in_region
 
 
 # infer an instruction size from buffer_region's access pattern that is compatible on second_buffer_region
@@ -108,14 +47,10 @@ def find_max_inst_size(
     first_inst_stride = 1
     second_inst_stride = 1
     inst_data_iters = {}
-    while True:
-        if len(tiled_range_infos_per_dim) == 0:
-            break
+    while len(tiled_range_infos_per_dim) > 0:
         range_info = tiled_range_infos_per_dim[0]
         tiled_range_infos_per_dim = tiled_range_infos_per_dim[1:]
-        dim_in_shape = range_info[3]
-        dim_in_data_iter = range_info[2]
-        dim_type = range_info[4]
+        st, ext, dim_in_data_iter, dim_in_shape, dim_type = range_info
         if (
             dim_type == T.TrainiumLayout.Free
             and inst_size != 1
@@ -125,8 +60,6 @@ def find_max_inst_size(
         ):
             # the stride of the found data iter is not compatible with previous data iters
             break
-        st = range_info[0]
-        ext = range_info[1]
         stride_in_logical_dim = 1
         for i in range(dim_in_data_iter + 1, seps[dim_in_shape + 1]):
             stride_in_logical_dim *= data_iters[i].extent
@@ -187,53 +120,6 @@ def find_max_inst_size(
         else:
             assert False, "Invalid layout"
     return inst_size, first_inst_stride, inst_data_iters
-
-
-def generate_indices(
-    buffer_region: BufferRegion,
-    second_buffer_region: BufferRegion,
-    inst_size,
-    inst_stride,
-    inst_data_iters,
-    analyzer,
-):
-    range_info, tiled_layout, seps = normalize_buffer_region_with_layout(buffer_region, analyzer)
-    dim_in_region = [range_info[i][2] for i in range(len(range_info))]
-    data_iters = get_layout_data_iters(tiled_layout)
-
-    def f(b_loop, b_extent, f_loop, p_loop):
-        def extract_block_loop(extent):
-            nonlocal b_loop, b_extent
-            ret = b_loop // (b_extent // extent)
-            b_loop = b_loop % (b_extent // extent)
-            b_extent = b_extent // extent
-            return ret
-
-        region_indices = []
-        second_region_indices = []
-        for i in range(len(seps) - 1):
-            index_in_this_dim = 0
-            for j in range(seps[i], seps[i + 1]):
-                index_in_this_dim *= data_iters[j].extent
-                dim_type = tiled_layout.dimension_types[j]
-                if dim_type == T.TrainiumLayout.Partition:
-                    index_in_this_dim += (p_loop // data_iters[j].stride) % data_iters[j].extent
-                elif j in inst_data_iters:
-                    assert analyzer.can_prove_equal(data_iters[j].extent % inst_data_iters[j], 0)
-                    index_in_this_dim += (
-                        extract_block_loop(data_iters[j].extent // inst_data_iters[j])
-                        * inst_data_iters[j]
-                    )
-                    index_in_this_dim += (
-                        f_loop // (data_iters[j].stride // inst_stride)
-                    ) % inst_data_iters[j]
-                elif j in dim_in_region:
-                    index_in_this_dim += extract_block_loop(data_iters[j].extent)
-            region_indices.append(index_in_this_dim + buffer_region.region[i].min)
-            second_region_indices.append(index_in_this_dim + second_buffer_region.region[i].min)
-        return region_indices, second_region_indices
-
-    return f
 
 
 def get_p_size(buffer_region: BufferRegion, analyzer: Analyzer):
@@ -308,30 +194,25 @@ def copy_trn(
         inst_stride = inst_stride_1
         inst_data_iters = inst_data_iters_1
         p_size = get_p_size(src_buffer_region, analyzer)
-        f_gen_idx = generate_indices(
-            src_buffer_region, dst_buffer_region, inst_size, inst_stride, inst_data_iters, analyzer
+        f_gen_axes = generate_axes_in_region(
+            src_buffer_region, inst_stride, inst_data_iters, analyzer
         )
-        f_gen_src_idx = lambda b_loop, b_extent, f_loop, p_loop: f_gen_idx(
-            b_loop, b_extent, f_loop, p_loop
-        )[0]
-        f_gen_dst_idx = lambda b_loop, b_extent, f_loop, p_loop: f_gen_idx(
-            b_loop, b_extent, f_loop, p_loop
-        )[1]
 
     else:
         inst_size = inst_size_2
         inst_stride = inst_stride_2
         inst_data_iters = inst_data_iters_2
         p_size = get_p_size(dst_buffer_region, analyzer)
-        f_gen_idx = generate_indices(
-            dst_buffer_region, src_buffer_region, inst_size, inst_stride, inst_data_iters, analyzer
+        f_gen_axes = generate_axes_in_region(
+            dst_buffer_region, inst_stride, inst_data_iters, analyzer
         )
-        f_gen_src_idx = lambda b_loop, b_extent, f_loop, p_loop: f_gen_idx(
-            b_loop, b_extent, f_loop, p_loop
-        )[1]
-        f_gen_dst_idx = lambda b_loop, b_extent, f_loop, p_loop: f_gen_idx(
-            b_loop, b_extent, f_loop, p_loop
-        )[0]
+
+    def f_gen_src_idx(b_loop, b_extent, f_loop, p_loop):
+        axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
+        return [src_buffer_region.region[i].min + axes[i] for i in range(len(axes))]
+    def f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop):
+        axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
+        return [dst_buffer_region.region[i].min + axes[i] for i in range(len(axes))]
 
     b_extent = reduce(operator.mul, src_extent, 1) // p_size // inst_size
     # fmt: off
