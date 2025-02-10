@@ -122,7 +122,8 @@ def test_scope_slice():
                     with T.warpgroup()[1:2]:
                         pass
                     with T.warpgroup()[2:3]:
-                        pass
+                        with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                            pass
     @T.prim_func(tirp=True, check_well_formed=False)
     def test3() -> None:
         with T.kernel():
@@ -130,11 +131,37 @@ def test_scope_slice():
                 with T.warpgroup()[0:3]:
                     with T.warpgroup()[1:5]:
                         pass
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test4() -> None:
+        with T.kernel():
+            with T.cta():
+                with T.thread()[0:3]:
+                    with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                        pass
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test5() -> None:
+        with T.kernel():
+            with T.cta():
+                with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                    with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                        pass
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test6() -> None:
+        with T.kernel():
+            with T.cta():
+                with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                    with T.thread()[T.int32(0)]:
+                        pass
     # fmt: on
     verify(test1)
     verify(test2)
     with pytest.raises(Exception, match="is inconsistent with"):
         verify(test3)
+    with pytest.raises(Exception, match="has both slices and select_cond"):
+        verify(test4)
+    # we don't check select_cond for now
+    verify(test5)
+    verify(test6)
 
 
 def test_invalid_stmt():

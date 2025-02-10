@@ -293,23 +293,27 @@ class KernelScope : public ExecScope {
 class ExecScopeSliceNode : public ExecScopeNode {
  public:
   /*! \brief slices of the execution scope */
-  Array<Range> slices;
+  Optional<Array<Range>> slices;
+  /*! \brief select condition */
+  Optional<PrimExpr> select_cond;
   /*! \brief parent scope name */
   String parent;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("slices", &slices);
+    v->Visit("select_cond", &select_cond);
     v->Visit("parent", &parent);
     ExecScopeNode::VisitAttrs(v);
   }
 
   bool SEqualReduce(const ExecScopeSliceNode* other, SEqualReducer equal) const {
-    return equal(slices, other->slices) && equal(parent, other->parent) &&
-           ExecScopeNode::SEqualReduce(other, equal);
+    return equal(slices, other->slices) && equal(select_cond, other->select_cond) &&
+           equal(parent, other->parent) && ExecScopeNode::SEqualReduce(other, equal);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(slices);
+    hash_reduce(select_cond);
     hash_reduce(parent);
     ExecScopeNode::SHashReduce(hash_reduce);
   }
@@ -322,7 +326,8 @@ class ExecScopeSliceNode : public ExecScopeNode {
 
 class ExecScopeSlice : public ExecScope {
  public:
-  TVM_DLL explicit ExecScopeSlice(Array<Range> slices, String parent, String cur);
+  TVM_DLL explicit ExecScopeSlice(Optional<Array<Range>> slices, Optional<PrimExpr> select_cond,
+                                  String parent, String cur);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeSliceNode);
@@ -331,7 +336,7 @@ class ExecScopeSlice : public ExecScope {
 /******** Helper functions ********/
 /*! \brief ExecScope order from highest to lowest */
 static const std::unordered_map<String, int> ScopeOrder = {
-    {"world", 0},      {"kernel", 1}, {"cluster", 2}, {"cta", 3},
+    {"world", 0},     {"kernel", 1}, {"cluster", 2}, {"cta", 3},
     {"warpgroup", 4}, {"warp", 5},   {"thread", 6}};
 
 /*! \brief Map from storage scope to its belonging logical scope */

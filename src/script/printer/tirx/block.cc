@@ -323,18 +323,26 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
       ExprDoc call = TIR(d, block->exec_scope.value()->name)
                          ->Call({LiteralDoc::Str(scope_slice->parent,
                                                  block_p->Attr("exec_scope")->Attr("parent"))});
-      Array<Doc> slices;
-      for (size_t i = 0; i < scope_slice->slices.size(); ++i) {
-        auto path = block_p->Attr("exec_scope")->Attr("slices")->ArrayIndex(i);
-        auto start = d->AsDoc<ExprDoc>(scope_slice->slices[i]->min, path->Attr("min"));
-        auto stop = d->AsDoc<ExprDoc>(scope_slice->slices[i]->extent + scope_slice->slices[i]->min,
-                                      path->Attr("extent"));
-        slices.push_back(SliceDoc(start, stop, NullOpt));
+      if (scope_slice->slices.defined()) {
+        auto slices = scope_slice->slices.value();
+        Array<Doc> slices_doc;
+        for (size_t i = 0; i < slices.size(); ++i) {
+          auto path = block_p->Attr("exec_scope")->Attr("slices")->ArrayIndex(i);
+          auto start = d->AsDoc<ExprDoc>(slices[i]->min, path->Attr("min"));
+          auto stop = d->AsDoc<ExprDoc>(slices[i]->min + slices[i]->extent, path->Attr("extent"));
+          slices_doc.push_back(SliceDoc(start, stop, std::nullopt));
+        }
+        return ScopeDoc(std::nullopt, call.operator[](slices_doc), (*frame)->stmts);
+      } else {
+        ICHECK(scope_slice->select_cond.defined());
+        auto cond = scope_slice->select_cond.value();
+        auto cond_doc = d->AsDoc<ExprDoc>(cond, block_p->Attr("exec_scope")->Attr("select_cond"));
+        return ScopeDoc(std::nullopt, call.operator[]({cond_doc}), (*frame)->stmts);
       }
-      return ScopeDoc(NullOpt, call.operator[](slices), (*frame)->stmts);
+    } else {
+      return ScopeDoc(std::nullopt, TIR(d, block->exec_scope.value()->name)->Call({}),
+                      (*frame)->stmts);
     }
-    return ScopeDoc(std::nullopt, TIR(d, block->exec_scope.value()->name)->Call({}),
-                    (*frame)->stmts);
   }
   return ScopeDoc(std::nullopt,
                   TIR(d, "sblock")  //

@@ -18,8 +18,8 @@
 
 from tvm_ffi import register_object as _register_object
 
-from tvm.tirx import Var
 from tvm.ir.expr import Range
+from tvm.tirx import Buffer, PrimExpr, Var
 
 from ..base import IRBuilderFrame
 from . import _ffi_api
@@ -33,12 +33,13 @@ class TIRFrame(IRBuilderFrame): ...
 class PrimFuncFrame(TIRFrame): ...
 
 
-@_register_object("script.ir_builder.tirx.SSBlockFrame")
-class SBlockFrame(TIRFrame): ...
+@_register_object("script.ir_builder.tir.SSBlockFrame")
+class SBlockFrame(TIRFrame):
+    ...
 
     def __getitem__(self, slices) -> "BlockFrame":
         """Slice operator for block frame.
-        
+
         Parameters
         ----------
         slices : Union[Range, Tuple[Range, ...]]
@@ -51,6 +52,10 @@ class SBlockFrame(TIRFrame): ...
         """
         if not isinstance(slices, tuple):
             slices = (slices,)
+        if len(slices) == 1 and isinstance(slices[0], PrimExpr):
+            # If the slice is a single PrimExpr, it is a select condition
+            return _ffi_api.BlockFrameSlice(self, None, slices[0])  # pylint: disable=no-member
+        # Otherwise, the slices are a list of ranges
         slices_t = []
         for s in slices:
             if isinstance(s, slice):
@@ -58,7 +63,7 @@ class SBlockFrame(TIRFrame): ...
                 slices_t.append(Range(s.start, s.stop))
             else:
                 assert False, f"Slice must be a slice, got {type(s)}"
-        return _ffi_api.BlockFrameSlice(self, slices_t) # pylint: disable=no-member
+        return _ffi_api.BlockFrameSlice(self, slices_t, None)  # pylint: disable=no-member
 
 
 @_register_object("script.ir_builder.tirx.SBlockInitFrame")
@@ -76,7 +81,25 @@ class ForFrame(TIRFrame):
 class AssertFrame(TIRFrame): ...
 
 
-@_register_object("script.ir_builder.tirx.AttrFrame")
+@_register_object("script.ir_builder.tir.LetFrame")
+class LetFrame(TIRFrame):
+    def __enter__(self) -> Var:
+        super().__enter__()
+        return self.var
+
+
+@_register_object("script.ir_builder.tir.RealizeFrame")
+class RealizeFrame(TIRFrame): ...
+
+
+@_register_object("script.ir_builder.tir.AllocateFrame")
+class AllocateFrame(TIRFrame):
+    def __enter__(self) -> Buffer:
+        super().__enter__()
+        return self.buffer_var
+
+
+@_register_object("script.ir_builder.tir.AttrFrame")
 class AttrFrame(TIRFrame): ...
 
 

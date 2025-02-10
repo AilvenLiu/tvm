@@ -96,20 +96,23 @@ TVM_REGISTER_GLOBAL("tirx.KernelScope").set_body_typed([](Array<ScopeIdDef> def)
 });
 
 // ExecScopeSlice
-ExecScopeSlice::ExecScopeSlice(Array<Range> slices, String parent, String cur) {
+ExecScopeSlice::ExecScopeSlice(Optional<Array<Range>> slices, Optional<PrimExpr> select_cond,
+                               String parent, String cur) {
   auto n = make_object<ExecScopeSliceNode>();
   n->name = cur;
   n->parent = parent;
+  CHECK(!slices.defined() || !select_cond.defined())
+      << "ValueError: select_cond and slices cannot both be present";
   n->slices = std::move(slices);
+  n->select_cond = std::move(select_cond);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_NODE_TYPE(ExecScopeSliceNode);
 
 TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
-    .set_body_typed([](Array<Range> slices, String parent, String cur) {
-      return ExecScopeSlice(slices, parent, cur);
-    });
+    .set_body_typed([](Optional<Array<Range>> slices, Optional<PrimExpr> select_cond, String parent,
+                       String cur) { return ExecScopeSlice(slices, select_cond, parent, cur); });
 
 /******** Definition of Var ********/
 // ScopePair
@@ -321,5 +324,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cluster", "cta", "cuda")
       return Trivial3DResolve(def, params, "clusterCtaIdx.");
     });
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

@@ -255,11 +255,14 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
 
 void OpCall(tvm::Op op, Array<ObjectRef> args) { AddToParent(tvm::tirx::tirp::OpCall(op, args)); }
 
-BlockFrame BlockFrameSlice(BlockFrame block, Array<Range> slices) {
+BlockFrame BlockFrameSlice(BlockFrame block, Optional<Array<Range>> slices,
+                           Optional<PrimExpr> select_cond) {
   ICHECK(block->exec_scope.defined()) << "InternalError: Block frame must have an execution scope";
   ICHECK(block->exec_scope_slice_parent.defined())
       << "InternalError: Block frame must have an execution scope slice parent";
-  block->exec_scope = tvm::tir::ExecScopeSlice(slices, block->exec_scope_slice_parent,
+  ICHECK(!block->exec_scope->IsInstance<tvm::tirx::ExecScopeSliceNode>())
+      << "InternalError: Block frame already has an execution scope slice";
+  block->exec_scope = tvm::tirx::ExecScopeSlice(slices, select_cond, block->exec_scope_slice_parent,
                                                block->exec_scope.value()->name);
   return block;
 }
@@ -286,7 +289,8 @@ BlockFrame Thread(String exec_scope_slice_parent) {
   return Block("", false, "thread", exec_scope_slice_parent);
 }
 
-BlockFrame ScopeSlice(ffi::Array<Range> slices, ffi::String parent, ffi::String cur) {
+BlockFrame ScopeSlice(ffi::Optional<ffi::Array<Range>> slices, ffi::Optional<PrimExpr> select_cond,
+                      ffi::String parent, ffi::String cur) {
   ObjectPtr<BlockFrameNode> n = ffi::make_object<BlockFrameNode>();
   n->name = cur;
   n->iter_vars.clear();
@@ -299,7 +303,7 @@ BlockFrame ScopeSlice(ffi::Array<Range> slices, ffi::String parent, ffi::String 
   n->iter_values.clear();
   n->predicate = std::nullopt;
   n->no_realize = false;
-  n->exec_scope = tvm::tirx::ExecScopeSlice(slices, parent, cur);
+  n->exec_scope = tvm::tirx::ExecScopeSlice(slices, select_cond, parent, cur);
   return BlockFrame(n);
 }
 
@@ -1138,7 +1142,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

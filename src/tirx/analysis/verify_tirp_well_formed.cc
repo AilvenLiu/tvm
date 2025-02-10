@@ -75,6 +75,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
       }
     }
     // C4: exec_scope slice is consistent
+    bool erase_slices{false}, erase_select_cond{false}, pop_scope{false};
     arith::Analyzer ana;
     auto covered = [&](const Array<Range>& l, const Array<Range>& r) -> bool {
       // r's range is covered by l's range
@@ -90,20 +91,38 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
       return true;
     };
     if (const auto* slice = scope.as<ExecScopeSliceNode>()) {
-      auto it = scope_slices_.find(slice->name);
-      if (it == scope_slices_.end()) {
-        scope_slices_[slice->name] = {slice->slices};
-      } else {
-        bool consistent = true;
-        for (const auto& s : it->second) {
-          if (!covered(s, slice->slices) && !covered(slice->slices, s)) {
-            consistent = false;
-            break;
-          }
+      auto it_slices = scope_slices_.find(slice->name);
+      auto it_select_cond = scope_select_cond_.find(slice->name);
+      if (slice->select_cond.defined()) {
+        // current scope slice has select_cond, it should not have slices
+        Verify(it_slices == scope_slices_.end())
+            << "TIRpError: ExecScopeSlice at " << path << " has both slices and select_cond";
+        if (it_select_cond == scope_select_cond_.end()) {
+          scope_select_cond_[slice->name] = slice->select_cond.value();
+          erase_select_cond = true;
         }
-        Verify(consistent) << "TIRpError: ExecScopeSlice at " << path << " is inconsistent with "
-                            << it->first;
-        it->second.push_back(slice->slices);
+      } else {
+        // current scope slice has slices, it should not have select_cond
+        Verify(it_select_cond == scope_select_cond_.end())
+            << "TIRpError: ExecScopeSlice at " << path << " has both slices and select_cond";
+        ICHECK(slice->slices.defined())
+            << "InternalError: ExecScopeSlice at " << path << " has neither slices nor select_cond";
+        if (it_slices == scope_slices_.end()) {
+          scope_slices_[slice->name] = {slice->slices.value()};
+          erase_slices = true;
+        } else {
+          bool consistent = true;
+          for (const auto& s : it_slices->second) {
+            if (!covered(s, slice->slices.value()) && !covered(slice->slices.value(), s)) {
+              consistent = false;
+              break;
+            }
+          }
+          Verify(consistent) << "TIRpError: ExecScopeSlice at " << path << " is inconsistent with "
+                             << it_slices->first;
+          it_slices->second.push_back(slice->slices.value());
+          pop_scope = true;
+        }
       }
     }
     scope_stack_.push_back(scope);
@@ -111,10 +130,18 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     scope_stack_.pop_back();
     // C5: cleanup scope slice when exiting scope
     if (const auto* slice = scope.as<ExecScopeSliceNode>()) {
-      auto it = scope_slices_.find(slice->name);
-      ICHECK(it != scope_slices_.end() && !it->second.empty())
-          << "TIRpError: ExecScopeSlice at " << path << " is not found in scope_slices_";
-      it->second.pop_back();
+      if (erase_slices) {
+        scope_slices_.erase(slice->name);
+      }
+      if (erase_select_cond) {
+        scope_select_cond_.erase(slice->name);
+      }
+      if (pop_scope) {
+        auto it_slices = scope_slices_.find(slice->name);
+        ICHECK(it_slices != scope_slices_.end());
+        ICHECK(!it_slices->second.empty());
+        it_slices->second.pop_back();
+      }
     }
   }
 
@@ -127,7 +154,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   Optional<ExecScope> cur_roof_ = NullOpt;
   std::vector<ExecScope> scope_stack_;
   std::unordered_map<std::string, std::vector<Array<Range>>> scope_slices_;
-  std::unordered_map<std::string, std::string> parent_scope_;
+  std::unordered_map<std::string, PrimExpr> scope_select_cond_;
 };
 
 class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
