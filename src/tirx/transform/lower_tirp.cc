@@ -280,13 +280,14 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     ICHECK_EQ(resolved.size(), out_dim);
     Stmt body = StmtExprMutator::VisitStmt(op->body);
     if (scope_slice->select_cond.defined()) {
-      PrimExpr cond = resolved[0] == scope_slice->select_cond;
+      PrimExpr cond = scope_slice->select_cond.value();
       body = IfThenElse(cond, body);
     } else {
       auto slices = scope_slice->slices.value();
       PrimExpr cond = Bool(true);
       for (size_t i = 0; i < slices.size(); i++) {
-        cond = cond && resolved[i] >= slices[i]->min && resolved[i] < slices[i]->extent + slices[i]->min;
+        cond = cond && resolved[i] >= slices[i]->min &&
+               resolved[i] < slices[i]->extent + slices[i]->min;
       }
       body = IfThenElse(cond, body);
     }

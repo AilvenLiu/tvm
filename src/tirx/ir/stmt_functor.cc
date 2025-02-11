@@ -512,6 +512,34 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
   ffi::Array<BufferRegion> reads = Internal::Mutate(this, op->reads);
   ffi::Array<BufferRegion> writes = Internal::Mutate(this, op->writes);
   ffi::Array<MatchBufferRegion> match_buffers = Internal::Mutate(this, op->match_buffers);
+  ffi::Optional<ExecScope> scope = op->exec_scope;
+  {
+    if (scope.defined()) {
+      // Visit the exec scope
+      auto scope_slice_opt = scope.value().as<ExecScopeSlice>();
+      if (scope_slice_opt.has_value()) {
+        auto scope_slice = scope_slice_opt.value();
+        ffi::Optional<Array<Range>> slices = std::nullopt;
+        if (scope_slice->slices.defined()) {
+          slices = Internal::Mutate(this, scope_slice->slices.value());
+        }
+        ffi::Optional<PrimExpr> select_cond = std::nullopt;
+        if (scope_slice->select_cond.defined()) {
+          select_cond = this->VisitExpr(scope_slice->select_cond.value());
+        }
+        ffi::Optional<Array<PrimExpr>> extents = std::nullopt;
+        if (scope_slice->extents.defined()) {
+          extents = Internal::Mutate(this, scope_slice->extents.value());
+        }
+        if (!slices.same_as(scope_slice->slices) ||
+            !select_cond.same_as(scope_slice->select_cond) ||
+            !extents.same_as(scope_slice->extents)) {
+          scope =
+              ExecScopeSlice(slices, select_cond, extents, scope_slice->parent, scope_slice->name);
+        }
+      }
+    }
+  }
   ffi::Optional<Stmt> init = std::nullopt;
   if (op->init.defined()) {
     init = VisitStmt(op->init.value());
@@ -519,7 +547,8 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
   Stmt body = VisitStmt(op->body);
   if (iter_vars.same_as(op->iter_vars) && alloc_buffers.same_as(op->alloc_buffers) &&
       reads.same_as(op->reads) && writes.same_as(op->writes) && body.same_as(op->body) &&
-      init.same_as(op->init) && match_buffers.same_as(op->match_buffers)) {
+      init.same_as(op->init) && match_buffers.same_as(op->match_buffers) &&
+      scope.same_as(op->exec_scope)) {
     return ffi::GetRef<SBlock>(op);
   } else {
     auto n = CopyOnWrite(op);
@@ -530,6 +559,7 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
     n->body = std::move(body);
     n->init = std::move(init);
     n->match_buffers = std::move(match_buffers);
+    n->exec_scope = std::move(scope);
     return Stmt(n);
   }
 }

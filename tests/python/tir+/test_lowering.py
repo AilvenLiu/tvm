@@ -222,11 +222,15 @@ def test_lower_scope_slice():
             bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
             warp_id = T.warp_id([4], parent="cta")
             tx = T.thread_id([128], parent="cta")
-            
+
             with T.cta()[0:1, 0:2, 0:3]:
                 with T.thread()[0:64]:
                     T.evaluate(tx)
                     T.evaluate(warp_id)
+                with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                    T.evaluate(tx)
+                with T.thread()[tx == 0]:
+                    T.evaluate(tx)
 
     @T.prim_func(private=True, tirp=True)
     def main():
@@ -241,6 +245,12 @@ def test_lower_scope_slice():
                         if threadIdx_x >= 0 and threadIdx_x < 64:
                             T.evaluate(threadIdx_x)
                             T.evaluate(threadIdx_x // 32)
+                    with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                        if T.elect_sync(0xFFFFFFFF):
+                            T.evaluate(threadIdx_x)
+                    with T.thread()[threadIdx_x == 0]:
+                        if threadIdx_x == 0:
+                            T.evaluate(threadIdx_x)
     # fmt: on
 
     compare(before, main, LowerTIRp)
