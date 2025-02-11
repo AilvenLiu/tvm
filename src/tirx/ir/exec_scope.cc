@@ -306,6 +306,45 @@ TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cta", "cuda")
       return Trivial3DResolve(params, "blockIdx.", out_dim);
     });
 
+TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cluster", "cuda")
+    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> Array<PrimExpr> {
+      CHECK_LE(out_dim, 3) << "ValueError: kernel->cluster can only have 3 dimensions for now";
+      Array<PrimExpr> ret;
+      for (size_t i = 0; i < out_dim; i++) {
+        std::string reg_name = std::string("clusterid.") + static_cast<char>('x' + i);
+        auto call = tir::Call(DataType::Int(32), builtin::ptx_fetch_register(),
+                              {IntImm(DataType::Int(32), 32), StringImm(reg_name)});
+        ret.push_back(call);
+      }
+      return std::move(ret);
+    });
+
+TVM_REGISTER_SCOPEID_RESOLVE("cta", "warpgroup", "cuda")
+    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> Array<PrimExpr> {
+      CHECK_EQ(out_dim, 1) << "ValueError: cta->warpgroup can only have 1 dimension for now";
+      PrimExpr tx, ty, tz, ex, ey, ez;
+      std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
+      std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
+      std::tie(tz, ez) = GetThread("threadIdx.z", params, true);
+      arith::Analyzer ana;
+      return {ana.Simplify(FloorDiv(tx + ty * ex + tz * ex * ey, 128))};
+    });
+
+TVM_REGISTER_SCOPEID_RESOLVE("warpgroup", "warp", "cuda")
+    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> Array<PrimExpr> {
+      CHECK_EQ(out_dim, 1) << "ValueError: warpgroup->warp can only have 1 dimension for now";
+      CHECK_EQ(out_dim, 1) << "ValueError: cta->warp can only have 1 dimension for now";
+      PrimExpr tx, ty, tz, ex, ey, ez;
+      std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
+      std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
+      std::tie(tz, ez) = GetThread("threadIdx.z", params, true);
+      arith::Analyzer ana;
+      return {ana.Simplify(FloorMod(FloorDiv(tx + ty * ex + tz * ex * ey, 32), 4))};
+    });
+
 TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
     .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
             const LaunchParams& params) -> Array<PrimExpr> {

@@ -487,6 +487,20 @@ def kernel(
     return _ffi_api.Kernel(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
+def cluster(
+    extents: Optional[List[PrimExpr]] = None,
+    parent: str = "world",
+) -> frame.BlockFrame:
+    """The cluster declaration statement.
+
+    Returns
+    -------
+    res : frame.BlockFrame
+        The BlockFrame.
+    """
+    return _ffi_api.Cluster(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
 def cta(
     extents: Optional[List[PrimExpr]] = None,
     parent: str = "kernel",
@@ -547,8 +561,22 @@ def kernel_id(extent: Union[PrimExpr, int]) -> Var:
     return _ffi_api.KernelId(extent)
 
 
+def cluster_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
+    ret = _ffi_api.ClusterId(extents, parent)
+    if len(ret) == 1:
+        return ret[0]
+    return ret
+
+
 def cta_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
     ret = _ffi_api.CtaId(extents, parent)
+    if len(ret) == 1:
+        return ret[0]
+    return ret
+
+
+def warpgroup_id(extents: List[Union[PrimExpr, int]], parent: str) -> List[Var]:
+    ret = _ffi_api.WarpgroupId(extents, parent)
     if len(ret) == 1:
         return ret[0]
     return ret
@@ -2645,12 +2673,15 @@ __all__ = float_types + [
 __all__ += [
     "world",
     "kernel",
+    "cluster",
     "cta",
     "warp",
     "warpgroup",
     "thread",
     "kernel_id",
+    "cluster_id",
     "cta_id",
+    "warpgroup_id",
     "warp_id",
     "thread_id",
     "WorldScope",

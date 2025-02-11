@@ -186,10 +186,10 @@ struct StorageScope {
     } else if (s.compare(0, 15, "metal.simdgroup") == 0) {
       r.rank = StorageRank::kMetalSimdGroup;
       r.tag = s.substr(15, std::string::npos);
-    } else if(s.compare(0, 8, "trn.sbuf") == 0) {
+    } else if (s.compare(0, 8, "trn.sbuf") == 0) {
       r.rank = StorageRank::kTrnSbuf;
       r.tag = s.substr(8, std::string::npos);
-    } else if(s.compare(0, 8, "trn.psum") == 0) {
+    } else if (s.compare(0, 8, "trn.psum") == 0) {
       r.rank = StorageRank::kTrnPsum;
       r.tag = s.substr(8, std::string::npos);
     } else {

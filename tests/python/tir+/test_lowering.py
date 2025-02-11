@@ -213,6 +213,45 @@ def test_lower_scope_id():
     # fmt: on
     compare(before2, after2, LowerTIRp)
 
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before3() -> None:
+        with T.kernel():
+            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
+            cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
+            clx, cly, clz = T.cluster_id([4, 5, 12], parent="kernel")
+            wg_id = T.warpgroup_id([3], parent="cta")
+            warp_id = T.warp_id([4], parent="warpgroup")
+            lane_id = T.thread_id([32], parent="warp")
+            with T.cta():
+                with T.warpgroup():
+                    with T.thread():
+                        T.evaluate(bx + by + bz)
+                        T.evaluate(cbx + cby + cbz)
+                        T.evaluate(clx + cly + clz)
+                        T.evaluate(wg_id + warp_id + lane_id)
+
+    @T.prim_func(private=True, tirp=True)   
+    def after3() -> None:
+        with T.kernel():
+            clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
+            clusterCtaIdx_y = T.launch_thread("clusterCtaIdx.y", 2)
+            clusterCtaIdx_z = T.launch_thread("clusterCtaIdx.z", 1)
+            blockIdx_x = T.launch_thread("blockIdx.x", 8)
+            threadIdx_x = T.launch_thread("threadIdx.x", 384)
+            blockIdx_y = T.launch_thread("blockIdx.y", 10)
+            blockIdx_z = T.launch_thread("blockIdx.z", 12)
+            with T.cta():
+                with T.warpgroup():
+                    with T.thread():
+                        T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z)
+                        T.evaluate(clusterCtaIdx_x + clusterCtaIdx_y + clusterCtaIdx_z)
+                        T.evaluate(T.ptx_fetch_register(32, "clusterid.x") + T.ptx_fetch_register(32, "clusterid.y") + T.ptx_fetch_register(32, "clusterid.z"))
+                        T.evaluate(threadIdx_x // 128 + threadIdx_x % 128 // 32 + threadIdx_x % 32)
+    # fmt: on
+
+    compare(before3, after3, LowerTIRp)
+
 
 def test_lower_scope_slice():
     # fmt: off

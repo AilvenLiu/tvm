@@ -193,7 +193,7 @@ def test_invalid_stmt():
     verify(test2)
 
 
-def test_inconsistent_scope_id():
+def test_scope_id_consistency():
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def test1():
@@ -226,12 +226,41 @@ def test_inconsistent_scope_id():
 
             with T.thread():
                 pass
+
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test4():
+        with T.kernel():
+            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
+            cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
+            clx, cly, clz = T.cluster_id([4, 5, 12], parent="kernel")
+            with T.cta():
+                with T.warp():
+                    with T.thread():
+                        T.evaluate(bx + by + bz)
+                        T.evaluate(cbx + cby + cbz)
+                        T.evaluate(clx + cly + clz)
+
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test5():
+        with T.kernel():
+            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
+            cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
+            clx, cly, clz = T.cluster_id([3, 5, 12], parent="kernel")
+            with T.cta():
+                with T.warp():
+                    with T.thread():
+                        T.evaluate(bx + by + bz)
+                        T.evaluate(cbx + cby + cbz)
+                        T.evaluate(clx + cly + clz)
     # fmt: on
 
     verify(test1)
     verify(test2)
     with pytest.raises(Exception, match="Inconsistent extents for scope"):
         verify(test3)
+    verify(test4)
+    with pytest.raises(Exception, match="Inconsistent extents for scope"):
+        verify(test5)
 
 
 def test_layout():
@@ -343,6 +372,6 @@ if __name__ == "__main__":
     test_nested_scope()
     test_scope_slice()
     test_invalid_stmt()
-    test_inconsistent_scope_id()
+    test_scope_id_consistency()
     test_layout()
     test_host()

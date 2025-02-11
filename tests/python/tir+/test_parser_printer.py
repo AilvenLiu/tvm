@@ -28,7 +28,7 @@ def from_source(code):
     return tvm.script.from_source(code, tirp=True)
 
 
-def test_roundtrip_scopeid():
+def test_roundtrip_scopeid1():
     # fmt: off
     @T.prim_func(tirp=True)
     def test(A_ptr: T.handle) -> None:
@@ -52,6 +52,29 @@ def test_roundtrip_scopeid():
     assert_structural_equal(test, from_source(code))
 
 
+def test_roundtrip_scopeid2():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (64,), "float32", scope="global")
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
+            cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
+            clx, cly, clz = T.cluster_id([4, 5, 12], parent="kernel")
+            with T.cta():
+                with T.warp():
+                    with T.thread():
+                        T.evaluate(bx + by + bz)
+                        T.evaluate(cbx + cby + cbz)
+                        T.evaluate(clx + cly + clz)
+    # fmt: on
+
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
 def test_roundtrip_exec_scope():
     # fmt: off
     @T.prim_func(tirp=True)
@@ -63,21 +86,23 @@ def test_roundtrip_exec_scope():
                 tx, ty, tz = T.thread_id([16, 8, 1], parent="cta")
                 warp_id = T.warp_id([4], parent="cta")
                 lane_id = T.thread_id([32], parent="warp")
-                with T.cta():
-                    with T.warp():
+                with T.cluster():
+                    with T.cta():
+                        with T.warpgroup():
+                            with T.warp():
+                                with T.thread():
+                                    T.evaluate(0)
                         with T.thread():
                             T.evaluate(0)
-                    with T.thread():
-                        T.evaluate(0)
-                    with T.warp()[0:2]:
-                        with T.thread():
+                        with T.warp()[0:2]:
+                            with T.thread():
+                                T.evaluate(0)
+                        with T.thread([128])[0:2]:
                             T.evaluate(0)
-                    with T.thread([128])[0:2]:
-                        T.evaluate(0)
-                    with T.thread([16, 8])[0:8, 0:4]:
-                        T.evaluate(0)
-                    with T.thread()[T.elect_sync(0xFFFFFFFF)]:
-                        T.evaluate(0)
+                        with T.thread([16, 8])[0:8, 0:4]:
+                            T.evaluate(0)
+                        with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                            T.evaluate(0)
     # fmt: on
 
     code = test.script()
@@ -401,7 +426,8 @@ def test_roundtrip_tensormap():
 
 
 if __name__ == "__main__":
-    test_roundtrip_scopeid()
+    test_roundtrip_scopeid1()
+    test_roundtrip_scopeid2()
     test_roundtrip_exec_scope()
     test_roundtrip_layout()
     test_roundtrip_buffer_view_get1()
