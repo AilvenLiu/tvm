@@ -72,7 +72,9 @@ def test_roundtrip_exec_scope():
                     with T.warp()[0:2]:
                         with T.thread():
                             T.evaluate(0)
-                    with T.thread()[0:2]:
+                    with T.thread([128])[0:2]:
+                        T.evaluate(0)
+                    with T.thread([16, 8])[0:8, 0:4]:
                         T.evaluate(0)
                     with T.thread()[T.elect_sync(0xFFFFFFFF)]:
                         T.evaluate(0)

@@ -417,7 +417,13 @@ def get(src_buffer: Buffer) -> Buffer:
     return _ffi_api.BufferGet(src_buffer)
 
 
-def sblock(name: str = "", no_realize: bool = False, exec_scope="", exec_scope_slice_parent="") -> frame.SBlockFrame:
+def sblock(
+    name: str = "",
+    no_realize: bool = False,
+    exec_scope="",
+    scope_slice_extents=None,
+    scope_slice_parent="",
+) -> frame.SBlockFrame:
     """The sblock declaration statement.
 
     Parameters
@@ -431,7 +437,7 @@ def sblock(name: str = "", no_realize: bool = False, exec_scope="", exec_scope_s
     exec_scope : str
         The execution scope of the block.
 
-    exec_scope_slice_parent : str
+    scope_slice_parent : str
         The parent of the execution scope slice.
 
     Returns
@@ -445,7 +451,7 @@ def sblock(name: str = "", no_realize: bool = False, exec_scope="", exec_scope_s
     block_suffix = _get_sblock_name_suffix()
     if block_suffix and name:
         name = name + block_suffix
-    return _ffi_api.Block(name, no_realize, exec_scope, exec_scope_slice_parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Block(name, no_realize, exec_scope, scope_slice_extents, scope_slice_parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def world() -> frame.BlockFrame:
@@ -460,19 +466,29 @@ def world() -> frame.BlockFrame:
 
 
 def kernel(
+    extents: Optional[List[PrimExpr]] = None,
     parent: str = "world",
 ) -> frame.BlockFrame:
     """The block declaration statement.
+
+    Parameters
+    ----------
+    extents : Optional[List[PrimExpr]]
+        The extents of the execution scope slice.
+
+    parent : Optional[str]
+        The parent of the execution scope slice.
 
     Returns
     -------
     res : frame.BlockFrame
         The BlockFrame.
     """
-    return _ffi_api.Kernel(parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Kernel(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def cta(
+    extents: Optional[List[PrimExpr]] = None,
     parent: str = "kernel",
 ) -> frame.BlockFrame:
     """The block declaration statement.
@@ -482,10 +498,11 @@ def cta(
     res : frame.BlockFrame
         The BlockFrame.
     """
-    return _ffi_api.CTA(parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.CTA(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def warpgroup(
+    extents: Optional[List[PrimExpr]] = None,
     parent: str = "cta",
 ) -> frame.BlockFrame:
     """The warpgroup declaration statement.
@@ -495,10 +512,11 @@ def warpgroup(
     res : frame.BlockFrame
         The BlockFrame.
     """
-    return _ffi_api.WarpGroup(parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.WarpGroup(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def warp(
+    extents: Optional[List[PrimExpr]] = None,
     parent: str = "cta",
 ) -> frame.BlockFrame:
     """The block declaration statement.
@@ -508,10 +526,11 @@ def warp(
     res : frame.BlockFrame
         The BlockFrame.
     """
-    return _ffi_api.Warp(parent)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Warp(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def thread(
+    extents: Optional[List[PrimExpr]] = None,
     parent: str = "cta",
 ) -> frame.BlockFrame:
     """The block declaration statement.
@@ -521,11 +540,7 @@ def thread(
     res : frame.BlockFrame
         The BlockFrame.
     """
-    return _ffi_api.Thread(parent)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def scope_slice(slices: List[ir.Range], parent: str, cur: str) -> frame.BlockFrame:
-    return _ffi_api.ScopeSlice(slices, parent, cur)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.Thread(extents, parent)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 def kernel_id(extent: Union[PrimExpr, int]) -> Var:

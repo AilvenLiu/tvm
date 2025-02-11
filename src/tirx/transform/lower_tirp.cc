@@ -66,18 +66,17 @@ class ScopeIdDefResolver : public StmtExprMutator {
 
     // Step 2: Extract kernel launch parameters
     const auto& target = Target::Current(false);
-
-    // Step 3: Extract kernel launch parameters
     LaunchParams launch_params;
     ExtractKernelLaunchParams(verifier.id_set, target, &launch_params);
 
-    // Step 4: Resolve the ScopeIdDef and replace them
+    // Step 3: Resolve the ScopeIdDef and replace them
     auto* n = block.CopyOnWrite();
 
     std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> id_map;
     for (const auto& def : kernel->scope_id_def) {
       // Resolve the scope ids defined in the kernel
-      auto resolved = ScopeIdResolveTable::Resolve(def, target->kind->name, launch_params);
+      auto resolved = ScopeIdResolveTable::Resolve(def->scope, def->extents, def->extents.size(),
+                                                   target->kind->name, launch_params);
       ICHECK_EQ(resolved.size(), def->extents.size())
           << "Internal Error: Inconsistent resolved size " << resolved.size() << " vs "
           << def->extents.size();
@@ -87,7 +86,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
     }
     Stmt body = Substitute(n->body, id_map);
 
-    // Step 5. Warp kernel launch parameters
+    // Step 4. Wrap the body with thread_extent attributes
     for (const auto& [tag, iv] : launch_params) {
       body = AttrStmt(iv, tir::attr::thread_extent, iv->dom->extent, body);
     }
@@ -190,7 +189,8 @@ class TIRpOpScheduler : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const tirp::OpCallNode* op) final {
-    tirp::ScheduleContext sctx(Target::Current(false), exec_scope_stack_.back(), launch_params_, var_range_map_);
+    tirp::ScheduleContext sctx(Target::Current(false), exec_scope_stack_.back(), launch_params_,
+                               var_range_map_);
     static auto f_op_scheduler_ = tvm::runtime::Registry::Get("tirp.f_op_scheduler");
     ICHECK(f_op_scheduler_ != nullptr) << "Internal Error: tirp.f_op_scheduler is not registered";
     PrimFunc res;
@@ -246,6 +246,59 @@ class ScopeMerger : public StmtExprMutator {
   };
 };
 
+class ExecScopeSliceResolver : public StmtExprMutator {
+ public:
+  static Stmt Resolve(const Stmt& stmt) { return ExecScopeSliceResolver()(stmt); }
+
+ private:
+  using LaunchParams = ScopeIdResolveTable::LaunchParams;
+
+  Stmt VisitStmt_(const AttrStmtNode* op) final {
+    if (op->attr_key == tir::attr::thread_extent) {
+      auto iv = op->node.as<IterVar>();
+      ICHECK(iv.defined()) << "Internal Error: thread_extent should annotate an IterVar";
+      launch_params_[iv.value()->thread_tag] = iv.value();
+    }
+    return StmtExprMutator::VisitStmt_(op);
+  }
+
+  Stmt VisitStmt_(const BlockNode* op) final {
+    ICHECK(op->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
+    auto exec_scope = op->exec_scope.value();
+    auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
+    if (!scope_slice_opt.defined()) {
+      // No scope slice, return the block as is
+      return std::move(StmtExprMutator::VisitStmt_(op));
+    }
+    auto scope_slice = scope_slice_opt.value();
+    auto scope = ScopePair(scope_slice->parent, scope_slice->name);
+    ICHECK(scope_slice->select_cond.defined() || scope_slice->slices.defined());
+    int out_dim = scope_slice->select_cond.defined() ? 1 : scope_slice->slices.value().size();
+    const auto& target = Target::Current(false);
+    auto resolved = ScopeIdResolveTable::Resolve(scope, scope_slice->extents, out_dim,
+                                                 target->kind->name, launch_params_);
+    ICHECK_EQ(resolved.size(), out_dim);
+    Stmt body = StmtExprMutator::VisitStmt(op->body);
+    if (scope_slice->select_cond.defined()) {
+      PrimExpr cond = resolved[0] == scope_slice->select_cond;
+      body = IfThenElse(cond, body);
+    } else {
+      auto slices = scope_slice->slices.value();
+      PrimExpr cond = Bool(true);
+      for (size_t i = 0; i < slices.size(); i++) {
+        cond = cond && resolved[i] >= slices[i]->min && resolved[i] < slices[i]->extent + slices[i]->min;
+      }
+      body = IfThenElse(cond, body);
+    }
+    Block block = GetRef<Block>(op);
+    auto* n = block.CopyOnWrite();
+    n->body = body;
+    return std::move(block);
+  }
+
+  LaunchParams launch_params_;
+};
+
 class ScheduleContextRemover : public StmtExprMutator {
  public:
   static Stmt Remove(const Stmt& stmt) { return ScheduleContextRemover()(stmt); }
@@ -266,7 +319,7 @@ class LogicalTensorRemover : public arith::IRMutatorWithAnalyzer {
   static Stmt Remove(const Stmt& stmt, const Map<tir::Var, Buffer> buffer_map) {
     arith::Analyzer ana;
     LogicalTensorRemover remover(&ana);
-    for(const auto& kv : buffer_map) {
+    for (const auto& kv : buffer_map) {
       remover.storage_map_[kv.second] = kv.second;
     }
     return remover(stmt);
@@ -299,24 +352,25 @@ class LogicalTensorRemover : public arith::IRMutatorWithAnalyzer {
     return std::move(block);
   }
 
-  Array<PrimExpr> RewriteIndices(Array<PrimExpr> indices, Array<PrimExpr> old_shape, Array<PrimExpr> new_shape){
+  Array<PrimExpr> RewriteIndices(Array<PrimExpr> indices, Array<PrimExpr> old_shape,
+                                 Array<PrimExpr> new_shape) {
     PrimExpr indices_prod = 1;
-    for(size_t i = 0; i < indices.size(); i++){
+    for (size_t i = 0; i < indices.size(); i++) {
       indices_prod *= old_shape[i];
       indices_prod += indices[i];
     }
     std::vector<PrimExpr> new_indices;
     int new_shape_size = new_shape.size();
-    for (int i = new_shape_size - 1; i>=0; i--) {
-      new_indices.push_back(analyzer_->Simplify( floormod(indices_prod, new_shape[i])));
+    for (int i = new_shape_size - 1; i >= 0; i--) {
+      new_indices.push_back(analyzer_->Simplify(floormod(indices_prod, new_shape[i])));
       indices_prod = floordiv(indices_prod, new_shape[i]);
     }
     std::reverse(new_indices.begin(), new_indices.end());
     return Array<PrimExpr>(new_indices.begin(), new_indices.end());
   }
 
-  using StmtExprMutator::VisitStmt_;
   using StmtExprMutator::VisitExpr_;
+  using StmtExprMutator::VisitStmt_;
 
   Stmt VisitStmt_(const BufferStoreNode* op) override {
     BufferStore store = Downcast<BufferStore>(StmtExprMutator::VisitStmt_(op));
@@ -450,8 +504,9 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     }
   }
 
-  virtual Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer, const Array<PrimExpr>& indices) {
-    if(buffer->layout.defined() && buffer->layout.value().as<TrainiumLayoutNode>()){
+  virtual Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer,
+                                                  const Array<PrimExpr>& indices) {
+    if (buffer->layout.defined() && buffer->layout.value().as<TrainiumLayoutNode>()) {
       auto simplified_indices = this->IterMapSimplifyWithContext(indices, false);
       if (buffer->layout.defined()) {
         simplified_indices = buffer->layout.value()->Apply(simplified_indices, buffer->shape);
@@ -487,7 +542,6 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
   std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_remap_;
 };
 
-
 class BufferOffsetRemover : public StmtExprMutator {
  public:
   static Stmt Remove(const Stmt& stmt) { return BufferOffsetRemover()(stmt); }
@@ -522,6 +576,7 @@ Pass LowerTIRp() {
     NoOpCallVerifier::Verify(f, true);
 
     // Lower other TIRp aux data structures
+    n->body = ExecScopeSliceResolver::Resolve(n->body);
     n->body = ScheduleContextRemover::Remove(n->body);
     n->body = LogicalTensorRemover::Remove(n->body, n->buffer_map);
     n->body = StorageLower::Flatten(n->body, n->buffer_map);

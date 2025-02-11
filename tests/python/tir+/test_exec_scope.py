@@ -44,7 +44,7 @@ def test_exec_scope_create():
     assert is_trivial_scope(wg)
     assert is_trivial_scope(cta)
     assert is_trivial_scope(cluster)
-    
+
     with pytest.raises(Exception, match="Unknown scope name"):
         ExecScope.create("aaa")
 

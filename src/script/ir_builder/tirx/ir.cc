@@ -227,7 +227,8 @@ Buffer BufferGet(tvm::tirx::Buffer buffer) {
 }
 
 SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
-                  ffi::String exec_scope_slice_parent) {
+                  ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                  ffi::String scope_slice_parent) {
   ObjectPtr<SBlockFrameNode> n = ffi::make_object<SBlockFrameNode>();
   n->name = name;
   n->iter_vars.clear();
@@ -245,7 +246,8 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
   } else {
     n->exec_scope = tvm::tirx::ExecScope::Create(exec_scope);
   }
-  n->exec_scope_slice_parent = exec_scope_slice_parent;
+  n->scope_slice_parent = scope_slice_parent;
+  n->scope_slice_extents = scope_slice_extents;
   n->buffer_views.clear();
   n->buffer_gets.clear();
   n->barriers.clear();
@@ -258,35 +260,41 @@ void OpCall(tvm::Op op, Array<ObjectRef> args) { AddToParent(tvm::tirx::tirp::Op
 BlockFrame BlockFrameSlice(BlockFrame block, Optional<Array<Range>> slices,
                            Optional<PrimExpr> select_cond) {
   ICHECK(block->exec_scope.defined()) << "InternalError: Block frame must have an execution scope";
-  ICHECK(block->exec_scope_slice_parent.defined())
+  ICHECK(block->scope_slice_parent.defined())
       << "InternalError: Block frame must have an execution scope slice parent";
   ICHECK(!block->exec_scope->IsInstance<tvm::tirx::ExecScopeSliceNode>())
       << "InternalError: Block frame already has an execution scope slice";
-  block->exec_scope = tvm::tirx::ExecScopeSlice(slices, select_cond, block->exec_scope_slice_parent,
-                                               block->exec_scope.value()->name);
+  block->exec_scope =
+      tvm::tirx::ExecScopeSlice(slices, select_cond, block->scope_slice_extents,
+                               block->scope_slice_parent, block->exec_scope.value()->name);
   return block;
 }
 
-BlockFrame World() { return Block("", false, "world", ""); }
+BlockFrame World() { return Block("", false, "world", NullOpt, ""); }
 
-BlockFrame Kernel(String exec_scope_slice_parent) {
-  return Block("", false, "kernel", exec_scope_slice_parent);
+BlockFrame Kernel(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                  ffi::String scope_slice_parent) {
+  return Block("", false, "kernel", scope_slice_extents, scope_slice_parent);
 }
 
-BlockFrame WarpGroup(String exec_scope_slice_parent) {
-  return Block("", false, "warpgroup", exec_scope_slice_parent);
+BlockFrame WarpGroup(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                     ffi::String scope_slice_parent) {
+  return Block("", false, "warpgroup", scope_slice_extents, scope_slice_parent);
 }
 
-BlockFrame CTA(String exec_scope_slice_parent) {
-  return Block("", false, "cta", exec_scope_slice_parent);
+BlockFrame CTA(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+               ffi::String scope_slice_parent) {
+  return Block("", false, "cta", scope_slice_extents, scope_slice_parent);
 }
 
-BlockFrame Warp(String exec_scope_slice_parent) {
-  return Block("", false, "warp", exec_scope_slice_parent);
+BlockFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                ffi::String scope_slice_parent) {
+  return Block("", false, "warp", scope_slice_extents, scope_slice_parent);
 }
 
-BlockFrame Thread(String exec_scope_slice_parent) {
-  return Block("", false, "thread", exec_scope_slice_parent);
+BlockFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                  ffi::String scope_slice_parent) {
+  return Block("", false, "thread", scope_slice_extents, scope_slice_parent);
 }
 
 BlockFrame ScopeSlice(ffi::Optional<ffi::Array<Range>> slices, ffi::Optional<PrimExpr> select_cond,
@@ -1142,7 +1150,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

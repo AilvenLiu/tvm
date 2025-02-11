@@ -140,11 +140,13 @@ Buffer BufferGet(tvm::tirx::Buffer buffer);
  * \param name The name of the block.
  * \param no_realize The flag whether to construct SBlockRealize or SBlock.
  * \param exec_scope The name of the execution scope.
- * \param exec_scope_slice_parent The name of the execution scope slice parent.
+ * \param scope_slice_extents The extents of the execution scope slice.
+ * \param scope_slice_parent The name of the execution scope slice parent.
  * \return The SBlockFrame.
  */
 SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_scope = "",
-                  ffi::String exec_scope_slice_parent = "");
+                  ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
+                  ffi::String scope_slice_parent = "");
 
 void OpCall(tvm::Op op, Array<ObjectRef> args);
 
@@ -153,15 +155,17 @@ BlockFrame BlockFrameSlice(BlockFrame block, ffi::Optional<ffi::Array<Range>> sl
 
 BlockFrame World();
 
-BlockFrame Kernel(ffi::String exec_scope_slice_parent = "");
+BlockFrame Kernel(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                  ffi::String scope_slice_parent);
 
-BlockFrame CTA(ffi::String exec_scope_slice_parent = "");
+BlockFrame CTA(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+               ffi::String scope_slice_parent);
 
-BlockFrame Warp(ffi::String exec_scope_slice_parent = "");
+BlockFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                ffi::String scope_slice_parent);
 
-BlockFrame Thread(ffi::String exec_scope_slice_parent = "");
-
-BlockFrame ScopeSlice(ffi::Array<Range> slices, ffi::String parent, ffi::String cur);
+BlockFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
+                  ffi::String scope_slice_parent);
 
 tvm::tirx::Var KernelId(PrimExpr extent);
 

@@ -167,7 +167,9 @@ class SBlockFrameNode : public TIRFrameNode {
 
   // TIR+ signature
   Optional<tvm::tirx::ExecScope> exec_scope;
-  String exec_scope_slice_parent;
+  String scope_slice_parent;
+  Optional<Array<PrimExpr>> scope_slice_extents;
+
   Array<tvm::tirx::BufferView> buffer_views;
   Array<tvm::tirx::BufferGet> buffer_gets;
   Array<tvm::tirx::Barrier> barriers;
@@ -189,7 +191,8 @@ class SBlockFrameNode : public TIRFrameNode {
         .def_ro("predicate", &SBlockFrameNode::predicate)
         .def_ro("no_realize", &SBlockFrameNode::no_realize)
         .def_ro("exec_scope", &SBlockFrameNode::exec_scope)
-        .def_ro("exec_scope_slice_parent", &SBlockFrameNode::exec_scope_slice_parent)
+        .def_ro("scope_slice_parent", &SBlockFrameNode::scope_slice_parent)
+        .def_ro("scope_slice_extents", &SBlockFrameNode::scope_slice_extents)
         .def_ro("buffer_views", &SBlockFrameNode::buffer_views)
         .def_ro("buffer_gets", &SBlockFrameNode::buffer_gets)
         .def_ro("barriers", &SBlockFrameNode::barriers)
@@ -622,7 +625,7 @@ class ElseFrame : public TIRFrame {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ElseFrame, TIRFrame, ElseFrameNode);
 };
 
-}  // namespace tirxxxxxx
+}  // namespace tirxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

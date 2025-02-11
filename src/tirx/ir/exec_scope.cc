@@ -97,12 +97,23 @@ TVM_REGISTER_GLOBAL("tirx.KernelScope").set_body_typed([](Array<ScopeIdDef> def)
 
 // ExecScopeSlice
 ExecScopeSlice::ExecScopeSlice(Optional<Array<Range>> slices, Optional<PrimExpr> select_cond,
-                               String parent, String cur) {
+                               Optional<Array<PrimExpr>> extents, String parent, String cur) {
   auto n = make_object<ExecScopeSliceNode>();
   n->name = cur;
   n->parent = parent;
+  n->extents = std::move(extents);
   CHECK(!slices.defined() || !select_cond.defined())
       << "ValueError: select_cond and slices cannot both be present";
+  if (extents.defined()) {
+    if (slices.defined()) {
+      CHECK_EQ(slices.value().size(), extents.value().size())
+          << "ValueError: Number of slices must match the number of extents";
+    }
+    if (select_cond.defined()) {
+      CHECK_EQ(1, extents.value().size())
+          << "ValueError: Number of select_cond must match the number of extents";
+    }
+  }
   n->slices = std::move(slices);
   n->select_cond = std::move(select_cond);
   data_ = std::move(n);
@@ -111,8 +122,10 @@ ExecScopeSlice::ExecScopeSlice(Optional<Array<Range>> slices, Optional<PrimExpr>
 TVM_REGISTER_NODE_TYPE(ExecScopeSliceNode);
 
 TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
-    .set_body_typed([](Optional<Array<Range>> slices, Optional<PrimExpr> select_cond, String parent,
-                       String cur) { return ExecScopeSlice(slices, select_cond, parent, cur); });
+    .set_body_typed([](Optional<Array<Range>> slices, Optional<PrimExpr> select_cond,
+                       Optional<Array<PrimExpr>> extents, String parent, String cur) {
+      return ExecScopeSlice(slices, select_cond, extents, parent, cur);
+    });
 
 /******** Definition of Var ********/
 // ScopePair
@@ -125,7 +138,7 @@ ScopePair::ScopePair(String parent, String cur) {
 
 TVM_REGISTER_NODE_TYPE(ScopePairNode);
 
-TVM_REGISTER_GLOBAL("tirx.Scope").set_body_typed([](String parent, String cur) {
+TVM_REGISTER_GLOBAL("tirx.ScopePair").set_body_typed([](String parent, String cur) {
   return ScopePair(parent, cur);
 });
 
@@ -249,13 +262,14 @@ ScopeIdResolveTable::Registry& ScopeIdResolveTable::Register(String parent, Stri
   return table->resolve_map_[key];
 }
 
-Array<PrimExpr> ScopeIdResolveTable::Resolve(const ScopeIdDef& def, String target_kind,
-                                             const LaunchParams& params) {
+Array<PrimExpr> ScopeIdResolveTable::Resolve(const ScopePair& scope,
+                                             const Optional<Array<PrimExpr>>& extents, int out_dim,
+                                             String target_kind, const LaunchParams& params) {
   auto table = ScopeIdResolveTable::Global();
-  const auto& key = GetKey(def->scope, target_kind);
+  const auto& key = GetKey(scope, target_kind);
   auto it = table->resolve_map_.find(key);
   CHECK(it != table->resolve_map_.end()) << "Cannot resolve scope id for " << key;
-  return it->second.func_(def, params);
+  return it->second.func_(extents, out_dim, params);
 }
 
 #define TVM_SCOPEID_RESOLVE_FUNC_REG_VAR_DEF \
@@ -277,29 +291,31 @@ std::pair<PrimExpr, PrimExpr> GetThread(const std::string& tag, const LaunchPara
   return {(*it).second->var, (*it).second->dom->extent};
 }
 
-Array<PrimExpr> Trivial3DResolve(const ScopeIdDef& def, const LaunchParams& params,
-                                 const std::string& prefix) {
-  CHECK_LE(def->extents.size(), 3) << "ValueError: kernel->cta can only have 3 dimensions";
+Array<PrimExpr> Trivial3DResolve(const LaunchParams& params, const std::string& prefix,
+                                 int out_dim) {
   Array<PrimExpr> ret;
-  for (size_t i = 0; i < def->extents.size(); i++) {
+  for (size_t i = 0; i < out_dim; i++) {
     ret.push_back(GetThread(prefix + static_cast<char>('x' + i), params).first);
   }
   return std::move(ret);
 }
 
 TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cta", "cuda")
-    .set([](const ScopeIdDef& def, const LaunchParams& params) -> Array<PrimExpr> {
-      return Trivial3DResolve(def, params, "blockIdx.");
+    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> Array<PrimExpr> {
+      return Trivial3DResolve(params, "blockIdx.", out_dim);
     });
 
 TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
-    .set([](const ScopeIdDef& def, const LaunchParams& params) -> Array<PrimExpr> {
-      return Trivial3DResolve(def, params, "threadIdx.");
+    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> Array<PrimExpr> {
+      return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
 TVM_REGISTER_SCOPEID_RESOLVE("warp", "thread", "cuda")
-    .set([](const ScopeIdDef& def, const LaunchParams& params) -> Array<PrimExpr> {
-      CHECK_EQ(def->extents.size(), 1) << "ValueError: cta->warp can only have 1 dimension for now";
+    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> Array<PrimExpr> {
+      CHECK_EQ(out_dim, 1) << "ValueError: cta->warp can only have 1 dimension for now";
       PrimExpr tx, ty, tz, ex, ey, ez;
       std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
       std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
@@ -309,8 +325,9 @@ TVM_REGISTER_SCOPEID_RESOLVE("warp", "thread", "cuda")
     });
 
 TVM_REGISTER_SCOPEID_RESOLVE("cta", "warp", "cuda")
-    .set([](const ScopeIdDef& def, const LaunchParams& params) -> Array<PrimExpr> {
-      CHECK_EQ(def->extents.size(), 1) << "ValueError: cta->warp can only have 1 dimension for now";
+    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> Array<PrimExpr> {
+      CHECK_EQ(out_dim, 1) << "ValueError: cta->warp can only have 1 dimension for now";
       PrimExpr tx, ty, tz, ex, ey, ez;
       std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
       std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
@@ -320,9 +337,10 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "warp", "cuda")
     });
 
 TVM_REGISTER_SCOPEID_RESOLVE("cluster", "cta", "cuda")
-    .set([](const ScopeIdDef& def, const LaunchParams& params) -> Array<PrimExpr> {
-      return Trivial3DResolve(def, params, "clusterCtaIdx.");
+    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> Array<PrimExpr> {
+      return Trivial3DResolve(params, "clusterCtaIdx.", out_dim);
     });
 
-}  // namespace tirxxx
+}  // namespace tirx
 }  // namespace tvm

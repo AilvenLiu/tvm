@@ -144,7 +144,8 @@ class ScopeIdResolveTable {
   using ScopeIdSet = ScopeIdDefVerifier::ScopeIdSet;
   using LaunchParams = std::unordered_map<String, IterVar, ObjectHash, ObjectEqual>;
 
-  typedef Array<PrimExpr> (*ResolveFunc)(const ScopeIdDef& def, const LaunchParams& params);
+  typedef Array<PrimExpr> (*ResolveFunc)(const Optional<Array<PrimExpr>>& extents, int out_dim,
+                                         const LaunchParams& params);
 
   static ScopeIdResolveTable* Global() {
     static ScopeIdResolveTable inst;
@@ -167,8 +168,8 @@ class ScopeIdResolveTable {
   static Registry& Register(String parent, String cur, String target_kind);
 
   /*! \brief Resolve a ScopeIdDef */
-  static Array<PrimExpr> Resolve(const ScopeIdDef& def, String target_kind,
-                                 const LaunchParams& params);
+  static Array<PrimExpr> Resolve(const ScopePair& scope, const Optional<Array<PrimExpr>>& extents,
+                                 int out_dim, String target_kind, const LaunchParams& params);
 
  private:
   static std::string GetKey(const ScopePair& scope, const String& target_kind) {
@@ -296,24 +297,29 @@ class ExecScopeSliceNode : public ExecScopeNode {
   Optional<Array<Range>> slices;
   /*! \brief select condition */
   Optional<PrimExpr> select_cond;
+  /*! \brief extents of the execution scope */
+  Optional<Array<PrimExpr>> extents;
   /*! \brief parent scope name */
   String parent;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("slices", &slices);
     v->Visit("select_cond", &select_cond);
+    v->Visit("extents", &extents);
     v->Visit("parent", &parent);
     ExecScopeNode::VisitAttrs(v);
   }
 
   bool SEqualReduce(const ExecScopeSliceNode* other, SEqualReducer equal) const {
     return equal(slices, other->slices) && equal(select_cond, other->select_cond) &&
-           equal(parent, other->parent) && ExecScopeNode::SEqualReduce(other, equal);
+           equal(extents, other->extents) && equal(parent, other->parent) &&
+           ExecScopeNode::SEqualReduce(other, equal);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(slices);
     hash_reduce(select_cond);
+    hash_reduce(extents);
     hash_reduce(parent);
     ExecScopeNode::SHashReduce(hash_reduce);
   }
@@ -327,7 +333,7 @@ class ExecScopeSliceNode : public ExecScopeNode {
 class ExecScopeSlice : public ExecScope {
  public:
   TVM_DLL explicit ExecScopeSlice(Optional<Array<Range>> slices, Optional<PrimExpr> select_cond,
-                                  String parent, String cur);
+                                  Optional<Array<PrimExpr>> extents, String parent, String cur);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeSliceNode);

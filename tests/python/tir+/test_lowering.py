@@ -214,6 +214,38 @@ def test_lower_scope_id():
     compare(before2, after2, LowerTIRp)
 
 
+def test_lower_scope_slice():
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before():
+        with T.kernel():
+            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            tx = T.thread_id([128], parent="cta")
+            
+            with T.cta()[0:1, 0:2, 0:3]:
+                with T.thread()[0:64]:
+                    T.evaluate(tx)
+                    T.evaluate(warp_id)
+
+    @T.prim_func(private=True, tirp=True)
+    def main():
+        with T.kernel():
+            blockIdx_x = T.launch_thread("blockIdx.x", 3)
+            threadIdx_x = T.launch_thread("threadIdx.x", 128)
+            blockIdx_y = T.launch_thread("blockIdx.y", 4)
+            blockIdx_z = T.launch_thread("blockIdx.z", 5)
+            with T.cta()[0:1, 0:2, 0:3]:
+                if blockIdx_x >= 0 and blockIdx_x < 1 and blockIdx_y >= 0 and blockIdx_y < 2 and blockIdx_z >= 0 and blockIdx_z < 3:
+                    with T.thread()[0:64]:
+                        if threadIdx_x >= 0 and threadIdx_x < 64:
+                            T.evaluate(threadIdx_x)
+                            T.evaluate(threadIdx_x // 32)
+    # fmt: on
+
+    compare(before, main, LowerTIRp)
+
+
 def test_lower_layout():
     # fmt: off
     @T.prim_func(private=True, tirp=True)
@@ -313,6 +345,7 @@ def test_lower_decl_buffer_access_ptr():
 if __name__ == "__main__":
     test_lower_view_get()
     test_lower_scope_id()
+    test_lower_scope_slice()
     test_lower_layout()
     test_lower_opcall_fail()
     test_lower_decl_buffer_access_ptr()

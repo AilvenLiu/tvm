@@ -320,10 +320,13 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   if (block->exec_scope.defined()) {
     if (auto scope_slice_opt = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
       auto scope_slice = scope_slice_opt.value();
-      ExprDoc call = TIR(d, block->exec_scope.value()->name)
-                         ->Call({LiteralDoc::Str(scope_slice->parent,
-                                                 block_p->Attr("exec_scope")->Attr("parent"))});
+      ExprDoc extents_doc =
+          d->AsDoc<ExprDoc>(scope_slice->extents, block_p->Attr("exec_scope")->Attr("extents"));
+      ExprDoc parent_doc =
+          LiteralDoc::Str(scope_slice->parent, block_p->Attr("exec_scope")->Attr("parent"));
+      ExprDoc call = TIR(d, block->exec_scope.value()->name)->Call({extents_doc, parent_doc});
       if (scope_slice->slices.defined()) {
+        // slices
         auto slices = scope_slice->slices.value();
         Array<Doc> slices_doc;
         for (size_t i = 0; i < slices.size(); ++i) {
@@ -334,6 +337,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
         }
         return ScopeDoc(std::nullopt, call.operator[](slices_doc), (*frame)->stmts);
       } else {
+        // select_cond
         ICHECK(scope_slice->select_cond.defined());
         auto cond = scope_slice->select_cond.value();
         auto cond_doc = d->AsDoc<ExprDoc>(cond, block_p->Attr("exec_scope")->Attr("select_cond"));
