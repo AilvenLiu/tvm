@@ -55,6 +55,7 @@ class TLayout(Object):
         """Check if the layout is swizzle."""
         return isinstance(self, SwizzleLayout)
 
+
 @register_object("tirx.DeviceIterAttr")
 class DeviceIterAttr(Object):
     Split = 0
@@ -155,7 +156,7 @@ class TileLayout(TLayout):
         return data_iter_array, device_iter_array
 
     @staticmethod
-    def from_nested_tuple(
+    def from_tuple(
         data: Union[Tuple, int, PrimExpr, S],
         strides: Optional[Union[Tuple, int, PrimExpr]] = None,
         device: Optional[Union[Tuple, int, PrimExpr]] = None,
@@ -285,11 +286,12 @@ class SwizzleLayout(TLayout):
             swizzle_inner,
         )
 
+
 @register_object("tirx.TrainiumLayout")
 class TrainiumLayout(TLayout):
 
-    Partition=0
-    Free=1
+    Partition = 0
+    Free = 1
 
     dimension_types: Tuple[int]
     combined_1d_layout: TileLayout
@@ -301,8 +303,11 @@ class TrainiumLayout(TLayout):
     ):
         if isinstance(dimension_types, str):
             for c in dimension_types:
-                assert c in ['P', 'F'], "dimension_types must be a string of 'P' and 'F'"
-            dimension_types = [TrainiumLayout.Partition if c == 'P' else TrainiumLayout.Free for c in dimension_types]
+                assert c in ["P", "F"], "dimension_types must be a string of 'P' and 'F'"
+            dimension_types = [
+                TrainiumLayout.Partition if c == "P" else TrainiumLayout.Free
+                for c in dimension_types
+            ]
         self.__init_handle_by_constructor__(
             _ffi_api.TrainiumLayout, ShapeTuple(dimension_types), combined_1d_layout
         )
@@ -310,8 +315,6 @@ class TrainiumLayout(TLayout):
     @property
     def partition_size(self):
         return get_global_func("tir.TrainiumLayoutGetPartitionSize")(self)
-    
-    
 
     @staticmethod
     def normalize(layout: "TrainiumLayout") -> "TrainiumLayout":

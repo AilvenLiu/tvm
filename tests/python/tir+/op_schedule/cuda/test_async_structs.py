@@ -31,9 +31,9 @@ def test_pipeline_no_specialize_cta():
     @T.prim_func(tirp=True)
     def test(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (N, M), "float32", scope="global", 
-                           layout=T.TileLayout.from_nested_tuple((1024, 4096)))
+                           layout=T.TileLayout.from_tuple((1024, 4096)))
         B = T.match_buffer(B_ptr, (N, 128), "float32", scope="global",
-                           layout=T.TileLayout.from_nested_tuple((1024, 128)))
+                           layout=T.TileLayout.from_tuple((1024, 128)))
 
         with T.kernel():
             bx = T.cta_id([N // 32], parent="kernel")
@@ -41,9 +41,9 @@ def test_pipeline_no_specialize_cta():
 
             with T.cta():
                 A_smem = T.alloc_buffer([N_STAGES, 32, 128], dtype="float32", scope="shared.dyn", 
-                                        layout=T.TileLayout.from_nested_tuple((N_STAGES, 32, 128)))
+                                        layout=T.TileLayout.from_tuple((N_STAGES, 32, 128)))
                 O_smem = T.alloc_buffer([32, 128], dtype="float32", scope="shared.dyn", 
-                                        layout=T.TileLayout.from_nested_tuple((32, 128)))
+                                        layout=T.TileLayout.from_tuple((32, 128)))
 
                 pipe = Tp.alloc_copy_pipeline(thread_scope="cta", depth=0, separate_pc=False)
 

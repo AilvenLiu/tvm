@@ -30,14 +30,14 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 def test_simple_gemm():
     A_layout = T.TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_nested_tuple((128, 128), (1, 1))
+        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
     )
     B_layout = T.TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_nested_tuple((128, 128), (1, 1))
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
     )
 
     C_layout = T.TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_nested_tuple((128, 128), (1, 1))
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
     )
     # fmt: off
     @T.prim_func(tirp=True)
@@ -69,16 +69,16 @@ def test_simple_gemm():
 def test_larger_gemm():
     A_layout = T.TrainiumLayout(
         dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((2, 128, 4, 128), (512, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((2, 128, 4, 128), (512, 1, 128, 1)),
     )
     B_layout = T.TrainiumLayout(
         dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
     )
 
     C_layout = T.TrainiumLayout(
         dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((2, 128, 2, 128), (256, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((2, 128, 2, 128), (256, 1, 128, 1)),
     )
     # fmt: off
     @T.prim_func(tirp=True)
@@ -110,16 +110,16 @@ def test_larger_gemm():
 def test_gemm_in_a_loop():
     A_layout = T.TrainiumLayout(
         dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
     )
     B_layout = T.TrainiumLayout(
         dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
     )
 
     C_layout = T.TrainiumLayout(
         dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
     )
     # fmt: off
     @T.prim_func(tirp=True)
@@ -158,16 +158,16 @@ def test_gemm_in_a_loop():
 def test_gemm_with_stride():
     A_layout = T.TrainiumLayout(
         dimension_types="FFPF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 128, 8), (1024, 1, 1, 128)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 128, 8), (1024, 1, 1, 128)),
     )
     B_layout = T.TrainiumLayout(
         dimension_types="PFFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((128, 8, 2, 128), (1, 512, 256, 2)),
+        combined_1d_layout=T.TileLayout.from_tuple((128, 8, 2, 128), (1, 512, 256, 2)),
     )
 
     C_layout = T.TrainiumLayout(
         dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
     )
     # fmt: off
     @T.prim_func(tirp=True)
@@ -207,16 +207,16 @@ def test_gemm_with_stride():
 def test_gemm_swap_lhs_rhs():
     A_layout = T.TrainiumLayout(
         dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
     )
     B_layout = T.TrainiumLayout(
         dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
     )
 
     C_layout = T.TrainiumLayout(
         dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
     )
     # fmt: off
     @T.prim_func(tirp=True)
@@ -255,16 +255,16 @@ def test_gemm_swap_lhs_rhs():
 def test_gemm_with_sbuf_output():
     A_layout = T.TrainiumLayout(
         dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
     )
     B_layout = T.TrainiumLayout(
         dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
     )
 
     C_layout = T.TrainiumLayout(
         dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
     )
     # fmt: off
     @T.prim_func(tirp=True)

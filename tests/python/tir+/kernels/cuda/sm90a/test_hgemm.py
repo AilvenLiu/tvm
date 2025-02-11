@@ -152,9 +152,9 @@ def test_hgemm_hopper_ws_cooperative():
     # fmt: off
     @T.prim_func(tirp=True)
     def manual(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=T.TileLayout.from_nested_tuple((M, K)))
-        B = T.match_buffer(B_ptr, (K, N), "float16", scope="global", layout=T.TileLayout.from_nested_tuple((K, N)))
-        C = T.match_buffer(C_ptr, (M, N), "float32", scope="global", layout=T.TileLayout.from_nested_tuple((M, N)))
+        A = T.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=T.TileLayout.from_tuple((M, K)))
+        B = T.match_buffer(B_ptr, (K, N), "float16", scope="global", layout=T.TileLayout.from_tuple((K, N)))
+        C = T.match_buffer(C_ptr, (M, N), "float32", scope="global", layout=T.TileLayout.from_tuple((M, N)))
 
         A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
@@ -176,8 +176,8 @@ def test_hgemm_hopper_ws_cooperative():
                 B_smem = T.alloc_buffer([STAGES_MMA, BLK_K * BLK_N], "float16", scope="shared.dyn", align=128)
                 C_smem = T.alloc_buffer([STAGES_EPI, BLK_M * 32], "float32", scope="shared.dyn", align=1024)
                 # mainloop pipeline barriers, note that these are cluster-wide barriers
-                full = T.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=T.TileLayout.from_nested_tuple(STAGES_MMA), align=8)
-                empty = T.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=T.TileLayout.from_nested_tuple(STAGES_MMA), align=8)
+                full = T.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=T.TileLayout.from_tuple(STAGES_MMA), align=8)
+                empty = T.alloc_buffer([STAGES_MMA], "uint64", scope="shared.dyn", layout=T.TileLayout.from_tuple(STAGES_MMA), align=8)
 
                 with T.thread():
                     wg_id = int_var()
@@ -511,9 +511,9 @@ def test_hgemm_hopper_no_ws():
 
     @T.prim_func(tirp=True)
     def manual(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=T.TileLayout.from_nested_tuple((M, K)))
-        B = T.match_buffer(B_ptr, (N, K), "float16", scope="global", layout=T.TileLayout.from_nested_tuple((N, K)))
-        C = T.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=T.TileLayout.from_nested_tuple((M, N)))
+        A = T.match_buffer(A_ptr, (M, K), "float16", scope="global", layout=T.TileLayout.from_tuple((M, K)))
+        B = T.match_buffer(B_ptr, (N, K), "float16", scope="global", layout=T.TileLayout.from_tuple((N, K)))
+        C = T.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=T.TileLayout.from_tuple((M, N)))
 
         A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

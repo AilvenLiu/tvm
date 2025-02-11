@@ -459,8 +459,8 @@ def test_fp16_fused_attn():
 
     @T.prim_func(tirp=True)
     def manual(Q_ptr: T.handle, K_ptr: T.handle, V_ptr: T.handle, b_indices_ptr: T.handle, h_indices_ptr: T.handle, q_indices_ptr: T.handle, tiles_indptr_ptr: T.handle, O_ptr: T.handle) -> None:
-        qo_layout = T.meta_var(T.TileLayout.from_nested_tuple(QO_SHAPE))
-        kv_layout = T.meta_var(T.TileLayout.from_nested_tuple(KV_SHAPE))
+        qo_layout = T.meta_var(T.TileLayout.from_tuple(QO_SHAPE))
+        kv_layout = T.meta_var(T.TileLayout.from_tuple(KV_SHAPE))
         Q = T.match_buffer(Q_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
         K = T.match_buffer(K_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
         V = T.match_buffer(V_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)

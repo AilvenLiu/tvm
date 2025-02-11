@@ -287,7 +287,7 @@ def matmul_trn(
                 logical_scope="trn.psum",
                 layout=T.TrainiumLayout(
                     dimension_types,
-                    T.TileLayout.from_nested_tuple(C_psum_shape, (max_inst_size, 1, 1)),
+                    T.TileLayout.from_tuple(C_psum_shape, (max_inst_size, 1, 1)),
                 ),
             )
             for lhs_b_loop, rhs_b_loop in T.grid(lhs_b_extent, rhs_b_extent):

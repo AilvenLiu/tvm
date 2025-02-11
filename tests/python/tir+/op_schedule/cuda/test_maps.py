@@ -55,7 +55,7 @@ from tvm.script import tirp as Tp
 def test_unary_op(input, op_type, dtype):
     g_shape, st_a, st_res, ext_a, ext_res, thread_cnt, dev = input
     s_shape = g_shape
-    g_layout = s_layout = TileLayout.from_nested_tuple(g_shape)
+    g_layout = s_layout = TileLayout.from_tuple(g_shape)
 
     copy_slice = list(slice(None) for _ in range(len(g_shape)))
     map_slice_a = list(slice(st_a[i], st_a[i] + ext_a[i]) for i in range(len(g_shape)))
@@ -156,7 +156,7 @@ def test_binary_op(input, op_type, operands_type, dtype):
 
     g_shape, st_a, st_b, st_res, ext_a, ext_b, ext_res, thread_cnt, dev = input
     s_shape = g_shape
-    g_layout = s_layout = TileLayout.from_nested_tuple(g_shape)
+    g_layout = s_layout = TileLayout.from_tuple(g_shape)
 
     copy_slice = list(slice(None) for i in range(len(g_shape)))
     map_slice_a = list(slice(st_a[i], st_a[i] + ext_a[i]) for i in range(len(g_shape)))

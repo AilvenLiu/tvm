@@ -245,7 +245,7 @@ def test_layout():
             lane = T.thread_id([32], parent="warp")
 
             with T.thread():
-                A = T.alloc_buffer((2,), layout=T.TileLayout.from_nested_tuple(2, 1))
+                A = T.alloc_buffer((2,), layout=T.TileLayout.from_tuple(2, 1))
 
                 A[0] = 0
 
@@ -257,7 +257,7 @@ def test_layout():
             lane = T.thread_id([32], parent="warp")
 
             with T.thread():
-                A = T.alloc_buffer((2,), layout=T.TileLayout.from_nested_tuple(3, 1))
+                A = T.alloc_buffer((2,), layout=T.TileLayout.from_tuple(3, 1))
 
                 A[0] = 0
     @T.prim_func(tirp=True, check_well_formed=False)
@@ -268,7 +268,7 @@ def test_layout():
             lane = T.thread_id([32], parent="warp")
 
             with T.thread():
-                A = T.alloc_buffer((2,), layout=T.TileLayout.from_nested_tuple(3, -1))
+                A = T.alloc_buffer((2,), layout=T.TileLayout.from_tuple(3, -1))
 
                 A[0] = 0
     # fmt: on

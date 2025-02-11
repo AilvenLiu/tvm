@@ -35,9 +35,9 @@ from tvm.script import tirp as Tp
             (0, 0),  # g_st
             (8, 8),  # g_extent
             8,  # thread_cnt
-            TileLayout.from_nested_tuple((16, 16)),  # layoutA
-            TileLayout.from_nested_tuple((16, 16)),  # layoutB
-            TileLayout.from_nested_tuple((8, 8)),  # layoutS
+            TileLayout.from_tuple((16, 16)),  # layoutA
+            TileLayout.from_tuple((16, 16)),  # layoutB
+            TileLayout.from_tuple((8, 8)),  # layoutS
             tvm.cuda(0),
         ),
         ################ A[0:128, 0:32] -> A_smem[0:128, 0:32] -> B[0:128, 0:32] ################
@@ -47,9 +47,9 @@ from tvm.script import tirp as Tp
             (0, 0),  # g_st
             (128, 32),  # g_extent
             32,  # thread_cnt
-            TileLayout.from_nested_tuple((128, 32)),  # layoutA
-            TileLayout.from_nested_tuple((128, 32)),  # layoutB
-            TileLayout.from_nested_tuple((128, 32)),  # layoutS
+            TileLayout.from_tuple((128, 32)),  # layoutA
+            TileLayout.from_tuple((128, 32)),  # layoutB
+            TileLayout.from_tuple((128, 32)),  # layoutS
             tvm.cuda(0),
         ),
         ################ A[32:64, 32:64] -> A_smem[0:32, 0:32] -> B[32:64, 32:64] ################
@@ -59,9 +59,9 @@ from tvm.script import tirp as Tp
             (32, 0),  # g_st
             (32, 32),  # g_extent
             32,  # thread_cnt
-            TileLayout.from_nested_tuple((64, 64)),  # layoutA
-            TileLayout.from_nested_tuple((64, 64)),  # layoutB
-            TileLayout.from_nested_tuple((32, 32)),  # layoutS
+            TileLayout.from_tuple((64, 64)),  # layoutA
+            TileLayout.from_tuple((64, 64)),  # layoutB
+            TileLayout.from_tuple((32, 32)),  # layoutS
             tvm.cuda(0),
         ),
         ################ A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32] ################
@@ -71,9 +71,9 @@ from tvm.script import tirp as Tp
             (0, 0, 0),  # g_st
             (1, 32, 32),  # g_extent
             32,  # thread_cnt
-            TileLayout.from_nested_tuple((4, 32, 32)),  # layoutA
-            TileLayout.from_nested_tuple((4, 32, 32)),  # layoutB
-            TileLayout.from_nested_tuple((32, 32)),  # layoutS
+            TileLayout.from_tuple((4, 32, 32)),  # layoutA
+            TileLayout.from_tuple((4, 32, 32)),  # layoutB
+            TileLayout.from_tuple((32, 32)),  # layoutS
             tvm.cuda(0),
         ),
     ],

@@ -109,7 +109,7 @@ def _get_layout(layout: Optional[Union[str, TLayout]], shape: List[PrimExpr]) ->
         return None
     if isinstance(layout, str):
         assert layout == "default"
-        return TileLayout.from_nested_tuple(shape)
+        return TileLayout.from_tuple(shape)
     assert isinstance(layout, TLayout)
     return layout
 

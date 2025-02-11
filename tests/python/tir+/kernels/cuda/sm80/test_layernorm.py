@@ -52,12 +52,12 @@ def test_layernorm():
     @T.prim_func(tirp=True)
     def layernorm(inp_ptr: T.handle, inp_resid_ptr: T.handle, norm_weight_ptr: T.handle, norm_bias_ptr: T.handle,
                   out_ptr: T.handle, out_resid_ptr: T.handle) -> None:
-        inp = T.match_buffer(inp_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=T.TileLayout.from_nested_tuple((ATTN_B, 1, ATTN_N, ATTN_D)))
-        out = T.match_buffer(out_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=T.TileLayout.from_nested_tuple((ATTN_B, 1, ATTN_N, ATTN_D)))
-        inp_resid = T.match_buffer(inp_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=T.TileLayout.from_nested_tuple((ATTN_B, 1, ATTN_N, ATTN_D)))
-        out_resid = T.match_buffer(out_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=T.TileLayout.from_nested_tuple((ATTN_B, 1, ATTN_N, ATTN_D)))
-        norm_weight = T.match_buffer(norm_weight_ptr, (ATTN_D,), dtype, scope="global", layout=T.TileLayout.from_nested_tuple((ATTN_D,))) # gamma
-        norm_bias = T.match_buffer(norm_bias_ptr, (ATTN_D,), dtype, scope="global", layout=T.TileLayout.from_nested_tuple((ATTN_D,))) # beta
+        inp = T.match_buffer(inp_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=T.TileLayout.from_tuple((ATTN_B, 1, ATTN_N, ATTN_D)))
+        out = T.match_buffer(out_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=T.TileLayout.from_tuple((ATTN_B, 1, ATTN_N, ATTN_D)))
+        inp_resid = T.match_buffer(inp_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=T.TileLayout.from_tuple((ATTN_B, 1, ATTN_N, ATTN_D)))
+        out_resid = T.match_buffer(out_resid_ptr, (ATTN_B, 1, ATTN_N, ATTN_D), dtype, scope="global", layout=T.TileLayout.from_tuple((ATTN_B, 1, ATTN_N, ATTN_D)))
+        norm_weight = T.match_buffer(norm_weight_ptr, (ATTN_D,), dtype, scope="global", layout=T.TileLayout.from_tuple((ATTN_D,))) # gamma
+        norm_bias = T.match_buffer(norm_bias_ptr, (ATTN_D,), dtype, scope="global", layout=T.TileLayout.from_tuple((ATTN_D,))) # beta
 
         with T.kernel():
             bx, by = T.cta_id([T.ceildiv(ATTN_N, N_PER_TILE), ATTN_B], parent="kernel")
@@ -66,12 +66,12 @@ def test_layernorm():
             lane_id = T.thread_id([32], parent="warp")
 
             with T.cta():
-                x_smem = T.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=T.TileLayout.from_nested_tuple((NUM_WORKERS, PIPELINE_DEPTH, ATTN_D)))
-                resid_smem = T.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=T.TileLayout.from_nested_tuple((NUM_WORKERS, PIPELINE_DEPTH, ATTN_D)))
-                norm_weight_smem = T.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=T.TileLayout.from_nested_tuple((ATTN_D,)))
-                norm_bias_smem = T.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=T.TileLayout.from_nested_tuple((ATTN_D,)))
-                mean = T.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=T.TileLayout.from_nested_tuple((NUM_WORKERS, 1, 1)), align=8)
-                var = T.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=T.TileLayout.from_nested_tuple((NUM_WORKERS, 1, 1)), align=8)
+                x_smem = T.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=T.TileLayout.from_tuple((NUM_WORKERS, PIPELINE_DEPTH, ATTN_D)))
+                resid_smem = T.alloc_buffer([NUM_WORKERS, PIPELINE_DEPTH, ATTN_D], dtype, scope="shared", layout=T.TileLayout.from_tuple((NUM_WORKERS, PIPELINE_DEPTH, ATTN_D)))
+                norm_weight_smem = T.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=T.TileLayout.from_tuple((ATTN_D,)))
+                norm_bias_smem = T.alloc_buffer([ATTN_D,], dtype, scope="shared", layout=T.TileLayout.from_tuple((ATTN_D,)))
+                mean = T.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=T.TileLayout.from_tuple((NUM_WORKERS, 1, 1)), align=8)
+                var = T.alloc_buffer([NUM_WORKERS, 1, 1], dtype, scope="shared", layout=T.TileLayout.from_tuple((NUM_WORKERS, 1, 1)), align=8)
 
                 Tp.copy(norm_bias_smem[:], norm_bias[:])
                 Tp.copy(norm_weight_smem[:], norm_weight[:])

@@ -86,7 +86,7 @@ def test_roundtrip_exec_scope():
 
 def test_roundtrip_layout():
     def get_layout1():
-        return T.TileLayout.from_nested_tuple(
+        return T.TileLayout.from_tuple(
             data=(8, T.S(0), 8, T.S(1), 2),
             strides=(6, -1, 2, -1, 1),
             device=(8, 4),
@@ -94,7 +94,7 @@ def test_roundtrip_layout():
         )
 
     def get_layout2():
-        return T.TileLayout.from_nested_tuple(
+        return T.TileLayout.from_tuple(
             data=(8, T.S(0), 8, 4, 2),
             strides=(64, -1, 8, 2, 1),
             device=(8, 4),
@@ -103,7 +103,7 @@ def test_roundtrip_layout():
         )
 
     def get_layout3():
-        return T.TileLayout.from_nested_tuple(
+        return T.TileLayout.from_tuple(
             data=(8, 16, 8, 16),
             strides=(1024, 16, 128, 1),
         )
@@ -144,7 +144,7 @@ def test_roundtrip_buffer_view_get1():
         with T.kernel():
             with T.cta():
                 A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
-                A_layout = T.TileLayout.from_nested_tuple((1, 2), (2, 1))
+                A_layout = T.TileLayout.from_tuple((1, 2), (2, 1))
                 A_warp_layout = T.TileLayout.shard(
                     (8, 8), (8, 4), "S0S1", inner=A_layout, from_to=("thread", "warp")
                 )
@@ -174,7 +174,7 @@ def test_roundtrip_buffer_view_get2():
 
             with T.cta():
                 A = T.alloc_buffer([2,], dtype="float16", scope="local", logical_scope="thread")
-                A_layout = T.TileLayout.from_nested_tuple((1, 2), (2, 1))
+                A_layout = T.TileLayout.from_tuple((1, 2), (2, 1))
                 B_layout = T.TileLayout.shard(
                     (8, 8), (8, 4), "S0S1", inner=A_layout, from_to=("thread", "warp")
                 )

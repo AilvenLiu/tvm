@@ -30,10 +30,10 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 def test_simple_copy():
     src_shape = [128, 512]
-    src_layout = T.TileLayout.from_nested_tuple((128, 512), (512, 1))
+    src_layout = T.TileLayout.from_tuple((128, 512), (512, 1))
     dst_shape = [128, 512]
     dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_nested_tuple((128, 512), (1, 1))
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
     )
 
     @T.prim_func(tirp=True)
@@ -50,7 +50,7 @@ def test_simple_copy():
             A_ptr,
             (128, 512),
             logical_scope="kernel",
-            layout=T.TileLayout.from_nested_tuple(data=(128, 512), strides=(512, 1)),
+            layout=T.TileLayout.from_tuple(data=(128, 512), strides=(512, 1)),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
@@ -68,12 +68,12 @@ def test_simple_copy():
 
 def test_simple_copy_2():
     src_shape = [128, 512]
-    src_layout = T.TileLayout.from_nested_tuple((128, 4, 128), (512, 128, 1))
+    src_layout = T.TileLayout.from_tuple((128, 4, 128), (512, 128, 1))
 
     dst_shape = [128, 512]
     dst_layout = TrainiumLayout(
         dimension_types="FFP",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((128, 4, 128), (4, 1, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((128, 4, 128), (4, 1, 1)),
     )
 
     @T.prim_func(tirp=True)
@@ -90,7 +90,7 @@ def test_simple_copy_2():
             A_ptr,
             (128, 512),
             logical_scope="kernel",
-            layout=T.TileLayout.from_nested_tuple(data=(128, 4, 128), strides=(512, 128, 1)),
+            layout=T.TileLayout.from_tuple(data=(128, 4, 128), strides=(512, 128, 1)),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
@@ -108,11 +108,11 @@ def test_simple_copy_2():
 
 def test_copy_in_a_loop():
     src_shape = [512, 512]
-    src_layout = T.TileLayout.from_nested_tuple((4, 128, 512), (512 * 128, 512, 1))
+    src_layout = T.TileLayout.from_tuple((4, 128, 512), (512 * 128, 512, 1))
     dst_shape = [512, 512]
     dst_layout = TrainiumLayout(
         dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 512), (512, 1, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
     )
 
     @T.prim_func(tirp=True)
@@ -130,7 +130,7 @@ def test_copy_in_a_loop():
             A_ptr,
             (512, 512),
             logical_scope="kernel",
-            layout=T.TileLayout.from_nested_tuple(data=(4, 128, 512), strides=(65536, 512, 1)),
+            layout=T.TileLayout.from_tuple(data=(4, 128, 512), strides=(65536, 512, 1)),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
@@ -148,10 +148,10 @@ def test_copy_in_a_loop():
 
 def test_copy_in_a_loop_2():
     src_shape = [512, 512]
-    src_layout = T.TileLayout.from_nested_tuple((128, 2048), (2048, 1))
+    src_layout = T.TileLayout.from_tuple((128, 2048), (2048, 1))
     dst_shape = [512, 512]
     dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_nested_tuple((128, 2048), (1, 1))
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
     )
 
     @T.prim_func(tirp=True)
@@ -171,7 +171,7 @@ def test_copy_in_a_loop_2():
             A_ptr,
             (512, 512),
             logical_scope="kernel",
-            layout=T.TileLayout.from_nested_tuple(data=(128, 2048), strides=(2048, 1)),
+            layout=T.TileLayout.from_tuple(data=(128, 2048), strides=(2048, 1)),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
@@ -191,11 +191,11 @@ def test_copy_in_a_loop_2():
 def test_copy_transpose_fail():
     src_shape = [512, 512]
     src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_nested_tuple((128, 2048), (1, 1))
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
     )
     dst_shape = [512, 512]
     dst_layout = TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_nested_tuple((2048, 128), (1, 1))
+        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((2048, 128), (1, 1))
     )
 
     @T.prim_func(tirp=True)
@@ -215,12 +215,12 @@ def test_copy_different_f():
     src_shape = [512, 64]
     src_layout = TrainiumLayout(
         dimension_types="FPFFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 4, 4, 4), (64, 1, 16, 4, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4, 4, 4), (64, 1, 16, 4, 1)),
     )
     dst_shape = [512, 64]
     dst_layout = TrainiumLayout(
         dimension_types="FPFFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 4, 4, 4), (64, 1, 4, 16, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4, 4, 4), (64, 1, 4, 16, 1)),
     )
 
     @T.prim_func(tirp=True)
@@ -253,12 +253,12 @@ def test_copy_different_shape():
     src_shape = [512, 64]
     src_layout = TrainiumLayout(
         dimension_types="FPFFF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 4, 4, 4), (64, 1, 16, 4, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4, 4, 4), (64, 1, 16, 4, 1)),
     )
     dst_shape = [4, 128, 4]
     dst_layout = TrainiumLayout(
         dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_nested_tuple((4, 128, 4), (4, 1, 1)),
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4), (4, 1, 1)),
     )
 
     @T.prim_func(tirp=True)
@@ -288,10 +288,10 @@ def test_copy_different_shape():
 
 def test_copy_irregular_shape():
     src_shape = [128, 10000]
-    src_layout = T.TileLayout.from_nested_tuple((128, 10000), (10000, 1))
+    src_layout = T.TileLayout.from_tuple((128, 10000), (10000, 1))
     dst_shape = [128, 512]
     dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_nested_tuple((128, 512), (1, 1))
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
     )
 
     @T.prim_func(tirp=True)
@@ -309,7 +309,7 @@ def test_copy_irregular_shape():
             A_ptr,
             (128, 10000),
             logical_scope="kernel",
-            layout=T.TileLayout.from_nested_tuple(data=(128, 10000), strides=(10000, 1)),
+            layout=T.TileLayout.from_tuple(data=(128, 10000), strides=(10000, 1)),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")

@@ -84,8 +84,8 @@ def test_reduction_op(input, dtype):
     copy_slice_b = list(slice(None) for i in range(len(g_shape_b)))
     reduce_slice_a = list(slice(st_a[i], st_a[i] + extent_a[i]) for i in range(len(g_shape_a)))
     reduce_slice_b = list(slice(st_b[i], st_b[i] + extent_b[i]) for i in range(len(g_shape_b)))
-    g_layout_a = s_layout_a = TileLayout.from_nested_tuple(g_shape_a)
-    g_layout_b = s_layout_b = TileLayout.from_nested_tuple(g_shape_b)
+    g_layout_a = s_layout_a = TileLayout.from_tuple(g_shape_a)
+    g_layout_b = s_layout_b = TileLayout.from_tuple(g_shape_b)
 
     # fmt: off
     @T.prim_func(tirp=True)

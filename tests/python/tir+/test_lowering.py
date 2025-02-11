@@ -47,7 +47,7 @@ def test_lower_view_get():
 
             with T.thread():
                 A = T.alloc_buffer([2], dtype="float16", scope="local",
-                                   layout=T.TileLayout.from_nested_tuple((2,), (1,)))
+                                   layout=T.TileLayout.from_tuple((2,), (1,)))
                 B_layout = T.TileLayout.shard((64,), (32,), "S0", inner=A.layout, from_to=("thread", "warp"))
                 """
                 load in_buf into A
@@ -104,8 +104,8 @@ def test_lower_view_get():
             lane_id = T.thread_id([32], parent="warp")
 
             with T.thread():
-                atom = T.TileLayout.from_nested_tuple((1, 2), (2, 1))
-                tile = T.TileLayout.from_nested_tuple((2, 2), (2, 1))
+                atom = T.TileLayout.from_tuple((1, 2), (2, 1))
+                tile = T.TileLayout.from_tuple((2, 2), (2, 1))
                 warp_atom = T.TileLayout.shard(
                     (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
                 )
