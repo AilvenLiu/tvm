@@ -28,22 +28,13 @@ from tvm.runtime import DataType
 from tvm.arith.analyzer import Analyzer
 from tvm.tir import BufferRegion, PrimFunc, Buffer
 from tvm.tir.expr import FloatImm
-
+from ..common import MapOpType
 
 class InstType(Enum):
     """Enumeration of instruction types for memory operations."""
 
     NORMAL = 0
     CP_ASYNC = 1
-
-class MapOpType(Enum):
-    """Enumeration of common unary and binary operator types."""
-    ADD = 0
-    SUB = 1
-    MUL = 2
-    FDIV = 3
-    ZERO = 4
-    SQRT = 5
 
 
 def copy_cuda_g2s_s2g_2d_cta_vec_load_impl(

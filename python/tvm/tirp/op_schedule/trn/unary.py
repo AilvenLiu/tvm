@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Implementation of copy operator schedules."""
+"""Implementation of unary operator schedules."""
 
 from typing import Optional
 import operator
@@ -23,26 +23,29 @@ import operator
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tirp.op_schedule import ScheduleContext
 
 from functools import reduce
-from tvm._ffi import get_global_func
 from .common import (
-    get_layout_data_iters,
-    infer_range_info,
     generate_axes_in_region,
     get_ewise_dim_map,
     find_max_inst_size_unary,
 )
+from ..common import MapOpType
+
+unary_map_ops = {
+    MapOpType.SQRT: (T.nki_activation, "sqrt"),
+    MapOpType.RECIPROCAL: (T.nki_reciprocal, None),
+}
 
 
-@register_schedule("copy")
-def copy_trn(
+def unary_trn(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
+    unary_op: MapOpType,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
-    """Schedule copy operation between global and shared memory on CUDA."""
+    """Schedule unary operation on Trainium."""
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
@@ -52,17 +55,14 @@ def copy_trn(
         [
             src.layout and dst.layout,
             src.dtype == dst.dtype,
-            (src.scope() == "global" and dst.scope() == "trn.sbuf")
-            or (src.scope() == "trn.sbuf" and dst.scope() == "global")
-            or (src.scope() == "trn.sbuf" and dst.scope() == "trn.sbuf"),
-            (src.scope() == "global" and isinstance(src.layout, T.TileLayout))
-            or (src.scope() == "trn.sbuf" and isinstance(src.layout, T.TrainiumLayout)),
-            (dst.scope() == "global" and isinstance(dst.layout, T.TileLayout))
-            or (dst.scope() == "trn.sbuf" and isinstance(dst.layout, T.TrainiumLayout)),
+            src.scope() == "trn.sbuf" or src.scope() == "trn.psum",
+            dst.scope() == "trn.sbuf",
+            isinstance(src.layout, T.TrainiumLayout),
+            isinstance(dst.layout, T.TrainiumLayout),
         ]
     ):
         return None
-
+    assert unary_op in unary_map_ops, f"Unsupported unary operation {unary_op}"
     # Extract regions and validate dimensions
     analyzer = Analyzer()
     for v, r in sctx.var_range_map.items():
@@ -79,58 +79,28 @@ def copy_trn(
         and all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent_, dst_extent_))
     ):
         return None
-
-    inst_size = None
-    inst_stride = None
-    inst_data_iters = None
-    if isinstance(src.layout, T.TrainiumLayout):
-        inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-            src_buffer_region, dst_buffer_region, analyzer
-        )
-        src_to_dst = True
-    if inst_size is None and isinstance(dst.layout, T.TrainiumLayout):
-        inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-            dst_buffer_region, src_buffer_region, analyzer
-        )
-        src_to_dst = False
-    if src_to_dst:
-        p_size = src_buffer_region.buffer.layout.partition_size
-        f_gen_axes = generate_axes_in_region(
-            src_buffer_region, inst_stride, inst_data_iters, analyzer
-        )
-        dim_map = get_ewise_dim_map(src_buffer_region, dst_buffer_region, analyzer)
-    else:
-        p_size = dst_buffer_region.buffer.layout.partition_size
-        f_gen_axes = generate_axes_in_region(
-            dst_buffer_region, inst_stride, inst_data_iters, analyzer
-        )
-        dim_map = get_ewise_dim_map(dst_buffer_region, src_buffer_region, analyzer)
+    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
+        src_buffer_region, dst_buffer_region, analyzer
+    )
+    p_size = src_buffer_region.buffer.layout.partition_size
+    f_gen_axes = generate_axes_in_region(src_buffer_region, inst_stride, inst_data_iters, analyzer)
 
     def f_gen_src_idx(b_loop, b_extent, f_loop, p_loop):
-        indices = [src_buffer_region.region[i].min for i in range(len(src_buffer_region.region))]
         axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
-        if not src_to_dst:
-            for i, j in dim_map.items():
-                indices[j] += axes[i]
-        else:
-            assert len(indices) == len(axes)
-            for i in range(len(axes)):
-                indices[i] += axes[i]
-        return indices
+        return [src_buffer_region.region[i].min + axes[i] for i in range(len(axes))]
 
     def f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop):
+        dim_map = get_ewise_dim_map(src_buffer_region, dst_buffer_region, analyzer)
         indices = [dst_buffer_region.region[i].min for i in range(len(dst_buffer_region.region))]
         axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
-        if src_to_dst:
-            for i, j in dim_map.items():
-                indices[j] += axes[i]
-        else:
-            assert len(indices) == len(axes)
-            for i in range(len(axes)):
-                indices[i] += axes[i]
+        for i, j in dim_map.items():
+            indices[j] += axes[i]
         return indices
 
     b_extent = reduce(operator.mul, src_extent, 1) // p_size // inst_size
+
+    func, opcode = unary_map_ops[unary_op]
+
     # fmt: off
     @T.prim_func(tirp=True)
     def impl():
@@ -140,7 +110,10 @@ def copy_trn(
                     for f_loop in T.serial(0, inst_size):
                         src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop, p_loop))
                         dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop))
-                        dst[*dst_indices] = src[*src_indices]
+                        if opcode is None:
+                            T.evaluate(func(dst[*dst_indices], src[*src_indices]))
+                        else:
+                            T.evaluate(func(dst[*dst_indices], src[*src_indices], opcode))
     # fmt: on
 
     return impl

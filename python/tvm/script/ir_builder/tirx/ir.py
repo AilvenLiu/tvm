@@ -2245,8 +2245,10 @@ vscale = _op_wrapper(_tir_op.vscale)
 ignore_loop_partition = _op_wrapper(_tir_op.ignore_loop_partition)
 print_buffer = _op_wrapper(_tir_op.print_buffer)
 nki_matmul = _op_wrapper(_tir_op.nki_matmul)
-
-
+nki_activation = _op_wrapper(_tir_op.nki_activation)
+nki_reciprocal = _op_wrapper(_tir_op.nki_reciprocal)
+nki_tensortensor = _op_wrapper(_tir_op.nki_tensortensor)
+nki_tensorscalar = _op_wrapper(_tir_op.nki_tensorscalar)
 def _dtype_forward(func):
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
@@ -2629,6 +2631,10 @@ __all__ = float_types + [
     "ramp",
     "cast",
     "nki_matmul",
+    "nki_activation",
+    "nki_reciprocal",
+    "nki_tensortensor",
+    "nki_tensorscalar",
     # tvm.tirx.expr
     "Var",
     "SizeVar",

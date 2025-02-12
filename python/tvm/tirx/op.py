@@ -4451,3 +4451,99 @@ def nki_matmul(res, lhs, rhs, accum):
         The call expression.
     """
     return call_intrin("", "tir.nki_matmul", res, lhs, rhs, accum)
+
+def nki_activation(result, data, opcode, bias = 0.0, scale = 1.0):
+    """TVM intrinsic to call nki activation instruction
+
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+    
+    data: BufferLoad
+        The data buffer.
+        
+    opcode: str
+        The opcode.
+        
+    bias: PrimExpr
+        The bias.
+        
+    scale: PrimExpr
+        The scale.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_activation", result, data, opcode, bias, scale)
+
+def nki_reciprocal(result, data):
+    """TVM intrinsic to call nki reciprocal instruction
+
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+    
+    data: BufferLoad
+        The data buffer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_reciprocal", result, data)
+
+def nki_tensortensor(result, operand1, operand2, opcode):
+    """TVM intrinsic to call nki tensortensor instruction
+
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+    
+    operand1: BufferLoad
+        The first operand buffer.
+        
+    operand2: BufferLoad
+        The second operand buffer.
+        
+    opcode: str
+        The opcode.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_tensortensor", result, operand1, operand2, opcode)
+
+def nki_tensorscalar(result, operand1, operand2, opcode, reorder):
+    """TVM intrinsic to call nki tensorscalar instruction
+
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+    
+    operand1: BufferLoad
+        The first operand buffer.
+        
+    operand2: PrimExpr
+        The second operand scalar.
+        
+    opcode: str
+        The opcode.
+        
+    reorder: bool
+        Whether to reorder the operands.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_tensorscalar", result, operand1, operand2, opcode, reorder)

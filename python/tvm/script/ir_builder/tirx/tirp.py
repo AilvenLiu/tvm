@@ -114,7 +114,8 @@ def sub(
         The source buffer region 2, or float.
     """
     dst = _to_region(dst)
-    src1 = _to_region(src1)
+    if isinstance(src1, Buffer):
+        src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
     return _ffi_api.OpCall(_get_tirp_op("sub"), [dst, src1, src2])
@@ -260,6 +261,23 @@ def reduce(
     src = _to_region(src)
     return _ffi_api.OpCall(_get_tirp_op("reduce"), [dst, src, accum, reduce_op])
 
+def reciprocal(
+    dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]
+):
+    """Reciprocal all elements in src and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for reciprocal result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+    """
+    dst = _to_region(dst)
+    src = _to_region(src)
+    return _ffi_api.OpCall(_get_tirp_op("reciprocal"), [dst, src])
+
 
 def alloc_copy_pipeline(
     thread_scope: ExecScope, depth: int, separate_pc: bool, name_hint: str = ""
@@ -303,5 +321,6 @@ __all__ = [
     "fill",
     "gemm",
     "reduce",
+    "reciprocal",
     "alloc_copy_pipeline",
 ]

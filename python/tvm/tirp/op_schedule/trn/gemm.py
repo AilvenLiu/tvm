@@ -27,7 +27,7 @@ from tvm.ir import Range, assert_structural_equal
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from .common import (
     get_layout_data_iters,
-    normalize_buffer_region_with_layout,
+    infer_range_info,
     generate_axes_in_region,
 )
 
@@ -50,7 +50,7 @@ def get_pf_dim_from_buffer_region(
         if not analyzer.can_prove_equal(r.extent, 1):
             non_unit_dims.append(i)
     assert len(non_unit_dims) == 2, "Only 2D matrix is supported for gemm"
-    _, layout, seps = normalize_buffer_region_with_layout(buffer_region, analyzer)
+    _, layout, seps = infer_range_info(buffer_region, analyzer)
     if operator_kind == OperatorKind.A:
         p_dim = non_unit_dims[1]
         f_dim = non_unit_dims[0]
@@ -78,9 +78,7 @@ def get_inst_size(
     operator_kind: OperatorKind,
 ):
     p_dim, f_dim = get_pf_dim_from_buffer_region(buffer_region, analyzer, operator_kind)
-    tiled_range_infos_per_dim, layout, seps = normalize_buffer_region_with_layout(
-        buffer_region, analyzer
-    )
+    tiled_range_infos_per_dim, layout, seps = infer_range_info(buffer_region, analyzer)
     # check p_dim covers whole partition
     prod = 1
     data_iters = get_layout_data_iters(layout)

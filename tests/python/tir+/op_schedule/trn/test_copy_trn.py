@@ -325,5 +325,39 @@ def test_copy_irregular_shape():
         assert_structural_equal(mod["main"], expected)
 
 
+def test_copy_different_shape_dim():
+    src_shape = [32, 128, 512]
+    src_layout = T.TileLayout.from_tuple((32, 128, 512), (128 * 512, 128, 1))
+    dst_shape = [128, 512]
+    dst_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
+    )
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def copy(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, src_shape, "float32", layout=src_layout)
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            for i in range(32):
+                Tp.copy(A_sbuf, A[i, :, :])
+        
+    @T.prim_func(tirp=True)
+    def expected(A_ptr: T.handle):
+        T.func_attr({"global_symbol": "copy"})
+        A = T.match_buffer(A_ptr, (32, 128, 512), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(32, 128, 512), strides=(65536, 128, 1)))
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop in T.grid(32, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    A_1 = T.Buffer((2097152,), data=A.data, logical_scope="kernel")
+                    A_sbuf[p_loop, f_loop] = A_1[i * 65536 + p_loop * 128 + f_loop]        
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": copy})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

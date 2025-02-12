@@ -120,7 +120,7 @@ TIRP_DEFINE_SCHEDULE_OP(sub).set_num_inputs(3).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
       ICHECK_EQ(args.size(), 3U) << "sub() expects 3 arguments";
       ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of sub() must be BufferRegion";
-      ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of sub() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>() || args[1].as<FloatImmNode>()) << "arg[1] of sub() must be BufferRegion";
       ICHECK(args[2].as<BufferRegionNode>() || args[2].as<FloatImmNode>()) << "arg[2] of sub() must be BufferRegion or FloatImm";
     });
 
@@ -170,6 +170,13 @@ TIRP_DEFINE_SCHEDULE_OP(reduce).set_num_inputs(4).set_attr<FArgSanitizer>(
         ICHECK_EQ(args.size(), 4U) << "reduce() expects 4 arguments";
         ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of reduce() must be BufferRegion";
         ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of reduce() must be BufferRegion";
+    });
+
+TIRP_DEFINE_SCHEDULE_OP(reciprocal).set_num_inputs(2).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+        ICHECK_EQ(args.size(), 2U) << "reciprocal() expects 2 arguments";
+        ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of reciprocal() must be BufferRegion";
+        ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of reciprocal() must be BufferRegion";
     });
 
 /********************* Pipeline Ops **********************/

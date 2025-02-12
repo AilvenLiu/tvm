@@ -1,0 +1,330 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+import pytest
+
+import tvm
+from tvm.tir.layout import TrainiumLayout, TileLayout
+import numpy as np
+import tvm.testing
+from tvm.script import ir as I
+from tvm.script import tir as T
+from tvm.script import tirp as Tp
+from tvm.ir import assert_structural_equal
+
+target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+
+Tp_func_map = {
+    "reciprocal": Tp.reciprocal,
+    "sqrt": Tp.sqrt,
+    "add": Tp.add,
+    "sub": Tp.sub,
+    "mul": Tp.mul,
+}
+
+
+@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt"])
+def test_simple_unary(op_type):
+    src_shape = [128, 512]
+    src_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
+    )
+    dst_shape = [128, 512]
+    dst_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
+    )
+    tp_func = Tp_func_map[op_type]
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def unary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            tp_func(B_sbuf, A_sbuf)
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "unary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop in range(1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    if op_type == "reciprocal":
+                        T.nki_reciprocal(
+                            B_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop]
+                        )
+                    elif op_type == "sqrt":
+                        T.nki_activation(
+                            B_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], "sqrt"
+                        )
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": unary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt"])
+def test_unary_in_a_loop(op_type):
+    src_shape = [1024, 512]
+    src_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 4096), (1, 1))
+    )
+    dst_shape = [512, 512]
+    dst_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
+    )
+
+    Tp_func = Tp_func_map[op_type]
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def unary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            A_sbuf_view = T.view(A_sbuf, A_sbuf.layout, (128, 8, 512))
+            B_sbuf_view = T.view(B_sbuf, B_sbuf.layout, (128, 4, 512))
+            for i in range(4):
+                Tp_func(B_sbuf_view[:, i, :], A_sbuf_view[:, i * 2, :])
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "unary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop in T.grid(4, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    if op_type == "reciprocal":
+                        T.nki_reciprocal(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop])
+                    elif op_type == "sqrt":
+                        T.nki_activation(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], "sqrt")
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": unary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+@pytest.mark.parametrize("op_type", ["add", "sub", "mul"])
+@pytest.mark.parametrize(
+    "operands_type",
+    [
+        "region_region",
+        "const_region",
+        "region_const",
+        "region_broadcast_lhs",
+        "region_broadcast_rhs",
+    ],
+)
+def test_simple_binary(op_type, operands_type):
+    const = T.float32(3.0)
+    src1_shape = [128, 512] if operands_type != "region_broadcast_lhs" else [128, 1]
+    src1_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple(src1_shape, (1, 1))
+    )
+    src2_shape = [128, 512] if operands_type != "region_broadcast_rhs" else [128, 1]
+    src2_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple(src2_shape, (1, 1))
+    )
+    dst_shape = [128, 512]
+    dst_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
+    )
+    Tp_func = Tp_func_map[op_type]
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def binary() ->None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
+            B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            if operands_type == "region_region" or operands_type.startswith("region_broadcast"):
+                Tp_func(C_sbuf, A_sbuf, B_sbuf)
+            elif operands_type == "const_region":
+                Tp_func(C_sbuf, const, A_sbuf)
+            elif operands_type == "region_const":
+                Tp_func(C_sbuf, A_sbuf, const)
+                
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "binary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src1_shape, scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer(src2_shape, scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer(dst_shape, scope="trn.sbuf", logical_scope="kernel")
+            for b_loop in range(1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    if operands_type == "region_region":
+                        T.nki_tensortensor(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], B_sbuf[p_loop, f_loop], op_type)
+                    elif operands_type == "region_const":
+                        T.nki_tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], T.float32(3.0), op_type, T.bool(False))
+                    elif operands_type == "const_region":
+                        T.nki_tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], T.float32(3.0), op_type, T.bool(True))
+                    elif operands_type == "region_broadcast_rhs":
+                        T.nki_tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], B_sbuf[p_loop, 0], op_type, T.bool(False))
+                    elif operands_type == "region_broadcast_lhs":
+                        T.nki_tensorscalar(C_sbuf[p_loop, f_loop], B_sbuf[p_loop, f_loop], A_sbuf[p_loop, 0], op_type, T.bool(True))
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": binary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+@pytest.mark.parametrize("op_type", ["add", "sub", "mul"])
+@pytest.mark.parametrize(
+    "operands_type",
+    [
+        "region_region",
+        "const_region",
+        "region_const",
+        "region_broadcast_lhs",
+        "region_broadcast_rhs",
+    ],
+)
+def test_binary_complex(op_type, operands_type):
+    src1_shape = [1024, 512] if operands_type != "region_broadcast_lhs" else [1024, 4]
+    src1_layout_data_iter = (128, 4096) if operands_type != "region_broadcast_lhs" else (128, 32)
+    src1_layout = TrainiumLayout(
+        dimension_types="PF",
+        combined_1d_layout=T.TileLayout.from_tuple(src1_layout_data_iter, (1, 1)),
+    )
+    src2_shape = [512, 512] if operands_type != "region_broadcast_rhs" else [128, 512]
+    src2_layout_data_iter = (128, 2048) if operands_type != "region_broadcast_rhs" else (128, 512)
+    src2_layout = TrainiumLayout(
+        dimension_types="PF",
+        combined_1d_layout=T.TileLayout.from_tuple(src2_layout_data_iter, (1, 1)),
+    )
+
+    dst_shape = [512, 512]
+    dst_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
+    )
+    const = T.float32(3.0)
+    Tp_func = Tp_func_map[op_type]
+
+    src1_view_shape = [128, 8, 512]
+    src2_view_shape = [128, 4, 512] if operands_type != "region_broadcast_rhs" else [128, 1, 512]
+    dst_view_shape = [128, 4, 512]
+    if operands_type == "region_broadcast_lhs":
+        src1_view_shape = [128, 8, 4, 1]
+        src2_view_shape = [128, 4, 4, 128]
+        dst_view_shape = [128, 4, 4, 128]
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def binary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
+            B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            A_sbuf_view = T.view(A_sbuf, A_sbuf.layout, src1_view_shape)
+            B_sbuf_view = T.view(B_sbuf, B_sbuf.layout, src2_view_shape)
+            C_sbuf_view = T.view(C_sbuf, C_sbuf.layout, dst_view_shape)
+            for i in range(4):
+                if operands_type == "region_region":
+                    Tp_func(C_sbuf_view[:, i, :], A_sbuf_view[:, i * 2, :], B_sbuf_view[:, i, :])
+                elif operands_type == "region_const":
+                    Tp_func(C_sbuf_view[:, i, :], A_sbuf_view[:, i * 2, :], const)
+                elif operands_type == "const_region":
+                    Tp_func(C_sbuf_view[:, i, :], const, A_sbuf_view[:, i * 2, :])
+                elif operands_type == "region_broadcast_rhs":
+                    Tp_func(C_sbuf_view[:, i, :], A_sbuf_view[:, i * 2, :], B_sbuf_view[:, 0, :])
+                elif operands_type == "region_broadcast_lhs":
+                    Tp_func(C_sbuf_view[:, i, :, :], A_sbuf_view[:, i*2,:, :], B_sbuf_view[:, i, :, :])
+    
+    f_extent = 128 if operands_type == "region_broadcast_lhs" else 512
+    b_extent = 4 if operands_type == "region_broadcast_lhs" else 1
+    
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "binary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src1_layout_data_iter, scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer(src2_layout_data_iter, scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop in T.grid(4, b_extent):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, f_extent):
+                    if operands_type == "region_region":
+                        T.nki_tensortensor(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], B_sbuf[p_loop, i * 512 + f_loop], op_type)
+                    elif operands_type == "const_region":
+                        T.nki_tensorscalar(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(True))
+                    elif operands_type == "region_const":
+                        T.nki_tensorscalar(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(False))
+                    elif operands_type == "region_broadcast_lhs":
+                        T.nki_tensorscalar(C_sbuf[p_loop, i * 512 + b_loop * 128 + f_loop], B_sbuf[p_loop, i * 512 + b_loop * 128 + f_loop], A_sbuf[p_loop, i * 8 + b_loop], op_type, T.bool(True))
+                    elif operands_type == "region_broadcast_rhs":
+                        T.nki_tensortensor(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], B_sbuf[p_loop, f_loop], op_type)
+
+    # fmt: on
+
+    with target:
+        mod = tvm.IRModule({"main": binary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+def test_binary_broadcast():
+    src1_shape = [32, 128, 512]
+    src1_layout = TrainiumLayout(
+        dimension_types="FFFP",
+        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 4, 128), (1, 32, 32 * 128, 1)),
+    )
+    src2_shape = [128, 512]
+    src2_layout = TrainiumLayout(
+        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((512, 128), (1, 1))
+    )
+    dst_shape = src1_shape
+    dst_layout = src1_layout
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def binary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
+            B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            Tp.add(C_sbuf, A_sbuf, B_sbuf)
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "binary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop in range(512):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 32):
+                    T.nki_tensorscalar(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], "add", T.bool(False))
+    # fmt: on
+
+    with target:
+        mod = tvm.IRModule({"main": binary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+if __name__ == "__main__":
+    tvm.testing.main()

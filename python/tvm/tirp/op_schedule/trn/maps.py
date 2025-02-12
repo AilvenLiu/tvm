@@ -17,23 +17,16 @@
 
 """Implementation of mapping schedules."""
 
-from typing import Optional, Union, Callable, List
-
-from tvm.script import tir as T
-from tvm.tirp.op_schedule import ScheduleContext
-from tvm.tir import BufferRegion, PrimFunc
-from tvm.tir.expr import FloatImm
 
 from ..registry import register_schedule
-from .common import MapOpType, unary_map_cuda_shared_nd_sync_cta_impl, binary_map_cuda_shared_nd_sync_cta_impl
 from ..common import _make_schedule, MapOpType
-
-
+from .binary import binary_trn
+from .unary import unary_trn
 
 # Register unary mapping schedules.
-for op_name, op_type in [("zero", MapOpType.ZERO), ("sqrt", MapOpType.SQRT)]:
-    custom_name = f"unary_{op_name}_cuda_shared_nd_sync_cta_impl"
-    func = _make_schedule(op_type, 1, [unary_map_cuda_shared_nd_sync_cta_impl])
+for op_name, op_type in [("sqrt", MapOpType.SQRT), ("reciprocal", MapOpType.RECIPROCAL)]:
+    custom_name = f"unary_{op_name}_trn_impl"
+    func = _make_schedule(op_type, 1, [unary_trn])
     func.__name__ = custom_name
     func.__doc__ = f"Schedule unary {op_name}."
     register_schedule(op_name)(func)
@@ -44,10 +37,9 @@ for op_name, op_type in [
     ("add", MapOpType.ADD),
     ("sub", MapOpType.SUB),
     ("mul", MapOpType.MUL),
-    ("fdiv", MapOpType.FDIV)
 ]:
-    custom_name = f"binary_{op_name}_cuda_shared_nd_sync_cta_impl"
-    func = _make_schedule(op_type, 2, [binary_map_cuda_shared_nd_sync_cta_impl])
+    custom_name = f"binary_{op_name}_trn_impl"
+    func = _make_schedule(op_type, 2, [binary_trn])
     func.__name__ = custom_name
     func.__doc__ = f"Schedule binary {op_name}."
     register_schedule(op_name)(func)

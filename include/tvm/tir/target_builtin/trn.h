@@ -55,6 +55,34 @@ TVM_DLL const Op& nki_transpose();
  */
 TVM_DLL const Op& nki_sum();
 
+/*!
+ * \brief nki intrinsics for activation operation.
+ *
+ * nki_activation(result, data, opcode, scale)
+ */
+TVM_DLL const Op& nki_activation();
+
+/*!
+ * \brief nki intrinsics for reciprocal operation.
+ *
+ * nki_reciprocal(result, data)
+ */
+TVM_DLL const Op& nki_reciprocal();
+
+/*!
+ * \brief nki intrinsics for sqrt operation.
+ *
+ * nki_tensortensor(result, operand1, operand2, opcode)
+ */
+TVM_DLL const Op& nki_tensortensor();
+
+/*!
+ * \brief nki intrinsics for sqrt operation.
+ *
+ * nki_tensortensor(result, operand1, operand2, opcode, reorder)
+ */
+TVM_DLL const Op& nki_tensorscalar();
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm
