@@ -223,13 +223,14 @@ def test_lower_scope_id():
             wg_id = T.warpgroup_id([3], parent="cta")
             warp_id = T.warp_id([4], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
+            tid_in_wg = T.thread_id([128], parent="warpgroup")
             with T.cta():
                 with T.warpgroup():
                     with T.thread():
                         T.evaluate(bx + by + bz)
                         T.evaluate(cbx + cby + cbz)
                         T.evaluate(clx + cly + clz)
-                        T.evaluate(wg_id + warp_id + lane_id)
+                        T.evaluate(wg_id + warp_id + lane_id + tid_in_wg)
 
     @T.prim_func(private=True, tirp=True)   
     def after3() -> None:
@@ -247,7 +248,7 @@ def test_lower_scope_id():
                         T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z)
                         T.evaluate(clusterCtaIdx_x + clusterCtaIdx_y + clusterCtaIdx_z)
                         T.evaluate(T.ptx_fetch_register(32, "clusterid.x") + T.ptx_fetch_register(32, "clusterid.y") + T.ptx_fetch_register(32, "clusterid.z"))
-                        T.evaluate(threadIdx_x // 128 + threadIdx_x % 128 // 32 + threadIdx_x % 32)
+                        T.evaluate(threadIdx_x // 128 + threadIdx_x % 128 // 32 + threadIdx_x % 32 + threadIdx_x % 128)
     # fmt: on
 
     compare(before3, after3, LowerTIRp)

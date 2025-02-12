@@ -87,7 +87,7 @@ def test_fp8_gemm_hopper_no_ws():
     # fmt: off
     @T.macro
     def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, A_map, B_map, bars: tvm.tir.Buffer):
-        if tid == 0:
+        with T.thread()[tid == 0]:
             stage = T.meta_var(k_tile % STAGES_TMA)
             T.mbarrier_arrive_expect_tx(bars.access_ptr("rw", offset=stage), TMA_BYTES)
             T.cp_async_bulk_tensor_global_to_cluster(
@@ -133,7 +133,7 @@ def test_fp8_gemm_hopper_no_ws():
     def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):
         T.cuda_fence_proxy_async("shared")
         T.tvm_storage_sync("shared")
-        if warp_id == 0 and lane_id == 0:
+        with T.thread()[warp_id == 0 and lane_id == 0]:
             T.cp_async_bulk_tensor_shared_to_global(2, C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
                                                     C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
             T.cp_async_bulk_tensor_commit_group()
@@ -171,6 +171,7 @@ def test_fp8_gemm_hopper_no_ws():
             tid = T.thread_id([128 * 2], parent="cta")
             warp_id = T.warp_id([8], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
+            wg_id = T.warpgroup_id([2], parent="cta")
 
             with T.cta():
                 # tensor stroage
@@ -184,7 +185,6 @@ def test_fp8_gemm_hopper_no_ws():
 
                 with T.thread():
                     # index
-                    wg_id = int_var()
                     tma_index = int_var()
                     mma_index = int_var()
                     # acuumulators
@@ -193,13 +193,12 @@ def test_fp8_gemm_hopper_no_ws():
                     # tile scheduler
                     tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
 
-                    wg_id[0] = tid // WG_SIZE
                     # initialize the tile scheduler
                     tile_scheduler.init(bx)
 
                     while (tile_scheduler.valid()):
                         # initialize the barriers
-                        if (tid == 0):
+                        with T.thread()[tid == 0]:
                             for i in range(STAGES_TMA):
                                 T.mbarrier_init(bars.access_ptr("rw", offset=i), 1)
                         T.tvm_storage_sync("shared")
@@ -218,14 +217,14 @@ def test_fp8_gemm_hopper_no_ws():
                             tma_load(tid, m_idx, n_idx, tma_index[0], A_smem, B_smem, A_map, B_map, bars)
                             tma_index[0] = tma_index[0] + 1
                         for _ in range(STAGES_WGMMA - 1):
-                            mma_compute(wg_id[0], mma_index[0], A_smem, B_smem, accum, bars, desc_A, desc_B)
+                            mma_compute(wg_id, mma_index[0], A_smem, B_smem, accum, bars, desc_A, desc_B)
                             mma_index[0] = mma_index[0] + 1
 
                         # mainloop
                         k_tile_count = T.meta_var((K + BLK_K - 1) // BLK_K)
                         for _ in range(k_tile_count):
                             if mma_index[0] < k_tile_count:
-                                mma_compute(wg_id[0], mma_index[0], A_smem, B_smem, accum, bars, desc_A, desc_B)
+                                mma_compute(wg_id, mma_index[0], A_smem, B_smem, accum, bars, desc_A, desc_B)
                                 mma_index[0] = mma_index[0] + 1
                             # wait for oldest one stage to finish
                             if _ == k_tile_count - 1:

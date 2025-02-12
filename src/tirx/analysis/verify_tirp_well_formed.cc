@@ -51,6 +51,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
 
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
     // C0: exec_scope is defined
+    auto roof = cur_roof_;
     Verify(op->exec_scope != nullptr) << "TIRpError: Block at " << path << " has no exec_scope";
     auto scope = op->exec_scope.value();
     // C1: exec_scope is valid
@@ -143,6 +144,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
         it_slices->second.pop_back();
       }
     }
+    cur_roof_ = roof;
   }
 
   void VisitStmt_(const tirp::OpCallNode* op, ObjectPath path) override {

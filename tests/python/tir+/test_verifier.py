@@ -96,12 +96,25 @@ def test_nested_scope():
                     with T.cta():
                         with T.thread():
                             pass
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test4() -> None:
+        with T.kernel():
+            with T.thread():
+                with T.warpgroup():
+                    with T.warp():
+                        with T.thread():
+                            pass
+                with T.warpgroup():
+                    with T.warp():
+                        with T.thread():
+                            pass
     # fmt: on
 
     verify(test1)
     verify(test2)
     with pytest.raises(Exception, match="invalid exec_scope cta under warp"):
         verify(test3)
+    verify(test4)
 
 
 def test_scope_slice():

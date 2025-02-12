@@ -148,7 +148,7 @@ def test_fp16_fused_attn():
 
         @T.macro
         def init(self, tid):
-            if tid == 0:
+            with T.thread()[tid == 0]:
                 for i in T.serial(KV_STAGES):
                     T.mbarrier_init(self.full.access_ptr("rw", offset=i), 1)
                     T.mbarrier_init(self.empty.access_ptr("rw", offset=i), 2 * WG_SIZE)  # 2 consumers
@@ -396,7 +396,7 @@ def test_fp16_fused_attn():
     ):
         pipeline_k.consumer_wait(consumer_k)
         # commit S_i = Q^TK_i but do not wait
-        gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id[0] - 1, consumer_k)
+        gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)
         # scale O_{i-1} with scale_{i-1}
         softmax.scale_o(O_reg)
         # wait V_{i-1} to be loaded
@@ -409,7 +409,7 @@ def test_fp16_fused_attn():
         pipeline_k.consumer_release(consumer_k)
         # mask S_i
         if do_masking:
-            mask(S_reg, wg_id[0] - 1, warp_id_in_wg[0], lane_id, q_idx * BLK_Q, kv_tile_idx_read[0] * BLK_KV, QO_LEN, KV_LEN)
+            mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read[0] * BLK_KV, QO_LEN, KV_LEN)
         # update m, P, l for the current tile
         softmax.update_m_P_l(S_reg)
         # wait for P_{i-1}V_{i-1} to be computed
@@ -440,7 +440,7 @@ def test_fp16_fused_attn():
     def s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, n_tile):
         T.cuda_fence_proxy_async("shared")
         T.named_barrier_sync(NameBarrier.EPILOGUE, MMA_THREADS)
-        if warp_id == 0 and lane_id == 0:
+        with T.thread()[warp_id == 0 and lane_id == 0]:
             T.cp_async_bulk_tensor_shared_to_global(4, smem_o.access_ptr("r", offset=smem_o.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
                                                     O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)
             T.cp_async_bulk_tensor_commit_group()
@@ -495,7 +495,9 @@ def test_fp16_fused_attn():
             warp_id = T.warp_id([NUM_WARPS], parent="cta")
             tid = T.thread_id([NUM_WARPS * 32], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
-
+            wg_id = T.warpgroup_id([NUM_WARPS // 4], parent="cta")
+            warp_id_in_wg = T.warp_id([4], parent="warpgroup")
+            
             with T.cta():
                 # dyn smem buffer
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
@@ -513,9 +515,6 @@ def test_fp16_fused_attn():
                 smem_o = T.decl_buffer([STAGES_EPI, BLK_Q, TMA_TILE], "float16", buf.data, elem_offset=512 + (BLK_Q + BLK_KV * KV_STAGES) * HEAD_DIM)
 
                 with T.thread():
-                    wg_id = int_var()
-                    tid_in_wg = int_var()
-                    warp_id_in_wg = int_var()
                     # tile scheduler
                     tile_scheduler = T.meta_var(TileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr))
                     # pipeline
@@ -541,14 +540,10 @@ def test_fp16_fused_attn():
                     # softmax
                     softmax = T.meta_var(Softmax("softmax"))
                     ############################################################################## INITIALIZATION
-                    # threading
-                    wg_id[0] = tid // WG_SIZE
-                    tid_in_wg[0] = tid % WG_SIZE
-                    warp_id_in_wg[0] = tid_in_wg[0] // 32
                     # tile scheduler
                     tile_scheduler.init(bx)
                     # barriers
-                    if (tid == 0):
+                    with T.thread()[tid == 0]:
                         T.mbarrier_init(bar_Q.access_ptr("rw", offset=0), 1)
                         T.mbarrier_init(bar_O.access_ptr("rw", offset=0), 1)
                     T.fence_mbarrier_init_release_cluster()
@@ -573,23 +568,23 @@ def test_fp16_fused_attn():
                     is_leader = T.meta_var(T.elect_sync(0xFFFFFFFF))
 
                     P_reg_fp16 = T.decl_buffer([S_REG_COUNT], "float16", data=P_reg.data, elem_offset=0)
-                    if (wg_id[0] == WarpGroupRole.PRODUCER):
+                    with T.warpgroup()[0:1]:
                         ############################################################################## PRODUCER
                         # deallocate registers
                         T.setmaxnreg(False, 24)
                         # only 1 warp is responsible for the producer
-                        if (warp_id_in_wg[0] == 0):
+                        with T.warp()[0:1]:
                             while (tile_scheduler.valid()):
                                 if q_idx * BLK_Q < QO_LEN:
                                     kv_tile_idx_load[0] = num_kv_tiles - 1
                                     # copy a tile of K first
-                                    if (is_leader):
+                                    with T.thread()[is_leader]:
                                         pipeline_k.producer_acquire(producer_k)
                                         pipeline_k.copy(producer_k, smem_k, K_map, 0, h_idx, kv_tile_idx_load[0] * BLK_KV, b_idx)
                                         producer_k.advance()
                                     # wait for consumers to finish the previous Q tile, then load the current Q tile
                                     T.named_barrier_sync(NameBarrier.Q_EMPTY, 32 + MMA_THREADS) # 32 threads in producer, 256 threads in consumer
-                                    if (is_leader):
+                                    with T.thread()[is_leader]:
                                         T.mbarrier_arrive_expect_tx(bar_Q_ptr, TMA_BYTES_Q)
                                         for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
                                             T.cp_async_bulk_tensor_global_to_cluster(
@@ -598,7 +593,7 @@ def test_fp16_fused_attn():
                                             )
                                     # wait for the consumers to finish writing last O_tile to gmem to reuse for Vsmem
                                     T.named_barrier_sync(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
-                                    if (is_leader):
+                                    with T.thread()[is_leader]:
                                         while kv_tile_idx_load[0] > 0:
                                             # load k tiles
                                             pipeline_k.producer_acquire(producer_k)
@@ -617,10 +612,10 @@ def test_fp16_fused_attn():
                                 tile_scheduler.next_tile()
                             # wait until all the consumers finish
                             # in our case, I think it's fine to let producers exit early since there's no cluster coordination
-                            if (is_leader):
+                            with T.thread()[is_leader]:
                                 pipeline_k.producer_tail(producer_k)
                                 pipeline_v.producer_tail(producer_v)
-                    else:
+                    with T.warpgroup()[1:3]:
                         ############################################################################## CONSUMER
                         # allocate registers
                         T.setmaxnreg(True, 240)
@@ -642,7 +637,7 @@ def test_fp16_fused_attn():
                                 # initialize the softmax (m=-INF, l=0)
                                 softmax.init()
                                 # calculate S_0 = Q^TK_0
-                                gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id[0] - 1, consumer_k)
+                                gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)
                                 # wait for O of last tile to be written back to gmem, notifify the producer to load V
                                 T.cp_async_bulk_tensor_wait_group(0)
                                 T.named_barrier_arrive(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
@@ -652,7 +647,7 @@ def test_fp16_fused_attn():
                                 pipeline_k.consumer_release(consumer_k)
                                 consumer_k.advance()
                                 # mask S_0
-                                mask(S_reg, wg_id[0] - 1, warp_id_in_wg[0], lane_id, q_idx * BLK_Q, kv_tile_idx_read[0] * BLK_KV, QO_LEN, KV_LEN)
+                                mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read[0] * BLK_KV, QO_LEN, KV_LEN)
                                 # softmax, initialize m, P, l for the first tile
                                 softmax.init_m_P_l(S_reg)
                                 # copy to P_0 and downcast to float16

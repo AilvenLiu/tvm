@@ -172,47 +172,28 @@ TVM_REGISTER_GLOBAL("tirx.ScopeIdDef")
 bool ScopeIdDefVerifier::Verify(const Array<ScopeIdDef>& defs) {
   id_set.clear();
   arith::Analyzer ana;
-
-  auto get_extent = [&](const ScopeIdDef& id) {
-    auto it = id_set.find(id->scope);
-    CHECK(it != id_set.end()) << "Cannot resolve extent for scope " << id->scope;
-    return (*it).second.fused_extent();
-  };
   std::queue<ScopeIdDef> queue;
+
   auto insert_id = [&](const ScopeIdDef& id) {
-    auto it = id_set.find(id->scope);
-    if (it == id_set.end()) {
-      id_set.insert({id->scope, id});
-      queue.push(id);
+    auto [it, inserted] = id_set.try_emplace(id->scope, id);
+    if (!inserted) {
+      CHECK(ana.CanProveEqual(it->second.fused_extent(), id.fused_extent()))
+          << "Inconsistent extents for scope " << id->scope;
     } else {
-      CHECK(ana.CanProveEqual((*it).second.fused_extent(), id.fused_extent()))
-          << "Inconsistent extents for scope " << id->scope << ": " << (*it).second.fused_extent()
-          << " vs " << id.fused_extent();
+      queue.push(id);
     }
   };
-  for (const auto& def : defs) {
-    insert_id(def);
-  }
+
+  for (const auto& def : defs) insert_id(def);
+
   while (!queue.empty()) {
     auto head = queue.front();
     queue.pop();
-    PrimExpr extent = get_extent(head);
 
-    std::vector<ScopeIdDef> ids;
-    for (const auto& [scope, def] : id_set) {
-      ids.push_back(def);
-    }
-
-    for (const auto& def : ids) {
-      auto def_extent = get_extent(def);
-      if (auto composed = Compose(head, def)) {
-        insert_id(composed.value());
-      } else if (auto composed = Compose(def, head)) {
-        insert_id(composed.value());
-      } else if (auto compliment = Compliment(head, def)) {
-        insert_id(compliment.value());
-      } else if (auto compliment = Compliment(def, head)) {
-        insert_id(compliment.value());
+    for (const auto& [_, def] : id_set) {
+      for (auto op : {Compose, Compliment}) {
+        if (auto result = op(head, def)) insert_id(result.value());
+        if (auto result = op(def, head)) insert_id(result.value());
       }
     }
   }
@@ -220,25 +201,22 @@ bool ScopeIdDefVerifier::Verify(const Array<ScopeIdDef>& defs) {
 }
 
 Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
-  if (lhs->scope->cur == rhs->scope->parent) {
-    return ScopeIdDef({Var("")}, {lhs.fused_extent() * rhs.fused_extent()},
-                      ScopePair(lhs->scope->parent, rhs->scope->cur));
-  } else {
-    return NullOpt;
-  }
+  return (lhs->scope->cur == rhs->scope->parent)
+             ? ScopeIdDef({Var("")}, {lhs.fused_extent() * rhs.fused_extent()},
+                          ScopePair(lhs->scope->parent, rhs->scope->cur))
+             : Optional<ScopeIdDef>(NullOpt);
 }
 
 Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
-  if (lhs->scope->parent == rhs->scope->parent) {
-    if (ExecScope::Create(rhs->scope->cur).Higher(lhs->scope->cur)) {
-      return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
-                        ScopePair(rhs->scope->cur, lhs->scope->cur));
-    }
-  } else if (lhs->scope->cur == rhs->scope->cur) {
-    if (ExecScope::Create(lhs->scope->parent).Higher(rhs->scope->parent)) {
-      return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
-                        ScopePair(lhs->scope->parent, rhs->scope->parent));
-    }
+  if (lhs->scope->parent == rhs->scope->parent &&
+      ExecScope::Create(rhs->scope->cur).Higher(lhs->scope->cur)) {
+    return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
+                      ScopePair(rhs->scope->cur, lhs->scope->cur));
+  }
+  if (lhs->scope->cur == rhs->scope->cur &&
+      ExecScope::Create(lhs->scope->parent).Higher(rhs->scope->parent)) {
+    return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
+                      ScopePair(lhs->scope->parent, rhs->scope->parent));
   }
   return NullOpt;
 }
@@ -300,6 +278,15 @@ Array<PrimExpr> Trivial3DResolve(const LaunchParams& params, const std::string& 
   return std::move(ret);
 }
 
+// Helper function to handle common thread index calculations
+inline PrimExpr GetLinearThreadIndex(const LaunchParams& params) {
+  PrimExpr tx, ty, tz, ex, ey, ez;
+  std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
+  std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
+  std::tie(tz, ez) = GetThread("threadIdx.z", params, true);
+  return tx + ty * ex + tz * ex * ey;
+}
+
 TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cta", "cuda")
     .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
             const LaunchParams& params) -> Array<PrimExpr> {
@@ -312,73 +299,45 @@ TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cluster", "cuda")
       CHECK_LE(out_dim, 3) << "ValueError: kernel->cluster can only have 3 dimensions for now";
       Array<PrimExpr> ret;
       for (size_t i = 0; i < out_dim; i++) {
-        std::string reg_name = std::string("clusterid.") + static_cast<char>('x' + i);
-        auto call = tir::Call(DataType::Int(32), builtin::ptx_fetch_register(),
-                              {IntImm(DataType::Int(32), 32), StringImm(reg_name)});
-        ret.push_back(call);
+        ret.push_back(tirx::Call(
+            DataType::Int(32), builtin::ptx_fetch_register(),
+            {IntImm(DataType::Int(32), 32), StringImm("clusterid." + std::string(1, 'x' + i))}));
       }
-      return std::move(ret);
-    });
-
-TVM_REGISTER_SCOPEID_RESOLVE("cta", "warpgroup", "cuda")
-    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> Array<PrimExpr> {
-      CHECK_EQ(out_dim, 1) << "ValueError: cta->warpgroup can only have 1 dimension for now";
-      PrimExpr tx, ty, tz, ex, ey, ez;
-      std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
-      std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
-      std::tie(tz, ez) = GetThread("threadIdx.z", params, true);
-      arith::Analyzer ana;
-      return {ana.Simplify(FloorDiv(tx + ty * ex + tz * ex * ey, 128))};
-    });
-
-TVM_REGISTER_SCOPEID_RESOLVE("warpgroup", "warp", "cuda")
-    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> Array<PrimExpr> {
-      CHECK_EQ(out_dim, 1) << "ValueError: warpgroup->warp can only have 1 dimension for now";
-      CHECK_EQ(out_dim, 1) << "ValueError: cta->warp can only have 1 dimension for now";
-      PrimExpr tx, ty, tz, ex, ey, ez;
-      std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
-      std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
-      std::tie(tz, ez) = GetThread("threadIdx.z", params, true);
-      arith::Analyzer ana;
-      return {ana.Simplify(FloorMod(FloorDiv(tx + ty * ex + tz * ex * ey, 32), 4))};
-    });
-
-TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
-    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> Array<PrimExpr> {
-      return Trivial3DResolve(params, "threadIdx.", out_dim);
-    });
-
-TVM_REGISTER_SCOPEID_RESOLVE("warp", "thread", "cuda")
-    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> Array<PrimExpr> {
-      CHECK_EQ(out_dim, 1) << "ValueError: cta->warp can only have 1 dimension for now";
-      PrimExpr tx, ty, tz, ex, ey, ez;
-      std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
-      std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
-      std::tie(tz, ez) = GetThread("threadIdx.z", params, true);
-      arith::Analyzer ana;
-      return {ana.Simplify(FloorMod(tx + ty * ex + tz * ex * ey, 32))};
-    });
-
-TVM_REGISTER_SCOPEID_RESOLVE("cta", "warp", "cuda")
-    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> Array<PrimExpr> {
-      CHECK_EQ(out_dim, 1) << "ValueError: cta->warp can only have 1 dimension for now";
-      PrimExpr tx, ty, tz, ex, ey, ez;
-      std::tie(tx, ex) = GetThread("threadIdx.x", params, true);
-      std::tie(ty, ey) = GetThread("threadIdx.y", params, true);
-      std::tie(tz, ez) = GetThread("threadIdx.z", params, true);
-      arith::Analyzer ana;
-      return {ana.Simplify(FloorDiv(tx + ty * ex + tz * ex * ey, 32))};
+      return ret;
     });
 
 TVM_REGISTER_SCOPEID_RESOLVE("cluster", "cta", "cuda")
     .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
             const LaunchParams& params) -> Array<PrimExpr> {
       return Trivial3DResolve(params, "clusterCtaIdx.", out_dim);
+    });
+
+// Macro to reduce boilerplate for single-dimension checks and thread calculations
+#define REGISTER_1D_THREAD_SCOPE(from, to, divisor, modifier)                                     \
+  TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                                  \
+      .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,                              \
+              const LaunchParams& params) -> Array<PrimExpr> {                                    \
+        CHECK_EQ(out_dim, 1) << "ValueError: " from "->" to " can only have 1 dimension for now"; \
+        arith::Analyzer ana;                                                                      \
+        return {ana.Simplify(modifier(FloorDiv(GetLinearThreadIndex(params), divisor)))};         \
+      })
+
+// Define common modifiers
+auto identity = [](PrimExpr x) { return x; };
+auto mod4 = [](PrimExpr x) { return FloorMod(x, 4); };
+auto mod32 = [](PrimExpr x) { return FloorMod(x, 32); };
+auto mod128 = [](PrimExpr x) { return FloorMod(x, 128); };
+
+REGISTER_1D_THREAD_SCOPE("cta", "warpgroup", 128, identity);
+REGISTER_1D_THREAD_SCOPE("cta", "warp", 32, identity);
+REGISTER_1D_THREAD_SCOPE("warpgroup", "warp", 32, mod4);
+REGISTER_1D_THREAD_SCOPE("warpgroup", "thread", 1, mod128);
+REGISTER_1D_THREAD_SCOPE("warp", "thread", 1, mod32);
+
+TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
+    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> Array<PrimExpr> {
+      return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
 }  // namespace tirx
