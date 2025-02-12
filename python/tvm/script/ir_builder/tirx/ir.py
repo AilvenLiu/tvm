@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """IRBuilder for TIR"""
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import contextlib
 import functools
@@ -2053,25 +2054,30 @@ def Range(begin: PrimExpr, end: PrimExpr) -> ir.Range:  # pylint: disable=invali
     return ir.Range(begin, end)
 
 
-class meta_var:  # pylint: disable=invalid-name
-    """A meta variable used in TVMScript metaprogramming. It means that the value of the variable
-    does not appear in the final TIR, but only stays in the parser.
+if TYPE_CHECKING:
+    T = TypeVar("T")
+    # When type checking (and by extension, for linters like Pylint), make meta_var an identity function.
+    def meta_var(x: T) -> T:
+        return x
 
-    Parameters
-    ----------
-    value: Any
-        The meta variable.
-    """
+else:
 
-    def __init__(self, value: Any) -> None:
-        self.value = value
+    class meta_var:
+        """A meta variable used in TVMScript metaprogramming. It means that the value of the variable
+        does not appear in the final TIR, but only stays in the parser.
 
-    def __iter__(self):
-        def f():
-            for i in self.value:
-                yield meta_var(i)
+        Parameters
+        ----------
+        value: Any
+            The meta variable.
+        """
 
-        return f()
+        def __init__(self, value: Any) -> None:
+            self.value = value
+
+        def __iter__(self):
+            # Return a generator that yields wrapped items.
+            return (meta_var(i) for i in self.value)
 
 
 # pylint: disable=invalid-name
