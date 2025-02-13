@@ -50,6 +50,37 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
   using Verifier::Visit;
 
   void VisitStmt_(const BlockNode* op, ObjectPath path) override {
+    if (op->annotations.count(attr::tirp_scope_partition)) {
+      // scope partition is enabled, check if body is a list of BlockRealize
+      if (auto seq = op->body.as<SeqStmt>()) {
+        Optional<ExecScopeSlice> scope_slice_chk = NullOpt;
+        for (const auto& stmt : seq.value()->seq) {
+          auto block_realize = stmt.as<BlockRealize>();
+          if (!block_realize.defined()) {
+            Verify(false) << "TIRpError: Block with scope partition at " << path
+                          << " has invalid body " << op->body;
+          }
+          auto block = block_realize.value()->block;
+          Verifier::VisitStmt_(block.get(), path);
+          Verify(block->exec_scope.defined()) << "TIRpError: Block with scope partition at " << path
+                                              << " has invalid body " << op->body;
+          auto scope_slice = block->exec_scope.value().as<ExecScopeSlice>();
+          Verify(scope_slice.defined()) << "TIRpError: Block with scope partition at " << path
+                                        << " has invalid exec_scope " << block->exec_scope.value();
+          if (scope_slice_chk.defined()) {
+            Verify(scope_slice_chk.value()->name == scope_slice.value()->name &&
+                   scope_slice_chk.value()->parent == scope_slice.value()->parent)
+                << "TIRpError: Block with scope partition at " << path << " has invalid exec_scope "
+                << block->exec_scope.value();
+          }
+          scope_slice_chk = scope_slice;
+        }
+      } else {
+        Verify(false) << "TIRpError: Block with scope partition at " << path << " has invalid body "
+                      << op->body;
+      }
+      return;
+    }
     // C0: exec_scope is defined
     auto roof = cur_roof_;
     Verify(op->exec_scope != nullptr) << "TIRpError: Block at " << path << " has no exec_scope";

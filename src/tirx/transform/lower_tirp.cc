@@ -262,7 +262,43 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     return StmtExprMutator::VisitStmt_(op);
   }
 
+  Stmt VisitStmt_(const BlockRealizeNode* op) final {
+    Stmt block = this->VisitStmt(op->block);
+    if (block.same_as(op->block)) {
+      return GetRef<Stmt>(op);
+    } else {
+      if (auto* block_ptr = block.as<BlockNode>()) {
+        auto n = CopyOnWrite(op);
+        n->block = GetRef<Block>(block_ptr);
+        return Stmt(n);
+      } else {
+        return block;
+      }
+    }
+  }
+
   Stmt VisitStmt_(const BlockNode* op) final {
+    if (op->annotations.count("tirp.scope_partition")) {
+      // scope partition is enabled, check if body is a list of BlockRealize
+      if (auto seq = op->body.as<SeqStmt>()) {
+        Array<Stmt> new_seq;
+        // First visit each stmt to get IfThenElse stmts
+        for (const auto& stmt : seq.value()->seq) {
+          new_seq.push_back(VisitStmt(stmt));
+        }
+        // Connect the IfThenElse stmts
+        Stmt result = new_seq[new_seq.size() - 1];
+        for (int i = new_seq.size() - 2; i >= 0; i--) {
+          auto if_then = new_seq[i].as<IfThenElse>();
+          CHECK(if_then.defined())
+              << "TIRpError: Block with scope partition has invalid body " << op->body;
+          result = IfThenElse(if_then.value()->condition, if_then.value()->then_case, result);
+        }
+        return result;
+      } else {
+        CHECK(false) << "TIRpError: Block with scope partition at has invalid body " << op->body;
+      }
+    }
     ICHECK(op->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
     auto exec_scope = op->exec_scope.value();
     auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
@@ -291,10 +327,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
       }
       body = IfThenElse(cond, body);
     }
-    Block block = GetRef<Block>(op);
-    auto* n = block.CopyOnWrite();
-    n->body = body;
-    return std::move(block);
+    return body;
   }
 
   LaunchParams launch_params_;

@@ -177,33 +177,68 @@ def test_scope_slice():
     verify(test6)
 
 
-def test_invalid_stmt():
+def test_scope_partition():
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test1() -> None:
+    def test1():
         with T.kernel():
-            with T.cta():
-                with T.warp():
-                    with T.thread():
-                        pass
-                with T.thread():
-                    pass
+            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            tx = T.thread_id([128], parent="cta")
 
+            with T.cta():
+                T.block_attr({"tirp.scope_partition": True})
+                with T.thread()[0:30]:
+                    T.evaluate(tx)
+                with T.thread()[30:128]:
+                    T.evaluate(tx)
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test2() -> None:
+    def test2():
         with T.kernel():
-            with T.cta():
-                for i in range(3):
-                    with T.warp():
-                        with T.thread():
-                            pass
-                    with T.thread():
-                        pass
+            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            tx = T.thread_id([128], parent="cta")
 
+            with T.cta():
+                T.block_attr({"tirp.scope_partition": True})
+                with T.thread()[0:30]:
+                    T.evaluate(tx)
+                with T.thread():
+                    T.evaluate(tx)
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test3():
+        with T.kernel():
+            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            tx = T.thread_id([128], parent="cta")
+
+            with T.thread():
+                T.block_attr({"tirp.scope_partition": True})
+                with T.thread()[0:30]:
+                    T.evaluate(tx)
+                T.evaluate(tx)
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test4():
+        with T.kernel():
+            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            tx = T.thread_id([128], parent="cta")
+
+            with T.thread():
+                T.block_attr({"tirp.scope_partition": True})
+                with T.thread()[0:30]:
+                    T.evaluate(tx)
+                with T.warp()[30:128]:
+                    T.evaluate(tx)
     # fmt: on
 
     verify(test1)
-    verify(test2)
+    with pytest.raises(Exception, match="has invalid exec_scope"):
+        verify(test2)
+    with pytest.raises(Exception, match="has invalid body"):
+        verify(test3)
+    with pytest.raises(Exception, match="has invalid exec_scope"):
+        verify(test4)
 
 
 def test_scope_id_consistency():

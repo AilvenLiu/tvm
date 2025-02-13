@@ -1277,6 +1277,8 @@ constexpr const char* explicit_read_region = "explicit_read_region";
 constexpr const char* explicit_write_region = "explicit_write_region";
 constexpr const char* tensorized_nki_instruction = "tensorized_nki_instruction";
 
+constexpr const char* tirp_scope_partition = "tirp.scope_partition";
+
 /*! \brief ,ark a ForNode represent an irregular loop of non-structural control flow edges. */
 constexpr const char* irregular_loop_mark = "irregular_loop_mark";
 
