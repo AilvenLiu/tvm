@@ -272,18 +272,18 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     }
     auto scope_slice = scope_slice_opt.value();
     auto scope = ScopePair(scope_slice->parent, scope_slice->name);
-    ICHECK(scope_slice->select_cond.defined() || scope_slice->slices.defined());
-    int out_dim = scope_slice->select_cond.defined() ? 1 : scope_slice->slices.value().size();
+    int out_dim = scope_slice->slice.as<PrimExpr>().defined()
+                      ? 1
+                      : scope_slice->slice.as<Array<Range>>().value().size();
     const auto& target = Target::Current(false);
     auto resolved = ScopeIdResolveTable::Resolve(scope, scope_slice->extents, out_dim,
                                                  target->kind->name, launch_params_);
     ICHECK_EQ(resolved.size(), out_dim);
     Stmt body = StmtExprMutator::VisitStmt(op->body);
-    if (scope_slice->select_cond.defined()) {
-      PrimExpr cond = scope_slice->select_cond.value();
-      body = IfThenElse(cond, body);
+    if (auto select_cond = scope_slice->slice.as<PrimExpr>()) {
+      body = IfThenElse(select_cond.value(), body);
     } else {
-      auto slices = scope_slice->slices.value();
+      auto slices = scope_slice->slice.as<Array<Range>>().value();
       PrimExpr cond = Bool(true);
       for (size_t i = 0; i < slices.size(); i++) {
         cond = cond && resolved[i] >= slices[i]->min &&

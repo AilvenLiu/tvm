@@ -519,23 +519,18 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
       auto scope_slice_opt = scope.value().as<ExecScopeSlice>();
       if (scope_slice_opt.has_value()) {
         auto scope_slice = scope_slice_opt.value();
-        ffi::Optional<Array<Range>> slices = std::nullopt;
-        if (scope_slice->slices.defined()) {
-          slices = Internal::Mutate(this, scope_slice->slices.value());
+        ffi::Variant<ffi::Array<Range>, PrimExpr> slice;
+        if (auto slices = scope_slice->slice.as<ffi::Array<Range>>()) {
+          slice = Internal::Mutate(this, slices.value());
+        } else {
+          slice = this->VisitExpr(scope_slice->slice.as<PrimExpr>().value());
         }
-        ffi::Optional<PrimExpr> select_cond = std::nullopt;
-        if (scope_slice->select_cond.defined()) {
-          select_cond = this->VisitExpr(scope_slice->select_cond.value());
-        }
-        ffi::Optional<Array<PrimExpr>> extents = std::nullopt;
+        ffi::Optional<ffi::Array<PrimExpr>> extents = std::nullopt;
         if (scope_slice->extents.defined()) {
           extents = Internal::Mutate(this, scope_slice->extents.value());
         }
-        if (!slices.same_as(scope_slice->slices) ||
-            !select_cond.same_as(scope_slice->select_cond) ||
-            !extents.same_as(scope_slice->extents)) {
-          scope =
-              ExecScopeSlice(slices, select_cond, extents, scope_slice->parent, scope_slice->name);
+        if (!slice.same_as(scope_slice->slice) || !extents.same_as(scope_slice->extents)) {
+          scope = ExecScopeSlice(slice, extents, scope_slice->parent, scope_slice->name);
         }
       }
     }

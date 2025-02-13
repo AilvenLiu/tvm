@@ -150,8 +150,7 @@ SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_sc
 
 void OpCall(tvm::Op op, Array<ObjectRef> args);
 
-BlockFrame BlockFrameSlice(BlockFrame block, ffi::Optional<ffi::Array<Range>> slices,
-                           ffi::Optional<PrimExpr> select_cond);
+BlockFrame BlockFrameSlice(BlockFrame block, ffi::Variant<ffi::Array<Range>, PrimExpr> slice);
 
 BlockFrame World();
 

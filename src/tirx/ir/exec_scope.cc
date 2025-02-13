@@ -96,36 +96,31 @@ TVM_REGISTER_GLOBAL("tirx.KernelScope").set_body_typed([](Array<ScopeIdDef> def)
 });
 
 // ExecScopeSlice
-ExecScopeSlice::ExecScopeSlice(Optional<Array<Range>> slices, Optional<PrimExpr> select_cond,
+ExecScopeSlice::ExecScopeSlice(Variant<Array<Range>, PrimExpr> slice,
                                Optional<Array<PrimExpr>> extents, String parent, String cur) {
   auto n = make_object<ExecScopeSliceNode>();
   n->name = cur;
   n->parent = parent;
   n->extents = std::move(extents);
-  CHECK(!slices.defined() || !select_cond.defined())
-      << "ValueError: select_cond and slices cannot both be present";
   if (extents.defined()) {
-    if (slices.defined()) {
+    if (auto slices = slice.as<Array<Range>>()) {
       CHECK_EQ(slices.value().size(), extents.value().size())
           << "ValueError: Number of slices must match the number of extents";
-    }
-    if (select_cond.defined()) {
+    } else if (auto cond = slice.as<PrimExpr>()) {
       CHECK_EQ(1, extents.value().size())
           << "ValueError: Number of select_cond must match the number of extents";
     }
   }
-  n->slices = std::move(slices);
-  n->select_cond = std::move(select_cond);
+  n->slice = std::move(slice);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_NODE_TYPE(ExecScopeSliceNode);
 
 TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
-    .set_body_typed([](Optional<Array<Range>> slices, Optional<PrimExpr> select_cond,
-                       Optional<Array<PrimExpr>> extents, String parent, String cur) {
-      return ExecScopeSlice(slices, select_cond, extents, parent, cur);
-    });
+    .set_body_typed([](Variant<Array<Range>, PrimExpr> slice, Optional<Array<PrimExpr>> extents,
+                       String parent,
+                       String cur) { return ExecScopeSlice(slice, extents, parent, cur); });
 
 /******** Definition of Var ********/
 // ScopePair
@@ -340,5 +335,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm

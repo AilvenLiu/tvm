@@ -54,7 +54,7 @@ class SBlockFrame(TIRFrame):
             slices = (slices,)
         if len(slices) == 1 and isinstance(slices[0], PrimExpr):
             # If the slice is a single PrimExpr, it is a select condition
-            return _ffi_api.BlockFrameSlice(self, None, slices[0])  # pylint: disable=no-member
+            return _ffi_api.BlockFrameSlice(self, slices[0])  # pylint: disable=no-member
         # Otherwise, the slices are a list of ranges
         slices_t = []
         for s in slices:
@@ -63,7 +63,7 @@ class SBlockFrame(TIRFrame):
                 slices_t.append(Range(s.start, s.stop))
             else:
                 assert False, f"Slice must be a slice, got {type(s)}"
-        return _ffi_api.BlockFrameSlice(self, slices_t, None)  # pylint: disable=no-member
+        return _ffi_api.BlockFrameSlice(self, slices_t)  # pylint: disable=no-member
 
 
 @_register_object("script.ir_builder.tirx.SBlockInitFrame")

@@ -94,34 +94,33 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     if (const auto* slice = scope.as<ExecScopeSliceNode>()) {
       auto it_slices = scope_slices_.find(slice->name);
       auto it_select_cond = scope_select_cond_.find(slice->name);
-      if (slice->select_cond.defined()) {
+      if (auto cond = slice->slice.as<PrimExpr>()) {
         // current scope slice has select_cond, it should not have slices
         Verify(it_slices == scope_slices_.end())
             << "TIRpError: ExecScopeSlice at " << path << " has both slices and select_cond";
         if (it_select_cond == scope_select_cond_.end()) {
-          scope_select_cond_[slice->name] = slice->select_cond.value();
+          scope_select_cond_[slice->name] = cond.value();
           erase_select_cond = true;
         }
       } else {
         // current scope slice has slices, it should not have select_cond
         Verify(it_select_cond == scope_select_cond_.end())
             << "TIRpError: ExecScopeSlice at " << path << " has both slices and select_cond";
-        ICHECK(slice->slices.defined())
-            << "InternalError: ExecScopeSlice at " << path << " has neither slices nor select_cond";
+        auto slices = slice->slice.as<Array<Range>>().value();
         if (it_slices == scope_slices_.end()) {
-          scope_slices_[slice->name] = {slice->slices.value()};
+          scope_slices_[slice->name] = {slices};
           erase_slices = true;
         } else {
           bool consistent = true;
           for (const auto& s : it_slices->second) {
-            if (!covered(s, slice->slices.value()) && !covered(slice->slices.value(), s)) {
+            if (!covered(s, slices) && !covered(slices, s)) {
               consistent = false;
               break;
             }
           }
           Verify(consistent) << "TIRpError: ExecScopeSlice at " << path << " is inconsistent with "
                              << it_slices->first;
-          it_slices->second.push_back(slice->slices.value());
+          it_slices->second.push_back(slices);
           pop_scope = true;
         }
       }
