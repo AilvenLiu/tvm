@@ -114,37 +114,60 @@ def get_inst_tile_with_broadcast(
     inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(dst, src1, analyzer)
     dst_range_info, dst_layout, dst_seps = infer_range_info(dst, analyzer)
     f_data_iters_in_broadcast_dim = []
+    f_data_iters_in_non_broadcast_dim = []
     for i in range(len(dst_seps) - 1):
-        if i not in broadcast_dims:
-            continue
         for j in range(dst_seps[i], dst_seps[i + 1]):
             # F dimension in broadcast dim
             if j in inst_data_iters:
-                f_data_iters_in_broadcast_dim.append((j, inst_data_iters[j]))
-    # broadcast dim is B dimension
-    # fallback to tensortensor
-    if len(f_data_iters_in_broadcast_dim) == 0:
-        return get_inst_tile_with_no_broadcast(dst, src1, src2, analyzer)
+                if j in broadcast_dims:
+                    f_data_iters_in_broadcast_dim.append((j, inst_data_iters[j]))
+                else:
+                    f_data_iters_in_non_broadcast_dim.append((j, inst_data_iters[j]))
 
-    # todo: consider using tensortensor if F dim is small when using tensorscalar
-    # broadcast dim contains F dimension
-    # adjust F size to fit in broadcast dim
-    f_data_iters_in_broadcast_dim.sort(
-        key=lambda x: dst_layout.combined_1d_layout.data_iter_array[x[0]].stride
+    def try_f_data_iters(f_data_iters):
+        f_data_iters.sort(key=lambda x: dst_layout.combined_1d_layout.data_iter_array[x[0]].stride)
+        new_inst_size = 1
+        new_data_iters = {}
+        inst_stride = 1
+        while len(f_data_iters) > 0:
+            dim_in_data_iter, extent = f_data_iters[0]
+            f_data_iters = f_data_iters[1:]
+            iter = dst_layout.combined_1d_layout.data_iter_array[dim_in_data_iter]
+            if extent == 1:
+                continue
+            if new_inst_size != 1 and new_inst_size * inst_stride != iter.stride:
+                break
+            if new_inst_size == 1:
+                inst_stride = iter.stride
+            new_inst_size *= extent
+            new_data_iters[dim_in_data_iter] = extent
+        return new_inst_size, inst_stride, new_data_iters
+
+    tensortensor_inst_size, tensortensor_inst_stride, tensortensor_inst_data_iters = (
+        try_f_data_iters(f_data_iters_in_non_broadcast_dim)
     )
-    new_inst_size = 1
-    new_data_iters = {}
-    while len(f_data_iters_in_broadcast_dim) > 0:
-        dim_in_data_iter, extent = f_data_iters_in_broadcast_dim[0]
-        f_data_iters_in_broadcast_dim = f_data_iters_in_broadcast_dim[1:]
-        iter = dst_layout.combined_1d_layout.data_iter_array[dim_in_data_iter]
-        if iter.extent == 1:
-            continue
-        if new_inst_size * inst_stride != iter.stride:
-            break
-        new_inst_size *= extent
-        new_data_iters[dim_in_data_iter] = extent
-    return new_inst_size, inst_stride, new_data_iters, False
+    tensorscalar_inst_size, tensorscalar_inst_stride, tensorscalar_inst_data_iters = (
+        try_f_data_iters(f_data_iters_in_broadcast_dim)
+    )
+    option_chosen = None
+    # if f extent is 1, do not choose it
+    if tensortensor_inst_size == 1:
+        option_chosen = "tensorscalar"
+    elif tensorscalar_inst_size == 1:
+        option_chosen = "tensortensor"
+    # prioritize contiguous f
+    elif tensortensor_inst_stride == 1:
+        option_chosen = "tensortensor"
+    elif tensorscalar_inst_stride == 1:
+        option_chosen = "tensorscalar"
+    # choose the one with larger inst size
+    elif tensortensor_inst_size > tensorscalar_inst_size:
+        option_chosen = "tensortensor"
+    else:
+        option_chosen = "tensorscalar"
+    if option_chosen == "tensortensor":
+        return tensortensor_inst_size, tensortensor_inst_stride, tensortensor_inst_data_iters, True
+    return tensorscalar_inst_size, tensorscalar_inst_stride, tensorscalar_inst_data_iters, False
 
 
 def binary_trn(

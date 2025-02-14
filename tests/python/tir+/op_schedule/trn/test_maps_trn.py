@@ -285,7 +285,7 @@ def test_binary_complex(op_type, operands_type):
         assert_structural_equal(mod["main"], expected)
 
 
-def test_binary_broadcast():
+def test_binary_broadcast1():
     src1_shape = [32, 128, 512]
     src1_layout = TrainiumLayout(
         dimension_types="FFFP",
@@ -318,6 +318,48 @@ def test_binary_broadcast():
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 32):
                     T.nki_tensorscalar(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], "add", T.bool(False))
+    # fmt: on
+
+    with target:
+        mod = tvm.IRModule({"main": binary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+def test_binary_broadcast2():
+    src1_shape = [32, 128, 512]
+    src1_layout = TrainiumLayout(
+        dimension_types="FFFP",
+        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 4, 128), (128, 1, 32 * 128, 1)),
+    )
+    src2_shape = [128, 512]
+    src2_layout = TrainiumLayout(
+        dimension_types="FFP",
+        combined_1d_layout=T.TileLayout.from_tuple((128, 4, 128), (1, 128, 1)),
+    )
+    dst_shape = src1_shape
+    dst_layout = src1_layout
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def binary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
+            B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            Tp.add(C_sbuf, A_sbuf, B_sbuf)
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "binary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop in range(128):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 128):
+                    T.nki_tensortensor(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], B_sbuf[p_loop, b_loop % 4 * 128 + f_loop], "add")
     # fmt: on
 
     with target:

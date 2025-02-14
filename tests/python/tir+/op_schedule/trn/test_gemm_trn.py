@@ -306,5 +306,54 @@ def test_gemm_with_sbuf_output():
         assert_structural_equal(mod["main"], expected)
 
 
+def test_gemm_different_shape():
+    A_layout = T.TrainiumLayout(
+        dimension_types="FFFFP",
+        combined_1d_layout=T.TileLayout.from_tuple((2, 4, 128, 8, 128), (4096, 1024, 1, 128, 1)),
+    )
+    B_layout = T.TrainiumLayout(
+        dimension_types="FPFF",
+        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
+    )
+
+    C_layout = T.TrainiumLayout(
+        dimension_types="FFFP",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
+    )
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def gemm() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((2, 512, 1024), "float32", scope="trn.sbuf", layout=A_layout)
+            B_sbuf = T.alloc_buffer((1024, 256), "float32", scope="trn.sbuf", layout=B_layout)
+            C_psum = T.alloc_buffer((512, 256), "float32", scope="trn.psum", layout=C_layout)
+            for i in range(2):
+                for k in range(2):
+                    Tp.gemm(
+                        C_psum[256 * i : 256 * i + 256, :],
+                        A_sbuf[1, 256 * i : 256 * i + 256, 512 * k : 512 * k + 512],
+                        B_sbuf[512 * k : 512 * k + 512, :],
+                        C_psum[256 * i : 256 * i + 256, :],
+                    )
+                    
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "gemm"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            C_psum = T.alloc_buffer((128, 1024), scope="trn.psum", logical_scope="kernel")
+            for i, k, lhs_b_loop, rhs_b_loop, reduction_b_loop in T.grid(2, 2, 2, 2, 4):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
+                    T.nki_matmul(C_psum[rhs_f_loop, i * 512 + lhs_b_loop * 256 + rhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop + 4096], T.bool(True))
+
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": gemm})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
 if __name__ == "__main__":
     tvm.testing.main()
