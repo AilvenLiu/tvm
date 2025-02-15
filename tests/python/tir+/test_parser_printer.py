@@ -136,6 +136,12 @@ def test_roundtrip_layout():
     def get_layout4():
         return T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
 
+    def get_layout5():
+        return T.ComposeLayout(
+            T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+            T.TileLayout.from_tuple(data=(64, 64, 4), strides=(64, 1, 64 * 64)),
+        )
+
     # fmt: off
     @T.prim_func(tirp=True)
     def test(A_ptr: T.handle) -> None:
@@ -153,8 +159,10 @@ def test_roundtrip_layout():
                 A_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout1())
                 B_warp = T.alloc_buffer([64, 64], dtype="float16", scope="shared", layout=get_layout2())
 
+                E = T.alloc_buffer([64, 256], dtype="float16", scope="shared", layout=get_layout5())
+
                 with T.thread():
-                    T.evaluate(A_warp[0, 0] + B_warp[0, 0] + C[0, 0] + D[0, 0])
+                    T.evaluate(A_warp[0, 0] + B_warp[0, 0] + C[0, 0] + D[0, 0] + E[0, 0])
     # fmt: on
 
     code = test.script()

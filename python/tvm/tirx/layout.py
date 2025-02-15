@@ -14,46 +14,17 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# pylint: disable=super-init-not-called
 """Definition of layout."""
 from dataclasses import dataclass
-import functools
-import operator
-from typing import List, Optional, Tuple, Union, Dict
+from typing import List, Optional, Tuple, Union
 
 from . import _ffi_api
-from tvm._ffi import register_object, get_global_func
-from tvm.runtime import Object, convert_to_object, ShapeTuple
+from tvm._ffi import register_object
+from tvm.runtime import Object, ShapeTuple
 
 from .expr import Var, PrimExpr
 from .exec_scope import ExecScope
-
-
-@register_object("tirx.TLayout")
-class TLayout(Object):
-    def __init__(self):
-        self.__init_handle_by_constructor__(_ffi_api.TLayout)
-
-    @property
-    def size(self):
-        return get_global_func("tir.TLayoutGetSize")(self)
-
-    @property
-    def cosize(self):
-        return get_global_func("tir.TLayoutGetCosize")(self)
-
-    def apply(self, *coord: List[PrimExpr], shape: List[PrimExpr] = None) -> List[PrimExpr]:
-        if shape is None:
-            assert len(coord) == 1, "shape must be provided if coord is not a single element"
-            shape = [1]
-        return get_global_func("tir.TLayoutApply")(self, coord, shape)
-
-    def is_trivial(self) -> bool:
-        """Check if the layout is trivial."""
-        return get_global_func("tir.IsTrivialLayout")(self)
-
-    def is_swizzle(self) -> bool:
-        """Check if the layout is swizzle."""
-        return isinstance(self, SwizzleLayout)
 
 
 @register_object("tirx.DeviceIterAttr")
@@ -74,7 +45,13 @@ class DeviceIterAttr(Object):
         bound: Optional[Var] = None,
         owner: Optional[PrimExpr] = None,
     ):
-        self.__init_handle_by_constructor__(_ffi_api.DeviceIterAttr, extent, type, bound, owner)
+        self.__init_handle_by_constructor__(
+            _ffi_api.DeviceIterAttr,  # pylint: disable=no-member
+            extent,
+            type,
+            bound,
+            owner,
+        )
 
     @staticmethod
     def replicate(extent: PrimExpr):
@@ -95,12 +72,126 @@ class DataIterAttr(Object):
     stride: PrimExpr
 
     def __init__(self, extent: PrimExpr, stride: PrimExpr):
-        self.__init_handle_by_constructor__(_ffi_api.DataIterAttr, extent, stride)
+        self.__init_handle_by_constructor__(
+            _ffi_api.DataIterAttr,  # pylint: disable=no-member
+            extent,
+            stride,
+        )
 
 
 @dataclass
 class S:
     device_index: int
+
+
+@register_object("tirx.TLayout")
+class TLayout(Object):
+    def __init__(self):
+        self.__init_handle_by_constructor__(_ffi_api.TLayout)  # pylint: disable=no-member
+
+    @property
+    def size(self):
+        return _ffi_api.TLayoutGetSize(self)  # pylint: disable=no-member
+
+    @property
+    def cosize(self):
+        return _ffi_api.TLayoutGetCosize(self)  # pylint: disable=no-member
+
+    def apply(self, *coord: List[PrimExpr], shape: List[PrimExpr] = None) -> List[PrimExpr]:
+        if shape is None:
+            assert len(coord) == 1, "shape must be provided if coord is not a single element"
+            shape = [1]
+        return _ffi_api.TLayoutApply(self, coord, shape)  # pylint: disable=no-member
+
+    def is_trivial(self) -> bool:
+        """Check if the layout is trivial."""
+        return _ffi_api.IsTrivialLayout(self)  # pylint: disable=no-member
+
+    def is_swizzle(self) -> bool:
+        """Check if the layout is swizzle."""
+        return isinstance(self, SwizzleLayout)
+
+    def normalize(self) -> "TLayout":
+        """Normalize the layout by simplifying and fusing iterators where possible.
+
+        Returns
+        -------
+        TLayout
+            The normalized layout
+        """
+        raise NotImplementedError("Normalize is not implemented for this layout")
+
+    def tile(
+        self,
+        outer: "TileLayout",
+        outer_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> Union["TileLayout", "ComposeLayout"]:
+        """Tile the current layout with an outer layout.
+
+        Parameters
+        ----------
+        outer : TileLayout
+            The outer layout to tile with
+        outer_shape : List[PrimExpr]
+            The shape of the outer layout
+        inner_shape : List[PrimExpr]
+            The shape of the inner layout
+
+        Returns
+        -------
+        Union[TileLayout, ComposeLayout]
+            The resulting tiled layout
+        """
+        raise NotImplementedError("Tile is not implemented for this layout")
+
+    def is_tile_inner(
+        self,
+        tile_layout: Union["TileLayout", "ComposeLayout"],
+        tiled_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> bool:
+        """Check if a layout is the inner layout of a tiled layout.
+
+        Parameters
+        ----------
+        tile_layout : Union[TileLayout, ComposeLayout]
+            The tiled layout to check
+        tiled_shape : List[PrimExpr]
+            The shape of the tiled layout
+        inner_shape : List[PrimExpr]
+            The shape of the inner layout
+
+        Returns
+        -------
+        bool
+            Whether the inner layout is the inner layout of the tiled layout
+        """
+        raise NotImplementedError("is_tile_inner is not implemented for this layout")
+
+    def is_tile_outer(
+        self,
+        tile_layout: Union["TileLayout", "ComposeLayout"],
+        tiled_shape: List[PrimExpr],
+        outer_shape: List[PrimExpr],
+    ) -> bool:
+        """Check if a layout is the outer layout of a tiled layout.
+
+        Parameters
+        ----------
+        tile_layout : Union[TileLayout, ComposeLayout]
+            The tiled layout to check
+        tiled_shape : List[PrimExpr]
+            The shape of the tiled layout
+        outer_shape : List[PrimExpr]
+            The shape of the outer layout
+
+        Returns
+        -------
+        bool
+            Whether the outer layout is the outer layout of the tiled layout
+        """
+        raise NotImplementedError("is_tile_outer is not implemented for this layout")
 
 
 @register_object("tirx.TileLayout")
@@ -119,7 +210,44 @@ class TileLayout(TLayout):
     ):
         device_iter_array = device_iter_array or []
         self.__init_handle_by_constructor__(
-            _ffi_api.TileLayout, data_iter_array, device_iter_array, from_scope, to_scope
+            _ffi_api.TileLayout,  # pylint: disable=no-member
+            data_iter_array,
+            device_iter_array,
+            from_scope,
+            to_scope,
+        )
+
+    def normalize(self) -> "TileLayout":
+        return _ffi_api.TileLayoutNormalize(self)  # pylint: disable=no-member
+
+    def tile(
+        self,
+        outer: "TileLayout",
+        outer_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> Union["TileLayout", "ComposeLayout"]:
+        return _ffi_api.TileLayoutTile(  # pylint: disable=no-member
+            outer, self, outer_shape, inner_shape
+        )
+
+    def is_tile_inner(
+        self,
+        tile_layout: Union["TileLayout", "ComposeLayout"],
+        tiled_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> bool:
+        return _ffi_api.TileLayoutIsTileInner(  # pylint: disable=no-member
+            tile_layout, self, tiled_shape, inner_shape
+        )
+
+    def is_tile_outer(
+        self,
+        tile_layout: Union["TileLayout", "ComposeLayout"],
+        tiled_shape: List[PrimExpr],
+        outer_shape: List[PrimExpr],
+    ) -> bool:
+        return _ffi_api.TileLayoutIsTileOuter(  # pylint: disable=no-member
+            tile_layout, self, tiled_shape, outer_shape
         )
 
     @staticmethod
@@ -207,15 +335,6 @@ class TileLayout(TLayout):
         )
 
     @staticmethod
-    def tile(
-        outer: "TileLayout",
-        inner: "TileLayout",
-        outer_shape: List[PrimExpr],
-        inner_shape: List[PrimExpr],
-    ) -> "TileLayout":
-        return get_global_func("tir.TileLayoutTile")(outer, inner, outer_shape, inner_shape)
-
-    @staticmethod
     def shard(
         shape: Tuple[PrimExpr, int],
         mesh: Tuple,
@@ -225,7 +344,7 @@ class TileLayout(TLayout):
     ) -> "TileLayout":
         assert from_to is not None, "from_to must be provided if device is provided"
         assert isinstance(from_to, tuple) and len(from_to) == 2, "from_to must be a tuple of 2"
-        return get_global_func("tir.TileLayoutShard")(
+        return _ffi_api.TileLayoutShard(  # pylint: disable=no-member
             shape,
             mesh,
             strategy,
@@ -235,35 +354,8 @@ class TileLayout(TLayout):
         )
 
     @staticmethod
-    def normalize(layout: "TileLayout") -> "TileLayout":
-        return get_global_func("tir.NormalizeTileLayout")(layout)
-
-    @staticmethod
-    def is_tile_inner(
-        tile_layout: "TileLayout",
-        inner: "TileLayout",
-        tiled_shape: List[PrimExpr],
-        inner_shape: List[PrimExpr],
-    ) -> bool:
-        # assume outer must be continuous with exactly one layer
-        return get_global_func("tir.IsTileLayout_Inner")(
-            tile_layout, inner, tiled_shape, inner_shape
-        )
-
-    @staticmethod
-    def is_tile_outer(
-        tile_layout: "TileLayout",
-        outer: "TileLayout",
-        tiled_shape: List[PrimExpr],
-        outer_shape: List[PrimExpr],
-    ) -> bool:
-        return get_global_func("tir.IsTileLayout_Outer")(
-            tile_layout, outer, tiled_shape, outer_shape
-        )
-
-    @staticmethod
     def find_optimal_vec_len(layout_A: "TileLayout", layout_B: "TileLayout") -> int:
-        return get_global_func("tir.Vec_Len")(layout_A, layout_B)
+        return _ffi_api.Vec_Len(layout_A, layout_B)  # pylint: disable=no-member
 
 
 @register_object("tirx.SwizzleLayout")
@@ -284,6 +376,64 @@ class SwizzleLayout(TLayout):
             swizzle_len,
             atom_len,
             swizzle_inner,
+        )
+
+    def normalize(self) -> "SwizzleLayout":
+        return _ffi_api.SwizzleLayoutNormalize(self)  # pylint: disable=no-member
+
+    def tile(
+        self,
+        outer: "TileLayout",
+        outer_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> Union["TileLayout", "ComposeLayout"]:
+        return _ffi_api.SwizzleLayoutTile(  # pylint: disable=no-member
+            outer, self, outer_shape, inner_shape
+        )
+
+    def is_tile_inner(
+        self,
+        tile_layout: Union["TileLayout", "ComposeLayout"],
+        tiled_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> bool:
+        return _ffi_api.SwizzleLayoutIsTileInner(  # pylint: disable=no-member
+            tile_layout, self, tiled_shape, inner_shape
+        )
+
+
+@register_object("tirx.ComposeLayout")
+class ComposeLayout(TLayout):
+    """A memory layout that composes 2 layouts."""
+
+    def __init__(self, layout_A: TLayout, layout_B: TLayout):
+        self.__init_handle_by_constructor__(
+            _ffi_api.ComposeLayout,  # pylint: disable=no-member
+            layout_A,
+            layout_B,
+        )
+
+    def normalize(self) -> "ComposeLayout":
+        return _ffi_api.ComposeLayoutNormalize(self)  # pylint: disable=no-member
+
+    def tile(
+        self,
+        outer: "TileLayout",
+        outer_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> Union["TileLayout", "ComposeLayout"]:
+        return _ffi_api.ComposeLayoutTile(  # pylint: disable=no-member
+            outer, self, outer_shape, inner_shape
+        )
+
+    def is_tile_inner(
+        self,
+        tile_layout: Union["TileLayout", "ComposeLayout"],
+        tiled_shape: List[PrimExpr],
+        inner_shape: List[PrimExpr],
+    ) -> bool:
+        return _ffi_api.ComposeLayoutIsTileInner(  # pylint: disable=no-member
+            tile_layout, self, tiled_shape, inner_shape
         )
 
 
@@ -309,13 +459,14 @@ class TrainiumLayout(TLayout):
                 for c in dimension_types
             ]
         self.__init_handle_by_constructor__(
-            _ffi_api.TrainiumLayout, ShapeTuple(dimension_types), combined_1d_layout
+            _ffi_api.TrainiumLayout,  # pylint: disable=no-member
+            ShapeTuple(dimension_types),
+            combined_1d_layout,
         )
+
+    def normalize(self) -> "TrainiumLayout":
+        return _ffi_api.TrainiumLayoutNormalize(self)  # pylint: disable=no-member
 
     @property
     def partition_size(self):
-        return get_global_func("tir.TrainiumLayoutGetPartitionSize")(self)
-
-    @staticmethod
-    def normalize(layout: "TrainiumLayout") -> "TrainiumLayout":
-        return get_global_func("tir.NormalizeTrainiumLayout")(layout)
+        return _ffi_api.TrainiumLayoutGetPartitionSize(self)  # pylint: disable=no-member

@@ -110,8 +110,8 @@ def test_lower_view_get():
                     (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
                 )
                 A = T.alloc_buffer([4, 2], dtype="float32", scope="local",
-                                   layout=T.TileLayout.tile(tile, atom, (2, 2), (1, 2)))
-                B_layout = T.TileLayout.tile(tile, warp_atom, (2, 2), (8, 8))
+                                   layout=atom.tile(tile, (2, 2), (1, 2)))
+                B_layout = warp_atom.tile(tile, (2, 2), (8, 8))
                 """
                 load in_buf into A
                 """

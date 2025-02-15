@@ -23,7 +23,7 @@ from tvm.script import tir as T
 from tvm.ir import assert_structural_equal
 
 
-def test_constructor_nested_tuple_no_device():
+def test_constructor_from_tuple_no_device():
     layout = T.TileLayout.from_tuple(
         data=(8, 8, 8, 4, 2),
         strides=(512, 64, 8, 2, 1),
@@ -60,7 +60,7 @@ def test_constructor_nested_tuple_no_device():
         )
 
 
-def test_constructor_nested_tuple():
+def test_constructor_from_tuple():
     layout = T.TileLayout.from_tuple(
         data=(8, T.S(0), 8, T.S(1), 2),
         strides=(16, -1, 2, -1, 1),
@@ -146,12 +146,7 @@ def test_constructor_nested_tuple():
     assert_structural_equal(layout, layout_expected)
 
 
-def normalize_tile_layout(layout):
-    return T.TileLayout.normalize(layout)
-
-
 def test_normalize_tile_layout():
-
     # no unit removal case but normalize subtree
     layout = T.TileLayout.from_tuple(
         data=(8, 8, 8, 4, 2),
@@ -161,7 +156,7 @@ def test_normalize_tile_layout():
         data=4096,
         strides=1,
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree #1
     layout = T.TileLayout.from_tuple(
@@ -172,7 +167,7 @@ def test_normalize_tile_layout():
         data=4096,
         strides=1,
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree #2
     layout = T.TileLayout.from_tuple(
@@ -183,7 +178,7 @@ def test_normalize_tile_layout():
         data=2048,
         strides=2,
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree #3
     layout = T.TileLayout.from_tuple(
@@ -194,7 +189,7 @@ def test_normalize_tile_layout():
         data=(64, 4),
         strides=(64, 2),
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree #4
     layout = T.TileLayout.from_tuple(
@@ -205,7 +200,7 @@ def test_normalize_tile_layout():
         data=8,
         strides=64,
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree #5
     layout = T.TileLayout.from_tuple(
@@ -216,7 +211,7 @@ def test_normalize_tile_layout():
         data=36,
         strides=1,
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree #6
     layout = T.TileLayout.from_tuple(
@@ -227,7 +222,7 @@ def test_normalize_tile_layout():
         data=(8, 36),
         strides=(6, 1),
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree (partial norm - back) #7
     layout = T.TileLayout.from_tuple(
@@ -238,7 +233,7 @@ def test_normalize_tile_layout():
         data=(8, 2, 18),
         strides=(6, 24, 1),
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree (partial norm - front) #8
     layout = T.TileLayout.from_tuple(
@@ -249,7 +244,7 @@ def test_normalize_tile_layout():
         data=(16, 4, 2, 18),
         strides=(1, 4, 24, 1),
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree (partial norm - middle) #9
     layout = T.TileLayout.from_tuple(
@@ -260,7 +255,7 @@ def test_normalize_tile_layout():
         data=(60, 2),
         strides=(1, 60),
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree (partial norm - middle) #10
     layout = T.TileLayout.from_tuple(
@@ -271,7 +266,7 @@ def test_normalize_tile_layout():
         data=(18, 16, 4, 2, 18),
         strides=(4, 1, 4, 24, 1),
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # only data tree (partial norm - middle) #11
     layout = T.TileLayout.from_tuple(
@@ -282,7 +277,7 @@ def test_normalize_tile_layout():
         data=(60, 24),
         strides=(1, 5),
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # no normalization case
     layout_normalized = T.TileLayout.from_tuple(
@@ -291,7 +286,7 @@ def test_normalize_tile_layout():
         device=(8, 4),
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout_normalized))
+    assert_structural_equal(layout_normalized, layout_normalized.normalize())
 
     # both data and device tree #1
     layout = T.TileLayout.from_tuple(
@@ -300,7 +295,7 @@ def test_normalize_tile_layout():
         device=(8, 4),
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #2
     layout = T.TileLayout.from_tuple(
@@ -309,7 +304,7 @@ def test_normalize_tile_layout():
         device=(8, 1, 4),
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree (both fused) #3
     layout = T.TileLayout.from_tuple(
@@ -326,7 +321,7 @@ def test_normalize_tile_layout():
         exclusive=[(1, 0)],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #4
     layout = T.TileLayout.from_tuple(
@@ -343,7 +338,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #5
     layout = T.TileLayout.from_tuple(
@@ -360,7 +355,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #6
     layout = T.TileLayout.from_tuple(
@@ -377,7 +372,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #7
     layout = T.TileLayout.from_tuple(
@@ -394,7 +389,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #8 （Fuse-Case 1)
     layout = T.TileLayout.from_tuple(
@@ -411,7 +406,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #9 （Fuse-Case 2)
     layout = T.TileLayout.from_tuple(
@@ -428,7 +423,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #10 （Fuse-Case 3)
     layout = T.TileLayout.from_tuple(
@@ -445,7 +440,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #11 （Fuse-Case 4)
     layout = T.TileLayout.from_tuple(
@@ -462,7 +457,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #12 (Fuse-mixed)
     layout = T.TileLayout.from_tuple(
@@ -479,7 +474,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #13 (Fuse-mixed with partial)
     layout = T.TileLayout.from_tuple(
@@ -496,7 +491,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # both data and device tree #14 (Fuse-mixed with partial)
     layout = T.TileLayout.from_tuple(
@@ -513,7 +508,7 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_normalized, normalize_tile_layout(layout))
+    assert_structural_equal(layout_normalized, layout.normalize())
 
     # only data tree (partial norm - middle) #15
     layout = T.TileLayout.from_tuple(
@@ -530,12 +525,12 @@ def test_normalize_tile_layout():
         exclusive=[],
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(layout_expected, normalize_tile_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # unit layout case#1
     layout = T.TileLayout.from_tuple(data=(1, 1, 1, 1, 1), strides=(1, 1, 1, 1, 1))
     layout_unit = T.TileLayout.from_tuple(data=1, strides=1)
-    assert_structural_equal(layout_unit, normalize_tile_layout(layout))
+    assert_structural_equal(layout_unit, layout.normalize())
 
     # unit layout case#2
     layout = T.TileLayout.from_tuple(
@@ -544,74 +539,63 @@ def test_normalize_tile_layout():
         device=(1, 1),
         from_to=("thread", "warp"),
     )
-    layout_unit = T.TileLayout.from_tuple(
-        data=1, strides=1, device=1, from_to=("thread", "warp")
-    )
-    assert_structural_equal(layout_unit, normalize_tile_layout(layout))
+    layout_unit = T.TileLayout.from_tuple(data=1, strides=1, device=1, from_to=("thread", "warp"))
+    assert_structural_equal(layout_unit, layout.normalize())
 
     # idempotent unit layout case#3
-    layout_unit = T.TileLayout.from_tuple(
-        data=1, strides=1, device=1, from_to=("thread", "warp")
-    )
-    assert_structural_equal(layout_unit, normalize_tile_layout(normalize_tile_layout(layout_unit)))
+    layout_unit = T.TileLayout.from_tuple(data=1, strides=1, device=1, from_to=("thread", "warp"))
+    assert_structural_equal(layout_unit, layout_unit.normalize())
 
 
 def test_tile_layout():
-
     layout = T.TileLayout.from_tuple(data=8, strides=1)
     layout_tile = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
-    assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout, [8], [8]))
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, layout, [64], [8]
+    assert_structural_equal(layout_tile, layout.tile(layout, [8], [8]))
+    assert layout.is_tile_inner(
+        layout_tile, [64], [8]
     ), "The layout is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_outer(
-        layout_tile, layout, [64], [8]
-    ), "The layout_tile is a tiling for layout."
+    assert layout.is_tile_outer(layout_tile, [64], [8]), "The layout_tile is a tiling for layout."
 
     layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
     layout_tile = T.TileLayout.from_tuple(data=(8, 8, 8, 8), strides=(512, 8, 64, 1))
-    assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout, [8, 8], [8, 8]))
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, layout, [64, 64], [8, 8]
+    assert_structural_equal(layout_tile, layout.tile(layout, [8, 8], [8, 8]))
+    assert layout.is_tile_inner(
+        layout_tile, [64, 64], [8, 8]
     ), "The layout is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_outer(
-        layout_tile, layout, [64, 64], [8, 8]
+    assert layout.is_tile_outer(
+        layout_tile, [64, 64], [8, 8]
     ), "The layout_tile is a tiling for layout."
 
     layout2 = T.TileLayout.from_tuple(data=(2, 4), strides=(1, 2))
     layout_tile = T.TileLayout.from_tuple(data=(8, 2, 8, 4), strides=(64, 1, 8, 2))
-    assert_structural_equal(layout_tile, T.TileLayout.tile(layout, layout2, [8, 8], [2, 4]))
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, layout2, [16, 32], [2, 4]
+    assert_structural_equal(layout_tile, layout2.tile(layout, [8, 8], [2, 4]))
+    assert layout2.is_tile_inner(
+        layout_tile, [16, 32], [2, 4]
     ), "The layout2 is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_outer(
-        layout_tile, layout, [16, 32], [8, 8]
+    assert layout.is_tile_outer(
+        layout_tile, [16, 32], [8, 8]
     ), "The layout_tile is a tiling for layout."
-    assert not T.TileLayout.is_tile_inner(
-        layout_tile, layout, [16, 32], [8, 8]
+    assert not layout.is_tile_inner(
+        layout_tile, [16, 32], [8, 8]
     ), "The layout2 is used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_outer(
-        layout_tile, layout2, [16, 32], [2, 4]
+    assert not layout2.is_tile_outer(
+        layout_tile, [16, 32], [2, 4]
     ), "The layout_tile is a tiling for layout."
 
     layout3 = T.TileLayout.from_tuple(data=(4, 2, 2, 4), strides=(16, 8, 1, 2))
-    layout_tile = T.TileLayout.from_tuple(
-        data=(8, 4, 2, 8, 2, 4), strides=(512, 16, 8, 64, 1, 2)
-    )
-    assert_structural_equal(
-        normalize_tile_layout(layout_tile), T.TileLayout.tile(layout, layout3, (8, 8), (8, 8))
-    )
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, layout3, (64, 64), (8, 8)
+    layout_tile = T.TileLayout.from_tuple(data=(8, 4, 2, 8, 2, 4), strides=(512, 16, 8, 64, 1, 2))
+    assert_structural_equal(layout_tile.normalize(), layout3.tile(layout, (8, 8), (8, 8)))
+    assert layout3.is_tile_inner(
+        layout_tile, (64, 64), (8, 8)
     ), "The layout3 is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_outer(
-        layout_tile, layout, (64, 64), (8, 8)
+    assert layout.is_tile_outer(
+        layout_tile, (64, 64), (8, 8)
     ), "The layout_tile is a tiling for layout."
-    assert not T.TileLayout.is_tile_inner(
-        layout_tile, layout, (64, 64), (8, 8)
+    assert not layout.is_tile_inner(
+        layout_tile, (64, 64), (8, 8)
     ), "The layout3 is not used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_outer(
-        layout_tile, layout3, (64, 64), (8, 8)
+    assert not layout3.is_tile_outer(
+        layout_tile, (64, 64), (8, 8)
     ), "The layout_tile is not a tiling for layout."
 
     # Tile over a sharded layout - 1
@@ -621,9 +605,8 @@ def test_tile_layout():
         device=(8, 4),
         from_to=("thread", "warp"),
     )
-    layout_tile = T.TileLayout.tile(
+    layout_tile = layout.tile(
         outer=T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)),
-        inner=layout,
         outer_shape=(8, 8),
         inner_shape=(8, 8),
     )
@@ -633,18 +616,18 @@ def test_tile_layout():
         device=(8, 4),
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(normalize_tile_layout(layout_expected), layout_tile)
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, layout, (64, 64), (8, 8)
+    assert_structural_equal(layout_expected.normalize(), layout_tile)
+    assert layout.is_tile_inner(
+        layout_tile, (64, 64), (8, 8)
     ), "The layout is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_outer(
-        layout_tile, T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)), (64, 64), (8, 8)
+    assert T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)).is_tile_outer(
+        layout_tile, (64, 64), (8, 8)
     ), "The layout is used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_inner(
-        layout_tile, T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)), (64, 64), (8, 8)
+    assert not T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)).is_tile_inner(
+        layout_tile, (64, 64), (8, 8)
     ), "The layout is not used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_outer(
-        layout_tile, layout, (64, 64), (8, 8)
+    assert not layout.is_tile_outer(
+        layout_tile, (64, 64), (8, 8)
     ), "The layout is not used for tiling layout_tile."
 
     # Tile over a sharded layout - 2
@@ -654,9 +637,8 @@ def test_tile_layout():
         device=(8, 4),
         from_to=("thread", "warp"),
     )
-    layout_tile = T.TileLayout.tile(
+    layout_tile = layout.tile(
         outer=T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)),
-        inner=layout,
         outer_shape=(8, 8),
         inner_shape=(8, 4),
     )
@@ -667,17 +649,17 @@ def test_tile_layout():
         from_to=("thread", "warp"),
     )
     assert_structural_equal(layout_expected, layout_tile)
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, layout, (64, 32), (8, 4)
+    assert layout.is_tile_inner(
+        layout_tile, (64, 32), (8, 4)
     ), "The layout is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_outer(
-        layout_tile, T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)), (64, 32), (8, 8)
+    assert T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)).is_tile_outer(
+        layout_tile, (64, 32), (8, 8)
     ), "The layout is used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_inner(
-        layout_tile, T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)), (64, 32), (8, 8)
+    assert not T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)).is_tile_inner(
+        layout_tile, (64, 32), (8, 8)
     ), "The layout is not used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_outer(
-        layout_tile, layout, (64, 32), (8, 4)
+    assert not layout.is_tile_outer(
+        layout_tile, (64, 32), (8, 4)
     ), "The layout is not used for tiling layout_tile."
 
     # Tile over a complicated sharded layout - 3
@@ -687,96 +669,92 @@ def test_tile_layout():
         device=(8, 4),
         from_to=("thread", "warp"),
     )
-
-    outer = T.TileLayout.from_tuple(data=(8, 2, 8, 4), strides=(8, 4, 2, 1))
-    layout_tile = T.TileLayout.tile(
-        outer=outer, inner=layout, outer_shape=(16, 32), inner_shape=(8, 8)
-    )
+    outer = T.TileLayout.from_tuple(data=(8, 2, 8, 4), strides=(64, 4, 8, 1))
+    layout_tile = layout.tile(outer=outer, outer_shape=(16, 32), inner_shape=(8, 8))
     layout_expected = T.TileLayout.from_tuple(
-        data=(16, T.S(0), 1, 8, 4, T.S(1), 2),
-        strides=(8, -1, 2, 4, 2, -1, 1),
+        data=(8, 2, T.S(0), 8, 4, T.S(1), 2),
+        strides=(128, 8, -1, 16, 2, -1, 1),
         device=(8, 4),
         from_to=("thread", "warp"),
     )
-    assert_structural_equal(normalize_tile_layout(layout_expected), layout_tile)
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, layout, (128, 256), (8, 8)
+    assert_structural_equal(layout_expected.normalize(), layout_tile)
+    assert layout.is_tile_inner(
+        layout_tile, (128, 256), (8, 8)
     ), "The layout is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_outer(
-        layout_tile, outer, (128, 256), (16, 32)
+    assert outer.is_tile_outer(
+        layout_tile, (128, 256), (16, 32)
     ), "The layout is used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_inner(
-        layout_tile, outer, (128, 256), (16, 32)
+    assert not outer.is_tile_inner(
+        layout_tile, (128, 256), (16, 32)
     ), "The layout is not used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_outer(
-        layout_tile, layout, (128, 256), (8, 8)
+    assert not layout.is_tile_outer(
+        layout_tile, (128, 256), (8, 8)
     ), "The layout is not used for tiling layout_tile."
 
     # Normalized Tile Layout Test - 4 (tile < inner)
     outer = T.TileLayout.from_tuple(data=(4, 2, 1), strides=(2, 1, 1))
     inner = T.TileLayout.from_tuple(data=(2, 4, 1), strides=(2, 3, 1))
-    layout_tile = T.TileLayout.tile(
+    layout_tile = inner.tile(
         outer,
-        inner,
         outer_shape=(4, 2),
         inner_shape=(2, 4),
     )
 
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, inner, (8, 8), (2, 4)
+    assert inner.is_tile_inner(
+        layout_tile, (8, 8), (2, 4)
     ), "The inner is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), inner, (8, 8), (2, 4)
+    assert inner.is_tile_inner(
+        layout_tile.normalize(), (8, 8), (2, 4)
     ), "The inner is used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), outer, (8, 8), (4, 2)
+    assert not outer.is_tile_inner(
+        layout_tile.normalize(), (8, 8), (4, 2)
     ), "The outer is not used for tiling layout_tile as inner."
 
     # Normalized Tile Layout Test - 5 (tile = inner)
     outer = T.TileLayout.from_tuple(data=(8, 2), strides=(2, 1))
     inner = T.TileLayout.from_tuple(data=(2, 4), strides=(4, 1))
-    layout_tile = T.TileLayout.tile(outer, inner, (8, 2), (2, 4))
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, inner, (16, 8), (2, 4)
+    layout_tile = inner.tile(outer, (8, 2), (2, 4))
+    assert inner.is_tile_inner(
+        layout_tile, (16, 8), (2, 4)
     ), "The inner is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), inner, (16, 8), (2, 4)
+    assert inner.is_tile_inner(
+        layout_tile.normalize(), (16, 8), (2, 4)
     ), "The inner is used for tiling layout_tile."
 
     # Normalized Tile Layout Test - 6 (tile < inner)
     outer = T.TileLayout.from_tuple(data=(8, 4, 1), strides=(4, 1, 4))
     inner = T.TileLayout.from_tuple(data=(2, 1, 1), strides=(4, 3, 1))
     inner_tmp = T.TileLayout.from_tuple(data=(8, 2, 2), strides=(4, 2, 2))
-    layout_tile = T.TileLayout.tile(outer, inner, (8, 4), (2, 1))
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, inner, (16, 4), (2, 1)
+    layout_tile = inner.tile(outer, (8, 4), (2, 1))
+    assert inner.is_tile_inner(
+        layout_tile, (16, 4), (2, 1)
     ), "The inner is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), inner, (16, 4), (2, 1)
+    assert inner.is_tile_inner(
+        layout_tile.normalize(), (16, 4), (2, 1)
     ), "The inner is used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), normalize_tile_layout(outer), (16, 4), (8, 4)
+    assert not outer.normalize().is_tile_inner(
+        layout_tile.normalize(), (16, 4), (8, 4)
     ), "The layout is not used for tiling layout_tile as inner."
-    assert not T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), inner_tmp, (16, 4), (8, 2, 2)
+    assert not inner_tmp.is_tile_inner(
+        layout_tile.normalize(), (16, 4), (8, 2, 2)
     ), "The layout is not used for tiling layout_tile as inner."
 
     # Normalized Tile Layout Test - 7 (tile = inner)
     outer = T.TileLayout.from_tuple(data=(8, 8, 4), strides=(32, 4, 1))
     inner = T.TileLayout.from_tuple(data=(1, 2, 1), strides=(4, 3, 1))
     inner_tmp = T.TileLayout.from_tuple(data=(1, 2, 2), strides=(8, 4, 3))
-    layout_tile = T.TileLayout.tile(outer, inner, outer_shape=(8, 8, 4), inner_shape=(1, 2, 1))
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, inner, (8, 16, 4), (1, 2, 1)
+    layout_tile = inner.tile(outer, (8, 8, 4), (1, 2, 1))
+    assert inner.is_tile_inner(
+        layout_tile, (8, 16, 4), (1, 2, 1)
     ), "The inner is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), inner, (8, 16, 4), (1, 2, 1)
+    assert inner.is_tile_inner(
+        layout_tile.normalize(), (8, 16, 4), (1, 2, 1)
     ), "The inner is used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), normalize_tile_layout(outer), (8, 16, 4), (8, 8, 4)
+    assert not outer.normalize().is_tile_inner(
+        layout_tile.normalize(), (8, 16, 4), (8, 8, 4)
     ), "The layout is not used for tiling layout_tile as inner."
-    assert not T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), inner_tmp, (8, 16, 4), (1, 2, 2)
+    assert not inner_tmp.is_tile_inner(
+        layout_tile.normalize(), (8, 16, 4), (1, 2, 2)
     ), "The layout is not used for tiling layout_tile as inner."
 
     # Normalized Tile Layout Test - 8 (tile = inner w/ device)
@@ -787,40 +765,40 @@ def test_tile_layout():
         device=(8, 4),
         from_to=("thread", "warp"),
     )
-    layout_tile = T.TileLayout.tile(outer, inner, outer_shape=(8, 8, 4), inner_shape=(8, 8, 8))
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, inner, (64, 64, 32), (8, 8, 8)
+    layout_tile = inner.tile(outer, (8, 8, 4), (8, 8, 8))
+    assert inner.is_tile_inner(
+        layout_tile, (64, 64, 32), (8, 8, 8)
     ), "The inner is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), inner, (64, 64, 32), (8, 8, 8)
+    assert inner.is_tile_inner(
+        layout_tile.normalize(), (64, 64, 32), (8, 8, 8)
     ), "The inner is used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), normalize_tile_layout(outer), (64, 64, 32), (8, 8, 4)
+    assert not outer.normalize().is_tile_inner(
+        layout_tile.normalize(), (64, 64, 32), (8, 8, 4)
     ), "The layout is not used for tiling layout_tile as inner."
 
     # Normalized Tile Layout Test - 9 (tile = inner w/ device + diff major-dim)
     outer = T.TileLayout.from_tuple(data=(16, 8, 4), strides=(1, 64, 16))
     inner = T.TileLayout.from_tuple(data=(2, 4, 2, 2), strides=(4, 1, 4, 3))
     inner_tmp = T.TileLayout.from_tuple(data=(1, 2, 2), strides=(8, 4, 3))
-    layout_tile = T.TileLayout.tile(outer, inner, outer_shape=(16, 8, 4), inner_shape=(8, 2, 2))
-    assert T.TileLayout.is_tile_inner(
-        layout_tile, inner, (128, 16, 8), (8, 2, 2)
+    layout_tile = inner.tile(outer, (16, 8, 4), (8, 2, 2))
+    assert inner.is_tile_inner(
+        layout_tile, (128, 16, 8), (8, 2, 2)
     ), "The inner is used for tiling layout_tile."
-    assert T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), inner, (128, 16, 8), (8, 2, 2)
+    assert inner.is_tile_inner(
+        layout_tile.normalize(), (128, 16, 8), (8, 2, 2)
     ), "The inner is used for tiling layout_tile."
-    assert not T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), normalize_tile_layout(outer), (128, 16, 8), (16, 8, 4)
+    assert not outer.normalize().is_tile_inner(
+        layout_tile.normalize(), (128, 16, 8), (16, 8, 4)
     ), "The layout is not used for tiling layout_tile as inner."
-    assert T.TileLayout.is_tile_inner(
-        normalize_tile_layout(layout_tile), inner_tmp, (128, 16, 8), (1, 2, 2)
+    assert inner_tmp.is_tile_inner(
+        layout_tile.normalize(), (128, 16, 8), (1, 2, 2)
     ), "The layout is used for tiling layout_tile as inner."
 
     with pytest.raises(Exception):
         # dims mismatch
         layout = T.TileLayout.from_tuple(data=8, strides=1)
         layout2 = T.TileLayout.from_tuple(data=(2, 4), strides=(1, 2))
-        T.TileLayout.tile(layout, layout2, [8], [2, 4])
+        layout2.tile(layout, [8], [2, 4])
 
     with pytest.raises(Exception):
         # outer must not have device tree
@@ -830,12 +808,63 @@ def test_tile_layout():
             device=(8, 4),
             from_to=("thread", "warp"),
         )
-        T.TileLayout.tile(
+        T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)).tile(
             outer=layout,
-            inner=T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)),
             outer_shape=(8, 8),
             inner_shape=(8, 8),
         )
+
+    # tile(TileLayout, ComposeLayout)
+    compose = T.ComposeLayout(
+        layout_A=T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+        layout_B=T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1)),
+    )
+    layout = T.TileLayout.from_tuple(data=(8, 1), strides=(1, 1))
+    layout_tile = compose.tile(layout, (8, 1), (8, 64))
+    layout_expected = T.ComposeLayout(
+        T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
+        T.TileLayout.from_tuple(data=(4096,), strides=(1,)),
+    )
+    assert_structural_equal(layout_tile.normalize(), layout_expected)
+    assert compose.is_tile_inner(
+        layout_tile, (4096,), (512,)
+    ), "The layout is used for tiling compose."
+    assert layout.is_tile_outer(
+        layout_tile, (4096,), (8,)
+    ), "The layout is used for tiling compose."
+
+    compose = T.ComposeLayout(
+        layout_A=T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+        layout_B=T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1)),
+    )
+    layout = T.TileLayout.from_tuple(data=(8, 4), strides=(1, 8))
+    layout_tile = compose.tile(layout, (8, 4), (8, 64))
+    layout_expected = T.ComposeLayout(
+        T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
+        T.TileLayout.from_tuple(data=(64, 4, 64), strides=(64, 4096, 1)),
+    )
+    assert_structural_equal(layout_tile.normalize(), layout_expected)
+    assert compose.is_tile_inner(
+        layout_tile, (64, 4, 64), (8, 1, 64)
+    ), "The layout is used for tiling compose."
+    assert layout.is_tile_outer(
+        layout_tile, (64, 4, 64), (8, 4, 1)
+    ), "The layout is used for tiling compose."
+
+    # tile(TileLayout, SwizzleLayout)
+    swizzle = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+    layout_tile = swizzle.tile(layout, (8, 4), (8, 64))
+    layout_expected = T.ComposeLayout(
+        T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
+        T.TileLayout.from_tuple(data=(64, 4, 64), strides=(64, 4096, 1)),
+    )
+    assert_structural_equal(layout_tile.normalize(), layout_expected)
+    assert swizzle.is_tile_inner(
+        layout_tile, (64, 4, 64), (8, 4, 1)
+    ), "The layout is used for tiling compose."
+    assert layout.is_tile_outer(
+        layout_tile, (64, 4, 64), (8, 4, 1)
+    ), "The layout is used for tiling compose."
 
 
 def test_vec_len_layout():
@@ -844,11 +873,10 @@ def test_vec_len_layout():
     layout_rm = T.TileLayout.from_tuple(data=(32), strides=(1))
     layout_rm_2 = T.TileLayout.from_tuple(data=(8, 2, 2), strides=(4, 2, 1))
 
-
     layout_cm = T.TileLayout.from_tuple(data=(8, 4), strides=(1, 8))
     layout_cm_2 = T.TileLayout.from_tuple(data=(4, 2, 4), strides=(2, 1, 8))
     layout_cm_half = T.TileLayout.from_tuple(data=(4, 8), strides=(1, 4))
-    
+
     # different dim-majors
     # vec_len(layout_rm, layout_cm) = 1
     assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_cm) == 1
@@ -900,7 +928,7 @@ def test_shard_layout():
         device=(2, 2, 8, 4),
         from_to=("thread", "cta"),
     )
-    assert_structural_equal(normalize_tile_layout(layout_expected), layout_cta)
+    assert_structural_equal(layout_expected.normalize(), layout_cta)
 
     # quad shuffle test
     layout = T.TileLayout.from_tuple(data=(1, 2), strides=(2, 1))
@@ -961,6 +989,13 @@ def test_size_cosize():
     layout = T.SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
     assert layout.size == 1024
 
+    # ComposeLayout
+    layout = T.ComposeLayout(
+        T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+        T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1)),
+    )
+    assert layout.size == 512
+
     ###################################################################### cosize
     # TileLayout
     layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
@@ -980,6 +1015,13 @@ def test_size_cosize():
     assert layout.cosize == 512
     layout = T.SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
     assert layout.cosize == 1024
+
+    # ComposeLayout
+    layout = T.ComposeLayout(
+        T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+        T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1)),
+    )
+    assert layout.cosize == 512
 
     # TrainiumLayout
     layout = T.TileLayout.from_tuple(data=(8, 8), strides=(1, 1))
@@ -1002,7 +1044,7 @@ def test_size_cosize():
 
 def test_apply():
     ################ TileLayout
-    def test0():
+    def test_tile_layout_0():
         layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
         for i, j in itertools.product(range(8), range(8)):
             assert layout.apply(i * 8 + j)[0] == i * 8 + j * 1
@@ -1017,7 +1059,7 @@ def test_apply():
         with pytest.raises(Exception):
             layout.apply(1, 1, 1)
 
-    def test1():
+    def test_tile_layout_1():
         layout = T.TileLayout.from_tuple(data=(8, 8), strides=(10, 1))
         for i, j in itertools.product(range(8), range(8)):
             assert layout.apply(i * 8 + j)[0] == i * 10 + j * 1
@@ -1036,7 +1078,7 @@ def test_apply():
                 == outer * 78 + i * 10 + j * 1
             )
 
-    def test2():
+    def test_tile_layout_2():
         layout = T.TileLayout.from_tuple(data=(2, 3, 4, 2, 2), strides=(1, 2, 12, 6, 48))
 
         def f(i0, i1):
@@ -1055,7 +1097,7 @@ def test_apply():
         for i in range(6 * 16):
             f(i // 16, i % 16)
 
-    def test3():
+    def test_tile_layout_3():
         layout = T.TileLayout.from_tuple(
             data=(T.S(0), 1, T.S(1), 2),
             strides=(-1, 2, -1, 1),
@@ -1066,13 +1108,13 @@ def test_apply():
             assert layout.apply(i0, i1, shape=(8, 8))[0] == i1 % 2
 
     ################ Swizzle Layout
-    def test4():
+    def test_swizzle_layout_0():
         layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3)
         assert layout.size == 64
         for i, j in itertools.product(range(8), range(8)):
             assert layout.apply(i * 8 + j)[0] == i * 8 + i ^ j
 
-    def test5():
+    def test_swizzle_layout_1():
         layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
         assert layout.size == 512
         for i, j, k in itertools.product(range(8), range(8), range(8)):
@@ -1084,23 +1126,49 @@ def test_apply():
             i, j, k = inner // 64, (inner % 64) // 8, inner % 8
             assert layout.apply(p)[0] == outer * 512 + (i * 8 + (i ^ j)) * 8 + k
 
-    def test6():
+    def test_swizzle_layout_2():
         layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3, swizzle_inner=False)
         assert layout.size == 64
         for i, j in itertools.product(range(8), range(8)):
             assert layout.apply(i * 8 + j)[0] == (i ^ j) * 8 + j
 
+    ################ Compose Layout
+    def test_compose_layout_0():
+        layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        layoutB = T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1))
+        layout = T.ComposeLayout(layoutA, layoutB)
+        assert layout.size == 512
+        assert layout.cosize == 512
+        for i, j in itertools.product(range(8), range(64)):
+            assert layout.apply(i * 64 + j)[0] == layoutA.apply(layoutB.apply(i * 64 + j)[0])[0]
+
+    def test_compose_layout_1():
+        layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        layoutB = T.TileLayout.from_tuple(data=(16, 64, 8), strides=(64, 1, 1024))
+        layout = T.ComposeLayout(layoutA, layoutB)
+        assert layout.size == 16 * 64 * 8
+        assert layout.cosize == 16 * 64 * 8
+        for i, j, k in itertools.product(range(16), range(64), range(8)):
+            assert (
+                layout.apply(i * 64 * 8 + j * 8 + k)[0]
+                == layoutA.apply(layoutB.apply(i * 64 * 8 + j * 8 + k)[0])[0]
+            )
+
     ################ Trainium Layout
-    def test7():
-        layout = T.TrainiumLayout(dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)))
+    def test_trainium_layout_0():
+        layout = T.TrainiumLayout(
+            dimension_types="FP",
+            combined_1d_layout=T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)),
+        )
         for i, j in itertools.product(range(8), range(8)):
-            coord = layout.apply(i, j, shape=(8, 8)) 
+            coord = layout.apply(i, j, shape=(8, 8))
             assert coord[0] == j
-            assert coord[1] == i*8
-            
-    def test8():
+            assert coord[1] == i * 8
+
+    def test_trainium_layout_1():
         layout = T.TileLayout.from_tuple(data=(2, 6, 4, 2, 2), strides=(1, 1, 12, 6, 48))
         layout = T.TrainiumLayout(dimension_types="FPFPF", combined_1d_layout=layout)
+
         def f(i0, i1):
             leaf1 = i0 // 6
             leaf2 = i0 % 6
@@ -1108,33 +1176,43 @@ def test_apply():
             leaf4 = (i1 % 4) // 2
             leaf5 = i1 % 2
             coord = layout.apply(i0, i1, shape=(12, 16))
-            assert coord[0] == leaf2  + leaf4 * 6
-            assert coord[1] == leaf1 * 1 +  leaf3 * 12 + leaf5 * 48
+            assert coord[0] == leaf2 + leaf4 * 6
+            assert coord[1] == leaf1 * 1 + leaf3 * 12 + leaf5 * 48
 
         for i0, i1 in itertools.product(range(6), range(16)):
             f(i0, i1)
         for i in range(6 * 16):
             f(i // 16, i % 16)
 
+    test_tile_layout_0()
+    test_tile_layout_1()
+    test_tile_layout_2()
+    test_tile_layout_3()
+    test_swizzle_layout_0()
+    test_swizzle_layout_1()
+    test_swizzle_layout_2()
+    test_compose_layout_0()
+    test_compose_layout_1()
+    test_trainium_layout_0()
+    test_trainium_layout_1()
 
-    test0()
-    test1()
-    test2()
-    test3()
-    test4()
-    test5()
-    test6()
-    test7()
-    test8()
 
+def test_normalize_compose_layout():
+    layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+    layoutB = T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1))
+    layout = T.ComposeLayout(layoutA, layoutB.normalize())
+    assert_structural_equal(layout.normalize(), layout)
 
-def normalize_trainium_layout(layout):
-    return T.TrainiumLayout.normalize(layout)
+    layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+    layoutB = T.TileLayout.from_tuple(data=(64, 4, 64), strides=(64, 4096, 1))
+    layout = T.ComposeLayout(layoutA, layoutB.normalize())
+    assert_structural_equal(layout.normalize(), layout)
+
 
 def test_normalize_trainium_layout():
     layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
     layout = T.TrainiumLayout(dimension_types="PF", combined_1d_layout=layout)
-    assert_structural_equal(layout, normalize_trainium_layout(layout))
+    assert_structural_equal(layout, layout.normalize())
 
     layout = T.TileLayout.from_tuple(data=(8, 1, 8), strides=(8, 1, 1))
     layout = T.TrainiumLayout(dimension_types="FPF", combined_1d_layout=layout)
@@ -1142,12 +1220,12 @@ def test_normalize_trainium_layout():
         dimension_types="F",
         combined_1d_layout=T.TileLayout.from_tuple(data=(64), strides=(1)),
     )
-    assert_structural_equal(layout_expected, normalize_trainium_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
 
     # cannot fuse P and F
     layout = T.TileLayout.from_tuple(data=(8, 8, 8), strides=(8, 1, 1))
     layout = T.TrainiumLayout(dimension_types="FPF", combined_1d_layout=layout)
-    assert_structural_equal(layout, normalize_trainium_layout(layout))
+    assert_structural_equal(layout, layout.normalize())
 
     layout = T.TileLayout.from_tuple(data=(8, 8, 8, 8), strides=(8, 8, 1, 1))
     layout = T.TrainiumLayout(dimension_types="FPPF", combined_1d_layout=layout)
@@ -1155,14 +1233,17 @@ def test_normalize_trainium_layout():
         dimension_types="FPF",
         combined_1d_layout=T.TileLayout.from_tuple(data=(8, 64, 8), strides=(8, 1, 1)),
     )
-    assert_structural_equal(layout_expected, normalize_trainium_layout(layout))
+    assert_structural_equal(layout_expected, layout.normalize())
+
 
 if __name__ == "__main__":
-    test_constructor_nested_tuple_no_device()
-    test_constructor_nested_tuple()
+    test_constructor_from_tuple_no_device()
+    test_constructor_from_tuple()
     test_normalize_tile_layout()
     test_tile_layout()
     test_shard_layout()
     test_size_cosize()
     test_apply()
     test_vec_len_layout()
+    test_normalize_compose_layout()
+    test_normalize_trainium_layout()

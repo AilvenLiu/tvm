@@ -49,6 +49,7 @@ from tvm.tirx.layout import (
     DataIterAttr,
     S,
     SwizzleLayout,
+    ComposeLayout,
     TrainiumLayout,
 )
 from tvm.ir.tensormap_type import (
@@ -2056,6 +2057,7 @@ def Range(begin: PrimExpr, end: PrimExpr) -> ir.Range:  # pylint: disable=invali
 
 if TYPE_CHECKING:
     T = TypeVar("T")
+
     # When type checking (and by extension, for linters like Pylint), make meta_var an identity function.
     def meta_var(x: T) -> T:
         return x
@@ -2249,6 +2251,8 @@ nki_activation = _op_wrapper(_tir_op.nki_activation)
 nki_reciprocal = _op_wrapper(_tir_op.nki_reciprocal)
 nki_tensortensor = _op_wrapper(_tir_op.nki_tensortensor)
 nki_tensorscalar = _op_wrapper(_tir_op.nki_tensorscalar)
+
+
 def _dtype_forward(func):
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
@@ -2708,6 +2712,7 @@ __all__ += [
     "DataIterAttr",
     "S",
     "SwizzleLayout",
+    "ComposeLayout",
     "view",
     "get",
     "static_assert",

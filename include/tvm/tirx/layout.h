@@ -31,6 +31,8 @@
 namespace tvm {
 namespace tirx {
 
+class TLayout;
+class TileLayout;
 // Base class for layout
 class TLayoutNode : public Object {
  public:
@@ -51,6 +53,21 @@ class TLayoutNode : public Object {
 
   /*! \brief Apply layout on the flattened coordinate and get the mapped output */
   virtual Array<PrimExpr> Apply(const PrimExpr& coord) const = 0;
+
+  /*! \brief Normalize the layout */
+  virtual TLayout Normalize() const;
+
+  /*! \brief Tile the layout with an outer layout */
+  virtual TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
+                       const Array<PrimExpr>& inner_shape) const;
+
+  /*! \brief Check if the layout is the inner layout of a tiled layout */
+  virtual bool IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                           const Array<PrimExpr>& inner_shape) const;
+
+  /*! \brief Check if the layout is the outer layout of a tiled layout */
+  virtual bool IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                           const Array<PrimExpr>& outer_shape) const;
 
   static constexpr const char* _type_key = "tirx.TLayout";
   static constexpr const bool _type_has_method_sequal_reduce = false;
@@ -212,6 +229,21 @@ class TileLayoutNode : public TLayoutNode {
   /*! \brief Apply the input coordinate and get the mapped output */
   Array<PrimExpr> Apply(const PrimExpr& coord) const final;
 
+  /*! \brief Normalize the layout */
+  TLayout Normalize() const final;
+
+  /*! \brief Tile the layout with an outer layout */
+  TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
+               const Array<PrimExpr>& inner_shape) const final;
+
+  /*! \brief Check if the layout is the inner layout of a tiled layout */
+  bool IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                   const Array<PrimExpr>& inner_shape) const final;
+
+  /*! \brief Check if the layout is the outer layout of a tiled layout */
+  bool IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                   const Array<PrimExpr>& outer_shape) const final;
+
   static constexpr const char* _type_key = "tirx.TileLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
@@ -233,9 +265,6 @@ class TileLayout : public TLayout {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);
 };
 
-/*! \brief Construct a new layout by tiling the ouer layout over the inner layout */
-TileLayout Tile(TileLayout outer, TileLayout inner, ShapeTuple outer_shape, ShapeTuple inner_shape);
-
 /*!
  * \brief Construct a new layout to express the sharding strategy of a tensor.
  * \param shape The shape of the tensor.
@@ -247,13 +276,6 @@ TileLayout Tile(TileLayout outer, TileLayout inner, ShapeTuple outer_shape, Shap
  */
 TileLayout Shard(Array<PrimExpr> shape, Array<PrimExpr> mesh, String strategy, TileLayout inner,
                  ExecScope from, ExecScope to);
-
-/*! \brief Layout normalization
-    1. Deduplicate the split nodes in the tree, such that no two split nodes share the same child
-   node.
-    2. Remove the split nodes with extent 1.
- */
-TileLayout NormalizeTileLayout(TileLayout layout);
 
 // SwizzleLayout
 class SwizzleLayoutNode : public TLayoutNode {
@@ -294,6 +316,17 @@ class SwizzleLayoutNode : public TLayoutNode {
   /*! \brief Apply the input coordinate and get the mapped output */
   Array<PrimExpr> Apply(const PrimExpr& coord) const final;
 
+  /*! \brief Normalize the layout */
+  TLayout Normalize() const final;
+
+  /*! \brief Tile the layout with an outer layout */
+  TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
+               const Array<PrimExpr>& inner_shape) const final;
+
+  /*! \brief Check if the layout is the inner layout of a tiled layout */
+  bool IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                   const Array<PrimExpr>& inner_shape) const final;
+
   static constexpr const char* _type_key = "tirx.SwizzleLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
@@ -314,6 +347,66 @@ class SwizzleLayout : public TLayout {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SwizzleLayoutNode);
 };
 
+// ComposeLayout
+class ComposeLayoutNode : public TLayoutNode {
+ public:
+  SwizzleLayout layout_A;
+  TileLayout layout_B;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("layout_A", &layout_A);
+    v->Visit("layout_B", &layout_B);
+  }
+
+  bool SEqualReduce(const ComposeLayoutNode* other, SEqualReducer equal) const {
+    return equal(layout_A, other->layout_A) && equal(layout_B, other->layout_B);
+  }
+
+  void SHashReduce(SHashReducer hash_reducer) const {
+    hash_reducer(layout_A);
+    hash_reducer(layout_B);
+  }
+
+  /*! \brief Check if the layout is compatible with the shape */
+  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
+
+  /*! \brief Verify if the layout is well-formed */
+  bool VerifyWellFormed() const final;
+
+  /*! \brief Get the size of the layout */
+  PrimExpr GetSize() const final;
+
+  /*! \brief Get the cosize of the layout */
+  PrimExpr GetCosize() const final;
+
+  /*! \brief Apply the input coordinate and get the mapped output */
+  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
+
+  /*! \brief Normalize the layout */
+  TLayout Normalize() const final;
+
+  /*! \brief Tile the layout with an outer layout */
+  TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
+               const Array<PrimExpr>& inner_shape) const final;
+
+  /*! \brief Check if the layout is the inner layout of a tiled layout */
+  bool IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                   const Array<PrimExpr>& inner_shape) const final;
+
+  static constexpr const char* _type_key = "tirx.ComposeLayout";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  TVM_DECLARE_FINAL_OBJECT_INFO(ComposeLayoutNode, TLayoutNode);
+};
+
+class ComposeLayout : public TLayout {
+ public:
+  TVM_DLL explicit ComposeLayout(SwizzleLayout layout_A, TileLayout layout_B);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(ComposeLayout, TLayout, ComposeLayoutNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(ComposeLayoutNode);
+};
+
 // Trainium Layout
 
 enum PhysicalDimensionType : int {
@@ -321,10 +414,8 @@ enum PhysicalDimensionType : int {
   kFree = 1,
 };
 
-
-class TrainiumLayoutNode: public TLayoutNode {
-  public:
-
+class TrainiumLayoutNode : public TLayoutNode {
+ public:
   ShapeTuple dimension_types;
   TileLayout combined_1d_layout;
 
@@ -334,7 +425,8 @@ class TrainiumLayoutNode: public TLayoutNode {
   }
 
   bool SEqualReduce(const TrainiumLayoutNode* other, SEqualReducer equal) const {
-    return equal(dimension_types, other->dimension_types) && equal(combined_1d_layout, other->combined_1d_layout);
+    return equal(dimension_types, other->dimension_types) &&
+           equal(combined_1d_layout, other->combined_1d_layout);
   }
 
   void SHashReduce(SHashReducer hash_reducer) const {
@@ -358,23 +450,27 @@ class TrainiumLayoutNode: public TLayoutNode {
 
   Array<PrimExpr> Apply(const PrimExpr& coord) const final;
 
-  static constexpr const char* _type_key = "tir.TrainiumLayout";
+  /*! \brief Normalize the layout */
+  TLayout Normalize() const final;
+
+  static constexpr const char* _type_key = "tirx.TrainiumLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(TrainiumLayoutNode, TLayoutNode);
 };
 
 class TrainiumLayout : public TLayout {
-  public:
+ public:
   TVM_DLL explicit TrainiumLayout(ShapeTuple dimension_types, TileLayout combined_1d_layout);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TrainiumLayout, TLayout, TrainiumLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TrainiumLayoutNode);
 };
+
 /********************* Utils *********************/
 bool IsTrivialLayout(const TLayout& layout);
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_
