@@ -165,6 +165,8 @@ class PythonDocPrinter : public DocPrinter {
   void PrintTypedDoc(const AssignDoc& doc) final;
   void PrintTypedDoc(const IfDoc& doc) final;
   void PrintTypedDoc(const WhileDoc& doc) final;
+  void PrintTypedDoc(const BreakDoc& doc) final;
+  void PrintTypedDoc(const ContinueDoc& doc) final;
   void PrintTypedDoc(const ForDoc& doc) final;
   void PrintTypedDoc(const ExprStmtDoc& doc) final;
   void PrintTypedDoc(const AssertDoc& doc) final;
@@ -609,6 +611,14 @@ void PythonDocPrinter::PrintTypedDoc(const WhileDoc& doc) {
   output_ << ":";
 
   PrintIndentedBlock(doc->body);
+}
+
+void PythonDocPrinter::PrintTypedDoc(const BreakDoc& doc) {
+  output_ << "break";
+}
+
+void PythonDocPrinter::PrintTypedDoc(const ContinueDoc& doc) {
+  output_ << "continue";
 }
 
 void PythonDocPrinter::PrintTypedDoc(const ForDoc& doc) {

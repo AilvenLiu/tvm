@@ -194,6 +194,16 @@ WhileDoc::WhileDoc(ExprDoc predicate, ffi::Array<StmtDoc> body) {
   this->data_ = std::move(n);
 }
 
+BreakDoc::BreakDoc() {
+  ObjectPtr<BreakDocNode> n = ffi::make_object<BreakDocNode>();
+  this->data_ = std::move(n);
+}
+
+ContinueDoc::ContinueDoc() {
+  ObjectPtr<ContinueDocNode> n = ffi::make_object<ContinueDocNode>();
+  this->data_ = std::move(n);
+}
+
 ForDoc::ForDoc(ExprDoc lhs, ExprDoc rhs, ffi::Array<StmtDoc> body) {
   ObjectPtr<ForDocNode> n = ffi::make_object<ForDocNode>();
   n->lhs = lhs;
@@ -410,6 +420,16 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("script.printer.BreakDoc", []() { return BreakDoc(); });
+});
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("script.printer.ContinueDoc", []() { return ContinueDoc(); });
+});
+
+TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(
       "script.printer.ForDoc",

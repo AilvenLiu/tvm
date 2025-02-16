@@ -406,6 +406,16 @@ AttrFrame Attr(ffi::Any node, ffi::String attr_key, PrimExpr value);
 WhileFrame While(PrimExpr condition);
 
 /*!
+ * \brief Create a break statement.
+ */
+void Break();
+
+/*!
+ * \brief Create a continue statement.
+ */
+void Continue();
+
+/*!
  * \brief Create an if statement.
  * \param condition The condition of if statement.
  * \return The result IfFrame.

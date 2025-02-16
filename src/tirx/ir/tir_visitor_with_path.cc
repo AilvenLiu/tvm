@@ -212,6 +212,10 @@ void TIRVisitorWithPath::VisitStmt_(const WhileNode* op, AccessPath path) {
   bind_scope_.WithNewScope([&]() { Visit(op->body, path->Attr("body")); });
 }
 
+void TIRVisitorWithPath::VisitStmt_(const BreakNode* op, AccessPath path) {}
+
+void TIRVisitorWithPath::VisitStmt_(const ContinueNode* op, AccessPath path) {}
+
 void TIRVisitorWithPath::VisitStmt_(const AllocBufferNode* op, AccessPath path) {
   // AllocBuffer both allocates the data variable and declares the buffer.
   // Push definitions into the current scope so they are visible to subsequent siblings.

@@ -239,6 +239,30 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   });
 }
 
+// Break
+Break::Break(Span span) {
+  ObjectPtr<BreakNode> node = make_object<BreakNode>();
+  node->span = std::move(span);
+  data_ = std::move(node);
+}
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.Break", [](Span span) { return Break(span); });
+});
+
+// Continue
+Continue::Continue(Span span) {
+  ObjectPtr<ContinueNode> node = make_object<ContinueNode>();
+  node->span = std::move(span);
+  data_ = std::move(node);
+}
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.Continue", [](Span span) { return Continue(span); });
+});
+
 // DeclBuffer
 DeclBuffer::DeclBuffer(Buffer buffer, Span span) {
   ObjectPtr<DeclBufferNode> node = ffi::make_object<DeclBufferNode>();

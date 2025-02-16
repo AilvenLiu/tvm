@@ -57,6 +57,10 @@ void StmtVisitor::VisitStmt_(const WhileNode* op) {
   this->VisitStmt(op->body);
 }
 
+void StmtVisitor::VisitStmt_(const BreakNode* op) {}
+
+void StmtVisitor::VisitStmt_(const ContinueNode* op) {}
+
 void StmtVisitor::VisitBufferDef(const Buffer& buffer, bool alloc_data) {
   for (const auto& e : buffer->shape) this->VisitExpr(e);
   for (const auto& e : buffer->strides) this->VisitExpr(e);
@@ -314,6 +318,14 @@ Stmt StmtMutator::VisitStmt_(const WhileNode* op) {
     n->body = std::move(body);
     return Stmt(n);
   }
+}
+
+Stmt StmtMutator::VisitStmt_(const BreakNode* op) {
+  return GetRef<Stmt>(op);
+}
+
+Stmt StmtMutator::VisitStmt_(const ContinueNode* op) {
+  return GetRef<Stmt>(op);
 }
 
 Buffer StmtMutator::VisitBufferDef(const Buffer& buffer, bool alloc_data) {

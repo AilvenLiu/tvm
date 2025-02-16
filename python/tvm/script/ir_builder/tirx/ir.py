@@ -1325,6 +1325,16 @@ def While(condition: PrimExpr) -> frame.WhileFrame:  # pylint: disable=invalid-n
     return _ffi_api.While(condition)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
+def Break() -> None:  # pylint: disable=invalid-name
+    """Create a break node."""
+    return _ffi_api.Break()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def Continue() -> None:  # pylint: disable=invalid-name
+    """Create a continue node."""
+    return _ffi_api.Continue()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
 def If(condition: PrimExpr) -> frame.IfFrame:  # pylint: disable=invalid-name
     """Create an if node.
 
@@ -2442,6 +2452,8 @@ __all__ = float_types + [
     "Assert",
     "attr",
     "While",
+    "Break",
+    "Continue",
     "If",
     "Then",
     "Else",

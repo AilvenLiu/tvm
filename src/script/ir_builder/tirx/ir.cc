@@ -758,6 +758,10 @@ WhileFrame While(PrimExpr condition) {
   return WhileFrame(n);
 }
 
+void Break() { AddToParent(tvm::tir::Break(Span())); }
+
+void Continue() { AddToParent(tvm::tir::Continue(Span())); }
+
 IfFrame If(PrimExpr condition) {
   ObjectPtr<IfFrameNode> n = ffi::make_object<IfFrameNode>();
   n->condition = condition;
@@ -1018,6 +1022,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.Bind", Bind)
       .def("script.ir_builder.tir.Attr", Attr)
       .def("script.ir_builder.tir.While", While)
+      .def("script.ir_builder.tir.Break", Break)
+      .def("script.ir_builder.tir.Continue", Continue)
       .def("script.ir_builder.tir.If", If)
       .def("script.ir_builder.tir.Then", Then)
       .def("script.ir_builder.tir.Else", Else)

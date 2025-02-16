@@ -433,6 +433,169 @@ def test_roundtrip_tensormap():
     assert_structural_equal(func1, from_source(code))
 
 
+def test_roundtrip_break_for():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (10,), "int32")
+
+        with T.kernel():
+            with T.cta():
+                for i in T.serial(10):
+                    if i > 5:
+                        break
+                    A[i] = i
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_break_while():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (10,), "int32")
+        i = T.alloc_buffer((1,), dtype="int32", scope="local")
+
+        with T.kernel():
+            with T.cta():
+                i[0] = 0
+                while i[0] < 10:
+                    A[i[0]] = i[0] * 2
+                    if A[i[0]] > 10:
+                        break
+                    i[0] = i[0] + 1
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_break_nested():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (9,), "int32")
+
+        with T.kernel():
+            with T.cta():
+                idx = T.alloc_buffer((1,), "int32", scope="local")
+                idx[0] = 0
+                for i in T.serial(3):
+                    for j in T.serial(3):
+                        A[idx[0]] = i * 10 + j
+                        idx[0] += 1
+                        if j == 1:
+                            break
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_continue_for():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (10,), "int32")
+
+        with T.kernel():
+            with T.cta():
+                for i in T.serial(10):
+                    if (i % 2) == 0:
+                        continue
+                    A[i] = i
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_continue_while():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (10,), "int32")
+        i = T.alloc_buffer((1,), "int32", scope="local")
+
+        with T.kernel():
+            with T.cta():
+                i[0] = 0
+                while i[0] < 10:
+                    if (i[0] % 2) == 1:
+                        i[0] += 1
+                        continue
+                    A[i[0]] = i[0]
+                    i[0] += 1
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_continue_nested():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (9,), "int32")
+
+        with T.kernel():
+            with T.cta():
+                idx = T.alloc_buffer((1,), dtype="int32", scope="local")
+                idx[0] = 0
+                for i in T.serial(3):
+                    for j in T.serial(3):
+                        if j == 1:
+                            continue
+                        A[idx[0]] = i * 10 + j
+                        idx[0] += 1
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_break_and_continue():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (10,), "int32")
+
+        with T.kernel():
+            with T.cta():
+                for i in T.serial(10):
+                    if i == 2:
+                        continue
+                    if i == 7:
+                        break
+                    A[i] = i
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_unreachable_after_break():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (5,), "int32")
+
+        with T.kernel():
+            with T.cta():
+                for i in T.serial(5):
+                    A[i] = i
+                    break
+                    # This line is never reached
+                    A[i] = -1
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+
 if __name__ == "__main__":
     test_roundtrip_scopeid1()
     test_roundtrip_scopeid2()
@@ -447,3 +610,11 @@ if __name__ == "__main__":
     test_roundtrip_pipeline_no_specialize_async_no_depth()
     test_roundtrip_pipeline_specialize_sync_depth()
     test_roundtrip_tensormap()
+    test_roundtrip_break_for()
+    test_roundtrip_break_while()
+    test_roundtrip_break_nested()
+    test_roundtrip_continue_for()
+    test_roundtrip_continue_while()
+    test_roundtrip_continue_nested()
+    test_roundtrip_break_and_continue()
+    test_roundtrip_unreachable_after_break()

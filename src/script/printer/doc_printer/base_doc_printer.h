@@ -170,6 +170,16 @@ class DocPrinter {
   virtual void PrintTypedDoc(const WhileDoc& doc) = 0;
 
   /*!
+   * \brief Virtual method to print a BreakDoc
+   */
+  virtual void PrintTypedDoc(const BreakDoc& doc) = 0;
+
+  /*!
+   * \brief Virtual method to print a ContinueDoc
+   */
+  virtual void PrintTypedDoc(const ContinueDoc& doc) = 0;
+
+  /*!
    * \brief Virtual method to print a ForDoc
    */
   virtual void PrintTypedDoc(const ForDoc& doc) = 0;

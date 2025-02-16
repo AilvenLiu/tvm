@@ -892,6 +892,60 @@ class WhileDoc : public StmtDoc {
 };
 
 /*!
+ * \brief Doc that represents break statement.
+ *
+ * \sa BreakDoc
+ */
+class BreakDocNode : public StmtDocNode {
+  public:
+   void VisitAttrs(AttrVisitor* v) { StmtDocNode::VisitAttrs(v); }
+
+   static constexpr const char* _type_key = "script.printer.BreakDoc";
+   TVM_DECLARE_FINAL_OBJECT_INFO(BreakDocNode, StmtDocNode);
+ };
+
+ /*!
+  * \brief Reference type of BreakDocNode.
+  *
+  * \sa BreakDocNode
+  */
+ class BreakDoc : public StmtDoc {
+  public:
+   /*!
+    * \brief Constructor of BreakDoc.
+    */
+   explicit BreakDoc();
+   TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(BreakDoc, StmtDoc, BreakDocNode);
+ };
+
+ /*!
+ * \brief Doc that represents continue statement.
+ *
+ * \sa ContinueDoc
+ */
+class ContinueDocNode : public StmtDocNode {
+  public:
+   void VisitAttrs(AttrVisitor* v) { StmtDocNode::VisitAttrs(v); }
+
+   static constexpr const char* _type_key = "script.printer.ContinueDoc";
+   TVM_DECLARE_FINAL_OBJECT_INFO(ContinueDocNode, StmtDocNode);
+ };
+
+ /*!
+  * \brief Reference type of ContinueDocNode.
+  *
+  * \sa ContinueDocNode
+  */
+ class ContinueDoc : public StmtDoc {
+  public:
+   /*!
+    * \brief Constructor of ContinueDoc.
+    */
+   explicit ContinueDoc();
+   TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(ContinueDoc, StmtDoc, ContinueDocNode);
+ };
+
+/*!
  * \brief Doc that represents for statement.
  *
  * Example:

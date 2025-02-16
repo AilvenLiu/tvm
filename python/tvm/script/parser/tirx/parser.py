@@ -231,7 +231,37 @@ def visit_while(self: Parser, node: doc.While) -> None:
             self.visit_body(node.body)
 
 
-@dispatch.register(token="tirx", type_name="Assign")
+@dispatch.register(token="tir", type_name="Break")
+def visit_break(self: Parser, node: doc.Break) -> None:
+    """The break visiting method for tir.
+
+    Parameters
+    ----------
+    self : Parser
+        The visiting parser.
+
+    node : doc.Break
+        The doc AST break node.
+    """
+    T.Break()
+
+
+@dispatch.register(token="tir", type_name="Continue")
+def visit_continue(self: Parser, node: doc.Continue) -> None:
+    """The continue visiting method for tir.
+
+    Parameters
+    ----------
+    self : Parser
+        The visiting parser.
+
+    node : doc.Continue
+        The doc AST continue node.
+    """
+    T.Continue()
+
+
+@dispatch.register(token="tir", type_name="Assign")
 def visit_assign(self: Parser, node: doc.Assign) -> None:
     """The assign visiting method for tirx.
 

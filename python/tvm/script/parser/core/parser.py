@@ -754,6 +754,36 @@ class Parser(doc.NodeVisitor):
         """
         return _dispatch(self, "While")(self, node)
 
+    def visit_Break(self, node: doc.Break) -> Any:  # pylint: disable=invalid-name
+        """The general break visiting method.
+
+        Parameters
+        ----------
+        node : doc.Break
+            The doc AST break node.
+
+        Returns
+        -------
+        res : Any
+            The visiting result.
+        """
+        return _dispatch(self, "Break")(self, node)
+
+    def visit_Continue(self, node: doc.Continue) -> Any:  # pylint: disable=invalid-name
+        """The general continue visiting method.
+
+        Parameters
+        ----------
+        node : doc.Continue
+            The doc AST continue node.
+
+        Returns
+        -------
+        res : Any
+            The visiting result.
+        """
+        return _dispatch(self, "Continue")(self, node)
+
     def visit_With(self, node: doc.With) -> Any:  # pylint: disable=invalid-name
         """The general with visiting method.
 

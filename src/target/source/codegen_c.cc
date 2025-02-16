@@ -1204,6 +1204,16 @@ void CodeGenC::VisitStmt_(const WhileNode* op) {
   stream << "}\n";
 }
 
+void CodeGenC::VisitStmt_(const BreakNode* op) {
+  PrintIndent();
+  stream << "break;\n";
+}
+
+void CodeGenC::VisitStmt_(const ContinueNode* op) {
+  PrintIndent();
+  stream << "continue;\n";
+}
+
 void CodeGenC::VisitStmt_(const IfThenElseNode* op) {
   std::string cond = PrintExpr(op->condition);
   PrintIndent();

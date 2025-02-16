@@ -296,6 +296,16 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       return WhileDoc(cond, (*f)->stmts);
     });
 
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::Break>("", [](tirx::Break stmt, ObjectPath p, IRDocsifier d) -> Doc {
+      return BreakDoc();
+    });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::Continue>("", [](tirx::Continue stmt, ObjectPath p, IRDocsifier d) -> Doc {
+      return ContinueDoc();
+    });
+
 namespace {
 Doc DeclBufferDoc(tirx::DeclBuffer stmt, AccessPath p, IRDocsifier d,
                   BufferVarDefinition var_definitions) {
@@ -464,6 +474,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
         });
 
 TVM_SCRIPT_REPR(tirx::AllocBufferNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::BreakNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::ContinueNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::DeclBufferNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::SeqStmtNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::IfThenElseNode, ReprPrintTIR);

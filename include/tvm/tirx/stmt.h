@@ -690,6 +690,60 @@ class While : public Stmt {
 };
 
 /*!
+ * \brief A Break in control flow.
+ */
+class BreakNode : public StmtNode {
+ public:
+  void VisitAttrs(AttrVisitor* v) { v->Visit("span", &span); }
+
+  bool SEqualReduce(const BreakNode* other, SEqualReducer equal) const { return true; }
+
+  void SHashReduce(SHashReducer hash_reduce) const {}
+
+  static constexpr const char* _type_key = "tir.Break";
+  TVM_DECLARE_FINAL_OBJECT_INFO(BreakNode, StmtNode);
+};
+
+/*!
+ * \brief Managed reference to BreakNode.
+ * \sa BreakNode
+ */
+class Break : public Stmt {
+ public:
+  TVM_DLL Break(Span span = Span());
+
+  TVM_DEFINE_OBJECT_REF_METHODS(Break, Stmt, BreakNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(BreakNode);
+};
+
+/*!
+ * \brief A Continue in control flow.
+ */
+class ContinueNode : public StmtNode {
+ public:
+  void VisitAttrs(AttrVisitor* v) { v->Visit("span", &span); }
+
+  bool SEqualReduce(const ContinueNode* other, SEqualReducer equal) const { return true; }
+
+  void SHashReduce(SHashReducer hash_reduce) const {}
+
+  static constexpr const char* _type_key = "tir.Continue";
+  TVM_DECLARE_FINAL_OBJECT_INFO(ContinueNode, StmtNode);
+};
+
+/*!
+ * \brief Managed reference to ContinueNode.
+ * \sa ContinueNode
+ */
+class Continue : public Stmt {
+ public:
+  TVM_DLL Continue(Span span = Span());
+
+  TVM_DEFINE_OBJECT_REF_METHODS(Continue, Stmt, ContinueNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(ContinueNode);
+};
+
+/*!
  * \brief Representing the region of multi-dimensional buffer access.
  */
 class BufferRegionNode : public PrimExprConvertibleNode {
