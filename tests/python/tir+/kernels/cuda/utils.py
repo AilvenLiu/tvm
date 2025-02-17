@@ -59,20 +59,23 @@ def bench(func, warmup=0, repeat=10, proton_name="kernel"):
 
 
 class ProtonContext:
+    """Context manager for Proton profiling sessions."""
+    
     def __init__(self, name="kernel", hook="triton"):
         self.name = name
         self.hook = hook
+        self.session = None
 
     def __enter__(self):
         if not is_running_under_pytest():
-            proton.start(self.name, hook=self.hook)
-            proton.activate(0)
+            self.session = proton.start(self.name, hook=self.hook)
+            proton.activate(self.session)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not is_running_under_pytest():
-            proton.deactivate(0)
-            proton.finalize()
+            proton.deactivate(self.session)
+            proton.finalize(self.session)
 
             subprocess.run(
                 ["proton-viewer", "-m", "avg_time/ms", f"{self.name}.hatchet"], check=True

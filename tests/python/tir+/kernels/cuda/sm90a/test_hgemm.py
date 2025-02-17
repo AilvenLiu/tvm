@@ -340,6 +340,9 @@ def test_hgemm_hopper_ws_cooperative():
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
 
+    def flops(ms):
+        return M * N * K * 2 / ms / 1e9
+
     def tir_gemm():
         C_np = -np.ones((M, N), dtype=np.float32)
         C_tvm = tvm.nd.array(C_np, device=DEV)
@@ -348,11 +351,9 @@ def test_hgemm_hopper_ws_cooperative():
             mod = tvm.IRModule({"main": manual})
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
-            mod(A_tvm, B_tvm, C_tvm)
-            timer = mod.time_evaluator(mod.entry_name, DEV, number=100, repeat=5)
-            res = timer(A_tvm, B_tvm, C_tvm)
-            print("tvm tir time: ")
-            print(res)
+            func = lambda: mod(A_tvm, B_tvm, C_tvm)
+            ms = bench(func, warmup=0, repeat=10, proton_name="tir")
+            print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
         return C_tvm
 
@@ -365,17 +366,15 @@ def test_hgemm_hopper_ws_cooperative():
         C_np = np.zeros((M, N), dtype=np.float32)
         C_tvm = tvm.nd.array(C_np, device=DEV)
         mod_cublaslt = tvm.build(s, [A, B, C], target)
-        mod_cublaslt(A_tvm, B_tvm, C_tvm)
-
-        timer = mod_cublaslt.time_evaluator(mod_cublaslt.entry_name, DEV, number=100, repeat=5)
-        res = timer(A_tvm, B_tvm, C_tvm)
-        print("cublas time: ")
-        print(res)
+        func = lambda: mod_cublaslt(A_tvm, B_tvm, C_tvm)
+        ms = bench(func, warmup=0, repeat=10, proton_name="cublas")
+        print(f"CUBLAS flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
         return C_tvm
 
-    C_tvm = tir_gemm()
-    C_cublas = cublas_gemm()
+    with ProtonContext("hopper_gemm_ws"):
+        C_tvm = tir_gemm()
+        C_cublas = cublas_gemm()
 
     tvm.testing.assert_allclose(C_tvm.asnumpy(), C_cublas.asnumpy(), rtol=1e-3, atol=1e-3)
 
@@ -633,7 +632,7 @@ def test_hgemm_hopper_no_ws():
         C_torch = func()
         return C_torch.cpu().numpy()
 
-    with ProtonContext("matmul"):
+    with ProtonContext("hopper_hgemm_no_ws"):
         C_tvm = tir_gemm()
         C_cublas = cublas_gemm()
 
