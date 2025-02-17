@@ -18,10 +18,9 @@ import numpy as np
 
 import tvm
 import tvm.testing
-from tvm import te
 from tvm.script import tir as T
 from tvm.tir.transform import LowerTIRp
-from tvm.contrib import cublas
+from ..utils import bench, ProtonContext
 
 
 @tvm.testing.requires_cuda_compute_version(8)
@@ -36,17 +35,6 @@ def test_hgemm_ampere():
     BLK_M, BLK_N, BLK_K = 128, 128, 32
     VEC = 8
     DEPTH = 2
-
-    np.random.seed(0)
-    A_np = np.random.randn(M, K).astype(np.float16)
-    B_np = np.random.randn(N, K).astype(np.float16)
-
-    DEV = tvm.cuda()
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
-
-    target = tvm.target.Target.from_device(DEV)
-    print(target)
 
     @T.macro
     def load_global_to_shared_A(
@@ -339,44 +327,51 @@ def test_hgemm_ampere():
                     T.tvm_storage_sync("shared")
                     store_shared_to_global(tz, ty, tx, bx, by, C, C_smem)
 
-    def tvm_gemm(func, name):
+    np.random.seed(0)
+    A_np = np.random.randn(M, K).astype(np.float16)
+    B_np = np.random.randn(N, K).astype(np.float16)
+
+    DEV = tvm.cuda()
+    A_tvm = tvm.nd.array(A_np, device=DEV)
+    B_tvm = tvm.nd.array(B_np, device=DEV)
+
+    target = tvm.target.Target.from_device(DEV)
+    print(target)
+
+    def tvm_gemm(func):
         with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
             mod = tvm.IRModule({"main": func})
             mod = LowerTIRp()(mod)
             mod = tvm.build(mod, target=target)
-            cuda_code = mod.imported_modules[0].get_source()
             C_np = np.zeros((M, N), dtype=np.float32)
             C_tvm = tvm.nd.array(C_np, device=DEV)
-            timer = mod.time_evaluator(mod.entry_name, DEV, number=10, repeat=3)
-            res = timer(A_tvm, B_tvm, C_tvm)
-            print("tvm ", name, " time: ")
-            print(res)
-        return C_tvm
+
+            func = lambda: mod(A_tvm, B_tvm, C_tvm)
+            ms = bench(func, warmup=0, repeat=10, proton_name="tir")
+            print(f"TIR time: {ms} ms")
+        return C_tvm.asnumpy()
 
     # cublas
     def cublas_gemm():
-        A = te.placeholder((M, K), name="A", dtype="float16")
-        B = te.placeholder((N, K), name="B", dtype="float16")
-        C = cublas.matmul(A, B, transb=True, dtype="float32")
-        s = te.create_schedule(C.op)
+        import torch
 
-        C_np = np.zeros((M, N), dtype=np.float32)
-        C_tvm = tvm.nd.array(C_np, device=DEV)
-        mod_cublaslt = tvm.build(s, [A, B, C], target)
-        mod_cublaslt(A_tvm, B_tvm, C_tvm)
-        timer = mod_cublaslt.time_evaluator(mod_cublaslt.entry_name, DEV, number=10, repeat=3)
-        res = timer(A_tvm, B_tvm, C_tvm)
-        print("cublas time: ")
-        print(res)
-
-        return C_tvm
+        torch_dev = torch.device("cuda")
+        A_torch = torch.tensor(A_np, device=torch_dev)
+        B_torch = torch.tensor(B_np, device=torch_dev)
+        C_torch = torch.zeros((M, N), device=torch_dev)
+        func = lambda: torch.matmul(A_torch, B_torch.T)
+        ms = bench(func, warmup=0, repeat=10, proton_name="cublas")
+        print(f"cublas time: {ms} ms")
+        C_torch = func()
+        return C_torch.cpu().numpy()
 
     with target:
-        print(f"M, N, K: {M}, {N}, {K}")
-        C_tvm_efficient = tvm_gemm(efficient, "efficient")
-        C_cublas = cublas_gemm()
+        with ProtonContext("hgemm"):
+            print(f"M, N, K: {M}, {N}, {K}")
+            C_tvm_efficient = tvm_gemm(efficient)
+            C_cublas = cublas_gemm()
 
-    tvm.testing.assert_allclose(C_tvm_efficient.asnumpy(), C_cublas.asnumpy(), rtol=1e-3, atol=1e-3)
+    tvm.testing.assert_allclose(C_tvm_efficient, C_cublas, rtol=1e-3, atol=1e-3)
     print("test passed")
 
 

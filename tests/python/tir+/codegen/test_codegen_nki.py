@@ -23,6 +23,7 @@ from tvm.script import tir as T, ir as I
 import tvm.testing
 from tvm.tir.transform import LowerTIRp
 
+
 def test_nki_add_1():
     # fmt: off
     @T.prim_func
@@ -42,13 +43,14 @@ def test_nki_add_1():
                 for j in range(0, 512):
                     B[i, j] =  B_sbuf[i, j]
             
-    target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+    target = tvm.target.Target("aws/trn1/trn1.2xlarge", host="llvm")
     mod = tvm.IRModule({"main": func})
     mod = tvm.tir.transform.DecorateDeviceScope()(mod)
     with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
-        mod = tvm.build(mod, target=target, target_host="llvm")
+        mod = tvm.build(mod, target=target)
         src = mod.imported_modules[0].get_source()
         print(src)
+
 
 def test_nki_add_2():
     # fmt: off
@@ -71,18 +73,19 @@ def test_nki_add_2():
                         B[i, 512*k+j] =  B_sbuf[i, j]
 
             
-    target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+    target = tvm.target.Target("aws/trn1/trn1.2xlarge", host="llvm")
     mod = tvm.IRModule({"main": func})
     mod = tvm.tir.transform.DecorateDeviceScope()(mod)
     with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
-        mod = tvm.build(mod, target=target, target_host="llvm")
+        mod = tvm.build(mod, target=target)
         src = mod.imported_modules[0].get_source()
         print(src)
 
+
 def test_nki_matmul_1():
-    TILES_IN_BLOCK_M=16
-    TILES_IN_BLOCK_N=2
-    TILES_IN_BLOCK_K=8
+    TILES_IN_BLOCK_M = 16
+    TILES_IN_BLOCK_N = 2
+    TILES_IN_BLOCK_K = 8
     TILE_M = 128
     TILE_K = 128
     TILE_N = 512
@@ -100,13 +103,22 @@ def test_nki_matmul_1():
     NUM_BLOCK_M = M // BLOCK_M
     NUM_BLOCK_N = N // BLOCK_N
     NUM_BLOCK_K = K // BLOCK_K
-    
 
     @T.prim_func
-    def func(lhsT: T.Buffer((K, M), "float16"), rhs: T.Buffer((K, N), "float16"), result: T.buffer((M, N), "float16")):
-        result_tiles = T.alloc_buffer((TILE_M, NUM_BLOCK_M, TILES_IN_BLOCK_M, TILES_IN_BLOCK_N, TILE_N), "float32", scope="trn.sbuf")
+    def func(
+        lhsT: T.Buffer((K, M), "float16"),
+        rhs: T.Buffer((K, N), "float16"),
+        result: T.buffer((M, N), "float16"),
+    ):
+        result_tiles = T.alloc_buffer(
+            (TILE_M, NUM_BLOCK_M, TILES_IN_BLOCK_M, TILES_IN_BLOCK_N, TILE_N),
+            "float32",
+            scope="trn.sbuf",
+        )
         rhs_tiles = T.alloc_buffer((TILE_K, TILES_IN_BLOCK_K, BLOCK_N), "float16", scope="trn.sbuf")
-        lhsT_tiles = T.alloc_buffer((TILE_K, TILES_IN_BLOCK_K, BLOCK_M), "float16", scope="trn.sbuf")
+        lhsT_tiles = T.alloc_buffer(
+            (TILE_K, TILES_IN_BLOCK_K, BLOCK_M), "float16", scope="trn.sbuf"
+        )
         res_tile = T.alloc_buffer((TILE_M, TILE_N), "float32", scope="trn.psum")
         result_packed = T.alloc_buffer((TILE_K, BLOCK_N), "float32", scope="trn.sbuf")
         for n in range(NUM_BLOCK_N):
@@ -116,19 +128,23 @@ def test_nki_matmul_1():
                         for i2 in range(TILES_IN_BLOCK_M):
                             for i3 in range(TILES_IN_BLOCK_N):
                                 for i4 in range(TILE_N):
-                                    result_tiles[i0, i1, i2, i3, i4] = 0 
+                                    result_tiles[i0, i1, i2, i3, i4] = 0
             for k in range(NUM_BLOCK_K):
                 for bk_r in range(TILES_IN_BLOCK_K):
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for i in range(TILE_K):
                             for j in range(BLOCK_N):
-                                rhs_tiles[i, bk_r, j] = rhs[(TILES_IN_BLOCK_K * k + bk_r) * TILE_K + i, n * BLOCK_N + j]
+                                rhs_tiles[i, bk_r, j] = rhs[
+                                    (TILES_IN_BLOCK_K * k + bk_r) * TILE_K + i, n * BLOCK_N + j
+                                ]
                 for m in range(NUM_BLOCK_M):
                     for bk_l in range(TILES_IN_BLOCK_K):
                         with T.attr(0, "tensorized_nki_instruction", 1):
                             for i in range(TILE_K):
                                 for j in range(BLOCK_M):
-                                    lhsT_tiles[i, bk_l, j] = lhsT[(TILES_IN_BLOCK_K * k + bk_l) * TILE_K + i, m * BLOCK_M + j]
+                                    lhsT_tiles[i, bk_l, j] = lhsT[
+                                        (TILES_IN_BLOCK_K * k + bk_l) * TILE_K + i, m * BLOCK_M + j
+                                    ]
                     for bn in range(TILES_IN_BLOCK_N):
                         for bm in range(TILES_IN_BLOCK_M):
                             with T.attr(0, "tensorized_nki_instruction", 1):
@@ -140,7 +156,12 @@ def test_nki_matmul_1():
                                     for i in range(TILE_M):
                                         for j in range(TILE_N):
                                             for k in range(TILE_K):
-                                                T.nki_matmul(res_tile[i, j], lhsT_tiles[k, bk, bm * TILE_M + i], rhs_tiles[k, bk, bn * TILE_N + j], 1)
+                                                T.nki_matmul(
+                                                    res_tile[i, j],
+                                                    lhsT_tiles[k, bk, bm * TILE_M + i],
+                                                    rhs_tiles[k, bk, bn * TILE_N + j],
+                                                    1,
+                                                )
                             with T.attr(0, "tensorized_nki_instruction", 1):
                                 for i in range(TILE_M):
                                     for j in range(TILE_N):
@@ -151,21 +172,25 @@ def test_nki_matmul_1():
                         with T.attr(0, "tensorized_nki_instruction", 1):
                             for i in range(TILE_K):
                                 for j in range(TILE_N):
-                                    result_packed[i, bn * TILE_N + j] = result_tiles[i, m, bm, bn, j]
+                                    result_packed[i, bn * TILE_N + j] = result_tiles[
+                                        i, m, bm, bn, j
+                                    ]
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for i in range(TILE_K):
                             for j in range(BLOCK_N):
-                                result[m * BLOCK_M + bm * TILE_M + i, n * BLOCK_N + j] = result_packed[i, j]
-    
-    target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+                                result[m * BLOCK_M + bm * TILE_M + i, n * BLOCK_N + j] = (
+                                    result_packed[i, j]
+                                )
+
+    target = tvm.target.Target("aws/trn1/trn1.2xlarge", host="llvm")
     mod = tvm.IRModule({"main": func})
     mod = tvm.tir.transform.DecorateDeviceScope()(mod)
     with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
-        mod = tvm.build(mod, target=target, target_host="llvm")
+        mod = tvm.build(mod, target=target)
         src = mod.imported_modules[0].get_source()
         print(src)
-        
-    
+
+
 if __name__ == "__main__":
     test_nki_add_1()
     test_nki_add_2()

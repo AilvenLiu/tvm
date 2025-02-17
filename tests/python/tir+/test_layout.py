@@ -866,6 +866,21 @@ def test_tile_layout():
         layout_tile, (64, 4, 64), (8, 4, 1)
     ), "The layout is used for tiling compose."
 
+    swizzle = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+    tile = T.TileLayout.from_tuple((3, 8, 4), (8 * 4, 1, 8))
+    layout_tile = swizzle.tile(tile, (3, 8, 4), (1, 8, 64))
+    layout_expected = T.ComposeLayout(
+        swizzle,
+        T.TileLayout.from_tuple(data=(3, 64, 4, 64), strides=(16384, 64, 4096, 1)),
+    )
+    assert_structural_equal(layout_tile.normalize(), layout_expected)
+    assert swizzle.is_tile_inner(
+        layout_tile, (3, 64, 256), (1, 8, 64)
+    ), "The layout is used for tiling compose."
+    assert tile.is_tile_outer(
+        layout_tile, (3, 64, 256), (3, 8, 4)
+    ), "The layout is used for tiling compose."
+
 
 def test_vec_len_layout():
 

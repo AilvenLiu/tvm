@@ -127,9 +127,9 @@ inline DataType DTypeFromString(const std::string str) {
   } else if (str == ".b64") {
     return DataType::kBit64;
   } else if (str == "e4m3_float8") {
-    return DataType::kE4M3;
+    return DataType::kFloat8_e4m3;
   } else if (str == "e5m2_float8") {
-    return DataType::kE5M2;
+    return DataType::kFloat8_e5m2;
   } else {
     TVM_FFI_THROW(InternalError) << "Unrecognized PTX data type " << str;
   }
