@@ -15,14 +15,21 @@
 # specific language governing permissions and limitations
 # under the License.
 import pytest
+import ml_dtypes
+import numpy as np
 
 import tvm
-from tvm.tir.layout import TileLayout
-import numpy as np
 import tvm.testing
-from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.tir.layout import TileLayout
+
+ml_dtypes_dict = {
+    "e4m3_float8": ml_dtypes.float8_e4m3fn,
+    "e5m2_float8": ml_dtypes.float8_e5m2,
+    # "bfloat16": ml_dtypes.bfloat16,
+    "int4": ml_dtypes.int4,
+}
 
 
 @pytest.mark.parametrize(
@@ -78,9 +85,9 @@ from tvm.script import tirp as Tp
         ),
     ],
 )
-@pytest.mark.parametrize("dtype", ["float32", "float16"])
-@pytest.mark.parametrize("sync", [True])
-def test_copy_global_to_shared(input, dtype, sync):
+@pytest.mark.parametrize("dtype", ["int8", "e4m3_float8", "e5m2_float8", "float16", "float32"])
+@pytest.mark.parametrize("sync", [True, False])
+def test_copy_global_to_shared_cta_vec_load(input, dtype, sync):
     g_shape, s_shape, g_st, g_extent, thread_cnt, layoutA, layoutB, layoutS, dev = input
 
     r_smem = list(slice(None) for i in range(len(s_shape)))
@@ -121,6 +128,7 @@ def test_copy_global_to_shared(input, dtype, sync):
                 Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
 
+    np_dtype = ml_dtypes_dict[dtype] if dtype in ml_dtypes_dict else np.dtype(dtype)
     target = tvm.target.Target.from_device(dev)
     with target:
         mod = tvm.IRModule({"main": copy_sync if sync else copy_async})
@@ -128,15 +136,16 @@ def test_copy_global_to_shared(input, dtype, sync):
         mod = tvm.build(mod, target=target)
 
         np.random.seed(0)
-        A_np = np.random.rand(*g_shape).astype(dtype)
-        B_np = np.zeros(g_shape, dtype=dtype)
+        A_np = np.random.rand(*g_shape).astype(np_dtype)
+        B_np = np.zeros(g_shape, dtype=np_dtype)
+
         A = tvm.nd.array(A_np, dev)
         B = tvm.nd.array(B_np, dev)
         mod(A, B)
 
         B_ref = B_np.copy()
         B_ref[*r_gmem] = A_np[*r_gmem]
-        tvm.testing.assert_allclose(B_ref, B.asnumpy())
+        np.testing.assert_allclose(B_ref, B.asnumpy())
 
 
 if __name__ == "__main__":

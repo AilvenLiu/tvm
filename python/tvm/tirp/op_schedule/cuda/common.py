@@ -30,6 +30,7 @@ from tvm.tir import BufferRegion, PrimFunc, Buffer
 from tvm.tir.expr import FloatImm
 from ..common import MapOpType
 
+
 class InstType(Enum):
     """Enumeration of instruction types for memory operations."""
 
@@ -82,13 +83,13 @@ def copy_cuda_g2s_s2g_2d_cta_vec_load_impl(
     tx = sctx.launch_params["threadIdx.x"]
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
-    elem_size = DataType(src.dtype).bits // 8
+    elem_size = DataType(src.dtype).bits  # in bits
     n_elements = functools.reduce(operator.mul, src_extent, 1)
 
     # Find valid vector length
     if n_elements % tx != 0:
         return None
-    for vec_len in [16 // elem_size, 8 // elem_size, 4 // elem_size, 1]:
+    for vec_len in [128 // elem_size, 64 // elem_size, 32 // elem_size, 1]:
         if vec_len > 0 and all(
             analyzer.can_prove_equal(x % vec_len, 0)
             for x in [
@@ -104,10 +105,9 @@ def copy_cuda_g2s_s2g_2d_cta_vec_load_impl(
             break
     else:
         return None
-
     # cp-size (the size of data in bytes) can only be 4, 8 and 16 for cp.async
     if inst_type == InstType.CP_ASYNC:
-        cp_size = vec_len * elem_size
+        cp_size = vec_len * elem_size // 8  # in bytes
         if cp_size not in [4, 8, 16]:
             return None
 
@@ -208,7 +208,9 @@ def reduction_cuda_shared_nd_sync_cta_impl(
 
     else:
         spatial_dims = len(dst_extent)
-        if not all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent[:spatial_dims], dst_extent)):
+        if not all(
+            analyzer.can_prove_equal(s, d) for s, d in zip(src_extent[:spatial_dims], dst_extent)
+        ):
             return None
 
     assert spatial_dims > 0 and spatial_dims < len(src_extent)
@@ -367,7 +369,10 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
     # Basic validation checks
     if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
         return None
-    if not (isinstance(binary_op, MapOpType) and binary_op in [MapOpType.ADD, MapOpType.SUB, MapOpType.MUL, MapOpType.FDIV]):
+    if not (
+        isinstance(binary_op, MapOpType)
+        and binary_op in [MapOpType.ADD, MapOpType.SUB, MapOpType.MUL, MapOpType.FDIV]
+    ):
         return None
 
     CONST = None
@@ -384,7 +389,11 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
 
     # Basic region checks
     dst, src1, src2 = _dst.buffer, _src1.buffer, None if CONST is not None else _src2.buffer
-    dst_region, src1_region, src2_region = _dst.region, _src1.region, None if CONST is not None else _src2.region
+    dst_region, src1_region, src2_region = (
+        _dst.region,
+        _src1.region,
+        None if CONST is not None else _src2.region,
+    )
     dtype = dst.dtype
 
     dst_st = [r.min for r in dst_region]
@@ -397,7 +406,9 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
     if not all(
         [
             dst.layout and src1.layout and (src2.layout if src2 else True),
-            dst.layout.is_trivial() and src1.layout.is_trivial() and (src2.layout.is_trivial() if src2 else True),
+            dst.layout.is_trivial()
+            and src1.layout.is_trivial()
+            and (src2.layout.is_trivial() if src2 else True),
             dst.scope().startswith("shared"),
             src1.scope().startswith("shared"),
             (src2.scope().startswith("shared") if src2 else True),
@@ -415,8 +426,28 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
         if NUM_ELEMENTS < src2_num:
             if binary_op not in [MapOpType.ADD, MapOpType.MUL]:
                 return None
-            _src1, _src2, src1, src2, src1_region, src2_region, src1_st, src2_st, src1_extent, src2_extent = (
-                _src2, _src1, src2, src1, src2_region, src1_region, src2_st, src1_st, src2_extent, src1_extent
+            (
+                _src1,
+                _src2,
+                src1,
+                src2,
+                src1_region,
+                src2_region,
+                src1_st,
+                src2_st,
+                src1_extent,
+                src2_extent,
+            ) = (
+                _src2,
+                _src1,
+                src2,
+                src1,
+                src2_region,
+                src1_region,
+                src2_st,
+                src1_st,
+                src2_extent,
+                src1_extent,
             )
 
     # Check dst and src1 have the same shape
