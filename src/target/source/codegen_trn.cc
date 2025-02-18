@@ -279,8 +279,12 @@ void CodeGenTrainium::VisitStmt_(const EvaluateNode* op) {
 }
 
 void CodeGenTrainium::VisitExpr_(const BufferLoadNode* op, std::ostream& os) {
-  const VarNode* buffer_var = op->buffer->data.get();
-  std::string buffer_str = GetVarID(buffer_var);
+  std::string buffer_str;
+  if (buffer_idmap_.count(op->buffer)) {
+    buffer_str = buffer_idmap_[op->buffer];
+  } else {
+    buffer_str = GetVarID(op->buffer->data.get());
+  }
   os << buffer_str << "[";
   os << PrintIndices(op->indices);
   os << "]";
@@ -393,6 +397,19 @@ void CodeGenTrainium::VisitExpr_(const FloorDivNode* op, std::ostream& os) {
 
 void CodeGenTrainium::VisitExpr_(const FloorModNode* op, std::ostream& os) {
   os << PrintExpr(op->a) << " % " << PrintExpr(op->b);
+}
+
+void CodeGenTrainium::VisitStmt_(const DeclBufferNode* op) {
+  if(op->buffer.scope() == "trn.psum" || op->buffer.scope() == "trn.sbuf"){
+    PrintStmt(op->body);
+    return;
+  }
+  std::string data_vid = GetVarID(op->buffer->data.get());
+  std::string buffer_vid = name_supply_->FreshName(data_vid + "_buffer");
+  buffer_idmap_[op->buffer] = buffer_vid;
+  PrintIndent();
+  stream << buffer_vid << " = " << data_vid << ".reshape(" << op->buffer->shape << ")\n";
+  PrintStmt(op->body);
 }
 
 runtime::Module BuildTrainium(IRModule mod, Target target) {

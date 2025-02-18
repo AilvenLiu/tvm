@@ -21,70 +21,137 @@ import numpy as np
 import tvm
 from tvm.script import tir as T, ir as I
 import tvm.testing
-from tvm.tir.transform import LowerTIRp
+
+
+target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+
+
+def lower_and_get_source(func):
+    mod = tvm.IRModule({"main": func})
+    mod = tvm.tir.transform.DecorateDeviceScope()(mod)
+    with tvm.transform.PassContext(
+        config={"tir.disable_storage_rewrite": True},
+        disabled_pass=["tir.StorageFlattenatten", "tir.FlattenBuffer", "tir.LowerIntrin"],
+    ):
+        mod = tvm.build(mod, target=target)
+        src = mod.imported_modules[0].get_source()
+        return src
+
+
+def compare_strings_ignore_whitespace(s1, s2):
+    # Remove all whitespace by splitting and joining the string back together
+    return "".join(s1.split()) == "".join(s2.split())
 
 
 def test_nki_add_1():
     # fmt: off
     @T.prim_func
     def func(A: T.Buffer((128, 512)), B: T.Buffer((128, 512))):
+        T.func_attr({"num_inputs": 1})
         A_sbuf = T.alloc_buffer((128, 512), "float32", scope="trn.sbuf",)
         B_sbuf = T.alloc_buffer((128, 512), "float32", scope="trn.sbuf",)
         with T.attr(0, "tensorized_nki_instruction", 1):
             for i in range(0, 128):
                 for j in range(0, 512):
-                    A_sbuf[i, j] =  A[i, j]
+                    T.nki_load(A_sbuf[i, j], A[i, j])
         with T.attr(0, "tensorized_nki_instruction", 1):
             for i in range(0, 128):
                 for j in range(0, 512):
-                    B_sbuf[i, j] = A_sbuf[i, j] + 1
+                    T.nki_tensorscalar(B_sbuf[i, j], A_sbuf[i, j], T.float32(1.0), "add")
         with T.attr(0, "tensorized_nki_instruction", 1):
             for i in range(0, 128):
                 for j in range(0, 512):
-                    B[i, j] =  B_sbuf[i, j]
-            
-    target = tvm.target.Target("aws/trn1/trn1.2xlarge", host="llvm")
-    mod = tvm.IRModule({"main": func})
-    mod = tvm.tir.transform.DecorateDeviceScope()(mod)
-    with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
-        mod = tvm.build(mod, target=target)
-        src = mod.imported_modules[0].get_source()
-        print(src)
+                    T.nki_store(B[i, j], B_sbuf[i, j])
+    # fmt: on
+    src = lower_and_get_source(func)
+    expected = """
+# Function: func_kernel
+import neuronxcc.nki.language as nl
+from neuronxcc.nki import baremetal, benchmark, simulate_kernel, trace
+import numpy as np
+import neuronxcc.nki.isa as nisa
+import math
+import neuronxcc.nki as nki
+import neuronxcc.nki.typing as nt
+@nki.compiler.enable_stack_allocator
+@nki.compiler.skip_middle_end_transformations
+@baremetal(experimental_flags='enable-mutable-parameter')
+def func_kernel(A, B: nt.mutable_tensor, ):
+  B_buffer = B.reshape([128, 512])
+  A_buffer = A.reshape([128, 512])
+  A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
+  B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
+  i = nl.arange(128)
+  j = nl.arange(512)
+  A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[i[:, None, ], j[None, :, ]])
+  i_1 = nl.arange(128)
+  j_1 = nl.arange(512)
+  B_sbuf[i_1[:, None, ], j_1[None, :, ]] = nisa.tensor_scalar(A_sbuf[i_1[:, None, ], j_1[None, :, ]], operand0=1.000000e+00, op0=nki.language.add, reverse0=0)
+  i_2 = nl.arange(128)
+  j_2 = nl.arange(512)
+  nl.store(B_buffer[i_2[:, None, ], j_2[None, :, ]], B_sbuf[i_2[:, None, ], j_2[None, :, ]])
+  return B
+  """
+    assert compare_strings_ignore_whitespace(src, expected)
 
 
 def test_nki_add_2():
     # fmt: off
     @T.prim_func
-    def func(A: T.Buffer((128, 512)), B: T.Buffer((128, 512))):
+    def func(A: T.Buffer((128, 2048)), B: T.Buffer((128, 2048))):
+        T.func_attr({"num_inputs": 1})
         A_sbuf = T.alloc_buffer((128, 512), "float32", scope="trn.sbuf",)
         B_sbuf = T.alloc_buffer((128, 512), "float32", scope="trn.sbuf",)
         for k in range(0, 4):
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for i in range(0, 128):
                     for j in range(0, 512):
-                        A_sbuf[i, j] =  A[i, 512*k+j]
+                        T.nki_load(A_sbuf[i, j], A[i, 512*k+j])
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for i in range(0, 128):
                     for j in range(0, 512):
-                        B_sbuf[i, j] = A_sbuf[i, j] + 1
+                        T.nki_tensorscalar(B_sbuf[i, j], A_sbuf[i, j], T.float32(1.0), "add")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for i in range(0, 128):
                     for j in range(0, 512):
-                        B[i, 512*k+j] =  B_sbuf[i, j]
+                        T.nki_store(B[i, 512*k+j], B_sbuf[i, j])
 
-            
-    target = tvm.target.Target("aws/trn1/trn1.2xlarge", host="llvm")
-    mod = tvm.IRModule({"main": func})
-    mod = tvm.tir.transform.DecorateDeviceScope()(mod)
-    with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
-        mod = tvm.build(mod, target=target)
-        src = mod.imported_modules[0].get_source()
-        print(src)
+    # fmt: on
+    src = lower_and_get_source(func)
+    expected = """
+# Function: func_kernel
+import neuronxcc.nki.language as nl
+from neuronxcc.nki import baremetal, benchmark, simulate_kernel, trace
+import numpy as np
+import neuronxcc.nki.isa as nisa
+import math
+import neuronxcc.nki as nki
+import neuronxcc.nki.typing as nt
+@nki.compiler.enable_stack_allocator
+@nki.compiler.skip_middle_end_transformations
+@baremetal(experimental_flags='enable-mutable-parameter')
+def func_kernel(A, B: nt.mutable_tensor, ):
+  B_buffer = B.reshape([128, 2048])
+  A_buffer = A.reshape([128, 2048])
+  A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
+  B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
+  for k in nl.sequential_range(4):
+    i = nl.arange(128)
+    j = nl.arange(512)
+    A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[i[:, None, ], ((k * 512) + j[None, :, ])])
+    i_1 = nl.arange(128)
+    j_1 = nl.arange(512)
+    B_sbuf[i_1[:, None, ], j_1[None, :, ]] = nisa.tensor_scalar(A_sbuf[i_1[:, None, ], j_1[None, :, ]], operand0=1.000000e+00, op0=nki.language.add, reverse0=0)
+    i_2 = nl.arange(128)
+    j_2 = nl.arange(512)
+    nl.store(B_buffer[i_2[:, None, ], ((k * 512) + j_2[None, :, ])], B_sbuf[i_2[:, None, ], j_2[None, :, ]])
+  return B"""
+    assert compare_strings_ignore_whitespace(src, expected)
 
 
 def test_nki_matmul_1():
     TILES_IN_BLOCK_M = 16
-    TILES_IN_BLOCK_N = 2
+    TILES_IN_BLOCK_N = 1
     TILES_IN_BLOCK_K = 8
     TILE_M = 128
     TILE_K = 128
@@ -110,6 +177,7 @@ def test_nki_matmul_1():
         rhs: T.Buffer((K, N), "float16"),
         result: T.buffer((M, N), "float16"),
     ):
+        T.func_attr({"num_inputs": 2})
         result_tiles = T.alloc_buffer(
             (TILE_M, NUM_BLOCK_M, TILES_IN_BLOCK_M, TILES_IN_BLOCK_N, TILE_N),
             "float32",
@@ -119,7 +187,7 @@ def test_nki_matmul_1():
         lhsT_tiles = T.alloc_buffer(
             (TILE_K, TILES_IN_BLOCK_K, BLOCK_M), "float16", scope="trn.sbuf"
         )
-        res_tile = T.alloc_buffer((TILE_M, TILE_N), "float32", scope="trn.psum")
+        res_tile = T.alloc_buffer((1, TILE_M, TILE_N), "float32", scope="trn.psum")
         result_packed = T.alloc_buffer((TILE_K, BLOCK_N), "float32", scope="trn.sbuf")
         for n in range(NUM_BLOCK_N):
             with T.attr(0, "tensorized_nki_instruction", 1):
@@ -128,36 +196,46 @@ def test_nki_matmul_1():
                         for i2 in range(TILES_IN_BLOCK_M):
                             for i3 in range(TILES_IN_BLOCK_N):
                                 for i4 in range(TILE_N):
-                                    result_tiles[i0, i1, i2, i3, i4] = 0
+                                    T.nki_memset(
+                                        result_tiles[i0, i1, i2, i3, i4],
+                                        T.float32(0.0),
+                                    )
             for k in range(NUM_BLOCK_K):
                 for bk_r in range(TILES_IN_BLOCK_K):
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for i in range(TILE_K):
                             for j in range(BLOCK_N):
-                                rhs_tiles[i, bk_r, j] = rhs[
-                                    (TILES_IN_BLOCK_K * k + bk_r) * TILE_K + i, n * BLOCK_N + j
-                                ]
+                                T.nki_load(
+                                    rhs_tiles[i, bk_r, j],
+                                    rhs[
+                                        (TILES_IN_BLOCK_K * k + bk_r) * TILE_K + i, n * BLOCK_N + j
+                                    ],
+                                )
                 for m in range(NUM_BLOCK_M):
                     for bk_l in range(TILES_IN_BLOCK_K):
                         with T.attr(0, "tensorized_nki_instruction", 1):
                             for i in range(TILE_K):
                                 for j in range(BLOCK_M):
-                                    lhsT_tiles[i, bk_l, j] = lhsT[
-                                        (TILES_IN_BLOCK_K * k + bk_l) * TILE_K + i, m * BLOCK_M + j
-                                    ]
+                                    T.nki_load(
+                                        lhsT_tiles[i, bk_l, j],
+                                        lhsT[
+                                            (TILES_IN_BLOCK_K * k + bk_l) * TILE_K + i,
+                                            m * BLOCK_M + j,
+                                        ],
+                                    )
                     for bn in range(TILES_IN_BLOCK_N):
                         for bm in range(TILES_IN_BLOCK_M):
                             with T.attr(0, "tensorized_nki_instruction", 1):
                                 for i in range(TILE_M):
                                     for j in range(TILE_N):
-                                        res_tile[i, j] = 0
+                                        T.nki_memset(res_tile[0, i, j], T.float32(0.0))
                             for bk in range(TILES_IN_BLOCK_K):
                                 with T.attr(0, "tensorized_nki_instruction", 1):
                                     for i in range(TILE_M):
                                         for j in range(TILE_N):
                                             for k in range(TILE_K):
                                                 T.nki_matmul(
-                                                    res_tile[i, j],
+                                                    res_tile[0, i, j],
                                                     lhsT_tiles[k, bk, bm * TILE_M + i],
                                                     rhs_tiles[k, bk, bn * TILE_N + j],
                                                     1,
@@ -165,33 +243,92 @@ def test_nki_matmul_1():
                             with T.attr(0, "tensorized_nki_instruction", 1):
                                 for i in range(TILE_M):
                                     for j in range(TILE_N):
-                                        result_tiles[i, m, bm, bn, j] += res_tile[i, j]
+                                        T.nki_tensortensor(
+                                            result_tiles[i, m, bm, bn, j],
+                                            result_tiles[i, m, bm, bn, j],
+                                            res_tile[0, i, j],
+                                            "add",
+                                        )
             for m in range(NUM_BLOCK_M):
                 for bm in range(TILES_IN_BLOCK_M):
                     for bn in range(TILES_IN_BLOCK_N):
                         with T.attr(0, "tensorized_nki_instruction", 1):
                             for i in range(TILE_K):
                                 for j in range(TILE_N):
-                                    result_packed[i, bn * TILE_N + j] = result_tiles[
-                                        i, m, bm, bn, j
-                                    ]
+                                    T.nki_tensor_copy(
+                                        result_packed[i, bn * TILE_N + j],
+                                        result_tiles[i, m, bm, bn, j],
+                                    )
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for i in range(TILE_K):
                             for j in range(BLOCK_N):
-                                result[m * BLOCK_M + bm * TILE_M + i, n * BLOCK_N + j] = (
-                                    result_packed[i, j]
+                                T.nki_store(
+                                    result[m * BLOCK_M + bm * TILE_M + i, n * BLOCK_N + j],
+                                    result_packed[i, j],
                                 )
 
-    target = tvm.target.Target("aws/trn1/trn1.2xlarge", host="llvm")
-    mod = tvm.IRModule({"main": func})
-    mod = tvm.tir.transform.DecorateDeviceScope()(mod)
-    with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
-        mod = tvm.build(mod, target=target)
-        src = mod.imported_modules[0].get_source()
-        print(src)
+    # fmt: on
+
+    src = lower_and_get_source(func)
+    expected = """
+# Function: func_kernel
+import neuronxcc.nki.language as nl
+from neuronxcc.nki import baremetal, benchmark, simulate_kernel, trace
+import numpy as np
+import neuronxcc.nki.isa as nisa
+import math
+import neuronxcc.nki as nki
+import neuronxcc.nki.typing as nt
+@nki.compiler.enable_stack_allocator
+@nki.compiler.skip_middle_end_transformations
+@baremetal(experimental_flags='enable-mutable-parameter')
+def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
+  result_buffer = result.reshape([4096, 2048])
+  lhsT_buffer = lhsT.reshape([1024, 4096])
+  rhs_buffer = rhs.reshape([1024, 2048])
+  result_tiles = nl.ndarray(shape=[128, 2, 16, 1, 512], dtype=np.float32, buffer=nl.sbuf)
+  rhs_tiles = nl.ndarray(shape=[128, 8, 512], dtype=np.float16, buffer=nl.sbuf)
+  lhsT_tiles = nl.ndarray(shape=[128, 8, 2048], dtype=np.float16, buffer=nl.sbuf)
+  res_tile = nl.ndarray(shape=[1, nl.par_dim(128), 512], dtype=np.float32, buffer=nl.psum)
+  result_packed = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
+  for n in nl.sequential_range(4):
+    i0 = nl.arange(128)
+    i1 = nl.arange(2)
+    i2 = nl.arange(16)
+    i4 = nl.arange(512)
+    result_tiles[i0[:, None, None, None, ], i1[None, :, None, None, ], i2[None, None, :, None, ], 0, i4[None, None, None, :, ]] = 0.000000e+00
+    for bk_r in nl.sequential_range(8):
+      i = nl.arange(128)
+      j = nl.arange(512)
+      rhs_tiles[i[:, None, ], bk_r, j[None, :, ]] = nl.load(rhs_buffer[((bk_r * 128) + i[:, None, ]), ((n * 512) + j[None, :, ])])
+    for m in nl.sequential_range(2):
+      for bk_l in nl.sequential_range(8):
+        i_1 = nl.arange(128)
+        j_1 = nl.arange(2048)
+        lhsT_tiles[i_1[:, None, ], bk_l, j_1[None, :, ]] = nl.load(lhsT_buffer[((bk_l * 128) + i_1[:, None, ]), ((m * 2048) + j_1[None, :, ])])
+      for bm in nl.sequential_range(16):
+        i_2 = nl.arange(128)
+        j_2 = nl.arange(512)
+        res_tile[0, i_2[:, None, ], j_2[None, :, ]] = 0.000000e+00
+        for bk in nl.sequential_range(8):
+          i_3 = nl.arange(128)
+          j_3 = nl.arange(512)
+          k = nl.arange(128)
+          res_tile[0, i_3[:, None, ], j_3[None, :, ]] += nisa.nc_matmul(lhsT_tiles[k[:, None, ], bk, ((bm * 128) + i_3[None, :, ])],rhs_tiles[k[:, None, ], bk, j_3[None, :, ]])
+        i_4 = nl.arange(128)
+        j_4 = nl.arange(512)
+        result_tiles[i_4[:, None, ], m, bm, 0, j_4[None, :, ]] = nisa.tensor_tensor(result_tiles[i_4[:, None, ], m, bm, 0, j_4[None, :, ]], res_tile[0, i_4[:, None, ], j_4[None, :, ]], op=nki.language.add)
+    for m_1 in nl.sequential_range(2):
+      for bm_1 in nl.sequential_range(16):
+        i_5 = nl.arange(128)
+        j_5 = nl.arange(512)
+        result_packed[i_5[:, None, ], j_5[None, :, ]] = nisa.tensor_copy(result_tiles[i_5[:, None, ], m_1, bm_1, 0, j_5[None, :, ]])
+        i_6 = nl.arange(128)
+        j_6 = nl.arange(512)
+        nl.store(result_buffer[(((m_1 * 2048) + (bm_1 * 128)) + i_6[:, None, ]), ((n * 512) + j_6[None, :, ])], result_packed[i_6[:, None, ], j_6[None, :, ]])
+  return result"""
+    assert compare_strings_ignore_whitespace(src, expected)
 
 
 if __name__ == "__main__":
-    test_nki_add_1()
-    test_nki_add_2()
-    test_nki_matmul_1()
+    tvm.testing.main()
