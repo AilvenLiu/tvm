@@ -379,5 +379,34 @@ def test_binary_broadcast2():
         assert_structural_equal(mod["main"], expected)
 
 
+def test_unary_complex1():
+    dst_layout = TrainiumLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 256), (256, 1, 1)),
+    )
+    dst_shape = [4096, 256]
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def unary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            Tp.memset(A_sbuf, T.float32(0.0))
+            
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "unary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop in range(1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 8192):
+                    T.nki_memset(A_sbuf[p_loop, f_loop], T.float32(0.0))       
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": unary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

@@ -227,6 +227,7 @@ def find_max_inst_size_unary(
                 assert i - 1 >= second_seps[second_buffer_dim]
                 leftover = second_data_iters[i - 1].extent
                 second_data_iter = i - 1
+                second_new_stride = second_data_iters[i - 1].stride
                 break
         assert leftover is not None
         if dim_type == T.TrainiumLayout.Partition:

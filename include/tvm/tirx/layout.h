@@ -433,6 +433,9 @@ class TrainiumLayoutNode : public TLayoutNode {
     hash_reducer(dimension_types);
     hash_reducer(combined_1d_layout);
   }
+  /*! \brief Check if the layout is compatible with the shape */
+  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
+
   /*! \brief Verify if the layout is well-formed */
   virtual bool VerifyWellFormed() const;
 

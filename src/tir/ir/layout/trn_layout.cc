@@ -40,6 +40,13 @@ TVM_REGISTER_GLOBAL("tir.TrainiumLayout")
 
 constexpr int kMaxPartitionSize = 128;
 
+bool TrainiumLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const {
+  arith::Analyzer analyzer;
+  PrimExpr prod_shape = ReduceMul(shape);
+  PrimExpr prod_layout = GetSize() * GetPartitionSize();
+  return analyzer.CanProveEqual(prod_shape, prod_layout);
+}
+
 bool TrainiumLayoutNode::VerifyWellFormed() const {
   if (!combined_1d_layout->VerifyWellFormed()) {
     return false;

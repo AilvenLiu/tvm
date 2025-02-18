@@ -178,11 +178,11 @@ void CodeGenTrainium::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
 
 std::string CodeGenTrainium::GetStorageScopeStr(const std::string& scope) {  // NOLINT(*)
   if (scope == "global") {
-    return "nl.hbm ";
+    return "nl.hbm";
   } else if (scope == "trn.sbuf") {
-    return "nl.sbuf ";
+    return "nl.sbuf";
   } else if (scope == "trn.psum") {
-    return "nl.psum ";
+    return "nl.psum";
   } else {
     LOG(FATAL) << "Unknown storage scope `" << scope << "`";
     return "";
@@ -198,8 +198,16 @@ void CodeGenTrainium::VisitStmt_(const AllocateNode* op) {
   std::ostringstream dtype_os;
   PrintType(op->dtype, dtype_os);
   std::string dtype_str = dtype_os.str();
-  stream << vid << " = nl.ndarray(shape=" << op->extents << ", dtype=" << dtype_str
+  if (scope == "trn.psum") {
+    stream << vid << " = nl.ndarray(shape=[";
+    ICHECK(op->extents.size() == 3);
+    stream << PrintExpr(op->extents[0]) << ", nl.par_dim(" << PrintExpr(op->extents[1])
+    << "), " << PrintExpr(op->extents[2]) << "], dtype=" << dtype_str
+    << ", buffer=" << GetStorageScopeStr(scope) << ")\n";
+  } else {
+    stream << vid << " = nl.ndarray(shape=" << op->extents << ", dtype=" << dtype_str
          << ", buffer=" << GetStorageScopeStr(scope) << ")\n";
+  }
   this->PrintStmt(op->body);
 }
 
