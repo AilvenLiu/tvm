@@ -33,6 +33,7 @@ class MapOpType(Enum):
     ZERO = 4
     SQRT = 5
     RECIPROCAL = 6
+    MEMSET = 7
 
 
 def _make_schedule(

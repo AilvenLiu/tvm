@@ -179,6 +179,13 @@ TIRP_DEFINE_SCHEDULE_OP(reciprocal).set_num_inputs(2).set_attr<FArgSanitizer>(
         ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of reciprocal() must be BufferRegion";
     });
 
+TIRP_DEFINE_SCHEDULE_OP(memset).set_num_inputs(2).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+        ICHECK_EQ(args.size(), 2U) << "memset() expects 2 arguments";
+        ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of memset() must be BufferRegion";
+        ICHECK(args[1].as<FloatImmNode>()) << "arg[1] of memset() must be FloatImm";
+    });
+
 /********************* Pipeline Ops **********************/
 #define TIRP_DEFINE_PIPELINE_OP(OpName) \
   TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsPipelineOp", Bool(true))

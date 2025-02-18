@@ -30,13 +30,14 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 Tp_func_map = {
     "reciprocal": Tp.reciprocal,
     "sqrt": Tp.sqrt,
+    "memset": Tp.memset,
     "add": Tp.add,
     "sub": Tp.sub,
     "mul": Tp.mul,
 }
 
 
-@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt"])
+@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt", "memset"])
 def test_simple_unary(op_type):
     src_shape = [128, 512]
     src_layout = TrainiumLayout(
@@ -54,7 +55,10 @@ def test_simple_unary(op_type):
         with T.kernel():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            tp_func(B_sbuf, A_sbuf)
+            if op_type == "memset":
+                tp_func(B_sbuf, T.float32(0.0))
+            else:
+                tp_func(B_sbuf, A_sbuf)
 
     @T.prim_func(tirp=True)
     def expected():
@@ -73,6 +77,8 @@ def test_simple_unary(op_type):
                         T.nki_activation(
                             B_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], "sqrt"
                         )
+                    elif op_type == "memset":
+                        T.nki_memset(B_sbuf[p_loop, f_loop], 0.0)
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -80,7 +86,7 @@ def test_simple_unary(op_type):
         assert_structural_equal(mod["main"], expected)
 
 
-@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt"])
+@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt", "memset"])
 def test_unary_in_a_loop(op_type):
     src_shape = [1024, 512]
     src_layout = TrainiumLayout(
@@ -101,7 +107,10 @@ def test_unary_in_a_loop(op_type):
             A_sbuf_view = T.view(A_sbuf, A_sbuf.layout, (128, 8, 512))
             B_sbuf_view = T.view(B_sbuf, B_sbuf.layout, (128, 4, 512))
             for i in range(4):
-                Tp_func(B_sbuf_view[:, i, :], A_sbuf_view[:, i * 2, :])
+                if op_type == "memset":
+                    Tp_func(B_sbuf_view[:, i, :], T.float32(0.0))
+                else:
+                    Tp_func(B_sbuf_view[:, i, :], A_sbuf_view[:, i * 2, :])
 
     @T.prim_func(tirp=True)
     def expected():
@@ -116,6 +125,8 @@ def test_unary_in_a_loop(op_type):
                         T.nki_reciprocal(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop])
                     elif op_type == "sqrt":
                         T.nki_activation(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], "sqrt")
+                    elif op_type == "memset":
+                        T.nki_memset(B_sbuf[p_loop, i * 512 + f_loop], 0.0)
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary})

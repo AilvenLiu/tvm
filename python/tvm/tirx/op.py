@@ -4428,6 +4428,61 @@ sum = comm_reducer(lambda x, y: x + y, lambda t: const(0, dtype=t), name="sum")
 min = comm_reducer(lambda x, y: _ffi_api._OpMin(x, y, None), max_value, name="min")  # type: ignore
 max = comm_reducer(lambda x, y: _ffi_api._OpMax(x, y, None), min_value, name="max")  # type: ignore
 
+
+def nki_load(res, data):
+    """TVM intrinsic to call nki load instruction
+
+    Parameters
+    ----------
+    res : BufferLoad
+        The result buffer.
+    
+    data: BufferLoad
+        The data buffer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_load", res, data)
+
+def nki_store(res, data):
+    """TVM intrinsic to call nki store instruction
+
+    Parameters
+    ----------
+    res : BufferLoad
+        The result buffer.
+    
+    data: BufferLoad
+        The data buffer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_store", res, data)
+
+def nki_tensor_copy(res, data):
+    """TVM intrinsic to call nki tensor copy instruction
+
+    Parameters
+    ----------
+    res : BufferLoad
+        The result buffer.
+    
+    data: BufferLoad
+        The data buffer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_tensor_copy", res, data)
+
 def nki_matmul(res, lhs, rhs, accum):
     """TVM intrinsic to call nki matmul instruction
 
@@ -4521,7 +4576,7 @@ def nki_tensortensor(result, operand1, operand2, opcode):
     """
     return call_intrin("", "tir.nki_tensortensor", result, operand1, operand2, opcode)
 
-def nki_tensorscalar(result, operand1, operand2, opcode, reorder):
+def nki_tensorscalar(result, operand1, operand2, opcode, reorder = False):
     """TVM intrinsic to call nki tensorscalar instruction
 
     Parameters
@@ -4547,3 +4602,21 @@ def nki_tensorscalar(result, operand1, operand2, opcode, reorder):
         The call expression.
     """
     return call_intrin("", "tir.nki_tensorscalar", result, operand1, operand2, opcode, reorder)
+
+def nki_memset(result, value):
+    """TVM intrinsic to call nki memset instruction
+
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+        
+    value: PrimExpr
+        The value to set.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_memset", result, value)

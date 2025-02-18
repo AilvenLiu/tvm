@@ -132,6 +132,13 @@ constexpr const char* kGlobalSymbol = "global_symbol";
  */
 constexpr const char* kIsTIRp = "is_tirp";
 
+/*!
+ * \brief Number of inputs of the Primfunc
+ *
+ * Type: Int
+ */
+constexpr const char* kNumInputs = "num_inputs";
+
 }  // namespace attr
 
 /*!

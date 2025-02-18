@@ -51,17 +51,16 @@ def copy_trn(
     if not all(
         [
             src.layout and dst.layout,
-            src.dtype == dst.dtype,
-            (src.scope() == "global" and dst.scope() == "trn.sbuf")
-            or (src.scope() == "trn.sbuf" and dst.scope() == "global")
-            or (src.scope() == "trn.sbuf" and dst.scope() == "trn.sbuf"),
+            src.scope() in ["global", "trn.sbuf", "trn.psum"],
+            dst.scope() in ["global", "trn.sbuf", "trn.psum"],
+            src.scope() != "global" or dst.scope() != "global",
             (src.scope() == "global" and isinstance(src.layout, T.TileLayout))
-            or (src.scope() == "trn.sbuf" and isinstance(src.layout, T.TrainiumLayout)),
+            or (src.scope() in ["trn.sbuf", "trn.psum"] and isinstance(src.layout, T.TrainiumLayout)),
             (dst.scope() == "global" and isinstance(dst.layout, T.TileLayout))
-            or (dst.scope() == "trn.sbuf" and isinstance(dst.layout, T.TrainiumLayout)),
+            or (dst.scope() in ["trn.sbuf", "trn.psum"] and isinstance(dst.layout, T.TrainiumLayout)),
         ]
     ):
-        return None
+        raise ValueError("Invalid buffer layout/scope for copy operation.")
 
     # Extract regions and validate dimensions
     analyzer = Analyzer()
@@ -132,6 +131,12 @@ def copy_trn(
 
     b_extent = reduce(operator.mul, src_extent, 1) // p_size // inst_size
     # fmt: off
+    if src.scope() == "global":
+        func = T.nki_load
+    elif dst.scope() == "global":
+        func = T.nki_store
+    else:
+        func = T.nki_tensor_copy
     @T.prim_func(tirp=True)
     def impl():
         for b_loop in T.serial(0, b_extent):
@@ -140,7 +145,7 @@ def copy_trn(
                     for f_loop in T.serial(0, inst_size):
                         src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop, p_loop))
                         dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop))
-                        dst[*dst_indices] = src[*src_indices]
+                        func(dst[*dst_indices], src[*src_indices])
     # fmt: on
 
     return impl

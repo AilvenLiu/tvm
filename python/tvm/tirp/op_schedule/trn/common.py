@@ -221,6 +221,7 @@ def find_max_inst_size_unary(
                 ), "Invalid layout"
                 leftover = second_stride_in_logical_dim // stride_in_logical_dim
                 second_data_iter = i
+                second_new_stride = second_data_iters[i].stride * second_data_iters[i].extent // leftover
                 break
             elif second_stride_in_logical_dim == stride_in_logical_dim:
                 assert i - 1 >= second_seps[second_buffer_dim]
@@ -239,7 +240,7 @@ def find_max_inst_size_unary(
                 ), "partition dimension in the first buffer must be partition dimension in the second buffer"
             continue
         if inst_size != 1 and not analyzer.can_prove(
-            second_inst_stride * inst_size == second_data_iters[second_data_iter].stride
+            second_inst_stride * inst_size == second_new_stride
         ):
             # the stride of the found data iter is not compatible with previous data iters
             break
@@ -259,7 +260,7 @@ def find_max_inst_size_unary(
                 ext == data_iters[dim_in_data_iter].extent
             ):
                 break
-        elif analyzer.can_prove(st == 0) and analyzer.can_prove(ext % leftover == 0):
+        elif analyzer.can_prove(ext % leftover == 0):
             inst_size *= leftover
             inst_data_iters[dim_in_data_iter] = leftover
             break

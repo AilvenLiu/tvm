@@ -45,6 +45,15 @@ CodeGenTrainium::CodeGenTrainium(Target target) : target_(target) {
   decl_stream << "import numpy as np\n";
   decl_stream << "import neuronxcc.nki.isa as nisa\n";
   decl_stream << "import math\n";
+  decl_stream << "import neuronxcc.nki as nki\n";
+  decl_stream << "import neuronxcc.nki.typing as nt\n";
+  decl_stream << "@nki.compiler.enable_stack_allocator\n";
+  decl_stream << "@nki.compiler.skip_middle_end_transformations\n";
+  decl_stream << "@baremetal(experimental_flags='enable-mutable-parameter')\n";
+  opcode_map_ = {{"sqrt", "nki.language.sqrt"},
+                 {"add", "nki.language.add"},
+                 {"sub", "nki.language.subtract"},
+                 {"mul", "nki.language.multiply"}};
 }
 
 void CodeGenTrainium::AddFunction(const GlobalVar& gvar, const PrimFunc& func) {
@@ -76,6 +85,9 @@ void CodeGenTrainium::AddFunction(const GlobalVar& gvar, const PrimFunc& func) {
   this->stream << "def " << static_cast<std::string>(global_symbol.value()) << "(";
 
   // Buffer arguments
+  auto num_inputs = func->GetAttr<Integer>(tvm::attr::kNumInputs);
+  ICHECK(num_inputs.defined());
+  std::vector<std::string> output_vids;
   size_t num_buffer = 0;
   for (size_t i = 0; i < func->params.size(); ++i, ++num_buffer) {
     Var v = func->params[i];
@@ -83,13 +95,26 @@ void CodeGenTrainium::AddFunction(const GlobalVar& gvar, const PrimFunc& func) {
       LOG(FATAL) << "Trainium codegen currently only support buffer arguments";
     };
     std::string vid = AllocVarID(v.get());
-    this->stream << vid << ", ";
+    if(i >= static_cast<size_t>(num_inputs.value()->value)){
+      this->stream << vid << ": nt.mutable_tensor, ";
+      output_vids.push_back(vid);
+    } else {
+      this->stream << vid << ", ";
+    }
   }
 
   // the function scope.
   stream << "):\n";
   int func_scope = this->BeginScope();
   this->PrintStmt(func->body);
+  this->PrintIndent();
+  stream << "return ";
+  for(size_t i = 0; i < output_vids.size(); i++){
+    if(i != 0){
+      stream << ", ";
+    }
+    stream << output_vids[i];
+  }
   this->EndScope(func_scope);
 }
 
@@ -188,6 +213,8 @@ void CodeGenTrainium::VisitStmt_(const AttrStmtNode* op) {
   }
 }
 
+
+
 void CodeGenTrainium::VisitStmt_(const ForNode* op) {
   std::string extent = PrintExpr(op->extent);
   PrintIndent();
@@ -231,34 +258,7 @@ std::string CodeGenTrainium::PrintIndices(const Array<PrimExpr>& indices) {
 }
 
 void CodeGenTrainium::VisitStmt_(const BufferStoreNode* op) {
-  std::string store_scope = op->buffer.scope();
-  std::string index_str = PrintIndices(op->indices);
-  const VarNode* buffer_var = op->buffer->data.get();
-  std::string buffer_str = GetVarID(buffer_var);
-  std::string value_str = this->PrintExpr(op->value);
-  PrintIndent();
-  const BufferLoadNode* load = op->value.as<BufferLoadNode>();
-  if(const auto* cast = op->value.as<CastNode>()){
-    load = cast->value.as<BufferLoadNode>();
-  }
-  if(load){
-    // This is a data movement instruction
-    std::string load_scope = load->buffer.scope();
-    if (store_scope == "trn.sbuf" && load_scope == "global") {
-      stream << buffer_str << "[" << index_str << "] = nl.load(" << value_str << ")\n";
-      return;
-    } else if (store_scope == "global" && load_scope == "trn.sbuf") {
-      stream << "nl.store(" << buffer_str << "[" << index_str << "], " << value_str << ")\n";
-      return;
-    } else if (store_scope == "trn.sbuf" && (load_scope == "trn.sbuf" || load_scope == "trn.psum")) {
-      stream << buffer_str << "[" << index_str << "] = nl.copy(" << value_str << ")\n";
-      return;
-    } else {
-      LOG(FATAL) << "Trainium codegen does not support store from " << load_scope << " to "
-                << store_scope;
-    }
-  }
-  stream << buffer_str << "[" << index_str << "] = " << value_str << "\n";
+  LOG(FATAL) << "Trainium codegen does not support buffer store";
 }
 
 void CodeGenTrainium::VisitStmt_(const EvaluateNode* op) {
@@ -278,6 +278,7 @@ void CodeGenTrainium::VisitExpr_(const BufferLoadNode* op, std::ostream& os) {
   os << "]";
 }
 
+
 void CodeGenTrainium::VisitExpr_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
   CHECK(!op->op.as<GlobalVarNode>())
       << "CodegenTrainium does not support inter-function calls, "
@@ -285,8 +286,47 @@ void CodeGenTrainium::VisitExpr_(const CallNode* op, std::ostream& os) {  // NOL
   if (op->op.same_as(builtin::nki_matmul())) {
     ICHECK_EQ(op->args.size(), 4);
     std::string accum = is_one(op->args[3])? " += ":" = ";
-    os << PrintExpr(op->args[0]) << accum << "nl.matmul(" << PrintExpr(op->args[1]) << "," <<
-        PrintExpr(op->args[2]) <<", transpose_x=True)";
+    os << PrintExpr(op->args[0]) << accum << "nisa.nc_matmul(" << PrintExpr(op->args[1]) << "," <<
+        PrintExpr(op->args[2]) << ")";
+  } else if (op->op.same_as(builtin::nki_load())){
+    ICHECK_EQ(op->args.size(), 2);
+    os << PrintExpr(op->args[0]) << " = nl.load(" << PrintExpr(op->args[1]) << ")";
+  } else if (op->op.same_as(builtin::nki_store())){
+    ICHECK_EQ(op->args.size(), 2);
+    os <<  "nl.store(" <<PrintExpr(op->args[0]) <<", "<< PrintExpr(op->args[1]) << ")";
+  } else if (op->op.same_as(builtin::nki_tensor_copy())){
+    ICHECK_EQ(op->args.size(), 2);
+    os << PrintExpr(op->args[0]) << " = nisa.tensor_copy(" << PrintExpr(op->args[1]) << ")";
+  } else if (op->op.same_as(builtin::nki_activation())){
+    ICHECK_EQ(op->args.size(), 5);
+    // nki_activation(result, data, opcode, bias, scale)
+    ICHECK(opcode_map_.count(op->args[2].as<StringImmNode>()->value));
+    std::string nki_op = opcode_map_[op->args[2].as<StringImmNode>()->value];
+    os << PrintExpr(op->args[0]) << " = nisa.activation(op=" << nki_op << ", data=" << PrintExpr(op->args[2]) << ",";
+    os << "bias=" << PrintExpr(op->args[3]) << ", scale=" << PrintExpr(op->args[4]) << ")";
+  } else if (op->op.same_as(builtin::nki_reciprocal())){
+    ICHECK_EQ(op->args.size(), 2);
+    os << PrintExpr(op->args[0]) << " = nisa.reciprocal(" << PrintExpr(op->args[1]) << ")";
+  } else if (op->op.same_as(builtin::nki_tensortensor())){
+    ICHECK_EQ(op->args.size(), 4);
+    // nki_tensortensor(result, data1, data2, opcode)
+    ICHECK(opcode_map_.count(op->args[3].as<StringImmNode>()->value));
+    std::string nki_op = opcode_map_[op->args[3].as<StringImmNode>()->value];
+    os << PrintExpr(op->args[0]) << " = nisa.tensor_tensor(" << PrintExpr(op->args[1]) << ", ";
+    os << PrintExpr(op->args[2]) << ", op=" << nki_op << ")";
+  } else if (op->op.same_as(builtin::nki_tensorscalar())){
+    ICHECK_EQ(op->args.size(), 5);
+    // nki_tensorscalar(result, operand1, operand2, opcode, reorder)
+    ICHECK(opcode_map_.count(op->args[3].as<StringImmNode>()->value));
+    std::string nki_op = opcode_map_[op->args[3].as<StringImmNode>()->value];
+    int reorder = op->args[4].as<IntImmNode>()->value;
+    bool is_reorder = reorder != 0;
+    os << PrintExpr(op->args[0]) << " = nisa.tensor_scalar(" << PrintExpr(op->args[1]) << ", operand0=";
+    os << PrintExpr(op->args[2]) << ", op0=" << nki_op << ", reverse0=" << is_reorder << ")";
+  } else if (op->op.same_as(builtin::nki_memset())){
+    ICHECK_GE(op->args.size(), 2);
+    // result, value
+    os << PrintExpr(op->args[0]) << " = " << PrintExpr(op->args[1]);
   } else if (op->op.same_as(builtin::nki_transpose())){
     ICHECK_EQ(op->args.size(), 2);
     os << PrintExpr(op->args[0]) << " = nl.transpose(" << PrintExpr(op->args[1]) << ")";
@@ -337,6 +377,14 @@ void CodeGenTrainium::VisitExpr_(const VarNode* op, std::ostream& os) {  // NOLI
 void CodeGenTrainium::VisitExpr_(const CastNode* op, std::ostream& os){
   ctx_.dst_dtype = op->dtype;
   CodeGenTrainium::VisitExpr(op->value, os);
+}
+
+void CodeGenTrainium::VisitExpr_(const FloorDivNode* op, std::ostream& os) {
+  os << PrintExpr(op->a) << " // " << PrintExpr(op->b);
+}
+
+void CodeGenTrainium::VisitExpr_(const FloorModNode* op, std::ostream& os) {
+  os << PrintExpr(op->a) << " % " << PrintExpr(op->b);
 }
 
 runtime::Module BuildTrainium(IRModule mod, Target target) {

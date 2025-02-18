@@ -152,7 +152,7 @@ def matmul_trn(
     assert all(
         [
             A.layout and B.layout and C.layout,
-            A.dtype == B.dtype and B.dtype == C.dtype,
+            A.dtype == B.dtype,
             A.scope() == "trn.sbuf" and B.scope() == "trn.sbuf",
             C.scope() == "trn.psum" or C.scope() == "trn.sbuf",
             isinstance(A.layout, T.TrainiumLayout),
@@ -163,7 +163,7 @@ def matmul_trn(
 
     p_size = A.layout.partition_size
     assert (
-        p_size == B.layout.partition_size and p_size == C.layout.partition_size
+        p_size == B.layout.partition_size
     ), "Partition size mismatch"
 
     lhs_f_size, lhs_f_stride, lhs_f_data_iters, lhs_p_dim, lhs_f_dim = get_inst_size(

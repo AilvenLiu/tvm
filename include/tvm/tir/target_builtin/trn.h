@@ -32,6 +32,24 @@ namespace tir {
 namespace builtin {
 
 /*!
+ * \brief nki intrinsics for load operation.
+ *
+ * nki_load(result, data)
+ */
+TVM_DLL const Op& nki_load();
+/*!
+ * \brief nki intrinsics for store operation.
+ *
+ * nki_store(result, data)
+ */
+TVM_DLL const Op& nki_store();
+/*!
+ * \brief nki intrinsics for tensor_copy operation.
+ *
+ * nki_tensor_copy(result, data)
+ */
+TVM_DLL const Op& nki_tensor_copy();
+/*!
  * \brief nki intrinsics for matmul operation.
  *
  * nki_matmul(C, A, B, accum)
@@ -58,7 +76,7 @@ TVM_DLL const Op& nki_sum();
 /*!
  * \brief nki intrinsics for activation operation.
  *
- * nki_activation(result, data, opcode, scale)
+ * nki_activation(result, data, opcode, bias, scale)
  */
 TVM_DLL const Op& nki_activation();
 
@@ -70,18 +88,25 @@ TVM_DLL const Op& nki_activation();
 TVM_DLL const Op& nki_reciprocal();
 
 /*!
- * \brief nki intrinsics for sqrt operation.
+ * \brief nki intrinsics for tensortensor operation.
  *
  * nki_tensortensor(result, operand1, operand2, opcode)
  */
 TVM_DLL const Op& nki_tensortensor();
 
 /*!
- * \brief nki intrinsics for sqrt operation.
+ * \brief nki intrinsics for tensorscalar operation.
  *
  * nki_tensortensor(result, operand1, operand2, opcode, reorder)
  */
 TVM_DLL const Op& nki_tensorscalar();
+
+/*!
+ * \brief nki intrinsics for memset operation.
+ *
+ * nki_memset(result, value)
+ */
+TVM_DLL const Op& nki_memset();
 
 }  // namespace builtin
 }  // namespace tir

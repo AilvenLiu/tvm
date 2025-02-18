@@ -278,6 +278,22 @@ def reciprocal(
     src = _to_region(src)
     return _ffi_api.OpCall(_get_tirp_op("reciprocal"), [dst, src])
 
+def memset(
+    dst: Union[BufferRegion, Buffer], value: PrimExpr
+):
+    """Set all elements in dst to value.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for memset.
+
+    value : PrimExpr
+        The value to be set.
+    """
+    dst = _to_region(dst)
+    return _ffi_api.OpCall(_get_tirp_op("memset"), [dst, value])
+
 
 def alloc_copy_pipeline(
     thread_scope: ExecScope, depth: int, separate_pc: bool, name_hint: str = ""
@@ -322,5 +338,6 @@ __all__ = [
     "gemm",
     "reduce",
     "reciprocal",
+    "memset",
     "alloc_copy_pipeline",
 ]
