@@ -430,6 +430,19 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
         });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
+    .set_dispatch<tirx::TrainiumPSUMLayout>(
+        "", [](tirx::TrainiumPSUMLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
+          Array<String> keys;
+          Array<ExprDoc> values;
+          keys.push_back("dimension_types");
+          values.push_back(d->AsDoc<ExprDoc>(layout->dimension_types, p->Attr("dimension_types")));
+          keys.push_back("combined_1d_layout");
+          values.push_back(
+              d->AsDoc<ExprDoc>(layout->combined_1d_layout, p->Attr("combined_1d_layout")));
+          return TIR(d, "TrainiumPSUMLayout")->Call({}, keys, values);
+        });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::SwizzleLayout>(
         "", [](tirx::SwizzleLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
           return TIR(d, "SwizzleLayout")

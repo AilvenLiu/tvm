@@ -129,7 +129,8 @@ def matmul_trn(
     C_buffer_region: BufferRegion,
     alpha: PrimExpr,
     beta: PrimExpr,
-    sctx: ScheduleContext) -> Optional[PrimFunc]:
+    sctx: ScheduleContext,
+) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
@@ -162,9 +163,7 @@ def matmul_trn(
     ), "Invalid buffer layout and scope"
 
     p_size = A.layout.partition_size
-    assert (
-        p_size == B.layout.partition_size
-    ), "Partition size mismatch"
+    assert p_size == B.layout.partition_size, "Partition size mismatch"
 
     lhs_f_size, lhs_f_stride, lhs_f_data_iters, lhs_p_dim, lhs_f_dim = get_inst_size(
         A_buffer_region, p_size, analyzer, OperatorKind.A
@@ -224,10 +223,7 @@ def matmul_trn(
             [(rhs_b_loop, rhs_b_extent), (0, reduction_b_extent)], rhs_f_loop, 0
         )
 
-        acc_indices = [
-            C_buffer_region.region[i].min if C.scope() == "trn.psum" else 0
-            for i in range(len(C_buffer_region.region))
-        ]
+        acc_indices = [C_buffer_region.region[i].min for i in range(len(C_buffer_region.region))]
         if swap_lhs_rhs:
             acc_indices[acc_p_dim] += rhs_axes[rhs_f_dim]
             acc_indices[acc_f_dim] += lhs_axes[lhs_f_dim]
@@ -283,7 +279,7 @@ def matmul_trn(
                 C_psum_shape,
                 "float32",
                 logical_scope="trn.psum",
-                layout=T.TrainiumLayout(
+                layout=T.TrainiumPSUMLayout(
                     dimension_types,
                     T.TileLayout.from_tuple(C_psum_shape, (max_inst_size, 1, 1)),
                 ),
@@ -315,7 +311,8 @@ def matmul_trn(
                                             )
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for lhs_f_loop, rhs_f_loop in T.grid(lhs_f_size, rhs_f_size):
-                            C[f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop, rhs_f_loop)] = C_psum[psum_bank, lhs_f_loop, rhs_f_loop]
+                            acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop, rhs_f_loop))
+                            C[acc_indices] = C_psum[psum_bank, lhs_f_loop, rhs_f_loop]
     # fmt: on
     if C.scope() == "trn.psum":
         return impl_C_psum

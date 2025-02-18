@@ -166,6 +166,41 @@ Array<PrimExpr> TrainiumLayoutNode::Apply(const PrimExpr& coord) const {
   }
   return {partition_coord, free_coord};
 }
+/**************** TrainiumPSUMLayout ****************/
+
+Array<PrimExpr> TrainiumPSUMLayoutNode::Apply(const PrimExpr& coord) const {
+  auto indices = TrainiumLayoutNode::Apply(coord);
+  ICHECK_EQ(indices.size(), 2);
+  return {floordiv(indices[1], kPSUMMaxElemPerBank), indices[0],
+          floormod(indices[1], kPSUMMaxElemPerBank)};
+}
+
+bool TrainiumPSUMLayoutNode::VerifyWellFormed() const {
+  if (!TrainiumLayoutNode::VerifyWellFormed()) {
+    return false;
+  }
+  auto cosize = GetCosize();
+  arith::Analyzer analyzer;
+  if (!analyzer.CanProve(cosize <= kPSUMMaxElemPerBank * kPSUMBankNum)) {
+    return false;
+  }
+  return true;
+}
+
+TVM_REGISTER_NODE_TYPE(TrainiumPSUMLayoutNode);
+
+TrainiumPSUMLayout::TrainiumPSUMLayout(ShapeTuple dimension_types, TileLayout combined_1d_layout) {
+  auto n = make_object<TrainiumPSUMLayoutNode>();
+  n->dimension_types = dimension_types;
+  n->combined_1d_layout = combined_1d_layout;
+  CHECK(n->VerifyWellFormed()) << "ValueError: The trainium psum layout is not well-formed";
+  data_ = std::move(n);
+}
+
+TVM_REGISTER_GLOBAL("tir.TrainiumPSUMLayout")
+    .set_body_typed([](ShapeTuple dimension_types, TileLayout combined_1d_layout) {
+      return TrainiumPSUMLayout(dimension_types, combined_1d_layout);
+    });
 
 }  // namespace tir
 }  // namespace tvm

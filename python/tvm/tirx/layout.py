@@ -437,6 +437,16 @@ class ComposeLayout(TLayout):
         )
 
 
+def parse_dimension_types(dimension_types: Union[Tuple[int], str]) -> Tuple[int]:
+    if isinstance(dimension_types, str):
+        for c in dimension_types:
+            assert c in ["P", "F"], "dimension_types must be a string of 'P' and 'F'"
+        dimension_types = [
+            TrainiumLayout.Partition if c == "P" else TrainiumLayout.Free for c in dimension_types
+        ]
+    return ShapeTuple(dimension_types)
+
+
 @register_object("tirx.TrainiumLayout")
 class TrainiumLayout(TLayout):
 
@@ -451,16 +461,10 @@ class TrainiumLayout(TLayout):
         dimension_types: Union[Tuple[int], str],
         combined_1d_layout: TileLayout,
     ):
-        if isinstance(dimension_types, str):
-            for c in dimension_types:
-                assert c in ["P", "F"], "dimension_types must be a string of 'P' and 'F'"
-            dimension_types = [
-                TrainiumLayout.Partition if c == "P" else TrainiumLayout.Free
-                for c in dimension_types
-            ]
+        dimension_types = parse_dimension_types(dimension_types)
         self.__init_handle_by_constructor__(
             _ffi_api.TrainiumLayout,  # pylint: disable=no-member
-            ShapeTuple(dimension_types),
+            dimension_types,
             combined_1d_layout,
         )
 
@@ -470,3 +474,18 @@ class TrainiumLayout(TLayout):
     @property
     def partition_size(self):
         return _ffi_api.TrainiumLayoutGetPartitionSize(self)  # pylint: disable=no-member
+
+
+@register_object("tirx.TrainiumPSUMLayout")
+class TrainiumPSUMLayout(TrainiumLayout):
+    def __init__(
+        self,
+        dimension_types: Union[Tuple[int], str],
+        combined_1d_layout: TileLayout,
+    ):
+        dimension_types = parse_dimension_types(dimension_types)
+        self.__init_handle_by_constructor__(
+            _ffi_api.TrainiumPSUMLayout,  # pylint: disable=no-member
+            dimension_types,
+            combined_1d_layout,
+        )

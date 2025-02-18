@@ -1199,6 +1199,18 @@ def test_apply():
         for i in range(6 * 16):
             f(i // 16, i % 16)
 
+    ################ Trainium PSUM Layout
+    def test_trainium_psum_layout_0():
+        layout = T.TrainiumPSUMLayout(
+            dimension_types="FP",
+            combined_1d_layout=T.TileLayout.from_tuple(data=(1024, 8), strides=(1, 1)),
+        )
+        for i, j in itertools.product(range(1024), range(8)):
+            coord = layout.apply(i, j, shape=(1024, 8))
+            assert coord[0] == i // 512
+            assert coord[1] == j
+            assert coord[2] == i % 512
+    
     test_tile_layout_0()
     test_tile_layout_1()
     test_tile_layout_2()
@@ -1210,6 +1222,7 @@ def test_apply():
     test_compose_layout_1()
     test_trainium_layout_0()
     test_trainium_layout_1()
+    test_trainium_psum_layout_0()
 
 
 def test_normalize_compose_layout():

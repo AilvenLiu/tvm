@@ -434,21 +434,21 @@ class TrainiumLayoutNode : public TLayoutNode {
     hash_reducer(combined_1d_layout);
   }
   /*! \brief Verify if the layout is well-formed */
-  bool VerifyWellFormed() const final;
+  virtual bool VerifyWellFormed() const;
 
   /*! \brief Get the size of the layout */
-  PrimExpr GetSize() const final;
+  PrimExpr GetSize() const;
 
   /*! \brief Get the cosize of the layout */
-  PrimExpr GetCosize() const final;
+  PrimExpr GetCosize() const;
 
   /*! \brief Get the partition dimension size */
   PrimExpr GetPartitionSize() const;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const final;
+  Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
 
-  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
+  virtual Array<PrimExpr> Apply(const PrimExpr& coord) const;
 
   /*! \brief Normalize the layout */
   TLayout Normalize() const final;
@@ -456,7 +456,7 @@ class TrainiumLayoutNode : public TLayoutNode {
   static constexpr const char* _type_key = "tirx.TrainiumLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
-  TVM_DECLARE_FINAL_OBJECT_INFO(TrainiumLayoutNode, TLayoutNode);
+  TVM_DECLARE_BASE_OBJECT_INFO(TrainiumLayoutNode, TLayoutNode);
 };
 
 class TrainiumLayout : public TLayout {
@@ -464,8 +464,30 @@ class TrainiumLayout : public TLayout {
   TVM_DLL explicit TrainiumLayout(ShapeTuple dimension_types, TileLayout combined_1d_layout);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TrainiumLayout, TLayout, TrainiumLayoutNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(TrainiumLayoutNode);
 };
+
+class TrainiumPSUMLayoutNode : public TrainiumLayoutNode {
+ public:
+  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
+
+  bool VerifyWellFormed() const final;
+
+  static constexpr const char* _type_key = "tir.TrainiumPSUMLayout";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  TVM_DECLARE_FINAL_OBJECT_INFO(TrainiumPSUMLayoutNode, TrainiumLayoutNode);
+};
+
+class TrainiumPSUMLayout : public TrainiumLayout {
+ public:
+  TVM_DLL explicit TrainiumPSUMLayout(ShapeTuple dimension_types, TileLayout combined_1d_layout);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(TrainiumPSUMLayout, TrainiumLayout, TrainiumPSUMLayoutNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(TrainiumPSUMLayoutNode);
+};
+
+constexpr int kPSUMMaxElemPerBank = 512;
+constexpr int kPSUMBankNum = 8;
 
 /********************* Utils *********************/
 bool IsTrivialLayout(const TLayout& layout);

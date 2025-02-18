@@ -51,6 +51,7 @@ from tvm.tirx.layout import (
     SwizzleLayout,
     ComposeLayout,
     TrainiumLayout,
+    TrainiumPSUMLayout,
 )
 from tvm.ir.tensormap_type import (
     TensorMapInterleaveKind,
@@ -2726,6 +2727,7 @@ __all__ += [
     "TLayout",
     "TileLayout",
     "TrainiumLayout",
+    "TrainiumPSUMLayout",
     "DeviceIterAttr",
     "DataIterAttr",
     "S",

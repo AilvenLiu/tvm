@@ -477,7 +477,18 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     Buffer flattened;
     tir::BufferNode* writer;
     if (trn_layout) {
-      auto new_shape = {trn_layout->GetPartitionSize(), trn_layout->GetCosize()};
+      Array<PrimExpr> new_shape;
+      if (buf->layout.as<TrainiumPSUMLayoutNode>()) {
+        arith::Analyzer analyzer;
+        if (analyzer.CanProve(trn_layout->GetCosize() <= kPSUMMaxElemPerBank)) {
+          new_shape = {1, trn_layout->GetPartitionSize(), trn_layout->GetCosize()};
+        } else {
+          new_shape = {ceildiv(trn_layout->GetCosize(), kPSUMMaxElemPerBank),
+                       trn_layout->GetPartitionSize(), kPSUMMaxElemPerBank};
+        }
+      } else {
+        new_shape = {trn_layout->GetPartitionSize(), trn_layout->GetCosize()};
+      }
       flattened = buf;
       writer = flattened.CopyOnWrite();
       writer->shape = new_shape;
