@@ -268,3 +268,18 @@ def find_max_inst_size_unary(
         else:
             assert False, "Invalid layout"
     return inst_size, first_inst_stride, inst_data_iters
+
+
+def get_hardware_inst_size_limit(is_dma: bool) -> int:
+    return 1e9 if is_dma else 512
+
+def bound_inst_with_limit(inst_size, inst_size_limit, analyzer):
+    if not analyzer.can_prove(inst_size <= inst_size_limit):
+        # FIXME: this constraint can be relaxed if we support mask
+        assert analyzer.can_prove(inst_size % inst_size_limit == 0)
+        actual_inst_size = inst_size_limit
+        additional_b_size = T.ceildiv(inst_size, inst_size_limit)
+    else:
+        actual_inst_size = inst_size
+        additional_b_size = 1
+    return actual_inst_size, additional_b_size

@@ -66,7 +66,7 @@ def test_simple_unary(op_type):
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop in range(1):
+            for b_loop, additional_b_loop in T.grid(1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     if op_type == "reciprocal":
@@ -118,7 +118,7 @@ def test_unary_in_a_loop(op_type):
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop in T.grid(4, 1):
+            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     if op_type == "reciprocal":
@@ -182,7 +182,7 @@ def test_simple_binary(op_type, operands_type):
             A_sbuf = T.alloc_buffer(src1_shape, scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer(src2_shape, scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer(dst_shape, scope="trn.sbuf", logical_scope="kernel")
-            for b_loop in range(1):
+            for b_loop, additional_b_loop in T.grid(1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     if operands_type == "region_region":
@@ -274,7 +274,7 @@ def test_binary_complex(op_type, operands_type):
             A_sbuf = T.alloc_buffer(src1_layout_data_iter, scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer(src2_layout_data_iter, scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop in T.grid(4, b_extent):
+            for i, b_loop, additional_b_loop in T.grid(4, b_extent, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, f_extent):
                     if operands_type == "region_region":
@@ -325,7 +325,7 @@ def test_binary_broadcast1():
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop in range(512):
+            for b_loop, additional_b_loop in T.grid(512, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 32):
                     T.nki_tensorscalar(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], "add", T.bool(False))
@@ -367,7 +367,7 @@ def test_binary_broadcast2():
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop in range(128):
+            for b_loop, additional_b_loop in T.grid(128, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 128):
                     T.nki_tensortensor(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], B_sbuf[p_loop, b_loop % 4 * 128 + f_loop], "add")
@@ -397,10 +397,10 @@ def test_unary_complex1():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop in range(1):
+            for b_loop, additional_b_loop in T.grid(1, 16):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, f_loop in T.grid(128, 8192):
-                    T.nki_memset(A_sbuf[p_loop, f_loop], T.float32(0.0))       
+                for p_loop, f_loop in T.grid(128, 512):
+                    T.nki_memset(A_sbuf[p_loop, additional_b_loop * 512 + f_loop], T.float32(0.0))       
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary})

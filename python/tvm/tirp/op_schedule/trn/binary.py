@@ -31,6 +31,8 @@ from .common import (
     find_max_inst_size_unary,
     infer_range_info,
     get_ewise_dim_map,
+    get_hardware_inst_size_limit,
+    bound_inst_with_limit
 )
 from ..common import MapOpType
 
@@ -323,15 +325,20 @@ def binary_trn(
     # fmt: off
     _func = T.nki_tensortensor if is_tensor_tensor else T.nki_tensorscalar
     func = lambda *args: _func(*args, reorder) if not is_tensor_tensor else _func(*args)
+    
+    inst_size_limit = get_hardware_inst_size_limit(is_dma=False)
+    actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
+    
     @T.prim_func(tirp=True)
     def impl():
-        for b_loop in T.serial(0, b_extent):
+        for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop, f_loop in T.grid(p_size, inst_size):
-                        dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop))
-                        src1_indices = T.meta_var(f_gen_src1_idx(b_loop, b_extent, f_loop, p_loop))
+                for p_loop, f_loop in T.grid(p_size, actual_inst_size):
+                        f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
+                        dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
+                        src1_indices = T.meta_var(f_gen_src1_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
                         if CONST is None:
-                            src2_indices = T.meta_var(f_gen_src2_idx(b_loop, b_extent, f_loop, p_loop))
+                            src2_indices = T.meta_var(f_gen_src2_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
                             T.evaluate(func(dst[*dst_indices], src1[*src1_indices], src2[*src2_indices], opcode))
                         else:
                             T.evaluate(func(dst[*dst_indices], src1[*src1_indices], CONST, opcode))

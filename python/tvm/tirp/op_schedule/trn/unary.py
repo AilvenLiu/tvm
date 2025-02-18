@@ -30,6 +30,8 @@ from .common import (
     generate_axes_in_region,
     get_ewise_dim_map,
     find_max_inst_size_unary,
+    get_hardware_inst_size_limit,
+    bound_inst_with_limit
 )
 from ..common import MapOpType
 
@@ -117,18 +119,22 @@ def unary_trn(
     func, opcode = unary_map_ops[unary_op]
     # fmt: off
     
+    inst_size_limit = get_hardware_inst_size_limit(is_dma=False)
+    actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
+    
     @T.prim_func(tirp=True)
     def impl():
-        for b_loop in T.serial(0, b_extent):
+        for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, p_size):
-                    for f_loop in T.serial(0, inst_size):
-                        dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop))
+                    for f_loop in T.serial(0, actual_inst_size):
+                        f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
+                        dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
                         if CONST is not None:
                             if unary_op == MapOpType.MEMSET:
                                 T.evaluate(func(dst[*dst_indices], CONST))
                         else:
-                            src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop, p_loop) if CONST is None else [])
+                            src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop_wo_limit, p_loop) if CONST is None else [])
                             if opcode is None:
                                 T.evaluate(func(dst[*dst_indices], src[*src_indices]))
                             else:

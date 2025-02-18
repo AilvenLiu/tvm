@@ -33,6 +33,8 @@ from .common import (
     generate_axes_in_region,
     get_ewise_dim_map,
     find_max_inst_size_unary,
+    get_hardware_inst_size_limit,
+    bound_inst_with_limit
 )
 
 
@@ -137,15 +139,21 @@ def copy_trn(
         func = T.nki_store
     else:
         func = T.nki_tensor_copy
+    
+    inst_size_limit = get_hardware_inst_size_limit(func!=T.nki_tensor_copy)
+    actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
+    
     @T.prim_func(tirp=True)
     def impl():
-        for b_loop in T.serial(0, b_extent):
-            with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop in T.serial(0, p_size):
-                    for f_loop in T.serial(0, inst_size):
-                        src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop, p_loop))
-                        dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop))
-                        func(dst[*dst_indices], src[*src_indices])
+        # the additional b loop is to satisfy hardware instuction size limit
+        for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
+                with T.attr(0, "tensorized_nki_instruction", 1):
+                    for p_loop in T.serial(0, p_size):
+                        for f_loop in T.serial(0, actual_inst_size):
+                            f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
+                            src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
+                            dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
+                            func(dst[*dst_indices], src[*src_indices])
     # fmt: on
 
     return impl

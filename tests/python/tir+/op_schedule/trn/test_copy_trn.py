@@ -54,7 +54,7 @@ def test_simple_copy():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop in range(1):
+            for b_loop, additional_b_loop in T.grid(1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     A_1 = T.Buffer((65536,), data=A.data, logical_scope="kernel")
@@ -94,7 +94,7 @@ def test_simple_copy_2():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop in range(512):
+            for b_loop, additional_b_loop in T.grid(512, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 1):
                     A_1 = T.Buffer((65536,), data=A.data, logical_scope="kernel")
@@ -134,7 +134,7 @@ def test_copy_in_a_loop():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop in T.grid(4, 1):
+            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     A_1 = T.Buffer((262144,), data=A.data, logical_scope="kernel")
@@ -175,7 +175,7 @@ def test_copy_in_a_loop_2():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop in T.grid(4, 1):
+            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     A_1 = T.Buffer((262144,), data=A.data, logical_scope="kernel")
@@ -236,7 +236,7 @@ def test_copy_different_f():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop in range(64):
+            for b_loop, additional_b_loop in T.grid(64, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 4):
                     T.nki_tensor_copy(B_sbuf[
@@ -275,7 +275,7 @@ def test_copy_different_shape():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop in range(4):
+            for b_loop, additional_b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 4):
                     T.nki_tensor_copy(B_sbuf[p_loop, b_loop * 4 + f_loop], A_sbuf[p_loop, b_loop * 64 + f_loop])
@@ -313,7 +313,7 @@ def test_copy_irregular_shape():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop in T.grid(4, 1):
+            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     A_1 = T.Buffer((1280000,), data=A.data, logical_scope="kernel")
@@ -347,7 +347,7 @@ def test_copy_different_shape_dim():
         A = T.match_buffer(A_ptr, (32, 128, 512), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(32, 128, 512), strides=(65536, 128, 1)))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop in T.grid(32, 1):
+            for i, b_loop, additional_b_loop in T.grid(32, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     A_1 = T.Buffer((2097152,), data=A.data, logical_scope="kernel")
@@ -385,13 +385,89 @@ def test_copy_with_offset():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop in T.grid(2, 2):
+            for i, b_loop, additional_b_loop in T.grid(2, 2, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     A_1 = T.Buffer((131072,), data=A.data, logical_scope="kernel")
                     T.nki_load(
                         A_sbuf[p_loop, i * 1024 + b_loop * 512 + f_loop],
                         A_1[b_loop * 65536 + p_loop * 512 + f_loop],
+                    )
+
+    with target:
+        mod = tvm.IRModule({"main": copy})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+def test_large_dma_copy():
+    src_shape = [512, 4096]
+    src_layout = T.TileLayout.from_tuple((4, 128, 4096), (4096 * 128, 4096, 1))
+    dst_shape = [512, 4096]
+    dst_layout = TrainiumLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4096), (4096, 1, 1)),
+    )
+
+    @T.prim_func(tirp=True)
+    def copy(A_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, src_shape, "float32", layout=src_layout)
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            for i in range(4):
+                Tp.copy(A_sbuf[i * 128 : i * 128 + 128, :], A[i * 128 : i * 128 + 128, :])
+
+    @T.prim_func(tirp=True)
+    def expected(A_ptr: T.handle):
+        T.func_attr({"global_symbol": "copy"})
+        A = T.match_buffer(
+            A_ptr,
+            (512, 4096),
+            logical_scope="kernel",
+            layout=T.TileLayout.from_tuple(data=(4, 128, 4096), strides=(524288, 4096, 1)),
+        )
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 4096):
+                    A_1 = T.Buffer((2097152,), data=A.data, logical_scope="kernel")
+                    T.nki_load(
+                        A_sbuf[p_loop, i * 4096 + f_loop], A_1[i * 524288 + p_loop * 4096 + f_loop]
+                    )
+
+    with target:
+        mod = tvm.IRModule({"main": copy})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+def test_copy_with_inst_size_limit():
+    src_shape = [512, 4096]
+    src_layout = dst_layout = TrainiumLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4096), (4096, 1, 1)),
+    )
+    dst_shape = src_shape
+    dst_layout = src_layout
+    @T.prim_func(tirp=True)
+    def copy(A_ptr: T.handle) -> None:
+        with T.kernel():
+            B_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            for i in range(4):
+                Tp.copy(A_sbuf[i * 128 : i * 128 + 128, :], B_sbuf[i * 128 : i * 128 + 128, :])
+
+    @T.prim_func(tirp=True)
+    def expected(A_ptr: T.handle):
+        T.func_attr({"global_symbol": "copy"})
+        with T.kernel():
+            B_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop, additional_b_loop in T.grid(4, 1, 8):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    T.nki_tensor_copy(
+                        A_sbuf[p_loop, i * 4096 + additional_b_loop * 512 + f_loop],
+                        B_sbuf[p_loop, i * 4096 + additional_b_loop * 512 + f_loop],
                     )
 
     with target:
