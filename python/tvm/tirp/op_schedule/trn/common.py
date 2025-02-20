@@ -82,7 +82,7 @@ def infer_range_info(buffer_region: BufferRegion, analyzer: Analyzer):
             if analyzer.can_prove(st + ext <= data_iters[j].extent):
                 tiled_range_infos_per_dim.append(RangeInfo(st, ext, j, i, dim_type))
                 break
-            assert False, "Invalid layout"
+            assert False, f"Cannot analyze the physical tensor region for: {buffer_region}"
     # put partition axis at the front
     # then put free axis with lower stride at the front
     tiled_range_infos_per_dim = sorted(

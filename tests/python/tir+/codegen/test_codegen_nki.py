@@ -73,9 +73,10 @@ import neuronxcc.nki.isa as nisa
 import math
 import neuronxcc.nki as nki
 import neuronxcc.nki.typing as nt
+import neuronxcc.nki.compiler as ncc
 @nki.compiler.enable_stack_allocator
 @nki.compiler.skip_middle_end_transformations
-@baremetal(experimental_flags='enable-mutable-parameter')
+@baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
 def func_kernel(A, B: nt.mutable_tensor, ):
   B_buffer = B.reshape([128, 512])
   A_buffer = A.reshape([128, 512])
@@ -127,15 +128,16 @@ import neuronxcc.nki.isa as nisa
 import math
 import neuronxcc.nki as nki
 import neuronxcc.nki.typing as nt
+import neuronxcc.nki.compiler as ncc
 @nki.compiler.enable_stack_allocator
 @nki.compiler.skip_middle_end_transformations
-@baremetal(experimental_flags='enable-mutable-parameter')
+@baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
 def func_kernel(A, B: nt.mutable_tensor, ):
   B_buffer = B.reshape([128, 2048])
   A_buffer = A.reshape([128, 2048])
   A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
   B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
-  for k in nl.sequential_range(4):
+  for k in nl.sequential_range(4, precise_schedule=True):
     i = nl.arange(128)
     j = nl.arange(512)
     A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[i[:, None, ], ((k * 512) + j[None, :, ])])
@@ -279,9 +281,10 @@ import neuronxcc.nki.isa as nisa
 import math
 import neuronxcc.nki as nki
 import neuronxcc.nki.typing as nt
+import neuronxcc.nki.compiler as ncc
 @nki.compiler.enable_stack_allocator
 @nki.compiler.skip_middle_end_transformations
-@baremetal(experimental_flags='enable-mutable-parameter')
+@baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
 def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
   result_buffer = result.reshape([4096, 2048])
   lhsT_buffer = lhsT.reshape([1024, 4096])
@@ -291,26 +294,26 @@ def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
   lhsT_tiles = nl.ndarray(shape=[128, 8, 2048], dtype=np.float16, buffer=nl.sbuf)
   res_tile = nl.ndarray(shape=[1, nl.par_dim(128), 512], dtype=np.float32, buffer=nl.psum)
   result_packed = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
-  for n in nl.sequential_range(4):
+  for n in nl.sequential_range(4, precise_schedule=True):
     i0 = nl.arange(128)
     i1 = nl.arange(2)
     i2 = nl.arange(16)
     i4 = nl.arange(512)
     result_tiles[i0[:, None, None, None, ], i1[None, :, None, None, ], i2[None, None, :, None, ], 0, i4[None, None, None, :, ]] = 0.000000e+00
-    for bk_r in nl.sequential_range(8):
+    for bk_r in nl.sequential_range(8, precise_schedule=True):
       i = nl.arange(128)
       j = nl.arange(512)
       rhs_tiles[i[:, None, ], bk_r, j[None, :, ]] = nl.load(rhs_buffer[((bk_r * 128) + i[:, None, ]), ((n * 512) + j[None, :, ])])
-    for m in nl.sequential_range(2):
-      for bk_l in nl.sequential_range(8):
+    for m in nl.sequential_range(2, precise_schedule=True):
+      for bk_l in nl.sequential_range(8, precise_schedule=True):
         i_1 = nl.arange(128)
         j_1 = nl.arange(2048)
         lhsT_tiles[i_1[:, None, ], bk_l, j_1[None, :, ]] = nl.load(lhsT_buffer[((bk_l * 128) + i_1[:, None, ]), ((m * 2048) + j_1[None, :, ])])
-      for bm in nl.sequential_range(16):
+      for bm in nl.sequential_range(16, precise_schedule=True):
         i_2 = nl.arange(128)
         j_2 = nl.arange(512)
         res_tile[0, i_2[:, None, ], j_2[None, :, ]] = 0.000000e+00
-        for bk in nl.sequential_range(8):
+        for bk in nl.sequential_range(8, precise_schedule=True):
           i_3 = nl.arange(128)
           j_3 = nl.arange(512)
           k = nl.arange(128)
@@ -318,8 +321,8 @@ def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
         i_4 = nl.arange(128)
         j_4 = nl.arange(512)
         result_tiles[i_4[:, None, ], m, bm, 0, j_4[None, :, ]] = nisa.tensor_tensor(result_tiles[i_4[:, None, ], m, bm, 0, j_4[None, :, ]], res_tile[0, i_4[:, None, ], j_4[None, :, ]], op=nki.language.add)
-    for m_1 in nl.sequential_range(2):
-      for bm_1 in nl.sequential_range(16):
+    for m_1 in nl.sequential_range(2, precise_schedule=True):
+      for bm_1 in nl.sequential_range(16, precise_schedule=True):
         i_5 = nl.arange(128)
         j_5 = nl.arange(512)
         result_packed[i_5[:, None, ], j_5[None, :, ]] = nisa.tensor_copy(result_tiles[i_5[:, None, ], m_1, bm_1, 0, j_5[None, :, ]])

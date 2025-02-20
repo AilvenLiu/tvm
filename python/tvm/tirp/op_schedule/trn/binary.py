@@ -269,7 +269,9 @@ def binary_trn(
     # Check src2 is broadcastable to src1
     broadcast_dims = []
     if CONST is None:
-        for i in range(1, len(src2_extent) + 1):
+        # min(len(src2_extent), len(src1_extent)) prevents the following scenario:
+        # shape src1: [1024, 1024], shape src2: [1, 1024, 1024]
+        for i in range(1, min(len(src2_extent), len(src1_extent)) + 1):
             if src2_extent[-i] != 1 and src2_extent[-i] != src1_extent[-i]:
                 return None
             elif src2_extent[-i] != src1_extent[-i]:
