@@ -571,7 +571,7 @@ PrimExpr Buffer::access_ptr(int access_mask, DataType ptr_type, int content_lane
 Buffer::Buffer(Var data, DataType dtype, ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> strides,
                PrimExpr elem_offset, ffi::String name, int data_alignment, int offset_factor,
                BufferType buffer_type, ffi::Array<IntImm> axis_separators, Span span,
-               ffi::Optional<TLayout> layout) {
+               ffi::Optional<TLayout> layout, ffi::Array<Integer> allocated_addr) {
   DataType storage_dtype = dtype;
   // specially handle bool
   if (storage_dtype == DataType::Bool()) {
@@ -623,6 +623,7 @@ Buffer::Buffer(Var data, DataType dtype, ffi::Array<PrimExpr> shape, ffi::Array<
   }
   n->span = std::move(span);
   n->layout = std::move(layout);
+  n->allocated_addr = std::move(allocated_addr);
   data_ = std::move(n);
 }
 

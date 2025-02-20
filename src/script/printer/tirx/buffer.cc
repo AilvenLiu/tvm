@@ -189,6 +189,11 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
   if (buffer->layout.defined()) {
     kwargs.Set("layout", d->AsDoc<ExprDoc>(buffer->layout, buffer_p->Attr("layout")));
   }
+  // Step 13. Handle `buffer.allocated_addr`
+  if (!buffer->allocated_addr.empty()) {
+    kwargs.Set("allocated_addr",
+               d->AsDoc<ExprDoc>(buffer->allocated_addr, buffer_p->Attr("allocated_addr")));
+  }
 
   if (var_def_lhs.size() == 1) {
     frame->stmts.push_back(AssignDoc(var_def_lhs[0], var_def_rhs[0], std::nullopt));
@@ -207,8 +212,9 @@ ExprDoc BufferCall(const ExprDoc& prefix, const ffi::Map<ffi::String, ExprDoc>& 
       args.push_back(doc.value());
     }
   }
-  for (ffi::String s : {"data", "strides", "elem_offset", "scope", "align", "offset_factor",
-                        "buffer_type", "axis_separators", "logical_scope", "layout"}) {
+  for (ffi::String s :
+       {"data", "strides", "elem_offset", "scope", "align", "offset_factor", "buffer_type",
+        "axis_separators", "logical_scope", "layout", "allocated_addr"}) {
     if (ffi::Optional<ExprDoc> doc = attrs.Get(s)) {
       kwargs_keys.push_back(s);
       kwargs_values.push_back(doc.value());

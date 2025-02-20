@@ -1140,6 +1140,8 @@ constexpr const char* scan_init_scope = "scan_init_scope";
 constexpr const char* buffer_dim_align = "buffer_dim_align";
 /*! \brief Mark buffer initial addr alignment in bytes */
 constexpr const char* buffer_data_alignment = "buffer_data_alignment";
+/*! \brief Mark buffer allocated addr in bytes */
+constexpr const char* buffer_allocated_addr = "buffer_allocated_addr";
 /*!
  * \brief Bind the buffer specification to the region of the op
  *  When this scope occurs, the stmt.node is a ffi::Array<NodeRef> = [buffer, tensor]

@@ -218,6 +218,7 @@ def buffer(
         axis_separators,
         logical_scope,
         _get_layout(layout, shape),
+        []
     )
 
 
@@ -732,6 +733,7 @@ def sblock_alloc_buffer(
     axis_separators: list[int] | None = None,
     logical_scope: str = "",
     layout: str | TLayout | None = None,
+    allocated_addr: int | tuple[int, ...] | None = None,
 ) -> Buffer:
     """SBlock-level buffer allocation function.
 
@@ -765,6 +767,9 @@ def sblock_alloc_buffer(
 
     layout: Optional[Union[str, TLayout]]
         The layout of the buffer.
+        
+    allocated_addr: Optional[Union[int, Tuple[int]]]
+        The address of the allocated buffer. Might be multi-dimensional.
 
     Returns
     -------
@@ -776,6 +781,10 @@ def sblock_alloc_buffer(
         strides = [Var(s, "int32") if isinstance(s, str) else s for s in strides]
     else:
         strides = []
+    if allocated_addr is None:
+        allocated_addr = []
+    if not isinstance(allocated_addr, (list, tuple)):
+        allocated_addr = [allocated_addr]
     return _ffi_api.SBlockAllocBuffer(  # type: ignore[attr-defined] # pylint: disable=no-member
         shape,
         dtype,
@@ -789,6 +798,7 @@ def sblock_alloc_buffer(
         axis_separators,
         logical_scope,
         _get_layout(layout, shape),
+        allocated_addr,
     )
 
 

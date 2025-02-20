@@ -72,6 +72,7 @@ class OpaqueBlockLower : public StmtExprMutator {
       }
       allocate_annotations.Set(attr::buffer_data_alignment,
                                IntImm(DataType::Int(32), buffer->data_alignment));
+      allocate_annotations.Set(attr::buffer_allocated_addr, buffer->allocated_addr);
       body = SeqStmt::Flatten(AllocBuffer(buffer, allocate_annotations), std::move(body));
     }
     // Step 4. Handle annotations, block annotations are not preserved by default.

@@ -114,6 +114,12 @@ class BufferNode : public Object {
   /*! \brief The layout of the buffer */
   Optional<TLayout> layout;
 
+  /*! \brief The allocated address of the buffer.
+   * The address might be multi-dimensional based on its scope.
+   * For example, trn.psum takes 2D address, representing (bank, offset).
+   */
+  Array<Integer> allocated_addr;
+
   /*! \brief constructor */
   BufferNode() {}
 
@@ -132,7 +138,8 @@ class BufferNode : public Object {
         .def_ro("offset_factor", &BufferNode::offset_factor)
         .def_ro("buffer_type", &BufferNode::buffer_type)
         .def_ro("span", &BufferNode::span, refl::AttachFieldFlag::SEqHashIgnore())
-        .def_ro("layout", &BufferNode::layout);
+        .def_ro("layout", &BufferNode::layout)
+        .def_ro("allocated_addr", &BufferNode::allocated_addr);
   }
 
   /*! \return preferred index type for this buffer node */
@@ -169,7 +176,8 @@ class Buffer : public ObjectRef {
   TVM_DLL Buffer(Var data, DataType dtype, ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> strides,
                  PrimExpr elem_offset, ffi::String name, int data_alignment, int offset_factor,
                  BufferType buffer_type, ffi::Array<IntImm> axis_separators = {},
-                 Span span = Span(), ffi::Optional<TLayout> layout = std::nullopt);
+                 Span span = Span(), ffi::Optional<TLayout> layout = std::nullopt,
+                 ffi::Array<Integer> allocated_addr = {});
 
   /*!
    * \brief Return a new buffer that is equivalent with current one

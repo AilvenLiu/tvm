@@ -594,7 +594,19 @@ def test_roundtrip_unreachable_after_break():
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
+def test_roundtrip_allocated_addr():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        with T.kernel():
+            A = T.alloc_buffer([10], "float32", scope="trn.sbuf", allocated_addr=1024)
+            for i in T.serial(2):
+                Tp.memset(A[i*5:i*5+5], T.float32(0.0))
 
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
 
 if __name__ == "__main__":
     test_roundtrip_scopeid1()
@@ -618,3 +630,4 @@ if __name__ == "__main__":
     test_roundtrip_continue_nested()
     test_roundtrip_break_and_continue()
     test_roundtrip_unreachable_after_break()
+    test_roundtrip_allocated_addr()

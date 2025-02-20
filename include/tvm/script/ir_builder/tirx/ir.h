@@ -56,6 +56,7 @@ using tvm::tirx::Var;
  * \param axis_separators The separators between input axes when generating flattened output axes.
  * \param logical_scope The logical scope of the buffer.
  * \param layout The layout of the buffer.
+ * \param allocated_addr The allocated address of the buffer. Might be multi-dimensional.
  * \return The declared buffer.
  */
 Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
@@ -64,7 +65,8 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   int offset_factor, ffi::String buffer_type,
                   ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::String logical_scope = "",
 
-                  ffi::Optional<TLayout> layout = std::nullopt);
+                  ffi::Optional<TLayout> layout = std::nullopt,
+                  ffi::Array<Integer> allocated_addr = {});
 
 /*!
  * \brief The primitive function statement.
@@ -218,6 +220,7 @@ void BlockAttrs(ffi::Map<ffi::String, ffi::Any> attrs);
  * \param axis_separators The separators between input axes when generating flattened output axes.
  * \param logical_scope The logical scope of the buffer.
  * \param layout The layout of the buffer.
+ * \param allocated_addr The allocated address of the buffer. Might be multi-dimensional.
  * \return The allocated buffer.
  */
 Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::Float(32),
@@ -225,7 +228,8 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::
                          PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "",
                          int align = -1, int offset_factor = 0, ffi::String buffer_type = "default",
                          ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
-                         ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt);
+                         ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt,
+                         ffi::Array<Integer> allocated_addr = {});
 
 /*!
  * \brief The barrier allocation function.

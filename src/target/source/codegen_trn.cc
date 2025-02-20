@@ -47,9 +47,10 @@ CodeGenTrainium::CodeGenTrainium(Target target) : target_(target) {
   decl_stream << "import math\n";
   decl_stream << "import neuronxcc.nki as nki\n";
   decl_stream << "import neuronxcc.nki.typing as nt\n";
+  decl_stream << "import neuronxcc.nki.compiler as ncc\n";
   decl_stream << "@nki.compiler.enable_stack_allocator\n";
   decl_stream << "@nki.compiler.skip_middle_end_transformations\n";
-  decl_stream << "@baremetal(experimental_flags='enable-mutable-parameter')\n";
+  decl_stream << "@baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')\n";
   opcode_map_ = {{"sqrt", "nki.language.sqrt"},
                  {"add", "nki.language.add"},
                  {"sub", "nki.language.subtract"},
@@ -201,12 +202,26 @@ void CodeGenTrainium::VisitStmt_(const AllocateNode* op) {
   if (scope == "trn.psum") {
     stream << vid << " = nl.ndarray(shape=[";
     ICHECK(op->extents.size() == 3);
-    stream << PrintExpr(op->extents[0]) << ", nl.par_dim(" << PrintExpr(op->extents[1])
-    << "), " << PrintExpr(op->extents[2]) << "], dtype=" << dtype_str
-    << ", buffer=" << GetStorageScopeStr(scope) << ")\n";
+    stream << PrintExpr(op->extents[0]) << ", nl.par_dim(" << PrintExpr(op->extents[1]) << "), "
+           << PrintExpr(op->extents[2]) << "], dtype=" << dtype_str << ", buffer=";
   } else {
     stream << vid << " = nl.ndarray(shape=" << op->extents << ", dtype=" << dtype_str
-         << ", buffer=" << GetStorageScopeStr(scope) << ")\n";
+           << ", buffer=";
+  }
+  auto allocated_addr = op->annotations.Get(tir::attr::buffer_allocated_addr);
+  ICHECK(allocated_addr.defined());
+  Array<Integer> addr = Downcast<Array<Integer>>(allocated_addr.value());
+  if (addr.empty()) {
+    stream << GetStorageScopeStr(scope) << ")\n";
+  } else {
+    if(scope == "trn.psum"){
+      ICHECK(addr.size() == 2);
+      stream << "ncc.psum.mod_alloc(base_bank=" << addr[0] << ", base_addr=" << addr[1];
+      stream << ", num_bank_tiles=(" << op->extents[0] << ",)))\n";
+    } else {
+      ICHECK(addr.size() == 1);
+      stream << "ncc.sbuf.mod_alloc(base_addr=" << addr[0] << "))\n";
+    }
   }
   this->PrintStmt(op->body);
 }
@@ -234,7 +249,8 @@ void CodeGenTrainium::VisitStmt_(const ForNode* op) {
     PrintStmt(op->body);
     ctx_.tensorized_loop_vars.erase(op->loop_var.get());
   } else {
-    stream << "for "<< vid << " in nl.sequential_range(" << extent << "):\n";
+    stream << "for " << vid << " in nl.sequential_range(" << extent
+           << ", precise_schedule=True):\n";
     int for_scope = BeginScope();
     PrintStmt(op->body);
     EndScope(for_scope);

@@ -42,13 +42,17 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
                   ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::String logical_scope,
-
-                  ffi::Optional<TLayout> layout) {
+                  ffi::Optional<TLayout> layout, ffi::Array<Integer> allocated_addr) {
   if (logical_scope == "" && storage_scope != "") {
     logical_scope = tvm::tirx::StorageToLogicalScope(storage_scope);
   }
   TVM_FFI_CHECK(buffer_type == "auto" || buffer_type == "default" || buffer_type.empty())
       << "ValueError: `buffer_type` must be `auto` or `default` or empty";
+  if (!allocated_addr.empty()) {
+    ICHECK(!data.defined() && !elem_offset.defined() && !offset_factor)
+        << "ValueError: `allocated_addr` can only be used with `data`, `elem_offset`, and "
+           "`offset_factor` undefined";
+  }
   Var buffer_data;
   if (!data.defined()) {
     DataType storage_dtype = dtype;
@@ -67,7 +71,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
   return Buffer(buffer_data, dtype, shape, strides.value_or(ffi::Array<PrimExpr>()),
                 elem_offset.value_or(PrimExpr()), buffer_name, align, offset_factor,
                 (buffer_type == "auto" ? tvm::tirx::kAutoBroadcast : tvm::tirx::kDefault),
-                axis_separators.value_or(ffi::Array<IntImm>()), Span(), layout);
+                axis_separators.value_or(ffi::Array<IntImm>()), Span(), layout, allocated_addr);
 }
 
 PrimFuncFrame PrimFunc(bool is_private, bool is_tirp) {
@@ -466,10 +470,11 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                          ffi::String storage_scope, int align, int offset_factor,
                          ffi::String buffer_type_str,
                          ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                         ffi::String logical_scope, ffi::Optional<TLayout> layout) {
+                         ffi::String logical_scope, ffi::Optional<TLayout> layout,
+                         ffi::Array<Integer> allocated_addr) {
   Buffer buffer =
       BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align, offset_factor,
-                 buffer_type_str, axis_separators, logical_scope, layout);
+                 buffer_type_str, axis_separators, logical_scope, layout, allocated_addr);
   IRBuilder builder = IRBuilder::Current();
   if (ffi::Optional<SBlockFrame> frame = builder->FindFrame<SBlockFrame>()) {
     frame.value()->alloc_buffers.push_back(buffer);
@@ -758,9 +763,9 @@ WhileFrame While(PrimExpr condition) {
   return WhileFrame(n);
 }
 
-void Break() { AddToParent(tvm::tir::Break(Span())); }
+void Break() { AddToParent(tvm::tirx::Break(Span())); }
 
-void Continue() { AddToParent(tvm::tir::Continue(Span())); }
+void Continue() { AddToParent(tvm::tirx::Continue(Span())); }
 
 IfFrame If(PrimExpr condition) {
   ObjectPtr<IfFrameNode> n = ffi::make_object<IfFrameNode>();
@@ -1174,7 +1179,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
