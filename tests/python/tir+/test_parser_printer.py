@@ -594,6 +594,7 @@ def test_roundtrip_unreachable_after_break():
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
+
 def test_roundtrip_allocated_addr():
     # fmt: off
     @T.prim_func(tirp=True)
@@ -607,6 +608,21 @@ def test_roundtrip_allocated_addr():
     code = test.script()
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_implicit_buffer_region():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (10, 10, 10), "float32", layout=T.TileLayout.from_tuple((10, 10, 10)))
+        with T.kernel():
+            Tp.memset(A[0], T.float32(0.0))
+
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
 
 if __name__ == "__main__":
     test_roundtrip_scopeid1()
@@ -631,3 +647,4 @@ if __name__ == "__main__":
     test_roundtrip_break_and_continue()
     test_roundtrip_unreachable_after_break()
     test_roundtrip_allocated_addr()
+    test_roundtrip_implicit_buffer_region()

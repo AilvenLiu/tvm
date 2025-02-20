@@ -235,8 +235,9 @@ class Buffer(Object, Scriptable):
         has_step = any(
             isinstance(i, slice) and (i.step is not None and i.step != 1) for i in indices
         )
+        has_implicit_slice = len(indices) < len(self.shape)
         analyzer = Analyzer()
-        if has_slice and not has_step:
+        if (has_slice and not has_step) or has_implicit_slice:
             region = []
             for i, index in enumerate(indices):
                 if isinstance(index, slice):
@@ -249,6 +250,9 @@ class Buffer(Object, Scriptable):
                             index, const(1, index.dtype) if isinstance(index, PrimExpr) else 1
                         )
                     )
+            if has_implicit_slice:
+                for i in range(len(indices), len(self.shape)):
+                    region.append(Range.from_min_extent(0, self.shape[i]))
             return BufferRegion(self, region)
         else:
             expr_indices = []
