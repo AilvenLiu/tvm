@@ -24,7 +24,11 @@ from .binary import binary_trn
 from .unary import unary_trn
 
 # Register unary mapping schedules.
-for op_name, op_type in [("sqrt", MapOpType.SQRT), ("reciprocal", MapOpType.RECIPROCAL), ("memset", MapOpType.MEMSET)]:
+for op_name, op_type in [
+    ("sqrt", MapOpType.SQRT),
+    ("reciprocal", MapOpType.RECIPROCAL),
+    ("memset", MapOpType.MEMSET),
+]:
     custom_name = f"unary_{op_name}_trn_impl"
     func = _make_schedule(op_type, 1, [unary_trn])
     func.__name__ = custom_name

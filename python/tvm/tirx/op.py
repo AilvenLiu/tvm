@@ -4552,6 +4552,31 @@ def nki_reciprocal(result, data):
     """
     return call_intrin("", "tir.nki_reciprocal", result, data)
 
+def nki_tensorreduce(result, data, opcode, *axes):
+    """TVM intrinsic to call nki tensorreduce instruction
+
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+
+    data: BufferLoad
+        The data buffer.
+        
+    opcode: str
+        The opcode.
+        
+    axes: Tuple[int]
+        The axes to reduce over.
+        
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_tensorreduce", result, data, opcode, *axes)
+
 def nki_tensortensor(result, operand1, operand2, opcode):
     """TVM intrinsic to call nki tensortensor instruction
 

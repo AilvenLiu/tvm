@@ -32,8 +32,8 @@ def test_layernorm():
     f16_bytes = 2
     bf16_bytes = 2
     f32_bytes = 4
-    dtype = "float16" # doesn't support bfloat16 yet
-    ATTN_B, ATTN_N, ATTN_D = 4, 1024, 1024 # attention batch size, seq length, feature dim
+    dtype = "float16"  # doesn't support bfloat16 yet
+    ATTN_B, ATTN_N, ATTN_D = 4, 1024, 1024  # attention batch size, seq length, feature dim
     PIPELINE_DEPTH = 2
     NUM_WORKERS = 2
     N_PER_TILE = 2
@@ -49,6 +49,7 @@ def test_layernorm():
     # NOTE 2: this kernel follows CTA-level prog style, where we assume all warps
     #         in a CTA participate in each op.
 
+    # fmt: off
     @T.prim_func(tirp=True)
     def layernorm(inp_ptr: T.handle, inp_resid_ptr: T.handle, norm_weight_ptr: T.handle, norm_bias_ptr: T.handle,
                   out_ptr: T.handle, out_resid_ptr: T.handle) -> None:
@@ -103,12 +104,12 @@ def test_layernorm():
                     Tp.add(resid_smem[:, 0, :], resid_smem[:, 0, :], x_smem[:, 0, :])
                     Tp.copy(out_resid[by, 0, slice(bx * NUM_WORKERS + curr_idx, (bx + 1) * NUM_WORKERS + curr_idx), :], resid_smem[:, 0, :])
                     # numerator
-                    Tp.reduce(mean[:, 0, 0], resid_smem[:, 0, :])
+                    Tp.sum(mean[:, 0, 0], resid_smem[:, 0, :])
                     Tp.fdiv(mean[:, 0, 0], mean[:, 0, 0], T.float16(ATTN_D))
                     Tp.sub(resid_smem[:, 0, :], resid_smem[:, 0, :], mean[:, 0, 0])
                     # denominator
                     Tp.mul(x_smem[:, 0, :], resid_smem[:, 0, :], resid_smem[:, 0, :])
-                    Tp.reduce(var[:, 0, 0], x_smem[:, 0, :])
+                    Tp.sum(var[:, 0, 0], x_smem[:, 0, :])
                     Tp.fdiv(var[:, 0, 0], var[:, 0, 0], T.float16(ATTN_D))
                     Tp.add(var[:, 0, 0], var[:, 0, 0], T.float16(1e-5))
                     Tp.sqrt(var[:, 0, 0], var[:, 0, 0])
@@ -123,8 +124,12 @@ def test_layernorm():
     # get inputs
     inp_np = np.random.randn(ATTN_B, 1, ATTN_N, ATTN_D).astype(dtype)
     inp_resid_np = np.random.randn(ATTN_B, 1, ATTN_N, ATTN_D).astype(dtype)
-    norm_weight_np = np.random.randn(ATTN_D,).astype(dtype)
-    norm_bias_np = np.random.randn(ATTN_D,).astype(dtype)
+    norm_weight_np = np.random.randn(
+        ATTN_D,
+    ).astype(dtype)
+    norm_bias_np = np.random.randn(
+        ATTN_D,
+    ).astype(dtype)
     out_np = np.zeros((ATTN_B, 1, ATTN_N, ATTN_D)).astype(dtype)
     out_resid_np = np.zeros((ATTN_B, 1, ATTN_N, ATTN_D)).astype(dtype)
     inp_tvm = tvm.nd.array(inp_np, DEV)
@@ -137,9 +142,10 @@ def test_layernorm():
     def tir_layernorm():
         with target:
             mod = tvm.IRModule({"main": layernorm})
-            mod = LowerTIRp()(mod)
-            mod = tvm.build(mod, target=target)
-            func = lambda: mod(inp_tvm, inp_resid_tvm, norm_weight_tvm, norm_bias_tvm, out_tvm, out_resid_tvm)
+            mod = tvm.build(mod, target=target, pipeline="tirp")
+            func = lambda: mod(
+                inp_tvm, inp_resid_tvm, norm_weight_tvm, norm_bias_tvm, out_tvm, out_resid_tvm
+            )
             ms = bench(func, warmup=2, repeat=10, proton_name="tir")
             print(f"TIR layernorm time: {ms:.3f} ms")
 
@@ -158,7 +164,13 @@ def test_layernorm():
         norm_bias_torch = torch.tensor(norm_bias_np, device=torch_dev)
         out_torch = torch.zeros((ATTN_B, 1, ATTN_N, ATTN_D), device=torch_dev)
         out_resid_torch = torch.zeros((ATTN_B, 1, ATTN_N, ATTN_D), device=torch_dev)
-        ln_func = nn.LayerNorm([ATTN_D,], device=torch_dev, dtype=torch.float16)
+        ln_func = nn.LayerNorm(
+            [
+                ATTN_D,
+            ],
+            device=torch_dev,
+            dtype=torch.float16,
+        )
         ln_func.weight = nn.Parameter(norm_weight_torch)
         ln_func.bias = nn.Parameter(norm_bias_torch)
 

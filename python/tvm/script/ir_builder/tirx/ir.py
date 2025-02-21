@@ -2275,6 +2275,7 @@ nki_activation = _op_wrapper(_tir_op.nki_activation)
 nki_reciprocal = _op_wrapper(_tir_op.nki_reciprocal)
 nki_tensortensor = _op_wrapper(_tir_op.nki_tensortensor)
 nki_tensorscalar = _op_wrapper(_tir_op.nki_tensorscalar)
+nki_tensorreduce = _op_wrapper(_tir_op.nki_tensorreduce)
 nki_memset = _op_wrapper(_tir_op.nki_memset)
 def _dtype_forward(func):
     @functools.wraps(func)
@@ -2665,6 +2666,7 @@ __all__ = float_types + [
     "nki_matmul",
     "nki_activation",
     "nki_reciprocal",
+    "nki_tensorreduce",
     "nki_tensortensor",
     "nki_tensorscalar",
     "nki_memset",

@@ -30,47 +30,89 @@ from tvm.script import tirp as Tp
     [
         ######### basic test #########
         (
-            (32, 32,), # g_shape_a
-            (32,), # g_shape_b
-            (0, 0,), # st_a
-            (0,), # st_b
-            (32, 32), # extent_a
-            (32,), # extent_b
-            32, # thread_cnt
-            tvm.cuda(0), # dev
+            (
+                32,
+                32,
+            ),  # g_shape_a
+            (32,),  # g_shape_b
+            (
+                0,
+                0,
+            ),  # st_a
+            (0,),  # st_b
+            (32, 32),  # extent_a
+            (32,),  # extent_b
+            32,  # thread_cnt
+            tvm.cuda(0),  # dev
         ),
         ######### large size #########
         (
-            (8, 16, 2, 22,), # g_shape_a
-            (8, 16,), # g_shape_b
-            (0, 0, 0, 0,), # st_a
-            (0, 0,), # st_b
-            (8, 16, 2, 22,), # extent_a
-            (8, 16,), # extent_b
-            128, # thread_cnt
-            tvm.cuda(0), # dev
+            (
+                8,
+                16,
+                2,
+                22,
+            ),  # g_shape_a
+            (
+                8,
+                16,
+            ),  # g_shape_b
+            (
+                0,
+                0,
+                0,
+                0,
+            ),  # st_a
+            (
+                0,
+                0,
+            ),  # st_b
+            (
+                8,
+                16,
+                2,
+                22,
+            ),  # extent_a
+            (
+                8,
+                16,
+            ),  # extent_b
+            128,  # thread_cnt
+            tvm.cuda(0),  # dev
         ),
         # ######### small size #########
         (
-            (32, 7,), # g_shape_a
-            (32,), # g_shape_b
-            (0, 0,), # st_a
-            (0,), # st_b
-            (32, 7,), # extent_a
-            (32,), # extent_b
-            32, # thread_cnt
-            tvm.cuda(0), # dev
+            (
+                32,
+                7,
+            ),  # g_shape_a
+            (32,),  # g_shape_b
+            (
+                0,
+                0,
+            ),  # st_a
+            (0,),  # st_b
+            (
+                32,
+                7,
+            ),  # extent_a
+            (32,),  # extent_b
+            32,  # thread_cnt
+            tvm.cuda(0),  # dev
         ),
         ######### offset test #########
         (
-            (32, 32,), # g_shape_a
-            (32,), # g_shape_b
-            (1, 1), # st_a
-            (2,), # st_b
-            (5, 8), # extent_a
-            (5,), # extent_b
-            32, # thread_cnt
-            tvm.cuda(0), # dev
+            (
+                32,
+                32,
+            ),  # g_shape_a
+            (32,),  # g_shape_b
+            (1, 1),  # st_a
+            (2,),  # st_b
+            (5, 8),  # extent_a
+            (5,),  # extent_b
+            32,  # thread_cnt
+            tvm.cuda(0),  # dev
         ),
     ],
 )
@@ -102,15 +144,14 @@ def test_reduction_op(input, dtype):
                 B_smem = T.alloc_buffer(s_shape_b, dtype, scope="shared", layout=s_layout_b)
 
                 Tp.copy(A_smem[*copy_slice_a], A[*copy_slice_a])
-                Tp.reduce(B_smem[*reduce_slice_b], A_smem[*reduce_slice_a])
+                Tp.sum(B_smem[*reduce_slice_b], A_smem[*reduce_slice_a])
                 Tp.copy(B[*copy_slice_b], B_smem[*copy_slice_b])
     # fmt: on
 
     target = tvm.target.Target.from_device(dev)
     with target:
         mod = tvm.IRModule({"main": sum_reduction})
-        mod = tvm.tir.transform.LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
         print(f"compiled source code: {mod.imported_modules[0].get_source()}")
 
         np.random.seed(0)

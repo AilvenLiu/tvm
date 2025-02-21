@@ -90,7 +90,7 @@ def test_gemm(ssh_client):
         # todo: we should allow alloc_buffer under for loops
         # todo: can we skip the first T.kernel()?
         with T.kernel():
-            result_tiles = T.alloc_buffer((2, M, BLOCK_N), dtype, scope="trn.sbuf", layout=T.TrainiumLayout("FPF", T.TileLayout.from_tuple((M // 128, 128, BLOCK_N), (BLOCK_N, 1, 1))), allocated_addr=0)
+            result_tiles = T.alloc_buffer((M, BLOCK_N), dtype, scope="trn.sbuf", layout=T.TrainiumLayout("FPF", T.TileLayout.from_tuple((M // 128, 128, BLOCK_N), (BLOCK_N, 1, 1))), allocated_addr=0)
             b_sbuf = T.alloc_buffer((2, BLOCK_K, BLOCK_N), dtype, scope="trn.sbuf", layout = T.TrainiumLayout("FFPF", T.TileLayout.from_tuple((2, BLOCK_K // 128, 128, BLOCK_N), (BLOCK_K*BLOCK_N//128,BLOCK_N, 1, 1))), allocated_addr=M*BLOCK_N//128*2)
             a_sbuf = T.alloc_buffer((2, BLOCK_M, BLOCK_K), dtype, scope="trn.sbuf", layout = T.TrainiumLayout("FFFP", T.TileLayout.from_tuple((2, BLOCK_M, BLOCK_K // 128, 128), (BLOCK_M*BLOCK_K//128, 1, BLOCK_M, 1))), allocated_addr=M*BLOCK_N//128*2 + 2*BLOCK_K*BLOCK_N//128*2)
             c_psum = T.alloc_buffer((8, TILE_M, TILE_N), "float32", scope="trn.psum", layout = T.TrainiumPSUMLayout("FPF", T.TileLayout.from_tuple((8, TILE_M, TILE_N), (TILE_N, 1, 1))), allocated_addr=(0, 0))

@@ -27,10 +27,8 @@ from tvm.tir.transform import LowerTIRp
 
 def _get_source(func: tvm.tir.PrimFunc) -> str:
     target = tvm.target.Target("nvidia/nvidia-h100")
-    print(target)
-    with target:
-        mod = LowerTIRp()(tvm.IRModule({"main": func}))
-    mod = tvm.build(mod, target=target)
+    mod = tvm.IRModule({"main": func})
+    mod = tvm.build(mod, target=target, pipeline="tirp")
     src = mod.imported_modules[0].get_source()
     return src
 
@@ -84,8 +82,7 @@ def test_stmatrix_sync_aligned(trans):
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     with target:
-        mod = tvm.tir.transform.LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
         src = mod.imported_modules[0].get_source()
         if not trans:
             assert "stmatrix.sync.aligned.m8n8.x4.shared.b16" in src
@@ -285,7 +282,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     target = tvm.target.Target("cuda")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-    mod = tvm.build(mod, target=target)
+    mod = tvm.build(mod, target=target, pipeline="tirp")
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
@@ -373,7 +370,7 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
     target = tvm.target.Target("cuda")
     func, shape = get_ir(swizzle, dtype)
     mod = tvm.IRModule({"main": func})
-    mod = tvm.build(mod, target=target)
+    mod = tvm.build(mod, target=target, pipeline="tirp")
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
@@ -462,7 +459,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
     target = tvm.target.Target("cuda")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-    mod = tvm.build(mod, target=target)
+    mod = tvm.build(mod, target=target, pipeline="tirp")
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
@@ -552,11 +549,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     target = tvm.target.Target("cuda")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-    mod.show()
-    with target:
-        mod = LowerTIRp()(mod)
-        mod.show()
-    mod = tvm.build(mod, target=target)
+    mod = tvm.build(mod, target=target, pipeline="tirp")
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
@@ -617,9 +610,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
     target = tvm.target.Target("cuda")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-    with target:
-        mod = LowerTIRp()(mod)
-    mod = tvm.build(mod, target=target)
+    mod = tvm.build(mod, target=target, pipeline="tirp")
     src = mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
@@ -772,9 +763,7 @@ def test_wgmma_ss_nt():
         B_encode_args,
     )
     mod = tvm.IRModule({"main": func})
-    with target:
-        mod = LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
+    mod = tvm.build(mod, target=target, pipeline="tirp")
 
     np.random.seed(0)
     A_np = np.random.randn(*shapeA).astype(in_dtype)
@@ -939,9 +928,7 @@ def test_wgmma_rs_nt():
         B_encode_args,
     )
     mod = tvm.IRModule({"main": func})
-    with target:
-        mod = LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
+    mod = tvm.build(mod, target=target, pipeline="tirp")
 
     np.random.seed(0)
     A_np = np.random.randn(*shapeA).astype(in_dtype)
@@ -988,15 +975,13 @@ def test_warp_shuffle_xor_sync():
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
-    with target:
-        mod = LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
-        A_np = np.zeros(32, dtype="float32")
-        A = tvm.nd.array(A_np, device=DEV)
-        mod(A)
-        assert "__shfl_xor_sync" in mod.imported_modules[0].get_source()
-        A_ref = np.ones(32, dtype="float32") * 496
-        np.testing.assert_allclose(A.asnumpy(), A_ref)
+    mod = tvm.build(mod, target=target, pipeline="tirp")
+    A_np = np.zeros(32, dtype="float32")
+    A = tvm.nd.array(A_np, device=DEV)
+    mod(A)
+    assert "__shfl_xor_sync" in mod.imported_modules[0].get_source()
+    A_ref = np.ones(32, dtype="float32") * 496
+    np.testing.assert_allclose(A.asnumpy(), A_ref)
 
 
 if __name__ == "__main__":

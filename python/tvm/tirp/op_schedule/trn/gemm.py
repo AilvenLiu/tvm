@@ -26,9 +26,10 @@ from tvm.tir import BufferRegion, PrimFunc, PrimExpr, Var
 from tvm.ir import Range, assert_structural_equal
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from .common import (
-    get_layout_data_iters,
     infer_range_info,
     generate_axes_in_region,
+    find_max_inst_size_from_one_region,
+    bound_inst_with_limit,
 )
 
 max_inst_size = 128
@@ -71,56 +72,6 @@ def get_pf_dim_from_buffer_region(
     return p_dim, f_dim
 
 
-def get_inst_size(
-    buffer_region: BufferRegion,
-    partition_size: PrimExpr,
-    analyzer: Analyzer,
-    operator_kind: OperatorKind,
-):
-    p_dim, f_dim = get_pf_dim_from_buffer_region(buffer_region, analyzer, operator_kind)
-    tiled_range_infos_per_dim, layout, seps = infer_range_info(buffer_region, analyzer)
-    # check p_dim covers whole partition
-    prod = 1
-    data_iters = get_layout_data_iters(layout)
-    for i in range(seps[p_dim], seps[p_dim + 1]):
-        if layout.dimension_types[i] == T.TrainiumLayout.Partition:
-            prod *= data_iters[i].extent
-    assert analyzer.can_prove_equal(
-        prod, partition_size
-    ), "Reduction dimension must cover whole partition"
-
-    # check largest inst size
-    inst_size = 1
-    inst_stride = 1
-    inst_data_iters = {}
-    while len(tiled_range_infos_per_dim) > 0:
-        range_info = tiled_range_infos_per_dim[0]
-        tiled_range_infos_per_dim = tiled_range_infos_per_dim[1:]
-        st, ext, dim_in_data_iter, dim_in_shape, dim_type = range_info
-        if dim_type == T.TrainiumLayout.Partition:
-            continue
-        if dim_in_shape != f_dim:
-            break
-        if inst_size != 1 and not analyzer.can_prove(
-            inst_stride * inst_size == data_iters[dim_in_data_iter].stride
-        ):
-            # the stride of the found data iter is not compatible with previous data iters
-            break
-        if inst_size == 1:
-            inst_stride = data_iters[dim_in_data_iter].stride
-        if operator_kind != OperatorKind.C and analyzer.can_prove(inst_size * ext > max_inst_size):
-            if analyzer.can_prove(max_inst_size % inst_size == 0) and analyzer.can_prove(
-                ext % (max_inst_size // inst_size) == 0
-            ):
-                inst_data_iters[dim_in_data_iter] = max_inst_size // inst_size
-                inst_size *= max_inst_size // inst_size
-            break
-        inst_data_iters[dim_in_data_iter] = ext
-        inst_size *= ext
-
-    return inst_size, inst_stride, inst_data_iters, p_dim, f_dim
-
-
 @register_schedule("gemm")
 def matmul_trn(
     D_buffer_region: BufferRegion,
@@ -159,28 +110,29 @@ def matmul_trn(
             isinstance(A.layout, T.TrainiumLayout),
             isinstance(B.layout, T.TrainiumLayout),
             isinstance(C.layout, T.TrainiumLayout),
+            A.layout.partition_size == B.layout.partition_size,
         ]
     ), "Invalid buffer layout and scope"
 
     p_size = A.layout.partition_size
     assert p_size == B.layout.partition_size, "Partition size mismatch"
 
-    lhs_f_size, lhs_f_stride, lhs_f_data_iters, lhs_p_dim, lhs_f_dim = get_inst_size(
-        A_buffer_region, p_size, analyzer, OperatorKind.A
+    lhs_p_dim, lhs_f_dim = get_pf_dim_from_buffer_region(A_buffer_region, analyzer, OperatorKind.A)
+    rhs_p_dim, rhs_f_dim = get_pf_dim_from_buffer_region(B_buffer_region, analyzer, OperatorKind.B)
+    lhs_f_size, lhs_f_stride, lhs_f_data_iters = find_max_inst_size_from_one_region(
+        A_buffer_region, [lhs_f_dim], analyzer
     )
-    rhs_f_size, rhs_f_stride, rhs_f_data_iters, rhs_p_dim, rhs_f_dim = get_inst_size(
-        B_buffer_region, p_size, analyzer, OperatorKind.B
+    rhs_f_size, rhs_f_stride, rhs_f_data_iters = find_max_inst_size_from_one_region(
+        B_buffer_region, [rhs_f_dim], analyzer
     )
     acc_p_dim, acc_f_dim = get_pf_dim_from_buffer_region(C_buffer_region, analyzer, OperatorKind.C)
     swap_lhs_rhs = acc_p_dim > acc_f_dim
 
     if C.scope() == "trn.psum":
-        acc_f_size, acc_f_stride, _, _, _ = get_inst_size(
-            C_buffer_region, p_size, analyzer, OperatorKind.C
+        acc_f_size, acc_f_stride, _ = find_max_inst_size_from_one_region(
+            C_buffer_region, [acc_f_dim], analyzer
         )
         assert acc_f_stride == 1, "psum_f_stride must be 1"
-        assert acc_f_size >= rhs_f_size
-        assert lhs_f_size == C.layout.partition_size
 
     dim2block_var_lhs = {lhs_f_dim: 0, lhs_p_dim: 1}
     dim2block_var_rhs = {rhs_f_dim: 0, rhs_p_dim: 1}
@@ -240,15 +192,24 @@ def matmul_trn(
     lhs_b_extent = A_buffer_region.region[lhs_f_dim].extent // lhs_f_size
     rhs_b_extent = B_buffer_region.region[rhs_f_dim].extent // rhs_f_size
     reduction_b_extent = A_buffer_region.region[lhs_p_dim].extent // p_size
+    max_lhs_size, max_rhs_size = (128, 512) if not swap_lhs_rhs else (512, 128)
+    actual_lhs_f_size, additional_lhs_b_size = bound_inst_with_limit(
+        lhs_f_size, max_lhs_size, analyzer
+    )
+    actual_rhs_f_size, additional_rhs_b_size = bound_inst_with_limit(
+        rhs_f_size, max_rhs_size, analyzer
+    )
     # fmt: off
     @T.prim_func(tirp=True)
     def impl_C_psum():
-        for lhs_b_loop, rhs_b_loop, reduction_b_loop in T.grid(lhs_b_extent, rhs_b_extent, reduction_b_extent):
+        for lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(lhs_b_extent, rhs_b_extent, reduction_b_extent, additional_lhs_b_size, additional_rhs_b_size):
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(p_size, lhs_f_size, rhs_f_size):
-                    lhs_indices = T.meta_var(f_gen_lhs_indices(lhs_b_loop, lhs_b_extent, reduction_b_loop, reduction_b_extent, lhs_f_loop, p_loop))
-                    rhs_indices = T.meta_var(f_gen_rhs_indices(rhs_b_loop, rhs_b_extent,  reduction_b_loop, reduction_b_extent,rhs_f_loop, p_loop))
-                    acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop, rhs_f_loop))
+                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(p_size, actual_lhs_f_size, actual_rhs_f_size):
+                    lhs_f_loop_wo_limit = T.meta_var(lhs_f_loop + additional_lhs_b_loop * actual_lhs_f_size)
+                    rhs_f_loop_wo_limit = T.meta_var(rhs_f_loop + additional_rhs_b_loop * actual_rhs_f_size)
+                    lhs_indices = T.meta_var(f_gen_lhs_indices(lhs_b_loop, lhs_b_extent, reduction_b_loop, reduction_b_extent, lhs_f_loop_wo_limit, p_loop))
+                    rhs_indices = T.meta_var(f_gen_rhs_indices(rhs_b_loop, rhs_b_extent,  reduction_b_loop, reduction_b_extent,rhs_f_loop_wo_limit, p_loop))
+                    acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop_wo_limit, rhs_f_loop_wo_limit))
                     if swap_lhs_rhs:
                         T.evaluate(
                             T.nki_matmul(
@@ -284,13 +245,15 @@ def matmul_trn(
                     T.TileLayout.from_tuple(C_psum_shape, (max_inst_size, 1, 1)),
                 ),
             )
-            for lhs_b_loop, rhs_b_loop in T.grid(lhs_b_extent, rhs_b_extent):
-                    psum_bank = T.meta_var((lhs_b_loop * rhs_b_extent + rhs_b_loop)%max_psum_banks) 
+            for lhs_b_loop, rhs_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(lhs_b_extent, rhs_b_extent, additional_lhs_b_size, additional_rhs_b_size):
+                    psum_bank = T.meta_var(((lhs_b_loop * additional_lhs_b_size + additional_lhs_b_loop) * additional_rhs_b_size * rhs_b_extent + rhs_b_loop * additional_rhs_b_size + additional_rhs_b_loop)%max_psum_banks) 
                     for reduction_b_loop in T.serial(0, reduction_b_extent):
                         with T.attr(0, "tensorized_nki_instruction", 1):
-                            for p_loop, lhs_f_loop, rhs_f_loop in T.grid(p_size, lhs_f_size, rhs_f_size):
-                                lhs_indices = T.meta_var(f_gen_lhs_indices(lhs_b_loop, lhs_b_extent, reduction_b_loop, reduction_b_extent, lhs_f_loop, p_loop))
-                                rhs_indices = T.meta_var(f_gen_rhs_indices(rhs_b_loop, rhs_b_extent,  reduction_b_loop, reduction_b_extent,rhs_f_loop, p_loop))
+                            for p_loop, lhs_f_loop, rhs_f_loop in T.grid(p_size, actual_lhs_f_size, actual_rhs_f_size):
+                                lhs_f_loop_wo_limit = T.meta_var(lhs_f_loop + additional_lhs_b_loop * actual_lhs_f_size)
+                                rhs_f_loop_wo_limit = T.meta_var(rhs_f_loop + additional_rhs_b_loop * actual_rhs_f_size)
+                                lhs_indices = T.meta_var(f_gen_lhs_indices(lhs_b_loop, lhs_b_extent, reduction_b_loop, reduction_b_extent, lhs_f_loop_wo_limit, p_loop))
+                                rhs_indices = T.meta_var(f_gen_rhs_indices(rhs_b_loop, rhs_b_extent,  reduction_b_loop, reduction_b_extent,rhs_f_loop_wo_limit, p_loop))
                                 if swap_lhs_rhs:
                                     T.evaluate(
                                         T.nki_matmul(
@@ -310,8 +273,10 @@ def matmul_trn(
                                         )
                                             )
                     with T.attr(0, "tensorized_nki_instruction", 1):
-                        for lhs_f_loop, rhs_f_loop in T.grid(lhs_f_size, rhs_f_size):
-                            acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop, rhs_f_loop))
+                        for lhs_f_loop, rhs_f_loop in T.grid(actual_lhs_f_size, actual_rhs_f_size):
+                            lhs_f_loop_wo_limit = T.meta_var(lhs_f_loop + additional_lhs_b_loop * actual_lhs_f_size)
+                            rhs_f_loop_wo_limit = T.meta_var(rhs_f_loop + additional_rhs_b_loop * actual_rhs_f_size)
+                            acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop_wo_limit, rhs_f_loop_wo_limit))
                             C[acc_indices] = C_psum[psum_bank, lhs_f_loop, rhs_f_loop]
     # fmt: on
     if C.scope() == "trn.psum":

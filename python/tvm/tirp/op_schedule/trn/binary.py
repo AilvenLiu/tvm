@@ -32,7 +32,7 @@ from .common import (
     infer_range_info,
     get_ewise_dim_map,
     get_hardware_inst_size_limit,
-    bound_inst_with_limit
+    bound_inst_with_limit,
 )
 from ..common import MapOpType
 

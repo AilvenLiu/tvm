@@ -40,7 +40,11 @@ namespace tirx {
 
 class ScopeIdDefResolver : public StmtExprMutator {
  public:
-  static Stmt Resolve(const Stmt& stmt) { return ScopeIdDefResolver()(stmt); }
+  ScopeIdDefResolver(const Target& target) : target_(target) {}
+
+  static Stmt Resolve(const Stmt& stmt, const Target& target) {
+    return ScopeIdDefResolver(target)(stmt);
+  }
 
  private:
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
@@ -65,9 +69,8 @@ class ScopeIdDefResolver : public StmtExprMutator {
     CHECK(verifier.Verify(kernel->scope_id_def)) << "Inconsistent ScopeIdDef";
 
     // Step 2: Extract kernel launch parameters
-    const auto& target = Target::Current(false);
     LaunchParams launch_params;
-    ExtractKernelLaunchParams(verifier.id_set, target, &launch_params);
+    ExtractKernelLaunchParams(verifier.id_set, target_, &launch_params);
 
     // Step 3: Resolve the ScopeIdDef and replace them
     auto* n = block.CopyOnWrite();
@@ -76,7 +79,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
     for (const auto& def : kernel->scope_id_def) {
       // Resolve the scope ids defined in the kernel
       auto resolved = ScopeIdResolveTable::Resolve(def->scope, def->extents, def->extents.size(),
-                                                   target->kind->name, launch_params);
+                                                   target_->kind->name, launch_params);
       ICHECK_EQ(resolved.size(), def->extents.size())
           << "Internal Error: Inconsistent resolved size " << resolved.size() << " vs "
           << def->extents.size();
@@ -135,6 +138,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
 
   /*! \brief The arithmetic analyzer */
   arith::Analyzer ana_;
+  const Target& target_;
 };
 
 class NoOpCallVerifier : public Verifier<NoOpCallVerifier> {
@@ -151,7 +155,11 @@ class NoOpCallVerifier : public Verifier<NoOpCallVerifier> {
 
 class TIRpOpScheduler : public StmtExprMutator {
  public:
-  static Stmt LowerOpCalls(const Stmt& stmt) { return TIRpOpScheduler()(stmt); }
+  TIRpOpScheduler(const Target& target) : target_(target) {}
+
+  static Stmt LowerOpCalls(const Stmt& stmt, const Target& target) {
+    return TIRpOpScheduler(target)(stmt);
+  }
 
  private:
   Stmt VisitStmt_(const BlockNode* op) final {
@@ -189,8 +197,7 @@ class TIRpOpScheduler : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const tirp::OpCallNode* op) final {
-    tirp::ScheduleContext sctx(Target::Current(false), exec_scope_stack_.back(), launch_params_,
-                               var_range_map_);
+    tirp::ScheduleContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_);
     static auto f_op_scheduler_ = tvm::runtime::Registry::Get("tirp.f_op_scheduler");
     ICHECK(f_op_scheduler_ != nullptr) << "Internal Error: tirp.f_op_scheduler is not registered";
     PrimFunc res;
@@ -200,6 +207,7 @@ class TIRpOpScheduler : public StmtExprMutator {
   }
 
   Map<Var, Range> var_range_map_;
+  const Target& target_;
   std::vector<ExecScope> exec_scope_stack_;
   std::unordered_map<String, PrimExpr, ObjectHash, ObjectEqual> launch_params_;
 };
@@ -248,7 +256,11 @@ class ScopeMerger : public StmtExprMutator {
 
 class ExecScopeSliceResolver : public StmtExprMutator {
  public:
-  static Stmt Resolve(const Stmt& stmt) { return ExecScopeSliceResolver()(stmt); }
+  ExecScopeSliceResolver(const Target& target) : target_(target) {}
+
+  static Stmt Resolve(const Stmt& stmt, const Target& target) {
+    return ExecScopeSliceResolver(target)(stmt);
+  }
 
  private:
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
@@ -311,9 +323,8 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     int out_dim = scope_slice->slice.as<PrimExpr>().defined()
                       ? 1
                       : scope_slice->slice.as<Array<Range>>().value().size();
-    const auto& target = Target::Current(false);
     auto resolved = ScopeIdResolveTable::Resolve(scope, scope_slice->extents, out_dim,
-                                                 target->kind->name, launch_params_);
+                                                 target_->kind->name, launch_params_);
     ICHECK_EQ(resolved.size(), out_dim);
     Stmt body = StmtExprMutator::VisitStmt(op->body);
     if (auto select_cond = scope_slice->slice.as<PrimExpr>()) {
@@ -331,6 +342,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   }
 
   LaunchParams launch_params_;
+  const Target& target_;
 };
 
 class ScheduleContextRemover : public StmtExprMutator {
@@ -605,23 +617,26 @@ class BufferOffsetRemover : public StmtExprMutator {
 namespace transform {
 Pass LowerTIRp() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
-    const auto& target = Target::Current(false);
+    auto target = f->GetAttr<Target>(tvm::attr::kTarget);
+    if (!target.defined()) {
+      target = Target::Current(false);
+    }
 
     auto* n = f.CopyOnWrite();
     // Lower ScopeIdDef, resolve the scope ids and replace them with target defined special
     // registers Collect the extents of the ScopeIds for OpCall scheduling
-    n->body = ScopeIdDefResolver::Resolve(n->body);
+    n->body = ScopeIdDefResolver::Resolve(n->body, target.value());
 
     // Default Schedule: lower TIRp OpCalls
     while (!NoOpCallVerifier::Verify(n->body, false)) {
-      n->body = TIRpOpScheduler::LowerOpCalls(n->body);
+      n->body = TIRpOpScheduler::LowerOpCalls(n->body, target.value());
       n->body = ScopeMerger::Merge(n->body);
     }
     // Verify that there are no OpCalls in the TIRp
     NoOpCallVerifier::Verify(f, true);
 
     // Lower other TIRp aux data structures
-    n->body = ExecScopeSliceResolver::Resolve(n->body);
+    n->body = ExecScopeSliceResolver::Resolve(n->body, target.value());
     n->body = ScheduleContextRemover::Remove(n->body);
     n->body = LogicalTensorRemover::Remove(n->body, n->buffer_map);
     n->body = StorageLower::Flatten(n->body, n->buffer_map);

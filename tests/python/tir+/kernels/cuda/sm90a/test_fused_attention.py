@@ -782,8 +782,7 @@ def test_fp16_fused_attn():
 
         with target:
             mod = tvm.IRModule({"main": manual})
-            mod = LowerTIRp()(mod)
-            mod = tvm.build(mod, target=target)
+            mod = tvm.build(mod, target=target, pipeline="tirp")
             func = lambda: mod(
                 q_tvm,
                 k_tvm,

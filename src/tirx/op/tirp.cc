@@ -165,18 +165,33 @@ TIRP_DEFINE_SCHEDULE_OP(gemm).set_num_inputs(6).set_attr<FArgSanitizer>(
       ICHECK(IsIntOrFloat(args[5])) << "arg[5] of gemm() must be int or float";
     });
 
-TIRP_DEFINE_SCHEDULE_OP(reduce).set_num_inputs(4).set_attr<FArgSanitizer>(
-    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
-        ICHECK_EQ(args.size(), 4U) << "reduce() expects 4 arguments";
-        ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of reduce() must be BufferRegion";
-        ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of reduce() must be BufferRegion";
-    });
 
 TIRP_DEFINE_SCHEDULE_OP(reciprocal).set_num_inputs(2).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
         ICHECK_EQ(args.size(), 2U) << "reciprocal() expects 2 arguments";
         ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of reciprocal() must be BufferRegion";
         ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of reciprocal() must be BufferRegion";
+    });
+
+TIRP_DEFINE_SCHEDULE_OP(sum).set_num_inputs(4).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+        ICHECK_EQ(args.size(), 4U) << "sum() expects 4 arguments";
+        ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of sum() must be BufferRegion";
+        ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of sum() must be BufferRegion";
+    });
+
+TIRP_DEFINE_SCHEDULE_OP(max).set_num_inputs(4).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+        ICHECK_EQ(args.size(), 4U) << "max() expects 4 arguments";
+        ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of max() must be BufferRegion";
+        ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of max() must be BufferRegion";
+    });
+
+TIRP_DEFINE_SCHEDULE_OP(min).set_num_inputs(4).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+        ICHECK_EQ(args.size(), 4U) << "min() expects 4 arguments";
+        ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of min() must be BufferRegion";
+        ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of min() must be BufferRegion";
     });
 
 TIRP_DEFINE_SCHEDULE_OP(memset).set_num_inputs(2).set_attr<FArgSanitizer>(

@@ -86,7 +86,7 @@ def test_pipeline_no_specialize_cta():
         mod = tvm.IRModule({"main": test})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod.show()
-        mod = tvm.build(mod, target=target)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
 
         np.random.seed(0)
         A_np = np.ones((N, M)).astype("float32") * 10

@@ -35,7 +35,13 @@ class MapOpType(Enum):
     RECIPROCAL = 6
     MEMSET = 7
 
+class ReduceOpType(Enum):
+    """Enumeration of common reduce operator types."""
 
+    SUM = 0
+    MAX = 1
+    MIN = 2
+    
 def _make_schedule(
     op_type: MapOpType, num_src: int, schedule_candidates: List[Callable[..., Optional[PrimFunc]]]
 ) -> Callable[..., Optional[PrimFunc]]:

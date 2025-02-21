@@ -341,8 +341,7 @@ def test_hgemm_ampere():
     def tvm_gemm(func):
         with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
             mod = tvm.IRModule({"main": func})
-            mod = LowerTIRp()(mod)
-            mod = tvm.build(mod, target=target)
+            mod = tvm.build(mod, target=target, pipeline="tirp")
             C_np = np.zeros((M, N), dtype=np.float32)
             C_tvm = tvm.nd.array(C_np, device=DEV)
 

@@ -25,8 +25,7 @@ def run_test_break_continue(func, shape, expected):
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     with target:
-        mod = LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
     arr_np = np.zeros(shape, dtype="int32")
     arr = tvm.nd.array(arr_np, device=dev)
     mod(arr)

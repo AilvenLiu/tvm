@@ -347,8 +347,7 @@ def test_hgemm_hopper_ws_cooperative():
 
         with target:
             mod = tvm.IRModule({"main": manual})
-            mod = LowerTIRp()(mod)
-            mod = tvm.build(mod, target=target)
+            mod = tvm.build(mod, target=target, pipeline="tirp")
             func = lambda: mod(A_tvm, B_tvm, C_tvm)
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")
             print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
@@ -607,8 +606,7 @@ def test_hgemm_hopper_no_ws():
 
         with target:
             mod = tvm.IRModule({"main": manual})
-            mod = LowerTIRp()(mod)
-            mod = tvm.build(mod, target=target)
+            mod = tvm.build(mod, target=target, pipeline="tirp")
             func = lambda: mod(A_tvm, B_tvm, C_tvm)
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")
             print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")

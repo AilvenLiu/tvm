@@ -59,7 +59,7 @@ def generate_test_function(func: PrimFunc, target: tvm.target.Target):
         config={"tir.disable_storage_rewrite": True},
         disabled_pass=["tir.StorageFlattenatten", "tir.FlattenBuffer", "tir.LowerIntrin"],
     ):
-        mod = tvm.build(mod, target=target)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
         src = mod.imported_modules[0].get_source()
     func_str = src
     func_name = func.attrs["global_symbol"]

@@ -132,8 +132,7 @@ def test_copy_global_to_shared_cta_vec_load(input, dtype, sync):
     target = tvm.target.Target.from_device(dev)
     with target:
         mod = tvm.IRModule({"main": copy_sync if sync else copy_async})
-        mod = tvm.tir.transform.LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
 
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(np_dtype)

@@ -18,6 +18,7 @@
 """Common utilities for operator scheduling."""
 
 from collections import namedtuple
+from typing import Tuple
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
@@ -221,7 +222,9 @@ def find_max_inst_size_unary(
                 ), "Invalid layout"
                 leftover = second_stride_in_logical_dim // stride_in_logical_dim
                 second_data_iter = i
-                second_new_stride = second_data_iters[i].stride * second_data_iters[i].extent // leftover
+                second_new_stride = (
+                    second_data_iters[i].stride * second_data_iters[i].extent // leftover
+                )
                 break
             elif second_stride_in_logical_dim == stride_in_logical_dim:
                 assert i - 1 >= second_seps[second_buffer_dim]
@@ -273,6 +276,7 @@ def find_max_inst_size_unary(
 def get_hardware_inst_size_limit(is_dma: bool) -> int:
     return 1e9 if is_dma else 512
 
+
 def bound_inst_with_limit(inst_size, inst_size_limit, analyzer):
     if not analyzer.can_prove(inst_size <= inst_size_limit):
         # FIXME: this constraint can be relaxed if we support mask
@@ -283,3 +287,41 @@ def bound_inst_with_limit(inst_size, inst_size_limit, analyzer):
         actual_inst_size = inst_size
         additional_b_size = 1
     return actual_inst_size, additional_b_size
+
+
+def find_max_inst_size_from_one_region(
+    buffer_region: BufferRegion,
+    allowed_f_dim: Tuple[int],
+    analyzer: Analyzer,
+):
+    tiled_range_infos_per_dim, layout, seps = infer_range_info(buffer_region, analyzer)
+    data_iters = get_layout_data_iters(layout)
+    # check largest inst size
+    inst_size = 1
+    inst_stride = 1
+    inst_data_iters = {}
+    prod_p_size = 1
+    while len(tiled_range_infos_per_dim) > 0:
+        range_info = tiled_range_infos_per_dim[0]
+        tiled_range_infos_per_dim = tiled_range_infos_per_dim[1:]
+        st, ext, dim_in_data_iter, dim_in_shape, dim_type = range_info
+        if dim_type == T.TrainiumLayout.Partition:
+            prod_p_size *= ext
+            continue
+        if dim_in_shape not in allowed_f_dim:
+            break
+        if inst_size != 1 and not analyzer.can_prove(
+            inst_stride * inst_size == data_iters[dim_in_data_iter].stride
+        ):
+            # the stride of the found data iter is not compatible with previous data iters
+            break
+        if inst_size == 1:
+            inst_stride = data_iters[dim_in_data_iter].stride
+        inst_data_iters[dim_in_data_iter] = ext
+        inst_size *= ext
+    # check p_dim covers whole partition
+    assert analyzer.can_prove(
+        prod_p_size == layout.partition_size
+    ), "Partition size of the instruction must match that of the buffer region"
+
+    return inst_size, inst_stride, inst_data_iters

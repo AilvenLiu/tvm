@@ -31,9 +31,14 @@ def lower_and_get_source(func):
     mod = tvm.tir.transform.DecorateDeviceScope()(mod)
     with tvm.transform.PassContext(
         config={"tir.disable_storage_rewrite": True},
-        disabled_pass=["tir.StorageFlattenatten", "tir.FlattenBuffer", "tir.LowerIntrin"],
+        disabled_pass=[
+            "tir.StorageFlattenatten",
+            "tir.FlattenBuffer",
+            "tir.LowerIntrin",
+            "tir.LowerTIRp",
+        ],
     ):
-        mod = tvm.build(mod, target=target)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
         src = mod.imported_modules[0].get_source()
         return src
 
@@ -64,8 +69,7 @@ def test_nki_add_1():
                     T.nki_store(B[i, j], B_sbuf[i, j])
     # fmt: on
     src = lower_and_get_source(func)
-    expected = """
-# Function: func_kernel
+    expected = """# Function: func_kernel
 import neuronxcc.nki.language as nl
 from neuronxcc.nki import baremetal, benchmark, simulate_kernel, trace
 import numpy as np
@@ -119,8 +123,7 @@ def test_nki_add_2():
 
     # fmt: on
     src = lower_and_get_source(func)
-    expected = """
-# Function: func_kernel
+    expected = """# Function: func_kernel
 import neuronxcc.nki.language as nl
 from neuronxcc.nki import baremetal, benchmark, simulate_kernel, trace
 import numpy as np
@@ -272,8 +275,7 @@ def test_nki_matmul_1():
     # fmt: on
 
     src = lower_and_get_source(func)
-    expected = """
-# Function: func_kernel
+    expected = """# Function: func_kernel
 import neuronxcc.nki.language as nl
 from neuronxcc.nki import baremetal, benchmark, simulate_kernel, trace
 import numpy as np

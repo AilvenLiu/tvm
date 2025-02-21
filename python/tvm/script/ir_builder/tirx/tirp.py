@@ -37,9 +37,13 @@ def _to_region(buffer: Union[BufferRegion, Buffer]):
     return buffer
 
 
-def zero(
-    dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]
-):
+def wrap_elem_in_tuple(e):
+    if isinstance(e, (tuple, list)):
+        return e
+    return (e,)
+
+
+def zero(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
     """Zero out all elements in src and store to dst.
 
     Parameters
@@ -52,12 +56,10 @@ def zero(
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("zero"), [dst, src])
+    return _ffi_api.OpCall(_get_tirp_op("zero"), [dst, src])  # pylint: disable=no-member
 
 
-def sqrt(
-    dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]
-):
+def sqrt(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
     """Sqrt all elements in src and store to dst.
 
     Parameters
@@ -70,11 +72,13 @@ def sqrt(
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("sqrt"), [dst, src])
+    return _ffi_api.OpCall(_get_tirp_op("sqrt"), [dst, src])  # pylint: disable=no-member
 
 
 def add(
-    dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, FloatImm], src2: Union[BufferRegion, Buffer, FloatImm]
+    dst: Union[BufferRegion, Buffer],
+    src1: Union[BufferRegion, Buffer, FloatImm],
+    src2: Union[BufferRegion, Buffer, FloatImm],
 ):
     """Add data from src1 and src2, store to dst.
 
@@ -94,11 +98,13 @@ def add(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("add"), [dst, src1, src2])
+    return _ffi_api.OpCall(_get_tirp_op("add"), [dst, src1, src2])  # pylint: disable=no-member
 
 
 def sub(
-    dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer], src2: Union[BufferRegion, Buffer, FloatImm]
+    dst: Union[BufferRegion, Buffer],
+    src1: Union[BufferRegion, Buffer],
+    src2: Union[BufferRegion, Buffer, FloatImm],
 ):
     """Sub data from src2 to src1, store to dst.
 
@@ -118,11 +124,13 @@ def sub(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("sub"), [dst, src1, src2])
+    return _ffi_api.OpCall(_get_tirp_op("sub"), [dst, src1, src2])  # pylint: disable=no-member
 
 
 def mul(
-    dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, FloatImm], src2: Union[BufferRegion, Buffer, FloatImm]
+    dst: Union[BufferRegion, Buffer],
+    src1: Union[BufferRegion, Buffer, FloatImm],
+    src2: Union[BufferRegion, Buffer, FloatImm],
 ):
     """Multiply data from src1 and src2, store to dst.
 
@@ -142,11 +150,13 @@ def mul(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("mul"), [dst, src1, src2])
+    return _ffi_api.OpCall(_get_tirp_op("mul"), [dst, src1, src2])  # pylint: disable=no-member
 
 
 def fdiv(
-    dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer], src2: Union[BufferRegion, Buffer, FloatImm]
+    dst: Union[BufferRegion, Buffer],
+    src1: Union[BufferRegion, Buffer],
+    src2: Union[BufferRegion, Buffer, FloatImm],
 ):
     """(Float) Div data from src2 to src1, store to dst.
 
@@ -165,7 +175,7 @@ def fdiv(
     src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("fdiv"), [dst, src1, src2])
+    return _ffi_api.OpCall(_get_tirp_op("fdiv"), [dst, src1, src2])  # pylint: disable=no-member
 
 
 def copy(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
@@ -181,7 +191,7 @@ def copy(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("copy"), [dst, src])
+    return _ffi_api.OpCall(_get_tirp_op("copy"), [dst, src])  # pylint: disable=no-member
 
 
 def fill(dst: Union[BufferRegion, Buffer], value: PrimExpr):
@@ -196,7 +206,7 @@ def fill(dst: Union[BufferRegion, Buffer], value: PrimExpr):
         The value to be filled.
     """
     dst = _to_region(dst)
-    return _ffi_api.OpCall(_get_tirp_op("fill"), [dst, value])
+    return _ffi_api.OpCall(_get_tirp_op("fill"), [dst, value])  # pylint: disable=no-member
 
 
 def gemm(
@@ -235,35 +245,105 @@ def gemm(
     A = _to_region(A)
     B = _to_region(B)
     C = _to_region(C)
-    return _ffi_api.OpCall(_get_tirp_op("gemm"), [D, A, B, C, alpha, beta])
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("gemm"), [D, A, B, C, alpha, beta]
+    )
 
 
-def reduce(
-        dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], accum: bool = False, reduce_op: str = "add"
-    ):
-    """Warp-level tree reduction in shared memory.
+def sum(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    axes: int = -1,
+    accum: bool = False,
+):
+    """
+    Sum all elements in src and store to dst.
 
     Parameters
     ----------
     dst : Union[BufferRegion, Buffer]
-        The destination buffer region for reduced result.
+        The destination buffer region for sum result.
 
     src : Union[BufferRegion, Buffer]
         The source buffer region.
 
+    axes : Tuple[int]
+        The axis to sum over.
+
     accum : bool
         Whether dst is accumulated.
-
-    op : str
-        The reduction operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("reduce"), [dst, src, accum, reduce_op])
+    axes = wrap_elem_in_tuple(axes)
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("sum"), [dst, src, axes, accum]
+    )
 
-def reciprocal(
-    dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]
+
+def max(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    axes: int = -1,
+    accum: bool = False,
 ):
+    """
+    Max all elements in src and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for sum result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+
+    axes : Tuple[int]
+        The axis to sum over.
+
+    accum : bool
+        Whether dst is accumulated.
+    """
+    dst = _to_region(dst)
+    src = _to_region(src)
+    axes = wrap_elem_in_tuple(axes)
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("max"), [dst, src, axes, accum]
+    )
+
+
+def min(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    axes: int = -1,
+    accum: bool = False,
+):
+    """
+    Min all elements in src and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for min result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+
+    axes : Tuple[int]
+        The axis to sum over.
+
+    accum : bool
+        Whether dst is accumulated.
+    """
+    dst = _to_region(dst)
+    src = _to_region(src)
+    axes = wrap_elem_in_tuple(axes)
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("min"), [dst, src, axes, accum]
+    )
+
+
+def reciprocal(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
     """Reciprocal all elements in src and store to dst.
 
     Parameters
@@ -276,11 +356,10 @@ def reciprocal(
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("reciprocal"), [dst, src])
+    return _ffi_api.OpCall(_get_tirp_op("reciprocal"), [dst, src])  # pylint: disable=no-member
 
-def memset(
-    dst: Union[BufferRegion, Buffer], value: PrimExpr
-):
+
+def memset(dst: Union[BufferRegion, Buffer], value: PrimExpr):
     """Set all elements in dst to value.
 
     Parameters
@@ -292,7 +371,7 @@ def memset(
         The value to be set.
     """
     dst = _to_region(dst)
-    return _ffi_api.OpCall(_get_tirp_op("memset"), [dst, value])
+    return _ffi_api.OpCall(_get_tirp_op("memset"), [dst, value])  # pylint: disable=no-member
 
 
 def alloc_copy_pipeline(
@@ -336,8 +415,10 @@ __all__ = [
     "copy",
     "fill",
     "gemm",
-    "reduce",
     "reciprocal",
     "memset",
+    "sum",
+    "max",
+    "min",
     "alloc_copy_pipeline",
 ]

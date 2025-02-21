@@ -55,7 +55,7 @@ def test_simple_gemm():
             A_sbuf = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
             C_psum = T.alloc_buffer((1, 128, 128), scope="trn.psum", logical_scope="kernel")
-            for lhs_b_loop, rhs_b_loop, reduction_b_loop in T.grid(1, 1, 1):
+            for lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(1, 1, 1, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
                     T.nki_matmul(C_psum[0, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, lhs_f_loop], B_sbuf[p_loop, rhs_f_loop], T.bool(True))
@@ -96,10 +96,10 @@ def test_larger_gemm():
             A_sbuf = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
             C_psum = T.alloc_buffer((1, 128, 512), scope="trn.psum", logical_scope="kernel")
-            for lhs_b_loop, rhs_b_loop, reduction_b_loop in T.grid(2, 2, 4):
+            for lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(2, 1, 4, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
-                    T.nki_matmul(C_psum[0, lhs_f_loop, lhs_b_loop * 256 + rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, lhs_b_loop * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 256 + rhs_b_loop * 128 + rhs_f_loop], T.bool(True))
+                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 256):
+                    T.nki_matmul(C_psum[0, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, lhs_b_loop * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 256 + rhs_f_loop], T.bool(True))
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -144,10 +144,10 @@ def test_gemm_in_a_loop():
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             C_psum = T.alloc_buffer((2, 128, 512), scope="trn.psum", logical_scope="kernel")
-            for i, k, lhs_b_loop, rhs_b_loop, reduction_b_loop in T.grid(2, 2, 2, 2, 4):
+            for i, k, lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(2, 2, 2, 1, 4, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
-                    T.nki_matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_b_loop * 128 + rhs_f_loop], T.bool(True))
+                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 256):
+                    T.nki_matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], T.bool(True))
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -192,10 +192,10 @@ def test_gemm_with_stride():
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 4095), scope="trn.sbuf", logical_scope="kernel")
             C_psum = T.alloc_buffer((2, 128, 512), scope="trn.psum", logical_scope="kernel")
-            for i, k, lhs_b_loop, rhs_b_loop, reduction_b_loop in T.grid(2, 2, 2, 2, 4):
+            for i, k, lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(2, 2, 2, 1, 4, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
-                    T.nki_matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + reduction_b_loop * 256 + k * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 1024 + k * 512 + rhs_b_loop * 256 + rhs_f_loop * 2], T.bool(True))
+                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 256):
+                    T.nki_matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + reduction_b_loop * 256 + k * 128 + lhs_f_loop], B_sbuf[p_loop, reduction_b_loop * 1024 + k * 512 + rhs_f_loop * 2], T.bool(True))
     # fmt: on
 
     with target:
@@ -241,10 +241,10 @@ def test_gemm_swap_lhs_rhs():
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             C_psum = T.alloc_buffer((2, 128, 512), scope="trn.psum", logical_scope="kernel")
-            for i, k, lhs_b_loop, rhs_b_loop, reduction_b_loop in T.grid(2, 2, 2, 2, 4):
+            for i, k, lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(2, 2, 2, 1, 4, 1, 2):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
-                    T.nki_matmul(C_psum[i, rhs_f_loop, lhs_b_loop * 256 + rhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], T.bool(True))
+                    T.nki_matmul(C_psum[i, rhs_f_loop, lhs_b_loop * 256 + additional_rhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + additional_rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], T.bool(True))
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -291,14 +291,14 @@ def test_gemm_with_sbuf_output():
             for i, k in T.grid(2, 2):
                 with T.kernel():
                     C_psum = T.alloc_buffer((8, 128, 512), logical_scope="trn.psum")
-                    for lhs_b_loop, rhs_b_loop in T.grid(2, 2):
+                    for lhs_b_loop, rhs_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(2, 1, 1, 2):
                         for reduction_b_loop in range(4):
                             T.attr(0, "tensorized_nki_instruction", 1)
                             for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
-                                T.nki_matmul(C_psum[0, rhs_f_loop, lhs_b_loop * 256 + rhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], T.bool(True))
+                                T.nki_matmul(C_psum[0, rhs_f_loop, lhs_b_loop * 256 + additional_rhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + additional_rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], T.bool(True))
                         T.attr(0, "tensorized_nki_instruction", 1)
                         for lhs_f_loop, rhs_f_loop in T.grid(128, 128):
-                            C_sbuf[rhs_f_loop, i * 512 + lhs_b_loop * 256 + rhs_b_loop * 128 + lhs_f_loop] = C_psum[0, rhs_f_loop, lhs_b_loop * 256 + rhs_b_loop * 128 + lhs_f_loop]
+                            C_sbuf[rhs_f_loop, i * 512 + lhs_b_loop * 256 + additional_rhs_b_loop * 128 + lhs_f_loop] = C_psum[0, rhs_f_loop, lhs_b_loop * 256 + additional_rhs_b_loop * 128 + lhs_f_loop]
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
@@ -343,11 +343,53 @@ def test_gemm_different_shape():
             A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             C_psum = T.alloc_buffer((2, 128, 512), scope="trn.psum", logical_scope="kernel")
-            for i, k, lhs_b_loop, rhs_b_loop, reduction_b_loop in T.grid(2, 2, 2, 2, 4):
+            for i, k, lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(2, 2, 2, 1, 4, 1, 2):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
-                    T.nki_matmul(C_psum[i, rhs_f_loop, lhs_b_loop * 256 + rhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop + 4096], T.bool(True))
+                    T.nki_matmul(C_psum[i, rhs_f_loop, lhs_b_loop * 256 + additional_rhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + additional_rhs_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop + 4096], T.bool(True))
 
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": gemm})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+def test_gemm_too_large_f_size():
+    A_layout = T.TrainiumLayout(
+        dimension_types="FP",
+        combined_1d_layout=T.TileLayout.from_tuple((256, 128), (1, 1)),
+    )
+    B_layout = T.TrainiumLayout(
+        dimension_types="PF",
+        combined_1d_layout=T.TileLayout.from_tuple((128, 1024), (1, 1)),
+    )
+
+    C_layout = T.TrainiumPSUMLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((2, 128, 1024), (1024, 1, 1)),
+    )
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def gemm() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((256, 128), "float32", scope="trn.sbuf", layout=A_layout)
+            B_sbuf = T.alloc_buffer((128, 1024), "float32", scope="trn.sbuf", layout=B_layout)
+            C_psum = T.alloc_buffer((256, 1024), "float32", scope="trn.psum", layout=C_layout)
+            Tp.gemm(C_psum, A_sbuf, B_sbuf, C_psum)
+            
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "gemm"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
+            C_psum = T.alloc_buffer((4, 128, 512), scope="trn.psum", logical_scope="kernel")
+            for lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(1, 1, 1, 2, 2):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 512):
+                    T.nki_matmul(C_psum[additional_lhs_b_loop * 2 + additional_rhs_b_loop, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, additional_lhs_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, additional_rhs_b_loop * 512 + rhs_f_loop], T.bool(True))
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})

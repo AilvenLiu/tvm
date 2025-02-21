@@ -31,7 +31,7 @@ from .common import (
     get_ewise_dim_map,
     find_max_inst_size_unary,
     get_hardware_inst_size_limit,
-    bound_inst_with_limit
+    bound_inst_with_limit,
 )
 from ..common import MapOpType
 
@@ -42,6 +42,7 @@ unary_map_ops = {
 }
 
 const_input_ops = [MapOpType.MEMSET]
+
 
 def unary_trn(
     dst_buffer_region: BufferRegion,
@@ -55,10 +56,12 @@ def unary_trn(
         return None
     CONST = None
     if isinstance(_src, FloatImm):
-        assert unary_op in const_input_ops, f"Unsupported unary operation {unary_op} taking const as input"
+        assert (
+            unary_op in const_input_ops
+        ), f"Unsupported unary operation {unary_op} taking const as input"
         CONST = _src
     else:
-        src_buffer_region = _src    
+        src_buffer_region = _src
 
     analyzer = Analyzer()
     for v, r in sctx.var_range_map.items():

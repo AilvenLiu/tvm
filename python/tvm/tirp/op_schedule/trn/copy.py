@@ -19,22 +19,19 @@
 
 from typing import Optional
 import operator
+from functools import reduce
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
-from functools import reduce
-from tvm._ffi import get_global_func
 from .common import (
-    get_layout_data_iters,
-    infer_range_info,
     generate_axes_in_region,
     get_ewise_dim_map,
     find_max_inst_size_unary,
     get_hardware_inst_size_limit,
-    bound_inst_with_limit
+    bound_inst_with_limit,
 )
 
 
@@ -57,9 +54,13 @@ def copy_trn(
             dst.scope() in ["global", "trn.sbuf", "trn.psum"],
             src.scope() != "global" or dst.scope() != "global",
             (src.scope() == "global" and isinstance(src.layout, T.TileLayout))
-            or (src.scope() in ["trn.sbuf", "trn.psum"] and isinstance(src.layout, T.TrainiumLayout)),
+            or (
+                src.scope() in ["trn.sbuf", "trn.psum"] and isinstance(src.layout, T.TrainiumLayout)
+            ),
             (dst.scope() == "global" and isinstance(dst.layout, T.TileLayout))
-            or (dst.scope() in ["trn.sbuf", "trn.psum"] and isinstance(dst.layout, T.TrainiumLayout)),
+            or (
+                dst.scope() in ["trn.sbuf", "trn.psum"] and isinstance(dst.layout, T.TrainiumLayout)
+            ),
         ]
     ):
         raise ValueError("Invalid buffer layout/scope for copy operation.")
@@ -84,6 +85,7 @@ def copy_trn(
     inst_size = None
     inst_stride = None
     inst_data_iters = None
+    src_to_dst = None
     if isinstance(src.layout, T.TrainiumLayout):
         inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
             src_buffer_region, dst_buffer_region, analyzer
@@ -94,6 +96,7 @@ def copy_trn(
             dst_buffer_region, src_buffer_region, analyzer
         )
         src_to_dst = False
+    assert src_to_dst is not None
     if src_to_dst:
         p_size = src_buffer_region.buffer.layout.partition_size
         f_gen_axes = generate_axes_in_region(
@@ -115,8 +118,8 @@ def copy_trn(
                 indices[j] += axes[i]
         else:
             assert len(indices) == len(axes)
-            for i in range(len(axes)):
-                indices[i] += axes[i]
+            for i, axis in enumerate(axes):
+                indices[i] += axis
         return indices
 
     def f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop):
@@ -127,8 +130,8 @@ def copy_trn(
                 indices[j] += axes[i]
         else:
             assert len(indices) == len(axes)
-            for i in range(len(axes)):
-                indices[i] += axes[i]
+            for i, axis in enumerate(axes):
+                indices[i] += axis
         return indices
 
     b_extent = reduce(operator.mul, src_extent, 1) // p_size // inst_size
@@ -147,13 +150,13 @@ def copy_trn(
     def impl():
         # the additional b loop is to satisfy hardware instuction size limit
         for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
-                with T.attr(0, "tensorized_nki_instruction", 1):
-                    for p_loop in T.serial(0, p_size):
-                        for f_loop in T.serial(0, actual_inst_size):
-                            f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                            src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
-                            dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
-                            func(dst[*dst_indices], src[*src_indices])
+            with T.attr(0, "tensorized_nki_instruction", 1):
+                for p_loop in T.serial(0, p_size):
+                    for f_loop in T.serial(0, actual_inst_size):
+                        f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
+                        src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
+                        dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
+                        func(dst[*dst_indices], src[*src_indices])
     # fmt: on
 
     return impl

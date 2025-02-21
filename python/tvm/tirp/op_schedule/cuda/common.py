@@ -28,7 +28,7 @@ from tvm.runtime import DataType
 from tvm.arith.analyzer import Analyzer
 from tvm.tir import BufferRegion, PrimFunc, Buffer
 from tvm.tir.expr import FloatImm
-from ..common import MapOpType
+from ..common import MapOpType, ReduceOpType
 
 
 class InstType(Enum):
@@ -148,7 +148,7 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
     accum: bool,
-    reduce_op: str,
+    reduce_op: ReduceOpType,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
     """Schedule warp-level tree-reduction operation in shared memory on CUDA.
@@ -162,7 +162,7 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
         return None
 
-    if reduce_op not in ["add"]:
+    if reduce_op not in [ReduceOpType.SUM]:
         return None
 
     thread_cnt = sctx.launch_params["threadIdx.x"]

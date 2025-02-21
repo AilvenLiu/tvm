@@ -96,8 +96,7 @@ def test_unary_op(input, op_type, dtype):
         A = tvm.nd.array(A_np, dev)
 
         mod = tvm.IRModule({"main": unary_op})
-        mod = tvm.tir.transform.LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
         print(f"compiled source code: {mod.imported_modules[0].get_source()}")
         mod(A)
 
@@ -268,8 +267,7 @@ def test_binary_op(input, op_type, operands_type, dtype):
         B = tvm.nd.array(B_np, dev)
 
         mod = tvm.IRModule({"main": get_prim_func(operands_type)})
-        mod = tvm.tir.transform.LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
         print(f"compiled source code: {mod.imported_modules[0].get_source()}")
         mod(A, B)
 

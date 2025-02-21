@@ -102,6 +102,13 @@ TVM_DLL const Op& nki_tensortensor();
 TVM_DLL const Op& nki_tensorscalar();
 
 /*!
+ * \brief nki intrinsics for tensorreduce operation.
+ *
+ * nki_tensorreduce(result, data, opcode, axes)
+ */
+TVM_DLL const Op& nki_tensorreduce();
+
+/*!
  * \brief nki intrinsics for memset operation.
  *
  * nki_memset(result, value)
