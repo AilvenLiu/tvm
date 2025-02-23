@@ -61,9 +61,15 @@ class TLayoutNode : public Object {
   virtual TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
                        const Array<PrimExpr>& inner_shape) const;
 
-  /*! \brief Check if the layout is the inner layout of a tiled layout */
-  virtual bool IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                           const Array<PrimExpr>& inner_shape) const;
+  /*! \brief Check if the layout is the inner layout of a tiled layout
+   * \param tile_layout The tiled layout to check
+   * \param tiled_shape The shape of the tiled layout
+   * \param inner_shape The shape of the inner layout
+   * \return The outer layout if this layout is the inner layout of tile_layout, NullOpt otherwise
+   */
+  virtual Optional<TileLayout> IsTileInner(const TLayout& tile_layout,
+                                           const Array<PrimExpr>& tiled_shape,
+                                           const Array<PrimExpr>& inner_shape) const;
 
   /*! \brief Check if the layout is the outer layout of a tiled layout */
   virtual bool IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
@@ -237,8 +243,8 @@ class TileLayoutNode : public TLayoutNode {
                const Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the inner layout of a tiled layout */
-  bool IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                   const Array<PrimExpr>& inner_shape) const final;
+  Optional<TileLayout> IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                                   const Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the outer layout of a tiled layout */
   bool IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
@@ -324,8 +330,8 @@ class SwizzleLayoutNode : public TLayoutNode {
                const Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the inner layout of a tiled layout */
-  bool IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                   const Array<PrimExpr>& inner_shape) const final;
+  Optional<TileLayout> IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                                   const Array<PrimExpr>& inner_shape) const final;
 
   static constexpr const char* _type_key = "tirx.SwizzleLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -390,8 +396,8 @@ class ComposeLayoutNode : public TLayoutNode {
                const Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the inner layout of a tiled layout */
-  bool IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                   const Array<PrimExpr>& inner_shape) const final;
+  Optional<TileLayout> IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                                   const Array<PrimExpr>& inner_shape) const final;
 
   static constexpr const char* _type_key = "tirx.ComposeLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;

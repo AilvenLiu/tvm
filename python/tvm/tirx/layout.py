@@ -150,7 +150,7 @@ class TLayout(Object):
         tile_layout: Union["TileLayout", "ComposeLayout"],
         tiled_shape: List[PrimExpr],
         inner_shape: List[PrimExpr],
-    ) -> bool:
+    ) -> Optional["TileLayout"]:
         """Check if a layout is the inner layout of a tiled layout.
 
         Parameters
@@ -235,7 +235,7 @@ class TileLayout(TLayout):
         tile_layout: Union["TileLayout", "ComposeLayout"],
         tiled_shape: List[PrimExpr],
         inner_shape: List[PrimExpr],
-    ) -> bool:
+    ) -> Optional["TileLayout"]:
         return _ffi_api.TileLayoutIsTileInner(  # pylint: disable=no-member
             tile_layout, self, tiled_shape, inner_shape
         )
@@ -396,7 +396,7 @@ class SwizzleLayout(TLayout):
         tile_layout: Union["TileLayout", "ComposeLayout"],
         tiled_shape: List[PrimExpr],
         inner_shape: List[PrimExpr],
-    ) -> bool:
+    ) -> Optional["TileLayout"]:
         return _ffi_api.SwizzleLayoutIsTileInner(  # pylint: disable=no-member
             tile_layout, self, tiled_shape, inner_shape
         )
@@ -431,7 +431,7 @@ class ComposeLayout(TLayout):
         tile_layout: Union["TileLayout", "ComposeLayout"],
         tiled_shape: List[PrimExpr],
         inner_shape: List[PrimExpr],
-    ) -> bool:
+    ) -> Optional["TileLayout"]:
         return _ffi_api.ComposeLayoutIsTileInner(  # pylint: disable=no-member
             tile_layout, self, tiled_shape, inner_shape
         )
