@@ -476,9 +476,21 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
       BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align, offset_factor,
                  buffer_type_str, axis_separators, logical_scope, layout, allocated_addr);
   IRBuilder builder = IRBuilder::Current();
-  if (ffi::Optional<SBlockFrame> frame = builder->FindFrame<SBlockFrame>()) {
+  auto opt_func_frame = builder->FindFrame<PrimFuncFrame>();
+  ICHECK(opt_func_frame.defined()) << "ValueError: PrimFunc frame not find. Please ensure "
+                                   << "'T.alloc_buffer' is called under T.prim_func()";
+  auto func_frame = opt_func_frame.value();
+
+  if (ffi::Optional<SBlockFrame> frame = builder->GetLastFrame<SBlockFrame>()) {
     frame.value()->alloc_buffers.push_back(buffer);
   } else if (ffi::Optional<PrimFuncFrame> frame = builder->GetLastFrame<PrimFuncFrame>()) {
+    frame.value()->root_alloc_buffers.push_back(buffer);
+  } else if (!func_frame->is_tirp) {
+    LOG(FATAL) << "ValueError: Block frame or PrimFunc frame not find. Please ensure "
+                  "'T.alloc_buffer' is called under T.block() or T.prim_func()";
+  } else if (ffi::Optional<SBlockFrame> frame = builder->FindFrame<SBlockFrame>()) {
+    frame.value()->alloc_buffers.push_back(buffer);
+  } else if (ffi::Optional<PrimFuncFrame> frame = builder->FindFrame<PrimFuncFrame>()) {
     frame.value()->root_alloc_buffers.push_back(buffer);
   } else {
     TVM_FFI_THROW(InternalError) << "ValueError: Block frame or PrimFunc frame not find. Please ensure "

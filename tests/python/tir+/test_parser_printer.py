@@ -624,6 +624,21 @@ def test_roundtrip_implicit_buffer_region():
     assert_structural_equal(test, from_source(code))
 
 
+def test_roundtrip_alloc_under_any_scope():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        with T.kernel():
+            for i in T.serial(10):
+                A = T.alloc_buffer([100], "float32", scope="trn.sbuf", allocated_addr=1024)
+                Tp.memset(A[i*10:i*10+10], T.float32(0.0))
+
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
 if __name__ == "__main__":
     test_roundtrip_scopeid1()
     test_roundtrip_scopeid2()
@@ -648,3 +663,4 @@ if __name__ == "__main__":
     test_roundtrip_unreachable_after_break()
     test_roundtrip_allocated_addr()
     test_roundtrip_implicit_buffer_region()
+    test_roundtrip_alloc_under_any_scope()
