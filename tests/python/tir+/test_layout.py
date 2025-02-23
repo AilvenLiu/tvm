@@ -653,10 +653,14 @@ def test_tile_layout():
         outer = inner
         layout_tile = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
         assert_structural_equal(layout_tile, inner.tile(outer, [8], [8]))
+
         outer_res = inner.is_tile_inner(layout_tile, [64], [8])
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
-        assert inner.is_tile_outer(layout_tile, [64], [8])
+
+        inner_res = outer.is_tile_outer(layout_tile, [64], [8])
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), inner.normalize())
 
     case1()
 
@@ -666,10 +670,14 @@ def test_tile_layout():
         outer = inner
         layout_tile = T.TileLayout.from_tuple(data=(8, 8, 8, 8), strides=(512, 8, 64, 1))
         assert_structural_equal(layout_tile, inner.tile(outer, [8, 8], [8, 8]))
+
         outer_res = inner.is_tile_inner(layout_tile, [64, 64], [8, 8])
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
-        assert outer.is_tile_outer(layout_tile, [64, 64], [8, 8])
+
+        inner_res = outer.is_tile_outer(layout_tile, [64, 64], [8, 8])
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), inner.normalize())
 
     case2()
 
@@ -679,12 +687,17 @@ def test_tile_layout():
         outer = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
         layout_tile = T.TileLayout.from_tuple(data=(8, 2, 8, 4), strides=(64, 1, 8, 2))
         assert_structural_equal(layout_tile, inner.tile(outer, [8, 8], [2, 4]))
+
         outer_res = inner.is_tile_inner(layout_tile, [16, 32], [2, 4])
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
-        assert outer.is_tile_outer(layout_tile, [16, 32], [8, 8])
+
+        inner_res = outer.is_tile_outer(layout_tile, [16, 32], [8, 8])
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), inner.normalize())
+
         assert outer.is_tile_inner(layout_tile, [16, 32], [8, 8]) is None
-        assert not inner.is_tile_outer(layout_tile, [16, 32], [2, 4])
+        assert inner.is_tile_outer(layout_tile, [16, 32], [2, 4]) is None
 
     case3()
 
@@ -696,12 +709,17 @@ def test_tile_layout():
             data=(8, 4, 2, 8, 2, 4), strides=(512, 16, 8, 64, 1, 2)
         )
         assert_structural_equal(layout_tile.normalize(), inner.tile(outer, (8, 8), (8, 8)))
+
         outer_res = inner.is_tile_inner(layout_tile, (64, 64), (8, 8))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
-        assert outer.is_tile_outer(layout_tile, (64, 64), (8, 8))
+
+        inner_res = outer.is_tile_outer(layout_tile, (64, 64), (8, 8))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), inner.normalize())
+
         assert outer.is_tile_inner(layout_tile, (64, 64), (8, 8)) is None
-        assert not inner.is_tile_outer(layout_tile, (64, 64), (8, 8))
+        assert inner.is_tile_outer(layout_tile, (64, 64), (8, 8)) is None
 
     case4()
 
@@ -713,8 +731,9 @@ def test_tile_layout():
             device=(8, 4),
             from_to=("thread", "warp"),
         )
+        outer = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
         layout_tile = layout.tile(
-            outer=T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)),
+            outer=outer,
             outer_shape=(8, 8),
             inner_shape=(8, 8),
         )
@@ -725,14 +744,17 @@ def test_tile_layout():
             from_to=("thread", "warp"),
         )
         assert_structural_equal(layout_expected.normalize(), layout_tile)
-        assert layout.is_tile_inner(layout_tile, (64, 64), (8, 8))
-        assert T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)).is_tile_outer(
-            layout_tile, (64, 64), (8, 8)
-        )
-        assert not T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)).is_tile_inner(
-            layout_tile, (64, 64), (8, 8)
-        )
-        assert not layout.is_tile_outer(layout_tile, (64, 64), (8, 8))
+
+        outer_res = layout.is_tile_inner(layout_tile, (64, 64), (8, 8))
+        assert outer_res is not None
+        assert_structural_equal(outer_res.normalize(), outer.normalize())
+
+        inner_res = outer.is_tile_outer(layout_tile, (64, 64), (8, 8))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), layout.normalize())
+
+        assert outer.is_tile_inner(layout_tile, (64, 64), (8, 8)) is None
+        assert layout.is_tile_outer(layout_tile, (64, 64), (8, 8)) is None
 
     case5_sharded1()
 
@@ -757,12 +779,17 @@ def test_tile_layout():
             from_to=("thread", "warp"),
         )
         assert_structural_equal(layout_expected, layout_tile)
+
         outer_res = inner.is_tile_inner(layout_tile, (64, 32), (8, 4))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
-        assert outer.is_tile_outer(layout_tile, (64, 32), (8, 8))
-        assert not outer.is_tile_inner(layout_tile, (64, 32), (8, 8))
-        assert not inner.is_tile_outer(layout_tile, (64, 32), (8, 4))
+
+        inner_res = outer.is_tile_outer(layout_tile, (64, 32), (8, 8))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), inner.normalize())
+
+        assert outer.is_tile_inner(layout_tile, (64, 32), (8, 8)) is None
+        assert inner.is_tile_outer(layout_tile, (64, 32), (8, 4)) is None
 
     case6_sharded2()
 
@@ -775,10 +802,17 @@ def test_tile_layout():
             outer_shape=(4, 2),
             inner_shape=(2, 4),
         )
+
+        inner_res = outer.is_tile_outer(layout_tile, (8, 8), (4, 2))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), inner.normalize())
+
         outer_res = inner.is_tile_inner(layout_tile, (8, 8), (2, 4))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
-        assert not outer.normalize().is_tile_inner(layout_tile.normalize(), (8, 8), (4, 2))
+
+        assert outer.is_tile_inner(layout_tile, (8, 8), (4, 2)) is None
+        assert inner.is_tile_outer(layout_tile, (8, 8), (2, 4)) is None
 
     case7_normalized4()
 
@@ -787,10 +821,17 @@ def test_tile_layout():
         outer = T.TileLayout.from_tuple(data=(8, 2), strides=(2, 1))
         inner = T.TileLayout.from_tuple(data=(2, 4), strides=(4, 1))
         layout_tile = inner.tile(outer, (8, 2), (2, 4))
+
         outer_res = inner.is_tile_inner(layout_tile, (16, 8), (2, 4))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
-        assert outer.normalize().is_tile_outer(layout_tile, (16, 8), (8, 2))
+
+        inner_res = outer.is_tile_outer(layout_tile, (16, 8), (8, 2))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), inner.normalize())
+
+        assert outer.is_tile_inner(layout_tile, (16, 8), (8, 2)) is None
+        assert inner.is_tile_outer(layout_tile, (16, 8), (2, 4)) is None
 
     case8_normalized5()
 
@@ -800,11 +841,16 @@ def test_tile_layout():
         inner = T.TileLayout.from_tuple(data=(2, 1, 1), strides=(4, 3, 1))
         inner_tmp = T.TileLayout.from_tuple(data=(8, 2, 2), strides=(4, 2, 2))
         layout_tile = inner.tile(outer, (8, 4), (2, 1))
+
         outer_res = inner.is_tile_inner(layout_tile, (16, 4), (2, 1))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
-        assert not outer.normalize().is_tile_inner(layout_tile.normalize(), (16, 4), (8, 4))
-        assert not inner_tmp.is_tile_inner(layout_tile.normalize(), (16, 4), (8, 2, 2))
+
+        inner_res = outer.is_tile_outer(layout_tile, (16, 4), (8, 4))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), inner.normalize())
+
+        assert inner_tmp.is_tile_inner(layout_tile, (16, 4), (8, 2, 2)) is None
 
     case9_normalized6()
 
@@ -814,12 +860,15 @@ def test_tile_layout():
         inner = T.TileLayout.from_tuple(data=(1, 2, 1), strides=(4, 3, 1))
         inner_tmp = T.TileLayout.from_tuple(data=(1, 2, 2), strides=(8, 4, 3))
         layout_tile = inner.tile(outer, (8, 8, 4), (1, 2, 1))
+
         outer_res = inner.is_tile_inner(layout_tile, (8, 16, 4), (1, 2, 1))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
+
         assert inner.is_tile_inner(layout_tile.normalize(), (8, 16, 4), (1, 2, 1))
-        assert not outer.normalize().is_tile_inner(layout_tile.normalize(), (8, 16, 4), (8, 8, 4))
-        assert not inner_tmp.is_tile_inner(layout_tile.normalize(), (8, 16, 4), (1, 2, 2))
+
+        assert outer.is_tile_inner(layout_tile, (8, 16, 4), (8, 8, 4)) is None
+        assert inner_tmp.is_tile_inner(layout_tile, (8, 16, 4), (1, 2, 2)) is None
 
     case10_normalized7()
 
@@ -894,11 +943,19 @@ def test_tile_layout():
             T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
             T.TileLayout.from_tuple(data=(4096,), strides=(1,)),
         )
-        assert_structural_equal(layout_tile.normalize(), layout_expected)
+        assert_structural_equal(layout_tile.normalize(), layout_expected.normalize())
+
         outer_res = compose.is_tile_inner(layout_tile, (4096,), (512,))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), layout.normalize())
-        assert layout.is_tile_outer(layout_tile, (4096,), (8,))
+
+        inner_res = layout.is_tile_outer(layout_tile, (4096,), (8,))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), compose.normalize())
+
+        assert layout.is_tile_inner(layout_tile, (4096,), (512,)) is None
+        with pytest.raises(Exception):
+            compose.is_tile_outer(layout_tile, (4096,), (8,))
 
     case_tile_compose_layout()
 
@@ -912,10 +969,14 @@ def test_tile_layout():
             T.TileLayout.from_tuple(data=(64, 4, 64), strides=(64, 4096, 1)),
         )
         assert_structural_equal(layout_tile.normalize(), layout_expected)
+
         outer_res = swizzle.is_tile_inner(layout_tile, (64, 4, 64), (8, 1, 64))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), layout.normalize())
-        assert layout.is_tile_outer(layout_tile, (64, 4, 64), (8, 4, 1))
+
+        inner_res = layout.is_tile_outer(layout_tile, (64, 4, 64), (8, 4, 1))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), swizzle.normalize())
 
     case_tile_swizzle_layout()
 
@@ -927,11 +988,15 @@ def test_tile_layout():
             swizzle,
             T.TileLayout.from_tuple(data=(3, 64, 4, 64), strides=(16384, 64, 4096, 1)),
         )
-        assert_structural_equal(layout_tile.normalize(), layout_expected)
+        assert_structural_equal(layout_tile.normalize(), layout_expected.normalize())
+
         outer_res = swizzle.is_tile_inner(layout_tile, (3, 64, 256), (1, 8, 64))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), tile.normalize())
-        assert tile.is_tile_outer(layout_tile, (3, 64, 256), (3, 8, 4))
+
+        inner_res = tile.is_tile_outer(layout_tile, (3, 64, 256), (3, 8, 4))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), swizzle.normalize())
 
     case_tile_swizzle_layout2()
 
@@ -1330,7 +1395,7 @@ def test_normalize_compose_layout():
         layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
         layoutB = T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1))
         layout = T.ComposeLayout(layoutA, layoutB.normalize())
-        assert_structural_equal(layout.normalize(), layout)
+        assert_structural_equal(layout.normalize(), layoutA)
 
     case1()
 

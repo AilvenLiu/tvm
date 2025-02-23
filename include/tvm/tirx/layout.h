@@ -71,9 +71,15 @@ class TLayoutNode : public Object {
                                            const Array<PrimExpr>& tiled_shape,
                                            const Array<PrimExpr>& inner_shape) const;
 
-  /*! \brief Check if the layout is the outer layout of a tiled layout */
-  virtual bool IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                           const Array<PrimExpr>& outer_shape) const;
+  /*! \brief Check if the layout is the outer layout of a tiled layout
+   * \param tile_layout The tiled layout to check
+   * \param tiled_shape The shape of the tiled layout
+   * \param outer_shape The shape of the outer layout
+   * \return The inner layout if this layout is the outer layout of tile_layout, NullOpt otherwise
+   */
+  virtual Optional<TLayout> IsTileOuter(const TLayout& tile_layout,
+                                        const Array<PrimExpr>& tiled_shape,
+                                        const Array<PrimExpr>& outer_shape) const;
 
   static constexpr const char* _type_key = "tirx.TLayout";
   static constexpr const bool _type_has_method_sequal_reduce = false;
@@ -247,8 +253,8 @@ class TileLayoutNode : public TLayoutNode {
                                    const Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the outer layout of a tiled layout */
-  bool IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                   const Array<PrimExpr>& outer_shape) const final;
+  Optional<TLayout> IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                                const Array<PrimExpr>& outer_shape) const final;
 
   static constexpr const char* _type_key = "tirx.TileLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;

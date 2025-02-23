@@ -404,24 +404,27 @@ TVM_REGISTER_GLOBAL("tir.ComposeLayoutIsTileInner")
  * -------------------------------------------------------------------------- */
 
 // Base TLayout: not implemented.
-bool TLayoutNode::IsTileOuter(const TLayout& /*tile_layout*/,
-                              const Array<PrimExpr>& /*tiled_shape*/,
-                              const Array<PrimExpr>& /*outer_shape*/) const {
+Optional<TLayout> TLayoutNode::IsTileOuter(const TLayout& /*tile_layout*/,
+                                           const Array<PrimExpr>& /*tiled_shape*/,
+                                           const Array<PrimExpr>& /*outer_shape*/) const {
   LOG(FATAL) << "IsTileOuter is not implemented for this layout.";
   throw;
 }
 
 // TileLayout: check if `tile_layout` can be the result of applying this layout as the *outer*
 // layout.
-bool TileLayoutNode::IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                                 const Array<PrimExpr>& outer_shape) const {
+Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
+                                              const Array<PrimExpr>& tiled_shape,
+                                              const Array<PrimExpr>& outer_shape) const {
   auto maybe_tile = tile_layout.as<TileLayout>();
   if (!maybe_tile) {
     // Could be ComposeLayout, in which case we test layout_B of compose.
     if (auto comp = tile_layout.as<ComposeLayout>()) {
-      return IsTileOuter(comp.value()->layout_B, tiled_shape, outer_shape);
+      auto inner_layout = IsTileOuter(comp.value()->layout_B, tiled_shape, outer_shape);
+      if (!inner_layout) return NullOpt;
+      return ComposeLayout(comp.value()->layout_A, inner_layout.value().as<TileLayout>().value());
     }
-    return false;
+    return NullOpt;
   }
 
   auto tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
@@ -434,62 +437,69 @@ bool TileLayoutNode::IsTileOuter(const TLayout& tile_layout, const Array<PrimExp
       << "Outer shape and tiled shape must have same dimension.";
   for (int i = 0; i < ndim; ++i) {
     if (!analyzer.CanProveEqual(floormod(tiled_shape[i], outer_shape[i]), 0)) {
-      return false;
+      return NullOpt;
     }
   }
 
   // Outer layout must not have device iters if used as the outer layout.
-  if (!layout->device_iter_array.empty()) return false;
+  if (!layout->device_iter_array.empty()) return NullOpt;
 
   // Factor tiled_shape by outer_shape.
   auto factored = TileShape(tiled_shape, outer_shape, /*is_inner=*/false);
   auto [grouped_tiled, tiled_seps] = TileLayoutGroupByLogicalShape(tiled, factored, nullptr);
   auto [grouped_layout, outer_seps] = TileLayoutGroupByLogicalShape(layout, outer_shape, nullptr);
 
-  if (tiled_seps.empty() || outer_seps.empty()) return false;
+  if (tiled_seps.empty() || outer_seps.empty()) return NullOpt;
   auto tiled_seps_even = GetEvenSeps(tiled_seps);
 
   // We'll collect leftover data iters (which belong to the "inner" part).
   Array<DataIterAttr> inner_data_iters;
   auto tiled_split_map = grouped_tiled.GetSplitMap();
+  TileLayout::SplitMap new_split_map;
 
   // Verify outer extents match directly.
   for (int i = 0; i < ndim; ++i) {
     int outer_count = outer_seps[i + 1] - outer_seps[i];
     int tile_count = tiled_seps_even[i + 1] - tiled_seps_even[i];
-    if (outer_count > tile_count) return false;
+    if (outer_count > tile_count) return NullOpt;
 
     // Compare each "outer" chunk's extents.
     for (int j = 0; j < outer_count; ++j) {
       DataIterAttr outer_attr = grouped_layout->data_iter_array[outer_seps[i] + j];
       DataIterAttr tiled_attr = grouped_tiled->data_iter_array[tiled_seps_even[i] + j];
-      if (tiled_split_map.count(tiled_seps_even[i] + j)) return false;
-      if (!analyzer.CanProveEqual(outer_attr->extent, tiled_attr->extent)) return false;
+      if (tiled_split_map.count(tiled_seps_even[i] + j)) return NullOpt;
+      if (!analyzer.CanProveEqual(outer_attr->extent, tiled_attr->extent)) return NullOpt;
     }
 
     // The rest belong to the "inner" side.
     for (int j = tiled_seps_even[i] + outer_count; j < tiled_seps_even[i + 1]; ++j) {
-      if (!tiled_split_map.count(j)) {
-        inner_data_iters.push_back(grouped_tiled->data_iter_array[j]);
-      }
+      inner_data_iters.push_back(grouped_tiled->data_iter_array[j]);
+      new_split_map[j] = inner_data_iters.size() - 1;
     }
   }
 
-  // Check that the outer stride matches the fused stride = outer_attr->stride * (inner cosize).
-  TileLayout inner_layout(inner_data_iters, {});
-  auto inner_cosize = inner_layout->GetCosize();
+  // Rebuild device iter array using the fused data iter indices for inner splits.
+  std::vector<DeviceIterAttr> new_device_iters;
+  for (const auto& iter : tiled->device_iter_array) {
+    new_device_iters.push_back(
+        iter.IsSplit() ? DeviceIterAttr::Split(iter->extent, new_split_map[iter.GetIntBound()])
+                       : iter);
+  }
+  TileLayout inner_layout(inner_data_iters, new_device_iters, tiled->from, tiled->to);
 
+  // Check that the outer stride matches the fused stride = outer_attr->stride * (inner cosize).
+  auto inner_cosize = inner_layout->GetCosize();
   for (int i = 0; i < ndim; ++i) {
     int outer_count = outer_seps[i + 1] - outer_seps[i];
     for (int j = 0; j < outer_count; ++j) {
       DataIterAttr outer_attr = grouped_layout->data_iter_array[outer_seps[i] + j];
       DataIterAttr tiled_attr = grouped_tiled->data_iter_array[tiled_seps_even[i] + j];
       if (!analyzer.CanProveEqual(outer_attr->stride * inner_cosize, tiled_attr->stride)) {
-        return false;
+        return NullOpt;
       }
     }
   }
-  return true;
+  return inner_layout;
 }
 
 /* Registration for Checking Outer Layout */

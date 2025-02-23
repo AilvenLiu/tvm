@@ -188,7 +188,11 @@ TVM_REGISTER_GLOBAL("tir.SwizzleLayoutNormalize").set_body_typed([](SwizzleLayou
 /******** Normalize ComposeLayout ********/
 
 TLayout ComposeLayoutNode::Normalize() const {
-  return ComposeLayout(layout_A, layout_B->Normalize().as<TileLayout>().value());
+  auto layout_B_normalized = layout_B->Normalize().as<TileLayout>().value();
+  if (IsTrivialLayout(layout_B_normalized)) {
+    return layout_A;
+  }
+  return ComposeLayout(layout_A, layout_B_normalized);
 }
 
 TVM_REGISTER_GLOBAL("tir.ComposeLayoutNormalize").set_body_typed([](ComposeLayout layout) {

@@ -164,8 +164,8 @@ class TLayout(Object):
 
         Returns
         -------
-        bool
-            Whether the inner layout is the inner layout of the tiled layout
+        Optional[TileLayout]
+            The outer layout if it is the inner layout of the tiled layout, None otherwise
         """
         raise NotImplementedError("is_tile_inner is not implemented for this layout")
 
@@ -174,7 +174,7 @@ class TLayout(Object):
         tile_layout: Union["TileLayout", "ComposeLayout"],
         tiled_shape: List[PrimExpr],
         outer_shape: List[PrimExpr],
-    ) -> bool:
+    ) -> Optional["TLayout"]:
         """Check if a layout is the outer layout of a tiled layout.
 
         Parameters
@@ -188,8 +188,8 @@ class TLayout(Object):
 
         Returns
         -------
-        bool
-            Whether the outer layout is the outer layout of the tiled layout
+        Optional[TLayout]
+            The inner layout if it is the outer layout of the tiled layout, None otherwise
         """
         raise NotImplementedError("is_tile_outer is not implemented for this layout")
 
@@ -245,7 +245,7 @@ class TileLayout(TLayout):
         tile_layout: Union["TileLayout", "ComposeLayout"],
         tiled_shape: List[PrimExpr],
         outer_shape: List[PrimExpr],
-    ) -> bool:
+    ) -> Optional["TLayout"]:
         return _ffi_api.TileLayoutIsTileOuter(  # pylint: disable=no-member
             tile_layout, self, tiled_shape, outer_shape
         )
