@@ -91,7 +91,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
 
     // Step 4. Wrap the body with thread_extent attributes
     for (const auto& [tag, iv] : launch_params) {
-      body = AttrStmt(iv, tir::attr::thread_extent, iv->dom->extent, body);
+      body = AttrStmt(iv, tirx::attr::thread_extent, iv->dom->extent, body);
     }
 
     // Clear the scope_id_def
@@ -179,7 +179,7 @@ class TIRpOpScheduler : public StmtExprMutator {
 
   Stmt VisitStmt_(const AttrStmtNode* op) final {
     // Collect the launch parameters
-    if (op->attr_key == tir::attr::thread_extent) {
+    if (op->attr_key == tirx::attr::thread_extent) {
       auto thread_extent = Downcast<IterVar>(op->node);
       ICHECK(thread_extent->thread_tag.defined())
           << "Internal Error: thread_extent without thread_tag";
@@ -266,7 +266,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
 
   Stmt VisitStmt_(const AttrStmtNode* op) final {
-    if (op->attr_key == tir::attr::thread_extent) {
+    if (op->attr_key == tirx::attr::thread_extent) {
       auto iv = op->node.as<IterVar>();
       ICHECK(iv.defined()) << "Internal Error: thread_extent should annotate an IterVar";
       launch_params_[iv.value()->thread_tag] = iv.value();
@@ -362,7 +362,7 @@ class ScheduleContextRemover : public StmtExprMutator {
 
 class LogicalTensorRemover : public arith::IRMutatorWithAnalyzer {
  public:
-  static Stmt Remove(const Stmt& stmt, const Map<tir::Var, Buffer> buffer_map) {
+  static Stmt Remove(const Stmt& stmt, const Map<tirx::Var, Buffer> buffer_map) {
     arith::Analyzer ana;
     LogicalTensorRemover remover(&ana);
     for (const auto& kv : buffer_map) {
@@ -450,9 +450,10 @@ class LogicalTensorRemover : public arith::IRMutatorWithAnalyzer {
 
 class StorageLower : public arith::IRMutatorWithAnalyzer {
  public:
-  static Stmt Flatten(const Stmt& stmt, const Map<tirx::Var, Buffer> buffer_map) {
+  static Stmt Flatten(const Stmt& stmt, const Map<tirx::Var, Buffer> buffer_map,
+                      const Target& target) {
     arith::Analyzer ana;
-    StorageLower storage_lower(&ana);
+    StorageLower storage_lower(&ana, target);
     for (const auto& kv : buffer_map) {
     }
     return storage_lower(stmt);
@@ -462,7 +463,8 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
   using IRMutatorWithAnalyzer::VisitExpr_;
   using IRMutatorWithAnalyzer::VisitStmt_;
 
-  explicit StorageLower(arith::Analyzer* analyzer) : arith::IRMutatorWithAnalyzer(analyzer) {}
+  explicit StorageLower(arith::Analyzer* analyzer, const Target& target)
+      : arith::IRMutatorWithAnalyzer(analyzer), target_(target) {}
 
   Stmt VisitStmt_(const BlockNode* op) final {
     ICHECK_EQ(op->buffer_gets.size(), 0) << "Unexpected BufferGet found";
@@ -472,7 +474,12 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     Block block = GetRef<Block>(op);
 
     Array<Buffer> alloc_buffers = op->alloc_buffers;
-    alloc_buffers.MutateByApply([this](Buffer buf) { return GetFlattenedBuffer(buf); });
+    alloc_buffers.MutateByApply([this](Buffer buf) {
+      if (target_->kind->name == "trn" && !buf->layout.defined()) {
+        return buf;
+      }
+      return GetFlattenedBuffer(buf);
+    });
     if (!alloc_buffers.same_as(op->alloc_buffers)) {
       block.CopyOnWrite()->alloc_buffers = alloc_buffers;
     }
@@ -487,7 +494,7 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     }
     auto trn_layout = buf->layout.as<TrainiumLayoutNode>();
     Buffer flattened;
-    tir::BufferNode* writer;
+    tirx::BufferNode* writer;
     if (trn_layout) {
       Array<PrimExpr> new_shape;
       if (buf->layout.as<TrainiumPSUMLayoutNode>()) {
@@ -583,9 +590,11 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
   template <typename Node>
   Node VisitBufferAccess(Node node) {
     ICHECK(node->buffer.defined());
+    if (target_->kind->name == "trn" && !node->buffer->layout.defined()) {
+      return node;
+    }
     auto flattened_indices = GetSimplifiedElemOffset(node->buffer, node->indices);
     Buffer flattened_buffer = GetFlattenedBuffer(node->buffer);
-
     auto writer = node.CopyOnWrite();
     writer->buffer = flattened_buffer;
     writer->indices = flattened_indices;
@@ -594,6 +603,7 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
 
   /*! \brief Map of buffers being remapped. */
   std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_remap_;
+  const Target& target_;
 };
 
 class BufferOffsetRemover : public StmtExprMutator {
@@ -636,7 +646,7 @@ Pass LowerTIRp() {
     n->body = ExecScopeSliceResolver::Resolve(n->body, target.value());
     n->body = ScheduleContextRemover::Remove(n->body);
     n->body = LogicalTensorRemover::Remove(n->body, n->buffer_map);
-    n->body = StorageLower::Flatten(n->body, n->buffer_map);
+    n->body = StorageLower::Flatten(n->body, n->buffer_map, target.value());
     n->body = BufferOffsetRemover::Remove(n->body);
     return f;
   };
@@ -646,5 +656,5 @@ Pass LowerTIRp() {
 TVM_REGISTER_GLOBAL("tirx.transform.LowerTIRp").set_body_typed(LowerTIRp);
 
 }  // namespace transform
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm

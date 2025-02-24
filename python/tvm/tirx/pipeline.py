@@ -21,6 +21,113 @@
 import tvm
 from tvm import tirx
 
+from . import backend
+
+
+def default_tir_pipeline():
+    """The default tir pipeline used in tvm.tir.build"""
+
+    @tvm.transform.module_pass(opt_level=0)
+    def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
+        """The default lowering passes for TIR backend."""
+        pass_ctx = tvm.transform.PassContext.current()
+        config = pass_ctx.config
+        passes = [
+            tir.transform.CanonicalizeLoop(),
+            tir.transform.LowerCrossThreadReduction(),
+            tir.transform.LowerInitBlock(),
+            tir.transform.PlanAndUpdateBufferAllocationLocation(),
+            tir.transform.ConvertBlocksToOpaque(),
+            tir.transform.LiftThreadBinding(),
+            tir.transform.ManifestSharedMemoryLocalStage(),
+            tir.transform.CompactBufferAllocation(),
+            tir.transform.LowerAutoCopy(),
+            tir.transform.UnifyThreadBinding(),
+            tir.transform.LowerMatchBuffer(),
+            tir.transform.Simplify(),
+            tir.transform.InjectPermutedLayout(),
+            tir.transform.AnnotateIrregularLoop(),
+            tir.transform.InjectSoftwarePipeline(),
+            tir.transform.TransformMmaBufferLayout(),
+            tir.transform.LowerOpaqueBlock(),
+            tir.transform.FlattenBuffer(),
+            tir.transform.BF16ComputeLegalize(),
+            tir.transform.NarrowDataType(32),
+            tir.transform.LoopPartition(),
+            tir.transform.VectorizeLoop(not bool(config.get("tir.disable_vectorize", False))),
+            tir.transform.InjectVirtualThread(),
+            tir.transform.InjectDoubleBuffer(),
+        ]
+        if not bool(config.get("tir.disable_storage_rewrite", False)):
+            passes.append(tir.transform.StorageRewrite())
+        if config.get("tir.use_async_copy", False):
+            passes.append(tir.transform.LowerAsyncDMA())
+        passes.extend(
+            [
+                tir.transform.HoistIfThenElse(),
+                tir.transform.UnrollLoop(),
+                tir.transform.RenormalizeSplitPattern(),
+                tir.transform.Simplify(),
+                tir.transform.RemoveNoOp(),
+                tir.transform.RewriteUnsafeSelect(),
+            ]
+        )
+        # Additional passes based on configuration.
+        if bool(config.get("tir.instrument_bound_checkers", False)):
+            passes.append(tir.transform.InstrumentBoundCheckers())
+        if bool(config.get("tir.ptx_ldg32", False)):
+            passes.append(tir.transform.InjectPTXLDG32(True))
+        passes.append(
+            tir.transform.CommonSubexprElimTIR(
+                not bool(config.get("tir.disable_cse_tir", False)),
+                bool(config.get("tir.enable_equiv_terms_in_cse_tir", False)),
+            )
+        )
+        if bool(config.get("tir.instrument_lwp", False)):
+            passes.append(tir.transform.InstrumentProfileIntrinsics())
+        passes.extend(
+            [
+                # Bind the target first so that target-specific attributes are available.
+                tir.transform.FP8ComputeLegalize(),
+                # VerifyVTCMLimit must occur before LowerVtcmAlloc.
+                tir.transform.VerifyVTCMLimit(),
+                tir.transform.LowerVtcmAlloc(),
+                tir.transform.VerifyMemory(),
+                tir.transform.AnnotateEntryFunc(),
+            ]
+        )
+        if bool(config.get("tir.detect_global_barrier", False)):
+            passes.append(tir.transform.ThreadSync("global"))
+        passes.extend(
+            [
+                tir.transform.ThreadSync("shared"),
+                tir.transform.ThreadSync("shared.dyn"),
+                tir.transform.ThreadSync("warp"),
+                tir.transform.InferFragment(),
+                tir.transform.LowerThreadAllreduce(),
+            ]
+        )
+        if bool(config.get("tir.use_async_copy", False)):
+            passes.append(tir.transform.InjectPTXAsyncCopy())
+        if bool(config.get("tir.ptx_ldg32", False)):
+            passes.append(tir.transform.InjectPTXLDG32())
+        passes.extend(
+            [
+                tir.transform.AnnotateDeviceRegions(),
+                tir.transform.SplitHostDevice(),
+                # MergeSharedMemoryAllocations must follow SplitHostDevice.
+                tir.transform.MergeSharedMemoryAllocations(),
+                tir.transform.MakePackedAPI(),
+                tir.transform.FP8StorageLegalize(),
+                tir.transform.BF16StorageLegalize(),
+                tir.transform.LowerDeviceKernelLaunch(),
+            ]
+        )
+        mod = tvm.ir.transform.Sequential(passes)(mod)
+        return mod
+
+    return _pipeline, finalize_host_passes, finalize_device_passes
+
 
 def tirp_pipeline():
     """The TIRP pipeline used in tvm.tir.build"""
@@ -32,11 +139,6 @@ def tirp_pipeline():
         config = pass_ctx.config
         passes = [
             tir.transform.LowerTIRp(),
-            tir.transform.InjectPrefetch(),
-            tir.transform.TextureFlatten(),
-            tir.transform.StorageFlatten(
-                64, bool(config.get("tir.instrument_bound_checkers", False))
-            ),
             tir.transform.LowerCrossThreadReduction(),
             tir.transform.LowerInitBlock(),
             # tir.transform.PlanAndUpdateBufferAllocationLocation(),
@@ -128,8 +230,37 @@ def tirp_pipeline():
         mod = tvm.ir.transform.Sequential(passes)(mod)
         return mod
 
-    return _pipeline
+    return _pipeline, finalize_host_passes, finalize_device_passes
 
+def trn_pipeline():
+    """The Trainium pipeline used in tvm.tir.build"""
+
+    @tvm.transform.module_pass(opt_level=0)
+    def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
+        """The default lowering passes for TRN backend."""
+        pass_ctx = tvm.transform.PassContext.current()
+        config = pass_ctx.config
+        passes = [
+            tir.transform.LowerTIRp(),
+            tvm.transform.PrintIR(),
+            tir.transform.DecorateDeviceScope(),
+            tir.transform.ConvertBlocksToOpaque(),
+            tir.transform.LowerMatchBuffer(),
+            tir.transform.Simplify(),
+            tir.transform.LowerOpaqueBlock(),
+            tir.transform.LoopPartition(),
+            tir.transform.HoistIfThenElse(),
+            tir.transform.Simplify(),
+            tir.transform.RemoveNoOp(),
+            tir.transform.AnnotateEntryFunc(),
+            tir.transform.AnnotateDeviceRegions(),
+            tir.transform.SplitHostDevice(),
+            tir.transform.MakePackedAPI(),
+            tir.transform.LowerDeviceKernelLaunch(),
+        ]
+        return tvm.ir.transform.Sequential(passes)(mod)
+
+    return _pipeline, finalize_host_passes, finalize_device_passes_trn
 
 def finalize_host_passes():  # pylint: disable=unused-argument
     """The default finalization passes for TIR backend."""
@@ -151,11 +282,18 @@ def finalize_device_passes():  # pylint: disable=unused-argument
     ]
     return tvm.ir.transform.Sequential(device_pass_list)
 
+def finalize_device_passes_trn():  # pylint: disable=unused-argument
+    """The default finalization passes for TRN backend."""
+    device_pass_list = [
+        tir.transform.Simplify(),
+    ]
+    return tvm.ir.transform.Sequential(device_pass_list)
 
 # global map of pre-built pipelines
 PIPELINE_MAP = {
     "default": default_tir_pipeline,
     "tirp": tirp_pipeline,
+    "trn": trn_pipeline,
 }
 
 
@@ -172,7 +310,7 @@ def get_tir_pipeline(name: str | None = None, **kwargs) -> tvm.transform.Pass:
         name = "s_tir"
     if name not in PIPELINE_MAP:
         raise ValueError(
-            f"Unknown pre-built pipeline {name},candidates are {list(PIPELINE_MAP.keys())}"
+            f"Unknown pre-built pipeline {name}," f"candidates are {list(PIPELINE_MAP.keys())}"
         )
     return PIPELINE_MAP[name](**kwargs)
 
