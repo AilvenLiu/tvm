@@ -4645,3 +4645,30 @@ def nki_memset(result, value):
         The call expression.
     """
     return call_intrin("", "tir.nki_memset", result, value)
+
+def nki_activation_reduce(reduce_res, act_res, data, opcode, reduce_opcode):
+    """TVM intrinsic to call nki activation reduce instruction
+
+    Parameters
+    ----------
+    reduce_res : BufferLoad
+        The result buffer of reduction.
+        
+    act_res : BufferLoad
+        The result buffer of activation.
+        
+    data: BufferLoad
+        The data buffer.
+        
+    opcode: str
+        The opcode.
+        
+    reduce_opcode: str
+        The reduce opcode.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_activation_reduce", reduce_res, act_res, data, opcode, reduce_opcode)

@@ -30,8 +30,8 @@ from collections.abc import Mapping
 from enum import IntEnum
 
 import tvm_ffi
-from tvm.ir import PrimExpr, Range, Span
-from tvm.runtime import Object, Scriptable, const
+from tvm.ir import PrimExpr, Range, Span, Op
+from tvm.runtime import Object, Scriptable, const, Tensor
 
 from . import _ffi_api
 from .async_structs import Barrier, BarrierArray, Pipeline
@@ -734,3 +734,22 @@ def stmt_list(stmt: Stmt) -> list[Stmt]:
             res += stmt_list(x)
         return res
     return [stmt]
+
+@tvm._ffi.register_object("tir.OpCall")
+class OpCall(Stmt):
+    """OpCall node.
+
+    Parameters
+    ----------
+    op : Op
+        The operator.
+
+    args : List[PrimExpr]
+        The arguments.
+        
+    """
+    op: Op
+    args: List[PrimExpr]
+    
+    def __init__(self, op: Op, args: List[PrimExpr]) -> None:
+        self.__init_handle_by_constructor__(_ffi_api.OpCall, op, args)

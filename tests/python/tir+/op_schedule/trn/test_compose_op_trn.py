@@ -1,0 +1,188 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+import pytest
+
+import tvm
+from tvm.tir.layout import TrainiumLayout, TileLayout
+import numpy as np
+import tvm.testing
+from tvm.script import ir as I
+from tvm.script import tir as T
+from tvm.script import tirp as Tp
+from tvm.ir import assert_structural_equal
+
+target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+
+
+def test_simple_activation_reduce():
+    A_shape = (128, 512)
+    A_layout = TrainiumLayout("PF", T.TileLayout.from_tuple((128, 512), (1, 1)))
+    B_shape = (128, 512)
+    B_layout = TrainiumLayout("PF", T.TileLayout.from_tuple((128, 512), (1, 1)))
+    C_shape = (128, 1)
+    C_layout = TrainiumLayout("PF", T.TileLayout.from_tuple((128, 1), (1, 1)))
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def activation_reduce():
+        with T.kernel():
+            A = T.alloc_buffer(A_shape, dtype="float32", scope="trn.sbuf", layout=A_layout)
+            B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
+            C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
+            with Tp.compose_op():
+                Tp.sqrt(B, A)
+                Tp.sum(C, B, axes=1)
+                
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "activation_reduce"})
+        with T.kernel():
+            A = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            B = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            C = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop in range(1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    T.nki_activation_reduce(C[p_loop, 0], B[p_loop, f_loop], A[p_loop, f_loop], "sqrt", "sum")
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+def test_activation_reduce_in_loop():
+    A_shape = (32, 512, 128)
+    A_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 1024, 128), (1, 1)))
+    B_shape = (16, 512, 128)
+    B_layout = TrainiumLayout(
+        "FFFP", T.TileLayout.from_tuple((2, 4, 1024, 128), (1024, 2048, 1, 1))
+    )
+    C_shape = (16, 128)
+    C_layout = TrainiumLayout("FFFP", T.TileLayout.from_tuple((2, 4, 2, 128), (2, 4, 1, 1)))
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def activation_reduce():
+        with T.kernel():
+            A = T.alloc_buffer(A_shape, dtype="float32", scope="trn.sbuf", layout=A_layout)
+            B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
+            C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
+            for i in range(2):
+                with Tp.compose_op():
+                    Tp.sqrt(B, A[i*16:i*16+16])
+                    Tp.sum(C, B, axes=1)  
+                    
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "activation_reduce"})
+        with T.kernel():
+            A = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
+            C = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop in T.grid(2, 16):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    T.nki_activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop % 8 // 2 * 2048 + b_loop // 8 * 1024 + b_loop % 2 * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "sum")
+    # fmt: off
+    with target:
+        mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+def test_activation_reduce_in_loop2():
+    A_shape = (32, 512, 128)
+    A_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 1024, 128), (1, 1)))
+    B_shape = (16, 512, 128)
+    B_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 512, 128), (1, 1)))
+    C_shape = (16, 128)
+    C_layout = TrainiumLayout("FFFP", T.TileLayout.from_tuple((2, 4, 2, 128), (2, 4, 1, 1)))
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def activation_reduce():
+        with T.kernel():
+            A = T.alloc_buffer(A_shape, dtype="float32", scope="trn.sbuf", layout=A_layout)
+            B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
+            C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
+            for i in range(2):
+                with Tp.compose_op():
+                    Tp.sqrt(B, A[i*16:i*16+16])
+                    Tp.sum(C, B, axes=1)  
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "activation_reduce"})
+        with T.kernel():
+            A = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
+            C = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop in T.grid(2, 16):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    T.nki_activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "sum")
+    # fmt: off
+    with target:
+        mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+def test_activation_reduce_two_stage():
+    A_shape = (32, 512, 128)
+    A_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 1024, 128), (1, 1)))
+    B_shape = (16, 512, 128)
+    B_layout = TrainiumLayout(
+        "FFFP", T.TileLayout.from_tuple((2, 4, 1024, 128), (1024, 2048, 1, 1))
+    )
+    C_shape = (1, 128)
+    C_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((1, 128), (1, 1)))
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def activation_reduce():
+        with T.kernel():
+            A = T.alloc_buffer(A_shape, dtype="float32", scope="trn.sbuf", layout=A_layout)
+            B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
+            C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
+            for i in range(2):
+                with Tp.compose_op():
+                    Tp.sqrt(B, A[i*16:i*16+16])
+                    Tp.sum(C, B, axes=(0,1)) 
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "activation_reduce"})
+        with T.kernel():
+            A = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
+            C = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
+            for i in range(2):
+                with T.kernel():
+                    intermediate_buffer = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
+                    for b_loop in range(16):
+                        for reduction_b_loop in range(16):
+                            T.attr(0, "tensorized_nki_instruction", 1)
+                            for p_loop, f_loop in T.grid(128, 512):
+                                T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], B[p_loop, reduction_b_loop % 8 // 2 * 2048 + reduction_b_loop // 8 * 1024 + reduction_b_loop % 2 * 512 + f_loop], A[p_loop, i * 8192 + reduction_b_loop * 512 + f_loop], "sqrt", "sum")
+                        T.attr(0, "tensorized_nki_instruction", 1)
+                        for p_loop, f_loop in T.grid(128, 16):
+                            T.nki_tensorreduce(C[p_loop, 0], intermediate_buffer[p_loop, f_loop], "sum", -1) 
+    # fmt: off
+    with target:
+        mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+if __name__ == "__main__":
+    tvm.testing.main()

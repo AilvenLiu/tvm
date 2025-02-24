@@ -18,12 +18,13 @@
 """Common utilities for operator scheduling."""
 
 from collections import namedtuple
-from typing import Tuple
+from typing import Tuple, Optional
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion
 from tvm._ffi import get_global_func
+from tvm.tirp.op_schedule import ScheduleContext
 
 f_normalize_trn_layout_with_shape = get_global_func("tir.NormalizeTrainiumLayoutWithShape")
 f_normalize_tile_layout_with_shape = get_global_func("tir.NormalizeTileLayoutWithShape")
@@ -97,15 +98,14 @@ def generate_axes_in_region(
     inst_stride,
     inst_data_iters,
     analyzer,
-    dim2block_var=None,  # shape dim -> block var
 ):
     range_info, tiled_layout, seps = infer_range_info(buffer_region, analyzer)
     dim_in_region = {
         range_info[i].dim_in_data_iter: range_info[i].extent for i in range(len(range_info))
     }
     data_iters = get_layout_data_iters(tiled_layout)
-
-    def f(b_loops, f_loop, p_loop):
+    # dim2block_var: shape dim -> block var
+    def f(b_loops, f_loop, p_loop, dim2block_var=None):
         b_loops = list(b_loops)
 
         def extract_block_loop(extent, dim_in_shape):
@@ -115,8 +115,7 @@ def generate_axes_in_region(
                 assert dim_in_shape in dim2block_var
                 idx = dim2block_var[dim_in_shape]
             b_loop, b_extent = b_loops[idx]
-            ret = b_loop // (b_extent // extent)
-            b_loop = b_loop % (b_extent // extent)
+            ret = b_loop % b_extent// (b_extent // extent)
             b_extent = b_extent // extent
             b_loops[idx] = (b_loop, b_extent)
             return ret
@@ -176,11 +175,36 @@ def get_ewise_dim_map(
         j += 1
     return dim_map
 
+# src -> dst
+def get_reduction_dim_map(src_buffer_region: BufferRegion, dst_buffer_region: BufferRegion, axes: Tuple[int]):
+    dst_region = dst_buffer_region.region
+    dst_extent = [r.extent for r in dst_region]
+    dst_non_unit_extent_ = [(i, e) for i, e in enumerate(dst_extent) if e != 1]
+    src_region = src_buffer_region.region
+    src_extent = [r.extent for r in src_region]
+    src_non_unit_extent_ = [(i, e) for i, e in enumerate(src_extent) if e != 1]
+    src_non_reduction_extents = [(i, e) for i, e in src_non_unit_extent_ if i not in axes]
+    assert len(src_non_reduction_extents) == len(
+        dst_non_unit_extent_
+    ), "Source and destination must have the same number of non-reduction extents"
+    for i in range(len(src_non_reduction_extents)):
+        assert (
+            src_non_reduction_extents[i][1] == dst_non_unit_extent_[i][1]
+        ), "Source and destination must have the same extent for non-reduction axes"
+    dim_map = {s[0]: d[0] for s, d in zip(src_non_reduction_extents, dst_non_unit_extent_)}
+    return dim_map
 
+# FIXME: this function tends to use the lowest-stride axis from the first buffer region, which
+#       might leads to smaller instruction size. We should also try using the lowest-stride axis
+#       from the second buffer region and choose the best one.
 # infer an instruction size from buffer_region's access pattern that is compatible on second_buffer_region
 def find_max_inst_size_unary(
-    buffer_region: BufferRegion, second_buffer_region: BufferRegion, analyzer: Analyzer
+    buffer_region: BufferRegion, second_buffer_region: BufferRegion, analyzer: Analyzer, allowed_f_dim_1: Optional[Tuple[int]] = None, allowed_f_dim_2: Optional[Tuple[int]] = None
 ):
+    if allowed_f_dim_1 is None:
+        allowed_f_dim_1 = tuple(range(len(buffer_region.buffer.shape)))
+    if allowed_f_dim_2 is None:
+        allowed_f_dim_2 = tuple(range(len(second_buffer_region.buffer.shape)))
     tiled_range_infos_per_dim, tiled_layout, seps = infer_range_info(buffer_region, analyzer)
     data_iters = get_layout_data_iters(tiled_layout)
     _, second_tiled_layout, second_seps = infer_range_info(second_buffer_region, analyzer)
@@ -211,6 +235,11 @@ def find_max_inst_size_unary(
         leftover = None
         second_data_iter = None
         second_buffer_dim = buffer_dim_map[dim_in_shape]
+        if dim_in_shape not in allowed_f_dim_1 or second_buffer_dim not in allowed_f_dim_2:
+            if inst_size != 1:
+                break
+            else:
+                continue
         # find the corresponding data iter in the second buffer region
         for i in reversed(
             range(second_seps[second_buffer_dim], second_seps[second_buffer_dim + 1])
@@ -236,7 +265,7 @@ def find_max_inst_size_unary(
         if dim_type == T.TrainiumLayout.Partition:
             if (
                 second_is_sbuf
-                and second_buffer_region.buffer.layout.dimension_types[second_data_iter]
+                and second_tiled_layout.dimension_types[second_data_iter]
                 == T.TrainiumLayout.Free
             ):
                 assert (
@@ -309,7 +338,10 @@ def find_max_inst_size_from_one_region(
             prod_p_size *= ext
             continue
         if dim_in_shape not in allowed_f_dim:
-            break
+            if inst_size != 1:
+                break
+            else:
+                continue
         if inst_size != 1 and not analyzer.can_prove(
             inst_stride * inst_size == data_iters[dim_in_data_iter].stride
         ):
@@ -325,3 +357,24 @@ def find_max_inst_size_from_one_region(
     ), "Partition size of the instruction must match that of the buffer region"
 
     return inst_size, inst_stride, inst_data_iters
+
+def init_analyzer(sctx: ScheduleContext):
+    analyzer = Analyzer()
+    for v, r in sctx.var_range_map.items():
+        analyzer.bind(v, r)
+    return analyzer
+
+def f_gen_idx_anchor(buffer_region: BufferRegion, f_gen_axes):
+    def f(b_loops, f_loop, p_loop, dim2block_var=None):
+        region_axes = f_gen_axes(b_loops, f_loop, p_loop, dim2block_var)
+        return [buffer_region.region[i].min + region_axes[i] for i in range(len(region_axes))]
+    return f
+
+def f_gen_idx_mapped(buffer_region: BufferRegion, f_gen_axes, dim_map):
+    def f(b_loops, f_loop, p_loop, dim2block_var=None):
+        region_axes = f_gen_axes(b_loops, f_loop, p_loop, dim2block_var)
+        indices = [buffer_region.region[i].min for i in range(len(buffer_region.region))]
+        for i, j in dim_map.items():
+            indices[j] += region_axes[i]
+        return indices
+    return f

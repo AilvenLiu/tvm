@@ -23,11 +23,11 @@ import operator
 from functools import reduce
 
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T
+from tvm.script import tir as T, tirp as Tp
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tirp.op_schedule import ScheduleContext
 
-from .common import find_max_inst_size_from_one_region, generate_axes_in_region
+from .common import find_max_inst_size_from_one_region, generate_axes_in_region, init_analyzer, get_reduction_dim_map, f_gen_idx_anchor, f_gen_idx_mapped
 from ..registry import register_schedule
 from ..common import _make_schedule, ReduceOpType
 
@@ -37,6 +37,25 @@ reduce_ops = {
     ReduceOpType.MAX: "max",
     ReduceOpType.MIN: "min",
 }
+
+def generate_intermediate_buffer(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    axes: Tuple[int],
+    inst_size,
+    analyzer: Analyzer
+):
+    reduction_size = reduce(operator.mul, [src_buffer_region.region[i].extent for i in axes], 1)
+    if analyzer.can_prove(reduction_size == inst_size):
+        # No need to split into 2 stages
+        return None, None, None
+    assert analyzer.can_prove(reduction_size % inst_size == 0), "Reduction size must be divisible by instruction size"
+    rfactor_size = reduction_size // inst_size
+    dst_layout = dst_buffer_region.buffer.layout
+    intermediate_shape = [dst_layout.partition_size, rfactor_size]
+    intermediate_dimension_types = [T.TrainiumLayout.Partition, T.TrainiumLayout.Free]
+    intermediate_layout = T.TrainiumLayout(intermediate_dimension_types, T.TileLayout.from_tuple((dst_layout.partition_size, rfactor_size), (1, 1)))
+    return intermediate_shape, intermediate_layout, rfactor_size
 
 
 def reduction_trn(
@@ -51,29 +70,15 @@ def reduction_trn(
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
     assert not accum, "Accumulation is not supported for reduction on Trainium"
-    analyzer = Analyzer()
-    for v, r in sctx.var_range_map.items():
-        analyzer.bind(v, r)
+    analyzer = init_analyzer(sctx)
     assert reduce_op in reduce_ops, f"Unsupported reduce operation {reduce_op}"
 
     dst = dst_buffer_region.buffer
     dst_region = dst_buffer_region.region
     dst_extent = [r.extent for r in dst_region]
-    dst_non_unit_extent_ = [(i, e) for i, e in enumerate(dst_extent) if e != 1]
     src = src_buffer_region.buffer
-    src_region = src_buffer_region.region
-    src_extent = [r.extent for r in src_region]
-    src_non_unit_extent_ = [(i, e) for i, e in enumerate(src_extent) if e != 1]
-    axes = [i if i >= 0 else len(src_non_unit_extent_) + i for i in axes]
-    src_non_reduction_extents = [(i, e) for i, e in src_non_unit_extent_ if i not in axes]
-    assert len(src_non_reduction_extents) == len(
-        dst_non_unit_extent_
-    ), "Source and destination must have the same number of non-reduction extents"
-    for i in range(len(src_non_reduction_extents)):
-        assert (
-            src_non_reduction_extents[i][1] == dst_non_unit_extent_[i][1]
-        ), "Source and destination must have the same extent for non-reduction axes"
-    dim_map = {s[0]: d[0] for s, d in zip(src_non_reduction_extents, dst_non_unit_extent_)}
+    axes = [i if i >= 0 else len(src.shape) + i for i in axes]
+    dim_map = get_reduction_dim_map(src_buffer_region, dst_buffer_region, axes)
     # layout checks
     assert all(
         [
@@ -90,39 +95,45 @@ def reduction_trn(
     inst_size, inst_stride, inst_data_iters = find_max_inst_size_from_one_region(
         src_buffer_region, axes, analyzer
     )
-    reduce_size = reduce(operator.mul, [src_buffer_region.region[i].extent for i in axes], 1)
-
-    # TODO: split into 2 stages if cannot find an instruction that covers the whole reduction axes
-    assert analyzer.can_prove(
-        reduce_size == inst_size
-    ), "Cannot find an instruction that covers the whole reduction axes"
-    f_gen_axes = generate_axes_in_region(src_buffer_region, inst_stride, inst_data_iters, analyzer)
-
-    def f_gen_src_idx(b_loop, b_extent, f_loop, p_loop):
-        region_axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
-        return [src_buffer_region.region[i].min + region_axes[i] for i in range(len(region_axes))]
-
-    def f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop):
-        indices = [dst_buffer_region.region[i].min for i in range(len(dst_buffer_region.region))]
-        region_axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
-        for i, j in dim_map.items():
-            indices[j] += region_axes[i]
-        return indices
-
+    assert analyzer.can_prove(inst_size > 1), "Instruction size must be greater than 1"
     p_size = dst.layout.partition_size
-    b_extent = reduce(operator.mul, [e for i, e in dst_non_unit_extent_], 1) // p_size
+    b_extent = reduce(operator.mul, dst_extent, 1) // p_size
     opcode = reduce_ops[reduce_op]
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def impl():
-        for b_loop in T.serial(0, b_extent):
-            with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop, f_loop in T.grid(p_size, inst_size):
-                    src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop, p_loop))
-                    dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop))
-                    T.evaluate(T.nki_tensorreduce(dst[dst_indices], src[src_indices], opcode, -1))
-    # fmt: on
-    return impl
+    intermediate_shape, intermediate_layout, reduction_b_extent = generate_intermediate_buffer(dst_buffer_region, src_buffer_region, axes, inst_size, analyzer)
+    f_gen_axes = generate_axes_in_region(src_buffer_region, inst_stride, inst_data_iters, analyzer)
+    f_gen_src_idx = f_gen_idx_anchor(src_buffer_region, f_gen_axes)
+    f_gen_dst_idx = f_gen_idx_mapped(dst_buffer_region, f_gen_axes, dim_map)
+    if intermediate_shape is None:
+        # fmt: off
+        @T.prim_func(tirp=True)
+        def impl():
+            for b_loop in T.serial(0, b_extent):
+                with T.attr(0, "tensorized_nki_instruction", 1):
+                    for p_loop, f_loop in T.grid(p_size, inst_size):
+                        src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop, p_loop))
+                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
+                        T.evaluate(T.nki_tensorreduce(dst[dst_indices], src[src_indices], opcode, -1))
+        # fmt: on
+        return impl
+    else:
+        dim2block_var = {dim: 1 if dim in axes else 0 for dim in range(len(src.shape))}
+        # fmt: off
+        @T.prim_func(tirp=True)
+        def two_stage_reduction():
+            with T.kernel():
+                intermediate_buffer = T.alloc_buffer(intermediate_shape, dtype=dst.dtype, layout=intermediate_layout, scope="trn.sbuf")
+                for b_loop in T.serial(0, b_extent):
+                    for reduction_b_loop in T.serial(0, reduction_b_extent):
+                        with T.attr(0, "tensorized_nki_instruction", 1):
+                            for p_loop, f_loop in T.grid(p_size, inst_size):
+                                src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                T.evaluate(T.nki_tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, -1))
+                    with T.attr(0, "tensorized_nki_instruction", 1):
+                        for p_loop, f_loop in T.grid(p_size, reduction_b_extent):
+                            dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                            T.evaluate(T.nki_tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, -1))
+        # fmt: on
+        return two_stage_reduction
 
 
 # Register unary mapping schedules.

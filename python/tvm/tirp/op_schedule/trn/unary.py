@@ -17,7 +17,7 @@
 
 """Implementation of unary operator schedules."""
 
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 import operator
 
 from tvm.arith.analyzer import Analyzer
@@ -32,6 +32,9 @@ from .common import (
     find_max_inst_size_unary,
     get_hardware_inst_size_limit,
     bound_inst_with_limit,
+    init_analyzer,
+    f_gen_idx_anchor,
+    f_gen_idx_mapped
 )
 from ..common import MapOpType
 
@@ -43,6 +46,41 @@ unary_map_ops = {
 
 const_input_ops = [MapOpType.MEMSET]
 
+
+def try_find_inst_unary(dst_buffer_region: BufferRegion, src_buffer_region: BufferRegion, analyzer: Analyzer, allowed_f_dim_dst: Optional[Tuple[int]] = None, allowed_f_dim_src: Optional[Tuple[int]] = None):
+    dst = dst_buffer_region.buffer
+    dst_region = dst_buffer_region.region
+    dst_extent = [r.extent for r in dst_region]
+    dst_extent_ = [e for e in dst_extent if e != 1]
+    src = src_buffer_region.buffer
+    if not all(
+        [
+            src.layout and dst.layout,
+            src.scope() == "trn.sbuf" or src.scope() == "trn.psum",
+            dst.scope() == "trn.sbuf",
+            isinstance(src.layout, T.TrainiumLayout),
+            isinstance(dst.layout, T.TrainiumLayout),
+        ]
+    ):
+        assert False, f"scope or layout mismatch, src: {src_buffer_region}, dst: {dst_buffer_region}"
+    # Extract regions and validate dimensions
+    src_region = src_buffer_region.region
+    src_extent = [r.extent for r in src_region]
+
+    # Validate non-unit dimensions match
+    src_extent_ = [e for e in src_extent if e != 1]
+    if not (
+        len(src_extent_) == len(dst_extent_)
+        and all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent_, dst_extent_))
+    ):
+        assert False, f"shape or dimension mismatch, src: {src_buffer_region}, dst: {dst_buffer_region}"
+    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
+        dst_buffer_region, src_buffer_region, analyzer, allowed_f_dim_dst, allowed_f_dim_src
+    )
+
+    f_gen_axes = generate_axes_in_region(dst_buffer_region, inst_stride, inst_data_iters, analyzer)
+    
+    return inst_size, inst_stride, inst_data_iters, f_gen_axes
 
 def unary_trn(
     dst_buffer_region: BufferRegion,
@@ -63,60 +101,21 @@ def unary_trn(
     else:
         src_buffer_region = _src
 
-    analyzer = Analyzer()
-    for v, r in sctx.var_range_map.items():
-        analyzer.bind(v, r)
+    analyzer = init_analyzer(sctx)
     assert unary_op in unary_map_ops, f"Unsupported unary operation {unary_op}"
     dst = dst_buffer_region.buffer
     dst_region = dst_buffer_region.region
     dst_extent = [r.extent for r in dst_region]
-    dst_extent_ = [e for e in dst_extent if e != 1]
     if CONST is None:
         src = src_buffer_region.buffer
-        if not all(
-            [
-                src.layout and dst.layout,
-                src.dtype == dst.dtype,
-                src.scope() == "trn.sbuf" or src.scope() == "trn.psum",
-                dst.scope() == "trn.sbuf",
-                isinstance(src.layout, T.TrainiumLayout),
-                isinstance(dst.layout, T.TrainiumLayout),
-            ]
-        ):
-            return None
-        # Extract regions and validate dimensions
-        src_region = src_buffer_region.region
-        src_extent = [r.extent for r in src_region]
-
-        # Validate non-unit dimensions match
-        src_extent_ = [e for e in src_extent if e != 1]
-        if not (
-            len(src_extent_) == len(dst_extent_)
-            and all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent_, dst_extent_))
-        ):
-            return None
-        inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-            dst_buffer_region, src_buffer_region, analyzer
-        )
+        inst_size, _, _, f_gen_axes = try_find_inst_unary(dst_buffer_region, src_buffer_region, analyzer)
+        f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
+        f_gen_src_idx = f_gen_idx_mapped(src_buffer_region, f_gen_axes, get_ewise_dim_map(dst_buffer_region, src_buffer_region, analyzer))
     else:
-        inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-            dst_buffer_region, dst_buffer_region, analyzer
-        )
+        inst_size, _, _, f_gen_axes = try_find_inst_unary(dst_buffer_region, dst_buffer_region, analyzer)
+        f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
+    
     p_size = dst_buffer_region.buffer.layout.partition_size
-    f_gen_axes = generate_axes_in_region(dst_buffer_region, inst_stride, inst_data_iters, analyzer)
-
-    def f_gen_src_idx(b_loop, b_extent, f_loop, p_loop):
-        dim_map = get_ewise_dim_map(dst_buffer_region, src_buffer_region, analyzer)
-        indices = [src_buffer_region.region[i].min for i in range(len(src_buffer_region.region))]
-        axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
-        for i, j in dim_map.items():
-            indices[j] += axes[i]
-        return indices
-
-    def f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop):
-        axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
-        return [dst_buffer_region.region[i].min + axes[i] for i in range(len(axes))]
-
     b_extent = reduce(operator.mul, dst_extent, 1) // p_size // inst_size
 
     func, opcode = unary_map_ops[unary_op]
@@ -132,12 +131,12 @@ def unary_trn(
                 for p_loop in T.serial(0, p_size):
                     for f_loop in T.serial(0, actual_inst_size):
                         f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                        dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
+                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
                         if CONST is not None:
                             if unary_op == MapOpType.MEMSET:
                                 T.evaluate(func(dst[*dst_indices], CONST))
                         else:
-                            src_indices = T.meta_var(f_gen_src_idx(b_loop, b_extent, f_loop_wo_limit, p_loop) if CONST is None else [])
+                            src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop) if CONST is None else [])
                             if opcode is None:
                                 T.evaluate(func(dst[*dst_indices], src[*src_indices]))
                             else:

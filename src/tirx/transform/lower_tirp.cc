@@ -565,12 +565,9 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
                                                   const Array<PrimExpr>& indices) {
     if (buffer->layout.defined() && buffer->layout.value().as<TrainiumLayoutNode>()) {
       auto simplified_indices = this->IterMapSimplifyWithContext(indices, false);
-      if (buffer->layout.defined()) {
-        simplified_indices = buffer->layout.value()->Apply(simplified_indices, buffer->shape);
-        simplified_indices = this->IterMapSimplifyWithContext(simplified_indices, false);
-        for (size_t i = 0; i < simplified_indices.size(); i++) {
-          simplified_indices.Set(i, analyzer_->Simplify(simplified_indices[i]));
-        }
+      simplified_indices = buffer->layout.value()->Apply(simplified_indices, buffer->shape);
+      for (size_t i = 0; i < simplified_indices.size(); i++) {
+        simplified_indices.Set(i, analyzer_->Simplify(simplified_indices[i]));
       }
       return simplified_indices;
     }

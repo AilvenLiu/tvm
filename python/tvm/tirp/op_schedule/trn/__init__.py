@@ -19,3 +19,4 @@ from .copy import *
 from .gemm import *
 from .maps import *
 from .reduction import *
+from .compose_op import *

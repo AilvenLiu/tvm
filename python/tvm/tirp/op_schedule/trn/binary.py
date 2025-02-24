@@ -33,6 +33,7 @@ from .common import (
     get_ewise_dim_map,
     get_hardware_inst_size_limit,
     bound_inst_with_limit,
+    init_analyzer
 )
 from ..common import MapOpType
 
@@ -223,9 +224,7 @@ def binary_trn(
         return None
 
     # Switch broadcasting
-    analyzer = Analyzer()
-    for v, r in sctx.var_range_map.items():
-        analyzer.bind(v, r)
+    analyzer = init_analyzer(sctx)
     NUM_ELEMENTS = functools.reduce(operator.mul, dst_extent, 1)
 
     if CONST is None:

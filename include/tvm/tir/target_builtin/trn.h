@@ -115,6 +115,15 @@ TVM_DLL const Op& nki_tensorreduce();
  */
 TVM_DLL const Op& nki_memset();
 
+/*!
+ * \brief nki intrinsics for activation reduce operation.
+ *
+ * nki_activation_reduce(reduce_res, act_res, data, opcode, reduce_opcode)
+ */
+TVM_DLL const Op& nki_activation_reduce();
+
+
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

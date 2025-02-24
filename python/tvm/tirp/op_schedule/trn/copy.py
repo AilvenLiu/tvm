@@ -32,6 +32,7 @@ from .common import (
     find_max_inst_size_unary,
     get_hardware_inst_size_limit,
     bound_inst_with_limit,
+    init_analyzer
 )
 
 
@@ -66,9 +67,7 @@ def copy_trn(
         raise ValueError("Invalid buffer layout/scope for copy operation.")
 
     # Extract regions and validate dimensions
-    analyzer = Analyzer()
-    for v, r in sctx.var_range_map.items():
-        analyzer.bind(v, r)
+    analyzer = init_analyzer(sctx)
     src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
     src_extent = [r.extent for r in src_region]
     dst_extent = [r.extent for r in dst_region]

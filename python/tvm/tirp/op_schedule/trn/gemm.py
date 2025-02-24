@@ -30,6 +30,7 @@ from .common import (
     generate_axes_in_region,
     find_max_inst_size_from_one_region,
     bound_inst_with_limit,
+    init_analyzer
 )
 
 max_inst_size = 128
@@ -87,9 +88,7 @@ def matmul_trn(
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
 
-    analyzer = Analyzer()
-    for v, r in sctx.var_range_map.items():
-        analyzer.bind(v, r)
+    analyzer = init_analyzer(sctx)
     A, B, C, D = (
         A_buffer_region.buffer,
         B_buffer_region.buffer,
@@ -137,17 +136,17 @@ def matmul_trn(
     dim2block_var_lhs = {lhs_f_dim: 0, lhs_p_dim: 1}
     dim2block_var_rhs = {rhs_f_dim: 0, rhs_p_dim: 1}
     f_gen_lhs_axes = generate_axes_in_region(
-        A_buffer_region, lhs_f_stride, lhs_f_data_iters, analyzer, dim2block_var_lhs
+        A_buffer_region, lhs_f_stride, lhs_f_data_iters, analyzer
     )
     f_gen_rhs_axes = generate_axes_in_region(
-        B_buffer_region, rhs_f_stride, rhs_f_data_iters, analyzer, dim2block_var_rhs
+        B_buffer_region, rhs_f_stride, rhs_f_data_iters, analyzer
     )
 
     def f_gen_lhs_indices(
         lhs_b_loop, lhs_b_extent, reduction_b_loop, reduction_b_extent, f_loop, p_loop
     ):
         lhs_axes = f_gen_lhs_axes(
-            [(lhs_b_loop, lhs_b_extent), (reduction_b_loop, reduction_b_extent)], f_loop, p_loop
+            [(lhs_b_loop, lhs_b_extent), (reduction_b_loop, reduction_b_extent)], f_loop, p_loop, dim2block_var_lhs
         )
         return [A_buffer_region.region[i].min + lhs_axes[i] for i in range(len(lhs_axes))]
 
@@ -155,7 +154,7 @@ def matmul_trn(
         rhs_b_loop, lhs_b_extent, reduction_b_loop, reduction_b_extent, f_loop, p_loop
     ):
         rhs_axes = f_gen_rhs_axes(
-            [(rhs_b_loop, lhs_b_extent), (reduction_b_loop, reduction_b_extent)], f_loop, p_loop
+            [(rhs_b_loop, lhs_b_extent), (reduction_b_loop, reduction_b_extent)], f_loop, p_loop, dim2block_var_rhs
         )
         return [B_buffer_region.region[i].min + rhs_axes[i] for i in range(len(rhs_axes))]
 
@@ -169,10 +168,10 @@ def matmul_trn(
         rhs_f_loop,
     ):
         lhs_axes = f_gen_lhs_axes(
-            [(lhs_b_loop, lhs_b_extent), (0, reduction_b_extent)], lhs_f_loop, 0
+            [(lhs_b_loop, lhs_b_extent), (0, reduction_b_extent)], lhs_f_loop, 0, dim2block_var_lhs
         )
         rhs_axes = f_gen_rhs_axes(
-            [(rhs_b_loop, rhs_b_extent), (0, reduction_b_extent)], rhs_f_loop, 0
+            [(rhs_b_loop, rhs_b_extent), (0, reduction_b_extent)], rhs_f_loop, 0, dim2block_var_rhs
         )
 
         acc_indices = [C_buffer_region.region[i].min for i in range(len(C_buffer_region.region))]
