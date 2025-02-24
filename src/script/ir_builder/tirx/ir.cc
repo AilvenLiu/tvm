@@ -797,6 +797,11 @@ ElseFrame Else() {
   return ElseFrame(n);
 }
 
+ComposeOpFrame ComposeOp() {
+  ObjectPtr<ComposeOpFrameNode> n = make_object<ComposeOpFrameNode>();
+  return ComposeOpFrame(n);
+}
+
 Var EnvThread(ffi::String thread_tag, DataType dtype) {
   IterVar iter_var(Range{nullptr}, Var("", dtype), tvm::tirx::IterVarType::kThreadIndex,
                    thread_tag);
@@ -1058,10 +1063,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                throw;
              }
            })
-      .def("script.ir_builder.tirx.EnvThread", EnvThread)
-      .def("script.ir_builder.tirx.BufferStore", BufferStore)
-      .def("script.ir_builder.tirx.Evaluate", Evaluate)
-      .def("script.ir_builder.tirx.Ptr", Ptr);
+      .def("script.ir_builder.tir.EnvThread", EnvThread)
+      .def("script.ir_builder.tir.ComposeOp", ComposeOp)
+      .def("script.ir_builder.tir.BufferStore", BufferStore)
+      .def("script.ir_builder.tir.Evaluate", Evaluate)
+      .def("script.ir_builder.tir.Ptr", Ptr);
 }
 
 #define TVM_TMP_STR(x) #x
@@ -1191,7 +1197,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

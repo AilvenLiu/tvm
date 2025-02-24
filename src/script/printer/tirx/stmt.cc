@@ -210,6 +210,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
           static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
           static const auto& pipeline_op_map = Op::GetAttrMap<Bool>("TIsPipelineOp");
+          static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
           ICHECK(bool(tirp_op_map.get(op, tvm::Bool(false))))
               << "Only TIR+ ops can be used in tirx::tirp::OpCall";
           String name = op_names.get(op, op->name);
@@ -227,6 +228,16 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             // pipeline_method_name
             std::string method = std::string(name).substr(9);
             return print_member_function_call(method);
+          } else if (bool(compose_op_map.get(op, tvm::Bool(false)))) {
+            // Compose ops
+            With<TIRFrame> f(d, op_call);
+            Array<tir::Stmt> stmts;
+            for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
+              stmts.push_back(Downcast<tir::Stmt>(op_call->args[i]));
+            }
+            tir::SeqStmt seq_stmt(stmts);
+            AsDocBody(seq_stmt, p->Attr("args"), f->get(), d);
+            return ScopeDoc(NullOpt, TIRp(d, "compose_op")->Call({}), (*f)->stmts);
           } else {
             LOG(FATAL) << "Unknown TIR+ op type: " << op->name;
           }

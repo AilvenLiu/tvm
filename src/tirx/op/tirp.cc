@@ -201,6 +201,14 @@ TIRP_DEFINE_SCHEDULE_OP(memset).set_num_inputs(2).set_attr<FArgSanitizer>(
         ICHECK(args[1].as<FloatImmNode>()) << "arg[1] of memset() must be FloatImm";
     });
 
+/********************* Compose Ops **********************/
+#define TIRP_DEFINE_COMPOSE_OP(OpName) \
+  TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsComposeOp", Bool(true))
+
+TIRP_DEFINE_COMPOSE_OP(compose_op)
+    .set_num_inputs(1)
+    .set_attr<FArgSanitizer>("FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {});
+
 /********************* Pipeline Ops **********************/
 #define TIRP_DEFINE_PIPELINE_OP(OpName) \
   TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsPipelineOp", Bool(true))

@@ -638,29 +638,21 @@ def test_roundtrip_alloc_under_any_scope():
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
+def test_roundtrip_compose_op():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        with T.kernel():
+            A = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            B = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            C = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            with Tp.compose_op():
+                Tp.add(B, A, T.float32(1))
+                Tp.add(C, B, T.float32(1))
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
 
 if __name__ == "__main__":
-    test_roundtrip_scopeid1()
-    test_roundtrip_scopeid2()
-    test_roundtrip_exec_scope()
-    test_roundtrip_layout()
-    test_roundtrip_buffer_view_get1()
-    test_roundtrip_buffer_view_get2()
-    test_alloc_buffer_default_logical_scope()
-    test_roundtrip_op1()
-    test_roundtrip_op2()
-    test_roundtrip_op3()
-    test_roundtrip_pipeline_no_specialize_async_no_depth()
-    test_roundtrip_pipeline_specialize_sync_depth()
-    test_roundtrip_tensormap()
-    test_roundtrip_break_for()
-    test_roundtrip_break_while()
-    test_roundtrip_break_nested()
-    test_roundtrip_continue_for()
-    test_roundtrip_continue_while()
-    test_roundtrip_continue_nested()
-    test_roundtrip_break_and_continue()
-    test_roundtrip_unreachable_after_break()
-    test_roundtrip_allocated_addr()
-    test_roundtrip_implicit_buffer_region()
-    test_roundtrip_alloc_under_any_scope()
+    tvm.testing.main()   

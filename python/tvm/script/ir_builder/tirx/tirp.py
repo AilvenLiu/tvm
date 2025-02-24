@@ -22,7 +22,7 @@ from tvm.tir.async_structs import CopyPipeline
 from tvm.tir.exec_scope import ExecScope
 from tvm.tir.expr import FloatImm
 
-from . import _ffi_api
+from . import _ffi_api, frame
 
 
 def _get_tirp_op(op_name: str):
@@ -405,6 +405,17 @@ def alloc_copy_pipeline(
     return _ffi_api.AllocCopyPipeline(thread_scope, depth, separate_pc, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
+def compose_op() -> frame.ComposeOpFrame:
+    """Compose a TIRp op.
+
+    Returns
+    -------
+    res : frame.ComposeOpFrame
+        The result ComposeOpFrame.
+    """
+    return _ffi_api.ComposeOp()  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
 __all__ = [
     "zero",
     "sqrt",
@@ -421,4 +432,5 @@ __all__ = [
     "max",
     "min",
     "alloc_copy_pipeline",
+    "compose_op",
 ]

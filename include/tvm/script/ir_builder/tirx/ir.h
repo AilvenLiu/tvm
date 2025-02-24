@@ -487,6 +487,13 @@ LaunchThreadFrame LaunchThread(Var var, PrimExpr extent);
  */
 LaunchThreadFrame LaunchThread(ffi::String thread_tag, PrimExpr extent);
 
+
+/*!
+ * \brief Compose TIRp op.
+ * \return The result ComposeOpFrame.
+ */
+ComposeOpFrame ComposeOp();
+
 /*!
  * \brief Bind a var to thread env.
  * \param thread_tag The thread type tag.
