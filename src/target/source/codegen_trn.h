@@ -66,7 +66,8 @@ class CodeGenTrainium final : public CodeGenC {
   void VisitExpr_(const CastNode* op, std::ostream& os) final;        // NOLINT(*)
   void VisitExpr_(const FloorDivNode* op, std::ostream& os) final;    // NOLINT(*)
   void VisitExpr_(const FloorModNode* op, std::ostream& os) final;    // NOLINT(*)
-  void VisitStmt_(const DeclBufferNode* op) final;
+  void VisitStmt_(const DeclBufferNode* op) final;                    // NOLINT(*)
+  void VisitStmt_(const IfThenElseNode* op) final;                    // NOLINT(*)
 
  private:
   Target target_;

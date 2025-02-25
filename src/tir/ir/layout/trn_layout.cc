@@ -150,7 +150,32 @@ Array<PrimExpr> TrainiumLayoutNode::Apply(const Array<PrimExpr>& coord,
   arith::Analyzer analyzer;
   ICHECK(!analyzer.CanProveEqual(shape_prod, layout_sz))
       << "ValueError: The shape must match the layout size";
-  return TLayoutNode::Apply(coord, shape);
+  auto pr = NormalizeTrainiumLayoutWithShape(GetRef<TrainiumLayout>(this), shape);
+  auto grouped_layout = pr.first;
+  auto seps = pr.second;
+  if (!grouped_layout.defined()) {
+    return TLayoutNode::Apply(coord, shape);
+  }
+  PrimExpr partition_coord = 0, free_coord = 0;
+  auto split_map = grouped_layout->combined_1d_layout.GetSplitMap();
+  for (int i = 0; i < static_cast<int>(shape.size()); i++) {
+    PrimExpr cur = coord[i];
+    for (int j = seps[i + 1] - 1; j >= seps[i]; j--) {
+      if (split_map.find(j) != split_map.end()) {
+        cur = floordiv(cur, grouped_layout->combined_1d_layout->data_iter_array[j]->extent);
+        continue;
+      }
+      PrimExpr e = floormod(cur, grouped_layout->combined_1d_layout->data_iter_array[j]->extent) *
+                   grouped_layout->combined_1d_layout->data_iter_array[j]->stride;
+      if (grouped_layout->dimension_types[j] == PhysicalDimensionType::kPartition) {
+        partition_coord += e;
+      } else {
+        free_coord += e;
+      }
+      cur = floordiv(cur, grouped_layout->combined_1d_layout->data_iter_array[j]->extent);
+    }
+  }
+  return {partition_coord, free_coord};
 }
 
 Array<PrimExpr> TrainiumLayoutNode::Apply(const PrimExpr& coord) const {
@@ -175,8 +200,8 @@ Array<PrimExpr> TrainiumLayoutNode::Apply(const PrimExpr& coord) const {
 }
 /**************** TrainiumPSUMLayout ****************/
 
-Array<PrimExpr> TrainiumPSUMLayoutNode::Apply(const PrimExpr& coord) const {
-  auto indices = TrainiumLayoutNode::Apply(coord);
+Array<PrimExpr> TrainiumPSUMLayoutNode::Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const {
+  auto indices = TrainiumLayoutNode::Apply(coord, shape);
   ICHECK_EQ(indices.size(), 2);
   return {floordiv(indices[1], kPSUMMaxElemPerBank), indices[0],
           floormod(indices[1], kPSUMMaxElemPerBank)};

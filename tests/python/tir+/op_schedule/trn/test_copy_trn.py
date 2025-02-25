@@ -475,5 +475,69 @@ def test_copy_with_inst_size_limit():
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
+def test_copy_with_complex_index():
+    A_shape = [4096, 4096]
+    A_layout = T.TileLayout.from_tuple((4096, 4096), (1, 4096))
+    A_sbuf_shape = (2, 2048, 1024)
+    A_sbuf_layout = T.TrainiumLayout("FFFP", T.TileLayout.from_tuple((2, 2048,8, 128), (16384, 1, 2048, 1)))
+    
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def copy(A_ptr: T.handle, ) -> None:
+        A = T.match_buffer(A_ptr, A_shape, "float32", layout=A_layout)
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(A_sbuf_shape, "float32", scope="trn.sbuf", layout=A_sbuf_layout)
+            Tp.copy(A_sbuf[1, 0:2048, 0:1024], A[2048: 4096, 3072:4096])
+            
+    @T.prim_func(tirp=True)
+    def expected(A_ptr: T.handle):
+        T.func_attr({"global_symbol": "copy"})
+        A = T.match_buffer(A_ptr, (4096, 4096), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(4096, 4096), strides=(1, 4096)))
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 32768), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop, additional_b_loop in T.grid(8, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 2048):
+                    A_1 = T.Buffer((16777216,), data=A.data, logical_scope="kernel")
+                    T.nki_load(A_sbuf[p_loop, b_loop * 2048 + f_loop + 16384], A_1[b_loop * 524288 + p_loop * 4096 + f_loop + 12584960])
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": copy})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+        
+def test_copy_with_complex_index_2():
+    A_sbuf_shape = [4096, 4096]
+    A_sbuf_layout = T.TrainiumLayout("FFP", T.TileLayout.from_tuple((4096, 32, 128), (1, 4096, 1)))
+    A_shape = (2, 2048, 1024)
+    A_layout = T.TileLayout.from_tuple((2, 2048,1024), (2048*1024, 1, 2048,))
+    
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def copy(A_ptr: T.handle, ) -> None:
+        A = T.match_buffer(A_ptr, A_shape, "float32", layout=A_layout)
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(A_sbuf_shape, "float32", scope="trn.sbuf", layout=A_sbuf_layout)
+            Tp.copy(A_sbuf[2048: 4096, 3072:4096], A[1, 0:2048, 0:1024])
+            
+    @T.prim_func(tirp=True)
+    def expected(A_ptr: T.handle):
+        T.func_attr({"global_symbol": "copy"})
+        A = T.match_buffer(A_ptr, (2, 2048, 1024), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(2, 2048, 1024), strides=(2097152, 1, 2048)))
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 131072), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop, additional_b_loop in T.grid(8, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 2048):
+                    A_1 = T.Buffer((4194304,), data=A.data, logical_scope="kernel")
+                    T.nki_load(A_sbuf[p_loop, b_loop * 4096 + f_loop + 100352], A_1[b_loop * 262144 + p_loop * 2048 + f_loop + 2097152])
+    # fmt: on
+    
+    with target:
+        mod = tvm.IRModule({"main": copy})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+    
+    
 if __name__ == "__main__":
     tvm.testing.main()

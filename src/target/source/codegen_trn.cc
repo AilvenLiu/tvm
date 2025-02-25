@@ -456,6 +456,23 @@ runtime::Module BuildTrainium(IRModule mod, Target target) {
   return codegen::DeviceSourceModuleCreate(source_maker.str(), fmt, ExtractFuncInfo(mod), "nki");
 }
 
+void CodeGenTrainium::VisitStmt_(const IfThenElseNode* op) {
+  std::string cond = PrintExpr(op->condition);
+  PrintIndent();
+  stream << "if " << cond << " :\n";
+  int then_scope = BeginScope();
+  PrintStmt(op->then_case);
+  this->EndScope(then_scope);
+  if (op->else_case) {
+    PrintIndent();
+    stream << "else:\n";
+    int else_scope = BeginScope();
+    PrintStmt(op->else_case.value());
+    this->EndScope(else_scope);
+  }
+}
+
+
 TVM_REGISTER_GLOBAL("target.build.trn").set_body_typed(BuildTrainium);
 }  // namespace codegen
 }  // namespace tvm

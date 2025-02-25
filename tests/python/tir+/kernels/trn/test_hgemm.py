@@ -29,9 +29,9 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 @pytest.mark.dependency(depends=["ssh_success"])
 def test_gemm(ssh_client):
-    K = 1024
+    K = 4096
     M = 4096
-    N = 2048
+    N = 4096
     BLOCK_M = 2048
     BLOCK_N = 1024
     BLOCK_K = 1024
@@ -54,17 +54,23 @@ def test_gemm(ssh_client):
             # FIXME: currently nki has a bug for psum initialization
             # fix this when NKI exposes psum initialization API
             Tp.gemm(c_psum[psum_bank], a_sbuf[m%2, TILE_M_START:TILE_M_START+TILE_M, :], b_sbuf[(n*NUM_BLOCK_K+k)%2, :, TILE_N_START:TILE_N_START+TILE_N], c_psum[psum_bank])
-            Tp.add(
-                result_tiles[
+            if k == 0:
+                Tp.copy(result_tiles[
                     m * BLOCK_M + TILE_M_START : m * BLOCK_M + TILE_M_START+TILE_M,
                     TILE_N_START : TILE_N_START + TILE_N,
-                ],
-                result_tiles[
-                    m * BLOCK_M + TILE_M_START : m * BLOCK_M + TILE_M_START+TILE_M,
-                    TILE_N_START : TILE_N_START + TILE_N,
-                ],
-                c_psum[psum_bank],
-            )
+                ], c_psum[psum_bank])
+            else:
+                Tp.add(
+                    result_tiles[
+                        m * BLOCK_M + TILE_M_START : m * BLOCK_M + TILE_M_START+TILE_M,
+                        TILE_N_START : TILE_N_START + TILE_N,
+                    ],
+                    result_tiles[
+                        m * BLOCK_M + TILE_M_START : m * BLOCK_M + TILE_M_START+TILE_M,
+                        TILE_N_START : TILE_N_START + TILE_N,
+                    ],
+                    c_psum[psum_bank],
+                )
 
     @T.macro
     def load_A(n, k, m, a_sbuf, A):
@@ -113,7 +119,6 @@ def test_gemm(ssh_client):
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": matmul})
-        mod = tvm.tir.transform.LowerTIRp()(mod)
         func = mod["main"]
         run_on_remote_and_check_correct(func, lambda x, y: (x.reshape(K, M).T @ y,), target)
 

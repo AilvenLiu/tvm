@@ -54,13 +54,8 @@ def generate_std_output(func: PrimFunc, std_f_output: Callable):
 
 def generate_test_function(func: PrimFunc, target: tvm.target.Target):
     mod = tvm.IRModule({"main": func})
-    mod = tvm.tir.transform.DecorateDeviceScope()(mod)
-    with tvm.transform.PassContext(
-        config={"tir.disable_storage_rewrite": True},
-        disabled_pass=["tir.StorageFlattenatten", "tir.FlattenBuffer", "tir.LowerIntrin"],
-    ):
-        mod = tvm.build(mod, target=target, pipeline="tirp")
-        src = mod.imported_modules[0].get_source()
+    mod = tvm.build(mod, target=target, pipeline="trn")
+    src = mod.imported_modules[0].get_source()
     func_str = src
     func_name = func.attrs["global_symbol"]
     func_str += "def test_func():\n"

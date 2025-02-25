@@ -242,7 +242,6 @@ def trn_pipeline():
         config = pass_ctx.config
         passes = [
             tir.transform.LowerTIRp(),
-            tvm.transform.PrintIR(),
             tir.transform.DecorateDeviceScope(),
             tir.transform.ConvertBlocksToOpaque(),
             tir.transform.LowerMatchBuffer(),

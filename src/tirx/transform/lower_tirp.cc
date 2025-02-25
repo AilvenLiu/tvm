@@ -571,20 +571,18 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
   virtual Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer,
                                                   const Array<PrimExpr>& indices) {
     if (buffer->layout.defined() && buffer->layout.value().as<TrainiumLayoutNode>()) {
-      auto simplified_indices = this->IterMapSimplifyWithContext(indices, false);
-      simplified_indices = buffer->layout.value()->Apply(simplified_indices, buffer->shape);
-      for (size_t i = 0; i < simplified_indices.size(); i++) {
-        simplified_indices.Set(i, analyzer_->Simplify(simplified_indices[i]));
+      auto applied = buffer->layout.value()->Apply(indices, buffer->shape);
+      for (size_t i = 0; i < applied.size(); i++) {
+        applied.Set(i, analyzer_->Simplify(applied[i]));
       }
-      return simplified_indices;
+      return applied;
+    }
+    if (buffer->layout.defined()) {
+      return {analyzer_->Simplify(buffer->layout.value()->Apply(indices, buffer->shape)[0])};
     }
     auto flattened_indices = buffer->ElemOffset(indices, true);
-    flattened_indices = this->IterMapSimplifyWithContext(flattened_indices, false);
     ICHECK_EQ(flattened_indices.size(), 1) << "Expected a single element offset";
-    if (buffer->layout.defined()) {
-      return {analyzer_->Simplify(buffer->layout.value()->Apply(flattened_indices[0])[0])};
-    }
-    return flattened_indices;
+    return {analyzer_->Simplify(flattened_indices[0])};
   }
 
   template <typename Node>

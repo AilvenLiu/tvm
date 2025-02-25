@@ -40,6 +40,9 @@ TileLayout SimplifyTileLayout(TileLayout layout);
 std::pair<TileLayout, std::vector<int64_t>> TileLayoutGroupByLogicalShape(
     TileLayout layout, Array<PrimExpr> shape, std::unordered_map<int, int>* index_map);
 
+std::pair<TrainiumLayout, std::vector<int64_t>> NormalizeTrainiumLayoutWithShape(
+    TrainiumLayout layout, Array<PrimExpr> shape);
+
 }  // namespace tir
 }  // namespace tvm
 

@@ -241,6 +241,9 @@ class TileLayoutNode : public TLayoutNode {
   /*! \brief Apply the input coordinate and get the mapped output */
   Array<PrimExpr> Apply(const PrimExpr& coord) const final;
 
+  /*! \brief Apply the input coordinate and get the mapped output */
+  Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
+
   /*! \brief Normalize the layout */
   TLayout Normalize() const final;
 
@@ -461,9 +464,9 @@ class TrainiumLayoutNode : public TLayoutNode {
   PrimExpr GetPartitionSize() const;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
+  virtual Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
 
-  virtual Array<PrimExpr> Apply(const PrimExpr& coord) const;
+  Array<PrimExpr> Apply(const PrimExpr& coord) const;
 
   /*! \brief Normalize the layout */
   TLayout Normalize() const final;
@@ -483,7 +486,7 @@ class TrainiumLayout : public TLayout {
 
 class TrainiumPSUMLayoutNode : public TrainiumLayoutNode {
  public:
-  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
+  Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const final;
 
   bool VerifyWellFormed() const final;
 

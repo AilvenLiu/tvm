@@ -150,12 +150,12 @@ def test_lower_view_get():
                         for i in T.unroll(4):
                             for j in T.vectorized(2):
                                 in_buf_1 = T.Buffer((256,), data=in_buf.data, logical_scope="kernel")
-                                A[i * 2 + j] = in_buf_1[i // 2 * 128 + threadIdx_x % 32 // 4 * 16 + i % 2 * 8 + j + threadIdx_x % 4]
+                                A[i * 2 + j] = in_buf_1[i // 2 * 128 + threadIdx_x // 4 * 16 + i % 2 * 8 + j + threadIdx_x % 4]
                 with T.warp():
                     with T.thread():
                         for i in T.vectorized(2):
                             out_1 = T.Buffer((256,), data=out.data, logical_scope="kernel")
-                            out_1[threadIdx_x % 32 // 4 * 128 + i // 2 * 128 + threadIdx_x % 4 * 18 + i % 2] = A[i]
+                            out_1[threadIdx_x // 4 * 128 + threadIdx_x % 4 * 18 + i] = A[i]
 
     # fmt: on
 
