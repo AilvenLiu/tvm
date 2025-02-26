@@ -264,6 +264,19 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     return impl
 
 
+def unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(
+    _dst: BufferRegion,
+    _src: BufferRegion,
+    _bias: Optional[Union[BufferRegion, FloatImm]],
+    _scale: Optional[FloatImm],
+    unary_op: MapOpType,
+    sctx: ScheduleContext,
+) -> Optional[PrimFunc]:
+    """Schedule unary map operation on CUDA in shared memory with bias and scale."""
+    if not (_bias is None and _scale is None):
+        return None
+    return unary_map_cuda_shared_nd_sync_cta_impl(_dst, _src, unary_op, sctx)
+    
 def unary_map_cuda_shared_nd_sync_cta_impl(
     _dst: BufferRegion,
     _src: BufferRegion,

@@ -49,7 +49,7 @@ def generate_intermediate_buffer(
     if analyzer.can_prove(reduction_size == inst_size):
         # No need to split into 2 stages
         return None, None, None
-    assert analyzer.can_prove(reduction_size % inst_size == 0), "Reduction size must be divisible by instruction size"
+    assert analyzer.can_prove(reduction_size % inst_size == 0), f"Reduction size {reduction_size} must be divisible by instruction size {inst_size}"
     rfactor_size = reduction_size // inst_size
     dst_layout = dst_buffer_region.buffer.layout
     intermediate_shape = [dst_layout.partition_size, rfactor_size]

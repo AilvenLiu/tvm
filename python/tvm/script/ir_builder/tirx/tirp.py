@@ -15,12 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 """Builtin ops in TIR+"""
-from typing import Union
+from typing import Union, Optional
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
-from tvm.tir.async_structs import CopyPipeline
-from tvm.tir.exec_scope import ExecScope
-from tvm.tir.expr import FloatImm
+from tvm.tirx.async_structs import CopyPipeline
+from tvm.tirx.exec_scope import ExecScope
+from tvm.tirx.expr import FloatImm
 
 from . import _ffi_api, frame
 
@@ -59,8 +59,10 @@ def zero(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
     return _ffi_api.OpCall(_get_tirp_op("zero"), [dst, src])  # pylint: disable=no-member
 
 
-def sqrt(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
+def sqrt(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None, scale: Optional[FloatImm] = None):
     """Sqrt all elements in src and store to dst.
+
+    dst = sqrt(src * scale + bias)  (if scale or bias are provided)
 
     Parameters
     ----------
@@ -69,10 +71,18 @@ def sqrt(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
 
     src : Union[BufferRegion, Buffer]
         The source buffer region.
+
+    bias : Optional[Union[BufferRegion, Buffer, FloatImm]]
+        The bias of the sqrt src. Only supported on Trn.
+
+    scale : Optional[FloatImm]
+        The scale of the sqrt src. Only supported on Trn.
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("sqrt"), [dst, src])  # pylint: disable=no-member
+    if bias is not None and isinstance(bias, Buffer):
+        bias = _to_region(bias)
+    return _ffi_api.OpCall(_get_tirp_op("sqrt"), [dst, src, bias, scale])  # pylint: disable=no-member
 
 
 def add(

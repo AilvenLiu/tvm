@@ -451,5 +451,83 @@ def test_binary_broadcast3():
 
 
 
+@pytest.mark.parametrize("op_type", ["sqrt"])
+def test_unary_with_bias_scale(op_type):
+    src_shape = [512, 1024]
+    src_layout = TrainiumLayout(
+        dimension_types="PF",
+        combined_1d_layout=T.TileLayout.from_tuple((128, 4096), (1, 1)),
+    )
+    dst_shape = src_shape
+    dst_layout = src_layout
+    bias_shape = [512, 1]
+    bias_layout = TrainiumLayout(
+        dimension_types="PF",
+        combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1)),
+    )
+    scale = T.float32(2.0)
+    
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def unary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(bias_shape, "float32", scope="trn.sbuf", layout=bias_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            Tp.sqrt(C_sbuf, A_sbuf, bias=B_sbuf, scale=scale)
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "unary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop, additional_b_loop in T.grid(4, 2):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    T.nki_activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], "sqrt", B_sbuf[p_loop, b_loop], T.float32(2.0))
+    # fmt: off
+    with target:
+        mod = tvm.IRModule({"main": unary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+        
+@pytest.mark.parametrize("op_type", ["sqrt"])
+def test_unary_with_bias_scale_2(op_type):
+    src_shape = [512, 1024]
+    src_layout = TrainiumLayout(
+        dimension_types="PF",
+        combined_1d_layout=T.TileLayout.from_tuple((128, 4096), (1, 1)),
+    )
+    dst_shape = src_shape
+    dst_layout = src_layout
+    bias = T.float32(1.0)
+    scale = T.float32(2.0)
+    
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def unary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            Tp.sqrt(C_sbuf, A_sbuf, bias=bias, scale=scale)
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "unary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop, additional_b_loop in T.grid(1, 8):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    T.nki_activation(C_sbuf[p_loop, additional_b_loop * 512 + f_loop], A_sbuf[p_loop, additional_b_loop * 512 + f_loop], "sqrt", bias, scale)
+    # fmt: off
+    with target:
+        mod = tvm.IRModule({"main": unary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+        
 if __name__ == "__main__":
     tvm.testing.main()

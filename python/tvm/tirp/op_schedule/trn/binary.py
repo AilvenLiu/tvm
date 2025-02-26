@@ -51,15 +51,15 @@ def check_broadcast_match_partition(src1: BufferRegion, src2: BufferRegion, anal
         # (dim_in_shape, extent, stride)
         partition_logical_data_iters = []
         logical_stride_map = {}
-        for i in range(len(src1_seps) - 1):
+        for i in range(len(seps) - 1):
             logical_stride_in_dim = 1
-            for j in reversed(range(src1_seps[i], src1_seps[i + 1])):
+            for j in reversed(range(seps[i], seps[i + 1])):
                 logical_stride_map[j] = logical_stride_in_dim
-                logical_stride_in_dim *= src1_layout.combined_1d_layout.data_iter_array[j].extent
+                logical_stride_in_dim *= layout.combined_1d_layout.data_iter_array[j].extent
         for i in range(len(range_info)):
             if range_info[i].dim_type == T.TrainiumLayout.Partition:
                 partition_logical_data_iters.append(
-                    (range_info[i].dim_in_shape, range_info[i].extent, logical_stride_map[i])
+                    (range_info[i].dim_in_shape, range_info[i].extent, logical_stride_map[range_info[i].dim_in_data_iter])
                 )
         return partition_logical_data_iters
 
@@ -127,12 +127,12 @@ def get_inst_tile_with_broadcast(
     for i in range(len(dst_seps) - 1):
         for j in range(dst_seps[i], dst_seps[i + 1]):
             # F dimension in broadcast dim
-            if j in inst_data_iters:
-                if j in broadcast_dims:
-                    f_data_iters_in_broadcast_dim.append((j, inst_data_iters[j]))
-                elif allowed_f_dim_dst is None or j in allowed_f_dim_src2:
-                    f_data_iters_in_non_broadcast_dim.append((j, inst_data_iters[j]))
-
+            if j not in inst_data_iters:
+                continue
+            if i in broadcast_dims:
+                f_data_iters_in_broadcast_dim.append((j, inst_data_iters[j]))
+            elif allowed_f_dim_dst is None or i in allowed_f_dim_src2:
+                f_data_iters_in_non_broadcast_dim.append((j, inst_data_iters[j]))
     def try_f_data_iters(f_data_iters):
         f_data_iters.sort(key=lambda x: dst_layout.combined_1d_layout.data_iter_array[x[0]].stride)
         new_inst_size = 1
@@ -190,6 +190,7 @@ def try_find_inst_binary(
     allowed_f_dim_src1: Optional[Tuple[int]] = None,
     allowed_f_dim_src2: Optional[Tuple[int]] = None,
     allow_tensortensor: bool = True,
+    allow_reorder: bool = True,
 ):
     CONST = None
     reorder = False
@@ -197,6 +198,8 @@ def try_find_inst_binary(
     if isinstance(_src1, FloatImm) and isinstance(_src2, FloatImm):
         return None
     if isinstance(_src1, FloatImm):
+        if not allow_reorder:
+            return None, None, None, None, None
         reorder = True
         _src1, _src2 = _src2, _src1
     if isinstance(_src2, FloatImm):
@@ -236,6 +239,8 @@ def try_find_inst_binary(
     if CONST is None:
         src1_num = functools.reduce(operator.mul, src1_extent, 1)
         if NUM_ELEMENTS > src1_num:
+            if not allow_reorder:
+                return None, None, None, None, None
             reorder = True
             (
                 _src1,

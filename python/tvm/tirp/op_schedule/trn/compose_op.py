@@ -172,7 +172,7 @@ def compose_act_reduce(
     op_call_2: OpCall,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
-    act_output, act_input = op_call_1.args
+    act_output, act_input, bias, scale = op_call_1.args
     reduce_output, reduce_input, reduce_axes, accum = op_call_2.args
 
     # validate single operator
@@ -184,24 +184,45 @@ def compose_act_reduce(
     ), "Act output and reduce input must be the same"
     analyzer = init_analyzer(sctx)
     reduce_axes = [i if i >= 0 else len(reduce_input.buffer.shape) + i for i in reduce_axes]
-    inst_size, f_gen_axes_1 = try_find_inst_unary(
-        act_output, act_input, analyzer, allowed_f_dim_dst=reduce_axes
-    )
+    scale = 1.0 if scale is None else scale
+    if bias is not None:
+        inst_size, f_gen_axes, is_tensor_tensor, reorder, broadcast_dims = try_find_inst_binary(
+            act_output,
+            act_input,
+            bias,
+            analyzer,
+            allow_tensortensor=False,
+            allow_reorder=False,
+            allowed_f_dim_dst=reduce_axes,
+        )
+    else:
+        inst_size, f_gen_axes = try_find_inst_unary(
+            act_output, act_input, analyzer, allowed_f_dim_dst=reduce_axes
+        )
     assert analyzer.can_prove(inst_size > 1), "Instruction size must be greater than 1"
     intermediate_shape, intermediate_layout, reduction_b_extent = generate_intermediate_buffer(
         reduce_output, reduce_input, reduce_axes, inst_size, analyzer
     )
-    f_gen_act_dst_idx = f_gen_idx_anchor(act_output, f_gen_axes_1)
-    f_gen_act_src_idx = f_gen_idx_mapped(
-        act_input, f_gen_axes_1, get_ewise_dim_map(act_output, act_input, analyzer)
-    )
+    f_gen_act_dst_idx = f_gen_idx_anchor(act_output, f_gen_axes)
+    dst_to_src_dim_map = get_ewise_dim_map(act_output, act_input, analyzer)
+    f_gen_act_src_idx = f_gen_idx_mapped(act_input, f_gen_axes, dst_to_src_dim_map)
     f_gen_reduce_dst_idx = f_gen_idx_mapped(
-        reduce_output, f_gen_axes_1, get_reduction_dim_map(reduce_input, reduce_output, reduce_axes)
+        reduce_output, f_gen_axes, get_reduction_dim_map(reduce_input, reduce_output, reduce_axes)
     )
+    if bias is not None and isinstance(bias, BufferRegion):
+        offset = len(act_input.region) - len(bias.region)
+        dst_to_bias_dim_map = {
+            d: s - offset for d, s in dst_to_src_dim_map.items() if s not in broadcast_dims
+        }
+        f_gen_bias_idx = f_gen_idx_mapped(bias, f_gen_axes, dst_to_bias_dim_map)
+    else:
+        f_gen_bias_idx = None
     p_size = act_output.buffer.layout.partition_size
     b_extent = reduce(operator.mul, [r.extent for r in act_output.region], 1) // p_size // inst_size
     src, dst1, dst2 = act_input.buffer, act_output.buffer, reduce_output.buffer
     opcode, reduce_opcode = act_ops[op_call_1.op][1], reduce_ops_after_act[op_call_2.op][1]
+    bias_buffer = bias.buffer if isinstance(bias, BufferRegion) else None
+
     if intermediate_shape is None:
         # fmt: off
         @T.prim_func(tirp=True)
@@ -212,7 +233,13 @@ def compose_act_reduce(
                         src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent),), f_loop, p_loop))
                         dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
                         dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], opcode, reduce_opcode))
+                        if bias is None:
+                            T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], opcode, reduce_opcode))
+                        elif isinstance(bias, BufferRegion):
+                            src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop, p_loop))
+                            T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
+                        else:
+                            T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], opcode, reduce_opcode, bias, scale))
         # fmt: on
         import tvm
 
@@ -233,7 +260,13 @@ def compose_act_reduce(
                             for p_loop, f_loop in T.grid(p_size, inst_size):
                                 src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
                                 dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], opcode, reduce_opcode))
+                                if bias is None:
+                                    T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], opcode, reduce_opcode))
+                                elif isinstance(bias, BufferRegion):
+                                    src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                    T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
+                                else:
+                                    T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], opcode, reduce_opcode, bias, scale))
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop, f_loop in T.grid(p_size, reduction_b_extent):
                             dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))

@@ -21,11 +21,10 @@
 from ..registry import register_schedule
 from ..common import _make_schedule, MapOpType
 from .binary import binary_trn
-from .unary import unary_trn
+from .unary import unary_trn, unary_with_bias_scale_trn
 
 # Register unary mapping schedules.
 for op_name, op_type in [
-    ("sqrt", MapOpType.SQRT),
     ("reciprocal", MapOpType.RECIPROCAL),
     ("memset", MapOpType.MEMSET),
 ]:
@@ -33,6 +32,15 @@ for op_name, op_type in [
     func = _make_schedule(op_type, 1, [unary_trn])
     func.__name__ = custom_name
     func.__doc__ = f"Schedule unary {op_name}."
+    register_schedule(op_name)(func)
+
+for op_name, op_type in [
+    ("sqrt", MapOpType.SQRT),
+]:
+    custom_name = f"unary_{op_name}_trn_with_bias_scale_impl"
+    func = _make_schedule(op_type, 3, [unary_with_bias_scale_trn])
+    func.__name__ = custom_name
+    func.__doc__ = f"Schedule unary {op_name} with bias and scale."
     register_schedule(op_name)(func)
 
 

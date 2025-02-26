@@ -32,9 +32,6 @@ namespace tirp {
 
 // OpCall
 OpCall::OpCall(tvm::Op op, Array<ObjectRef> args) {
-  for (size_t i = 0; i < args.size(); ++i) {
-    ICHECK(args[i].defined()) << "arg " << i << " is not defined()";
-  }
   // Check if the op is a TIR+ op.
   static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
   ICHECK_EQ(tirp_op_map.count(op), 1) << "Only TIR+ ops can be used in tirx::tirp::OpCall";

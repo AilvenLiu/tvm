@@ -118,7 +118,7 @@ TVM_DLL const Op& nki_memset();
 /*!
  * \brief nki intrinsics for activation reduce operation.
  *
- * nki_activation_reduce(reduce_res, act_res, data, opcode, reduce_opcode)
+ * nki_activation_reduce(reduce_res, act_res, data, opcode, reduce_opcode, bias, scale)
  */
 TVM_DLL const Op& nki_activation_reduce();
 

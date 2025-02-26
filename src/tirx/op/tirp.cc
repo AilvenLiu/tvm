@@ -101,9 +101,9 @@ TIRP_DEFINE_SCHEDULE_OP(zero).set_num_inputs(2).set_attr<FArgSanitizer>(
       ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of zero() must be BufferRegion";
     });
 
-TIRP_DEFINE_SCHEDULE_OP(sqrt).set_num_inputs(2).set_attr<FArgSanitizer>(
+TIRP_DEFINE_SCHEDULE_OP(sqrt).set_num_inputs(4).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
-      ICHECK_EQ(args.size(), 2U) << "sqrt() expects 2 arguments";
+      ICHECK_EQ(args.size(), 4U) << "sqrt() expects 4 arguments";
       ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of sqrt() must be BufferRegion";
       ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of sqrt() must be BufferRegion";
     });

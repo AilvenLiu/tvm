@@ -182,6 +182,48 @@ def test_activation_reduce_two_stage():
         mod = tvm.IRModule({"main": activation_reduce})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
+        
+        
+def test_activation_reduce_with_bias_scale():
+    A_shape = (32, 512, 128)
+    A_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 1024, 128), (1, 1)))
+    B_shape = (16, 512, 128)
+    B_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 512, 128), (1, 1)))
+    C_shape = (16, 128)
+    C_layout = TrainiumLayout("FFFP", T.TileLayout.from_tuple((2, 4, 2, 128), (2, 4, 1, 1)))
+    bias_shape = (128)
+    bias_layout = TrainiumLayout("P", T.TileLayout.from_tuple(128, 1))
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def activation_reduce():
+        with T.kernel():
+            A = T.alloc_buffer(A_shape, dtype="float32", scope="trn.sbuf", layout=A_layout)
+            B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
+            C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
+            bias = T.alloc_buffer(bias_shape, dtype="float32", scope="trn.sbuf", layout=bias_layout)
+            for i in range(2):
+                with Tp.compose_op():
+                    Tp.sqrt(B, A[i*16:i*16+16], bias=bias, scale=T.float32(2.0))
+                    Tp.sum(C, B, axes=1)  
+                    
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "activation_reduce"})
+        with T.kernel():
+            A = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
+            C = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
+            bias = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop in T.grid(2, 16):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    T.nki_activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "sum", bias[p_loop, 0], T.float32(2.0))
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+    
 
 def test_simple_tensor_scalar_reduce():
     A_shape = (128, 512)
@@ -292,7 +334,7 @@ def test_tensor_scalar_reduce_complex():
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-        
+
 def test_tensor_scalar_reduce_two_stage():
     src1_shape = [512, 1024, 4]
     src1_layout = TrainiumLayout(

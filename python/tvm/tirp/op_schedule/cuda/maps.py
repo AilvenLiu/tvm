@@ -25,19 +25,25 @@ from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.expr import FloatImm
 
 from ..registry import register_schedule
-from .common import MapOpType, unary_map_cuda_shared_nd_sync_cta_impl, binary_map_cuda_shared_nd_sync_cta_impl
+from .common import MapOpType, unary_map_cuda_shared_nd_sync_cta_impl, binary_map_cuda_shared_nd_sync_cta_impl, unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale
 from ..common import _make_schedule, MapOpType
 
 
 
 # Register unary mapping schedules.
-for op_name, op_type in [("zero", MapOpType.ZERO), ("sqrt", MapOpType.SQRT)]:
+for op_name, op_type in [("zero", MapOpType.ZERO)]:
     custom_name = f"unary_{op_name}_cuda_shared_nd_sync_cta_impl"
     func = _make_schedule(op_type, 1, [unary_map_cuda_shared_nd_sync_cta_impl])
     func.__name__ = custom_name
     func.__doc__ = f"Schedule unary {op_name}."
     register_schedule(op_name)(func)
 
+for op_name, op_type in [("sqrt", MapOpType.SQRT)]:
+    custom_name = f"unary_{op_name}_cuda_shared_nd_sync_cta_impl_with_bias_scale"
+    func = _make_schedule(op_type, 3, [unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale])
+    func.__name__ = custom_name
+    func.__doc__ = f"Schedule unary {op_name} with bias and scale."
+    register_schedule(op_name)(func)
 
 # Register binary mapping schedules.
 for op_name, op_type in [
