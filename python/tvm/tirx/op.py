@@ -4672,3 +4672,31 @@ def nki_activation_reduce(reduce_res, act_res, data, opcode, reduce_opcode):
         The call expression.
     """
     return call_intrin("", "tir.nki_activation_reduce", reduce_res, act_res, data, opcode, reduce_opcode)
+
+def nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand1, operand2, opcode, reduce_opcode, reorder = False):
+    """TVM intrinsic to call nki tensorscalar reduce instruction
+
+    Parameters
+    ----------
+    reduce_res : BufferLoad
+        The result buffer of reduction.
+        
+    tensorscalar_res : BufferLoad
+        The result buffer of tensorscalar.
+        
+    operand1: BufferLoad
+        The first operand buffer.
+        
+    operand2: BufferLoad
+        The second operand buffer.
+        
+    opcode: str
+        The opcode.
+        
+    reduce_opcode: str
+        The reduce opcode.
+        
+    reorder: bool
+        Whether to reorder the operands.
+    """
+    return call_intrin("", "tir.nki_tensorscalar_reduce", reduce_res, tensorscalar_res, operand1, operand2, opcode, reduce_opcode, reorder)

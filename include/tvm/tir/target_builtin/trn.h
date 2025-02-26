@@ -122,6 +122,12 @@ TVM_DLL const Op& nki_memset();
  */
 TVM_DLL const Op& nki_activation_reduce();
 
+/*!
+ * \brief nki intrinsics for tensorscalar reduce operation.
+ *
+ * nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand1, operand2, opcode, reduce_opcode, reorder)
+ */
+TVM_DLL const Op& nki_tensorscalar_reduce();
 
 
 }  // namespace builtin

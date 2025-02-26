@@ -17,7 +17,7 @@
 
 """Implementation of binary operator schedules."""
 
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Tuple
 import operator
 import functools
 
@@ -33,7 +33,9 @@ from .common import (
     get_ewise_dim_map,
     get_hardware_inst_size_limit,
     bound_inst_with_limit,
-    init_analyzer
+    init_analyzer,
+    f_gen_idx_anchor,
+    f_gen_idx_mapped,
 )
 from ..common import MapOpType
 
@@ -75,16 +77,16 @@ def check_broadcast_match_partition(src1: BufferRegion, src2: BufferRegion, anal
 
 
 # return inst tile size, inst stride, inst data iters, and is_tensor_tensor
-def get_inst_tile_with_const(dst: BufferRegion, src1: BufferRegion, analyzer: Analyzer):
-    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(dst, src1, analyzer)
+def get_inst_tile_with_const(dst: BufferRegion, src1: BufferRegion, analyzer: Analyzer, allowed_f_dim_dst: Optional[Tuple[int]] = None, allowed_f_dim_src1: Optional[Tuple[int]] = None):
+    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1)
     return inst_size, inst_stride, inst_data_iters, False
 
 
 def get_inst_tile_with_no_broadcast(
-    dst: BufferRegion, src1: BufferRegion, src2: BufferRegion, analyzer: Analyzer
+    dst: BufferRegion, src1: BufferRegion, src2: BufferRegion, analyzer: Analyzer, allowed_f_dim_dst: Optional[Tuple[int]] = None, allowed_f_dim_src1: Optional[Tuple[int]] = None, allowed_f_dim_src2: Optional[Tuple[int]] = None
 ):
-    inst_size_1, inst_stride_1, inst_data_iters_1 = find_max_inst_size_unary(dst, src1, analyzer)
-    inst_size_2, inst_stride_2, inst_data_iters_2 = find_max_inst_size_unary(dst, src2, analyzer)
+    inst_size_1, inst_stride_1, inst_data_iters_1 = find_max_inst_size_unary(dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1)
+    inst_size_2, inst_stride_2, inst_data_iters_2 = find_max_inst_size_unary(dst, src2, analyzer, allowed_f_dim_dst, allowed_f_dim_src2)
     if inst_size_1 < inst_size_2:
         (
             inst_size_1,
@@ -113,8 +115,12 @@ def get_inst_tile_with_broadcast(
     src2: BufferRegion,
     broadcast_dims: List[int],
     analyzer: Analyzer,
+    allow_tensortensor: bool = True,
+    allowed_f_dim_dst: Optional[Tuple[int]] = None,
+    allowed_f_dim_src1: Optional[Tuple[int]] = None,
+    allowed_f_dim_src2: Optional[Tuple[int]] = None,
 ):
-    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(dst, src1, analyzer)
+    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1)
     dst_range_info, dst_layout, dst_seps = infer_range_info(dst, analyzer)
     f_data_iters_in_broadcast_dim = []
     f_data_iters_in_non_broadcast_dim = []
@@ -124,7 +130,7 @@ def get_inst_tile_with_broadcast(
             if j in inst_data_iters:
                 if j in broadcast_dims:
                     f_data_iters_in_broadcast_dim.append((j, inst_data_iters[j]))
-                else:
+                elif allowed_f_dim_dst is None or j in allowed_f_dim_src2:
                     f_data_iters_in_non_broadcast_dim.append((j, inst_data_iters[j]))
 
     def try_f_data_iters(f_data_iters):
@@ -152,6 +158,8 @@ def get_inst_tile_with_broadcast(
     tensorscalar_inst_size, tensorscalar_inst_stride, tensorscalar_inst_data_iters = (
         try_f_data_iters(f_data_iters_in_broadcast_dim)
     )
+    if not allow_tensortensor:
+        return tensorscalar_inst_size, tensorscalar_inst_stride, tensorscalar_inst_data_iters, False
     option_chosen = None
     # if f extent is 1, do not choose it
     if tensortensor_inst_size == 1:
@@ -173,17 +181,16 @@ def get_inst_tile_with_broadcast(
     return tensorscalar_inst_size, tensorscalar_inst_stride, tensorscalar_inst_data_iters, False
 
 
-def binary_trn(
+def try_find_inst_binary(
     _dst: BufferRegion,
     _src1: Union[BufferRegion, FloatImm],
     _src2: Union[BufferRegion, FloatImm],
-    binary_op: MapOpType,
-    sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
-    if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
-        return None
-    assert binary_op in binary_map_ops, f"Unsupported binary operation {binary_op}"
-
+    analyzer: Analyzer,
+    allowed_f_dim_dst: Optional[Tuple[int]] = None,
+    allowed_f_dim_src1: Optional[Tuple[int]] = None,
+    allowed_f_dim_src2: Optional[Tuple[int]] = None,
+    allow_tensortensor: bool = True,
+):
     CONST = None
     reorder = False
     # Type checks
@@ -221,10 +228,9 @@ def binary_trn(
             (src2.scope() == "trn.sbuf" or src2.scope() == "trn.psum") if src2 else True,
         ]
     ):
-        return None
+        return None, None, None, None, None
 
     # Switch broadcasting
-    analyzer = init_analyzer(sctx)
     NUM_ELEMENTS = functools.reduce(operator.mul, dst_extent, 1)
 
     if CONST is None:
@@ -263,7 +269,7 @@ def binary_trn(
             all(analyzer.can_prove_equal(s, d) for s, d in zip(src1_extent_, dst_extent_)),
         ]
     ):
-        return None
+        return None, None, None, None, None
 
     # Check src2 is broadcastable to src1
     broadcast_dims = []
@@ -272,7 +278,7 @@ def binary_trn(
         # shape src1: [1024, 1024], shape src2: [1, 1024, 1024]
         for i in range(1, min(len(src2_extent), len(src1_extent)) + 1):
             if src2_extent[-i] != 1 and src2_extent[-i] != src1_extent[-i]:
-                return None
+                return None, None, None, None, None
             elif src2_extent[-i] != src1_extent[-i]:
                 broadcast_dims.append(len(src1_extent) - i)
         broadcast_dims += list(range(0, len(src1_extent) - len(src2_extent)))
@@ -281,46 +287,53 @@ def binary_trn(
     # find inst tile compatible for dst and src
     if CONST is not None:
         inst_size, inst_stride, inst_data_iters, is_tensor_tensor = get_inst_tile_with_const(
-            _dst, _src1, analyzer
+            _dst, _src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1
         )
     elif len(broadcast_dims) == 0:
         inst_size, inst_stride, inst_data_iters, is_tensor_tensor = get_inst_tile_with_no_broadcast(
-            _dst, _src1, _src2, analyzer
+            _dst, _src1, _src2, analyzer, allowed_f_dim_dst, allowed_f_dim_src1, allowed_f_dim_src2
         )
     else:
         inst_size, inst_stride, inst_data_iters, is_tensor_tensor = get_inst_tile_with_broadcast(
-            _dst, _src1, _src2, broadcast_dims, analyzer
+            _dst, _src1, _src2, broadcast_dims, analyzer, allow_tensortensor and not reorder, allowed_f_dim_dst, allowed_f_dim_src1, allowed_f_dim_src2
         )
 
-    assert not (
-        reorder and is_tensor_tensor
-    ), "reorder not supported for TensorTensor. Consider manually switch the order and apply minus operator somewhere."
-
-    p_size = dst.layout.partition_size
     f_gen_axes = generate_axes_in_region(_dst, inst_stride, inst_data_iters, analyzer)
+    if not allow_tensortensor and is_tensor_tensor:
+        return None, None, None, None, None
+    return inst_size, f_gen_axes, is_tensor_tensor, reorder, broadcast_dims
 
-    def f_gen_dst_idx(b_loop, b_extent, f_loop, p_loop):
-        axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
-        return [_dst.region[i].min + axes[i] for i in range(len(axes))]
+def binary_trn(
+    _dst: BufferRegion,
+    _src1: Union[BufferRegion, FloatImm],
+    _src2: Union[BufferRegion, FloatImm],
+    binary_op: MapOpType,
+    sctx: ScheduleContext,
+) -> Optional[PrimFunc]:
+    if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
+        return None
+    assert binary_op in binary_map_ops, f"Unsupported binary operation {binary_op}"
+    analyzer = init_analyzer(sctx)
 
-    def f_gen_src1_idx(b_loop, b_extent, f_loop, p_loop):
-        indices = [_src1.region[i].min for i in range(len(_src1.region))]
-        axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
-        dim_map = get_ewise_dim_map(_dst, _src1, analyzer)
-        for i, j in dim_map.items():
-            indices[j] += axes[i]
-        return indices
+    inst_size, f_gen_axes, is_tensor_tensor, reorder, broadcast_dims = try_find_inst_binary(
+        _dst, _src1, _src2, analyzer
+    )
+    if reorder:
+        _src1, _src2 = _src2, _src1
 
-    def f_gen_src2_idx(b_loop, b_extent, f_loop, p_loop):
-        indices = [_src2.region[i].min for i in range(len(_src2.region))]
-        axes = f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)
-        dim_map = get_ewise_dim_map(_dst, _src1, analyzer)
-        offset = len(src1_extent) - len(src2_extent)
-        for i, j in dim_map.items():
-            if j not in broadcast_dims:
-                indices[j - offset] += axes[i]
-        return indices
+    dst_extent = [r.extent for r in _dst.region]
+    f_gen_dst_idx = f_gen_idx_anchor(_dst, f_gen_axes)
+    dst_to_src1_dim_map = get_ewise_dim_map(_dst, _src1, analyzer)
+    f_gen_src1_idx = f_gen_idx_mapped(_src1, f_gen_axes, dst_to_src1_dim_map)
+    if isinstance(_src2, BufferRegion):
+        src1_src2_offset = len(_src1.region) - len(_src2.region)
+        dst_to_src2_dim_map = {d: s - src1_src2_offset for d, s in dst_to_src1_dim_map.items() if s not in broadcast_dims}
+        f_gen_src2_idx = f_gen_idx_mapped(_src2, f_gen_axes, dst_to_src2_dim_map)
 
+    NUM_ELEMENTS = functools.reduce(operator.mul, dst_extent, 1)
+    CONST = _src2 if isinstance(_src2, FloatImm) else None
+    dst, src1, src2 = _dst.buffer, _src1.buffer, None if CONST is not None else _src2.buffer
+    p_size = dst.layout.partition_size
     b_extent = NUM_ELEMENTS // p_size // inst_size
     opcode = binary_map_ops[binary_op]
     # fmt: off
@@ -336,10 +349,10 @@ def binary_trn(
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop, f_loop in T.grid(p_size, actual_inst_size):
                         f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                        dst_indices = T.meta_var(f_gen_dst_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
-                        src1_indices = T.meta_var(f_gen_src1_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
+                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                        src1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
                         if CONST is None:
-                            src2_indices = T.meta_var(f_gen_src2_idx(b_loop, b_extent, f_loop_wo_limit, p_loop))
+                            src2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
                             T.evaluate(func(dst[*dst_indices], src1[*src1_indices], src2[*src2_indices], opcode))
                         else:
                             T.evaluate(func(dst[*dst_indices], src1[*src1_indices], CONST, opcode))

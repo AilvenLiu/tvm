@@ -80,7 +80,7 @@ def try_find_inst_unary(dst_buffer_region: BufferRegion, src_buffer_region: Buff
 
     f_gen_axes = generate_axes_in_region(dst_buffer_region, inst_stride, inst_data_iters, analyzer)
     
-    return inst_size, inst_stride, inst_data_iters, f_gen_axes
+    return inst_size, f_gen_axes
 
 def unary_trn(
     dst_buffer_region: BufferRegion,
@@ -108,11 +108,11 @@ def unary_trn(
     dst_extent = [r.extent for r in dst_region]
     if CONST is None:
         src = src_buffer_region.buffer
-        inst_size, _, _, f_gen_axes = try_find_inst_unary(dst_buffer_region, src_buffer_region, analyzer)
+        inst_size, f_gen_axes = try_find_inst_unary(dst_buffer_region, src_buffer_region, analyzer)
         f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
         f_gen_src_idx = f_gen_idx_mapped(src_buffer_region, f_gen_axes, get_ewise_dim_map(dst_buffer_region, src_buffer_region, analyzer))
     else:
-        inst_size, _, _, f_gen_axes = try_find_inst_unary(dst_buffer_region, dst_buffer_region, analyzer)
+        inst_size, f_gen_axes = try_find_inst_unary(dst_buffer_region, dst_buffer_region, analyzer)
         f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
     
     p_size = dst_buffer_region.buffer.layout.partition_size
