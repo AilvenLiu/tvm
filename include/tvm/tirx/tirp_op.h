@@ -53,12 +53,28 @@ class ScheduleContextNode : public Object {
   Map<String, PrimExpr> launch_params;
   /*! \brief A map from loop variables to their ranges. */
   Map<Var, Range> var_range_map;
+  /*! \brief The buffers allocated by the operator. */
+  Array<Buffer> alloc_buffers;
+  /*! \brief The initialization statement of the operator. 
+   *  which will be inserted at the beginning of the kernel
+   */
+  Array<Stmt> init_stmts;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("target", &target);
     v->Visit("exec_scope", &exec_scope);
     v->Visit("launch_params", &launch_params);
     v->Visit("var_range_map", &var_range_map);
+    v->Visit("alloc_buffers", &alloc_buffers);
+    v->Visit("init_stmts", &init_stmts);
+  }
+
+  void AddAllocBuffer(Buffer buffer) {
+    alloc_buffers.push_back(buffer);
+  }
+
+  void AddInitStmt(Stmt stmt) {
+    init_stmts.push_back(stmt);
   }
 
   static constexpr const char* _type_key = "tirx.ScheduleContext";
@@ -81,7 +97,7 @@ class ScheduleContext : public ObjectRef {
    */
   TVM_DLL ScheduleContext(Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ScheduleContext, ObjectRef, ScheduleContextNode);
+  TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ScheduleContext, ObjectRef, ScheduleContextNode);
 };
 
 /*!

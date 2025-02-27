@@ -36,57 +36,42 @@ from .common import (
     init_analyzer,
     f_gen_idx_anchor,
     f_gen_idx_mapped,
+    check_partition_dim_match,
 )
 from ..common import MapOpType
 
 binary_map_ops = {MapOpType.ADD: "add", MapOpType.SUB: "sub", MapOpType.MUL: "mul"}
 
 
-# check if src1's partition dimension matches src2's partition dimension
-def check_broadcast_match_partition(src1: BufferRegion, src2: BufferRegion, analyzer: Analyzer):
-    src1_range_info, src1_layout, src1_seps = infer_range_info(src1, analyzer)
-    src2_range_info, src2_layout, src2_seps = infer_range_info(src2, analyzer)
-
-    def get_partition_logical_data_iters(range_info, layout, seps):
-        # (dim_in_shape, extent, stride)
-        partition_logical_data_iters = []
-        logical_stride_map = {}
-        for i in range(len(seps) - 1):
-            logical_stride_in_dim = 1
-            for j in reversed(range(seps[i], seps[i + 1])):
-                logical_stride_map[j] = logical_stride_in_dim
-                logical_stride_in_dim *= layout.combined_1d_layout.data_iter_array[j].extent
-        for i in range(len(range_info)):
-            if range_info[i].dim_type == T.TrainiumLayout.Partition:
-                partition_logical_data_iters.append(
-                    (range_info[i].dim_in_shape, range_info[i].extent, logical_stride_map[range_info[i].dim_in_data_iter])
-                )
-        return partition_logical_data_iters
-
-    src1_partition_logical_data_iters = get_partition_logical_data_iters(
-        src1_range_info, src1_layout, src1_seps
-    )
-    src2_partition_logical_data_iters = get_partition_logical_data_iters(
-        src2_range_info, src2_layout, src2_seps
-    )
-    src1_partition_logical_data_iters.sort(key=lambda x: (x[0], x[2]))
-    src2_partition_logical_data_iters.sort(key=lambda x: (x[0], x[2]))
-    src1_partition_logical_data_iters = [x[1:] for x in src1_partition_logical_data_iters]
-    src2_partition_logical_data_iters = [x[1:] for x in src2_partition_logical_data_iters]
-    return src1_partition_logical_data_iters == src2_partition_logical_data_iters
-
-
 # return inst tile size, inst stride, inst data iters, and is_tensor_tensor
-def get_inst_tile_with_const(dst: BufferRegion, src1: BufferRegion, analyzer: Analyzer, allowed_f_dim_dst: Optional[Tuple[int]] = None, allowed_f_dim_src1: Optional[Tuple[int]] = None):
-    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1)
+def get_inst_tile_with_const(
+    dst: BufferRegion,
+    src1: BufferRegion,
+    analyzer: Analyzer,
+    allowed_f_dim_dst: Optional[Tuple[int]] = None,
+    allowed_f_dim_src1: Optional[Tuple[int]] = None,
+):
+    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
+        dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1
+    )
     return inst_size, inst_stride, inst_data_iters, False
 
 
 def get_inst_tile_with_no_broadcast(
-    dst: BufferRegion, src1: BufferRegion, src2: BufferRegion, analyzer: Analyzer, allowed_f_dim_dst: Optional[Tuple[int]] = None, allowed_f_dim_src1: Optional[Tuple[int]] = None, allowed_f_dim_src2: Optional[Tuple[int]] = None
+    dst: BufferRegion,
+    src1: BufferRegion,
+    src2: BufferRegion,
+    analyzer: Analyzer,
+    allowed_f_dim_dst: Optional[Tuple[int]] = None,
+    allowed_f_dim_src1: Optional[Tuple[int]] = None,
+    allowed_f_dim_src2: Optional[Tuple[int]] = None,
 ):
-    inst_size_1, inst_stride_1, inst_data_iters_1 = find_max_inst_size_unary(dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1)
-    inst_size_2, inst_stride_2, inst_data_iters_2 = find_max_inst_size_unary(dst, src2, analyzer, allowed_f_dim_dst, allowed_f_dim_src2)
+    inst_size_1, inst_stride_1, inst_data_iters_1 = find_max_inst_size_unary(
+        dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1
+    )
+    inst_size_2, inst_stride_2, inst_data_iters_2 = find_max_inst_size_unary(
+        dst, src2, analyzer, allowed_f_dim_dst, allowed_f_dim_src2
+    )
     if inst_size_1 < inst_size_2:
         (
             inst_size_1,
@@ -120,7 +105,9 @@ def get_inst_tile_with_broadcast(
     allowed_f_dim_src1: Optional[Tuple[int]] = None,
     allowed_f_dim_src2: Optional[Tuple[int]] = None,
 ):
-    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1)
+    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
+        dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1
+    )
     dst_range_info, dst_layout, dst_seps = infer_range_info(dst, analyzer)
     f_data_iters_in_broadcast_dim = []
     f_data_iters_in_non_broadcast_dim = []
@@ -133,6 +120,7 @@ def get_inst_tile_with_broadcast(
                 f_data_iters_in_broadcast_dim.append((j, inst_data_iters[j]))
             elif allowed_f_dim_dst is None or i in allowed_f_dim_src2:
                 f_data_iters_in_non_broadcast_dim.append((j, inst_data_iters[j]))
+
     def try_f_data_iters(f_data_iters):
         f_data_iters.sort(key=lambda x: dst_layout.combined_1d_layout.data_iter_array[x[0]].stride)
         new_inst_size = 1
@@ -288,7 +276,9 @@ def try_find_inst_binary(
                 broadcast_dims.append(len(src1_extent) - i)
         broadcast_dims += list(range(0, len(src1_extent) - len(src2_extent)))
     if len(broadcast_dims) > 0:
-        assert check_broadcast_match_partition(_src1, _src2, analyzer)
+        assert check_partition_dim_match(
+            _src1, _src2, analyzer
+        ), "src1 and src2 partition dimension mismatch"
     # find inst tile compatible for dst and src
     if CONST is not None:
         inst_size, inst_stride, inst_data_iters, is_tensor_tensor = get_inst_tile_with_const(
@@ -300,13 +290,22 @@ def try_find_inst_binary(
         )
     else:
         inst_size, inst_stride, inst_data_iters, is_tensor_tensor = get_inst_tile_with_broadcast(
-            _dst, _src1, _src2, broadcast_dims, analyzer, allow_tensortensor and not reorder, allowed_f_dim_dst, allowed_f_dim_src1, allowed_f_dim_src2
+            _dst,
+            _src1,
+            _src2,
+            broadcast_dims,
+            analyzer,
+            allow_tensortensor and not reorder,
+            allowed_f_dim_dst,
+            allowed_f_dim_src1,
+            allowed_f_dim_src2,
         )
 
     f_gen_axes = generate_axes_in_region(_dst, inst_stride, inst_data_iters, analyzer)
     if not allow_tensortensor and is_tensor_tensor:
         return None, None, None, None, None
     return inst_size, f_gen_axes, is_tensor_tensor, reorder, broadcast_dims
+
 
 def binary_trn(
     _dst: BufferRegion,
@@ -332,7 +331,11 @@ def binary_trn(
     f_gen_src1_idx = f_gen_idx_mapped(_src1, f_gen_axes, dst_to_src1_dim_map)
     if isinstance(_src2, BufferRegion):
         src1_src2_offset = len(_src1.region) - len(_src2.region)
-        dst_to_src2_dim_map = {d: s - src1_src2_offset for d, s in dst_to_src1_dim_map.items() if s not in broadcast_dims}
+        dst_to_src2_dim_map = {
+            d: s - src1_src2_offset
+            for d, s in dst_to_src1_dim_map.items()
+            if s not in broadcast_dims
+        }
         f_gen_src2_idx = f_gen_idx_mapped(_src2, f_gen_axes, dst_to_src2_dim_map)
 
     NUM_ELEMENTS = functools.reduce(operator.mul, dst_extent, 1)

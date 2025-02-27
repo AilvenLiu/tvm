@@ -19,6 +19,7 @@
 
 from collections import namedtuple
 from typing import Tuple, Optional
+from enum import Enum
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
@@ -88,7 +89,7 @@ def infer_range_info(buffer_region: BufferRegion, analyzer: Analyzer):
     # put partition axis at the front
     # then put free axis with lower stride at the front
     tiled_range_infos_per_dim = sorted(
-        tiled_range_infos_per_dim, key=lambda x: data_iters[x[2]].stride + int(dim_type * 1e9)
+        tiled_range_infos_per_dim, key=lambda x: (x.dim_type, data_iters[x.dim_in_data_iter].stride)
     )
     return tiled_range_infos_per_dim, layout, seps
 
@@ -104,6 +105,7 @@ def generate_axes_in_region(
         range_info[i].dim_in_data_iter: range_info[i].extent for i in range(len(range_info))
     }
     data_iters = get_layout_data_iters(tiled_layout)
+
     # dim2block_var: shape dim -> block var
     def f(b_loops, f_loop, p_loop, dim2block_var=None):
         b_loops = list(b_loops)
@@ -115,7 +117,7 @@ def generate_axes_in_region(
                 assert dim_in_shape in dim2block_var
                 idx = dim2block_var[dim_in_shape]
             b_loop, b_extent = b_loops[idx]
-            ret = b_loop % b_extent// (b_extent // extent)
+            ret = b_loop % b_extent // (b_extent // extent)
             b_extent = b_extent // extent
             b_loops[idx] = (b_loop, b_extent)
             return ret
@@ -129,14 +131,38 @@ def generate_axes_in_region(
                 if dim_type == T.TrainiumLayout.Partition:
                     index_in_this_dim += (p_loop // data_iters[j].stride) % data_iters[j].extent
                 elif j in inst_data_iters:
-                    assert analyzer.can_prove_equal(dim_in_region[j] % inst_data_iters[j], 0)
-                    index_in_this_dim += (
-                        extract_block_loop(dim_in_region[j] // inst_data_iters[j], i)
-                        * inst_data_iters[j]
-                    )
-                    index_in_this_dim += (
-                        f_loop // (data_iters[j].stride // inst_stride)
-                    ) % inst_data_iters[j]
+                    if analyzer.can_prove(data_iters[j].stride < inst_stride):
+                        assert analyzer.can_prove(inst_stride % data_iters[j].stride == 0)
+                        assert analyzer.can_prove(
+                            dim_in_region[j]
+                            % (inst_data_iters[j] * inst_stride // data_iters[j].stride)
+                            == 0
+                        )
+                        index_in_this_dim += (
+                            extract_block_loop(
+                                dim_in_region[j]
+                                // (inst_data_iters[j] * inst_stride // data_iters[j].stride),
+                                i,
+                            )
+                            * inst_data_iters[j]
+                            * inst_stride
+                            // data_iters[j].stride
+                        )
+                        index_in_this_dim += (f_loop % inst_data_iters[j]) * (
+                            inst_stride // data_iters[j].stride
+                        )
+                        index_in_this_dim += extract_block_loop(
+                            inst_stride // data_iters[j].stride, i
+                        )
+                    else:
+                        assert analyzer.can_prove_equal(dim_in_region[j] % inst_data_iters[j], 0)
+                        index_in_this_dim += (
+                            extract_block_loop(dim_in_region[j] // inst_data_iters[j], i)
+                            * inst_data_iters[j]
+                        )
+                        index_in_this_dim += (
+                            f_loop // (data_iters[j].stride // inst_stride)
+                        ) % inst_data_iters[j]
                 elif j in dim_in_region:
                     index_in_this_dim += extract_block_loop(dim_in_region[j], i)
             region_indices.append(index_in_this_dim)
@@ -175,8 +201,11 @@ def get_ewise_dim_map(
         j += 1
     return dim_map
 
+
 # src -> dst
-def get_reduction_dim_map(src_buffer_region: BufferRegion, dst_buffer_region: BufferRegion, axes: Tuple[int]):
+def get_reduction_dim_map(
+    src_buffer_region: BufferRegion, dst_buffer_region: BufferRegion, axes: Tuple[int]
+):
     dst_region = dst_buffer_region.region
     dst_extent = [r.extent for r in dst_region]
     dst_non_unit_extent_ = [(i, e) for i, e in enumerate(dst_extent) if e != 1]
@@ -194,12 +223,23 @@ def get_reduction_dim_map(src_buffer_region: BufferRegion, dst_buffer_region: Bu
     dim_map = {s[0]: d[0] for s, d in zip(src_non_reduction_extents, dst_non_unit_extent_)}
     return dim_map
 
+
+class InstructionType(Enum):
+    UNARY = 0
+    TRANSPOSE = 1
+
+
 # FIXME: this function tends to use the lowest-stride axis from the first buffer region, which
 #       might leads to smaller instruction size. We should also try using the lowest-stride axis
 #       from the second buffer region and choose the best one.
 # infer an instruction size from buffer_region's access pattern that is compatible on second_buffer_region
-def find_max_inst_size_unary(
-    buffer_region: BufferRegion, second_buffer_region: BufferRegion, analyzer: Analyzer, allowed_f_dim_1: Optional[Tuple[int]] = None, allowed_f_dim_2: Optional[Tuple[int]] = None
+def _find_max_inst_size_from_two_regions(
+    buffer_region: BufferRegion,
+    second_buffer_region: BufferRegion,
+    analyzer: Analyzer,
+    allowed_f_dim_1: Optional[Tuple[int]] = None,
+    allowed_f_dim_2: Optional[Tuple[int]] = None,
+    inst_type: InstructionType = InstructionType.UNARY,
 ):
     if allowed_f_dim_1 is None:
         allowed_f_dim_1 = tuple(range(len(buffer_region.buffer.shape)))
@@ -208,7 +248,7 @@ def find_max_inst_size_unary(
     tiled_range_infos_per_dim, tiled_layout, seps = infer_range_info(buffer_region, analyzer)
     data_iters = get_layout_data_iters(tiled_layout)
     _, second_tiled_layout, second_seps = infer_range_info(second_buffer_region, analyzer)
-    second_is_sbuf = isinstance(second_buffer_region.buffer.layout, T.TrainiumLayout)
+    second_not_hbm = isinstance(second_buffer_region.buffer.layout, T.TrainiumLayout)
     second_data_iters = get_layout_data_iters(second_tiled_layout)
     inst_size = 1
     first_inst_stride = 1
@@ -219,15 +259,17 @@ def find_max_inst_size_unary(
         range_info = tiled_range_infos_per_dim[0]
         tiled_range_infos_per_dim = tiled_range_infos_per_dim[1:]
         st, ext, dim_in_data_iter, dim_in_shape, dim_type = range_info
-        if (
-            dim_type == T.TrainiumLayout.Free
-            and inst_size != 1
-            and not analyzer.can_prove(
+        if inst_type == InstructionType.UNARY and dim_type == T.TrainiumLayout.Free:
+            if inst_size != 1 and not analyzer.can_prove(
                 first_inst_stride * inst_size == data_iters[dim_in_data_iter].stride
-            )
-        ):
-            # the stride of the found data iter is not compatible with previous data iters
-            break
+            ):
+                # the stride of the found data iter is not compatible with previous data iters
+                break
+            if dim_in_shape not in allowed_f_dim_1 or second_buffer_dim not in allowed_f_dim_2:
+                if inst_size != 1:
+                    break
+                else:
+                    continue
         stride_in_logical_dim = 1
         for i in range(dim_in_data_iter + 1, seps[dim_in_shape + 1]):
             stride_in_logical_dim *= data_iters[i].extent
@@ -235,11 +277,6 @@ def find_max_inst_size_unary(
         leftover = None
         second_data_iter = None
         second_buffer_dim = buffer_dim_map[dim_in_shape]
-        if dim_in_shape not in allowed_f_dim_1 or second_buffer_dim not in allowed_f_dim_2:
-            if inst_size != 1:
-                break
-            else:
-                continue
         # find the corresponding data iter in the second buffer region
         for i in reversed(
             range(second_seps[second_buffer_dim], second_seps[second_buffer_dim + 1])
@@ -262,23 +299,57 @@ def find_max_inst_size_unary(
                 second_new_stride = second_data_iters[i - 1].stride
                 break
         assert leftover is not None
+
         if dim_type == T.TrainiumLayout.Partition:
-            if (
-                second_is_sbuf
-                and second_tiled_layout.dimension_types[second_data_iter]
-                == T.TrainiumLayout.Free
-            ):
+            # find out whether the instruction is unary or transpose
+            if not second_not_hbm:
+                assert inst_type != InstructionType.TRANSPOSE, "Cannot transpose from HBM to SBUF"
+                continue
+            if not analyzer.can_prove(st == 0):
+                raise ValueError(f"Partition dimension not starting from 0. Start: {st}")
+            if second_tiled_layout.dimension_types[second_data_iter] == T.TrainiumLayout.Free:
                 assert (
-                    False
-                ), "partition dimension in the first buffer must be partition dimension in the second buffer"
+                    inst_type != InstructionType.UNARY
+                ), "Partition dimension mismatch. Cannot perform ewise operation."
+                # if transpose, the P dim on the first buffer must be mapped to a contiguous F dim on the second buffer
+                if not analyzer.can_prove(
+                    leftover >= ext and ext == data_iters[dim_in_data_iter].extent
+                ):
+                    assert (
+                        inst_type != InstructionType.TRANSPOSE
+                    ), "Cannot perform transpose due to corresponding F dim not contiguous"
+                if inst_size == 1:
+                    second_inst_stride = second_new_stride
+                elif not analyzer.can_prove(second_inst_stride * inst_size == second_new_stride):
+                    raise ValueError(f"Transpose must be applied to contiguous F dim")
+                inst_size *= ext
+                inst_data_iters[second_data_iter] = ext
+            else:
+                # Cannot transpose 2 buffers with overlapping partition dimensions
+                assert (
+                    inst_type != InstructionType.TRANSPOSE
+                ), "Cannot perform transpose due to overlapping partition dimensions"
+                if not analyzer.can_prove(
+                    second_data_iters[second_data_iter].stride
+                    == data_iters[dim_in_data_iter].stride
+                    and leftover == data_iters[dim_in_data_iter].extent
+                ):
+                    # mismatch P dim
+                    assert (
+                        inst_type != InstructionType.UNARY
+                    ), "Partition dimension mismatch. Cannot perform ewise operation."
             continue
+
+        if inst_type == InstructionType.TRANSPOSE:
+            return inst_size, second_inst_stride, inst_data_iters
+        # find max inst size for unary instruction
         if inst_size != 1 and not analyzer.can_prove(
             second_inst_stride * inst_size == second_new_stride
         ):
             # the stride of the found data iter is not compatible with previous data iters
             break
         if inst_size == 1:
-            if not second_is_sbuf and not analyzer.can_prove(
+            if not second_not_hbm and not analyzer.can_prove(
                 second_data_iters[second_data_iter].stride == 1
             ):
                 # stride of hbm tensor access must be 1
@@ -300,6 +371,37 @@ def find_max_inst_size_unary(
         else:
             assert False, "Invalid layout"
     return inst_size, first_inst_stride, inst_data_iters
+
+
+def find_max_inst_size_unary(
+    buffer_region: BufferRegion,
+    second_buffer_region: BufferRegion,
+    analyzer: Analyzer,
+    allowed_f_dim_1: Optional[Tuple[int]] = None,
+    allowed_f_dim_2: Optional[Tuple[int]] = None,
+):
+    return _find_max_inst_size_from_two_regions(
+        buffer_region,
+        second_buffer_region,
+        analyzer,
+        allowed_f_dim_1,
+        allowed_f_dim_2,
+        InstructionType.UNARY,
+    )
+
+
+def find_inst_transpose(
+    buffer_region: BufferRegion, second_buffer_region: BufferRegion, analyzer: Analyzer
+):
+    inst_size, second_inst_stride, second_inst_data_iters = _find_max_inst_size_from_two_regions(
+        buffer_region, second_buffer_region, analyzer, inst_type=InstructionType.TRANSPOSE
+    )
+    assert inst_size == buffer_region.buffer.layout.partition_size
+    inst_size, first_inst_stride, first_inst_data_iters = _find_max_inst_size_from_two_regions(
+        second_buffer_region, buffer_region, analyzer, inst_type=InstructionType.TRANSPOSE
+    )
+    assert inst_size == second_buffer_region.buffer.layout.partition_size
+    return first_inst_stride, first_inst_data_iters, second_inst_stride, second_inst_data_iters
 
 
 def get_hardware_inst_size_limit(is_dma: bool) -> int:
@@ -358,17 +460,21 @@ def find_max_inst_size_from_one_region(
 
     return inst_size, inst_stride, inst_data_iters
 
+
 def init_analyzer(sctx: ScheduleContext):
     analyzer = Analyzer()
     for v, r in sctx.var_range_map.items():
         analyzer.bind(v, r)
     return analyzer
 
+
 def f_gen_idx_anchor(buffer_region: BufferRegion, f_gen_axes):
     def f(b_loops, f_loop, p_loop, dim2block_var=None):
         region_axes = f_gen_axes(b_loops, f_loop, p_loop, dim2block_var)
         return [buffer_region.region[i].min + region_axes[i] for i in range(len(region_axes))]
+
     return f
+
 
 def f_gen_idx_mapped(buffer_region: BufferRegion, f_gen_axes, dim_map):
     def f(b_loops, f_loop, p_loop, dim2block_var=None):
@@ -377,4 +483,50 @@ def f_gen_idx_mapped(buffer_region: BufferRegion, f_gen_axes, dim_map):
         for i, j in dim_map.items():
             indices[j] += region_axes[i]
         return indices
+
     return f
+
+
+def check_partition_dim_match(
+    buffer_region: BufferRegion, second_buffer_region: BufferRegion, analyzer: Analyzer
+):
+    if buffer_region.buffer.scope() == "global" or second_buffer_region.buffer.scope() == "global":
+        return True
+    src1_range_info, src1_layout, src1_seps = infer_range_info(buffer_region, analyzer)
+    src2_range_info, src2_layout, src2_seps = infer_range_info(second_buffer_region, analyzer)
+
+    def get_partition_logical_data_iters(range_info, layout, seps):
+        # (dim_in_shape, extent, stride)
+        partition_logical_data_iters = []
+        logical_stride_map = {}
+        for i in range(len(seps) - 1):
+            logical_stride_in_dim = 1
+            for j in reversed(range(seps[i], seps[i + 1])):
+                logical_stride_map[j] = logical_stride_in_dim
+                logical_stride_in_dim *= layout.combined_1d_layout.data_iter_array[j].extent
+        for i in range(len(range_info)):
+            if range_info[i].dim_type == T.TrainiumLayout.Partition:
+                partition_logical_data_iters.append(
+                    (
+                        range_info[i].dim_in_shape,
+                        range_info[i].extent,
+                        logical_stride_map[range_info[i].dim_in_data_iter],
+                    )
+                )
+        return partition_logical_data_iters
+
+    src1_partition_logical_data_iters = get_partition_logical_data_iters(
+        src1_range_info, src1_layout, src1_seps
+    )
+    src2_partition_logical_data_iters = get_partition_logical_data_iters(
+        src2_range_info, src2_layout, src2_seps
+    )
+    src1_partition_logical_data_iters.sort(key=lambda x: (x[0], x[2]))
+    src2_partition_logical_data_iters.sort(key=lambda x: (x[0], x[2]))
+    src1_partition_logical_data_iters = [x[1:] for x in src1_partition_logical_data_iters]
+    src2_partition_logical_data_iters = [x[1:] for x in src2_partition_logical_data_iters]
+    return src1_partition_logical_data_iters == src2_partition_logical_data_iters
+
+
+def get_max_psum_elements():
+    return 4096

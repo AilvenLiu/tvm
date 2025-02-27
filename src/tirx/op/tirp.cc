@@ -90,6 +90,8 @@ TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
       return ScheduleContext(target, exec_scope, launch_params, var_range_map);
     });
 
+TVM_REGISTER_GLOBAL("tir.ScheduleContextAddAllocBuffer").set_body_method<ScheduleContext>(&ScheduleContextNode::AddAllocBuffer);
+TVM_REGISTER_GLOBAL("tir.ScheduleContextAddInitStmt").set_body_method<ScheduleContext>(&ScheduleContextNode::AddInitStmt);
 /********************* Schedule Ops **********************/
 #define TIRP_DEFINE_SCHEDULE_OP(OpName) \
   TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsScheduleOp", Bool(true))

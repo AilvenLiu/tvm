@@ -163,6 +163,8 @@ class TIRpOpScheduler : public StmtExprMutator {
 
  private:
   Stmt VisitStmt_(const BlockNode* op) final {
+    bool is_first_block = is_first_block_;
+    is_first_block_ = false;
     Block block = GetRef<Block>(op);
     auto* n = block.CopyOnWrite();
     // Get the exec_scope
@@ -173,6 +175,10 @@ class TIRpOpScheduler : public StmtExprMutator {
     // Pop the exec_scope
     if (op->exec_scope.defined()) {
       exec_scope_stack_.pop_back();
+    }
+    if (is_first_block) {
+      n->body = SeqStmt::Flatten(Array<Stmt>{SeqStmt::Flatten(init_stmts_), n->body});
+      n->alloc_buffers.insert(n->alloc_buffers.end(), alloc_buffers_.begin(), alloc_buffers_.end());
     }
     return std::move(block);
   }
@@ -203,6 +209,8 @@ class TIRpOpScheduler : public StmtExprMutator {
     PrimFunc res;
     res = (*f_op_scheduler_)(op->op, op->args, sctx);
     ICHECK(res.defined()) << "Internal Error: tirp.f_op_scheduler returned an undefined PrimFunc";
+    alloc_buffers_.insert(alloc_buffers_.end(), sctx->alloc_buffers.begin(), sctx->alloc_buffers.end());
+    init_stmts_.insert(init_stmts_.end(), sctx->init_stmts.begin(), sctx->init_stmts.end());
     return res->body;
   }
 
@@ -210,6 +218,9 @@ class TIRpOpScheduler : public StmtExprMutator {
   const Target& target_;
   std::vector<ExecScope> exec_scope_stack_;
   std::unordered_map<String, PrimExpr, ObjectHash, ObjectEqual> launch_params_;
+  std::vector<Buffer> alloc_buffers_;
+  std::vector<Stmt> init_stmts_;
+  bool is_first_block_;
 };
 
 class ScopeMerger : public StmtExprMutator {

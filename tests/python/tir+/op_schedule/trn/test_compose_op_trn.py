@@ -168,14 +168,14 @@ def test_activation_reduce_two_stage():
             C = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
             for i in range(2):
                 with T.kernel():
-                    intermediate_buffer = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
+                    intermediate_buffer = T.alloc_buffer((128, 8), scope="trn.sbuf", logical_scope="kernel")
                     for b_loop in range(1):
-                        for reduction_b_loop in range(16):
+                        for reduction_b_loop in range(8):
                             T.attr(0, "tensorized_nki_instruction", 1)
-                            for p_loop, f_loop in T.grid(128, 512):
-                                T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], B[p_loop, reduction_b_loop % 8 // 2 * 2048 + reduction_b_loop // 8 * 1024 + reduction_b_loop % 2 * 512 + f_loop], A[p_loop, i * 8192 + reduction_b_loop * 512 + f_loop], "sqrt", "sum")
+                            for p_loop, f_loop in T.grid(128, 1024):
+                                T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], B[p_loop, reduction_b_loop % 4 * 2048 + reduction_b_loop // 4 * 1024 + f_loop], A[p_loop, i * 8192 + reduction_b_loop * 1024 + f_loop], "sqrt", "sum")
                         T.attr(0, "tensorized_nki_instruction", 1)
-                        for p_loop, f_loop in T.grid(128, 16):
+                        for p_loop, f_loop in T.grid(128, 8):
                             T.nki_tensorreduce(C[p_loop, 0], intermediate_buffer[p_loop, f_loop], "sum", -1)
     # fmt: off
     with target:

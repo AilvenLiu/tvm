@@ -30,12 +30,11 @@ from .common import (
     generate_axes_in_region,
     find_max_inst_size_from_one_region,
     bound_inst_with_limit,
-    init_analyzer
+    init_analyzer,
+    get_max_psum_elements,
 )
 
 max_inst_size = 128
-max_psum_banks = 8 * 4
-
 
 class OperatorKind:
     A = 0
@@ -198,35 +197,29 @@ def matmul_trn(
     actual_rhs_f_size, additional_rhs_b_size = bound_inst_with_limit(
         rhs_f_size, max_rhs_size, analyzer
     )
+    max_psum_slots = get_max_psum_elements() // max_inst_size 
     # fmt: off
+    
+    @T.macro
+    def matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop, psum_slot, acc, use_acc_indices):
+        with T.attr(0, "tensorized_nki_instruction", 1):
+            for p_loop, lhs_f_loop, rhs_f_loop in T.grid(p_size, actual_lhs_f_size, actual_rhs_f_size):
+                lhs_f_loop_wo_limit = T.meta_var(lhs_f_loop + additional_lhs_b_loop * actual_lhs_f_size)
+                rhs_f_loop_wo_limit = T.meta_var(rhs_f_loop + additional_rhs_b_loop * actual_rhs_f_size)
+                lhs_indices = T.meta_var(f_gen_lhs_indices(lhs_b_loop, lhs_b_extent, reduction_b_loop, reduction_b_extent, lhs_f_loop_wo_limit, p_loop))
+                rhs_indices = T.meta_var(f_gen_rhs_indices(rhs_b_loop, rhs_b_extent,  reduction_b_loop, reduction_b_extent,rhs_f_loop_wo_limit, p_loop))
+                acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop_wo_limit, rhs_f_loop_wo_limit))
+                lhs, rhs = T.meta_var((B[rhs_indices], A[lhs_indices]) if swap_lhs_rhs else (A[lhs_indices], B[rhs_indices]))
+                if use_acc_indices:
+                    T.evaluate(T.nki_matmul(acc[acc_indices], lhs, rhs))
+                else:
+                    T.evaluate(T.nki_matmul(acc[psum_slot, lhs_f_loop, rhs_f_loop], lhs, rhs))
+
+    
     @T.prim_func(tirp=True)
     def impl_C_psum():
         for lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(lhs_b_extent, rhs_b_extent, reduction_b_extent, additional_lhs_b_size, additional_rhs_b_size):
-            with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop, lhs_f_loop, rhs_f_loop in T.grid(p_size, actual_lhs_f_size, actual_rhs_f_size):
-                    lhs_f_loop_wo_limit = T.meta_var(lhs_f_loop + additional_lhs_b_loop * actual_lhs_f_size)
-                    rhs_f_loop_wo_limit = T.meta_var(rhs_f_loop + additional_rhs_b_loop * actual_rhs_f_size)
-                    lhs_indices = T.meta_var(f_gen_lhs_indices(lhs_b_loop, lhs_b_extent, reduction_b_loop, reduction_b_extent, lhs_f_loop_wo_limit, p_loop))
-                    rhs_indices = T.meta_var(f_gen_rhs_indices(rhs_b_loop, rhs_b_extent,  reduction_b_loop, reduction_b_extent,rhs_f_loop_wo_limit, p_loop))
-                    acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop_wo_limit, rhs_f_loop_wo_limit))
-                    if swap_lhs_rhs:
-                        T.evaluate(
-                            T.nki_matmul(
-                                res=C[acc_indices],
-                                lhs=B[rhs_indices],
-                                rhs=A[lhs_indices],
-                                accum=True,
-                            )
-                        )
-                    else:
-                        T.evaluate(
-                            T.nki_matmul(
-                                res=C[acc_indices],
-                                lhs=A[lhs_indices],
-                                rhs=B[rhs_indices],
-                                accum=True,
-                            )
-                        )
+            matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop, None, C, True)
 
     # todo: generalize the process of generating composite matmul + another_op pattern
     # by generating TIR op and reusing existing dispatch rule
@@ -234,7 +227,7 @@ def matmul_trn(
     def impl_C_sbuf():
         with T.kernel():
             dimension_types = T.meta_var("FFP" if swap_lhs_rhs else "FPF")
-            C_psum_shape = T.meta_var((max_psum_banks, max_inst_size, p_size) if swap_lhs_rhs else (max_psum_banks, p_size, max_inst_size))
+            C_psum_shape = T.meta_var((max_psum_slots, max_inst_size, p_size) if swap_lhs_rhs else (max_psum_slots, p_size, max_inst_size))
             C_psum = T.alloc_buffer(
                 C_psum_shape,
                 "float32",
@@ -245,38 +238,15 @@ def matmul_trn(
                 ),
             )
             for lhs_b_loop, rhs_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(lhs_b_extent, rhs_b_extent, additional_lhs_b_size, additional_rhs_b_size):
-                    psum_bank = T.meta_var(((lhs_b_loop * additional_lhs_b_size + additional_lhs_b_loop) * additional_rhs_b_size * rhs_b_extent + rhs_b_loop * additional_rhs_b_size + additional_rhs_b_loop)%max_psum_banks) 
+                    psum_slot = T.meta_var(((lhs_b_loop * additional_lhs_b_size + additional_lhs_b_loop) * additional_rhs_b_size * rhs_b_extent + rhs_b_loop * additional_rhs_b_size + additional_rhs_b_loop)%max_psum_slots) 
                     for reduction_b_loop in T.serial(0, reduction_b_extent):
-                        with T.attr(0, "tensorized_nki_instruction", 1):
-                            for p_loop, lhs_f_loop, rhs_f_loop in T.grid(p_size, actual_lhs_f_size, actual_rhs_f_size):
-                                lhs_f_loop_wo_limit = T.meta_var(lhs_f_loop + additional_lhs_b_loop * actual_lhs_f_size)
-                                rhs_f_loop_wo_limit = T.meta_var(rhs_f_loop + additional_rhs_b_loop * actual_rhs_f_size)
-                                lhs_indices = T.meta_var(f_gen_lhs_indices(lhs_b_loop, lhs_b_extent, reduction_b_loop, reduction_b_extent, lhs_f_loop_wo_limit, p_loop))
-                                rhs_indices = T.meta_var(f_gen_rhs_indices(rhs_b_loop, rhs_b_extent,  reduction_b_loop, reduction_b_extent,rhs_f_loop_wo_limit, p_loop))
-                                if swap_lhs_rhs:
-                                    T.evaluate(
-                                        T.nki_matmul(
-                                            res=C_psum[psum_bank, lhs_f_loop, rhs_f_loop],
-                                            lhs=B[rhs_indices],
-                                            rhs=A[lhs_indices],
-                                            accum=True,
-                                        )
-                                    )
-                                else:
-                                    T.evaluate(
-                                        T.nki_matmul(
-                                            res=C_psum[psum_bank, lhs_f_loop, rhs_f_loop],
-                                            lhs=A[lhs_indices],
-                                            rhs=B[rhs_indices],
-                                            accum=True,
-                                        )
-                                            )
+                        matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop, psum_slot, C_psum, False)
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for lhs_f_loop, rhs_f_loop in T.grid(actual_lhs_f_size, actual_rhs_f_size):
                             lhs_f_loop_wo_limit = T.meta_var(lhs_f_loop + additional_lhs_b_loop * actual_lhs_f_size)
                             rhs_f_loop_wo_limit = T.meta_var(rhs_f_loop + additional_rhs_b_loop * actual_rhs_f_size)
                             acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop_wo_limit, rhs_f_loop_wo_limit))
-                            C[acc_indices] = C_psum[psum_bank, lhs_f_loop, rhs_f_loop]
+                            C[acc_indices] = C_psum[psum_slot, lhs_f_loop, rhs_f_loop]
     # fmt: on
     if C.scope() == "trn.psum":
         return impl_C_psum

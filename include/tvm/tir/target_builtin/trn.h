@@ -129,6 +129,12 @@ TVM_DLL const Op& nki_activation_reduce();
  */
 TVM_DLL const Op& nki_tensorscalar_reduce();
 
+/*!
+ * \brief nki intrinsics for initializing identity tensor.
+ *
+ * nki_identity(result, size)
+ */
+TVM_DLL const Op& nki_identity();
 
 }  // namespace builtin
 }  // namespace tir

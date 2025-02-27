@@ -188,7 +188,7 @@ def test_copy_in_a_loop_2():
 
 
 # transpose is not a copy
-def test_copy_transpose_fail():
+def test_copy_transpose():
     src_shape = [512, 512]
     src_layout = TrainiumLayout(
         dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
@@ -198,18 +198,83 @@ def test_copy_transpose_fail():
         dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((2048, 128), (1, 1))
     )
 
+    #fmt: off
     @T.prim_func(tirp=True)
     def copy() -> None:
         with T.kernel():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             Tp.copy(B_sbuf, A_sbuf)
+            
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "copy"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            buffer = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
+            with T.attr(0, "tensorized_nki_instruction", 1):
+                for p_loop, rhs_f_loop in T.grid(128, 128):
+                    T.nki_identity(buffer[p_loop, rhs_f_loop], 128)
+            with T.kernel():
+                dst_psum = T.alloc_buffer((8, 128, 512), logical_scope="trn.psum")
+                for b_loop in range(16):
+                    with T.attr(0, "tensorized_nki_instruction", 1):
+                        for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
+                            T.nki_matmul(dst_psum[b_loop // 4, lhs_f_loop, b_loop % 4 * 128 + rhs_f_loop], A_sbuf[p_loop, b_loop * 128 + lhs_f_loop], buffer[p_loop, rhs_f_loop], T.bool(True))
+                    T.attr(0, "tensorized_nki_instruction", 1)
+                    for p_loop, f_loop in T.grid(128, 128):
+                        T.nki_tensor_copy(B_sbuf[p_loop, f_loop * 16 + b_loop], dst_psum[b_loop // 4, p_loop, b_loop % 4 * 128 + f_loop])    
+    #fmt: on
 
-    with pytest.raises(Exception):
-        with target:
-            mod = tvm.IRModule({"main": copy})
-            mod = tvm.tir.transform.LowerTIRp()(mod)
+    with target:
+        mod = tvm.IRModule({"main": copy})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
 
+def test_copy_transpose_2():
+    src_shape = [65536]
+    src_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
+    )
+    dst_shape = [4, 65536]
+    dst_layout = TrainiumLayout(
+        dimension_types="FFPF", combined_1d_layout=T.TileLayout.from_tuple((4, 128, 128, 4), (4,16,1,1))
+    )
+    #fmt: off
+    @T.prim_func(tirp=True)
+    def copy() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            for i in range(4):
+                Tp.copy(B_sbuf[i, :], A_sbuf)
+                
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "copy"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            buffer = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
+            with T.attr(0, "tensorized_nki_instruction", 1):
+                for p_loop, rhs_f_loop in T.grid(128, 128):
+                    T.nki_identity(buffer[p_loop, rhs_f_loop], 128)
+            for i in range(4):
+                with T.kernel():
+                    dst_psum = T.alloc_buffer((8, 128, 512), logical_scope="trn.psum")
+                    for b_loop in range(4):
+                        with T.attr(0, "tensorized_nki_instruction", 1):
+                            for p_loop, lhs_f_loop, rhs_f_loop in T.grid(128, 128, 128):
+                                T.nki_matmul(dst_psum[0, lhs_f_loop, b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, lhs_f_loop * 4 + b_loop], buffer[p_loop, rhs_f_loop], T.bool(True))
+                        T.attr(0, "tensorized_nki_instruction", 1)
+                        for p_loop, f_loop in T.grid(128, 128):
+                            T.nki_tensor_copy(B_sbuf[p_loop, f_loop * 16 + i * 4 + b_loop], dst_psum[0, p_loop, b_loop * 128 + f_loop])
+    #fmt: on
+    with target:
+        mod = tvm.IRModule({"main": copy})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
 
 def test_copy_different_f():
     src_shape = [512, 64]

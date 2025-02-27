@@ -14,11 +14,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from typing import Dict
+from typing import Dict, List
 
 from tvm._ffi import register_object, register_func
 from tvm.ir import Op, Range
-from tvm.tir import _ffi_api, PrimExpr, Var
+from tvm.tir import _ffi_api, PrimExpr, Var, Buffer, Stmt
 from tvm.runtime import Object, Scriptable
 from tvm.target import Target
 from tvm.tir.expr import PrimExpr
@@ -54,12 +54,20 @@ class ScheduleContext(Object, Scriptable):
 
     var_range_map : Dict[Var, Range]
         A map from loop variables to their ranges.
+        
+    alloc_buffers : List[Buffer]
+        The allocated buffers of the schedule context.
+
+    init_stmts : List[Stmt]
+        The initialization statements of the schedule context.
     """
 
     target: Target
     exec_scope: ExecScope
     launch_params: Dict[str, PrimExpr]
     var_range_map: Dict[Var, Range]
+    alloc_buffers: List[Buffer]
+    init_stmts: List[Stmt]
 
     def __init__(
         self, target: Target, exec_scope: ExecScope, launch_params: Dict[str, PrimExpr], var_range_map: Dict[Var, Range]
@@ -67,6 +75,28 @@ class ScheduleContext(Object, Scriptable):
         self.__init_handle_by_constructor__(
             _ffi_api.ScheduleContext, target, exec_scope, launch_params, var_range_map  # pylint: disable=no-member
         )
+
+    def add_alloc_buffer(self, buffer: Buffer) -> None:
+        """Add an allocated buffer to the schedule context.
+            The buffer will be added to the outermost block's alloc_buffers list.
+
+        Parameters
+        ----------
+        buffer : Buffer
+            The buffer to be added.
+        """
+        _ffi_api.ScheduleContextAddAllocBuffer(self, buffer)
+
+    def add_init_stmt(self, stmt: Stmt) -> None:
+        """Add an initialization statement to the schedule context.
+           The statement will be added to the beginning of the kernel.
+
+        Parameters
+        ----------
+        stmt : Stmt
+            The initialization statement to be added.
+        """
+        _ffi_api.ScheduleContextAddInitStmt(self, stmt)
 
     def is_cuda(self) -> bool:
         """Check if the target is CUDA."""

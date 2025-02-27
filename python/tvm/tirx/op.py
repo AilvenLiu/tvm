@@ -4483,7 +4483,7 @@ def nki_tensor_copy(res, data):
     """
     return call_intrin("", "tir.nki_tensor_copy", res, data)
 
-def nki_matmul(res, lhs, rhs, accum):
+def nki_matmul(res, lhs, rhs, accum = True):
     """TVM intrinsic to call nki matmul instruction
 
     Parameters
@@ -4712,3 +4712,21 @@ def nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand1, operand2, op
         Whether to reorder the operands.
     """
     return call_intrin("", "tir.nki_tensorscalar_reduce", reduce_res, tensorscalar_res, operand1, operand2, opcode, reduce_opcode, reorder)
+
+def nki_identity(result, size):
+    """TVM intrinsic to call nki identity instruction
+
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+        
+    size: PrimExpr
+        The size of the identity tensor.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_identity", result, size)
