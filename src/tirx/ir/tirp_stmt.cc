@@ -31,7 +31,7 @@ namespace tirx {
 namespace tirp {
 
 // OpCall
-OpCall::OpCall(tvm::Op op, Array<ObjectRef> args) {
+OpCall::OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace) {
   // Check if the op is a TIR+ op.
   static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
   ICHECK_EQ(tirp_op_map.count(op), 1) << "Only TIR+ ops can be used in tirx::tirp::OpCall";
@@ -43,15 +43,16 @@ OpCall::OpCall(tvm::Op op, Array<ObjectRef> args) {
   ObjectPtr<OpCallNode> n = make_object<OpCallNode>();
   n->op = std::move(op);
   n->args = std::move(args);
+  n->workspace = std::move(workspace);
   data_ = std::move(n);
 }
 
-TVM_REGISTER_GLOBAL("tirx.OpCall").set_body_typed([](tvm::Op op, Array<ObjectRef> args) {
-  return OpCall(op, args);
+TVM_REGISTER_GLOBAL("tirx.OpCall").set_body_typed([](tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace) {
+  return OpCall(op, args, workspace);
 });
 
 TVM_REGISTER_NODE_TYPE(OpCallNode);
 
-}  // namespace tirxp
-}  // namespace tirx
+}  // namespace tirxxp
+}  // namespace tirxx
 }  // namespace tvm

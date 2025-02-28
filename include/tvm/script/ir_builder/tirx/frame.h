@@ -655,9 +655,12 @@ class DeclBufferFrame : public TIRFrame {
 
 class ComposeOpFrameNode : public TIRFrameNode {
  public:
+  /*! \brief The workspace of the compose op. */
+  Map<String, tvm::tir::Buffer> workspace;
+
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ComposeOpFrameNode>();
+    refl::ObjectDef<ComposeOpFrameNode>().def_ro("workspace", &ComposeOpFrameNode::workspace);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.ComposeOpFrame", ComposeOpFrameNode,
                                     TIRFrameNode);

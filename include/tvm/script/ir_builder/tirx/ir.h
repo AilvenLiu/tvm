@@ -150,7 +150,7 @@ SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_sc
                   ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
                   ffi::String scope_slice_parent = "");
 
-void OpCall(tvm::Op op, Array<ObjectRef> args);
+void OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace = {});
 
 BlockFrame BlockFrameSlice(BlockFrame block, ffi::Variant<ffi::Array<Range>, PrimExpr> slice);
 
@@ -490,9 +490,10 @@ LaunchThreadFrame LaunchThread(ffi::String thread_tag, PrimExpr extent);
 
 /*!
  * \brief Compose TIRp op.
+ * \param workspace The workspace of the compose op.
  * \return The result ComposeOpFrame.
  */
-ComposeOpFrame ComposeOp();
+ComposeOpFrame ComposeOp(Map<String, Buffer> workspace);
 
 /*!
  * \brief Bind a var to thread env.

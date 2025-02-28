@@ -240,9 +240,9 @@ void ComposeOpFrameNode::ExitWithScope() {
     ops.push_back(GetRef<tvm::tirx::tirp::OpCall>(op_call));
   }
   auto compose_op_op = tvm::Op::Get("tirp.compose_op");
-  AddToParent(tvm::tirx::tirp::OpCall(compose_op_op, ops));
+  AddToParent(tvm::tirx::tirp::OpCall(compose_op_op, ops, workspace));
 }
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -278,10 +278,11 @@ DocStringDoc::DocStringDoc(ffi::String docs) {
   this->data_ = std::move(n);
 }
 
-OpCallDoc::OpCallDoc(ExprDoc callee, ffi::Array<Doc> args) {
+OpCallDoc::OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace) {
   ObjectPtr<OpCallDocNode> n = ffi::make_object<OpCallDocNode>();
   n->callee = callee;
   n->args = args;
+  n->workspace = workspace;
   this->data_ = std::move(n);
 }
 
@@ -422,14 +423,14 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("script.printer.BreakDoc", []() { return BreakDoc(); });
-});
+}
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("script.printer.ContinueDoc", []() { return ContinueDoc(); });
-});
+}
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(
       "script.printer.ForDoc",
@@ -493,9 +494,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("script.printer.OpCallDoc", [](ExprDoc callee, ffi::Array<Doc> args) {
-    return OpCallDoc(callee, args);
-  });
+  refl::GlobalDef().def("script.printer.OpCallDoc",
+                        [](ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace) {
+                          return OpCallDoc(callee, args, workspace);
+                        });
 }
 
 }  // namespace printer

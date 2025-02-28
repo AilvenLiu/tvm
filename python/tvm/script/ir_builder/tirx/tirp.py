@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Builtin ops in TIR+"""
-from typing import Union, Optional
+from typing import Union, Optional, Dict
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
 from tvm.tirx.async_structs import CopyPipeline
@@ -43,7 +43,7 @@ def wrap_elem_in_tuple(e):
     return (e,)
 
 
-def zero(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
+def zero(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], workspace: Dict[str, Buffer] = {}):
     """Zero out all elements in src and store to dst.
 
     Parameters
@@ -53,13 +53,16 @@ def zero(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
 
     src : Union[BufferRegion, Buffer]
         The source buffer region.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("zero"), [dst, src])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("zero"), [dst, src], workspace)  # pylint: disable=no-member
 
 
-def sqrt(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None, scale: Optional[FloatImm] = None):
+def sqrt(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None, scale: Optional[FloatImm] = None, workspace: Dict[str, Buffer] = {}):
     """Sqrt all elements in src and store to dst.
 
     dst = sqrt(src * scale + bias)  (if scale or bias are provided)
@@ -77,18 +80,22 @@ def sqrt(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], bia
 
     scale : Optional[FloatImm]
         The scale of the sqrt src. Only supported on Trn.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
     if bias is not None and isinstance(bias, Buffer):
         bias = _to_region(bias)
-    return _ffi_api.OpCall(_get_tirp_op("sqrt"), [dst, src, bias, scale])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("sqrt"), [dst, src, bias, scale], workspace)  # pylint: disable=no-member
 
 
 def add(
     dst: Union[BufferRegion, Buffer],
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
+    workspace: Dict[str, Buffer] = {},
 ):
     """Add data from src1 and src2, store to dst.
 
@@ -102,19 +109,23 @@ def add(
 
     src2 : Union[BufferRegion, Buffer, FloatImm]
         The source buffer region 2, or float.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("add"), [dst, src1, src2])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("add"), [dst, src1, src2], workspace)  # pylint: disable=no-member
 
 
 def sub(
     dst: Union[BufferRegion, Buffer],
     src1: Union[BufferRegion, Buffer],
     src2: Union[BufferRegion, Buffer, FloatImm],
+    workspace: Dict[str, Buffer] = {},
 ):
     """Sub data from src2 to src1, store to dst.
 
@@ -128,19 +139,23 @@ def sub(
 
     src2 : Union[BufferRegion, Buffer, FloatImm]
         The source buffer region 2, or float.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("sub"), [dst, src1, src2])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("sub"), [dst, src1, src2], workspace)  # pylint: disable=no-member
 
 
 def mul(
     dst: Union[BufferRegion, Buffer],
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
+    workspace: Dict[str, Buffer] = {},
 ):
     """Multiply data from src1 and src2, store to dst.
 
@@ -154,19 +169,23 @@ def mul(
 
     src2 : Union[BufferRegion, Buffer, FloatImm]
         The source buffer region 2, or float.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("mul"), [dst, src1, src2])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("mul"), [dst, src1, src2], workspace)  # pylint: disable=no-member
 
 
 def fdiv(
     dst: Union[BufferRegion, Buffer],
     src1: Union[BufferRegion, Buffer],
     src2: Union[BufferRegion, Buffer, FloatImm],
+    workspace: Dict[str, Buffer] = {},
 ):
     """(Float) Div data from src2 to src1, store to dst.
 
@@ -180,15 +199,18 @@ def fdiv(
 
     src2 : Union[BufferRegion, Buffer, FloatImm]
         The source buffer region 2, or float.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("fdiv"), [dst, src1, src2])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("fdiv"), [dst, src1, src2], workspace)  # pylint: disable=no-member
 
 
-def copy(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
+def copy(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], workspace: Dict[str, Buffer] = {}):
     """Copy data from src to dst.
 
     Parameters
@@ -198,13 +220,16 @@ def copy(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
 
     src : Union[BufferRegion, Buffer]
         The source buffer region.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("copy"), [dst, src])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("copy"), [dst, src], workspace)  # pylint: disable=no-member
 
 
-def fill(dst: Union[BufferRegion, Buffer], value: PrimExpr):
+def fill(dst: Union[BufferRegion, Buffer], value: PrimExpr, workspace: Dict[str, Buffer] = {}):
     """Fill the buffer region with the value.
 
     Parameters
@@ -214,9 +239,12 @@ def fill(dst: Union[BufferRegion, Buffer], value: PrimExpr):
 
     value : PrimExpr
         The value to be filled.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
-    return _ffi_api.OpCall(_get_tirp_op("fill"), [dst, value])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("fill"), [dst, value], workspace)  # pylint: disable=no-member
 
 
 def gemm(
@@ -226,6 +254,7 @@ def gemm(
     C: Union[BufferRegion, Buffer],
     alpha: PrimExpr = 1.0,
     beta: PrimExpr = 0.0,
+    workspace: Dict[str, Buffer] = {},
 ):
     """General matrix multiplication.
 
@@ -250,13 +279,16 @@ def gemm(
 
     beta : PrimExpr
         The scalar beta.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     D = _to_region(D)
     A = _to_region(A)
     B = _to_region(B)
     C = _to_region(C)
     return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("gemm"), [D, A, B, C, alpha, beta]
+        _get_tirp_op("gemm"), [D, A, B, C, alpha, beta], workspace
     )
 
 
@@ -265,6 +297,7 @@ def sum(
     src: Union[BufferRegion, Buffer],
     axes: int = -1,
     accum: bool = False,
+    workspace: Dict[str, Buffer] = {},
 ):
     """
     Sum all elements in src and store to dst.
@@ -282,12 +315,15 @@ def sum(
 
     accum : bool
         Whether dst is accumulated.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
     axes = wrap_elem_in_tuple(axes)
     return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("sum"), [dst, src, axes, accum]
+        _get_tirp_op("sum"), [dst, src, axes, accum], workspace
     )
 
 
@@ -296,6 +332,7 @@ def max(
     src: Union[BufferRegion, Buffer],
     axes: int = -1,
     accum: bool = False,
+    workspace: Dict[str, Buffer] = {},
 ):
     """
     Max all elements in src and store to dst.
@@ -313,12 +350,15 @@ def max(
 
     accum : bool
         Whether dst is accumulated.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
     axes = wrap_elem_in_tuple(axes)
     return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("max"), [dst, src, axes, accum]
+        _get_tirp_op("max"), [dst, src, axes, accum], workspace
     )
 
 
@@ -327,6 +367,7 @@ def min(
     src: Union[BufferRegion, Buffer],
     axes: int = -1,
     accum: bool = False,
+    workspace: Dict[str, Buffer] = {},
 ):
     """
     Min all elements in src and store to dst.
@@ -344,16 +385,19 @@ def min(
 
     accum : bool
         Whether dst is accumulated.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
     axes = wrap_elem_in_tuple(axes)
     return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("min"), [dst, src, axes, accum]
+        _get_tirp_op("min"), [dst, src, axes, accum], workspace
     )
 
 
-def reciprocal(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
+def reciprocal(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], workspace: Dict[str, Buffer] = {}):
     """Reciprocal all elements in src and store to dst.
 
     Parameters
@@ -366,10 +410,10 @@ def reciprocal(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("reciprocal"), [dst, src])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("reciprocal"), [dst, src], workspace)  # pylint: disable=no-member
 
 
-def memset(dst: Union[BufferRegion, Buffer], value: PrimExpr):
+def memset(dst: Union[BufferRegion, Buffer], value: PrimExpr, workspace: Dict[str, Buffer] = {}):
     """Set all elements in dst to value.
 
     Parameters
@@ -379,13 +423,16 @@ def memset(dst: Union[BufferRegion, Buffer], value: PrimExpr):
 
     value : PrimExpr
         The value to be set.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
-    return _ffi_api.OpCall(_get_tirp_op("memset"), [dst, value])  # pylint: disable=no-member
+    return _ffi_api.OpCall(_get_tirp_op("memset"), [dst, value], workspace)  # pylint: disable=no-member
 
 
 def alloc_copy_pipeline(
-    thread_scope: ExecScope, depth: int, separate_pc: bool, name_hint: str = ""
+    thread_scope: ExecScope, depth: int, separate_pc: bool, name_hint: str = "", workspace: Dict[str, Buffer] = {}
 ) -> CopyPipeline:
     """The copy pipeline allocation function.
 
@@ -403,6 +450,9 @@ def alloc_copy_pipeline(
     name_hint : str
         The name hint of the pipeline.
 
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+
     Returns
     -------
     res : CopyPipeline
@@ -412,18 +462,23 @@ def alloc_copy_pipeline(
         thread_scope = ExecScope(thread_scope)
     else:
         assert isinstance(thread_scope, ExecScope)
-    return _ffi_api.AllocCopyPipeline(thread_scope, depth, separate_pc, name_hint)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.AllocCopyPipeline(thread_scope, depth, separate_pc, name_hint, workspace)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
-def compose_op() -> frame.ComposeOpFrame:
+def compose_op(workspace: Dict[str, Buffer] = {}) -> frame.ComposeOpFrame:
     """Compose a TIRp op.
+
+    Parameters
+    ----------
+    workspace : Dict[str, Buffer]
+        The workspace of the operator
 
     Returns
     -------
     res : frame.ComposeOpFrame
         The result ComposeOpFrame.
     """
-    return _ffi_api.ComposeOp()  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.ComposeOp(workspace)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
 __all__ = [

@@ -149,7 +149,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                           LiteralDoc::Int(pipeline->depth, p->Attr("depth")),
                           LiteralDoc::Boolean(pipeline->separate_pc, p->Attr("separate_pc")),
                           LiteralDoc::Str(pipeline->name_hint, p->Attr("name_hint")),
-
+                          d->AsDoc<DictDoc>(pipeline->workspace, p->Attr("workspace")),
                       });
               opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
             } else {
@@ -174,6 +174,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                           LiteralDoc::Int(pipeline->depth, p->Attr("depth")),
                           LiteralDoc::Boolean(pipeline->separate_pc, p->Attr("separate_pc")),
                           LiteralDoc::Str(pipeline->name_hint, p->Attr("name_hint")),
+                          d->AsDoc<DictDoc>(pipeline->workspace, p->Attr("workspace")),
                       });
               opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
             } else {
@@ -204,7 +205,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             return OpCallDoc(
                 AttrAccessDoc(d->AsDoc<ExprDoc>(op_call->args[0], p->Attr("args")->ArrayIndex(0)),
                               method),
-                args);
+                args, {});
           };
 
           static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
@@ -220,7 +221,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
-            return OpCallDoc(TIRp(d, name), args);
+            return OpCallDoc(TIRp(d, name), args, d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")));
           } else if (bool(pipeline_op_map.get(op, tvm::Bool(false)))) {
             // Pipeline ops
             ICHECK(op_call->args[0]->IsInstance<tirx::PipelineNode>())
@@ -237,7 +238,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             }
             tir::SeqStmt seq_stmt(stmts);
             AsDocBody(seq_stmt, p->Attr("args"), f->get(), d);
-            return ScopeDoc(NullOpt, TIRp(d, "compose_op")->Call({}), (*f)->stmts);
+            return ScopeDoc(NullOpt, TIRp(d, "compose_op")->Call({}, {"workspace"}, {d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace"))}), (*f)->stmts);
           } else {
             LOG(FATAL) << "Unknown TIR+ op type: " << op->name;
           }

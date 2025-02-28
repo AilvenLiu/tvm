@@ -28,6 +28,7 @@ Each statement node have subfields that can be visited from python side.
 """
 from collections.abc import Mapping
 from enum import IntEnum
+from typing import Dict, List, Optional, Union
 
 import tvm_ffi
 from tvm.ir import PrimExpr, Range, Span, Op
@@ -747,9 +748,12 @@ class OpCall(Stmt):
     args : List[PrimExpr]
         The arguments.
         
+    workspace : Map[str, Buffer]
+        The workspace.
     """
     op: Op
     args: List[PrimExpr]
+    workspace: Dict[str, Buffer]
     
-    def __init__(self, op: Op, args: List[PrimExpr]) -> None:
-        self.__init_handle_by_constructor__(_ffi_api.OpCall, op, args)
+    def __init__(self, op: Op, args: List[PrimExpr], workspace: Dict[str, Buffer] = {}) -> None:
+        self.__init_handle_by_constructor__(_ffi_api.OpCall, op, args, workspace)

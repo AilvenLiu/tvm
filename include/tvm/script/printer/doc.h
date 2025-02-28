@@ -897,53 +897,53 @@ class WhileDoc : public StmtDoc {
  * \sa BreakDoc
  */
 class BreakDocNode : public StmtDocNode {
-  public:
-   void VisitAttrs(AttrVisitor* v) { StmtDocNode::VisitAttrs(v); }
+ public:
+  void VisitAttrs(AttrVisitor* v) { StmtDocNode::VisitAttrs(v); }
 
-   static constexpr const char* _type_key = "script.printer.BreakDoc";
-   TVM_DECLARE_FINAL_OBJECT_INFO(BreakDocNode, StmtDocNode);
- };
+  static constexpr const char* _type_key = "script.printer.BreakDoc";
+  TVM_DECLARE_FINAL_OBJECT_INFO(BreakDocNode, StmtDocNode);
+};
 
- /*!
-  * \brief Reference type of BreakDocNode.
-  *
-  * \sa BreakDocNode
-  */
- class BreakDoc : public StmtDoc {
-  public:
-   /*!
-    * \brief Constructor of BreakDoc.
-    */
-   explicit BreakDoc();
-   TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(BreakDoc, StmtDoc, BreakDocNode);
- };
+/*!
+ * \brief Reference type of BreakDocNode.
+ *
+ * \sa BreakDocNode
+ */
+class BreakDoc : public StmtDoc {
+ public:
+  /*!
+   * \brief Constructor of BreakDoc.
+   */
+  explicit BreakDoc();
+  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(BreakDoc, StmtDoc, BreakDocNode);
+};
 
- /*!
+/*!
  * \brief Doc that represents continue statement.
  *
  * \sa ContinueDoc
  */
 class ContinueDocNode : public StmtDocNode {
-  public:
-   void VisitAttrs(AttrVisitor* v) { StmtDocNode::VisitAttrs(v); }
+ public:
+  void VisitAttrs(AttrVisitor* v) { StmtDocNode::VisitAttrs(v); }
 
-   static constexpr const char* _type_key = "script.printer.ContinueDoc";
-   TVM_DECLARE_FINAL_OBJECT_INFO(ContinueDocNode, StmtDocNode);
- };
+  static constexpr const char* _type_key = "script.printer.ContinueDoc";
+  TVM_DECLARE_FINAL_OBJECT_INFO(ContinueDocNode, StmtDocNode);
+};
 
- /*!
-  * \brief Reference type of ContinueDocNode.
-  *
-  * \sa ContinueDocNode
-  */
- class ContinueDoc : public StmtDoc {
-  public:
-   /*!
-    * \brief Constructor of ContinueDoc.
-    */
-   explicit ContinueDoc();
-   TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(ContinueDoc, StmtDoc, ContinueDocNode);
- };
+/*!
+ * \brief Reference type of ContinueDocNode.
+ *
+ * \sa ContinueDocNode
+ */
+class ContinueDoc : public StmtDoc {
+ public:
+  /*!
+   * \brief Constructor of ContinueDoc.
+   */
+  explicit ContinueDoc();
+  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(ContinueDoc, StmtDoc, ContinueDocNode);
+};
 
 /*!
  * \brief Doc that represents for statement.
@@ -1303,11 +1303,14 @@ class OpCallDocNode : public StmtDocNode {
   ExprDoc callee{nullptr};
   /*! \brief The positional arguments */
   Array<Doc> args;
+  /*! \brief The workspace of this op call */
+  DictDoc workspace{nullptr};
 
   void VisitAttrs(AttrVisitor* v) {
     StmtDocNode::VisitAttrs(v);
     v->Visit("callee", &callee);
     v->Visit("args", &args);
+    v->Visit("workspace", &workspace);
   }
 
   static constexpr const char* _type_key = "script.printer.OpCallDoc";
@@ -1325,8 +1328,9 @@ class OpCallDoc : public StmtDoc {
    * \brief Constructor of OpCallDoc
    * \param callee The callee of this function call.
    * \param args The positional arguments.
+   * \param workspace The workspace of this op call.
    */
-  explicit OpCallDoc(ExprDoc callee, ffi::Array<Doc> args);
+  explicit OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace);
   TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(OpCallDoc, StmtDoc, OpCallDocNode);
 };
 

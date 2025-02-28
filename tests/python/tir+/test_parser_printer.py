@@ -654,5 +654,38 @@ def test_roundtrip_compose_op():
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
+def test_roundtrip_op_call_workspace():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle, B_ptr: T.handle):
+        A = T.match_buffer(A_ptr, [10], "float32", scope="global")
+        B = T.match_buffer(B_ptr, [10], "float32", scope="global")
+        with T.kernel():
+            smem = T.alloc_buffer([10], "float32", scope="shared")
+            Tp.add(B, A, T.float32(1), workspace={"smem": smem})
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+def test_roundtrip_compose_op_call_workspace():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        with T.kernel():
+            A = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            B = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            C = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            psum = T.alloc_buffer([10], "float32", scope="trn.psum")
+            intermediate = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            with Tp.compose_op(workspace={"intermediate": intermediate}):
+                Tp.add(B, A, T.float32(1))
+                Tp.add(C, B, T.float32(1), workspace={"psum": psum})
+    # fmt: on
+    code = test.script()
+    print(code)
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
 if __name__ == "__main__":
     tvm.testing.main()   

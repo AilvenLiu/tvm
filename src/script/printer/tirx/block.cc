@@ -272,7 +272,8 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
                   {LiteralDoc::Str(pipeline->thread_scope->name, pipeline_p->Attr("thread_scope")),
                    LiteralDoc::Int(pipeline->depth, pipeline_p->Attr("depth")),
                    LiteralDoc::Boolean(pipeline->separate_pc, pipeline_p->Attr("separate_pc")),
-                   LiteralDoc::Str(pipeline->name_hint, pipeline_p->Attr("name_hint"))});
+                   LiteralDoc::Str(pipeline->name_hint, pipeline_p->Attr("name_hint")),
+                   d->AsDoc<DictDoc>(pipeline->workspace, pipeline_p->Attr("workspace"))});
       (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
     } else {
       LOG(FATAL) << "ValueError: Unknown Pipeline type in block signature: "

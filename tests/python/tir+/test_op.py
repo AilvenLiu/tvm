@@ -25,7 +25,7 @@ def _test(op: str, *args):
     f = tvm.get_global_func("tir.OpCall")
     assert isinstance(op, str)
     op = Op.get("tirp." + op)
-    f(op, args)
+    f(op, args, {})
 
 
 def test_copy():

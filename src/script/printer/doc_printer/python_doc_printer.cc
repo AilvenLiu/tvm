@@ -744,7 +744,10 @@ void PythonDocPrinter::PrintTypedDoc(const OpCallDoc& doc) {
     }
     PrintDoc(arg);
   }
-
+  if (doc->workspace.defined() && !doc->workspace->keys.empty()) {
+    output_ << ", workspace=";
+    PrintDoc(doc->workspace);
+  }
   output_ << ")";
 }
 
