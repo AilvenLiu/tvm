@@ -203,7 +203,7 @@ class TIRpOpScheduler : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const tirp::OpCallNode* op) final {
-    tirp::ScheduleContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_);
+    tirp::ScheduleContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_, op->workspace);
     static auto f_op_scheduler_ = tvm::runtime::Registry::Get("tirp.f_op_scheduler");
     ICHECK(f_op_scheduler_ != nullptr) << "Internal Error: tirp.f_op_scheduler is not registered";
     PrimFunc res;

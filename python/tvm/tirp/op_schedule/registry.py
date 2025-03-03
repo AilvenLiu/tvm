@@ -68,12 +68,13 @@ class ScheduleContext(Object, Scriptable):
     var_range_map: Dict[Var, Range]
     alloc_buffers: List[Buffer]
     init_stmts: List[Stmt]
+    workspace: Dict[str, Buffer]
 
     def __init__(
-        self, target: Target, exec_scope: ExecScope, launch_params: Dict[str, PrimExpr], var_range_map: Dict[Var, Range]
+        self, target: Target, exec_scope: ExecScope, launch_params: Dict[str, PrimExpr], var_range_map: Dict[Var, Range], workspace: Dict[str, Buffer] = {}
     ) -> None:
         self.__init_handle_by_constructor__(
-            _ffi_api.ScheduleContext, target, exec_scope, launch_params, var_range_map  # pylint: disable=no-member
+            _ffi_api.ScheduleContext, target, exec_scope, launch_params, var_range_map, workspace  # pylint: disable=no-member
         )
 
     def add_alloc_buffer(self, buffer: Buffer) -> None:

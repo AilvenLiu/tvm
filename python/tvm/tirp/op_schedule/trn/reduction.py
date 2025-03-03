@@ -93,7 +93,7 @@ def reduction_trn(
 
     # reduction axes must be f dim
     inst_size, inst_stride, inst_data_iters = find_max_inst_size_from_one_region(
-        src_buffer_region, axes, analyzer
+        src_buffer_region, analyzer, axes
     )
     assert analyzer.can_prove(inst_size > 1), "Instruction size must be greater than 1"
     p_size = dst.layout.partition_size

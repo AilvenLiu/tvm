@@ -159,6 +159,7 @@ def buffer(
     axis_separators: list[int] | None = None,
     logical_scope: str = "",
     layout: TLayout | None = None,
+    allocated_addr: int | tuple[int, ...] | None = None,
 ) -> Buffer:
     """The buffer declaration function.
 
@@ -204,6 +205,10 @@ def buffer(
         strides = [Var(s, "int32") if isinstance(s, str) else s for s in strides]
     else:
         strides = []
+    if allocated_addr is None:
+        allocated_addr = []
+    if not isinstance(allocated_addr, (list, tuple)):
+        allocated_addr = [allocated_addr]
     return _ffi_api.Buffer(  # type: ignore[attr-defined] # pylint: disable=no-member
         shape,
         dtype,
@@ -218,7 +223,7 @@ def buffer(
         axis_separators,
         logical_scope,
         _get_layout(layout, shape),
-        []
+        allocated_addr,
     )
 
 

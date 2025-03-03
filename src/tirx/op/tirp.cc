@@ -76,18 +76,20 @@ TVM_REGISTER_NODE_TYPE(ScheduleContextNode);
 
 ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
                                  Map<String, PrimExpr> launch_params,
-                                 Map<Var, Range> var_range_map) {
+                                 Map<Var, Range> var_range_map,
+                                 Map<String, Buffer> workspace) {
   auto n = make_object<ScheduleContextNode>();
   n->target = std::move(target);
   n->exec_scope = std::move(exec_scope);
   n->launch_params = std::move(launch_params);
   n->var_range_map = std::move(var_range_map);
+  n->workspace = std::move(workspace);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
-    .set_body_typed([](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map) {
-      return ScheduleContext(target, exec_scope, launch_params, var_range_map);
+    .set_body_typed([](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map, Map<String, Buffer> workspace) {
+      return ScheduleContext(target, exec_scope, launch_params, var_range_map, workspace);
     });
 
 TVM_REGISTER_GLOBAL("tir.ScheduleContextAddAllocBuffer").set_body_method<ScheduleContext>(&ScheduleContextNode::AddAllocBuffer);
