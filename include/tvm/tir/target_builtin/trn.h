@@ -90,21 +90,21 @@ TVM_DLL const Op& nki_reciprocal();
 /*!
  * \brief nki intrinsics for tensortensor operation.
  *
- * nki_tensortensor(result, operand1, operand2, opcode)
+ * nki_tensortensor(result, operand0, operand1, opcode)
  */
 TVM_DLL const Op& nki_tensortensor();
 
 /*!
  * \brief nki intrinsics for tensorscalar operation.
  *
- * nki_tensortensor(result, operand1, operand2, opcode, reorder)
+ * nki_tensorscalar(result, operand0, operand1, opcode, reverse)
  */
 TVM_DLL const Op& nki_tensorscalar();
 
 /*!
  * \brief nki intrinsics for tensorreduce operation.
  *
- * nki_tensorreduce(result, data, opcode, axes)
+ * nki_tensorreduce(result, data, opcode, negate, axes)
  */
 TVM_DLL const Op& nki_tensorreduce();
 
@@ -125,7 +125,7 @@ TVM_DLL const Op& nki_activation_reduce();
 /*!
  * \brief nki intrinsics for tensorscalar reduce operation.
  *
- * nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand1, operand2, opcode, reduce_opcode, reorder)
+ * nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand0, operand1, opcode, reduce_opcode, reverse)
  */
 TVM_DLL const Op& nki_tensorscalar_reduce();
 
@@ -135,6 +135,26 @@ TVM_DLL const Op& nki_tensorscalar_reduce();
  * nki_identity(result, size)
  */
 TVM_DLL const Op& nki_identity();
+
+/*!
+ * \brief nki intrinsics for scalar tensor tensor operation.
+ *
+ * (data op1 operand1) op2 (operand2) where op1 is tensor-scalar and op2 is tensor-tensor
+ *
+ * nki_scalar_tensor_tensor(result, data, operand0, operand1, opcode0, opcode1, reverse0, reverse1)
+ * 
+ */
+TVM_DLL const Op& nki_scalar_tensor_tensor();
+
+/*!
+ * \brief nki intrinsics for scalar tensor scalar operation.
+ *
+ * (data op1 operand1) op2 (operand2) where op1 and op2 are tensor-scalar
+ *
+ * nki_scalar_tensor_scalar(result, data, operand0, operand1, opcode0, opcode1, reverse0, reverse1)
+ * 
+ */
+TVM_DLL const Op& nki_scalar_tensor_scalar();
 
 }  // namespace builtin
 }  // namespace tir

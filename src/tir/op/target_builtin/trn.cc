@@ -84,6 +84,12 @@ TIR_DEFINE_BUILTIN_FUNC(nki_tensorscalar_reduce)
 TIR_DEFINE_BUILTIN_FUNC(nki_identity)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(nki_scalar_tensor_tensor)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(nki_scalar_tensor_scalar)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

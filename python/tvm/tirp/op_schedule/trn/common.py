@@ -225,12 +225,19 @@ def get_reduction_dim_map(
 
 
 def _find_corresponding_data_iter(
-    range_info, tiled_layout, seps, second_tiled_layout, second_seps, buffer_dim_map, analyzer
+    range_info,
+    tiled_layout,
+    seps,
+    second_tiled_layout,
+    second_seps,
+    buffer_dim_map,
+    analyzer,
+    extra_logical_stride=1,
 ):
     st, ext, dim_in_data_iter, dim_in_shape, dim_type = range_info
     data_iters = get_layout_data_iters(tiled_layout)
     second_data_iters = get_layout_data_iters(second_tiled_layout)
-    stride_in_logical_dim = 1
+    stride_in_logical_dim = extra_logical_stride
     for i in range(dim_in_data_iter + 1, seps[dim_in_shape + 1]):
         stride_in_logical_dim *= data_iters[i].extent
     second_stride_in_logical_dim = 1
@@ -264,14 +271,18 @@ def _find_corresponding_data_iter(
 #       might leads to smaller instruction size. We should also try using the lowest-stride axis
 #       from the second buffer region and choose the best one.
 # infer an instruction size from buffer_region's access pattern that is compatible on second_buffer_region
-def _find_max_inst_size_from_two_regions(
+def _refine_inst_tile(
     buffer_region: BufferRegion,
     second_buffer_region: BufferRegion,
+    inst_size: int,
+    inst_stride: int,
     analyzer: Analyzer,
     allowed_f_dim_1: Optional[Tuple[int]] = None,
     allowed_f_dim_2: Optional[Tuple[int]] = None,
     buffer_dim_map: Optional[Dict[int, int]] = None,
+    check_partition=True,
 ):
+
     if allowed_f_dim_1 is None:
         allowed_f_dim_1 = tuple(range(len(buffer_region.buffer.shape)))
     if allowed_f_dim_2 is None:
@@ -281,10 +292,10 @@ def _find_max_inst_size_from_two_regions(
     _, second_tiled_layout, second_seps = infer_range_info(second_buffer_region, analyzer)
     second_not_hbm = isinstance(second_buffer_region.buffer.layout, T.TrainiumLayout)
     second_data_iters = get_layout_data_iters(second_tiled_layout)
-    inst_size = 1
-    first_inst_stride = 1
-    second_inst_stride = 1
-    inst_data_iters = {}
+    new_inst_size = None
+    new_first_inst_stride = None
+    new_second_inst_stride = None
+    new_inst_data_iters = {}
     buffer_dim_map = (
         get_ewise_dim_map(buffer_region, second_buffer_region, analyzer)
         if buffer_dim_map is None
@@ -295,11 +306,21 @@ def _find_max_inst_size_from_two_regions(
         tiled_range_infos_per_dim = tiled_range_infos_per_dim[1:]
         st, ext, dim_in_data_iter, dim_in_shape, dim_type = range_info
         if dim_in_shape not in buffer_dim_map:
+            if dim_type == T.TrainiumLayout.Partition and check_partition:
+                raise ValueError(
+                    f"Partition dimension {dim_in_shape} in {buffer_region} not mapped to the second buffer region: {second_buffer_region}"
+                )
             # skip if the dimension is not mapped to the second buffer region
             continue
+        extra_logical_stride = 1
         if dim_type == T.TrainiumLayout.Free:
-            if inst_size != 1 and not analyzer.can_prove(
-                first_inst_stride * inst_size == data_iters[dim_in_data_iter].stride
+            # this range is not covered by the inst tile
+            if analyzer.can_prove(ext * data_iters[dim_in_data_iter].stride <= inst_stride):
+                continue
+            if analyzer.can_prove(data_iters[dim_in_data_iter].stride >= inst_stride * inst_size):
+                continue
+            if new_inst_size is not None and not analyzer.can_prove(
+                new_first_inst_stride * new_inst_size == data_iters[dim_in_data_iter].stride
             ):
                 # the stride of the found data iter is not compatible with previous data iters
                 break
@@ -308,11 +329,17 @@ def _find_max_inst_size_from_two_regions(
                 or buffer_dim_map[dim_in_shape] not in allowed_f_dim_2
             ):
                 # do not include this dimension if the dimension is not allowed to be free
-                if inst_size != 1:
+                if new_inst_size is not None:
                     break
                 else:
                     continue
-        second_extent, second_new_stride, second_data_iter = _find_corresponding_data_iter(
+            if analyzer.can_prove(
+                ext * data_iters[dim_in_data_iter].stride > inst_stride * inst_size
+            ):
+                ext = (inst_stride * inst_size) // data_iters[dim_in_data_iter].stride
+            if analyzer.can_prove(data_iters[dim_in_data_iter].stride < inst_stride):
+                extra_logical_stride = inst_stride // data_iters[dim_in_data_iter].stride
+        second_extent, second_stride, second_data_iter = _find_corresponding_data_iter(
             range_info,
             tiled_layout,
             seps,
@@ -320,9 +347,10 @@ def _find_max_inst_size_from_two_regions(
             second_seps,
             buffer_dim_map,
             analyzer,
+            extra_logical_stride,
         )
         if dim_type == T.TrainiumLayout.Partition:
-            if not second_not_hbm:
+            if not second_not_hbm or not check_partition:
                 continue
             if not analyzer.can_prove(st == 0):
                 raise ValueError(f"Partition dimension not starting from 0. Start: {st}")
@@ -334,40 +362,50 @@ def _find_max_inst_size_from_two_regions(
                     == data_iters[dim_in_data_iter].stride
                     and second_extent == data_iters[dim_in_data_iter].extent
                 ):
+                    print(
+                        second_data_iters[second_data_iter].stride,
+                        data_iters[dim_in_data_iter].stride,
+                        second_extent,
+                        data_iters[dim_in_data_iter].extent,
+                    )
                     # mismatch P dim
                     raise ValueError(
                         f"Partition dimension mismatch. Cannot perform ewise operation."
                     )
             continue
         # find max inst size for unary instruction
-        if inst_size != 1 and not analyzer.can_prove(
-            second_inst_stride * inst_size == second_new_stride
+        if new_inst_size is not None and not analyzer.can_prove(
+            new_second_inst_stride * new_inst_size == second_stride
         ):
             # the stride of the found data iter is not compatible with previous data iters
             break
-        if inst_size == 1:
+        if new_inst_size is None:
             if not second_not_hbm and not analyzer.can_prove(
                 second_data_iters[second_data_iter].stride == 1
             ):
                 # stride of hbm tensor access must be 1
                 break
-            first_inst_stride = data_iters[dim_in_data_iter].stride
-            second_inst_stride = second_data_iters[second_data_iter].stride
+            new_first_inst_stride = data_iters[dim_in_data_iter].stride
+            new_second_inst_stride = second_data_iters[second_data_iter].stride
 
         if analyzer.can_prove(second_extent >= st + ext):
-            inst_size *= ext
-            inst_data_iters[dim_in_data_iter] = ext
+            new_inst_size = ext if new_inst_size is None else new_inst_size * ext
+            new_inst_data_iters[dim_in_data_iter] = ext
             if not analyzer.can_prove(st == 0) or not analyzer.can_prove(
                 ext == data_iters[dim_in_data_iter].extent
             ):
                 break
         elif analyzer.can_prove(ext % second_extent == 0):
-            inst_size *= second_extent
-            inst_data_iters[dim_in_data_iter] = second_extent
+            new_inst_size = (
+                second_extent if new_inst_size is None else new_inst_size * second_extent
+            )
+            new_inst_data_iters[dim_in_data_iter] = second_extent
             break
         else:
             assert False, "Invalid layout"
-    return inst_size, first_inst_stride, inst_data_iters, second_inst_stride, second_data_iters
+    if new_inst_size is None:
+        return 1, 1, 1, {}
+    return new_inst_size, new_first_inst_stride, new_second_inst_stride, new_inst_data_iters
 
 
 # use the first buffer region's P dim to find the corresponding F dim on the second buffer region
@@ -436,15 +474,14 @@ def find_max_inst_size_unary(
     allowed_f_dim_1: Optional[Tuple[int]] = None,
     allowed_f_dim_2: Optional[Tuple[int]] = None,
 ):
-    (
-        inst_size,
-        first_inst_stride,
-        first_inst_data_iters,
-        second_inst_stride,
-        second_inst_data_iters,
-    ) = _find_max_inst_size_from_two_regions(
+    inst_size, inst_stride, _ = find_max_inst_size_from_one_region(
+        buffer_region=buffer_region, analyzer=analyzer, allowed_f_dim=allowed_f_dim_1
+    )
+    inst_size, first_inst_stride, _, first_inst_data_iters = _refine_inst_tile(
         buffer_region,
         second_buffer_region,
+        inst_size,
+        inst_stride,
         analyzer,
         allowed_f_dim_1,
         allowed_f_dim_2,
@@ -474,26 +511,19 @@ def find_max_inst_size_matmul(
     allowed_f_dim_output: Optional[Tuple[int]] = None,
     f_dim_map: Optional[Dict[int, int]] = None,
 ):
-    (
-        inst_size,
-        first_inst_stride,
-        first_inst_data_iters,
-        second_inst_stride,
-        second_inst_data_iters,
-    ) = _find_max_inst_size_from_two_regions(
+    inst_size, inst_stride, _ = find_max_inst_size_from_one_region(
+        buffer_region=rhs_buffer_region, analyzer=analyzer, allowed_f_dim=allowed_f_dim_rhs
+    )
+    return _refine_inst_tile(
         rhs_buffer_region,
         output_buffer_region,
+        inst_size,
+        inst_stride,
         analyzer,
         allowed_f_dim_rhs,
         allowed_f_dim_output,
         f_dim_map,
-    )
-    return (
-        inst_size,
-        first_inst_stride,
-        first_inst_data_iters,
-        second_inst_stride,
-        second_inst_data_iters,
+        check_partition=False,
     )
 
 

@@ -4552,7 +4552,7 @@ def nki_reciprocal(result, data):
     """
     return call_intrin("", "tir.nki_reciprocal", result, data)
 
-def nki_tensorreduce(result, data, opcode, *axes):
+def nki_tensorreduce(result, data, opcode, negate, *axes):
     """TVM intrinsic to call nki tensorreduce instruction
 
     Parameters
@@ -4566,6 +4566,9 @@ def nki_tensorreduce(result, data, opcode, *axes):
     opcode: str
         The opcode.
         
+    negate: bool
+        Whether to negate the result.
+        
     axes: Tuple[int]
         The axes to reduce over.
         
@@ -4575,9 +4578,9 @@ def nki_tensorreduce(result, data, opcode, *axes):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_tensorreduce", result, data, opcode, *axes)
+    return call_intrin("", "tir.nki_tensorreduce", result, data, opcode, negate, *axes)
 
-def nki_tensortensor(result, operand1, operand2, opcode):
+def nki_tensortensor(result, operand0, operand1, opcode):
     """TVM intrinsic to call nki tensortensor instruction
 
     Parameters
@@ -4585,10 +4588,10 @@ def nki_tensortensor(result, operand1, operand2, opcode):
     result : BufferLoad
         The result buffer.
     
-    operand1: BufferLoad
+    operand0: BufferLoad
         The first operand buffer.
         
-    operand2: BufferLoad
+    operand1: BufferLoad
         The second operand buffer.
         
     opcode: str
@@ -4599,9 +4602,9 @@ def nki_tensortensor(result, operand1, operand2, opcode):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_tensortensor", result, operand1, operand2, opcode)
+    return call_intrin("", "tir.nki_tensortensor", result, operand0, operand1, opcode)
 
-def nki_tensorscalar(result, operand1, operand2, opcode, reorder = False):
+def nki_tensorscalar(result, operand0, operand1, opcode, reverse = False):
     """TVM intrinsic to call nki tensorscalar instruction
 
     Parameters
@@ -4609,24 +4612,24 @@ def nki_tensorscalar(result, operand1, operand2, opcode, reorder = False):
     result : BufferLoad
         The result buffer.
     
-    operand1: BufferLoad
+    operand0: BufferLoad
         The first operand buffer.
         
-    operand2: PrimExpr
+    operand1: PrimExpr
         The second operand scalar.
         
     opcode: str
         The opcode.
         
-    reorder: bool
-        Whether to reorder the operands.
+    reverse: bool
+        Whether to reverse the operands.
 
     Returns
     -------
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.nki_tensorscalar", result, operand1, operand2, opcode, reorder)
+    return call_intrin("", "tir.nki_tensorscalar", result, operand0, operand1, opcode, reverse)
 
 def nki_memset(result, value):
     """TVM intrinsic to call nki memset instruction
@@ -4682,10 +4685,10 @@ def nki_activation_reduce(reduce_res, act_res, data, opcode, reduce_opcode, bias
     """
     return call_intrin("", "tir.nki_activation_reduce", reduce_res, act_res, data, opcode, reduce_opcode, bias, scale)
 
-def nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand1, operand2, opcode, reduce_opcode, reorder = False):
+def nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand0, operand1, opcode, reduce_opcode, reverse = False):
     """TVM intrinsic to call nki tensorscalar reduce instruction
 
-    tensorscalar_res = tensorscalar_op(operand1, operand2)
+    tensorscalar_res = tensorscalar_op(operand0, operand1)
     reduce_res = reduce_op(tensorscalar_res)
 
     Parameters
@@ -4696,11 +4699,11 @@ def nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand1, operand2, op
     tensorscalar_res : BufferLoad
         The result buffer of tensorscalar.
         
-    operand1: BufferLoad
+    operand0: BufferLoad
         The first operand buffer.
         
-    operand2: BufferLoad
-        The second operand buffer.
+    operand1: PrimExpr
+        The second operand scalar.
         
     opcode: str
         The opcode.
@@ -4708,10 +4711,10 @@ def nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand1, operand2, op
     reduce_opcode: str
         The reduce opcode.
         
-    reorder: bool
-        Whether to reorder the operands.
+    reverse: bool
+        Whether to reverse the operands of tensorscalar.
     """
-    return call_intrin("", "tir.nki_tensorscalar_reduce", reduce_res, tensorscalar_res, operand1, operand2, opcode, reduce_opcode, reorder)
+    return call_intrin("", "tir.nki_tensorscalar_reduce", reduce_res, tensorscalar_res, operand0, operand1, opcode, reduce_opcode, reverse)
 
 def nki_identity(result, size):
     """TVM intrinsic to call nki identity instruction
@@ -4730,3 +4733,77 @@ def nki_identity(result, size):
         The call expression.
     """
     return call_intrin("", "tir.nki_identity", result, size)
+
+def nki_scalar_tensor_tensor(result, data, operand0, operand1, opcode0, opcode1, reverse0 = False, reverse1 = False):
+    """TVM intrinsic to call nki scalar tensor tensor instruction
+    (data op0 operand0) op1 (operand1) , where op0 is tensor-scalar and op1 is tensor-tensor
+    
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+        
+    data: BufferLoad
+        The data buffer.
+        
+    operand0: PrimExpr
+        The first operand scalar.
+        
+    operand1: BufferLoad
+        The second operand buffer.
+
+    opcode0: str
+        The first opcode.
+        
+    opcode1: str
+        The second opcode.
+        
+    reverse0: bool
+        Whether to reverse the first operand.
+
+    reverse1: bool
+        Whether to reverse the second operand.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_scalar_tensor_tensor", result, data, operand0, operand1, opcode0, opcode1, reverse0, reverse1)
+
+def nki_scalar_tensor_scalar(result, data, operand0, operand1, opcode0, opcode1, reverse0 = False, reverse1 = False):
+    """TVM intrinsic to call nki scalar tensor scalar instruction
+    (data op0 operand0) op1 (operand1) , where op0 and op1 are tensor-scalar
+    
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+        
+    data: BufferLoad
+        The data buffer.
+    
+    operand0: PrimExpr
+        The first operand scalar.
+        
+    operand1: PrimExpr
+        The second operand scalar.
+        
+    opcode0: str
+        The first opcode.
+        
+    opcode1: str
+        The second opcode.
+        
+    reverse0: bool
+        Whether to reverse the first operand.
+
+    reverse1: bool
+        Whether to reverse the second operand.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_scalar_tensor_scalar", result, data, operand0, operand1, opcode0, opcode1, reverse0, reverse1)

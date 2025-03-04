@@ -215,13 +215,13 @@ def unary_with_bias_scale_trn(
     assert unary_op in activation_map_ops, f"Unsupported activation operation {unary_op}"
 
     if _bias is not None:
-        inst_size, f_gen_axes, is_tensor_tensor, reorder, broadcast_dims = try_find_inst_binary(
+        inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
             dst_buffer_region,
             src_buffer_region,
             _bias,
             analyzer,
             allow_tensortensor=False,
-            allow_reorder=False,
+            allow_reverse=False,
         )
         assert inst_size is not None, "Failed to find a valid instruction"
     else:

@@ -65,6 +65,7 @@ def reduction_trn(
     accum: bool,
     reduce_op: ReduceOpType,
     sctx: ScheduleContext,
+    negate: bool = False,
 ) -> Optional[PrimFunc]:
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
@@ -112,7 +113,7 @@ def reduction_trn(
                     for p_loop, f_loop in T.grid(p_size, inst_size):
                         src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop, p_loop))
                         dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        T.evaluate(T.nki_tensorreduce(dst[dst_indices], src[src_indices], opcode, -1))
+                        T.evaluate(T.nki_tensorreduce(dst[dst_indices], src[src_indices], opcode, negate, -1))
         # fmt: on
         return impl
     else:
@@ -127,11 +128,11 @@ def reduction_trn(
                         with T.attr(0, "tensorized_nki_instruction", 1):
                             for p_loop, f_loop in T.grid(p_size, inst_size):
                                 src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                T.evaluate(T.nki_tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, -1))
+                                T.evaluate(T.nki_tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, False, -1))
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop, f_loop in T.grid(p_size, reduction_b_extent):
                             dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                            T.evaluate(T.nki_tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, -1))
+                            T.evaluate(T.nki_tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))
         # fmt: on
         return two_stage_reduction
 

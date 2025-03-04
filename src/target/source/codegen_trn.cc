@@ -344,13 +344,13 @@ void CodeGenTrainium::VisitExpr_(const CallNode* op, std::ostream& os) {  // NOL
     os << PrintExpr(op->args[2]) << ", op=" << nki_op << ")";
   } else if (op->op.same_as(builtin::nki_tensorscalar())){
     ICHECK_EQ(op->args.size(), 5);
-    // nki_tensorscalar(result, operand1, operand2, opcode, reorder)
+    // nki_tensorscalar(result, operand0, operand1, opcode, reverse)
     ICHECK(opcode_map_.count(op->args[3].as<StringImmNode>()->value));
     std::string nki_op = opcode_map_[op->args[3].as<StringImmNode>()->value];
-    int reorder = op->args[4].as<IntImmNode>()->value;
-    bool is_reorder = reorder != 0;
+    int reverse = op->args[4].as<IntImmNode>()->value;
+    bool is_reverse = reverse != 0;
     os << PrintExpr(op->args[0]) << " = nisa.tensor_scalar(" << PrintExpr(op->args[1]) << ", operand0=";
-    os << PrintExpr(op->args[2]) << ", op0=" << nki_op << ", reverse0=" << is_reorder << ")";
+    os << PrintExpr(op->args[2]) << ", op0=" << nki_op << ", reverse0=" << is_reverse << ")";
   } else if (op->op.same_as(builtin::nki_memset())){
     ICHECK_GE(op->args.size(), 2);
     // result, value

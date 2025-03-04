@@ -136,7 +136,7 @@ def matmul_trn(
     lhs_f_size, lhs_f_stride, lhs_f_data_iters = find_max_inst_size_from_one_region(
         A_buffer_region, analyzer, [lhs_f_dim]
     )
-    rhs_f_size, rhs_f_stride, rhs_f_data_iters, acc_f_stride, acc_f_data_iters = (
+    rhs_f_size, rhs_f_stride, acc_f_stride, rhs_f_data_iters = (
         find_max_inst_size_matmul(
             B_buffer_region,
             C_buffer_region,

@@ -176,7 +176,7 @@ def test_activation_reduce_two_stage():
                                 T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], B[p_loop, reduction_b_loop % 4 * 2048 + reduction_b_loop // 4 * 1024 + f_loop], A[p_loop, i * 8192 + reduction_b_loop * 1024 + f_loop], "sqrt", "sum")
                         T.attr(0, "tensorized_nki_instruction", 1)
                         for p_loop, f_loop in T.grid(128, 8):
-                            T.nki_tensorreduce(C[p_loop, 0], intermediate_buffer[p_loop, f_loop], "sum", -1)
+                            T.nki_tensorreduce(C[p_loop, 0], intermediate_buffer[p_loop, f_loop], "sum", False, -1)
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
@@ -375,13 +375,148 @@ def test_tensor_scalar_reduce_two_stage():
                             T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], B_sbuf[p_loop, reduction_b_loop * 4096 + b_loop * 1024 + f_loop], A_sbuf[p_loop, reduction_b_loop * 4096 + b_loop * 1024 + f_loop], T.float32(1.0), "add", "sum", T.bool(False))
                     T.attr(0, "tensorized_nki_instruction", 1)
                     for p_loop, f_loop in T.grid(128, 4):
-                        T.nki_tensorreduce(C_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "sum", -1)
+                        T.nki_tensorreduce(C_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "sum", False, -1)
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
     
+def test_vector_chain():
+    src1_shape = [32, 128, 512]
+    src1_layout = TrainiumLayout(
+        dimension_types="FFFP",
+        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 4, 128), (1, 32, 32 * 128, 1)),
+    )
+    src2_shape = [128, 512]
+    src2_layout = TrainiumLayout(
+        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((512, 128), (1, 1))
+    )
+    src3_shape = [512]
+    src3_layout = TrainiumLayout(
+        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((4, 128), (1, 1))
+    )
+    dst_shape = src1_shape
+    dst_layout = src1_layout
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def binary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
+            B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            D_sbuf = T.alloc_buffer(src3_shape, "float32", scope="trn.sbuf", layout=src3_layout)
+            E_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            with Tp.compose_op():
+                Tp.add(C_sbuf, A_sbuf, B_sbuf)
+                Tp.add(E_sbuf, D_sbuf, C_sbuf)
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "binary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            D_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            E_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop, additional_b_loop in T.grid(512, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 32):
+                    T.nki_scalar_tensor_scalar(E_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], D_sbuf[p_loop, b_loop % 4], "add", "add", T.bool(False), T.bool(True))
+    # fmt: on
+
+    with target:
+        mod = tvm.IRModule({"main": binary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+def test_vector_chain_2():
+    src1_shape = [32, 128, 512]
+    src1_layout = TrainiumLayout(
+        dimension_types="FFFP",
+        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 4, 128), (1, 32, 32 * 128, 1)),
+    )
+    src2_shape = [128, 512]
+    src2_layout = TrainiumLayout(
+        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((512, 128), (1, 1))
+    )
+    src3_shape = src1_shape
+    src3_layout = src1_layout
+    dst_shape = src1_shape
+    dst_layout = src1_layout
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def binary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
+            B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            D_sbuf = T.alloc_buffer(src3_shape, "float32", scope="trn.sbuf", layout=src3_layout)
+            E_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            with Tp.compose_op():
+                Tp.add(C_sbuf, A_sbuf, B_sbuf)
+                Tp.add(E_sbuf, D_sbuf, C_sbuf)
+    
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "binary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            D_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            E_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            for b_loop, additional_b_loop in T.grid(512, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 32):
+                    T.nki_scalar_tensor_tensor(E_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], D_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], "add", "add", T.bool(False), T.bool(True))
+    # fmt: on
+
+    with target:
+        mod = tvm.IRModule({"main": binary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+    
+def test_reduce_negate():
+    src_shape = [128, 512, 4]
+    src_layout = TrainiumLayout(
+        dimension_types="PFF", combined_1d_layout=T.TileLayout.from_tuple((128, 512, 4), (1, 4, 1))
+    )
+    dst_shape = [128, 4]
+    dst_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1))
+    )
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def reduction():
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            for i in range(4):
+                with Tp.compose_op():
+                    Tp.sum(B_sbuf[:, i], A_sbuf[:, :, i], axes=-2)
+                    Tp.mul(B_sbuf[:, i], B_sbuf[:, i], T.float32(-1.0))
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "reduction"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop in T.grid(4, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    T.nki_tensorreduce(B_sbuf[p_loop, i], A_sbuf[p_loop, f_loop * 4 + i], "add", True, -1)
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": reduction})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
     
 if __name__ == "__main__":
     tvm.testing.main()
