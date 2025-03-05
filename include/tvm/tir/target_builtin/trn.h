@@ -57,21 +57,6 @@ TVM_DLL const Op& nki_tensor_copy();
  * equivalent to C += A.T @ B (if accum is true), or C = A.T @ B (if accum is false)
  */
 TVM_DLL const Op& nki_matmul();
-/*!
- * \brief nki intrinsics for transpose operation.
- *
- * nki_transpose(result, data)
- *
- * The tensor must be 128x128.
- */
-
-TVM_DLL const Op& nki_transpose();
-/*!
- * \brief nki intrinsics for sum operation.
- *
- * nki_sum(result, data, axis)
- */
-TVM_DLL const Op& nki_sum();
 
 /*!
  * \brief nki intrinsics for activation operation.

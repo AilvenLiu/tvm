@@ -34,6 +34,9 @@ class MapOpType(Enum):
     SQRT = 5
     RECIPROCAL = 6
     MEMSET = 7
+    MAX = 8
+    MIN = 9
+    EXP = 10
 
 class ReduceOpType(Enum):
     """Enumeration of common reduce operator types."""

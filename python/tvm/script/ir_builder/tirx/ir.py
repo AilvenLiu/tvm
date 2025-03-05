@@ -160,6 +160,7 @@ def buffer(
     logical_scope: str = "",
     layout: TLayout | None = None,
     allocated_addr: int | tuple[int, ...] | None = None,
+    buffer_name: str = ""
 ) -> Buffer:
     """The buffer declaration function.
 
@@ -195,6 +196,9 @@ def buffer(
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
 
+    buffer_name : str
+        The name of the buffer.
+
     Returns
     -------
     res : Buffer
@@ -212,7 +216,7 @@ def buffer(
     return _ffi_api.Buffer(  # type: ignore[attr-defined] # pylint: disable=no-member
         shape,
         dtype,
-        "",
+        buffer_name,
         data,
         strides,
         elem_offset,

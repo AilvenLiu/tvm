@@ -41,7 +41,7 @@ from .common import (
 )
 from ..common import MapOpType
 
-binary_map_ops = {MapOpType.ADD: "add", MapOpType.SUB: "sub", MapOpType.MUL: "mul"}
+binary_map_ops = {MapOpType.ADD: "add", MapOpType.SUB: "sub", MapOpType.MUL: "mul", MapOpType.MAX: "max", MapOpType.MIN: "min"}
 
 
 class InstType(Enum):
@@ -159,6 +159,8 @@ def try_find_inst_binary(
     inst_size, f_gen_axes, inst_types, reverse, broadcast_dims = try_find_inst_nary(
         _dst, [_src1, _src2], analyzer, allowed_f_dim_dst, (allowed_f_dim_src1, allowed_f_dim_src2), allow_tensortensor
     )
+    if inst_size is None:
+        return None, None, None, None, None
     if inst_types[0] == InstType.TENSOR_TENSOR and not allow_tensortensor:
         return None, None, None, None, None
     if reverse[0] and not allow_reverse:
@@ -196,10 +198,10 @@ def try_find_inst_nary(
             isinstance(dst.layout, T.TrainiumLayout),
             all(isinstance(src.layout, T.TrainiumLayout) for src in srcs if src is not None),
             dst.scope() == "trn.sbuf",
-            all(src.scope() == "trn.sbuf" for src in srcs if src is not None),
+            all(src.scope() == "trn.sbuf" or src.scope() == "trn.psum" for src in srcs if src is not None),
         ]
     ):
-        return None, None, None, None, None
+        raise ValueError(f"Invalid buffer region: dst: {_dst}, srcs: {_srcs}")
     # Switch broadcasting
     dst_non_unit_extent = [r.extent for r in dst_region if r.extent != 1]
     NUM_ELEMENTS = functools.reduce(operator.mul, dst_non_unit_extent, 1)
@@ -209,7 +211,7 @@ def try_find_inst_nary(
     if src0_num_elements < src1_num_elements:
         _srcs[0], _srcs[1] = _srcs[1], _srcs[0]
         reverse[0] = True
-    assert max(src0_num_elements, src1_num_elements) == NUM_ELEMENTS, "the larger between src0 and src1 must have the same number of elements as dst"
+    assert max(src0_num_elements, src1_num_elements) == NUM_ELEMENTS, f"the larger between src0 and src1 must have the same number of elements as dst, src0: {src0_num_elements}, src1: {src1_num_elements}, dst: {NUM_ELEMENTS}"
 
     src0_non_unit_extent = [r.extent for r in _srcs[0].region if r.extent != 1]
     assert all(
@@ -272,7 +274,6 @@ def binary_trn(
     )
     if reverse:
         _src1, _src2 = _src2, _src1
-
     dst_extent = [r.extent for r in _dst.region]
     f_gen_dst_idx = f_gen_idx_anchor(_dst, f_gen_axes)
     dst_to_src1_dim_map = get_ewise_dim_map(_dst, _src1, analyzer)

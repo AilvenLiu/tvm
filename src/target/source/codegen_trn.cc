@@ -54,7 +54,10 @@ CodeGenTrainium::CodeGenTrainium(Target target) : target_(target) {
   opcode_map_ = {{"sqrt", "nki.language.sqrt"},
                  {"add", "nki.language.add"},
                  {"sub", "nki.language.subtract"},
-                 {"mul", "nki.language.multiply"}};
+                 {"mul", "nki.language.multiply"},
+                 {"max", "nki.language.maximum"},
+                 {"min", "nki.language.minimum"},
+                 {"exp", "nki.language.exp"}};
 }
 
 void CodeGenTrainium::AddFunction(const GlobalVar& gvar, const PrimFunc& func) {
@@ -330,7 +333,7 @@ void CodeGenTrainium::VisitExpr_(const CallNode* op, std::ostream& os) {  // NOL
     // nki_activation(result, data, opcode, bias, scale)
     ICHECK(opcode_map_.count(op->args[2].as<StringImmNode>()->value));
     std::string nki_op = opcode_map_[op->args[2].as<StringImmNode>()->value];
-    os << PrintExpr(op->args[0]) << " = nisa.activation(op=" << nki_op << ", data=" << PrintExpr(op->args[2]) << ",";
+    os << PrintExpr(op->args[0]) << " = nisa.activation(op=" << nki_op << ", data=" << PrintExpr(op->args[1]) << ",";
     os << "bias=" << PrintExpr(op->args[3]) << ", scale=" << PrintExpr(op->args[4]) << ")";
   } else if (op->op.same_as(builtin::nki_reciprocal())){
     ICHECK_EQ(op->args.size(), 2);
@@ -347,20 +350,76 @@ void CodeGenTrainium::VisitExpr_(const CallNode* op, std::ostream& os) {  // NOL
     // nki_tensorscalar(result, operand0, operand1, opcode, reverse)
     ICHECK(opcode_map_.count(op->args[3].as<StringImmNode>()->value));
     std::string nki_op = opcode_map_[op->args[3].as<StringImmNode>()->value];
-    int reverse = op->args[4].as<IntImmNode>()->value;
-    bool is_reverse = reverse != 0;
+    bool reverse = op->args[4].as<IntImmNode>()->value != 0;
     os << PrintExpr(op->args[0]) << " = nisa.tensor_scalar(" << PrintExpr(op->args[1]) << ", operand0=";
-    os << PrintExpr(op->args[2]) << ", op0=" << nki_op << ", reverse0=" << is_reverse << ")";
+    os << PrintExpr(op->args[2]) << ", op0=" << nki_op << ", reverse0=" << reverse << ")";
   } else if (op->op.same_as(builtin::nki_memset())){
     ICHECK_GE(op->args.size(), 2);
     // result, value
     os << PrintExpr(op->args[0]) << " = " << PrintExpr(op->args[1]);
-  } else if (op->op.same_as(builtin::nki_transpose())){
+  } else if (op->op.same_as(builtin::nki_tensorreduce())){
+    ICHECK(op->args.size() >= 5) << "nki_tensorreduce expects at least 5 arguments, but got " << op->args.size();
+    // nki_tensorreduce(result, data, opcode, negate, *axes)
+    ICHECK(opcode_map_.count(op->args[2].as<StringImmNode>()->value));
+    std::string nki_op = opcode_map_[op->args[2].as<StringImmNode>()->value];
+    bool negate = op->args[3].as<IntImmNode>()->value != 0;
+    Array<PrimExpr> axes(op->args.begin() + 4, op->args.end());
+    os << PrintExpr(op->args[0]) << " = nisa.tensor_reduce(data=" << PrintExpr(op->args[1]) << ", op=" << nki_op << ", negate=" << negate << ", axis=" << axes << ")";
+  } else if (op->op.same_as(builtin::nki_activation_reduce())){
+    ICHECK(op->args.size() == 7) << "nki_activation_reduce expects 7 arguments, but got " << op->args.size();
+    // nki_activation_reduce(reduce_res, act_res, data, opcode, reduce_opcode, bias, scale)
+    ICHECK(opcode_map_.count(op->args[3].as<StringImmNode>()->value));
+    std::string nki_op = opcode_map_[op->args[3].as<StringImmNode>()->value];
+    ICHECK(opcode_map_.count(op->args[4].as<StringImmNode>()->value));
+    std::string reduce_nki_op = opcode_map_[op->args[4].as<StringImmNode>()->value];
+    os << PrintExpr(op->args[1]) << " = nisa.activation_reduce(data=" << PrintExpr(op->args[2]) << ", op=" << nki_op;
+    os << ", reduce_op=" << reduce_nki_op << ", reduce_res=" << PrintExpr(op->args[0]) << ", bias=" << PrintExpr(op->args[5]) << ", scale=" << PrintExpr(op->args[6]) << ")";
+  } else if (op->op.same_as(builtin::nki_tensorscalar_reduce())){
+    ICHECK(op->args.size() == 7) << "nki_tensorscalar_reduce expects 7 arguments, but got " << op->args.size();
+    // nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand0, operand1, opcode, reduce_opcode, reverse)
+    ICHECK(opcode_map_.count(op->args[4].as<StringImmNode>()->value));
+    std::string nki_op = opcode_map_[op->args[4].as<StringImmNode>()->value];
+    ICHECK(opcode_map_.count(op->args[5].as<StringImmNode>()->value));
+    std::string reduce_nki_op = opcode_map_[op->args[5].as<StringImmNode>()->value];
+    bool reverse = op->args[6].as<IntImmNode>()->value != 0;
+    os << PrintExpr(op->args[1])
+       << " = nisa.tensor_scalar_reduce(data=" << PrintExpr(op->args[2]) << ", op0=" << nki_op
+       << ", operand0=" << PrintExpr(op->args[3])
+       << ", reduce_op=" << reduce_nki_op << ", reduce_res=" << PrintExpr(op->args[0])
+       << ", reverse0=" << reverse << ")";
+  } else if (op->op.same_as(builtin::nki_identity())){
+    // nki_identity(result, size)
     ICHECK_EQ(op->args.size(), 2);
-    os << PrintExpr(op->args[0]) << " = nl.transpose(" << PrintExpr(op->args[1]) << ")";
-  } else if (op->op.same_as(builtin::nki_sum())){
-    ICHECK_EQ(op->args.size(), 3);
-    os << PrintExpr(op->args[0]) << " = nl.sum(" << PrintExpr(op->args[1]) << ", axis=" << PrintExpr(op->args[2]) << ")";
+    auto identity_np_name = name_supply_->FreshName("identity_np");
+    os << identity_np_name << " = nl.shared_constant(np.identity("<< PrintExpr(op->args[1]) << ", dtype=np.int8), dtype=nl.bfloat16)" << std::endl;
+    for (int i = 0; i < indent_; ++i) {
+      os << ' ';
+    }
+    os << PrintExpr(op->args[0]) << " = nl.load(" << identity_np_name << ")";
+  } else if (op->op.same_as(builtin::nki_scalar_tensor_tensor())){
+    ICHECK_EQ(op->args.size(), 8);
+    // nki_scalar_tensor_tensor(result, data, operand0, operand1, opcode0, opcode1, reverse0, reverse1)
+    ICHECK(opcode_map_.count(op->args[4].as<StringImmNode>()->value));
+    std::string nki_op0 = opcode_map_[op->args[4].as<StringImmNode>()->value];
+    ICHECK(opcode_map_.count(op->args[5].as<StringImmNode>()->value));
+    std::string nki_op1 = opcode_map_[op->args[5].as<StringImmNode>()->value];
+    bool reverse0 = op->args[6].as<IntImmNode>()->value != 0;
+    bool reverse1 = op->args[7].as<IntImmNode>()->value != 0;
+    os << PrintExpr(op->args[0]) << " = nisa.scalar_tensor_tensor(data=" << PrintExpr(op->args[1])
+       << ", operand0=" << PrintExpr(op->args[2]) << ", op0=" << nki_op0 << ", reverse0=" << reverse0
+       << ", operand1=" << PrintExpr(op->args[3]) << ", op1=" << nki_op1 << ", reverse1=" << reverse1 << ")";
+  } else if (op->op.same_as(builtin::nki_scalar_tensor_scalar())){
+    ICHECK_EQ(op->args.size(), 8);
+    // nki_scalar_tensor_scalar(result, data, operand0, operand1, opcode0, opcode1, reverse0, reverse1)
+    ICHECK(opcode_map_.count(op->args[4].as<StringImmNode>()->value));
+    std::string nki_op0 = opcode_map_[op->args[4].as<StringImmNode>()->value];
+    ICHECK(opcode_map_.count(op->args[5].as<StringImmNode>()->value));
+    std::string nki_op1 = opcode_map_[op->args[5].as<StringImmNode>()->value];
+    bool reverse0 = op->args[6].as<IntImmNode>()->value != 0;
+    bool reverse1 = op->args[7].as<IntImmNode>()->value != 0;
+    os << PrintExpr(op->args[0]) << " = nisa.tensor_scalar(data=" << PrintExpr(op->args[1])
+       << ", operand0=" << PrintExpr(op->args[2]) << ", op0=" << nki_op0 << ", reverse0=" << reverse0
+       << ", operand1=" << PrintExpr(op->args[3]) << ", op1=" << nki_op1 << ", reverse1=" << reverse1 << ")";
   } else {
     LOG(FATAL)<< "Trainium codegen does not support call to " << op->op;
   }

@@ -56,7 +56,7 @@ def test_simple_activation_reduce():
             for b_loop in range(1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_activation_reduce(C[p_loop, 0], B[p_loop, f_loop], A[p_loop, f_loop], "sqrt", "sum")
+                    T.nki_activation_reduce(C[p_loop, 0], B[p_loop, f_loop], A[p_loop, f_loop], "sqrt", "add")
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
@@ -95,7 +95,7 @@ def test_activation_reduce_in_loop():
             for i, b_loop in T.grid(2, 16):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop % 8 // 2 * 2048 + b_loop // 8 * 1024 + b_loop % 2 * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "sum")
+                    T.nki_activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop % 8 // 2 * 2048 + b_loop // 8 * 1024 + b_loop % 2 * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "add")
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
@@ -131,7 +131,7 @@ def test_activation_reduce_in_loop2():
             for i, b_loop in T.grid(2, 16):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "sum")
+                    T.nki_activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "add")
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
@@ -173,10 +173,10 @@ def test_activation_reduce_two_stage():
                         for reduction_b_loop in range(8):
                             T.attr(0, "tensorized_nki_instruction", 1)
                             for p_loop, f_loop in T.grid(128, 1024):
-                                T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], B[p_loop, reduction_b_loop % 4 * 2048 + reduction_b_loop // 4 * 1024 + f_loop], A[p_loop, i * 8192 + reduction_b_loop * 1024 + f_loop], "sqrt", "sum")
+                                T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], B[p_loop, reduction_b_loop % 4 * 2048 + reduction_b_loop // 4 * 1024 + f_loop], A[p_loop, i * 8192 + reduction_b_loop * 1024 + f_loop], "sqrt", "add")
                         T.attr(0, "tensorized_nki_instruction", 1)
                         for p_loop, f_loop in T.grid(128, 8):
-                            T.nki_tensorreduce(C[p_loop, 0], intermediate_buffer[p_loop, f_loop], "sum", False, -1)
+                            T.nki_tensorreduce(C[p_loop, 0], intermediate_buffer[p_loop, f_loop], "add", False, -1)
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
@@ -217,7 +217,7 @@ def test_activation_reduce_with_bias_scale():
             for i, b_loop in T.grid(2, 16):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "sum", bias[p_loop, 0], T.float32(2.0))
+                    T.nki_activation_reduce(C[p_loop, b_loop % 8 // 2 * 4 + b_loop // 8 * 2 + b_loop % 2], B[p_loop, b_loop * 512 + f_loop], A[p_loop, i * 8192 + b_loop * 512 + f_loop], "sqrt", "add", bias[p_loop, 0], T.float32(2.0))
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
@@ -253,7 +253,7 @@ def test_simple_tensor_scalar_reduce():
             for b_loop in range(1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_tensorscalar_reduce(C[p_loop, 0], B[p_loop, f_loop], A[p_loop, f_loop], T.float32(1.0), "add", "sum", T.bool(False))
+                    T.nki_tensorscalar_reduce(C[p_loop, 0], B[p_loop, f_loop], A[p_loop, f_loop], T.float32(1.0), "add", "add", T.bool(False))
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
@@ -328,7 +328,7 @@ def test_tensor_scalar_reduce_complex():
             for b_loop in range(512):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 32):
-                    T.nki_tensorscalar_reduce(D_sbuf[p_loop, b_loop % 4 * 128 + b_loop // 4], C_sbuf[p_loop, b_loop % 4 * 4096 + f_loop * 128 + b_loop // 4], A_sbuf[p_loop, b_loop % 4 * 4096 + f_loop * 128 + b_loop // 4], B_sbuf[p_loop, b_loop % 4 * 128 + b_loop // 4], "add", "sum", T.bool(True))
+                    T.nki_tensorscalar_reduce(D_sbuf[p_loop, b_loop % 4 * 128 + b_loop // 4], C_sbuf[p_loop, b_loop % 4 * 4096 + f_loop * 128 + b_loop // 4], A_sbuf[p_loop, b_loop % 4 * 4096 + f_loop * 128 + b_loop // 4], B_sbuf[p_loop, b_loop % 4 * 128 + b_loop // 4], "add", "add", T.bool(True))
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
@@ -372,10 +372,10 @@ def test_tensor_scalar_reduce_two_stage():
                     for reduction_b_loop in range(4):
                         T.attr(0, "tensorized_nki_instruction", 1)
                         for p_loop, f_loop in T.grid(128, 1024):
-                            T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], B_sbuf[p_loop, reduction_b_loop * 4096 + b_loop * 1024 + f_loop], A_sbuf[p_loop, reduction_b_loop * 4096 + b_loop * 1024 + f_loop], T.float32(1.0), "add", "sum", T.bool(False))
+                            T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], B_sbuf[p_loop, reduction_b_loop * 4096 + b_loop * 1024 + f_loop], A_sbuf[p_loop, reduction_b_loop * 4096 + b_loop * 1024 + f_loop], T.float32(1.0), "add", "add", T.bool(False))
                     T.attr(0, "tensorized_nki_instruction", 1)
                     for p_loop, f_loop in T.grid(128, 4):
-                        T.nki_tensorreduce(C_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "sum", False, -1)
+                        T.nki_tensorreduce(C_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", False, -1)
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})

@@ -36,6 +36,7 @@ for op_name, op_type in [
 
 for op_name, op_type in [
     ("sqrt", MapOpType.SQRT),
+    ("exp", MapOpType.EXP),
 ]:
     custom_name = f"unary_{op_name}_trn_with_bias_scale_impl"
     func = _make_schedule(op_type, 3, [unary_with_bias_scale_trn])
@@ -49,6 +50,8 @@ for op_name, op_type in [
     ("add", MapOpType.ADD),
     ("sub", MapOpType.SUB),
     ("mul", MapOpType.MUL),
+    ("maximum", MapOpType.MAX),
+    ("minimum", MapOpType.MIN),
 ]:
     custom_name = f"binary_{op_name}_trn_impl"
     func = _make_schedule(op_type, 2, [binary_trn])

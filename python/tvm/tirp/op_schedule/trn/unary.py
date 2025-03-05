@@ -45,10 +45,12 @@ non_activation_unary_map_ops = [
 ]
 activation_map_ops = [
     MapOpType.SQRT,
+    MapOpType.EXP,
 ]
 
 opcode_table = {
     MapOpType.SQRT: "sqrt",
+    MapOpType.EXP: "exp",
 }
 
 const_input_ops = [MapOpType.MEMSET]
@@ -138,7 +140,7 @@ def generate_unary_func(
                             src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop) )
                             if unary_op == MapOpType.RECIPROCAL:
                                 T.evaluate(T.nki_reciprocal(dst[*dst_indices], src[*src_indices]))
-                            elif unary_op in [MapOpType.SQRT]:
+                            else:
                                 #todo: if we use direct allocation, nki activation should take zero bias tensor
                                 if bias is None:
                                     T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale))

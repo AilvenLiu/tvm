@@ -34,6 +34,8 @@ namespace tirp {
 
 bool IsInt(const ObjectRef& obj) { return obj.as<runtime::Int>() || obj.as<IntImmNode>(); }
 
+bool IsBool(const ObjectRef& obj) { return obj.as<runtime::Bool>() || obj.as<IntImmNode>(); }
+
 bool IsFloat(const ObjectRef& obj) { return obj.as<runtime::Float>() || obj.as<FloatImmNode>(); }
 
 bool IsIntOrFloat(const ObjectRef& obj) { return IsInt(obj) || IsFloat(obj); }
@@ -111,6 +113,12 @@ TIRP_DEFINE_SCHEDULE_OP(sqrt).set_num_inputs(4).set_attr<FArgSanitizer>(
       ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of sqrt() must be BufferRegion";
       ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of sqrt() must be BufferRegion";
     });
+TIRP_DEFINE_SCHEDULE_OP(exp).set_num_inputs(4).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 4U) << "exp() expects 4 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of exp() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of exp() must be BufferRegion";
+    });
 
 TIRP_DEFINE_SCHEDULE_OP(add).set_num_inputs(3).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
@@ -124,7 +132,7 @@ TIRP_DEFINE_SCHEDULE_OP(sub).set_num_inputs(3).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
       ICHECK_EQ(args.size(), 3U) << "sub() expects 3 arguments";
       ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of sub() must be BufferRegion";
-      ICHECK(args[1].as<BufferRegionNode>() || args[1].as<FloatImmNode>()) << "arg[1] of sub() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>() || args[1].as<FloatImmNode>()) << "arg[1] of sub() must be BufferRegion or FloatImm";
       ICHECK(args[2].as<BufferRegionNode>() || args[2].as<FloatImmNode>()) << "arg[2] of sub() must be BufferRegion or FloatImm";
     });
 
@@ -144,6 +152,23 @@ TIRP_DEFINE_SCHEDULE_OP(fdiv).set_num_inputs(3).set_attr<FArgSanitizer>(
       ICHECK(args[2].as<BufferRegionNode>() || args[2].as<FloatImmNode>()) << "arg[2] of fdiv() must be BufferRegion or FloatImm";
     });
 
+TIRP_DEFINE_SCHEDULE_OP(minimum).set_num_inputs(3).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 3U) << "minimum() expects 3 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of minimum() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>() || args[1].as<FloatImmNode>()) << "arg[1] of minimum() must be BufferRegion or FloatImm";
+      ICHECK(args[2].as<BufferRegionNode>() || args[2].as<FloatImmNode>()) << "arg[2] of minimum() must be BufferRegion or FloatImm";
+    });
+
+
+TIRP_DEFINE_SCHEDULE_OP(maximum).set_num_inputs(3).set_attr<FArgSanitizer>(
+    "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
+      ICHECK_EQ(args.size(), 3U) << "maximum() expects 3 arguments";
+      ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of maximum() must be BufferRegion";
+      ICHECK(args[1].as<BufferRegionNode>() || args[1].as<FloatImmNode>()) << "arg[1] of maximum() must be BufferRegion or FloatImm";
+      ICHECK(args[2].as<BufferRegionNode>() || args[2].as<FloatImmNode>()) << "arg[2] of maximum() must be BufferRegion or FloatImm";
+    });
+
 TIRP_DEFINE_SCHEDULE_OP(copy).set_num_inputs(2).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
       ICHECK_EQ(args.size(), 2U) << "copy() expects 2 arguments";
@@ -158,15 +183,17 @@ TIRP_DEFINE_SCHEDULE_OP(fill).set_num_inputs(2).set_attr<FArgSanitizer>(
       ICHECK(IsIntOrFloat(args[1])) << "arg[1] of fill() must be int or float";
     });
 
-TIRP_DEFINE_SCHEDULE_OP(gemm).set_num_inputs(6).set_attr<FArgSanitizer>(
+TIRP_DEFINE_SCHEDULE_OP(gemm).set_num_inputs(8).set_attr<FArgSanitizer>(
     "FArgSanitizer", [](tvm::Op op, Array<ObjectRef> args) {
-      ICHECK_EQ(args.size(), 6U) << "gemm() expects 6 arguments";
+      ICHECK_EQ(args.size(), 8U) << "gemm() expects 8 arguments";
       ICHECK(args[0].as<BufferRegionNode>()) << "arg[0] of gemm() must be BufferRegion";
       ICHECK(args[1].as<BufferRegionNode>()) << "arg[1] of gemm() must be BufferRegion";
       ICHECK(args[2].as<BufferRegionNode>()) << "arg[2] of gemm() must be BufferRegion";
       ICHECK(args[3].as<BufferRegionNode>()) << "arg[3] of gemm() must be BufferRegion";
-      ICHECK(IsIntOrFloat(args[4])) << "arg[4] of gemm() must be int or float";
-      ICHECK(IsIntOrFloat(args[5])) << "arg[5] of gemm() must be int or float";
+      ICHECK(IsBool(args[4])) << "arg[4] of gemm() must be int";
+      ICHECK(IsBool(args[5])) << "arg[5] of gemm() must be int";
+      ICHECK(IsIntOrFloat(args[6])) << "arg[6] of gemm() must be int or float";
+      ICHECK(IsIntOrFloat(args[7])) << "arg[7] of gemm() must be int or float";
     });
 
 

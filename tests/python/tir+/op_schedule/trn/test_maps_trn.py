@@ -31,13 +31,16 @@ Tp_func_map = {
     "reciprocal": Tp.reciprocal,
     "sqrt": Tp.sqrt,
     "memset": Tp.memset,
+    "exp": Tp.exp,
     "add": Tp.add,
     "sub": Tp.sub,
     "mul": Tp.mul,
+    "min": Tp.minimum,
+    "max": Tp.maximum,
 }
 
 
-@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt", "memset"])
+@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt", "memset", "exp"])
 def test_simple_unary(op_type):
     src_shape = [128, 512]
     src_layout = TrainiumLayout(
@@ -73,9 +76,9 @@ def test_simple_unary(op_type):
                         T.nki_reciprocal(
                             B_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop]
                         )
-                    elif op_type == "sqrt":
+                    elif op_type in ["sqrt", "exp"]:
                         T.nki_activation(
-                            B_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], "sqrt"
+                            B_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], op_type
                         )
                     elif op_type == "memset":
                         T.nki_memset(B_sbuf[p_loop, f_loop], 0.0)
@@ -86,7 +89,7 @@ def test_simple_unary(op_type):
         assert_structural_equal(mod["main"], expected)
 
 
-@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt", "memset"])
+@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt", "memset", "exp"])
 def test_unary_in_a_loop(op_type):
     src_shape = [1024, 512]
     src_layout = TrainiumLayout(
@@ -123,8 +126,8 @@ def test_unary_in_a_loop(op_type):
                 for p_loop, f_loop in T.grid(128, 512):
                     if op_type == "reciprocal":
                         T.nki_reciprocal(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop])
-                    elif op_type == "sqrt":
-                        T.nki_activation(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], "sqrt")
+                    elif op_type in ["sqrt", "exp"]:
+                        T.nki_activation(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], op_type)
                     elif op_type == "memset":
                         T.nki_memset(B_sbuf[p_loop, i * 512 + f_loop], 0.0)
     # fmt: on
@@ -134,7 +137,7 @@ def test_unary_in_a_loop(op_type):
         assert_structural_equal(mod["main"], expected)
 
 
-@pytest.mark.parametrize("op_type", ["add", "sub", "mul"])
+@pytest.mark.parametrize("op_type", ["add", "sub", "mul", "min", "max"])
 @pytest.mark.parametrize(
     "operands_type",
     [
@@ -202,7 +205,7 @@ def test_simple_binary(op_type, operands_type):
         assert_structural_equal(mod["main"], expected)
 
 
-@pytest.mark.parametrize("op_type", ["add", "sub", "mul"])
+@pytest.mark.parametrize("op_type", ["add", "sub", "mul", "min", "max"])
 @pytest.mark.parametrize(
     "operands_type",
     [

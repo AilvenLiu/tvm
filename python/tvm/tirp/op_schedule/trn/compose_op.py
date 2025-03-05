@@ -44,8 +44,8 @@ from ..common import ReduceOpType
 from ..registry import f_op_scheduler
 
 
-vector_ops = [Op.get("tirp.add"), Op.get("tirp.sub"), Op.get("tirp.mul")]
-act_ops = [Op.get("tirp.sqrt")]
+vector_ops = [Op.get("tirp.add"), Op.get("tirp.sub"), Op.get("tirp.mul"), Op.get("tirp.maximum"), Op.get("tirp.minimum")]
+act_ops = [Op.get("tirp.sqrt"), Op.get("tirp.exp")]
 reduce_ops = [Op.get("tirp.sum"), Op.get("tirp.max"), Op.get("tirp.min")]
 reduce_ops_after_act = [Op.get("tirp.sum")]
 reduce_ops_after_vector = [Op.get("tirp.sum"), Op.get("tirp.max"), Op.get("tirp.min")]
@@ -54,10 +54,13 @@ opcode_table = {
     Op.get("tirp.add"): "add",
     Op.get("tirp.sub"): "sub",
     Op.get("tirp.mul"): "mul",
+    Op.get("tirp.maximum"): "max",
+    Op.get("tirp.minimum"): "min",
     Op.get("tirp.sqrt"): "sqrt",
-    Op.get("tirp.sum"): "sum",
+    Op.get("tirp.sum"): "add",
     Op.get("tirp.max"): "max",
     Op.get("tirp.min"): "min",
+    Op.get("tirp.exp"): "exp",
 }
 
 optype_table = {
@@ -306,10 +309,7 @@ def compose_vector_chain(
     else:
         raise ValueError(f"The output of {op_call_1} is not the input of {op_call_2}")
     
-    intermediate_buffer = first_output.buffer
-    if len(intermediate_buffer.allocated_addr) > 0:
-        # FIXME: we need to check whether the intermediate buffer is used by other ops
-        raise ValueError(f"The intermediate buffer {intermediate_buffer} will be deleted by the composition. However, the intermediate buffer is allocated. Make sure that this is intended and remove the allocation.")
+    # FIXME: we need to check whether the intermediate buffer is used by other ops
     analyzer = init_analyzer(sctx)
     inst_size, f_gen_axes, inst_types, _reverse, broadcast_dims = try_find_inst_nary(second_output, srcs, analyzer, allow_first_op_tensortensor=False)
     assert inst_size is not None, "Failed to find a valid instruction"

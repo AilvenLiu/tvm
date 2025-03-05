@@ -50,12 +50,6 @@ TIR_DEFINE_BUILTIN_FUNC(nki_tensor_copy)
 
 TIR_DEFINE_BUILTIN_FUNC(nki_matmul)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-    
-TIR_DEFINE_BUILTIN_FUNC(nki_transpose)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(nki_sum)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(nki_activation)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));

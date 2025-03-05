@@ -252,6 +252,8 @@ def gemm(
     A: Union[BufferRegion, Buffer],
     B: Union[BufferRegion, Buffer],
     C: Union[BufferRegion, Buffer],
+    transpose_A: bool = False,
+    transpose_B: bool = False,
     alpha: PrimExpr = 1.0,
     beta: PrimExpr = 0.0,
     workspace: Dict[str, Buffer] = {},
@@ -274,6 +276,12 @@ def gemm(
     C : Union[BufferRegion, Buffer]
         The buffer of matrix C.
 
+    transpose_A : bool
+        Whether to transpose A. 
+
+    transpose_B : bool
+        Whether to transpose B.
+
     alpha : PrimExpr
         The scalar alpha.
 
@@ -288,7 +296,7 @@ def gemm(
     B = _to_region(B)
     C = _to_region(C)
     return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("gemm"), [D, A, B, C, alpha, beta], workspace
+        _get_tirp_op("gemm"), [D, A, B, C, transpose_A, transpose_B, alpha, beta], workspace
     )
 
 
@@ -430,6 +438,79 @@ def memset(dst: Union[BufferRegion, Buffer], value: PrimExpr, workspace: Dict[st
     dst = _to_region(dst)
     return _ffi_api.OpCall(_get_tirp_op("memset"), [dst, value], workspace)  # pylint: disable=no-member
 
+def maximum(dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, FloatImm], src2: Union[BufferRegion, Buffer, FloatImm], workspace: Dict[str, Buffer] = {}):
+    """Maximum all elements in src1 and src2 and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for maximum result.
+
+    src1 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 1, or float.
+
+    src2 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 2, or float.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+    """
+    dst = _to_region(dst)
+    if isinstance(src1, Buffer):
+        src1 = _to_region(src1)
+    if isinstance(src2, Buffer):
+        src2 = _to_region(src2)
+    return _ffi_api.OpCall(_get_tirp_op("maximum"), [dst, src1, src2], workspace)  # pylint: disable=no-member
+
+def minimum(dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, FloatImm], src2: Union[BufferRegion, Buffer, FloatImm], workspace: Dict[str, Buffer] = {}):
+    """Minimum all elements in src1 and src2 and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for minimum result.
+
+    src1 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 1, or float.
+
+    src2 : Union[BufferRegion, Buffer, FloatImm]
+        The source buffer region 2, or float.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+    """
+    dst = _to_region(dst)
+    if isinstance(src1, Buffer):
+        src1 = _to_region(src1)
+    if isinstance(src2, Buffer):
+        src2 = _to_region(src2)
+    return _ffi_api.OpCall(_get_tirp_op("minimum"), [dst, src1, src2], workspace)  # pylint: disable=no-member
+
+def exp(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None, scale: Optional[FloatImm] = None, workspace: Dict[str, Buffer] = {}):
+    """Exponentiate all elements in src and store to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for exp result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+
+    bias : Optional[Union[BufferRegion, Buffer, FloatImm]]
+        The bias of the exp src. Only supported on Trn.
+
+    scale : Optional[FloatImm]
+        The scale of the exp src. Only supported on Trn.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+    """
+    dst = _to_region(dst)
+    src = _to_region(src)
+    if bias is not None and isinstance(bias, Buffer):
+        bias = _to_region(bias) 
+    return _ffi_api.OpCall(_get_tirp_op("exp"), [dst, src, bias, scale], workspace)  # pylint: disable=no-member
 
 def alloc_copy_pipeline(
     thread_scope: ExecScope, depth: int, separate_pc: bool, name_hint: str = "", workspace: Dict[str, Buffer] = {}
@@ -498,4 +579,7 @@ __all__ = [
     "min",
     "alloc_copy_pipeline",
     "compose_op",
+    "maximum",
+    "minimum",
+    "exp",
 ]

@@ -89,7 +89,6 @@ def test_gemm(ssh_client):
     @T.prim_func(tirp=True)
     def matmul(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle):
         T.func_attr({"num_inputs": 2})
-        # todo: specify allocation of A, B, C
         A = T.match_buffer(A_ptr, (M, K), dtype, layout = T.TileLayout.from_tuple((M, K), (1, M)))
         B = T.match_buffer(B_ptr, (K, N), dtype, layout=T.TileLayout.from_tuple(K * N))
         C = T.match_buffer(C_ptr, (M, N), dtype, layout=T.TileLayout.from_tuple(N * M))

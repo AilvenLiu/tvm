@@ -76,7 +76,7 @@ def transpose_schedule(
     )
     if "identity" not in sctx.workspace:
         identity_tensor = T.buffer(
-            (p_size, rhs_f_size), src_buffer_region.buffer.dtype, scope="trn.sbuf"
+            (p_size, rhs_f_size), src_buffer_region.buffer.dtype, scope="trn.sbuf", buffer_name="identity"
         )
         sctx.add_alloc_buffer(identity_tensor)
 
@@ -123,6 +123,7 @@ def transpose_schedule(
             "float32",
             scope="trn.psum",
             allocated_addr=(0, 0),
+            buffer_name="acc_psum"
         )
         sctx.add_alloc_buffer(acc_psum)
     else:

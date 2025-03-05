@@ -19,7 +19,7 @@
 
 from typing import Optional, Set, List, Dict
 import operator
-
+import functools
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc, PrimExpr, Var
@@ -46,7 +46,10 @@ class OperatorKind:
 
 
 def get_pf_dim_from_buffer_region(
-    buffer_region: BufferRegion, analyzer: Analyzer, operator_kind: OperatorKind
+    buffer_region: BufferRegion,
+    analyzer: Analyzer,
+    operator_kind: OperatorKind,
+    transposed: bool = False,
 ):
     non_unit_dims = []
     for i in range(len(buffer_region.buffer.shape)):
@@ -62,6 +65,9 @@ def get_pf_dim_from_buffer_region(
         p_dim = non_unit_dims[0]
         f_dim = non_unit_dims[1]
     else:
+        assert (
+            not transposed
+        ), "Transposed C is implemented by swapping lhs and rhs. No need to specify by user."
         if any(
             layout.dimension_types[i] == T.TrainiumLayout.Partition
             for i in range(seps[non_unit_dims[0]], seps[non_unit_dims[0] + 1])
@@ -72,6 +78,21 @@ def get_pf_dim_from_buffer_region(
             # need swap lhs and rhs
             p_dim = non_unit_dims[1]
             f_dim = non_unit_dims[0]
+    if transposed:
+        p_dim, f_dim = f_dim, p_dim
+    p_exts = [
+        layout.combined_1d_layout.data_iter_array[i].extent
+        for i in range(seps[p_dim], seps[p_dim + 1])
+        if layout.dimension_types[i] == T.TrainiumLayout.Partition
+    ]
+    assert (
+        functools.reduce(operator.mul, p_exts, 1) == layout.partition_size
+    ), f"Acuumulation dimension and output non-streaming dimension must contain whole P dimension. However, the {p_dim} dimension of {buffer_region} does not."
+    assert all(
+        layout.dimension_types[i] == T.TrainiumLayout.Free
+        or layout.combined_1d_layout.data_iter_array[i].extent == 1
+        for i in range(seps[f_dim], seps[f_dim + 1])
+    ), f"Spatial dimension must not contain P. However, the {f_dim} dimension of {buffer_region} does."
     return p_dim, f_dim
 
 
@@ -81,6 +102,8 @@ def matmul_trn(
     A_buffer_region: BufferRegion,
     B_buffer_region: BufferRegion,
     C_buffer_region: BufferRegion,
+    transpose_A: bool,
+    transpose_B: bool,
     alpha: PrimExpr,
     beta: PrimExpr,
     sctx: ScheduleContext,
@@ -118,8 +141,12 @@ def matmul_trn(
     p_size = A.layout.partition_size
     assert p_size == B.layout.partition_size, "Partition size mismatch"
 
-    lhs_p_dim, lhs_f_dim = get_pf_dim_from_buffer_region(A_buffer_region, analyzer, OperatorKind.A)
-    rhs_p_dim, rhs_f_dim = get_pf_dim_from_buffer_region(B_buffer_region, analyzer, OperatorKind.B)
+    lhs_p_dim, lhs_f_dim = get_pf_dim_from_buffer_region(
+        A_buffer_region, analyzer, OperatorKind.A, transpose_A
+    )
+    rhs_p_dim, rhs_f_dim = get_pf_dim_from_buffer_region(
+        B_buffer_region, analyzer, OperatorKind.B, transpose_B
+    )
     acc_p_dim, acc_f_dim = get_pf_dim_from_buffer_region(C_buffer_region, analyzer, OperatorKind.C)
     swap_lhs_rhs = acc_p_dim > acc_f_dim
     if swap_lhs_rhs:
@@ -133,18 +160,25 @@ def matmul_trn(
             B_buffer_region,
             A_buffer_region,
         )
+    assert analyzer.can_prove(
+        A_buffer_region.region[lhs_p_dim].extent == B_buffer_region.region[rhs_p_dim].extent
+    ), f"Reduction dimension must match, but the {lhs_p_dim} dimension of {A_buffer_region} ({A_buffer_region.buffer.shape[lhs_p_dim]}) != the {rhs_p_dim} dimension of {B_buffer_region} ({B_buffer_region.buffer.shape[rhs_p_dim]})"
+    assert analyzer.can_prove(
+        A_buffer_region.region[lhs_f_dim].extent == C_buffer_region.region[acc_p_dim].extent
+    ), f"Spatial dimension must match, but the {lhs_f_dim} dimension of {A_buffer_region} ({A_buffer_region.buffer.shape[lhs_f_dim]}) != the {acc_p_dim} dimension of {C_buffer_region} ({C_buffer_region.buffer.shape[acc_p_dim]})"
+    assert analyzer.can_prove(
+        B_buffer_region.region[rhs_f_dim].extent == C_buffer_region.region[acc_f_dim].extent
+    ), f"Spatial dimension must match, but the {rhs_f_dim} dimension of {B_buffer_region} ({B_buffer_region.buffer.shape[rhs_f_dim]}) != the {acc_f_dim} dimension of {C_buffer_region} ({C_buffer_region.buffer.shape[acc_f_dim]})"
     lhs_f_size, lhs_f_stride, lhs_f_data_iters = find_max_inst_size_from_one_region(
         A_buffer_region, analyzer, [lhs_f_dim]
     )
-    rhs_f_size, rhs_f_stride, acc_f_stride, rhs_f_data_iters = (
-        find_max_inst_size_matmul(
-            B_buffer_region,
-            C_buffer_region,
-            analyzer,
-            allowed_f_dim_rhs=[rhs_f_dim],
-            allowed_f_dim_output=[acc_f_dim],
-            f_dim_map={rhs_f_dim: acc_f_dim},
-        )
+    rhs_f_size, rhs_f_stride, acc_f_stride, rhs_f_data_iters = find_max_inst_size_matmul(
+        B_buffer_region,
+        C_buffer_region,
+        analyzer,
+        allowed_f_dim_rhs=[rhs_f_dim],
+        allowed_f_dim_output=[acc_f_dim],
+        f_dim_map={rhs_f_dim: acc_f_dim},
     )
 
     if C.scope() == "trn.psum":
@@ -231,7 +265,8 @@ def matmul_trn(
                 acc_psum_shape,
                 "float32",
                 scope="trn.psum",
-                allocated_addr=(0, 0)
+                allocated_addr=(0, 0),
+                buffer_name="acc_psum"
             )
         sctx.add_alloc_buffer(acc_psum)
     else:
@@ -250,6 +285,6 @@ def matmul_trn(
                         lhs_f_loop_wo_limit = T.meta_var(lhs_f_loop + additional_lhs_b_loop * actual_lhs_f_size)
                         rhs_f_loop_wo_limit = T.meta_var(rhs_f_loop + additional_rhs_b_loop * actual_rhs_f_size)
                         acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop_wo_limit, rhs_f_loop_wo_limit))
-                        C[acc_indices] = acc_psum[b_idx // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_idx % inst_num_per_slot * rhs_f_size + rhs_f_loop]
+                        T.evaluate(T.nki_tensor_copy(C[acc_indices], acc_psum[b_idx // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_idx % inst_num_per_slot * rhs_f_size + rhs_f_loop]))
     # fmt: on
     return impl_C_sbuf
