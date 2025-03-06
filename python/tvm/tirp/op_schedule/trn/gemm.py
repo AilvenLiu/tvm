@@ -25,6 +25,7 @@ from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc, PrimExpr, Var
 from tvm.ir import Range, assert_structural_equal
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tir.stmt import OpCall
 from .common import (
     infer_range_info,
     generate_axes_in_region,
@@ -98,21 +99,14 @@ def get_pf_dim_from_buffer_region(
 
 @register_schedule("gemm")
 def matmul_trn(
-    D_buffer_region: BufferRegion,
-    A_buffer_region: BufferRegion,
-    B_buffer_region: BufferRegion,
-    C_buffer_region: BufferRegion,
-    transpose_A: bool,
-    transpose_B: bool,
-    alpha: PrimExpr,
-    beta: PrimExpr,
+    op: OpCall,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
-
+    D_buffer_region, A_buffer_region, B_buffer_region, C_buffer_region, transpose_A, transpose_B, alpha, beta = op.args
     analyzer = init_analyzer(sctx)
     A, B, C, D = (
         A_buffer_region.buffer,
@@ -260,7 +254,7 @@ def matmul_trn(
     # todo: generalize the process of generating composite matmul + another_op pattern
     # by generating TIR op and reusing existing dispatch rule
     acc_psum_shape = (max_psum_slots, p_size, largest_psum_per_bank)
-    if "acc_psum" not in sctx.workspace:
+    if "acc_psum" not in op.workspace:
         acc_psum = T.buffer(
                 acc_psum_shape,
                 "float32",
@@ -270,7 +264,7 @@ def matmul_trn(
             )
         sctx.add_alloc_buffer(acc_psum)
     else:
-        acc_psum = sctx.workspace["acc_psum"]
+        acc_psum = op.workspace["acc_psum"]
         check_workspace_buffer(acc_psum, (p_size, largest_psum_per_bank), "trn.psum")
         max_psum_slots = acc_psum.shape[0]
 

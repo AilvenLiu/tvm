@@ -72,7 +72,7 @@ optype_table = {
 def validate_single_op(op_calls: List[OpCall], sctx: ScheduleContext):
     for op_call in op_calls:
         try:
-            f_op_scheduler(op_call.op, op_call.args, sctx)
+            f_op_scheduler(op_call, sctx)
         except (ValueError, NotImplementedError) as e:
             raise ValueError(f"Invalid operator {op_call}, error: {e}")
 
@@ -382,13 +382,14 @@ def compose_reduce_negate(
         reduce_output, negate_input
     ), "Reduce output and negate input must be the same"
 
-    return reduction_trn(negate_output, reduce_input, reduce_axes, accum, optype_table[op_call_1.op], sctx, negate=True)
+    return reduction_trn(op_call_1, optype_table[op_call_1.op], sctx, negate=True)
 
 @register_schedule("compose_op")
 def compose_op_trn(
-    *op_calls,
+    op: OpCall,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
+    op_calls = op.args
     assert len(op_calls) == 2, "Currently only support composing two TIRp op calls"
     assert all(isinstance(op_call, OpCall) for op_call in op_calls), "All arguments must be OpCall"
     op1 = op_calls[0].op

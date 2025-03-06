@@ -24,6 +24,7 @@ from functools import reduce
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
+from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
 from .common import (
@@ -44,12 +45,11 @@ from .common import (
 
 
 def transpose_schedule(
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
+    op: OpCall,
     analyzer: Analyzer,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
-
+    dst_buffer_region, src_buffer_region = op.args
     assert (
         not src_buffer_region.buffer.scope() == "trn.psum"
     ), "Transpose on psum buffer is not supported"
@@ -74,7 +74,7 @@ def transpose_schedule(
         // p_size
         // lhs_f_size
     )
-    if "identity" not in sctx.workspace:
+    if "identity" not in op.workspace:
         identity_tensor = T.buffer(
             (p_size, rhs_f_size), src_buffer_region.buffer.dtype, scope="trn.sbuf", buffer_name="identity"
         )
@@ -88,7 +88,7 @@ def transpose_schedule(
 
         sctx.add_init_stmt(identity_init.body)
     else:
-        identity_tensor = sctx.workspace["identity"]
+        identity_tensor = op.workspace["identity"]
         check_workspace_buffer(identity_tensor, (p_size, rhs_f_size), "trn.sbuf")
 
     dst_buffer = dst_buffer_region.buffer
@@ -117,7 +117,7 @@ def transpose_schedule(
 
         return transpose_psum_output
 
-    if "acc_psum" not in sctx.workspace:
+    if "acc_psum" not in op.workspace:
         acc_psum = T.buffer(
             (max_psum_slots, p_size, largest_psum_per_bank),
             "float32",
@@ -127,7 +127,7 @@ def transpose_schedule(
         )
         sctx.add_alloc_buffer(acc_psum)
     else:
-        acc_psum = sctx.workspace["acc_psum"]
+        acc_psum = op.workspace["acc_psum"]
         check_workspace_buffer(acc_psum, (p_size, largest_psum_per_bank), "trn.psum")
         max_psum_slots = acc_psum.shape[0]
 
@@ -148,8 +148,7 @@ def transpose_schedule(
 
 @register_schedule("copy")
 def copy_trn(
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
+    op: OpCall,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
@@ -157,6 +156,7 @@ def copy_trn(
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
 
+    dst_buffer_region, src_buffer_region = op.args
     src, dst = src_buffer_region.buffer, dst_buffer_region.buffer
     if not all(
         [
@@ -192,7 +192,7 @@ def copy_trn(
         return None
 
     if not check_partition_dim_match(src_buffer_region, dst_buffer_region, analyzer):
-        return transpose_schedule(dst_buffer_region, src_buffer_region, analyzer, sctx)
+        return transpose_schedule(op, analyzer, sctx)
     inst_size = None
     inst_stride = None
     inst_data_iters = None

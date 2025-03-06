@@ -26,7 +26,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T, tirp as Tp
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tirp.op_schedule import ScheduleContext
-
+from tvm.tir.stmt import OpCall
 from .common import find_max_inst_size_from_one_region, generate_axes_in_region, init_analyzer, get_reduction_dim_map, f_gen_idx_anchor, f_gen_idx_mapped
 from ..registry import register_schedule
 from ..common import _make_schedule, ReduceOpType
@@ -59,10 +59,7 @@ def generate_intermediate_buffer(
 
 
 def reduction_trn(
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
-    axes: Tuple[int],
-    accum: bool,
+    op: OpCall,
     reduce_op: ReduceOpType,
     sctx: ScheduleContext,
     negate: bool = False,
@@ -70,6 +67,7 @@ def reduction_trn(
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
+    dst_buffer_region, src_buffer_region, axes, accum = op.args
     assert not accum, "Accumulation is not supported for reduction on Trainium"
     analyzer = init_analyzer(sctx)
     assert reduce_op in reduce_ops, f"Unsupported reduce operation {reduce_op}"

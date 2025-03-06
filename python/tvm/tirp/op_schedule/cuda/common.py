@@ -28,6 +28,7 @@ from tvm.runtime import DataType
 from tvm.arith.analyzer import Analyzer
 from tvm.tir import BufferRegion, PrimFunc, Buffer
 from tvm.tir.expr import FloatImm
+from tvm.tir.stmt import OpCall
 from ..common import MapOpType, ReduceOpType
 
 
@@ -265,21 +266,18 @@ def reduction_cuda_shared_nd_sync_cta_impl(
 
 
 def unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(
-    _dst: BufferRegion,
-    _src: BufferRegion,
-    _bias: Optional[Union[BufferRegion, FloatImm]],
-    _scale: Optional[FloatImm],
+    op: OpCall,
     unary_op: MapOpType,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
     """Schedule unary map operation on CUDA in shared memory with bias and scale."""
+    dst, *src, _bias, _scale = op.args
     if not (_bias is None and _scale is None):
         return None
-    return unary_map_cuda_shared_nd_sync_cta_impl(_dst, _src, unary_op, sctx)
+    return unary_map_cuda_shared_nd_sync_cta_impl(op, unary_op, sctx)
     
 def unary_map_cuda_shared_nd_sync_cta_impl(
-    _dst: BufferRegion,
-    _src: BufferRegion,
+    op: OpCall,
     unary_op: MapOpType,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
@@ -294,6 +292,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
     if not (isinstance(unary_op, MapOpType) and unary_op in [MapOpType.ZERO, MapOpType.SQRT]):
         return None
 
+    _dst, _src = op.args[:2]
     dst, src = _dst.buffer, _src.buffer
     dst_region, src_region = _dst.region, _src.region
     dtype = dst.dtype
@@ -365,9 +364,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
 
 
 def binary_map_cuda_shared_nd_sync_cta_impl(
-    _dst: BufferRegion,
-    _src1: Union[BufferRegion, FloatImm],
-    _src2: Union[BufferRegion, FloatImm],
+    op: OpCall,
     binary_op: MapOpType,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
@@ -382,6 +379,7 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
     # Basic validation checks
     if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
         return None
+    _dst, _src1, _src2 = op.args
     if not (
         isinstance(binary_op, MapOpType)
         and binary_op in [MapOpType.ADD, MapOpType.SUB, MapOpType.MUL, MapOpType.FDIV]

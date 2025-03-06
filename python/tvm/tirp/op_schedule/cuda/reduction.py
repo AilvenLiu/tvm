@@ -20,6 +20,7 @@
 from typing import Optional, Tuple
 
 from tvm.tir import BufferRegion, PrimFunc
+from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
 from ..registry import register_schedule
@@ -28,10 +29,7 @@ from ..common import _make_schedule, ReduceOpType
 
 
 def reduction_cuda_shared_nd_sync_cta(
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
-    axes: Tuple[int],
-    accum: bool,
+    op: OpCall,
     reduce_op: ReduceOpType,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
@@ -44,12 +42,13 @@ def reduction_cuda_shared_nd_sync_cta(
     """
 
     # FIXME: correctly handle the axes field
+    dst_buffer_region, src_buffer_region, axes, accum = op.args
     return reduction_cuda_shared_nd_sync_cta_impl(
         dst_buffer_region, src_buffer_region, accum, reduce_op, sctx
     )
 
 
-# Register unary mapping schedules.
+# Register reduction schedules.
 for op_name, op_type in [("sum", ReduceOpType.SUM)]:
     custom_name = f"reduction_{op_name}_cuda_shared_nd_sync_cta_impl"
     func = _make_schedule(op_type, 3, [reduction_cuda_shared_nd_sync_cta])

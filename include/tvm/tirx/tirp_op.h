@@ -53,8 +53,6 @@ class ScheduleContextNode : public Object {
   Map<String, PrimExpr> launch_params;
   /*! \brief A map from loop variables to their ranges. */
   Map<Var, Range> var_range_map;
-  /*! \brief The workspace of the operator. */
-  Map<String, Buffer> workspace;
   /*! \brief The allocated buffers of the operator. */
   Array<Buffer> alloc_buffers;
   /*! \brief The initialization statement of the operator. 
@@ -69,7 +67,6 @@ class ScheduleContextNode : public Object {
     v->Visit("var_range_map", &var_range_map);
     v->Visit("alloc_buffers", &alloc_buffers);
     v->Visit("init_stmts", &init_stmts);
-    v->Visit("workspace", &workspace);
   }
 
   void AddAllocBuffer(Buffer buffer) {
@@ -98,7 +95,7 @@ class ScheduleContext : public ObjectRef {
    * \param launch_params The kernel launch parameters.
    * \param var_range_map: A map from loop variables to their ranges.
    */
-  TVM_DLL ScheduleContext(Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map, Map<String, Buffer> workspace);
+  TVM_DLL ScheduleContext(Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map);
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ScheduleContext, ObjectRef, ScheduleContextNode);
 };

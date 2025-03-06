@@ -23,15 +23,17 @@ from tvm.script import tir as T
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.async_structs import CopyPipeline, Pipeline
+from tvm.tir.stmt import OpCall
 from ..registry import register_schedule
 from .common import InstType, copy_cuda_g2s_s2g_2d_cta_vec_load_impl
 
 
 @register_schedule("pipeline_producer_commit")
-def pipeline_producer_commit(pipeline: Pipeline, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def pipeline_producer_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule pipeline producer commit."""
     if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
         return None
+    pipeline = op.args[0]
     if isinstance(pipeline, CopyPipeline):
         if pipeline.depth == 0 and not pipeline.separate_pc:
             # copy pipeline without depth and separate pc: async-group mechanism
@@ -44,13 +46,13 @@ def pipeline_producer_commit(pipeline: Pipeline, sctx: ScheduleContext) -> Optio
     return None
 
 
+
 @register_schedule("pipeline_consumer_wait")
-def pipeline_consumer_wait(
-    pipeline: Pipeline, num_stages: int, sctx: ScheduleContext
-) -> Optional[PrimFunc]:
+def pipeline_consumer_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule pipeline consumer wait."""
     if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
         return None
+    pipeline, num_stages = op.args
     if isinstance(pipeline, CopyPipeline):
         if pipeline.depth == 0 and not pipeline.separate_pc:
             # copy pipeline without depth and separate pc: async-group mechanism
@@ -62,12 +64,11 @@ def pipeline_consumer_wait(
 
 
 @register_schedule("pipeline_copy")
-def pipeline_copy(
-    pipeline: CopyPipeline, dst: BufferRegion, src: BufferRegion, sctx: ScheduleContext
-) -> Optional[PrimFunc]:
+def pipeline_copy(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule pipeline copy."""
     if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
         return None
+    pipeline, dst, src = op.args
     if pipeline.depth == 0 and not pipeline.separate_pc:
         # copy pipeline without depth and separate pc: async-group mechanism
         for schedule in [copy_cuda_g2s_s2g_2d_cta_vec_load_impl]:

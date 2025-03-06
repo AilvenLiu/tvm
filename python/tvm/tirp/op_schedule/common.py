@@ -20,6 +20,7 @@ from typing import Optional, Union, List, Callable
 
 from tvm.tirp.op_schedule import ScheduleContext
 from tvm.tir import BufferRegion, PrimFunc
+from tvm.tir.stmt import OpCall
 from tvm.tir.expr import FloatImm
 
 
@@ -66,12 +67,12 @@ def _make_schedule(
     """
 
     def impl(
-        dst: BufferRegion, *src: Union[BufferRegion, FloatImm], sctx: ScheduleContext
+        op: OpCall, sctx: ScheduleContext
     ) -> Optional[PrimFunc]:
-        if len(src) != num_src:
-            raise ValueError(f"Expected {num_src} source arguments, got {len(src)}")
+        if len(op.args) != num_src + 1:
+            raise ValueError(f"Expected {num_src} source arguments, got {len(op.args) - 1}")
         for schedule in schedule_candidates:
-            res = schedule(dst, *src, op_type, sctx)
+            res = schedule(op, op_type, sctx)
             if res is not None:
                 return res
         return None

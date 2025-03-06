@@ -23,7 +23,7 @@ from tvm.runtime import Object, Scriptable
 from tvm.target import Target
 from tvm.tir.expr import PrimExpr
 from tvm.tir.exec_scope import ExecScope
-
+from tvm.tir.stmt import OpCall
 
 def _get_tirp_op(op_name: str):
     """Get TIRp operator by name.
@@ -68,13 +68,12 @@ class ScheduleContext(Object, Scriptable):
     var_range_map: Dict[Var, Range]
     alloc_buffers: List[Buffer]
     init_stmts: List[Stmt]
-    workspace: Dict[str, Buffer]
 
     def __init__(
-        self, target: Target, exec_scope: ExecScope, launch_params: Dict[str, PrimExpr], var_range_map: Dict[Var, Range], workspace: Dict[str, Buffer] = {}
+        self, target: Target, exec_scope: ExecScope, launch_params: Dict[str, PrimExpr], var_range_map: Dict[Var, Range]
     ) -> None:
         self.__init_handle_by_constructor__(
-            _ffi_api.ScheduleContext, target, exec_scope, launch_params, var_range_map, workspace  # pylint: disable=no-member
+            _ffi_api.ScheduleContext, target, exec_scope, launch_params, var_range_map  # pylint: disable=no-member
         )
 
     def add_alloc_buffer(self, buffer: Buffer) -> None:
@@ -141,15 +140,13 @@ def register_schedule(op_name: str):
 
 
 @register_func("tirp.f_op_scheduler")
-def f_op_scheduler(op: Op, args, sctx: ScheduleContext):
+def f_op_scheduler(op: OpCall, sctx: ScheduleContext):
     """Find and return a schedule for the operator.
 
     Parameters
     ----------
-    op : Op
+    op : OpCall
         The operator to be scheduled
-    args : list
-        The operator arguments
     sctx : ScheduleContext
         The scheduling context
 
@@ -158,16 +155,14 @@ def f_op_scheduler(op: Op, args, sctx: ScheduleContext):
     Optional[PrimFunc]
         The result of the operator implementation
     """
-    assert op in _OP_REGISTRY, f"No implementation found for operator {op}"
-    for impl in _OP_REGISTRY[op]:
-        res = impl(*args, sctx=sctx)
+    assert op.op in _OP_REGISTRY, f"No implementation found for operator {op.op}"
+    for impl in _OP_REGISTRY[op.op]:
+        res = impl(op, sctx=sctx)
         if res is not None:
             return res
     assert False, (
         "Internal Error: no implementation found for operator "
         + str(op)
-        + " with args "
-        + str(args)
         + " and context "
         + str(sctx)
     )

@@ -24,6 +24,7 @@ from enum import Enum
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc, FloatImm
+from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext
 
 from .common import (
@@ -258,9 +259,7 @@ def try_find_inst_nary(
     return inst_size, f_gen_axes, inst_types, reverse, broadcast_dims
 
 def binary_trn(
-    _dst: BufferRegion,
-    _src1: Union[BufferRegion, FloatImm],
-    _src2: Union[BufferRegion, FloatImm],
+    op: OpCall,
     binary_op: MapOpType,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
@@ -268,7 +267,7 @@ def binary_trn(
         return None
     assert binary_op in binary_map_ops, f"Unsupported binary operation {binary_op}"
     analyzer = init_analyzer(sctx)
-
+    _dst, _src1, _src2 = op.args
     inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
         _dst, _src1, _src2, analyzer
     )

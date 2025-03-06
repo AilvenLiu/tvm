@@ -24,7 +24,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc, FloatImm
 from tvm.tirp.op_schedule import ScheduleContext
-
+from tvm.tir.stmt import OpCall
 from functools import reduce
 from .common import (
     generate_axes_in_region,
@@ -154,8 +154,7 @@ def generate_unary_func(
 
 
 def unary_trn(
-    dst_buffer_region: BufferRegion,
-    _src: Union[BufferRegion, FloatImm],
+    op: OpCall,
     unary_op: MapOpType,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
@@ -163,6 +162,7 @@ def unary_trn(
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
+    dst_buffer_region, _src = op.args
     CONST = None
     if isinstance(_src, FloatImm):
         assert (
@@ -201,16 +201,13 @@ def unary_trn(
 
 
 def unary_with_bias_scale_trn(
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
-    _bias: Optional[Union[BufferRegion, FloatImm]] = None,
-    scale: Optional[FloatImm] = None,
+    op: OpCall,
     unary_op: MapOpType = MapOpType.SQRT,
     sctx: ScheduleContext = None,
 ) -> Optional[PrimFunc]:
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
-
+    dst_buffer_region, src_buffer_region, _bias, scale = op.args
     scale = 1.0 if scale is None else scale
 
     analyzer = init_analyzer(sctx)

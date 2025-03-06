@@ -20,6 +20,7 @@
 from typing import Optional
 
 from tvm.tir import BufferRegion, PrimFunc
+from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
 from ..registry import register_schedule
@@ -44,11 +45,11 @@ def register_copy_schedule(func):
 
 @register_copy_schedule
 def copy_cuda_g2s_s2g_2d_sync_cta_vec_load(
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
+    op: OpCall,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
+    dst_buffer_region, src_buffer_region = op.args
     return copy_cuda_g2s_s2g_2d_cta_vec_load_impl(
         dst_buffer_region, src_buffer_region, sctx, InstType.NORMAL
     )
