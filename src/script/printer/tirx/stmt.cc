@@ -205,7 +205,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             return OpCallDoc(
                 AttrAccessDoc(d->AsDoc<ExprDoc>(op_call->args[0], p->Attr("args")->ArrayIndex(0)),
                               method),
-                args, {});
+                args, {}, {});
           };
 
           static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
@@ -221,7 +221,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
-            return OpCallDoc(TIRp(d, name), args, d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")));
+            return OpCallDoc(TIRp(d, name), args, d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")), d->AsDoc<DictDoc>(op_call->schedule_config, p->Attr("schedule_config")));
           } else if (bool(pipeline_op_map.get(op, tvm::Bool(false)))) {
             // Pipeline ops
             ICHECK(op_call->args[0]->IsInstance<tirx::PipelineNode>())
@@ -238,7 +238,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             }
             tir::SeqStmt seq_stmt(stmts);
             AsDocBody(seq_stmt, p->Attr("args"), f->get(), d);
-            return ScopeDoc(NullOpt, TIRp(d, "compose_op")->Call({}, {"workspace"}, {d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace"))}), (*f)->stmts);
+            return ScopeDoc(NullOpt, TIRp(d, "compose_op")->Call({}, {"workspace", "schedule_config"}, {d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")), d->AsDoc<DictDoc>(op_call->schedule_config, p->Attr("schedule_config"))}), (*f)->stmts);
           } else {
             LOG(FATAL) << "Unknown TIR+ op type: " << op->name;
           }

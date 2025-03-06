@@ -157,6 +157,8 @@ class PipelineNode : public Object {
   String name_hint;
   /*! \brief The workspace of the pipeline. */
   Map<String, tvm::tirx::Buffer> workspace;
+  /*! \brief The schedule config of the pipeline. */
+  Map<String, ObjectRef> schedule_config;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("thread_scope", &thread_scope);
@@ -164,6 +166,7 @@ class PipelineNode : public Object {
     v->Visit("depth", &depth);
     v->Visit("separate_pc", &separate_pc);
     v->Visit("workspace", &workspace);
+    v->Visit("schedule_config", &schedule_config);
   }
 
   bool SEqualReduce(const PipelineNode* other, SEqualReducer equal) const {
@@ -171,6 +174,7 @@ class PipelineNode : public Object {
     if (!equal(depth, other->depth)) return false;
     if (!equal(separate_pc, other->separate_pc)) return false;
     if (!equal(workspace, other->workspace)) return false;
+    if (!equal(schedule_config, other->schedule_config)) return false;
     return equal.FreeVarEqualImpl(this, other);
   }
 
@@ -179,6 +183,7 @@ class PipelineNode : public Object {
     hash_reduce(depth);
     hash_reduce(separate_pc);
     hash_reduce(workspace);
+    hash_reduce(schedule_config);
     hash_reduce.FreeVarHashImpl(this);
   }
 
@@ -191,7 +196,7 @@ class PipelineNode : public Object {
 class Pipeline : public ObjectRef {
  public:
   TVM_DLL explicit Pipeline(ExecScope thread_scope, size_t depth = 0, bool separate_pc = false,
-                            String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {});
+                            String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {}, Map<String, ObjectRef> schedule_config = {});
 
   TVM_DEFINE_OBJECT_REF_METHODS(Pipeline, ObjectRef, PipelineNode);
 };
@@ -208,12 +213,12 @@ class CopyPipelineNode : public PipelineNode {
 class CopyPipeline : public Pipeline {
  public:
   TVM_DLL explicit CopyPipeline(ExecScope thread_scope, size_t depth = 0, bool separate_pc = false,
-                                String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {});
+                                String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {}, Map<String, ObjectRef> schedule_config = {});
 
   TVM_DEFINE_OBJECT_REF_METHODS(CopyPipeline, Pipeline, CopyPipelineNode);
 };
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_ASYNC_STRUCTS_H_

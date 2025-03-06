@@ -1305,12 +1305,15 @@ class OpCallDocNode : public StmtDocNode {
   Array<Doc> args;
   /*! \brief The workspace of this op call */
   DictDoc workspace{nullptr};
+  /*! \brief The schedule config of this op call */
+  DictDoc schedule_config{nullptr};
 
   void VisitAttrs(AttrVisitor* v) {
     StmtDocNode::VisitAttrs(v);
     v->Visit("callee", &callee);
     v->Visit("args", &args);
     v->Visit("workspace", &workspace);
+    v->Visit("schedule_config", &schedule_config);
   }
 
   static constexpr const char* _type_key = "script.printer.OpCallDoc";
@@ -1329,8 +1332,10 @@ class OpCallDoc : public StmtDoc {
    * \param callee The callee of this function call.
    * \param args The positional arguments.
    * \param workspace The workspace of this op call.
+   * \param schedule_config The schedule config of this op call.
    */
-  explicit OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace);
+  explicit OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace,
+                     DictDoc schedule_config);
   TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(OpCallDoc, StmtDoc, OpCallDocNode);
 };
 

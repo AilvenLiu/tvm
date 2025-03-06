@@ -683,9 +683,39 @@ def test_roundtrip_compose_op_call_workspace():
                 Tp.add(C, B, T.float32(1), workspace={"psum": psum})
     # fmt: on
     code = test.script()
-    print(code)
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
+
+def test_roundtrip_op_call_schedule_config():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle, B_ptr: T.handle):
+        A = T.match_buffer(A_ptr, [10], "float32", scope="global")
+        B = T.match_buffer(B_ptr, [10], "float32", scope="global")
+        with T.kernel():
+            Tp.add(B, A, T.float32(1), schedule_config={"schedule": "A"})
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+def test_roundtrip_compose_op_call_schedule_config():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        with T.kernel():
+            A = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            B = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            C = T.alloc_buffer([10], "float32", scope="trn.sbuf")
+            psum = T.alloc_buffer([10], "float32", scope="trn.psum")
+            with Tp.compose_op(schedule_config={"schedule": "A"}):
+                Tp.add(B, A, T.float32(1))
+                Tp.add(C, B, T.float32(1), workspace={"psum": psum})
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
 
 if __name__ == "__main__":
     tvm.testing.main()   

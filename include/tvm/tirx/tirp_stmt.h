@@ -44,20 +44,25 @@ class OpCallNode : public StmtNode {
   // Workspace (pre-allocated buffers) for the operator.
   Map<String, Buffer> workspace;
 
+  // Schedule config for the operator.
+  Map<String, ObjectRef> schedule_config;
+
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("op", &op);
     v->Visit("args", &args);
     v->Visit("workspace", &workspace);
+    v->Visit("schedule_config", &schedule_config);
   }
 
   bool SEqualReduce(const OpCallNode* other, SEqualReducer equal) const {
-    return equal(op, other->op) && equal(args, other->args) && equal(workspace, other->workspace);
+    return equal(op, other->op) && equal(args, other->args) && equal(workspace, other->workspace) && equal(schedule_config, other->schedule_config);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(op);
     hash_reduce(args);
     hash_reduce(workspace);
+    hash_reduce(schedule_config);
   }
 
   static constexpr const char* _type_key = "tirx.OpCall";
@@ -70,7 +75,7 @@ class OpCallNode : public StmtNode {
  */
 class OpCall : public Stmt {
  public:
-  TVM_DLL OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace = {});
+  TVM_DLL OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace = {}, Map<String, ObjectRef> schedule_config = {});
 
   static bool IsValidOpCallArgType(const ObjectRef& arg);
 

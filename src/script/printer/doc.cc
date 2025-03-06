@@ -278,11 +278,13 @@ DocStringDoc::DocStringDoc(ffi::String docs) {
   this->data_ = std::move(n);
 }
 
-OpCallDoc::OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace) {
+OpCallDoc::OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace,
+                     DictDoc schedule_config) {
   ObjectPtr<OpCallDocNode> n = ffi::make_object<OpCallDocNode>();
   n->callee = callee;
   n->args = args;
   n->workspace = workspace;
+  n->schedule_config = schedule_config;
   this->data_ = std::move(n);
 }
 
@@ -494,10 +496,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("script.printer.OpCallDoc",
-                        [](ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace) {
-                          return OpCallDoc(callee, args, workspace);
-                        });
+  refl::GlobalDef().def("script.printer.OpCallDoc", [](ExprDoc callee, ffi::Array<Doc> args,
+                                                       DictDoc workspace, DictDoc schedule_config) {
+    return OpCallDoc(callee, args, workspace, schedule_config);
+  });
 }
 
 }  // namespace printer

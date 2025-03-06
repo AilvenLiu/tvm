@@ -748,6 +748,10 @@ void PythonDocPrinter::PrintTypedDoc(const OpCallDoc& doc) {
     output_ << ", workspace=";
     PrintDoc(doc->workspace);
   }
+  if (doc->schedule_config.defined() && !doc->schedule_config->keys.empty()) {
+    output_ << ", schedule_config=";
+    PrintDoc(doc->schedule_config);
+  }
   output_ << ")";
 }
 
