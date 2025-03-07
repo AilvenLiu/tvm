@@ -20,7 +20,7 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.transform import LowerTIRp
+from tvm.tir.async_structs import CopyPipeline
 from ..utils import bench, ProtonContext
 
 
@@ -78,7 +78,8 @@ def test_layernorm():
                 Tp.copy(norm_weight_smem[:], norm_weight[:])
 
                 # two cp.async
-                pipeline = Tp.alloc_copy_pipeline("cta", depth=0, separate_pc=False)
+                pipeline = Tp.alloc_copy_pipeline("cta", depth=0, separate_pc=False,
+                                                  schedule_config={CopyPipeline.StrategyKind.IMPL: CopyPipeline.Impl.VEC_LOAD})
                 pipeline.copy(x_smem[:, 0, :], inp[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :])
                 pipeline.producer_commit()
                 pipeline.copy(resid_smem[:, 0, :], inp_resid[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :])

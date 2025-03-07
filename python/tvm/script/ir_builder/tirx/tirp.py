@@ -32,18 +32,23 @@ def _get_tirp_op(op_name: str):
 
 def _to_region(buffer: Union[BufferRegion, Buffer]):
     if isinstance(buffer, Buffer):
-        return buffer.__getitem__([slice(None, None, None) for _ in range(len(buffer.shape))])
+        return buffer[[slice(None, None, None) for _ in range(len(buffer.shape))]]
     assert isinstance(buffer, BufferRegion)
     return buffer
 
 
-def wrap_elem_in_tuple(e):
+def _wrap_elem_in_tuple(e):
     if isinstance(e, (tuple, list)):
         return e
     return (e,)
 
 
-def zero(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+def zero(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
     """Zero out all elements in src and store to dst.
 
     Parameters
@@ -54,16 +59,25 @@ def zero(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], wor
     src : Union[BufferRegion, Buffer]
         The source buffer region.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
     # TODO: check each key in schedule_config are valid. Same for other ops.
-    return _ffi_api.OpCall(_get_tirp_op("zero"), [dst, src], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("zero"), [dst, src], workspace, schedule_config
+    )
 
 
-def sqrt(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None, scale: Optional[FloatImm] = None, workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+def sqrt(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
+    scale: Optional[FloatImm] = None,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
     """Sqrt all elements in src and store to dst.
 
     dst = sqrt(src * scale + bias)  (if scale or bias are provided)
@@ -82,14 +96,18 @@ def sqrt(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], bia
     scale : Optional[FloatImm]
         The scale of the sqrt src. Only supported on Trn.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
+    if workspace is None:
+        workspace = {}
     if bias is not None and isinstance(bias, Buffer):
         bias = _to_region(bias)
-    return _ffi_api.OpCall(_get_tirp_op("sqrt"), [dst, src, bias, scale], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("sqrt"), [dst, src, bias, scale], workspace, schedule_config
+    )
 
 
 def add(
@@ -112,7 +130,7 @@ def add(
     src2 : Union[BufferRegion, Buffer, FloatImm]
         The source buffer region 2, or float.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     dst = _to_region(dst)
@@ -120,7 +138,9 @@ def add(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("add"), [dst, src1, src2], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("add"), [dst, src1, src2], workspace, schedule_config
+    )
 
 
 def sub(
@@ -151,7 +171,9 @@ def sub(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("sub"), [dst, src1, src2], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("sub"), [dst, src1, src2], workspace, schedule_config
+    )
 
 
 def mul(
@@ -182,7 +204,9 @@ def mul(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("mul"), [dst, src1, src2], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("mul"), [dst, src1, src2], workspace, schedule_config
+    )
 
 
 def fdiv(
@@ -205,17 +229,24 @@ def fdiv(
     src2 : Union[BufferRegion, Buffer, FloatImm]
         The source buffer region 2, or float.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     dst = _to_region(dst)
     src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("fdiv"), [dst, src1, src2], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("fdiv"), [dst, src1, src2], workspace, schedule_config
+    )
 
 
-def copy(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+def copy(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
     """Copy data from src to dst.
 
     Parameters
@@ -226,15 +257,22 @@ def copy(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], wor
     src : Union[BufferRegion, Buffer]
         The source buffer region.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("copy"), [dst, src], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("copy"), [dst, src], workspace, schedule_config
+    )
 
 
-def fill(dst: Union[BufferRegion, Buffer], value: PrimExpr, workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+def fill(
+    dst: Union[BufferRegion, Buffer],
+    value: PrimExpr,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
     """Fill the buffer region with the value.
 
     Parameters
@@ -245,11 +283,13 @@ def fill(dst: Union[BufferRegion, Buffer], value: PrimExpr, workspace: Dict[str,
     value : PrimExpr
         The value to be filled.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     dst = _to_region(dst)
-    return _ffi_api.OpCall(_get_tirp_op("fill"), [dst, value], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("fill"), [dst, value], workspace, schedule_config
+    )
 
 
 def gemm(
@@ -283,7 +323,7 @@ def gemm(
         The buffer of matrix C.
 
     transpose_A : bool
-        Whether to transpose A. 
+        Whether to transpose A.
 
     transpose_B : bool
         Whether to transpose B.
@@ -294,15 +334,20 @@ def gemm(
     beta : PrimExpr
         The scalar beta.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     D = _to_region(D)
     A = _to_region(A)
     B = _to_region(B)
     C = _to_region(C)
+    if workspace is None:
+        workspace = {}
     return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("gemm"), [D, A, B, C, transpose_A, transpose_B, alpha, beta], workspace, schedule_config
+        _get_tirp_op("gemm"),
+        [D, A, B, C, transpose_A, transpose_B, alpha, beta],
+        workspace,
+        schedule_config,
     )
 
 
@@ -331,12 +376,14 @@ def sum(
     accum : bool
         Whether dst is accumulated.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    axes = wrap_elem_in_tuple(axes)
+    axes = _wrap_elem_in_tuple(axes)
+    if workspace is None:
+        workspace = {}
     return _ffi_api.OpCall(  # pylint: disable=no-member
         _get_tirp_op("sum"), [dst, src, axes, accum], workspace, schedule_config
     )
@@ -367,12 +414,14 @@ def max(
     accum : bool
         Whether dst is accumulated.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    axes = wrap_elem_in_tuple(axes)
+    axes = _wrap_elem_in_tuple(axes)
+    if workspace is None:
+        workspace = {}
     return _ffi_api.OpCall(  # pylint: disable=no-member
         _get_tirp_op("max"), [dst, src, axes, accum], workspace, schedule_config
     )
@@ -403,18 +452,25 @@ def min(
     accum : bool
         Whether dst is accumulated.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    axes = wrap_elem_in_tuple(axes)
+    axes = _wrap_elem_in_tuple(axes)
+    if workspace is None:
+        workspace = {}
     return _ffi_api.OpCall(  # pylint: disable=no-member
         _get_tirp_op("min"), [dst, src, axes, accum], workspace, schedule_config
     )
 
 
-def reciprocal(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+def reciprocal(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
     """Reciprocal all elements in src and store to dst.
 
     Parameters
@@ -424,13 +480,23 @@ def reciprocal(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer
 
     src : Union[BufferRegion, Buffer]
         The source buffer region.
+
+    workspace : Optional[Dict[str, Buffer]]
+        The workspace of the operator.
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(_get_tirp_op("reciprocal"), [dst, src], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("reciprocal"), [dst, src], workspace, schedule_config
+    )
 
 
-def memset(dst: Union[BufferRegion, Buffer], value: PrimExpr, workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+def memset(
+    dst: Union[BufferRegion, Buffer],
+    value: PrimExpr,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
     """Set all elements in dst to value.
 
     Parameters
@@ -441,13 +507,24 @@ def memset(dst: Union[BufferRegion, Buffer], value: PrimExpr, workspace: Dict[st
     value : PrimExpr
         The value to be set.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
     """
+    if workspace is None:
+        workspace = {}
     dst = _to_region(dst)
-    return _ffi_api.OpCall(_get_tirp_op("memset"), [dst, value], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("memset"), [dst, value], workspace, schedule_config
+    )
 
-def maximum(dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, FloatImm], src2: Union[BufferRegion, Buffer, FloatImm], workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+
+def maximum(
+    dst: Union[BufferRegion, Buffer],
+    src1: Union[BufferRegion, Buffer, FloatImm],
+    src2: Union[BufferRegion, Buffer, FloatImm],
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
     """Maximum all elements in src1 and src2 and store to dst.
 
     Parameters
@@ -469,9 +546,18 @@ def maximum(dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, 
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("maximum"), [dst, src1, src2], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("maximum"), [dst, src1, src2], workspace, schedule_config
+    )
 
-def minimum(dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, FloatImm], src2: Union[BufferRegion, Buffer, FloatImm], workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+
+def minimum(
+    dst: Union[BufferRegion, Buffer],
+    src1: Union[BufferRegion, Buffer, FloatImm],
+    src2: Union[BufferRegion, Buffer, FloatImm],
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
     """Minimum all elements in src1 and src2 and store to dst.
 
     Parameters
@@ -493,9 +579,19 @@ def minimum(dst: Union[BufferRegion, Buffer], src1: Union[BufferRegion, Buffer, 
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(_get_tirp_op("minimum"), [dst, src1, src2], workspace, schedule_config)  # pylint: disable=no-member
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("minimum"), [dst, src1, src2], workspace, schedule_config
+    )
 
-def exp(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None, scale: Optional[FloatImm] = None, workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+
+def exp(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
+    scale: Optional[FloatImm] = None,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
     """Exponentiate all elements in src and store to dst.
 
     Parameters
@@ -518,11 +614,19 @@ def exp(dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer], bias
     dst = _to_region(dst)
     src = _to_region(src)
     if bias is not None and isinstance(bias, Buffer):
-        bias = _to_region(bias) 
-    return _ffi_api.OpCall(_get_tirp_op("exp"), [dst, src, bias, scale], workspace, schedule_config)  # pylint: disable=no-member
+        bias = _to_region(bias)
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("exp"), [dst, src, bias, scale], workspace, schedule_config
+    )
+
 
 def alloc_copy_pipeline(
-    thread_scope: ExecScope, depth: int, separate_pc: bool, name_hint: str = "", workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}
+    thread_scope: ExecScope,
+    depth: int,
+    separate_pc: bool,
+    name_hint: str = "",
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
 ) -> CopyPipeline:
     """The copy pipeline allocation function.
 
@@ -540,7 +644,7 @@ def alloc_copy_pipeline(
     name_hint : str
         The name hint of the pipeline.
 
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
 
     Returns
@@ -548,19 +652,27 @@ def alloc_copy_pipeline(
     res : CopyPipeline
         The allocated copy pipeline.
     """
+    if workspace is None:
+        workspace = {}
+    if schedule_config is None:
+        schedule_config = {}
     if isinstance(thread_scope, str):
         thread_scope = ExecScope(thread_scope)
     else:
         assert isinstance(thread_scope, ExecScope)
-    return _ffi_api.AllocCopyPipeline(thread_scope, depth, separate_pc, name_hint, workspace, schedule_config)  # type: ignore[attr-defined] # pylint: disable=no-member
+    return _ffi_api.AllocCopyPipeline(  # pylint: disable=no-member
+        thread_scope, depth, separate_pc, name_hint, workspace, schedule_config
+    )
 
 
-def compose_op(workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}) -> frame.ComposeOpFrame:
+def compose_op(
+    workspace: Dict[str, Buffer] = None, schedule_config: Dict[str, Any] = None
+) -> frame.ComposeOpFrame:
     """Compose a TIRp op.
 
     Parameters
     ----------
-    workspace : Dict[str, Buffer]
+    workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator
 
     Returns
@@ -568,7 +680,19 @@ def compose_op(workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any
     res : frame.ComposeOpFrame
         The result ComposeOpFrame.
     """
-    return _ffi_api.ComposeOp(workspace, schedule_config)  # type: ignore[attr-defined] # pylint: disable=no-member
+    if workspace is None:
+        workspace = {}
+    if schedule_config is None:
+        schedule_config = {}
+    return _ffi_api.ComposeOp(workspace, schedule_config)  # pylint: disable=no-member
+
+
+def tvm_kernel_replace_point():
+    """A placeholder for the kernel replace point, used in TIRp op scheduling."""
+    return _ffi_api.OpCall(  # pylint: disable=no-member
+        _get_tirp_op("tvm_kernel_replace_point"), [], {}, {}
+    )
+
 
 __all__ = [
     "zero",
@@ -590,4 +714,5 @@ __all__ = [
     "maximum",
     "minimum",
     "exp",
+    "tvm_kernel_replace_point",
 ]

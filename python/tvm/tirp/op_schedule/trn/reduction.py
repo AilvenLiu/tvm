@@ -27,9 +27,16 @@ from tvm.script import tir as T, tirp as Tp
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tirp.op_schedule import ScheduleContext
 from tvm.tir.stmt import OpCall
-from .common import find_max_inst_size_from_one_region, generate_axes_in_region, init_analyzer, get_reduction_dim_map, f_gen_idx_anchor, f_gen_idx_mapped
+from .common import (
+    find_max_inst_size_from_one_region,
+    generate_axes_in_region,
+    init_analyzer,
+    get_reduction_dim_map,
+    f_gen_idx_anchor,
+    f_gen_idx_mapped,
+)
 from ..registry import register_schedule
-from ..common import _make_schedule, ReduceOpType
+from ..common import _make_unary_binary_schedule, ReduceOpType
 
 
 reduce_ops = {
@@ -38,23 +45,29 @@ reduce_ops = {
     ReduceOpType.MIN: "min",
 }
 
+
 def generate_intermediate_buffer(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
     axes: Tuple[int],
     inst_size,
-    analyzer: Analyzer
+    analyzer: Analyzer,
 ):
     reduction_size = reduce(operator.mul, [src_buffer_region.region[i].extent for i in axes], 1)
     if analyzer.can_prove(reduction_size == inst_size):
         # No need to split into 2 stages
         return None, None, None
-    assert analyzer.can_prove(reduction_size % inst_size == 0), f"Reduction size {reduction_size} must be divisible by instruction size {inst_size}"
+    assert analyzer.can_prove(
+        reduction_size % inst_size == 0
+    ), f"Reduction size {reduction_size} must be divisible by instruction size {inst_size}"
     rfactor_size = reduction_size // inst_size
     dst_layout = dst_buffer_region.buffer.layout
     intermediate_shape = [dst_layout.partition_size, rfactor_size]
     intermediate_dimension_types = [T.TrainiumLayout.Partition, T.TrainiumLayout.Free]
-    intermediate_layout = T.TrainiumLayout(intermediate_dimension_types, T.TileLayout.from_tuple((dst_layout.partition_size, rfactor_size), (1, 1)))
+    intermediate_layout = T.TrainiumLayout(
+        intermediate_dimension_types,
+        T.TileLayout.from_tuple((dst_layout.partition_size, rfactor_size), (1, 1)),
+    )
     return intermediate_shape, intermediate_layout, rfactor_size
 
 
@@ -98,7 +111,9 @@ def reduction_trn(
     p_size = dst.layout.partition_size
     b_extent = reduce(operator.mul, dst_extent, 1) // p_size
     opcode = reduce_ops[reduce_op]
-    intermediate_shape, intermediate_layout, reduction_b_extent = generate_intermediate_buffer(dst_buffer_region, src_buffer_region, axes, inst_size, analyzer)
+    intermediate_shape, intermediate_layout, reduction_b_extent = generate_intermediate_buffer(
+        dst_buffer_region, src_buffer_region, axes, inst_size, analyzer
+    )
     f_gen_axes = generate_axes_in_region(src_buffer_region, inst_stride, inst_data_iters, analyzer)
     f_gen_src_idx = f_gen_idx_anchor(src_buffer_region, f_gen_axes)
     f_gen_dst_idx = f_gen_idx_mapped(dst_buffer_region, f_gen_axes, dim_map)
@@ -142,7 +157,7 @@ for op_name, op_type in [
     ("min", ReduceOpType.MIN),
 ]:
     custom_name = f"reduction_{op_name}_trn_impl"
-    func = _make_schedule(op_type, 3, [reduction_trn])
+    func = _make_unary_binary_schedule(op_type, 3, [reduction_trn])
     func.__name__ = custom_name
     func.__doc__ = f"Schedule reduction {op_name}."
     register_schedule(op_name)(func)

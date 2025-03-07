@@ -172,8 +172,6 @@ class SBlockFrameNode : public TIRFrameNode {
 
   Array<tvm::tirx::BufferView> buffer_views;
   Array<tvm::tirx::BufferGet> buffer_gets;
-  Array<tvm::tirx::Barrier> barriers;
-  Array<tvm::tirx::BarrierArray> barrier_arrays;
   Array<tvm::tirx::Pipeline> pipelines;
 
   static void RegisterReflection() {
@@ -195,8 +193,6 @@ class SBlockFrameNode : public TIRFrameNode {
         .def_ro("scope_slice_extents", &SBlockFrameNode::scope_slice_extents)
         .def_ro("buffer_views", &SBlockFrameNode::buffer_views)
         .def_ro("buffer_gets", &SBlockFrameNode::buffer_gets)
-        .def_ro("barriers", &SBlockFrameNode::barriers)
-        .def_ro("barrier_arrays", &SBlockFrameNode::barrier_arrays)
         .def_ro("pipelines", &SBlockFrameNode::pipelines);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.SSBlockFrame", SBlockFrameNode,
@@ -656,7 +652,7 @@ class DeclBufferFrame : public TIRFrame {
 class ComposeOpFrameNode : public TIRFrameNode {
  public:
   /*! \brief The workspace of the compose op. */
-  Map<String, tvm::tir::Buffer> workspace;
+  Map<String, tvm::tirx::Buffer> workspace;
   /*! \brief The schedule config of the compose op. */
   Map<String, ObjectRef> schedule_config;
 
@@ -678,7 +674,7 @@ class ComposeOpFrame : public TIRFrame {
   }
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ComposeOpFrame, TIRFrame, ComposeOpFrameNode);
 };
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

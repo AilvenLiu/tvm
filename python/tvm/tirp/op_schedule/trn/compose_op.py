@@ -44,7 +44,13 @@ from ..common import ReduceOpType
 from ..registry import f_op_scheduler
 
 
-vector_ops = [Op.get("tirp.add"), Op.get("tirp.sub"), Op.get("tirp.mul"), Op.get("tirp.maximum"), Op.get("tirp.minimum")]
+vector_ops = [
+    Op.get("tirp.add"),
+    Op.get("tirp.sub"),
+    Op.get("tirp.mul"),
+    Op.get("tirp.maximum"),
+    Op.get("tirp.minimum"),
+]
 act_ops = [Op.get("tirp.sqrt"), Op.get("tirp.exp")]
 reduce_ops = [Op.get("tirp.sum"), Op.get("tirp.max"), Op.get("tirp.min")]
 reduce_ops_after_act = [Op.get("tirp.sum")]
@@ -66,8 +72,9 @@ opcode_table = {
 optype_table = {
     Op.get("tirp.sum"): ReduceOpType.SUM,
     Op.get("tirp.max"): ReduceOpType.MAX,
-    Op.get("tirp.min"): ReduceOpType.MIN
+    Op.get("tirp.min"): ReduceOpType.MIN,
 }
+
 
 def validate_single_op(op_calls: List[OpCall], sctx: ScheduleContext):
     for op_call in op_calls:
@@ -295,25 +302,37 @@ def compose_vector_chain(
 ) -> Optional[PrimFunc]:
     first_output, first_input_1, first_input_2 = op_call_1.args
     second_output, second_input_1, second_input_2 = op_call_2.args
-    
+
     # validate single operator
     validate_single_op([op_call_1, op_call_2], sctx)
 
     # validate composition
-    if isinstance(second_input_1, BufferRegion) and structural_equal(first_output, second_input_1) and first_output.buffer == second_input_1.buffer:
+    if (
+        isinstance(second_input_1, BufferRegion)
+        and structural_equal(first_output, second_input_1)
+        and first_output.buffer == second_input_1.buffer
+    ):
         reverse = [False, False]
         srcs = [first_input_1, first_input_2, second_input_2]
-    elif isinstance(second_input_2, BufferRegion) and structural_equal(first_output, second_input_2) and first_output.buffer == second_input_2.buffer:
+    elif (
+        isinstance(second_input_2, BufferRegion)
+        and structural_equal(first_output, second_input_2)
+        and first_output.buffer == second_input_2.buffer
+    ):
         reverse = [False, True]
         srcs = [first_input_1, first_input_2, second_input_1]
     else:
         raise ValueError(f"The output of {op_call_1} is not the input of {op_call_2}")
-    
+
     # FIXME: we need to check whether the intermediate buffer is used by other ops
     analyzer = init_analyzer(sctx)
-    inst_size, f_gen_axes, inst_types, _reverse, broadcast_dims = try_find_inst_nary(second_output, srcs, analyzer, allow_first_op_tensortensor=False)
+    inst_size, f_gen_axes, inst_types, _reverse, broadcast_dims = try_find_inst_nary(
+        second_output, srcs, analyzer, allow_first_op_tensortensor=False
+    )
     assert inst_size is not None, "Failed to find a valid instruction"
-    assert inst_types[0] == InstType.TENSOR_SCALAR, "The first operator must be a tensor scalar operator"
+    assert (
+        inst_types[0] == InstType.TENSOR_SCALAR
+    ), "The first operator must be a tensor scalar operator"
     reverse[0] = _reverse[0]
     if reverse[0]:
         srcs[0], srcs[1] = srcs[1], srcs[0]
@@ -324,21 +343,39 @@ def compose_vector_chain(
         if isinstance(src, BufferRegion):
             src_src0_offset = len(srcs[0].region) - len(src.region)
             dst_to_src_dim_map = {
-                d: s - src_src0_offset for d, s in dst_to_src0_dim_map.items() if s not in broadcast_dims[i]
+                d: s - src_src0_offset
+                for d, s in dst_to_src0_dim_map.items()
+                if s not in broadcast_dims[i]
             }
             f_gen_src_idx_array.append(f_gen_idx_mapped(src, f_gen_axes, dst_to_src_dim_map))
         else:
             f_gen_src_idx_array.append(None)
     p_size = second_output.buffer.layout.partition_size
-    b_extent = reduce(operator.mul, [r.extent for r in second_output.region], 1) // p_size // inst_size
+    b_extent = (
+        reduce(operator.mul, [r.extent for r in second_output.region], 1) // p_size // inst_size
+    )
     src, dst = srcs[0].buffer, second_output.buffer
     opcode1, opcode2 = opcode_table[op_call_1.op], opcode_table[op_call_2.op]
-    func = T.nki_scalar_tensor_scalar if inst_types[1] == InstType.TENSOR_SCALAR else T.nki_scalar_tensor_tensor
+    func = (
+        T.nki_scalar_tensor_scalar
+        if inst_types[1] == InstType.TENSOR_SCALAR
+        else T.nki_scalar_tensor_tensor
+    )
     inst_size_limit = get_hardware_inst_size_limit(is_dma=False)
-    actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
-    
+    actual_inst_size, additional_b_size = bound_inst_with_limit(
+        inst_size, inst_size_limit, analyzer
+    )
+
     def get_srcs(b_loop, f_loop, p_loop):
-        return [srcs[i].buffer[f_gen_src_idx_array[i](((b_loop, b_extent),), f_loop, p_loop)] if isinstance(srcs[i], BufferRegion) else srcs[i] for i in range(len(srcs))]
+        return [
+            (
+                srcs[i].buffer[f_gen_src_idx_array[i](((b_loop, b_extent),), f_loop, p_loop)]
+                if isinstance(srcs[i], BufferRegion)
+                else srcs[i]
+            )
+            for i in range(len(srcs))
+        ]
+
     # fmt: off
     @T.prim_func(tirp=True)
     def impl():
@@ -352,6 +389,7 @@ def compose_vector_chain(
     # fmt: on
     return impl
 
+
 def is_negate_op(op_call: OpCall) -> bool:
     if op_call.op != Op.get("tirp.mul"):
         return False
@@ -361,6 +399,7 @@ def is_negate_op(op_call: OpCall) -> bool:
         return op_call.args[2].value == -1.0
     return False
 
+
 def compose_reduce_negate(
     op_call_1: OpCall,
     op_call_2: OpCall,
@@ -368,10 +407,10 @@ def compose_reduce_negate(
 ) -> Optional[PrimFunc]:
     reduce_output, reduce_input, reduce_axes, accum = op_call_1.args
     negate_output, _negate_input_1, _negate_input_2 = op_call_2.args
-    #validate single operator
+    # validate single operator
     validate_single_op([op_call_1, op_call_2], sctx)
 
-    #start compose
+    # start compose
     if isinstance(_negate_input_1, FloatImm):
         negate_input = _negate_input_2
     elif isinstance(_negate_input_2, FloatImm):
@@ -383,6 +422,7 @@ def compose_reduce_negate(
     ), "Reduce output and negate input must be the same"
 
     return reduction_trn(op_call_1, optype_table[op_call_1.op], sctx, negate=True)
+
 
 @register_schedule("compose_op")
 def compose_op_trn(

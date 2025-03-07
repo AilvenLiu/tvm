@@ -20,8 +20,7 @@ import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.ir import assert_structural_equal
-
-import pytest
+from tvm.tir.async_structs import CopyPipeline
 
 
 def from_source(code):
@@ -358,6 +357,7 @@ def test_roundtrip_pipeline_no_specialize_async_no_depth():
             with T.cta():
                 A_smem = T.alloc_buffer([4096], dtype="float32", scope="shared")
                 pipe = Tp.alloc_copy_pipeline(thread_scope="cta", depth=0, separate_pc=False)
+                pipe.init()
                 pipe.copy(A_smem[0:128], A[0:128])
                 pipe.producer_commit()
 
@@ -398,6 +398,7 @@ def test_roundtrip_pipeline_specialize_sync_depth():
                 C_local = T.alloc_buffer([32, 32], dtype="float32", scope="local")
 
                 pipe = Tp.alloc_copy_pipeline(thread_scope="cta", depth=DEPTH, separate_pc=True)
+                pipe.init()
                 
                 with T.thread()[0:64]:
                     for i in range(32):
@@ -638,6 +639,7 @@ def test_roundtrip_alloc_under_any_scope():
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
+
 def test_roundtrip_compose_op():
     # fmt: off
     @T.prim_func(tirp=True)
@@ -654,6 +656,7 @@ def test_roundtrip_compose_op():
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
+
 def test_roundtrip_op_call_workspace():
     # fmt: off
     @T.prim_func(tirp=True)
@@ -667,6 +670,7 @@ def test_roundtrip_op_call_workspace():
     code = test.script()
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
+
 
 def test_roundtrip_compose_op_call_workspace():
     # fmt: off
@@ -686,6 +690,7 @@ def test_roundtrip_compose_op_call_workspace():
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
+
 def test_roundtrip_op_call_schedule_config():
     # fmt: off
     @T.prim_func(tirp=True)
@@ -698,6 +703,7 @@ def test_roundtrip_op_call_schedule_config():
     code = test.script()
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
+
 
 def test_roundtrip_compose_op_call_schedule_config():
     # fmt: off
@@ -718,4 +724,4 @@ def test_roundtrip_compose_op_call_schedule_config():
 
 
 if __name__ == "__main__":
-    tvm.testing.main()   
+    tvm.testing.main()

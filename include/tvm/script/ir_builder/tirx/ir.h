@@ -33,8 +33,6 @@ namespace ir_builder {
 namespace tirx {
 
 using tvm::runtime::Tensor;
-using tvm::tirx::Barrier;
-using tvm::tirx::BarrierArray;
 using tvm::tirx::Buffer;
 using tvm::tirx::ExecScope;
 using tvm::tirx::Pipeline;
@@ -150,7 +148,8 @@ SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_sc
                   ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
                   ffi::String scope_slice_parent = "");
 
-void OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace = {}, Map<String, ObjectRef> schedule_config = {});
+void OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace = {},
+            Map<String, ObjectRef> schedule_config = {});
 
 BlockFrame BlockFrameSlice(BlockFrame block, ffi::Variant<ffi::Array<Range>, PrimExpr> slice);
 
@@ -230,23 +229,6 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::
                          ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
                          ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt,
                          ffi::Array<Integer> allocated_addr = {});
-
-/*!
- * \brief The barrier allocation function.
- * \param thread_scope The thread scope of the barrier.
- * \param name_hint The name hint of the barrier.
- * \return The allocated barrier.
- */
-Barrier AllocBarrier(ExecScope thread_scope, ffi::String name_hint = "");
-
-/*!
- * \brief The barrier array allocation function.
- * \param thread_scope The thread scope of the barrier.
- * \param size The number of barriers in the array.
- * \param name_hint The name hint of the barrier array.
- * \return The allocated barrier array.
- */
-BarrierArray AllocBarrierArray(ExecScope thread_scope, size_t size, ffi::String name_hint = "");
 
 /*!
  * \brief The pipeline allocation function.
@@ -451,13 +433,15 @@ ElseFrame Else();
  * \param offset_factor The factor of elem_offset field.
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
+ * \param layout The layout of the buffer.
  * \return The declared buffer.
  */
 Buffer DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
                   ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators);
+                  ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                  ffi::Optional<TLayout> layout = std::nullopt);
 
 /*!
  * \brief Statement-level buffer allocation (creates an AllocBuffer IR node).
@@ -485,8 +469,7 @@ LaunchThreadFrame LaunchThread(Var var, PrimExpr extent);
  * \param extent The extent of environment thread.
  * \return The result LaunchThreadFrame.
  */
-LaunchThreadFrame LaunchThread(ffi::String thread_tag, PrimExpr extent);
-
+LaunchThreadFrame LaunchThread(String thread_tag, PrimExpr extent);
 
 /*!
  * \brief Compose TIRp op.
@@ -620,7 +603,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

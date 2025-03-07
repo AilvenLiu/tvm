@@ -19,7 +19,7 @@
 
 
 from ..registry import register_schedule
-from ..common import _make_schedule, MapOpType
+from ..common import _make_unary_binary_schedule, MapOpType
 from .binary import binary_trn
 from .unary import unary_trn, unary_with_bias_scale_trn
 
@@ -29,7 +29,7 @@ for op_name, op_type in [
     ("memset", MapOpType.MEMSET),
 ]:
     custom_name = f"unary_{op_name}_trn_impl"
-    func = _make_schedule(op_type, 1, [unary_trn])
+    func = _make_unary_binary_schedule(op_type, 1, [unary_trn])
     func.__name__ = custom_name
     func.__doc__ = f"Schedule unary {op_name}."
     register_schedule(op_name)(func)
@@ -39,7 +39,7 @@ for op_name, op_type in [
     ("exp", MapOpType.EXP),
 ]:
     custom_name = f"unary_{op_name}_trn_with_bias_scale_impl"
-    func = _make_schedule(op_type, 3, [unary_with_bias_scale_trn])
+    func = _make_unary_binary_schedule(op_type, 3, [unary_with_bias_scale_trn])
     func.__name__ = custom_name
     func.__doc__ = f"Schedule unary {op_name} with bias and scale."
     register_schedule(op_name)(func)
@@ -54,7 +54,7 @@ for op_name, op_type in [
     ("minimum", MapOpType.MIN),
 ]:
     custom_name = f"binary_{op_name}_trn_impl"
-    func = _make_schedule(op_type, 2, [binary_trn])
+    func = _make_unary_binary_schedule(op_type, 2, [binary_trn])
     func.__name__ = custom_name
     func.__doc__ = f"Schedule binary {op_name}."
     register_schedule(op_name)(func)

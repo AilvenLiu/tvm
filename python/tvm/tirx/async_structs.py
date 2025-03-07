@@ -25,6 +25,8 @@ from tvm.ir import Op
 from tvm.tirx import BufferRegion, Buffer
 from tvm.tirx.exec_scope import ExecScope
 
+from . import _ffi_api
+
 
 def _get_tirp_op(op_name: str):
     """Get the TIR+ operator by name.
@@ -43,7 +45,9 @@ def _get_tirp_op(op_name: str):
     return Op.get("tirp." + op_name)
 
 
-def make_op_call(op_name: str, args, workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}):
+def make_op_call(
+    op_name: str, args, workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}
+):
     """Create a call to a TIR+ operator.
 
     Parameters
@@ -58,6 +62,8 @@ def make_op_call(op_name: str, args, workspace: Dict[str, Buffer] = {}, schedule
     Call
         The constructed operator call
     """
+    if workspace is None:
+        workspace = {}
     f = tvm.get_global_func("script.ir_builder.tir.OpCall")
     return f(_get_tirp_op(op_name), args, workspace, schedule_config)
 
@@ -72,6 +78,7 @@ class Pipeline(Object):
     separate_pc: bool
     workspace: Dict[str, Buffer]
     schedule_config: Dict[str, Any]
+
     def __init__(
         self,
         thread_scope: ExecScope,
@@ -80,17 +87,25 @@ class Pipeline(Object):
         name_hint: str = "",
         schedule_config: Dict[str, Any] = {},
     ):
+        if workspace is None:
+            workspace = {}
+        if strategy is None:
+            strategy = {}
         self.__init_handle_by_constructor__(
             _ffi_api.Pipeline, thread_scope, name_hint, depth, separate_pc, schedule_config
         )
+
+    def init(self):
+        """Initialize the pipeline."""
+        return make_op_call("pipeline_init", [self])
 
     def producer_acquire(self):
         """Acquire the producer stage."""
         return make_op_call("pipeline_producer_acquire", [self])
 
-    def producer_commit(self):
+    def producer_commit(self, tma_bytes: int = -1):
         """Commit the producer stage."""
-        return make_op_call("pipeline_producer_commit", [self])
+        return make_op_call("pipeline_producer_commit", [self, tma_bytes])
 
     def consumer_wait(self, num_stages: int = -1):
         """Wait for the consumer stage."""
@@ -104,6 +119,17 @@ class Pipeline(Object):
 @register_object("tirx.CopyPipeline")
 class CopyPipeline(Pipeline):
     """A pipeline for copying data asynchronously."""
+
+    class StrategyKind:
+        """The strategy of the pipeline."""
+
+        IMPL = "impl"
+
+    class Impl:
+        """Strategy: The implementation of the pipeline."""
+
+        VEC_LOAD = "vec_load"
+        TMA = "tma"
 
     def copy(self, dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
         """Copy data asynchronously from the source to the destination."""

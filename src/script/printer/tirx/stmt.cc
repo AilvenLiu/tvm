@@ -79,113 +79,51 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
   return call->args[0];
 }
 
-ExprDoc PrintBarrierCreation(const tirx::Barrier& barrier, const ObjectPath& p,
-                             const IRDocsifier& d) {
-  return TIRp(d, "Barrier")->Call({LiteralDoc::Str(barrier->name_hint, p->Attr("name_hint"))});
+ExprDoc PipelineDecl(const tirx::Pipeline& pipeline, const String& method, const ObjectPath& p,
+                     const IRDocsifier& d) {
+  return TIRp(d, method)->Call({
+      LiteralDoc::Str(pipeline->thread_scope->name, p->Attr("thread_scope")),
+      LiteralDoc::Int(pipeline->depth, p->Attr("depth")),
+      LiteralDoc::Boolean(pipeline->separate_pc, p->Attr("separate_pc")),
+      LiteralDoc::Str(pipeline->name_hint, p->Attr("name_hint")),
+      d->AsDoc<DictDoc>(pipeline->workspace, p->Attr("workspace")),
+      d->AsDoc<DictDoc>(pipeline->schedule_config, p->Attr("schedule_config")),
+  });
 }
 
-ExprDoc PrintBarrierArrayCreation(const tirx::BarrierArray& barrier_array, const ObjectPath& p,
-                                  const IRDocsifier& d) {
-  return TIRp(d, "BarrierArray")
-      ->Call({
-          LiteralDoc::Int(barrier_array->size, p->Attr("size")),
-          LiteralDoc::Str(barrier_array->name_hint, p->Attr("name_hint")),
-      });
+template <typename T>
+Doc HandlePipeline(const T& pipeline, const String& method, const ObjectPath& p,
+                   const IRDocsifier& d) {
+  if (!d->IsVarDefined(pipeline)) {
+    if (Optional<Frame> opt_f = FindLowestVarDef(pipeline, d)) {
+      ExprDoc lhs = DefinePipeline(pipeline, opt_f.value(), d);
+      ExprDoc rhs = PipelineDecl(pipeline, method, p, d);
+      opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+    } else {
+      LOG(WARNING) << "Didn't find pipeline definition for: " << pipeline->name_hint;
+    }
+  }
+  if (Optional<ExprDoc> doc = d->GetVarDoc(pipeline)) {
+    return doc.value();
+  }
+  LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << pipeline;
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::Barrier>("", [](tirx::Barrier barrier, ObjectPath p, IRDocsifier d) -> Doc {
-      if (!d->IsVarDefined(barrier)) {
-        if (Optional<Frame> opt_f = FindLowestVarDef(barrier, d)) {
-          ExprDoc lhs = DefineBarrier(barrier, opt_f.value(), d);
-          ExprDoc rhs = PrintBarrierCreation(barrier, p, d);
-          opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
-        } else {
-          LOG(WARNING) << "Didn't find barier definition for: " << barrier->name_hint;
-        }
-      }
-      if (Optional<ExprDoc> doc = d->GetVarDoc(barrier)) {
-        return doc.value();
-      }
-      LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << barrier;
-    });
+    .set_dispatch<tirx::Pipeline>("",
+                                 [](tirx::Pipeline pipeline, ObjectPath p, IRDocsifier d) -> Doc {
+                                   return HandlePipeline(pipeline, "Pipeline", p, d);
+                                 });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::BarrierArray>(
-        "", [](tirx::BarrierArray barrier_array, ObjectPath p, IRDocsifier d) -> Doc {
-          if (!d->IsVarDefined(barrier_array)) {
-            if (Optional<Frame> opt_f = FindLowestVarDef(barrier_array, d)) {
-              ExprDoc lhs = DefineBarrierArray(barrier_array, opt_f.value(), d);
-              ExprDoc rhs = PrintBarrierArrayCreation(barrier_array, p, d);
-              opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
-            } else {
-              LOG(WARNING) << "Didn't find barier array definition for: "
-                           << barrier_array->name_hint;
-            }
-          }
-          if (Optional<ExprDoc> doc = d->GetVarDoc(barrier_array)) {
-            return doc.value();
-          }
-          LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << barrier_array;
-        });
+    .set_dispatch<tirx::CopyPipeline>("",
+                                     [](tirx::CopyPipeline pipeline, ObjectPath p,
+                                        IRDocsifier d) -> Doc {
+                                       return HandlePipeline(pipeline, "CopyPipeline", p, d);
+                                     });
 
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::BarrierArrayElem>(
-        "", [](tirx::BarrierArrayElem elem, ObjectPath p, IRDocsifier d) -> Doc {
-          ExprDoc arr = d->AsDoc<ExprDoc>(elem->arr, p->Attr("arr"));
-          ExprDoc index = d->AsDoc<ExprDoc>(elem->index, p->Attr("index"));
-          return IndexDoc(arr, {index});
-        });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::Pipeline>(
-        "", [](tirx::Pipeline pipeline, ObjectPath p, IRDocsifier d) -> Doc {
-          if (!d->IsVarDefined(pipeline)) {
-            if (Optional<Frame> opt_f = FindLowestVarDef(pipeline, d)) {
-              ExprDoc lhs = DefinePipeline(pipeline, opt_f.value(), d);
-              ExprDoc rhs =
-                  TIRp(d, "Pipeline")
-                      ->Call({
-                          LiteralDoc::Int(pipeline->depth, p->Attr("depth")),
-                          LiteralDoc::Boolean(pipeline->separate_pc, p->Attr("separate_pc")),
-                          LiteralDoc::Str(pipeline->name_hint, p->Attr("name_hint")),
-                          d->AsDoc<DictDoc>(pipeline->workspace, p->Attr("workspace")),
-                      });
-              opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
-            } else {
-              LOG(WARNING) << "Didn't find pipeline definition for: " << pipeline->name_hint;
-            }
-          }
-          if (Optional<ExprDoc> doc = d->GetVarDoc(pipeline)) {
-            return doc.value();
-          }
-          LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << pipeline;
-        });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::CopyPipeline>(
-        "", [](tirx::CopyPipeline pipeline, ObjectPath p, IRDocsifier d) -> Doc {
-          if (!d->IsVarDefined(pipeline)) {
-            if (Optional<Frame> opt_f = FindLowestVarDef(pipeline, d)) {
-              ExprDoc lhs = DefinePipeline(pipeline, opt_f.value(), d);
-              ExprDoc rhs =
-                  TIRp(d, "CopyPipeline")
-                      ->Call({
-                          LiteralDoc::Int(pipeline->depth, p->Attr("depth")),
-                          LiteralDoc::Boolean(pipeline->separate_pc, p->Attr("separate_pc")),
-                          LiteralDoc::Str(pipeline->name_hint, p->Attr("name_hint")),
-                          d->AsDoc<DictDoc>(pipeline->workspace, p->Attr("workspace")),
-                      });
-              opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
-            } else {
-              LOG(WARNING) << "Didn't find pipeline definition for: " << pipeline->name_hint;
-            }
-          }
-          if (Optional<ExprDoc> doc = d->GetVarDoc(pipeline)) {
-            return doc.value();
-          }
-          LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << pipeline;
-        });
+TVM_SCRIPT_REPR(tirx::CopyPipelineNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::PipelineNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::tirp::OpCall>(
@@ -221,7 +159,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
-            return OpCallDoc(TIRp(d, name), args, d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")), d->AsDoc<DictDoc>(op_call->schedule_config, p->Attr("schedule_config")));
+            return OpCallDoc(
+                TIRp(d, name), args, d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")),
+                d->AsDoc<DictDoc>(op_call->schedule_config, p->Attr("schedule_config")));
           } else if (bool(pipeline_op_map.get(op, tvm::Bool(false)))) {
             // Pipeline ops
             ICHECK(op_call->args[0]->IsInstance<tirx::PipelineNode>())
@@ -232,15 +172,26 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           } else if (bool(compose_op_map.get(op, tvm::Bool(false)))) {
             // Compose ops
             With<TIRFrame> f(d, op_call);
-            Array<tir::Stmt> stmts;
+            Array<tirx::Stmt> stmts;
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
-              stmts.push_back(Downcast<tir::Stmt>(op_call->args[i]));
+              stmts.push_back(Downcast<tirx::Stmt>(op_call->args[i]));
             }
-            tir::SeqStmt seq_stmt(stmts);
+            tirx::SeqStmt seq_stmt(stmts);
             AsDocBody(seq_stmt, p->Attr("args"), f->get(), d);
-            return ScopeDoc(NullOpt, TIRp(d, "compose_op")->Call({}, {"workspace", "schedule_config"}, {d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")), d->AsDoc<DictDoc>(op_call->schedule_config, p->Attr("schedule_config"))}), (*f)->stmts);
+            return ScopeDoc(NullOpt,
+                            TIRp(d, "compose_op")
+                                ->Call({}, {"workspace", "schedule_config"},
+                                       {d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")),
+                                        d->AsDoc<DictDoc>(op_call->schedule_config,
+                                                          p->Attr("schedule_config"))}),
+                            (*f)->stmts);
           } else {
-            LOG(FATAL) << "Unknown TIR+ op type: " << op->name;
+            // Misc ops
+            Array<Doc> args;
+            for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
+              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayIndex(i)));
+            }
+            return OpCallDoc(TIRp(d, name), args, {}, {});
           }
         });
 

@@ -21,7 +21,6 @@ import tvm
 import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
-from tvm.tir.transform import LowerTIRp
 from ..utils import bench, ProtonContext
 
 
@@ -485,10 +484,10 @@ def test_fp16_fused_attn():
 
         COMMMON = T.meta_var((1, 1, 1, 1, 0, SWIZZLE, 0, 0))
 
-        T.call_packed("runtime.cuTensorMapInit", Q_map, "float16", 4, Q.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
-        T.call_packed("runtime.cuTensorMapInit", K_map, "float16", 4, K.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
-        T.call_packed("runtime.cuTensorMapInit", V_map, "float16", 4, V.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
-        T.call_packed("runtime.cuTensorMapInit", O_map, "float16", 4, O.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", Q_map, "float16", 4, Q.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", K_map, "float16", 4, K.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", V_map, "float16", 4, V.data, *GSHAPE_KV, *GSTRIDES_KV, *SSHAPE_KV, *COMMMON)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", O_map, "float16", 4, O.data, *GSHAPE_QO, *GSTRIDES_QO, *SSHAPE_QO, *COMMMON)
 
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")
@@ -497,7 +496,7 @@ def test_fp16_fused_attn():
             lane_id = T.thread_id([32], parent="warp")
             wg_id = T.warpgroup_id([NUM_WARPS // 4], parent="cta")
             warp_id_in_wg = T.warp_id([4], parent="warpgroup")
-            
+
             with T.cta():
                 # dyn smem buffer
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")

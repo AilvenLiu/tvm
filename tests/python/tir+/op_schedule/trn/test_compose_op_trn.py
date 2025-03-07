@@ -182,8 +182,8 @@ def test_activation_reduce_two_stage():
         mod = tvm.IRModule({"main": activation_reduce})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-        
-        
+
+
 def test_activation_reduce_with_bias_scale():
     A_shape = (32, 512, 128)
     A_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 1024, 128), (1, 1)))
@@ -191,7 +191,7 @@ def test_activation_reduce_with_bias_scale():
     B_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 512, 128), (1, 1)))
     C_shape = (16, 128)
     C_layout = TrainiumLayout("FFFP", T.TileLayout.from_tuple((2, 4, 2, 128), (2, 4, 1, 1)))
-    bias_shape = (128)
+    bias_shape = 128
     bias_layout = TrainiumLayout("P", T.TileLayout.from_tuple(128, 1))
     # fmt: off
     @T.prim_func(tirp=True)
@@ -223,7 +223,7 @@ def test_activation_reduce_with_bias_scale():
         mod = tvm.IRModule({"main": activation_reduce})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-    
+
 
 def test_simple_tensor_scalar_reduce():
     A_shape = (128, 512)
@@ -259,7 +259,8 @@ def test_simple_tensor_scalar_reduce():
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-        
+
+
 def test_tensor_tensor_reduce_fail():
     A_shape = (128, 512)
     A_layout = TrainiumLayout("PF", T.TileLayout.from_tuple((128, 512), (1, 1)))
@@ -286,6 +287,7 @@ def test_tensor_tensor_reduce_fail():
         with target:
             mod = tvm.IRModule({"main": tensor_scalar_reduce})
             mod = tvm.tir.transform.LowerTIRp()(mod)
+
 
 def test_tensor_scalar_reduce_complex():
     src1_shape = [32, 128, 512]
@@ -335,6 +337,7 @@ def test_tensor_scalar_reduce_complex():
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
+
 def test_tensor_scalar_reduce_two_stage():
     src1_shape = [512, 1024, 4]
     src1_layout = TrainiumLayout(
@@ -381,7 +384,8 @@ def test_tensor_scalar_reduce_two_stage():
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-    
+
+
 def test_vector_chain():
     src1_shape = [32, 128, 512]
     src1_layout = TrainiumLayout(
@@ -432,6 +436,7 @@ def test_vector_chain():
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
+
 def test_vector_chain_2():
     src1_shape = [32, 128, 512]
     src1_layout = TrainiumLayout(
@@ -479,7 +484,8 @@ def test_vector_chain_2():
         mod = tvm.IRModule({"main": binary})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-    
+
+
 def test_reduce_negate():
     src_shape = [128, 512, 4]
     src_layout = TrainiumLayout(
@@ -517,6 +523,6 @@ def test_reduce_negate():
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
-    
+
 if __name__ == "__main__":
     tvm.testing.main()

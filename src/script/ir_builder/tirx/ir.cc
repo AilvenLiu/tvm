@@ -254,12 +254,14 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
   n->scope_slice_extents = scope_slice_extents;
   n->buffer_views.clear();
   n->buffer_gets.clear();
-  n->barriers.clear();
-  n->barrier_arrays.clear();
+  n->pipelines.clear();
   return SBlockFrame(n);
 }
 
-void OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config) { AddToParent(tvm::tirx::tirp::OpCall(op, args, workspace, schedule_config)); }
+void OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace,
+            Map<String, ObjectRef> schedule_config) {
+  AddToParent(tvm::tirx::tirp::OpCall(op, args, workspace, schedule_config));
+}
 
 BlockFrame BlockFrameSlice(BlockFrame block, Variant<Array<Range>, PrimExpr> slice) {
   ICHECK(block->exec_scope.defined()) << "InternalError: Block frame must have an execution scope";
@@ -499,34 +501,11 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
   return buffer;
 }
 
-Barrier AllocBarrier(ExecScope thread_scope, String name_hint) {
-  Barrier barrier = tvm::tirx::Barrier(thread_scope, name_hint);
-  IRBuilder builder = IRBuilder::Current();
-  if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
-    frame.value()->barriers.push_back(barrier);
-  } else {
-    LOG(FATAL) << "ValueError: Block frame not find. Please ensure 'T.alloc_barrier' is called "
-                  "under T.block()";
-  }
-  ICHECK(barrier.defined()) << "InternalError: Barrier is not defined.";
-  return barrier;
-}
-
-BarrierArray AllocBarrierArray(ExecScope thread_scope, size_t size, String name_hint) {
-  BarrierArray barrier_array = tvm::tirx::BarrierArray(thread_scope, size, name_hint);
-  IRBuilder builder = IRBuilder::Current();
-  if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
-    frame.value()->barrier_arrays.push_back(barrier_array);
-  } else {
-    LOG(FATAL) << "ValueError: Block frame not find. Please ensure 'T.alloc_barrier_array' is "
-                  "called under T.block()";
-  }
-  return barrier_array;
-}
-
 CopyPipeline AllocCopyPipeline(ExecScope thread_scope, size_t depth, bool separate_pc,
-                               String name_hint, Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config) {
-  CopyPipeline pipeline = tvm::tirx::CopyPipeline(thread_scope, depth, separate_pc, name_hint, workspace, schedule_config);
+                               String name_hint, Map<String, Buffer> workspace,
+                               Map<String, ObjectRef> schedule_config) {
+  CopyPipeline pipeline = tvm::tirx::CopyPipeline(thread_scope, depth, separate_pc, name_hint,
+                                                 workspace, schedule_config);
   IRBuilder builder = IRBuilder::Current();
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->pipelines.push_back(pipeline);
@@ -886,9 +865,10 @@ Buffer DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators) {
+                  ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                  Optional<TLayout> layout) {
   Buffer buffer = BufferDecl(shape, dtype, buffer_name, data, strides, elem_offset, storage_scope,
-                             align, offset_factor, buffer_type, axis_separators);
+                             align, offset_factor, buffer_type, axis_separators, "", layout);
   if (data.defined()) {
     // Alias an existing buffer: emit DeclBuffer statement
     AddToParent(tvm::tirx::DeclBuffer(buffer));
@@ -936,16 +916,6 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     .set_dispatch<tvm::tirx::TileLayoutNode>([](const ObjectRef& node, ffi::String name) -> void {
-
-    });
-
-TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<tvm::tirx::BarrierNode>([](const ObjectRef& node, ffi::String name) -> void {
-
-    });
-
-TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<tvm::tirx::BarrierArrayNode>([](const ObjectRef& node, ffi::String name) -> void {
 
     });
 
@@ -1199,7 +1169,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

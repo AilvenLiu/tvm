@@ -22,7 +22,6 @@ import tvm
 import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
-from tvm.tir.transform import LowerTIRp
 from ..utils import bench, ProtonContext
 
 
@@ -162,9 +161,9 @@ def test_fp8_gemm_hopper_no_ws():
         B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         C_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
 
-        T.call_packed("runtime.cuTensorMapInit", A_map, "e4m3_float8", 2, A.data, K, M, f8_bytes * K, BLK_K, BLK_M, 1, 1, 0, swizzleA, 0, 0)
-        T.call_packed("runtime.cuTensorMapInit", B_map, "e4m3_float8", 2, B.data, K, N, f8_bytes * K, BLK_K, BLK_N, 1, 1, 0, swizzleB, 0, 0)
-        T.call_packed("runtime.cuTensorMapInit", C_map, "float16", 2, C.data, N, M, f16_bytes * N, 64, BLK_M, 1, 1, 0, swizzleC, 0, 0)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "e4m3_float8", 2, A.data, K, M, f8_bytes * K, BLK_K, BLK_M, 1, 1, 0, swizzleA, 0, 0)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "e4m3_float8", 2, B.data, K, N, f8_bytes * K, BLK_K, BLK_N, 1, 1, 0, swizzleB, 0, 0)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", C_map, "float16", 2, C.data, N, M, f16_bytes * N, 64, BLK_M, 1, 1, 0, swizzleC, 0, 0)
 
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")

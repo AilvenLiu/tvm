@@ -49,7 +49,7 @@ bool IsSimpleBuffer(const tirx::Buffer& buf) {
   if (buf->layout.defined()) {
     return false;
   }
-  if (!buf->allocated_addr.empty()){
+  if (!buf->allocated_addr.empty()) {
     return false;
   }
   return buf.scope() == "global" && buf->data_alignment == runtime::kAllocAlignment &&
@@ -76,7 +76,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       (*f)->AddDispatchToken(d, "tirx");
       IdDoc func_name = IdDoc(FindFunctionName(d, func).value_or("main"));
       d->SetCommonPrefix(func, [](const ObjectRef& obj) {
-        return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>();
+        return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>() ||
+               obj->IsInstance<tirx::PipelineNode>() || obj->IsInstance<tirx::CopyPipelineNode>();
       });
       int n_args = func->params.size();
       std::unordered_map<const tirx::VarNode*, int> buffer_data_counter;

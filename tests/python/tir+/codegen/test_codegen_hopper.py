@@ -246,9 +246,9 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
             B = T.match_buffer(B_ptr, shape, dtype=dtype, align=16, logical_scope="kernel")
 
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", A_map, dtype, len(shape), A.data, *tma_args_copy)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, dtype, len(shape), A.data, *tma_args_copy)
             B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", B_map, dtype, len(shape), B.data, *tma_args_copy)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", B_map, dtype, len(shape), B.data, *tma_args_copy)
 
             with T.kernel():
                 for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
@@ -334,9 +334,9 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
             B = T.match_buffer(B_ptr, total_elems, dtype=dtype, align=16, logical_scope="kernel")
 
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", A_map, dtype, len(shape), A.data, *load_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, dtype, len(shape), A.data, *load_args)
             B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", B_map, dtype, len(shape), B.data, *store_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", B_map, dtype, len(shape), B.data, *store_args)
 
             with T.kernel():
                 for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
@@ -417,9 +417,9 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
             B = T.match_buffer(B_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
 
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", A_map, "float32", len(shape), A.data, *tma_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", len(shape), A.data, *tma_args)
             B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", B_map, "float32", len(shape), A.data, *tma_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float32", len(shape), A.data, *tma_args)
 
             with T.kernel():
                 for clusterCtaIdx in T.thread_binding(4, thread="clusterCtaIdx.x"):
@@ -500,9 +500,9 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
             B = T.match_buffer(B_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
 
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", A_map, "float32", len(shape), A.data, *tma_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", len(shape), A.data, *tma_args)
             B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", B_map, "float32", len(shape), B.data, *tma_store_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float32", len(shape), B.data, *tma_store_args)
 
             with T.kernel():
                 for clusterCtaIdx in T.thread_binding(4, thread="clusterCtaIdx.x"):
@@ -583,7 +583,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
             A = T.match_buffer(A_ptr, shape, dtype="float32", align=16, logical_scope="kernel")
             
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", A_map, "float32", len(shape), A.data, *tma_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", len(shape), A.data, *tma_args)
 
             with T.kernel():
                 bx = T.cta_id([1], parent="kernel")
@@ -662,9 +662,9 @@ def test_wgmma_ss_nt():
             C = T.match_buffer(C_ptr, shapeC, dtype=out_dtype, align=16)
 
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", A_map, in_dtype, len(shapeA), A.data, *A_tma_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, in_dtype, len(shapeA), A.data, *A_tma_args)
             B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)
 
             with T.kernel():
                 bx = T.cta_id([1], parent="kernel")
@@ -819,7 +819,7 @@ def test_wgmma_rs_nt():
             C = T.match_buffer(C_ptr, shapeC, dtype=out_dtype, align=16)
 
             B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-            T.call_packed("runtime.cuTensorMapInit", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)
+            T.call_packed("runtime.cuTensorMapEncodeTiled", B_map, in_dtype, len(shapeB), B.data, *B_tma_args)
 
             with T.kernel():
                 bx = T.cta_id([1], parent="kernel")

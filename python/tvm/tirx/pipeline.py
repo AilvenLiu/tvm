@@ -225,12 +225,14 @@ def tirp_pipeline():
                 tir.transform.FP8StorageLegalize(),
                 tir.transform.BF16StorageLegalize(),
                 tir.transform.LowerDeviceKernelLaunch(),
+                tvm.ir.transform.PrintIR(),
             ]
         )
         mod = tvm.ir.transform.Sequential(passes)(mod)
         return mod
 
     return _pipeline, finalize_host_passes, finalize_device_passes
+
 
 def trn_pipeline():
     """The Trainium pipeline used in tvm.tir.build"""
@@ -261,6 +263,7 @@ def trn_pipeline():
 
     return _pipeline, finalize_host_passes, finalize_device_passes_trn
 
+
 def finalize_host_passes():  # pylint: disable=unused-argument
     """The default finalization passes for TIR backend."""
     host_pass_list = [
@@ -281,12 +284,14 @@ def finalize_device_passes():  # pylint: disable=unused-argument
     ]
     return tvm.ir.transform.Sequential(device_pass_list)
 
+
 def finalize_device_passes_trn():  # pylint: disable=unused-argument
     """The default finalization passes for TRN backend."""
     device_pass_list = [
         tir.transform.Simplify(),
     ]
     return tvm.ir.transform.Sequential(device_pass_list)
+
 
 # global map of pre-built pipelines
 PIPELINE_MAP = {

@@ -14,12 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import tvm
 import numpy as np
+
+import tvm
 import tvm.testing
-from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.tir.async_structs import CopyPipeline
 
 
 def test_pipeline_no_specialize_cta():
@@ -45,7 +46,8 @@ def test_pipeline_no_specialize_cta():
                 O_smem = T.alloc_buffer([32, 128], dtype="float32", scope="shared.dyn", 
                                         layout=T.TileLayout.from_tuple((32, 128)))
 
-                pipe = Tp.alloc_copy_pipeline(thread_scope="cta", depth=0, separate_pc=False)
+                pipe = Tp.alloc_copy_pipeline(thread_scope="cta", depth=0, separate_pc=False,
+                                              schedule_config={CopyPipeline.StrategyKind.IMPL: CopyPipeline.Impl.VEC_LOAD})
 
                 with T.thread():
                     for k in range(32):
@@ -85,7 +87,6 @@ def test_pipeline_no_specialize_cta():
     with target:
         mod = tvm.IRModule({"main": test})
         mod = tvm.tir.transform.LowerTIRp()(mod)
-        mod.show()
         mod = tvm.build(mod, target=target, pipeline="tirp")
 
         np.random.seed(0)
@@ -96,10 +97,9 @@ def test_pipeline_no_specialize_cta():
         B = tvm.nd.array(B_np, device=DEV)
         mod(A, B)
 
-        B_np_ref = np.sum(A_np.reshape(N, 128, M // 128), axis=2)
+        B_np_ref = np.sum(A_np.reshape((N, 128, M // 128)), axis=2)
         tvm.testing.assert_allclose(B.asnumpy(), B_np_ref)
 
 
 if __name__ == "__main__":
-    # test_barrier_cta()
     test_pipeline_no_specialize_cta()

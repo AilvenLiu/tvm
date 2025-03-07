@@ -28,51 +28,6 @@
 namespace tvm {
 namespace tirx {
 
-/*************************** Barrier ***************************/
-TVM_REGISTER_NODE_TYPE(BarrierNode);
-
-Barrier::Barrier(ExecScope thread_scope, String name_hint) {
-  auto n = make_object<BarrierNode>();
-  n->thread_scope = std::move(thread_scope);
-  n->name_hint = std::move(name_hint);
-  data_ = std::move(n);
-}
-
-TVM_REGISTER_GLOBAL("tirx.Barrier").set_body_typed([](ExecScope thread_scope, String name_hint) {
-  return Barrier(thread_scope, name_hint);
-});
-
-/*************************** BarrierArray ***************************/
-TVM_REGISTER_NODE_TYPE(BarrierArrayNode);
-
-BarrierArray::BarrierArray(ExecScope thread_scope, size_t size, String name_hint) {
-  auto n = make_object<BarrierArrayNode>();
-  n->thread_scope = std::move(thread_scope);
-  n->size = std::move(size);
-  n->name_hint = std::move(name_hint);
-  data_ = std::move(n);
-}
-
-TVM_REGISTER_GLOBAL("tirx.BarrierArray")
-    .set_body_typed([](ExecScope thread_scope, size_t size, String name_hint) {
-      return BarrierArray(thread_scope, size, name_hint);
-    });
-
-/*************************** BarrierArrayElem ***************************/
-TVM_REGISTER_NODE_TYPE(BarrierArrayElemNode);
-
-BarrierArrayElem::BarrierArrayElem(BarrierArray arr, PrimExpr index) {
-  auto n = make_object<BarrierArrayElemNode>();
-  n->thread_scope = arr->thread_scope;
-  n->arr = std::move(arr);
-  n->index = std::move(index);
-  data_ = std::move(n);
-}
-
-TVM_REGISTER_GLOBAL("tirx.BarrierArrayElem").set_body_typed([](BarrierArray arr, PrimExpr index) {
-  return BarrierArrayElem(arr, index);
-});
-
 /*************************** Pipeline ***************************/
 TVM_REGISTER_NODE_TYPE(PipelineNode);
 
@@ -112,5 +67,5 @@ TVM_REGISTER_GLOBAL("tirx.CopyPipeline")
       return CopyPipeline(thread_scope, depth, separate_pc, name_hint, workspace, schedule_config);
     });
 
-}  // namespace tirxxxxxx
+}  // namespace tirxxxxxxx
 }  // namespace tvm

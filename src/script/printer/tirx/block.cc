@@ -239,41 +239,12 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   }
 
   // tir+
-  for (size_t i = 0; i < block->barriers.size(); ++i) {
-    tir::Barrier barrier = block->barriers[i];
-    ObjectPath barrier_p = block_p->Attr("barriers")->ArrayIndex(i);
-    IdDoc lhs = DefineBarrier(barrier, *frame, d);
-    ExprDoc rhs =
-        TIRp(d, "alloc_barrier")
-            ->Call({LiteralDoc::Str(barrier->thread_scope->name, barrier_p->Attr("thread_scope")),
-                    LiteralDoc::Str(barrier->name_hint, barrier_p->Attr("name"))});
-    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
-  }
-  for (size_t i = 0; i < block->barrier_arrays.size(); ++i) {
-    tir::BarrierArray barrier_array = block->barrier_arrays[i];
-    ObjectPath barrier_array_p = block_p->Attr("barrier_arrays")->ArrayIndex(i);
-    IdDoc lhs = DefineBarrierArray(barrier_array, *frame, d);
-    ExprDoc rhs =
-        TIRp(d, "alloc_barrier_array")
-            ->Call({LiteralDoc::Str(barrier_array->thread_scope->name,
-                                    barrier_array_p->Attr("thread_scope")),
-                    LiteralDoc::Int(barrier_array->size, barrier_array_p->Attr("size")),
-                    LiteralDoc::Str(barrier_array->name_hint, barrier_array_p->Attr("name"))});
-    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
-  }
   for (size_t i = 0; i < block->pipelines.size(); ++i) {
     tir::Pipeline pipeline = block->pipelines[i];
     if (pipeline->IsInstance<tir::CopyPipelineNode>()) {
       ObjectPath pipeline_p = block_p->Attr("pipelines")->ArrayIndex(i);
       IdDoc lhs = DefinePipeline(pipeline, *frame, d);
-      ExprDoc rhs =
-          TIRp(d, "alloc_copy_pipeline")
-              ->Call(
-                  {LiteralDoc::Str(pipeline->thread_scope->name, pipeline_p->Attr("thread_scope")),
-                   LiteralDoc::Int(pipeline->depth, pipeline_p->Attr("depth")),
-                   LiteralDoc::Boolean(pipeline->separate_pc, pipeline_p->Attr("separate_pc")),
-                   LiteralDoc::Str(pipeline->name_hint, pipeline_p->Attr("name_hint")),
-                   d->AsDoc<DictDoc>(pipeline->workspace, pipeline_p->Attr("workspace"))});
+      ExprDoc rhs = PipelineDecl(pipeline, "alloc_copy_pipeline", pipeline_p, d);
       (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
     } else {
       LOG(FATAL) << "ValueError: Unknown Pipeline type in block signature: "
@@ -283,18 +254,14 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   for (size_t i = 0; i < block->buffer_views.size(); ++i) {
     tir::BufferView buffer_view = block->buffer_views[i];
     ObjectPath buffer_view_p = block_p->Attr("buffer_views")->ArrayIndex(i);
-
     IdDoc lhs = DefineBuffer(buffer_view->dst_buffer, *frame, d);
-
     ExprDoc rhs = d->AsDoc<ExprDoc>(buffer_view, buffer_view_p);
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
   }
   for (size_t i = 0; i < block->buffer_gets.size(); ++i) {
     tir::BufferGet buffer_get = block->buffer_gets[i];
     ObjectPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayIndex(i);
-
     IdDoc lhs = DefineBuffer(buffer_get->dst_buffer, *frame, d);
-
     ExprDoc rhs = TIR(d, "get")->Call({
         d->AsDoc<ExprDoc>(buffer_get->src_buffer, buffer_get_p->Attr("src_buffer")),
     });

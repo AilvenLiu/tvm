@@ -35,7 +35,7 @@ from tvm.ir import PrimExpr, Range, Span, Op
 from tvm.runtime import Object, Scriptable, const, Tensor
 
 from . import _ffi_api
-from .async_structs import Barrier, BarrierArray, Pipeline
+from .async_structs import Pipeline
 from .buffer import Buffer
 from .expr import IterVar, StringImm, Var
 from .exec_scope import ExecScope
@@ -565,12 +565,6 @@ class SBlock(Stmt):
     annotations: Optional[Mapping[str, Object]]
         Additional annotation hints.
 
-    barriers: List[tvm.tir.async_structs.Barrier]
-        The barriers in the block.
-
-    barrier_arrays: List[tvm.tir.async_structs.BarrierArray]
-        The barrier arrays in the block.
-
     pipelines: List[tvm.tir.async_structs.Pipeline]
         The pipelines in the block.
 
@@ -590,8 +584,6 @@ class SBlock(Stmt):
     exec_scope: ExecScope | None
     buffer_views: list[BufferView]
     buffer_gets: list[BufferGet]
-    barriers: list[Barrier]
-    barrier_arrays: list[BarrierArray]
     pipelines: list[Pipeline]
     span: Span | None
 
@@ -610,8 +602,6 @@ class SBlock(Stmt):
         exec_scope: ExecScope | None = None,
         buffer_views: list[BufferView] | None = None,
         buffer_gets: list[BufferGet] | None = None,
-        barriers: list[Barrier] | None = None,
-        barrier_arrays: list[BarrierArray] | None = None,
         pipelines: list[Pipeline] | None = None,
     ) -> None:
         if alloc_buffers is None:
@@ -624,10 +614,6 @@ class SBlock(Stmt):
             buffer_views = []
         if buffer_gets is None:
             buffer_gets = []
-        if barriers is None:
-            barriers = []
-        if barrier_arrays is None:
-            barrier_arrays = []
         if pipelines is None:
             pipelines = []
         self.__init_handle_by_constructor__(
@@ -645,8 +631,6 @@ class SBlock(Stmt):
             exec_scope,
             buffer_views,
             buffer_gets,
-            barriers,
-            barrier_arrays,
             pipelines,
         )  # type: ignore
 
@@ -736,6 +720,7 @@ def stmt_list(stmt: Stmt) -> list[Stmt]:
         return res
     return [stmt]
 
+
 @tvm._ffi.register_object("tir.OpCall")
 class OpCall(Stmt):
     """OpCall node.
@@ -754,9 +739,23 @@ class OpCall(Stmt):
     schedule_config : Map[str, ObjectRef]
         The schedule config.
     """
+
     op: Op
     args: List[PrimExpr]
     workspace: Dict[str, Buffer]
     schedule_config: Dict[str, Any]
-    def __init__(self, op: Op, args: List[PrimExpr], workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}) -> None:
-        self.__init_handle_by_constructor__(_ffi_api.OpCall, op, args, workspace, schedule_config)
+
+    def __init__(
+        self,
+        op: Op,
+        args: List[PrimExpr],
+        workspace: Dict[str, Buffer] = None,
+        schedule_config: Dict[str, Any] = None,
+    ) -> None:
+        if workspace is None:
+            workspace = {}
+        if schedule_config is None:
+            schedule_config = {}
+        self.__init_handle_by_constructor__(
+            _ffi_api.OpCall, op, args, workspace, schedule_config  # pylint: disable=no-member
+        )

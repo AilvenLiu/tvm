@@ -40,6 +40,19 @@ namespace tirp {
  */
 using FArgSanitizer = runtime::TypedPackedFunc<void(tvm::Op, Array<ObjectRef>)>;
 
+namespace callback {
+/*! \brief The buffers allocated by the operator. */
+constexpr const char* kPrivateAlloc = "private_alloc";
+/*! \brief The initialization statement of the operator.
+ *  which will be inserted at the beginning of the kernel
+ */
+constexpr const char* kDeviceInitStmt = "device_init_stmt";
+/*! \brief The initialization statement of the operator.
+ *  which will be inserted at the beginning of the kernel
+ */
+constexpr const char* kHostInitStmt = "host_init_stmt";
+}  // namespace callback
+
 /*!
  * \brief The context information of the kernel required by op schedule.
  */
@@ -53,29 +66,28 @@ class ScheduleContextNode : public Object {
   Map<String, PrimExpr> launch_params;
   /*! \brief A map from loop variables to their ranges. */
   Map<Var, Range> var_range_map;
-  /*! \brief The allocated buffers of the operator. */
-  Array<Buffer> alloc_buffers;
-  /*! \brief The initialization statement of the operator. 
-   *  which will be inserted at the beginning of the kernel
-   */
-  Array<Stmt> init_stmts;
+
+  /*! \brief Callback to be handled when the operator is scheduled. */
+  Map<String, ObjectRef> callbacks;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("target", &target);
     v->Visit("exec_scope", &exec_scope);
     v->Visit("launch_params", &launch_params);
     v->Visit("var_range_map", &var_range_map);
-    v->Visit("alloc_buffers", &alloc_buffers);
-    v->Visit("init_stmts", &init_stmts);
+    v->Visit("callbacks", &callbacks);
   }
 
-  void AddAllocBuffer(Buffer buffer) {
-    alloc_buffers.push_back(buffer);
-  }
+  /*! \brief Add a buffer to be allocated in the kernel. */
+  void AddAllocBuffer(Buffer buffer);
 
-  void AddInitStmt(Stmt stmt) {
-    init_stmts.push_back(stmt);
-  }
+  /*! \brief Add an initialization statement to be inserted.
+   *  \param stmt The statement to be inserted.
+   *  \param host Whether the statement is a host statement.
+   *  If True, the statement will be added to the host code (before the kernel).
+   *  If False, the statement will be added to the kernel body (at the beginning of the kernel).
+   */
+  void AddInitStmt(Stmt stmt, bool host = false);
 
   static constexpr const char* _type_key = "tirx.ScheduleContext";
   static constexpr bool _type_has_method_sequal_reduce = false;
@@ -94,8 +106,12 @@ class ScheduleContext : public ObjectRef {
    * \param exec_scope The exec scope of the operator.
    * \param launch_params The kernel launch parameters.
    * \param var_range_map: A map from loop variables to their ranges.
+   * \param callbacks The callbacks to be handled when the operator is scheduled.
    */
-  TVM_DLL ScheduleContext(Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map);
+  TVM_DLL ScheduleContext(Target target, ExecScope exec_scope,
+                          Map<String, PrimExpr> launch_params = {},
+                          Map<Var, Range> var_range_map = {},
+                          Map<String, ObjectRef> callbacks = {});
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ScheduleContext, ObjectRef, ScheduleContextNode);
 };
@@ -132,6 +148,13 @@ TVM_DLL const Op& gemm();
 /*!
  * \brief See pesudo code below:
  *
+ *  pipe.init()
+ */
+TVM_DLL const Op& pipeline_init();
+
+/*!
+ * \brief See pesudo code below:
+ *
  *  pipe.producer_acquire()
  */
 TVM_DLL const Op& pipeline_producer_acquire();
@@ -163,6 +186,13 @@ TVM_DLL const Op& pipeline_consumer_release();
  *  pipe.copy(BufferRegion dst, BufferRegion src)
  */
 TVM_DLL const Op& pipeline_copy();
+
+/*!
+ * \brief See pesudo code below:
+ *
+ *  tvm_kernel_replace_point()
+ */
+TVM_DLL const Op& tvm_kernel_replace_point();
 
 }  // namespace tirxp
 }  // namespace tirx

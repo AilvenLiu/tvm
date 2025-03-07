@@ -162,6 +162,37 @@ class TIRpOpScheduler : public StmtExprMutator {
   }
 
  private:
+  class KernelReplacePointSearcher : public StmtExprMutator {
+   public:
+    KernelReplacePointSearcher(const Stmt& body) : body_(body) {}
+
+    static Stmt Seek(const Stmt& stmt, const Stmt& body) {
+      return KernelReplacePointSearcher(body)(stmt);
+    }
+
+   private:
+    Stmt VisitStmt_(const tirp::OpCallNode* op) final {
+      if (op->op == tirp::tvm_kernel_replace_point()) {
+        return body_;
+      }
+      return StmtExprMutator::VisitStmt_(op);
+    }
+
+    Stmt body_;
+  };
+
+  Stmt VisitStmt_(const BlockRealizeNode* op) final {
+    BlockRealize block_realize = GetRef<BlockRealize>(op);
+    auto* n = block_realize.CopyOnWrite();
+    Stmt body = VisitStmt(n->block);
+    if (auto block = body.as<Block>()) {
+      n->block = block.value();
+      return std::move(block_realize);
+    } else {
+      return std::move(body);
+    }
+  }
+
   Stmt VisitStmt_(const BlockNode* op) final {
     bool is_first_block = is_first_block_;
     is_first_block_ = false;
@@ -177,8 +208,17 @@ class TIRpOpScheduler : public StmtExprMutator {
       exec_scope_stack_.pop_back();
     }
     if (is_first_block) {
-      n->body = SeqStmt::Flatten(Array<Stmt>{SeqStmt::Flatten(init_stmts_), n->body});
+      // Insert device init stmts and alloc buffers
+      for (const auto& stmt : device_init_stmts_) {
+        n->body = KernelReplacePointSearcher::Seek(stmt, n->body);
+      }
       n->alloc_buffers.insert(n->alloc_buffers.end(), alloc_buffers_.begin(), alloc_buffers_.end());
+      // Insert host init stmts
+      Stmt res = BlockRealize({}, Bool(true), std::move(block));
+      for (const auto& stmt : host_init_stmts_) {
+        res = KernelReplacePointSearcher::Seek(stmt, std::move(res));
+      }
+      return std::move(res);
     }
     return std::move(block);
   }
@@ -208,10 +248,25 @@ class TIRpOpScheduler : public StmtExprMutator {
     ICHECK(f_op_scheduler_ != nullptr) << "Internal Error: tirp.f_op_scheduler is not registered";
     PrimFunc res;
     res = (*f_op_scheduler_)(GetRef<tirp::OpCall>(op), sctx);
-    ICHECK(res.defined()) << "Internal Error: tirp.f_op_scheduler returned an undefined PrimFunc";
-    alloc_buffers_.insert(alloc_buffers_.end(), sctx->alloc_buffers.begin(), sctx->alloc_buffers.end());
-    init_stmts_.insert(init_stmts_.end(), sctx->init_stmts.begin(), sctx->init_stmts.end());
-    return res->body;
+    if (res.defined()) {
+      // Implmentation found, handle callbacks
+      if (auto bufs = sctx->callbacks.Get(tirp::callback::kPrivateAlloc)) {
+        auto buf_list = bufs.value().as<Array<Buffer>>().value();
+        alloc_buffers_.insert(alloc_buffers_.end(), buf_list.begin(), buf_list.end());
+      }
+      if (auto stmts = sctx->callbacks.Get(tirp::callback::kDeviceInitStmt)) {
+        auto stmt_list = stmts.value().as<Array<Stmt>>().value();
+        device_init_stmts_.insert(device_init_stmts_.end(), stmt_list.begin(), stmt_list.end());
+      }
+      if (auto stmts = sctx->callbacks.Get(tirp::callback::kHostInitStmt)) {
+        auto stmt_list = stmts.value().as<Array<Stmt>>().value();
+        host_init_stmts_.insert(host_init_stmts_.end(), stmt_list.begin(), stmt_list.end());
+      }
+      return res->body;
+    } else {
+      // No implementation found, it could be some deferred scheduling such as pipeline
+      return StmtExprMutator::VisitStmt_(op);
+    }
   }
 
   Map<Var, Range> var_range_map_;
@@ -219,7 +274,9 @@ class TIRpOpScheduler : public StmtExprMutator {
   std::vector<ExecScope> exec_scope_stack_;
   std::unordered_map<String, PrimExpr, ObjectHash, ObjectEqual> launch_params_;
   std::vector<Buffer> alloc_buffers_;
-  std::vector<Stmt> init_stmts_;
+  std::vector<Stmt> device_init_stmts_;
+  std::vector<Stmt> host_init_stmts_;
+
   bool is_first_block_;
 };
 
@@ -640,16 +697,19 @@ Pass LowerTIRp() {
 
     auto* n = f.CopyOnWrite();
     // Lower ScopeIdDef, resolve the scope ids and replace them with target defined special
-    // registers Collect the extents of the ScopeIds for OpCall scheduling
+    // registers
+    // Collect the extents of the ScopeIds for OpCall scheduling
     n->body = ScopeIdDefResolver::Resolve(n->body, target.value());
 
-    // Default Schedule: lower TIRp OpCalls
+    // // Decide the schedule strategy for pipeline ops, attach the strategy to the pipeline ops
+    // // Defer the actual schedule to the TIRp OpCall Scheduling pass
+    // n->body = PipelineOpScheduler::DecideStrategy(n->body, target.value());
+
+    // TIRp OpCall Scheduling
     while (!NoOpCallVerifier::Verify(n->body, false)) {
       n->body = TIRpOpScheduler::LowerOpCalls(n->body, target.value());
       n->body = ScopeMerger::Merge(n->body);
     }
-    // Verify that there are no OpCalls in the TIRp
-    NoOpCallVerifier::Verify(f, true);
 
     // Lower other TIRp aux data structures
     n->body = ExecScopeSliceResolver::Resolve(n->body, target.value());

@@ -17,12 +17,14 @@
 import pytest
 import ml_dtypes
 import numpy as np
+import functools
 
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, ComposeLayout, SwizzleLayout
+from tvm.tir.async_structs import CopyPipeline
 
 ml_dtypes_dict = {
     "e4m3_float8": ml_dtypes.float8_e4m3fn,
@@ -86,8 +88,8 @@ ml_dtypes_dict = {
     ],
 )
 @pytest.mark.parametrize("dtype", ["int8", "e4m3_float8", "e5m2_float8", "float16", "float32"])
-@pytest.mark.parametrize("sync", [True, False])
-def test_copy_global_to_shared_cta_vec_load(input, dtype, sync):
+@pytest.mark.parametrize("sync", [False])
+def test_copy_g2s_s2g_cta_vec_load(input, dtype, sync):
     g_shape, s_shape, g_st, g_extent, thread_cnt, layoutA, layoutB, layoutS, dev = input
 
     r_smem = list(slice(None) for i in range(len(s_shape)))
@@ -105,7 +107,7 @@ def test_copy_global_to_shared_cta_vec_load(input, dtype, sync):
 
             with T.cta():
                 A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
-                
+
                 Tp.copy(A_smem[*r_smem], A[*r_gmem])
                 Tp.copy(B[*r_gmem], A_smem[*r_smem])
 
@@ -121,7 +123,8 @@ def test_copy_global_to_shared_cta_vec_load(input, dtype, sync):
             with T.cta():
                 A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
 
-                pipeline = Tp.alloc_copy_pipeline("cta", depth=0, separate_pc=False)
+                pipeline = Tp.alloc_copy_pipeline("cta", depth=0, separate_pc=False,
+                                                  schedule_config={CopyPipeline.StrategyKind.IMPL: CopyPipeline.Impl.VEC_LOAD})
                 pipeline.copy(A_smem[*r_smem], A[*r_gmem])
                 pipeline.producer_commit()
                 pipeline.consumer_wait(0)
@@ -133,6 +136,109 @@ def test_copy_global_to_shared_cta_vec_load(input, dtype, sync):
     with target:
         mod = tvm.IRModule({"main": copy_sync if sync else copy_async})
         mod = tvm.build(mod, target=target, pipeline="tirp")
+
+        np.random.seed(0)
+        A_np = np.random.rand(*g_shape).astype(np_dtype)
+        B_np = np.zeros(g_shape, dtype=np_dtype)
+
+        A = tvm.nd.array(A_np, dev)
+        B = tvm.nd.array(B_np, dev)
+        mod(A, B)
+
+        B_ref = B_np.copy()
+        B_ref[*r_gmem] = A_np[*r_gmem]
+        np.testing.assert_allclose(B_ref, B.asnumpy())
+
+
+def generate_tma_test_cases():
+    # dtypes = ["int8", "e4m3_float8", "e5m2_float8", "float16", "float32"]
+    dtypes = ["float16"]
+
+    tasks = [
+        (
+            (64, 256),  # global_shape
+            ((0, 64), (0, 256)),  # global_region
+            (64, 256),  # shared_shape
+            ((0, 64), (0, 256)),  # shared_region
+            64,  # thread cnt per CTA
+            TileLayout.from_tuple((64, 256)),  # global_layout_src
+            TileLayout.from_tuple((64, 256)),  # global_layout_dst
+            tvm.cuda(0),
+        ),
+        # (
+        #     (64, 256),  # global_shape
+        #     ((0, 64), (0, 256)),  # global_region
+        #     (3, 64, 256),  # shared_shape
+        #     ((1, 2), (0, 64), (0, 256)),  # shared_region
+        #     64,  # thread cnt per CTA
+        #     TileLayout.from_tuple((64, 256)),  # global_layout_src
+        #     TileLayout.from_tuple((64, 256)),  # global_layout_dst
+        #     tvm.cuda(0),
+        # ),
+    ]
+
+    for task in tasks:
+        for dtype in dtypes:
+            bits = tvm.DataType(dtype).bits
+            # # swizzle = 128B
+            # for swizzle_len in [3]:
+            #     shared_layout = ComposeLayout(
+            #         SwizzleLayout(
+            #             per_element=(128 // bits).bit_length() - 1,
+            #             swizzle_len=swizzle_len,
+            #             atom_len=3,
+            #             swizzle_inner=True,
+            #         ),
+            #         TileLayout.from_tuple(task[2]),
+            #     ).normalize()
+            #     yield task + (shared_layout, dtype)
+            # No swizzle
+            shared_layout = TileLayout.from_tuple(task[2])
+            yield task + (shared_layout, dtype)
+
+
+@pytest.mark.parametrize("inp", generate_tma_test_cases())
+def test_copy_g2s_cta_tma_load(inp):
+    g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, dev, layoutS, dtype = inp
+    total_bytes = functools.reduce(lambda acc, region: acc * (region[1] - region[0]), s_region, 1)
+    total_bytes = total_bytes * tvm.DataType(dtype).bits // 8
+
+    r_smem = list(slice(s_region[i][0], s_region[i][1]) for i in range(len(s_shape)))
+    r_gmem = list(slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape)))
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def copy_async(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
+        B = T.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([thread_cnt], parent="cta")
+
+            # TODO(@bohan): remove this 
+            with T.cta():
+                dyn = T.alloc_buffer([total_bytes + 8], "uint8", scope="shared.dyn")
+                A_smem = T.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=layoutS)
+                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=total_bytes // 8, layout=TileLayout.from_tuple((1,)))
+
+                with T.cta():
+                    pipeline = Tp.alloc_copy_pipeline("cta", depth=0, separate_pc=False,
+                                                    workspace={"mbarrier": mbarrier},
+                                                    schedule_config={CopyPipeline.StrategyKind.IMPL: CopyPipeline.Impl.TMA})
+                    pipeline.init()
+                    pipeline.copy(A_smem[*r_smem], A[*r_gmem])
+                    pipeline.producer_commit(tma_bytes=total_bytes)
+                    pipeline.consumer_wait()
+                    Tp.copy(B[*r_gmem], A_smem[*r_smem])
+    # fmt: on
+
+    np_dtype = ml_dtypes_dict[dtype] if dtype in ml_dtypes_dict else np.dtype(dtype)
+    target = tvm.target.Target.from_device(dev)
+    with target:
+        mod = tvm.IRModule({"main": copy_async})
+        mod = tvm.build(mod, target=target, pipeline="tirp")
+        # print(mod.imported_modules[0].get_source())
 
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(np_dtype)

@@ -138,7 +138,9 @@ def test_copy_in_a_loop():
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     A_1 = T.Buffer((262144,), data=A.data, logical_scope="kernel")
-                    T.nki_load(A_sbuf[p_loop, i * 512 + f_loop], A_1[i * 65536 + p_loop * 512 + f_loop])
+                    T.nki_load(
+                        A_sbuf[p_loop, i * 512 + f_loop], A_1[i * 65536 + p_loop * 512 + f_loop]
+                    )
 
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -179,7 +181,9 @@ def test_copy_in_a_loop_2():
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 512):
                     A_1 = T.Buffer((262144,), data=A.data, logical_scope="kernel")
-                    T.nki_load(A_sbuf[p_loop, i * 512 + f_loop], A_1[p_loop * 2048 + i * 512 + f_loop])
+                    T.nki_load(
+                        A_sbuf[p_loop, i * 512 + f_loop], A_1[p_loop * 2048 + i * 512 + f_loop]
+                    )
 
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -198,7 +202,7 @@ def test_copy_transpose():
         dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((2048, 128), (1, 1))
     )
 
-    #fmt: off
+    # fmt: off
     @T.prim_func(tirp=True)
     def copy() -> None:
         with T.kernel():
@@ -225,13 +229,14 @@ def test_copy_transpose():
                     T.attr(0, "tensorized_nki_instruction", 1)
                     for p_loop, f_loop in T.grid(128, 128):
                         T.nki_tensor_copy(B_sbuf[p_loop, f_loop * 16 + b_loop], buffer_1[b_loop // 4, p_loop, b_loop % 4 * 128 + f_loop])    
-    #fmt: on
+    # fmt: on
 
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
+
 
 def test_copy_transpose_2():
     src_shape = [65536]
@@ -240,9 +245,10 @@ def test_copy_transpose_2():
     )
     dst_shape = [4, 65536]
     dst_layout = TrainiumLayout(
-        dimension_types="FFPF", combined_1d_layout=T.TileLayout.from_tuple((4, 128, 128, 4), (4,16,1,1))
+        dimension_types="FFPF",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 128, 4), (4, 16, 1, 1)),
     )
-    #fmt: off
+    # fmt: off
     @T.prim_func(tirp=True)
     def copy() -> None:
         with T.kernel():
@@ -271,12 +277,13 @@ def test_copy_transpose_2():
                         T.attr(0, "tensorized_nki_instruction", 1)
                         for p_loop, f_loop in T.grid(128, 128):
                             T.nki_tensor_copy(B_sbuf[p_loop, f_loop * 16 + i * 4 + b_loop], dst_psum[0, p_loop, b_loop * 128 + f_loop])
-    #fmt: on
+    # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
+
 
 def test_copy_different_f():
     src_shape = [512, 64]
@@ -306,9 +313,13 @@ def test_copy_different_f():
             for b_loop, additional_b_loop in T.grid(64, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 4):
-                    T.nki_tensor_copy(B_sbuf[
-                        p_loop, b_loop // 16 * 64 + b_loop % 4 * 16 + b_loop % 16 // 4 * 4 + f_loop
-                    ], A_sbuf[p_loop, b_loop * 4 + f_loop])
+                    T.nki_tensor_copy(
+                        B_sbuf[
+                            p_loop,
+                            b_loop // 16 * 64 + b_loop % 4 * 16 + b_loop % 16 // 4 * 4 + f_loop,
+                        ],
+                        A_sbuf[p_loop, b_loop * 4 + f_loop],
+                    )
 
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -345,7 +356,9 @@ def test_copy_different_shape():
             for b_loop, additional_b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop, f_loop in T.grid(128, 4):
-                    T.nki_tensor_copy(B_sbuf[p_loop, b_loop * 4 + f_loop], A_sbuf[p_loop, b_loop * 64 + f_loop])
+                    T.nki_tensor_copy(
+                        B_sbuf[p_loop, b_loop * 4 + f_loop], A_sbuf[p_loop, b_loop * 64 + f_loop]
+                    )
 
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -425,12 +438,14 @@ def test_copy_different_shape_dim():
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
+
 def test_copy_with_offset():
     src_shape = [256, 512]
     src_layout = T.TileLayout.from_tuple((256, 512), (512, 1))
     dst_shape = [512, 512]
     dst_layout = TrainiumLayout(
-        dimension_types="FPF", combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1))
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
     )
 
     @T.prim_func(tirp=True)
@@ -465,6 +480,7 @@ def test_copy_with_offset():
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
+
 
 def test_large_dma_copy():
     src_shape = [512, 4096]
@@ -507,6 +523,7 @@ def test_large_dma_copy():
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
+
 def test_copy_with_inst_size_limit():
     src_shape = [512, 4096]
     src_layout = dst_layout = TrainiumLayout(
@@ -515,6 +532,7 @@ def test_copy_with_inst_size_limit():
     )
     dst_shape = src_shape
     dst_layout = src_layout
+
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
         with T.kernel():
@@ -542,12 +560,15 @@ def test_copy_with_inst_size_limit():
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
+
 def test_copy_with_complex_index():
     A_shape = [4096, 4096]
     A_layout = T.TileLayout.from_tuple((4096, 4096), (1, 4096))
     A_sbuf_shape = (2, 2048, 1024)
-    A_sbuf_layout = T.TrainiumLayout("FFFP", T.TileLayout.from_tuple((2, 2048,8, 128), (16384, 1, 2048, 1)))
-    
+    A_sbuf_layout = T.TrainiumLayout(
+        "FFFP", T.TileLayout.from_tuple((2, 2048, 8, 128), (16384, 1, 2048, 1))
+    )
+
     # fmt: off
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle, ) -> None:
@@ -572,13 +593,21 @@ def test_copy_with_complex_index():
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-        
+
+
 def test_copy_with_complex_index_2():
     A_sbuf_shape = [4096, 4096]
     A_sbuf_layout = T.TrainiumLayout("FFP", T.TileLayout.from_tuple((4096, 32, 128), (1, 4096, 1)))
     A_shape = (2, 2048, 1024)
-    A_layout = T.TileLayout.from_tuple((2, 2048,1024), (2048*1024, 1, 2048,))
-    
+    A_layout = T.TileLayout.from_tuple(
+        (2, 2048, 1024),
+        (
+            2048 * 1024,
+            1,
+            2048,
+        ),
+    )
+
     # fmt: off
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle, ) -> None:
@@ -599,12 +628,13 @@ def test_copy_with_complex_index_2():
                     A_1 = T.Buffer((4194304,), data=A.data, logical_scope="kernel")
                     T.nki_load(A_sbuf[p_loop, b_loop * 4096 + f_loop + 100352], A_1[b_loop * 262144 + p_loop * 2048 + f_loop + 2097152])
     # fmt: on
-    
+
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-    
+
+
 def test_copy_transpose_with_workspace():
     src_shape = [512, 512]
     src_layout = TrainiumLayout(
@@ -615,7 +645,7 @@ def test_copy_transpose_with_workspace():
         dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((2048, 128), (1, 1))
     )
 
-    #fmt: off
+    # fmt: off
     @T.prim_func(tirp=True)
     def copy() -> None:
         with T.kernel():
@@ -648,11 +678,12 @@ def test_copy_transpose_with_workspace():
                     T.attr(0, "tensorized_nki_instruction", 1)
                     for p_loop, f_loop in T.grid(128, 128):
                         T.nki_tensor_copy(B_sbuf[p_loop, f_loop * 16 + b_loop], acc_psum[0, p_loop, b_loop % 4 * 128 + f_loop])
-    #fmt: on
+    # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-    
+
+
 if __name__ == "__main__":
     tvm.testing.main()

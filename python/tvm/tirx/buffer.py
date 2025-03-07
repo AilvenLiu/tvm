@@ -17,7 +17,6 @@
 """Abstraction for array data structures."""
 
 from numbers import Integral
-from typing import Optional
 
 import tvm_ffi
 
@@ -288,6 +287,7 @@ def decl_buffer(
     buffer_type="",
     axis_separators=None,
     span=None,
+    layout=None,
 ):
     """Declare a new symbolic buffer.
 
@@ -347,6 +347,9 @@ def decl_buffer(
 
     span: Optional[Span]
         The location of the decl_buffer creation in the source.
+
+    layout: Optional[TLayout]
+        The layout of the buffer.
 
     Returns
     -------

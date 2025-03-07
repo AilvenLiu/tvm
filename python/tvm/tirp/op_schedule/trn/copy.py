@@ -23,7 +23,8 @@ from functools import reduce
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
-from tvm.tir import BufferRegion, PrimFunc
+from tvm.script import tirp as Tp
+from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
@@ -76,7 +77,10 @@ def transpose_schedule(
     )
     if "identity" not in op.workspace:
         identity_tensor = T.buffer(
-            (p_size, rhs_f_size), src_buffer_region.buffer.dtype, scope="trn.sbuf", buffer_name="identity"
+            (p_size, rhs_f_size),
+            src_buffer_region.buffer.dtype,
+            scope="trn.sbuf",
+            buffer_name="identity",
         )
         sctx.add_alloc_buffer(identity_tensor)
 
@@ -85,6 +89,7 @@ def transpose_schedule(
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop, rhs_f_loop in T.grid(p_size, rhs_f_size):
                     T.evaluate(T.nki_identity(identity_tensor[p_loop, rhs_f_loop], p_size))
+            Tp.tvm_kernel_replace_point()
 
         sctx.add_init_stmt(identity_init.body)
     else:
@@ -123,7 +128,7 @@ def transpose_schedule(
             "float32",
             scope="trn.psum",
             allocated_addr=(0, 0),
-            buffer_name="acc_psum"
+            buffer_name="acc_psum",
         )
         sctx.add_alloc_buffer(acc_psum)
     else:

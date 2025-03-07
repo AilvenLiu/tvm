@@ -409,7 +409,7 @@ def test_unary_complex1():
         mod = tvm.IRModule({"main": unary})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-        
+
 
 def test_binary_broadcast3():
     src1_shape = [128, 512]
@@ -453,7 +453,6 @@ def test_binary_broadcast3():
         assert_structural_equal(mod["main"], expected)
 
 
-
 @pytest.mark.parametrize("op_type", ["sqrt"])
 def test_unary_with_bias_scale(op_type):
     src_shape = [512, 1024]
@@ -469,7 +468,7 @@ def test_unary_with_bias_scale(op_type):
         combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1)),
     )
     scale = T.float32(2.0)
-    
+
     # fmt: off
     @T.prim_func(tirp=True)
     def unary() -> None:
@@ -495,7 +494,8 @@ def test_unary_with_bias_scale(op_type):
         mod = tvm.IRModule({"main": unary})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-        
+
+
 @pytest.mark.parametrize("op_type", ["sqrt"])
 def test_unary_with_bias_scale_2(op_type):
     src_shape = [512, 1024]
@@ -507,7 +507,7 @@ def test_unary_with_bias_scale_2(op_type):
     dst_layout = src_layout
     bias = T.float32(1.0)
     scale = T.float32(2.0)
-    
+
     # fmt: off
     @T.prim_func(tirp=True)
     def unary() -> None:
@@ -531,6 +531,7 @@ def test_unary_with_bias_scale_2(op_type):
         mod = tvm.IRModule({"main": unary})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
-        
+
+
 if __name__ == "__main__":
     tvm.testing.main()

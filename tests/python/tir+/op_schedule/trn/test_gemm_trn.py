@@ -394,6 +394,7 @@ def test_gemm_too_large_f_size():
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
+
 def test_gemm_sbuf_output_with_workspace():
     A_layout = T.TrainiumLayout(
         dimension_types="FFFP",
@@ -533,6 +534,7 @@ def test_gemm_transpose_AB():
         mod = tvm.IRModule({"main": gemm})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
+
 
 if __name__ == "__main__":
     tvm.testing.main()

@@ -30,7 +30,6 @@
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirp_op.h>
-#include <tvm/ir/tensormap_type.h>
 
 #include <string>
 #include <unordered_map>
@@ -100,32 +99,6 @@ inline ExprDoc DefineVar(const tirx::Var& var, const Frame& frame, const IRDocsi
  */
 inline IdDoc DefineBuffer(const tirx::Buffer& buffer, const Frame& frame, const IRDocsifier& d) {
   return d->Define(buffer, frame, buffer->name.empty() ? "buffer" : buffer->name);
-}
-
-/*!
- * \brief Defines a barrier in the IRDocsifier at the given frame,
- * and returns the corresponding IdDoc
- * \param barrier The barrier to define
- * \param frame The frame to define the barrier in
- * \param d The IRDocsifier
- * \return The IdDoc corresponding to the barrier
- */
-inline IdDoc DefineBarrier(const tirx::Barrier& barrier, const Frame& frame, const IRDocsifier& d) {
-  return d->Define(barrier, frame, barrier->name_hint.empty() ? "barrier" : barrier->name_hint);
-}
-
-/*!
- * \brief Defines a barrier array in the IRDocsifier at the given frame,
- * and returns the corresponding IdDoc
- * \param barrier_array The barrier array to define
- * \param frame The frame to define the barrier array in
- * \param d The IRDocsifier
- * \return The IdDoc corresponding to the barrier array
- */
-inline IdDoc DefineBarrierArray(const tirx::BarrierArray& barrier_array, const Frame& frame,
-                                const IRDocsifier& d) {
-  return d->Define(barrier_array, frame,
-                   barrier_array->name_hint.empty() ? "barrier_array" : barrier_array->name_hint);
 }
 
 /*!
@@ -211,7 +184,8 @@ inline ffi::Optional<Frame> FindLowestVarDef(const ObjectRef& var, const IRDocsi
 inline std::string ReprPrintTIR(const ObjectRef& obj, const PrinterConfig& cfg) {
   IRDocsifier d(cfg);
   d->SetCommonPrefix(obj, [](const ObjectRef& obj) {
-    return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>();
+    return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>() ||
+           obj->IsInstance<tirx::PipelineNode>() || obj->IsInstance<tirx::CopyPipelineNode>();
   });
   With<TIRFrame> f(d, ObjectRef{nullptr});
   (*f)->AddDispatchToken(d, "tirx");
@@ -256,6 +230,17 @@ enum class BufferVarDefinition {
 ExprDoc BufferDecl(const tirx::Buffer& buffer, const ffi::String& method,
                    const ffi::Array<ExprDoc>& args, const AccessPath& p, const Frame& frame,
                    const IRDocsifier& d, BufferVarDefinition var_definitions);
+
+/*!
+ * \brief Declare and define a pipeline
+ * \param pipeline The pipeline to be defined
+ * \param method The method used to declare the pipeline
+ * \param p The object path
+ * \param d The IRDocsifier
+ * \return The ExprDoc corresponding to the pipeline declaration
+ */
+ExprDoc PipelineDecl(const tirx::Pipeline& pipeline, const String& method, const ObjectPath& p,
+                     const IRDocsifier& d);
 
 /*!
  * \brief Declare and define a buffer as annotation

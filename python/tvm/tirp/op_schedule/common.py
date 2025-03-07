@@ -39,14 +39,16 @@ class MapOpType(Enum):
     MIN = 9
     EXP = 10
 
+
 class ReduceOpType(Enum):
     """Enumeration of common reduce operator types."""
 
     SUM = 0
     MAX = 1
     MIN = 2
-    
-def _make_schedule(
+
+
+def _make_unary_binary_schedule(
     op_type: MapOpType, num_src: int, schedule_candidates: List[Callable[..., Optional[PrimFunc]]]
 ) -> Callable[..., Optional[PrimFunc]]:
     """Return a schedule function that works for both unary and binary cases.
@@ -62,13 +64,11 @@ def _make_schedule(
 
     Returns
     -------
-    Callable[..., Optional[PrimFunc]]
+    Callable[[OpCall, Any, ScheduleContext], Optional[PrimFunc]]
         A schedule function that unpacks its source arguments and calls the candidates.
     """
 
-    def impl(
-        op: OpCall, sctx: ScheduleContext
-    ) -> Optional[PrimFunc]:
+    def impl(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         if len(op.args) != num_src + 1:
             raise ValueError(f"Expected {num_src} source arguments, got {len(op.args) - 1}")
         for schedule in schedule_candidates:
