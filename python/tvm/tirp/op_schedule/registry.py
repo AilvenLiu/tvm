@@ -14,15 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from typing import Dict, List
+"""TIRp operator schedule registry."""
+from typing import Dict, Optional, Callable, Tuple
 
-from tvm._ffi import register_object, register_func
-from tvm.ir import Op, Range
-from tvm.tir import _ffi_api, PrimExpr, Var, Buffer, Stmt
-from tvm.runtime import Object, Scriptable
-from tvm.target import Target
-from tvm.tir.exec_scope import ExecScope
+from tvm._ffi import register_func
+from tvm.ir import Op
+from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
+from tvm.tirp.op_schedule.schedule_context import ScheduleContext
 
 
 def _get_tirp_op(op_name: str):
@@ -37,117 +36,22 @@ def _get_tirp_op(op_name: str):
     return Op.get("tirp." + op_name)
 
 
-@register_object("tir.ScheduleContext")
-class ScheduleContext(Object, Scriptable):
-    """ScheduleContext node.
-
-    Parameters
-    ----------
-    target : Target
-        The target of the schedule context.
-
-    exec_scope : ExecScope
-        The execution scope of the schedule context.
-
-    launch_params : Dict[str, PrimExpr]
-        The launch parameters of the schedule context.
-
-    var_range_map : Dict[Var, Range]
-        A map from loop variables to their ranges.
-
-    alloc_buffers : List[Buffer]
-        The allocated buffers of the schedule context.
-
-    init_stmts : List[Stmt]
-        The initialization statements of the schedule context.
-    """
-
-    target: Target
-    exec_scope: ExecScope
-    launch_params: Dict[str, PrimExpr]
-    var_range_map: Dict[Var, Range]
-    alloc_buffers: List[Buffer]
-    init_stmts: List[Stmt]
-
-    def __init__(
-        self,
-        target: Target,
-        exec_scope: ExecScope,
-        launch_params: Dict[str, PrimExpr],
-        var_range_map: Dict[Var, Range],
-    ) -> None:
-        self.__init_handle_by_constructor__(
-            _ffi_api.ScheduleContext,
-            target,
-            exec_scope,
-            launch_params,
-            var_range_map,
-            workspace,  # pylint: disable=no-member
-        )
-
-    def add_alloc_buffer(self, buffer: Buffer) -> None:
-        """Add an allocated buffer to the schedule context.
-            The buffer will be added to the outermost block's alloc_buffers list.
-
-        Parameters
-        ----------
-        buffer : Buffer
-            The buffer to be added.
-        """
-        _ffi_api.ScheduleContextAddAllocBuffer(self, buffer)  # pylint: disable=no-member
-
-    def add_init_stmt(self, stmt: Stmt, host: bool = False) -> None:
-        """Add an initialization statement to the schedule context.
-           The statement will be added to the beginning of the kernel.
-
-        Parameters
-        ----------
-        stmt : Stmt
-            The initialization statement to be added.
-        host : bool
-            Whether the statement is a host statement.
-            If True, the statement will be added to the host code (before the kernel).
-            If False, the statement will be added to the kernel body (at the beginning of the kernel).
-        """
-        _ffi_api.ScheduleContextAddInitStmt(self, stmt, host)  # pylint: disable=no-member
-
-    def add_create_tensor_map(self, tensor_map: Var, params: List[Object]) -> None:
-        """Add a tensor map to the schedule context.
-
-        Parameters
-        ----------
-        tensor_map : Var
-            The tensor map to be added.
-
-        params : List[Object]
-            The parameters of the tensor map.
-        """
-        _ffi_api.ScheduleContextAddCreateTensorMap(  # pylint: disable=no-member
-            self, tensor_map, params
-        )
-
-    def is_cuda(self) -> bool:
-        """Check if the target is CUDA."""
-        return self.target.kind.name == "cuda"
-
-    def is_trn(self) -> bool:
-        """Check if the target is Trainium."""
-        return self.target.kind.name == "trn"
+# Global registry to store operator implementations
+_OP_REGISTRY: Dict[Tuple[Op, str], Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]] = {}
 
 
-# Global registry to store operator implementations and their selectors
-_OP_REGISTRY = {}
-
-
-def register_schedule(op_name: str):
-    """Decorator function to register operator implementations with their selectors.
+def register_schedule(op_name: str, target_kind: str):
+    """Decorator function to register operator implementations
 
     Parameters
     ----------
     op_name : str
         The operator to be registered.
 
-    impl_func : Callable[..., Optional[PrimFunc]]
+    target_kind : str
+        The target kind to be registered.
+
+    impl_func : Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]
         The implementation function.
 
     Returns
@@ -156,24 +60,25 @@ def register_schedule(op_name: str):
         A decorator function that registers the implementation.
     """
 
-    def decorator(impl_func):
+    def decorator(impl_func: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
         # Register the implementation
         op = _get_tirp_op(op_name)
-        if op not in _OP_REGISTRY:
-            _OP_REGISTRY[op] = []
-        _OP_REGISTRY[op].append(impl_func)
+        if (op, target_kind) not in _OP_REGISTRY:
+            _OP_REGISTRY[(op, target_kind)] = impl_func
+        else:
+            raise ValueError(f"Operator {op_name} already registered")
         return impl_func
 
     return decorator
 
 
 @register_func("tirp.f_op_scheduler")
-def f_op_scheduler(op: OpCall, sctx: ScheduleContext):
+def f_op_scheduler(op_call: OpCall, sctx: ScheduleContext):
     """Find and return a schedule for the operator.
 
     Parameters
     ----------
-    op : OpCall
+    op_call : OpCall
         The operator to be scheduled
     sctx : ScheduleContext
         The scheduling context
@@ -183,9 +88,9 @@ def f_op_scheduler(op: OpCall, sctx: ScheduleContext):
     Optional[PrimFunc]
         The result of the operator implementation
     """
-    assert op.op in _OP_REGISTRY, f"No implementation found for operator {op.op}"
-    for impl in _OP_REGISTRY[op.op]:
-        res = impl(op, sctx=sctx)
-        if res is not None:
-            return res
-    return None
+    assert sctx.target is not None, "Target not found"
+    key = (op_call.op, str(sctx.target.kind))
+    assert (
+        key in _OP_REGISTRY
+    ), f"No schedule registered for operator {op_call.op} on target {sctx.target.kind}"
+    return _OP_REGISTRY[key](op_call, sctx=sctx)

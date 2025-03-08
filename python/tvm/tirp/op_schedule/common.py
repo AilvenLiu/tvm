@@ -14,14 +14,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""TIRp operator schedule common utilities."""
 
 from enum import Enum
-from typing import Optional, Union, List, Callable
+from typing import Optional, List, Callable, Union
 
 from tvm.tirp.op_schedule import ScheduleContext
-from tvm.tir import BufferRegion, PrimFunc
+from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
-from tvm.tir.expr import FloatImm
+
+from .registry import register_schedule
 
 
 class MapOpType(Enum):
@@ -48,33 +50,22 @@ class ReduceOpType(Enum):
     MIN = 2
 
 
-def _make_unary_binary_schedule(
-    op_type: MapOpType, num_src: int, schedule_candidates: List[Callable[..., Optional[PrimFunc]]]
-) -> Callable[..., Optional[PrimFunc]]:
-    """Return a schedule function that works for both unary and binary cases.
+def register_unary_binary_schedule(
+    op_name: str,
+    op_type: Union[MapOpType, ReduceOpType],
+    target_kind: str,
+    target_check: Callable[[ScheduleContext], bool],
+    schedule_candidates: List[Callable[[OpCall, Enum, ScheduleContext], Optional[PrimFunc]]],
+) -> None:
+    """Register a schedule function for a given operation type."""
 
-    Parameters
-    ----------
-    op_type : MapOpType
-        The mapping operation type (e.g. ZERO, SQRT, ADD, ...).
-    num_src : int
-        The number of source arguments (1 for unary, 2 for binary).
-    schedule_candidates : List[Callable[..., Optional[PrimFunc]]]
-        List of candidate schedule functions to try.
-
-    Returns
-    -------
-    Callable[[OpCall, Any, ScheduleContext], Optional[PrimFunc]]
-        A schedule function that unpacks its source arguments and calls the candidates.
-    """
-
-    def impl(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-        if len(op.args) != num_src + 1:
-            raise ValueError(f"Expected {num_src} source arguments, got {len(op.args) - 1}")
+    @register_schedule(op_name, target_kind)
+    @target_check
+    def schedule(op: OpCall, sctx: ScheduleContext):
         for schedule in schedule_candidates:
             res = schedule(op, op_type, sctx)
             if res is not None:
                 return res
         return None
 
-    return impl
+    return None

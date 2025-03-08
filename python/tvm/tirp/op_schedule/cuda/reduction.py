@@ -17,18 +17,17 @@
 
 """Implementation of reduce operator schedules."""
 
-from typing import Optional, Tuple
+from typing import Optional
 import functools
 import operator
 
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.stmt import OpCall
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tirp.op_schedule import ScheduleContext
 from tvm.arith.analyzer import Analyzer
 
-from ..registry import register_schedule
-from ..common import _make_unary_binary_schedule, ReduceOpType
+from ..common import ReduceOpType, register_unary_binary_schedule
 from .common import target_cuda
 
 
@@ -172,11 +171,10 @@ def reduction_cuda_shared_nd_sync_cta(
     )
 
 
-# Register reduction schedules.
-for op_name, op_type in [("sum", ReduceOpType.SUM)]:
-    custom_name = f"reduction_{op_name}_cuda_shared_nd_sync_cta_impl"
-    func = _make_unary_binary_schedule(op_type, 3, [reduction_cuda_shared_nd_sync_cta])
-    func.__name__ = custom_name
-    func.__doc__ = f"Schedule reduction {op_name}."
-    func = target_cuda(func)
-    register_schedule(op_name)(func)
+register_unary_binary_schedule(
+    "sum",
+    ReduceOpType.SUM,
+    "cuda",
+    target_cuda,
+    [reduction_cuda_shared_nd_sync_cta],
+)

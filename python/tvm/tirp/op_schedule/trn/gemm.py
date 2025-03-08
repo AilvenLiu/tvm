@@ -17,13 +17,13 @@
 
 """Implementation of copy operator schedules."""
 
-from typing import Optional, Set, List, Dict
+from typing import Optional
 import operator
 import functools
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
-from tvm.tir import BufferRegion, PrimFunc, PrimExpr, Var
-from tvm.ir import Range, assert_structural_equal
+from tvm.tir import BufferRegion, PrimFunc
+from tvm.ir import assert_structural_equal
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from tvm.tir.stmt import OpCall
 from .common import (
@@ -37,6 +37,7 @@ from .common import (
     f_gen_idx_anchor,
     check_workspace_buffer,
     get_largest_psum_per_bank,
+    target_trn,
 )
 
 
@@ -97,16 +98,23 @@ def get_pf_dim_from_buffer_region(
     return p_dim, f_dim
 
 
-@register_schedule("gemm")
-def matmul_trn(
-    op: OpCall,
-    sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+@register_schedule("gemm", "trn")
+@target_trn
+def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
-    D_buffer_region, A_buffer_region, B_buffer_region, C_buffer_region, transpose_A, transpose_B, alpha, beta = op.args
+    (
+        D_buffer_region,
+        A_buffer_region,
+        B_buffer_region,
+        C_buffer_region,
+        transpose_A,
+        transpose_B,
+        alpha,
+        beta,
+    ) = op.args
     analyzer = init_analyzer(sctx)
     A, B, C, D = (
         A_buffer_region.buffer,

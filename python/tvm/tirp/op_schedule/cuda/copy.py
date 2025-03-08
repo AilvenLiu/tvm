@@ -27,30 +27,11 @@ from ..registry import register_schedule
 from .common import InstType, copy_g2s_s2g_cta_vec_load_impl, target_cuda
 
 
-def register_copy_schedule(func):
-    """Decorator function to register copy operator implementations.
-
-    Parameters
-    ----------
-    func : Callable[..., Union[bool, PrimFunc]]
-    The implementation function.
-
-    Returns
-    -------
-    Callable
-        The decorated function.
-    """
-    return register_schedule("copy")(func)
-
-
-@register_copy_schedule
+@register_schedule("copy", "cuda")
 @target_cuda
-def copy_g2s_s2g_sync_cta_vec_load(
-    op: OpCall,
-    sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+def copy_schedule(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
-    dst_buffer_region, src_buffer_region = op.args
+    dst_buffer_region, src_buffer_region = op_call.args
     return copy_g2s_s2g_cta_vec_load_impl(
         dst_buffer_region, src_buffer_region, sctx, InstType.NORMAL
     )

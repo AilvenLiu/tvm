@@ -14,17 +14,19 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import pytest
-import ml_dtypes
 import numpy as np
+import ml_dtypes
 import functools
+import pytest
 
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.layout import TileLayout, ComposeLayout, SwizzleLayout
+
 from tvm.tir.async_structs import CopyPipeline
+
 
 ml_dtypes_dict = {
     "e4m3_float8": ml_dtypes.float8_e4m3fn,
@@ -88,29 +90,13 @@ ml_dtypes_dict = {
     ],
 )
 @pytest.mark.parametrize("dtype", ["int8", "e4m3_float8", "e5m2_float8", "float16", "float32"])
-@pytest.mark.parametrize("sync", [False])
-def test_copy_g2s_s2g_cta_vec_load(input, dtype, sync):
+def test_copy_g2s_s2g_cta_vec_load(input, dtype):
     g_shape, s_shape, g_st, g_extent, thread_cnt, layoutA, layoutB, layoutS, dev = input
 
     r_smem = list(slice(None) for i in range(len(s_shape)))
     r_gmem = list(slice(g_st[i], g_st[i] + g_extent[i]) for i in range(len(g_shape)))
 
     # fmt: off
-    @T.prim_func(tirp=True)
-    def copy_sync(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
-        B = T.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
-        
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            tx = T.thread_id([thread_cnt], parent="cta")
-
-            with T.cta():
-                A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
-
-                Tp.copy(A_smem[*r_smem], A[*r_gmem])
-                Tp.copy(B[*r_gmem], A_smem[*r_smem])
-
     @T.prim_func(tirp=True)
     def copy_async(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
@@ -134,7 +120,7 @@ def test_copy_g2s_s2g_cta_vec_load(input, dtype, sync):
     np_dtype = ml_dtypes_dict[dtype] if dtype in ml_dtypes_dict else np.dtype(dtype)
     target = tvm.target.Target.from_device(dev)
     with target:
-        mod = tvm.IRModule({"main": copy_sync if sync else copy_async})
+        mod = tvm.IRModule({"main": copy_async})
         mod = tvm.build(mod, target=target, pipeline="tirp")
 
         np.random.seed(0)
@@ -251,6 +237,84 @@ def test_copy_g2s_cta_tma_load(inp):
         B_ref = B_np.copy()
         B_ref[*r_gmem] = A_np[*r_gmem]
         np.testing.assert_allclose(B_ref, B.asnumpy())
+
+
+def test_copy_pipeline_no_specialize_cta():
+    N = 32 * 32
+    M = 128 * 32
+    N_STAGES = 3
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (N, M), "float32", scope="global", 
+                           layout=T.TileLayout.from_tuple((1024, 4096)))
+        B = T.match_buffer(B_ptr, (N, 128), "float32", scope="global",
+                           layout=T.TileLayout.from_tuple((1024, 128)))
+
+        with T.kernel():
+            bx = T.cta_id([N // 32], parent="kernel")
+            tx = T.thread_id([128], parent="cta")
+
+            with T.cta():
+                A_smem = T.alloc_buffer([N_STAGES, 32, 128], dtype="float32", scope="shared.dyn",
+                                        layout=T.TileLayout.from_tuple((N_STAGES, 32, 128)))
+                O_smem = T.alloc_buffer([32, 128], dtype="float32", scope="shared.dyn",
+                                        layout=T.TileLayout.from_tuple((32, 128)))
+
+                pipe = Tp.alloc_copy_pipeline(thread_scope="cta", depth=0, separate_pc=False,
+                                              schedule_config={CopyPipeline.StrategyKind.IMPL: CopyPipeline.Impl.VEC_LOAD})
+
+                with T.thread():
+                    for k in range(32):
+                        O_smem[k, tx] = 0.0
+                    T.tvm_storage_sync("shared")
+
+                for i in range(N_STAGES - 1):
+                    pipe.copy(A_smem[i, :, :], A[bx * 32 : (bx + 1) * 32, i * 128 : (i + 1) * 128])
+                    pipe.producer_commit()
+
+                for j in range(0, M // 128 - N_STAGES + 1):
+                    i = T.meta_var(j + N_STAGES - 1)
+                    pipe.copy(A_smem[i % N_STAGES, :, :], A[bx * 32 : (bx + 1) * 32, i * 128 : (i + 1) * 128])
+                    pipe.producer_commit()
+
+                    pipe.consumer_wait(num_stages=N_STAGES - 1)
+                    with T.thread():
+                        T.tvm_storage_sync("shared")
+                        for k in range(32):
+                            O_smem[k, tx] += A_smem[j % N_STAGES, k, tx]
+                        T.tvm_storage_sync("shared")
+
+                pipe.consumer_wait(num_stages=0)
+                for j in range(N_STAGES - 1):
+                    i = T.meta_var(j + M // 128 - N_STAGES + 1)
+                    with T.thread():
+                        for k in range(32):
+                            O_smem[k, tx] += A_smem[i % N_STAGES, k, tx]
+                        T.tvm_storage_sync("shared")
+
+                Tp.copy(B[bx * 32 : (bx + 1) * 32, 0:128], O_smem)
+    # fmt: on
+
+    DEV = tvm.cuda(0)
+    target = tvm.target.Target.from_device(DEV)
+
+    with target:
+        mod = tvm.IRModule({"main": test})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.build(mod, target=target, pipeline="tirp")
+
+        np.random.seed(0)
+        A_np = np.ones((N, M)).astype("float32") * 10
+        B_np = np.zeros((N, 128), dtype="float32")
+
+        A = tvm.nd.array(A_np, device=DEV)
+        B = tvm.nd.array(B_np, device=DEV)
+        mod(A, B)
+
+        B_np_ref = np.sum(A_np.reshape((N, 128, M // 128)), axis=2)
+        tvm.testing.assert_allclose(B.asnumpy(), B_np_ref)
 
 
 if __name__ == "__main__":

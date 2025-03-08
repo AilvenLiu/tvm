@@ -151,11 +151,11 @@ def copy_g2s_cta_tma_impl(
 
 def copy_pipeline_cta_impl(
     op_type: PipelineOp,
-    pipeline: CopyPipeline,
     sctx: ScheduleContext,
     *args,
 ) -> Optional[PrimFunc]:
     """Copy pipeline implementation."""
+    pipeline = args[0]
 
     impl = pipeline.schedule_config.get(CopyPipeline.StrategyKind.IMPL, None)
     assert impl is not None, "Copy pipeline implementation is not found"
@@ -173,7 +173,7 @@ def copy_pipeline_cta_impl(
 
         if op_type == PipelineOp.CONSUMER_WAIT:
             # cp.async.wait_group(num_stages)
-            num_stages = args[0]
+            num_stages = args[1]
 
             @T.prim_func
             def func():  # pylint: disable=function-redefined
@@ -183,7 +183,7 @@ def copy_pipeline_cta_impl(
             return func
 
         if op_type == PipelineOp.COPY:
-            dst, src = args
+            dst, src = args[1], args[2]
             # copy the data from src to dst
             for schedule in [copy_g2s_s2g_cta_vec_load_impl]:
                 res = schedule(dst, src, sctx, InstType.CP_ASYNC)
@@ -219,7 +219,7 @@ def copy_pipeline_cta_impl(
         # TMA-based copy pipeline
         if op_type == PipelineOp.PRODUCER_COMMIT:
             # mbarrier.arrive_expect_tx.shared::cta.b64
-            tma_bytes = args[0]
+            tma_bytes = args[1]
 
             @T.prim_func(check_well_formed=False, tirp=True)
             def func():  # pylint: disable=function-redefined
@@ -239,7 +239,7 @@ def copy_pipeline_cta_impl(
 
             return func
         if op_type == PipelineOp.COPY:
-            dst, src = args
+            dst, src = args[1], args[2]
             for schedule in [copy_g2s_cta_tma_impl]:
                 res = schedule(pipeline, dst, src, sctx)
                 if res is not None:
@@ -264,7 +264,7 @@ def copy_pipeline_cta_impl(
         )
 
 
-@register_schedule("pipeline_init")
+@register_schedule("pipeline_init", "cuda")
 @target_cuda
 def pipeline_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule pipeline initialization."""
@@ -272,47 +272,44 @@ def pipeline_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         return None
     pipeline = op.args[0]
     if isinstance(pipeline, CopyPipeline):
-        return copy_pipeline_cta_impl(PipelineOp.INIT, pipeline, sctx)
+        return copy_pipeline_cta_impl(PipelineOp.INIT, sctx, *op.args)
+
     return None
 
 
-@register_schedule("pipeline_producer_commit")
+@register_schedule("pipeline_producer_commit", "cuda")
 @target_cuda
 def pipeline_producer_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule pipeline producer commit."""
     if sctx.exec_scope.name != "cta":
         return None
     pipeline = op.args[0]
-    tma_bytes = op.args[1]
     if isinstance(pipeline, CopyPipeline):
-        return copy_pipeline_cta_impl(PipelineOp.PRODUCER_COMMIT, pipeline, sctx, tma_bytes)
+        return copy_pipeline_cta_impl(PipelineOp.PRODUCER_COMMIT, sctx, *op.args)
 
     return None
 
 
-@register_schedule("pipeline_consumer_wait")
+@register_schedule("pipeline_consumer_wait", "cuda")
 @target_cuda
 def pipeline_consumer_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule pipeline consumer wait."""
     if sctx.exec_scope.name != "cta":
         return None
     pipeline = op.args[0]
-    num_stages = op.args[1]
     if isinstance(pipeline, CopyPipeline):
-        return copy_pipeline_cta_impl(PipelineOp.CONSUMER_WAIT, pipeline, sctx, num_stages)
+        return copy_pipeline_cta_impl(PipelineOp.CONSUMER_WAIT, sctx, *op.args)
 
     return None
 
 
-@register_schedule("pipeline_copy")
+@register_schedule("pipeline_copy", "cuda")
 @target_cuda
 def pipeline_copy(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule pipeline copy."""
     if sctx.exec_scope.name != "cta":
         return None
     pipeline = op.args[0]
-    dst = op.args[1]
-    src = op.args[2]
     if isinstance(pipeline, CopyPipeline):
-        return copy_pipeline_cta_impl(PipelineOp.COPY, pipeline, sctx, dst, src)
+        return copy_pipeline_cta_impl(PipelineOp.COPY, sctx, *op.args)
     return None

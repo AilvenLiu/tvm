@@ -18,43 +18,32 @@
 """Implementation of mapping schedules."""
 
 
-from ..registry import register_schedule
-from ..common import _make_unary_binary_schedule, MapOpType
+from ..common import MapOpType, register_unary_binary_schedule
 from .binary import binary_trn
 from .unary import unary_trn, unary_with_bias_scale_trn
-
-# Register unary mapping schedules.
-for op_name, op_type in [
-    ("reciprocal", MapOpType.RECIPROCAL),
-    ("memset", MapOpType.MEMSET),
-]:
-    custom_name = f"unary_{op_name}_trn_impl"
-    func = _make_unary_binary_schedule(op_type, 1, [unary_trn])
-    func.__name__ = custom_name
-    func.__doc__ = f"Schedule unary {op_name}."
-    register_schedule(op_name)(func)
-
-for op_name, op_type in [
-    ("sqrt", MapOpType.SQRT),
-    ("exp", MapOpType.EXP),
-]:
-    custom_name = f"unary_{op_name}_trn_with_bias_scale_impl"
-    func = _make_unary_binary_schedule(op_type, 3, [unary_with_bias_scale_trn])
-    func.__name__ = custom_name
-    func.__doc__ = f"Schedule unary {op_name} with bias and scale."
-    register_schedule(op_name)(func)
+from .common import target_trn
 
 
-# Register binary mapping schedules.
-for op_name, op_type in [
-    ("add", MapOpType.ADD),
-    ("sub", MapOpType.SUB),
-    ("mul", MapOpType.MUL),
-    ("maximum", MapOpType.MAX),
-    ("minimum", MapOpType.MIN),
-]:
-    custom_name = f"binary_{op_name}_trn_impl"
-    func = _make_unary_binary_schedule(op_type, 2, [binary_trn])
-    func.__name__ = custom_name
-    func.__doc__ = f"Schedule binary {op_name}."
-    register_schedule(op_name)(func)
+for op_name_, op_type_ in {
+    "reciprocal": MapOpType.RECIPROCAL,
+    "memset": MapOpType.MEMSET,
+}.items():
+    register_unary_binary_schedule(op_name_, op_type_, "trn", target_trn, [unary_trn])
+
+
+for op_name_, op_type_ in {
+    "sqrt": MapOpType.SQRT,
+    "exp": MapOpType.EXP,
+}.items():
+    register_unary_binary_schedule(
+        op_name_, op_type_, "trn", target_trn, [unary_with_bias_scale_trn]
+    )
+
+for op_name_, op_type_ in {
+    "add": MapOpType.ADD,
+    "sub": MapOpType.SUB,
+    "mul": MapOpType.MUL,
+    "maximum": MapOpType.MAX,
+    "minimum": MapOpType.MIN,
+}.items():
+    register_unary_binary_schedule(op_name_, op_type_, "trn", target_trn, [binary_trn])

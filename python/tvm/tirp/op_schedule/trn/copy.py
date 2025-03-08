@@ -42,6 +42,7 @@ from .common import (
     get_max_psum_banks,
     check_workspace_buffer,
     get_largest_psum_per_bank,
+    target_trn,
 )
 
 
@@ -118,7 +119,7 @@ def transpose_schedule(
         @T.prim_func(tirp=True)
         def transpose_psum_output():
             for b_loop in T.serial(0, b_extent):
-                matmul_inst_macro(b_loop, None, dst_buffer, True, None)
+                matmul_inst_macro(b_loop, dst_buffer, True, max_psum_slots)
 
         return transpose_psum_output
 
@@ -151,14 +152,12 @@ def transpose_schedule(
     return transpose_sbuf_output
 
 
-@register_schedule("copy")
-def copy_trn(
-    op: OpCall,
-    sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+@register_schedule("copy", "trn")
+@target_trn
+def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
-    if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
+    if sctx.exec_scope.name != "kernel":
         return None
 
     dst_buffer_region, src_buffer_region = op.args

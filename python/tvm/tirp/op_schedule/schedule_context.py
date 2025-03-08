@@ -1,0 +1,120 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+"""TIRp operator schedule context."""
+from typing import Dict, List
+
+from tvm._ffi import register_object
+from tvm.ir import Range
+from tvm.tir import _ffi_api, PrimExpr, Var, Buffer, Stmt
+from tvm.runtime import Object, Scriptable
+from tvm.target import Target
+from tvm.tir.exec_scope import ExecScope
+
+
+@register_object("tir.ScheduleContext")
+class ScheduleContext(Object, Scriptable):
+    """ScheduleContext node.
+
+    Parameters
+    ----------
+    target : Target
+        The target of the schedule context.
+
+    exec_scope : ExecScope
+        The execution scope of the schedule context.
+
+    launch_params : Dict[str, PrimExpr]
+        The launch parameters of the schedule context.
+
+    var_range_map : Dict[Var, Range]
+        A map from loop variables to their ranges.
+
+    callbacks : Dict[str, Object]
+        The callbacks of the schedule context.
+    """
+
+    target: Target
+    exec_scope: ExecScope
+    launch_params: Dict[str, PrimExpr]
+    var_range_map: Dict[Var, Range]
+    callbacks: Dict[str, Object]
+
+    def __init__(
+        self,
+        target: Target,
+        exec_scope: ExecScope,
+        launch_params: Dict[str, PrimExpr],
+        var_range_map: Dict[Var, Range],
+        callbacks: Dict[str, Object],
+    ) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.ScheduleContext,  # pylint: disable=no-member
+            target,
+            exec_scope,
+            launch_params,
+            var_range_map,
+            callbacks,
+        )
+
+    def add_alloc_buffer(self, buffer: Buffer) -> None:
+        """Add an allocated buffer to the schedule context.
+            The buffer will be added to the outermost block's alloc_buffers list.
+
+        Parameters
+        ----------
+        buffer : Buffer
+            The buffer to be added.
+        """
+        _ffi_api.ScheduleContextAddAllocBuffer(self, buffer)  # pylint: disable=no-member
+
+    def add_init_stmt(self, stmt: Stmt, host: bool = False) -> None:
+        """Add an initialization statement to the schedule context.
+           The statement will be added to the beginning of the kernel.
+
+        Parameters
+        ----------
+        stmt : Stmt
+            The initialization statement to be added.
+        host : bool
+            Whether the statement is a host statement.
+            If True, the statement will be added to the host code (before the kernel).
+            If False, the statement will be added to the kernel body (at the beginning of the kernel).
+        """
+        _ffi_api.ScheduleContextAddInitStmt(self, stmt, host)  # pylint: disable=no-member
+
+    def add_create_tensor_map(self, tensor_map: Var, params: List[Object]) -> None:
+        """Add a tensor map to the schedule context.
+
+        Parameters
+        ----------
+        tensor_map : Var
+            The tensor map to be added.
+
+        params : List[Object]
+            The parameters of the tensor map.
+        """
+        _ffi_api.ScheduleContextAddCreateTensorMap(  # pylint: disable=no-member
+            self, tensor_map, params
+        )
+
+    def is_cuda(self) -> bool:
+        """Check if the target is CUDA."""
+        return self.target.kind.name == "cuda"
+
+    def is_trn(self) -> bool:
+        """Check if the target is Trainium."""
+        return self.target.kind.name == "trn"

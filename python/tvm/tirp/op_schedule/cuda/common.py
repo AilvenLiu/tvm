@@ -18,7 +18,7 @@
 """Common utilities for operator scheduling."""
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, Callable
 import functools
 import operator
 from functools import wraps
@@ -27,16 +27,20 @@ from tvm.tirp.op_schedule import ScheduleContext
 from tvm.runtime import DataType
 from tvm.arith.analyzer import Analyzer
 from tvm.tir import BufferRegion, PrimFunc, Buffer
+from tvm.tir.stmt import OpCall
 
 
-def target_cuda(fn):
+def target_cuda(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
     """Decorator that ensures the function is only executed for CUDA targets."""
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        sctx = kwargs.get("sctx")
+        sctx = kwargs.get("sctx", None)
         if sctx is None:
-            raise ValueError("Missing required argument: sctx")
+            assert len(args) == 2 and isinstance(
+                args[1], ScheduleContext
+            ), "The target_cuda() needs to annotate a function with signature (op_call, sctx)"
+            sctx = args[1]
         if not sctx.is_cuda():
             return None
         return fn(*args, **kwargs)
@@ -59,7 +63,7 @@ def copy_g2s_s2g_cta_vec_load_impl(
 ) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
-    if not (sctx.is_cuda() and sctx.exec_scope.name == "cta"):
+    if sctx.exec_scope.name != "cta":
         return None
 
     src: Buffer = src_buffer_region.buffer

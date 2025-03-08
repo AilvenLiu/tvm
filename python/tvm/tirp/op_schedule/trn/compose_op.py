@@ -424,11 +424,8 @@ def compose_reduce_negate(
     return reduction_trn(op_call_1, optype_table[op_call_1.op], sctx, negate=True)
 
 
-@register_schedule("compose_op")
-def compose_op_trn(
-    op: OpCall,
-    sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
+@register_schedule("compose_op", "trn")
+def compose_op_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     op_calls = op.args
     assert len(op_calls) == 2, "Currently only support composing two TIRp op calls"
     assert all(isinstance(op_call, OpCall) for op_call in op_calls), "All arguments must be OpCall"

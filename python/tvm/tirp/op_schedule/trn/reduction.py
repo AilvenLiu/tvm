@@ -23,7 +23,7 @@ import operator
 from functools import reduce
 
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T, tirp as Tp
+from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tirp.op_schedule import ScheduleContext
 from tvm.tir.stmt import OpCall
@@ -35,9 +35,8 @@ from .common import (
     f_gen_idx_anchor,
     f_gen_idx_mapped,
 )
-from ..registry import register_schedule
-from ..common import _make_unary_binary_schedule, ReduceOpType
-
+from ..common import register_unary_binary_schedule, ReduceOpType
+from .common import target_trn
 
 reduce_ops = {
     ReduceOpType.SUM: "add",
@@ -150,14 +149,9 @@ def reduction_trn(
         return two_stage_reduction
 
 
-# Register unary mapping schedules.
-for op_name, op_type in [
-    ("sum", ReduceOpType.SUM),
-    ("max", ReduceOpType.MAX),
-    ("min", ReduceOpType.MIN),
-]:
-    custom_name = f"reduction_{op_name}_trn_impl"
-    func = _make_unary_binary_schedule(op_type, 3, [reduction_trn])
-    func.__name__ = custom_name
-    func.__doc__ = f"Schedule reduction {op_name}."
-    register_schedule(op_name)(func)
+for op_name_, op_type_ in {
+    "sum": ReduceOpType.SUM,
+    "max": ReduceOpType.MAX,
+    "min": ReduceOpType.MIN,
+}.items():
+    register_unary_binary_schedule(op_name_, op_type_, "trn", target_trn, [reduction_trn])

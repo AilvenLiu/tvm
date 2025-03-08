@@ -27,8 +27,7 @@ from tvm.tir import BufferRegion, PrimFunc, OpCall
 from tvm.tir.expr import FloatImm
 from tvm.arith.analyzer import Analyzer
 
-from ..registry import register_schedule
-from ..common import MapOpType, _make_unary_binary_schedule
+from ..common import MapOpType, register_unary_binary_schedule
 from .common import target_cuda
 
 
@@ -127,12 +126,11 @@ def unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(
     unary_op: MapOpType,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
-    _dst: BufferRegion = op.args[0]
-    _src: BufferRegion = op.args[1]
+    """Schedule unary map operation on CUDA in shared memory with bias and scale."""
+
     _bias: Optional[Union[BufferRegion, FloatImm]] = op.args[2]
     _scale: Optional[FloatImm] = op.args[3]
 
-    """Schedule unary map operation on CUDA in shared memory with bias and scale."""
     if _bias is not None or _scale is not None:
         return None
     return unary_map_cuda_shared_nd_sync_cta_impl(op, unary_op, sctx)
@@ -282,35 +280,33 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
     return impl
 
 
-# Register unary mapping schedules.
-for op_name, op_type in [("zero", MapOpType.ZERO)]:
-    custom_name = f"unary_{op_name}_cuda_shared_nd_sync_cta_impl"
-    func = _make_unary_binary_schedule(op_type, 1, [unary_map_cuda_shared_nd_sync_cta_impl])
-    func.__name__ = custom_name
-    func.__doc__ = f"Schedule unary {op_name}."
-    func = target_cuda(func)
-    register_schedule(op_name)(func)
+register_unary_binary_schedule(
+    "zero",
+    MapOpType.ZERO,
+    "cuda",
+    target_cuda,
+    [unary_map_cuda_shared_nd_sync_cta_impl],
+)
 
-for op_name, op_type in [("sqrt", MapOpType.SQRT)]:
-    custom_name = f"unary_{op_name}_cuda_shared_nd_sync_cta_impl_with_bias_scale"
-    func = _make_unary_binary_schedule(
-        op_type, 3, [unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale]
+register_unary_binary_schedule(
+    "sqrt",
+    MapOpType.SQRT,
+    "cuda",
+    target_cuda,
+    [unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale],
+)
+
+
+for op_name_, op_type_ in {
+    "add": MapOpType.ADD,
+    "sub": MapOpType.SUB,
+    "mul": MapOpType.MUL,
+    "fdiv": MapOpType.FDIV,
+}.items():
+    register_unary_binary_schedule(
+        op_name_,
+        op_type_,
+        "cuda",
+        target_cuda,
+        [binary_map_cuda_shared_nd_sync_cta_impl],
     )
-    func.__name__ = custom_name
-    func.__doc__ = f"Schedule unary {op_name} with bias and scale."
-    func = target_cuda(func)
-    register_schedule(op_name)(func)
-
-# Register binary mapping schedules.
-for op_name, op_type in [
-    ("add", MapOpType.ADD),
-    ("sub", MapOpType.SUB),
-    ("mul", MapOpType.MUL),
-    ("fdiv", MapOpType.FDIV),
-]:
-    custom_name = f"binary_{op_name}_cuda_shared_nd_sync_cta_impl"
-    func = _make_unary_binary_schedule(op_type, 2, [binary_map_cuda_shared_nd_sync_cta_impl])
-    func.__name__ = custom_name
-    func.__doc__ = f"Schedule binary {op_name}."
-    func = target_cuda(func)
-    register_schedule(op_name)(func)

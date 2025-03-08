@@ -18,13 +18,15 @@
 """Common utilities for operator scheduling."""
 
 from collections import namedtuple
-from typing import Tuple, Optional, Dict
-from enum import Enum
+from typing import Tuple, Optional, Dict, Callable
+from functools import wraps
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, Buffer
 from tvm._ffi import get_global_func
+from tvm.tir import PrimFunc
+from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext
 
 f_normalize_trn_layout_with_shape = get_global_func("tir.NormalizeTrainiumLayoutWithShape")
@@ -674,3 +676,21 @@ def check_workspace_buffer(buffer: Buffer, shape: Tuple[int], scope: str):
         assert tuple(buffer.shape) == tuple(
             shape
         ), f"workspace buffer must have the correct shape, {buffer.shape} != {shape}"
+
+
+def target_trn(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
+    """Decorator that ensures the function is only executed for CUDA targets."""
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        sctx = kwargs.get("sctx", None)
+        if sctx is None:
+            assert len(args) == 2 and isinstance(
+                args[1], ScheduleContext
+            ), "The target_cuda() needs to annotate a function with signature (op_call, sctx)"
+            sctx = args[1]
+        if not sctx.is_trn():
+            return None
+        return fn(*args, **kwargs)
+
+    return wrapper
