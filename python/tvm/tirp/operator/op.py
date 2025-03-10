@@ -25,6 +25,11 @@ from tvm.ir import Op
 from tvm.tir.async_structs import Pipeline
 
 
+def get_tirp_op(op_name: str):
+    assert isinstance(op_name, str)
+    return Op.get("tirp." + op_name)
+
+
 ### Base Operator Classes ###
 class UnaryOp(OpCall):
     """Base class for unary operators: unary(output, input).
@@ -172,7 +177,7 @@ class PipelineOp(OpCall):
 class Zero(UnaryOp):
     """Zero out all elements in src and store to dst."""
 
-    op = Op.get("tirp.zero")
+    op = get_tirp_op("zero")
 
 
 class Sqrt(UnaryOpWithBiasScale):
@@ -181,44 +186,44 @@ class Sqrt(UnaryOpWithBiasScale):
     If bias and scale are provided: dst = sqrt(src * scale + bias)
     """
 
-    op = Op.get("tirp.sqrt")
+    op = get_tirp_op("sqrt")
 
 
 class Copy(UnaryOp):
     """Copy all elements from src to dst."""
 
-    op = Op.get("tirp.copy")
+    op = get_tirp_op("copy")
 
 
 class Fill(UnaryOp):
     """Fill dst with a scalar value."""
 
-    op = Op.get("tirp.fill")
+    op = get_tirp_op("fill")
     scalar_input = True
 
 
 class Add(BinaryOp):
     """Add src1 and src2 element-wise and store to dst."""
 
-    op = Op.get("tirp.add")
+    op = get_tirp_op("add")
 
 
 class Sub(BinaryOp):
     """Subtract src2 from src1 element-wise and store to dst."""
 
-    op = Op.get("tirp.sub")
+    op = get_tirp_op("sub")
 
 
 class Mul(BinaryOp):
     """Multiply src1 and src2 element-wise and store to dst."""
 
-    op = Op.get("tirp.mul")
+    op = get_tirp_op("mul")
 
 
 class FDiv(BinaryOp):
     """Divide src1 by src2 element-wise using floating point division and store to dst."""
 
-    op = Op.get("tirp.fdiv")
+    op = get_tirp_op("fdiv")
 
 
 class Gemm(OpCall):
@@ -235,7 +240,7 @@ class Gemm(OpCall):
         beta: Scalar multiplier for C
     """
 
-    op = Op.get("tirp.gemm")
+    op = get_tirp_op("gemm")
 
     @property
     def srcs(self) -> List[PrimExpr]:
@@ -291,44 +296,44 @@ class Gemm(OpCall):
 class Sum(ReduceOp):
     """Sum elements in src along specified axes and store in dst."""
 
-    op = Op.get("tirp.sum")
+    op = get_tirp_op("sum")
 
 
 class Max(ReduceOp):
     """Compute maximum value in src along specified axes and store in dst."""
 
-    op = Op.get("tirp.max")
+    op = get_tirp_op("max")
 
 
 class Min(ReduceOp):
     """Compute minimum value in src along specified axes and store in dst."""
 
-    op = Op.get("tirp.min")
+    op = get_tirp_op("min")
 
 
 class Reciprocal(UnaryOp):
     """Compute reciprocal (1/x) for all elements in src and store to dst."""
 
-    op = Op.get("tirp.reciprocal")
+    op = get_tirp_op("reciprocal")
 
 
 class Memset(UnaryOp):
     """Set all elements in dst to a specified value."""
 
-    op = Op.get("tirp.memset")
+    op = get_tirp_op("memset")
     scalar_input = True
 
 
 class Maximum(BinaryOp):
     """Compute element-wise maximum of src1 and src2 and store to dst."""
 
-    op = Op.get("tirp.maximum")
+    op = get_tirp_op("maximum")
 
 
 class Minimum(BinaryOp):
     """Compute element-wise minimum of src1 and src2 and store to dst."""
 
-    op = Op.get("tirp.minimum")
+    op = get_tirp_op("minimum")
 
 
 class Exp(UnaryOpWithBiasScale):
@@ -337,26 +342,26 @@ class Exp(UnaryOpWithBiasScale):
     If bias and scale are provided: dst = exp(src * scale + bias)
     """
 
-    op = Op.get("tirp.exp")
+    op = get_tirp_op("exp")
 
 
 ### Pipeline Ops ###
 class PipelineInit(PipelineOp):
     """Initialize a pipeline."""
 
-    op = Op.get("tirp.pipeline_init")
+    op = get_tirp_op("pipeline_init")
 
 
 class PipelineProducerAcquire(PipelineOp):
     """Acquire a producer slot in the pipeline."""
 
-    op = Op.get("tirp.pipeline_producer_acquire")
+    op = get_tirp_op("pipeline_producer_acquire")
 
 
 class PipelineCopy(PipelineOp):
     """Copy data through the pipeline from src to dst."""
 
-    op = Op.get("tirp.pipeline_copy")
+    op = get_tirp_op("pipeline_copy")
 
     @property
     def srcs(self) -> List[PrimExpr]:
@@ -383,25 +388,25 @@ class PipelineCopy(PipelineOp):
 class PipelineProducerCommit(PipelineOp):
     """Commit a producer operation in the pipeline."""
 
-    op = Op.get("tirp.pipeline_producer_commit")
+    op = get_tirp_op("pipeline_producer_commit")
 
 
 class PipelineConsumerWait(PipelineOp):
     """Wait for data to be available for consumption in the pipeline."""
 
-    op = Op.get("tirp.pipeline_consumer_wait")
+    op = get_tirp_op("pipeline_consumer_wait")
 
 
 class PipelineConsumerRelease(PipelineOp):
     """Release a consumer slot after data has been consumed."""
 
-    op = Op.get("tirp.pipeline_consumer_release")
+    op = get_tirp_op("pipeline_consumer_release")
 
 
 class KernelReplacePoint(OpCall):
     """A placeholder for kernel replacement points in TIR scheduling."""
 
-    op = Op.get("tirp.tvm_kernel_replace_point")
+    op = get_tirp_op("tvm_kernel_replace_point")
 
     @property
     def srcs(self) -> List[PrimExpr]:
@@ -422,10 +427,10 @@ class KernelReplacePoint(OpCall):
 class BinaryReduce(OpCall):
     """Combine a binary operation with a reduction operation.
 
-    binary_reduce(binary_output, reduce_output, binary_input1, binary_input2, reduce_axes)
+    binary_reduce(binary_output, reduce_output, binary_input1, binary_input2, binary_op, reduce_op, reduce_axes, )
     """
 
-    op = Op.get("tirp.binary_reduce")
+    op = get_tirp_op("binary_reduce")
 
     @property
     def srcs(self) -> List[PrimExpr]:
@@ -440,31 +445,46 @@ class BinaryReduce(OpCall):
     @property
     def reduce_axes(self) -> Tuple[int]:
         """Get the axes to reduce."""
+        return self.args[6]
+
+    @property
+    def binary_op(self) -> Op:
+        """Get the binary operation."""
         return self.args[4]
 
+    @property
+    def reduce_op(self) -> Op:
+        """Get the reduction operation."""
+        return self.args[5]
+
     def validate(self) -> None:
-        """Validate that the operator has the correct number and types of arguments."""
-        assert len(self.args) == 5, f"{self} expects 5 arguments, got {len(self.args)}"
+        assert len(self.args) == 7, f"{self} expects 7 arguments, got {len(self.args)}"
         assert all(
             isinstance(arg, BufferRegion) for arg in self.dsts
         ), f"{self} expects BufferRegion arguments as binary_output and reduce_output, got {self.dsts}"
         assert all(
             isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
         ), f"{self} expects BufferRegion or FloatImm arguments as binary_input1 and binary_input2, got {self.srcs}"
+        assert isinstance(
+            self.binary_op, Op
+        ), f"{self} expects Op as binary_op, got {self.binary_op}"
+        assert isinstance(
+            self.reduce_op, Op
+        ), f"{self} expects Op as reduce_op, got {self.reduce_op}"
 
 
 class UnaryReduce(OpCall):
     """Combine a unary operation with a reduction operation.
 
-    unary_reduce(unary_output, reduce_output, unary_input, bias, scale, reduce_axes)
+    unary_reduce(unary_output, reduce_output, unary_input, unary_op, reduce_op, bias, scale, reduce_axes)
     """
 
-    op = Op.get("tirp.unary_reduce")
+    op = get_tirp_op("unary_reduce")
 
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
-        return [self.args[i] for i in range(2, 5)]
+        return [self.args[2], self.args[5], self.args[6]]
 
     @property
     def dsts(self) -> List[PrimExpr]:
@@ -474,23 +494,37 @@ class UnaryReduce(OpCall):
     @property
     def reduce_axes(self) -> Tuple[int]:
         """Get the axes to reduce."""
-        return self.args[5]
+        return self.args[7]
+
+    @property
+    def unary_op(self) -> Op:
+        """Get the unary operation."""
+        return self.args[3]
+
+    @property
+    def reduce_op(self) -> Op:
+        """Get the reduction operation."""
+        return self.args[4]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
-        assert len(self.args) == 6, f"{self} expects 6 arguments, got {len(self.args)}"
+        assert len(self.args) == 8, f"{self} expects 8 arguments, got {len(self.args)}"
         assert all(
             isinstance(arg, BufferRegion) for arg in self.dsts
         ), f"{self} expects BufferRegion arguments as unary_output and reduce_output, got {self.dsts}"
-        assert all(
-            isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
-        ), f"{self} expects BufferRegion or FloatImm arguments as unary_input, bias and scale, got {self.srcs}"
+        assert isinstance(
+            self.srcs[0], (BufferRegion, FloatImm)
+        ), f"{self} expects BufferRegion or FloatImm arguments as unary_input, got {self.srcs[0]}"
+        assert isinstance(self.unary_op, Op), f"{self} expects Op as unary_op, got {self.unary_op}"
+        assert isinstance(
+            self.reduce_op, Op
+        ), f"{self} expects Op as reduce_op, got {self.reduce_op}"
 
 
 class BinaryChain(OpCall):
     """Chain multiple binary operations together.
 
-    binary_chain(output, data, operand0, operand1, reverse1)
+    binary_chain(output, data, operand0, operand1, op0, op1, reverse1)
 
     if not reverse1:
         output = (operand0 op0 data) op1 operand1
@@ -498,7 +532,7 @@ class BinaryChain(OpCall):
         output = operand1 op1 (operand0 op0 data)
     """
 
-    op = Op.get("tirp.binary_chain")
+    op = get_tirp_op("binary_chain")
 
     @property
     def srcs(self) -> List[PrimExpr]:
@@ -513,6 +547,43 @@ class BinaryChain(OpCall):
     @property
     def reverse1(self) -> bool:
         """Whether to reverse the order of the second binary operation."""
+        return self.args[6]
+
+    @property
+    def op0(self) -> Op:
+        """Get the first binary operation."""
+        return self.args[4]
+
+    @property
+    def op1(self) -> Op:
+        """Get the second binary operation."""
+        return self.args[5]
+
+    def validate(self) -> None:
+        """Validate that the operator has the correct number and types of arguments."""
+        assert len(self.args) == 7, f"{self} expects 7 arguments, got {len(self.args)}"
+        assert isinstance(
+            self.dsts[0], BufferRegion
+        ), f"{self} expects BufferRegion as output, got {self.dsts[0]}"
+        assert all(
+            isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
+        ), f"{self} expects BufferRegion or FloatImm arguments as data, operand0 and operand1, got {self.srcs}"
+        assert isinstance(self.op0, Op), f"{self} expects Op as op0, got {self.op0}"
+        assert isinstance(self.op1, Op), f"{self} expects Op as op1, got {self.op1}"
+
+
+class ReduceNegate(ReduceOp):
+    """
+    Negate the result of a reduction operation.
+
+    reduce_negate(output, input, reduce_axes, accum, reduce_op)
+    """
+
+    op = get_tirp_op("reduce_negate")
+
+    @property
+    def reduce_op(self) -> Op:
+        """Get the reduction operation."""
         return self.args[4]
 
     def validate(self) -> None:
@@ -521,15 +592,12 @@ class BinaryChain(OpCall):
         assert isinstance(
             self.dsts[0], BufferRegion
         ), f"{self} expects BufferRegion as output, got {self.dsts[0]}"
-        assert all(
-            isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
-        ), f"{self} expects BufferRegion or FloatImm arguments as data, operand0 and operand1, got {self.srcs}"
-
-
-class ReduceNegate(ReduceOp):
-    """Negate the result of a reduction operation."""
-
-    op = Op.get("tirp.reduce_negate")
+        assert isinstance(
+            self.srcs[0], BufferRegion
+        ), f"{self} expects BufferRegion as input, got {self.srcs[0]}"
+        assert isinstance(
+            self.reduce_op, Op
+        ), f"{self} expects Op as reduce_op, got {self.reduce_op}"
 
 
 class ComposeOp(OpCall):
@@ -538,7 +606,9 @@ class ComposeOp(OpCall):
     Must be lowered to specific compose operations before operator-level passes.
     """
 
-    op = Op.get("tirp.compose_op")
+    # TODO: add a pass to lower generic compose_op to specific compose ops
+
+    op = get_tirp_op("compose_op")
 
     @property
     def srcs(self) -> List[PrimExpr]:

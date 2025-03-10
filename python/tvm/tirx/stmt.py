@@ -789,7 +789,9 @@ class OpCall(Stmt):
         if subclass is None:
             raise ValueError(f"No subclass registered for op: {instance.op}")
         new_instance = subclass.__new__(subclass)
-        new_instance.__setstate__(instance.__getstate__())
+        new_instance.__init_handle_by_constructor__(
+            _ffi_api.OpCallCopyHandle, instance  # pylint: disable=no-member
+        )   
         return new_instance
 
     @property

@@ -79,7 +79,7 @@ def reduction_trn(
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
-    dst_buffer_region, src_buffer_region, axes, accum = op.args
+    dst_buffer_region, src_buffer_region, axes, accum = op.args[:4]
     assert not accum, "Accumulation is not supported for reduction on Trainium"
     analyzer = init_analyzer(sctx)
     assert reduce_op in reduce_ops, f"Unsupported reduce operation {reduce_op}"

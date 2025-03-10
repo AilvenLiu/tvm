@@ -24,25 +24,7 @@ from tvm.runtime import Object
 from tvm.ir import Op
 from tvm.tirx import BufferRegion, Buffer, OpCall
 from tvm.tirx.exec_scope import ExecScope
-
 from . import _ffi_api
-
-
-def _get_tirp_op(op_name: str):
-    """Get the TIR+ operator by name.
-
-    Parameters
-    ----------
-    op_name : str
-        Name of the operator
-
-    Returns
-    -------
-    Op
-        The requested TIR+ operator
-    """
-    assert isinstance(op_name, str)
-    return Op.get("tirp." + op_name)
 
 
 def make_op_call(
@@ -64,10 +46,11 @@ def make_op_call(
     """
     if workspace is None:
         workspace = {}
+    from tvm.tirp.operator import get_tirp_op
     f = tvm.get_global_func("script.ir_builder.tir.OpCall")
     return f(
         OpCall(
-            *args, op=_get_tirp_op(op_name), workspace=workspace, schedule_config=schedule_config
+            *args, op=get_tirp_op(op_name), workspace=workspace, schedule_config=schedule_config
         )
     )
 

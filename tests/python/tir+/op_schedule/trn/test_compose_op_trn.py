@@ -42,9 +42,8 @@ def test_simple_activation_reduce():
             A = T.alloc_buffer(A_shape, dtype="float32", scope="trn.sbuf", layout=A_layout)
             B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
             C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
-            with Tp.compose_op():
-                Tp.sqrt(B, A)
-                Tp.sum(C, B, axes=1)
+            Tp.unary_reduce(B, C, A, "sqrt", "sum", reduce_axes=1)
+    
                 
     @T.prim_func(tirp=True)
     def expected():
@@ -81,9 +80,7 @@ def test_activation_reduce_in_loop():
             B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
             C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
             for i in range(2):
-                with Tp.compose_op():
-                    Tp.sqrt(B, A[i*16:i*16+16])
-                    Tp.sum(C, B, axes=1)  
+                Tp.unary_reduce(B, C, A[i*16:i*16+16], "sqrt", "sum", reduce_axes=1)
                     
     @T.prim_func(tirp=True)
     def expected():
@@ -118,9 +115,8 @@ def test_activation_reduce_in_loop2():
             B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
             C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
             for i in range(2):
-                with Tp.compose_op():
-                    Tp.sqrt(B, A[i*16:i*16+16])
-                    Tp.sum(C, B, axes=1)  
+                Tp.unary_reduce(B, C, A[i*16:i*16+16], "sqrt", "sum", reduce_axes=1)
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "activation_reduce"})
@@ -156,9 +152,8 @@ def test_activation_reduce_two_stage():
             B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
             C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
             for i in range(2):
-                with Tp.compose_op():
-                    Tp.sqrt(B, A[i*16:i*16+16])
-                    Tp.sum(C, B, axes=(0,1)) 
+                Tp.unary_reduce(B, C, A[i*16:i*16+16], "sqrt", "sum", reduce_axes=(0,1))
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "activation_reduce"})
@@ -202,9 +197,7 @@ def test_activation_reduce_with_bias_scale():
             C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
             bias = T.alloc_buffer(bias_shape, dtype="float32", scope="trn.sbuf", layout=bias_layout)
             for i in range(2):
-                with Tp.compose_op():
-                    Tp.sqrt(B, A[i*16:i*16+16], bias=bias, scale=T.float32(2.0))
-                    Tp.sum(C, B, axes=1)  
+                Tp.unary_reduce(B, C, A[i*16:i*16+16], "sqrt", "sum", reduce_axes=1, bias=bias, scale=2.0)
                     
     @T.prim_func(tirp=True)
     def expected():
@@ -239,9 +232,7 @@ def test_simple_tensor_scalar_reduce():
             A = T.alloc_buffer(A_shape, dtype="float32", scope="trn.sbuf", layout=A_layout)
             B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
             C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
-            with Tp.compose_op():
-                Tp.add(B, A, T.float32(1))
-                Tp.sum(C, B, axes=1)
+            Tp.binary_reduce(B, C, A, 1.0, "add", "sum", reduce_axes=1)
                 
     @T.prim_func(tirp=True)
     def expected():
@@ -278,9 +269,7 @@ def test_tensor_tensor_reduce_fail():
             B = T.alloc_buffer(B_shape, dtype="float32", scope="trn.sbuf", layout=B_layout)
             C = T.alloc_buffer(C_shape, dtype="float32", scope="trn.sbuf", layout=C_layout)
             D = T.alloc_buffer(D_shape, dtype="float32", scope="trn.sbuf", layout=D_layout)
-            with Tp.compose_op():
-                Tp.add(B, A, D)
-                Tp.sum(C, B, axes=1)
+            Tp.binary_reduce(B, C, A, D, "add", "sum", reduce_axes=1)
                 
     # fmt: off
     with pytest.raises(Exception):
@@ -315,9 +304,7 @@ def test_tensor_scalar_reduce_complex():
             B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
             C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             D_sbuf = T.alloc_buffer(reduce_dst_shape, "float32", scope="trn.sbuf", layout=reduce_dst_layout)
-            with Tp.compose_op():
-                Tp.add(C_sbuf, B_sbuf, A_sbuf)
-                Tp.sum(D_sbuf, C_sbuf, axes=0)
+            Tp.binary_reduce(C_sbuf, D_sbuf, B_sbuf, A_sbuf, "add", "sum", reduce_axes=0)
                 
     @T.prim_func(tirp=True)
     def expected():
@@ -358,9 +345,7 @@ def test_tensor_scalar_reduce_two_stage():
             A_sbuf = T.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
             B_sbuf = T.alloc_buffer(dst1_shape, "float32", scope="trn.sbuf", layout=dst1_layout)
             C_sbuf = T.alloc_buffer(reduce_dst_shape, "float32", scope="trn.sbuf", layout=reduce_dst_layout)
-            with Tp.compose_op():
-                Tp.add(B_sbuf, A_sbuf, T.float32(1))
-                Tp.sum(C_sbuf, B_sbuf, axes=(1,2))
+            Tp.binary_reduce(B_sbuf, C_sbuf, A_sbuf, 1.0, "add", "sum", reduce_axes=(1, 2))
                 
     @T.prim_func(tirp=True)
     def expected():
@@ -412,9 +397,7 @@ def test_vector_chain():
             C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             D_sbuf = T.alloc_buffer(src3_shape, "float32", scope="trn.sbuf", layout=src3_layout)
             E_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            with Tp.compose_op():
-                Tp.add(C_sbuf, A_sbuf, B_sbuf)
-                Tp.add(E_sbuf, D_sbuf, C_sbuf)
+            Tp.binary_chain(E_sbuf, A_sbuf, B_sbuf, D_sbuf, "add", "add", reverse1=True)
 
     @T.prim_func(tirp=True)
     def expected():
@@ -461,9 +444,7 @@ def test_vector_chain_2():
             C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             D_sbuf = T.alloc_buffer(src3_shape, "float32", scope="trn.sbuf", layout=src3_layout)
             E_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            with Tp.compose_op():
-                Tp.add(C_sbuf, A_sbuf, B_sbuf)
-                Tp.add(E_sbuf, D_sbuf, C_sbuf)
+            Tp.binary_chain(E_sbuf, A_sbuf, B_sbuf, D_sbuf, "add", "add", reverse1=True)
     
     @T.prim_func(tirp=True)
     def expected():
@@ -503,9 +484,7 @@ def test_reduce_negate():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             for i in range(4):
-                with Tp.compose_op():
-                    Tp.sum(B_sbuf[:, i], A_sbuf[:, :, i], axes=-2)
-                    Tp.mul(B_sbuf[:, i], B_sbuf[:, i], T.float32(-1.0))
+                Tp.reduce_negate(B_sbuf[:, i], A_sbuf[:, :, i], reduce_op="sum", reduce_axes=-2)
 
     @T.prim_func(tirp=True)
     def expected():

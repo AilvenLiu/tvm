@@ -48,6 +48,10 @@ TVM_REGISTER_GLOBAL("tirx.OpCall").set_body_typed([](tvm::Op op, Array<ObjectRef
   return OpCall(op, args, workspace, schedule_config);
 });
 
+TVM_REGISTER_GLOBAL("tir.OpCallCopyHandle").set_body_typed([](const OpCall& op) {
+  return OpCall(op);
+});
+
 TVM_REGISTER_NODE_TYPE(OpCallNode);
 
 }  // namespace tirxxxxp

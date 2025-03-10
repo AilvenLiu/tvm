@@ -22,19 +22,7 @@ from tvm.ir import Op
 from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule.schedule_context import ScheduleContext
-
-
-def _get_tirp_op(op_name: str):
-    """Get TIRp operator by name.
-
-    Parameters
-    ----------
-    op_name : str
-        Name of the TIRp operator
-    """
-    assert isinstance(op_name, str)
-    return Op.get("tirp." + op_name)
-
+from tvm.tirp.operator import get_tirp_op
 
 # Global registry to store operator implementations
 _OP_REGISTRY: Dict[Tuple[Op, str], Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]] = {}
@@ -62,7 +50,7 @@ def register_schedule(op_name: str, target_kind: str):
 
     def decorator(impl_func: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
         # Register the implementation
-        op = _get_tirp_op(op_name)
+        op = get_tirp_op(op_name)
         if (op, target_kind) not in _OP_REGISTRY:
             _OP_REGISTRY[(op, target_kind)] = impl_func
         else:

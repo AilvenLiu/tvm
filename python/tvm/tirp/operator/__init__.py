@@ -16,3 +16,7 @@
 # under the License.
 
 from .op import *
+
+__all__ = [
+    "get_tirp_op",
+]

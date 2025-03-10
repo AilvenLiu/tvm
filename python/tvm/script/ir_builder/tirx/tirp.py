@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Builtin ops in TIR+"""
-from typing import Union, Optional, Dict, Any
+from typing import Union, Optional, Dict, Any, Tuple
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
 from tvm.tirx.async_structs import CopyPipeline
@@ -388,7 +388,7 @@ def gemm(
 def sum(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
-    axes: int = -1,
+    axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = None,
     schedule_config: Dict[str, Any] = None,
@@ -404,7 +404,7 @@ def sum(
     src : Union[BufferRegion, Buffer]
         The source buffer region.
 
-    axes : Tuple[int]
+    axes : Union[int, Tuple[int]]
         The axis to sum over.
 
     accum : bool
@@ -428,7 +428,7 @@ def sum(
 def max(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
-    axes: int = -1,
+    axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = None,
     schedule_config: Dict[str, Any] = None,
@@ -444,7 +444,7 @@ def max(
     src : Union[BufferRegion, Buffer]
         The source buffer region.
 
-    axes : Tuple[int]
+    axes : Union[int, Tuple[int]]
         The axis to sum over.
 
     accum : bool
@@ -468,7 +468,7 @@ def max(
 def min(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
-    axes: int = -1,
+    axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = None,
     schedule_config: Dict[str, Any] = None,
@@ -484,7 +484,7 @@ def min(
     src : Union[BufferRegion, Buffer]
         The source buffer region.
 
-    axes : Tuple[int]
+    axes : Union[int, Tuple[int]]
         The axis to sum over.
 
     accum : bool
@@ -750,6 +750,281 @@ def tvm_kernel_replace_point():
     return f_insert(tirp_op.KernelReplacePoint(workspace={}, schedule_config={}))
 
 
+def binary_reduce(
+    binary_output: Union[BufferRegion, Buffer],
+    reduce_output: Union[BufferRegion, Buffer],
+    binary_input1: Union[BufferRegion, Buffer, FloatImm],
+    binary_input2: Union[BufferRegion, Buffer, FloatImm],
+    binary_op: Union[str, Op],
+    reduce_op: Union[str, Op],
+    reduce_axes: Union[int, Tuple[int]] = -1,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
+    """Combine a binary operation with a reduction operation.
+
+    Parameters
+    ----------
+    binary_output : Union[BufferRegion, Buffer]
+        The destination buffer region for binary operation result.
+
+    reduce_output : Union[BufferRegion, Buffer]
+        The destination buffer region for reduction result.
+
+    binary_input1 : Union[BufferRegion, Buffer, FloatImm]
+        The first source input for binary operation.
+
+    binary_input2 : Union[BufferRegion, Buffer, FloatImm]
+        The second source input for binary operation.
+
+    binary_op : Union[str, Op]
+        The binary operation to perform.
+
+    reduce_op : Union[str, Op]
+        The reduction operation to perform.
+
+    reduce_axes : Union[int, Tuple[int]]
+        The axes to reduce over.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+
+    schedule_config : Dict[str, Any]
+        The schedule configuration.
+    """
+    binary_output = _to_region(binary_output)
+    reduce_output = _to_region(reduce_output)
+    if isinstance(binary_input1, Buffer):
+        binary_input1 = _to_region(binary_input1)
+    if isinstance(binary_input2, Buffer):
+        binary_input2 = _to_region(binary_input2)
+    reduce_axes = _wrap_elem_in_tuple(reduce_axes)
+
+    if isinstance(binary_op, str):
+        binary_op = tirp_op.get_tirp_op(binary_op)
+    if isinstance(reduce_op, str):
+        reduce_op = tirp_op.get_tirp_op(reduce_op)
+
+    return f_insert(
+        tirp_op.BinaryReduce(
+            binary_output,
+            reduce_output,
+            binary_input1,
+            binary_input2,
+            binary_op,
+            reduce_op,
+            reduce_axes,
+            workspace=workspace,
+            schedule_config=schedule_config,
+        )
+    )
+
+
+def unary_reduce(
+    unary_output: Union[BufferRegion, Buffer],
+    reduce_output: Union[BufferRegion, Buffer],
+    unary_input: Union[BufferRegion, Buffer],
+    unary_op: Union[str, Op],
+    reduce_op: Union[str, Op],
+    bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
+    scale: Optional[FloatImm] = None,
+    reduce_axes: Union[int, Tuple[int]] = -1,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
+    """Combine a unary operation with a reduction operation.
+
+    Parameters
+    ----------
+    unary_output : Union[BufferRegion, Buffer]
+        The destination buffer region for unary operation result.
+
+    reduce_output : Union[BufferRegion, Buffer]
+        The destination buffer region for reduction result.
+
+    unary_input : Union[BufferRegion, Buffer]
+        The source input for unary operation.
+
+    unary_op : Union[str, Op]
+        The unary operation to perform.
+
+    reduce_op : Union[str, Op]
+        The reduction operation to perform.
+
+    bias : Optional[Union[BufferRegion, Buffer, FloatImm]]
+        The bias to apply before unary operation.
+
+    scale : Optional[FloatImm]
+        The scale to apply before unary operation.
+
+    reduce_axes : Union[int, Tuple[int]]
+        The axes to reduce over.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+
+    schedule_config : Dict[str, Any]
+        The schedule configuration.
+    """
+    unary_output = _to_region(unary_output)
+    reduce_output = _to_region(reduce_output)
+    unary_input = _to_region(unary_input)
+
+    if bias is not None and isinstance(bias, Buffer):
+        bias = _to_region(bias)
+
+    reduce_axes = _wrap_elem_in_tuple(reduce_axes)
+
+    if isinstance(unary_op, str):
+        unary_op = tirp_op.get_tirp_op(unary_op)
+    if isinstance(reduce_op, str):
+        reduce_op = tirp_op.get_tirp_op(reduce_op)
+
+    return f_insert(
+        tirp_op.UnaryReduce(
+            unary_output,
+            reduce_output,
+            unary_input,
+            unary_op,
+            reduce_op,
+            bias,
+            scale,
+            reduce_axes,
+            workspace=workspace,
+            schedule_config=schedule_config,
+        )
+    )
+
+
+def binary_chain(
+    output: Union[BufferRegion, Buffer],
+    data: Union[BufferRegion, Buffer],
+    operand0: Union[BufferRegion, Buffer, FloatImm],
+    operand1: Union[BufferRegion, Buffer, FloatImm],
+    op0: Union[str, Op],
+    op1: Union[str, Op],
+    reverse1: bool = False,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
+    """Chain multiple binary operations together.
+
+    if not reverse1:
+        output = (operand0 op0 data) op1 operand1
+    else:
+        output = operand1 op1 (operand0 op0 data)
+
+    Parameters
+    ----------
+    output : Union[BufferRegion, Buffer]
+        The destination buffer region for the result.
+
+    data : Union[BufferRegion, Buffer]
+        The input data to operate on.
+
+    operand0 : Union[BufferRegion, Buffer, FloatImm]
+        The first operand to combine with data.
+
+    operand1 : Union[BufferRegion, Buffer, FloatImm]
+        The second operand to use in chained operation.
+
+    op0 : Union[str, Op]
+        The first binary operation to perform.
+
+    op1 : Union[str, Op]
+        The second binary operation to perform.
+
+    reverse1 : bool
+        Whether to reverse the order of the second binary operation.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+
+    schedule_config : Dict[str, Any]
+        The schedule configuration.
+    """
+    output = _to_region(output)
+    data = _to_region(data)
+
+    if isinstance(operand0, Buffer):
+        operand0 = _to_region(operand0)
+    if isinstance(operand1, Buffer):
+        operand1 = _to_region(operand1)
+
+    if isinstance(op0, str):
+        op0 = tirp_op.get_tirp_op(op0)
+    if isinstance(op1, str):
+        op1 = tirp_op.get_tirp_op(op1)
+
+    return f_insert(
+        tirp_op.BinaryChain(
+            output,
+            data,
+            operand0,
+            operand1,
+            op0,
+            op1,
+            reverse1,
+            workspace=workspace,
+            schedule_config=schedule_config,
+        )
+    )
+
+
+def reduce_negate(
+    output: Union[BufferRegion, Buffer],
+    input: Union[BufferRegion, Buffer],
+    reduce_op: Union[str, Op],
+    reduce_axes: Union[int, Tuple[int]] = -1,
+    accum: bool = False,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
+    """Negate the result of a reduction operation.
+
+    Parameters
+    ----------
+    output : Union[BufferRegion, Buffer]
+        The destination buffer region for the negated reduction result.
+
+    input : Union[BufferRegion, Buffer]
+        The input buffer region to reduce.
+
+    reduce_axes : Union[int, Tuple[int]]
+        The axes to reduce over.
+
+    accum : bool
+        Whether to accumulate the result into the output.
+
+    reduce_op : Union[str, Op]
+        The reduction operation to perform before negation.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+
+    schedule_config : Dict[str, Any]
+        The schedule configuration.
+    """
+    output = _to_region(output)
+    input = _to_region(input)
+    reduce_axes = _wrap_elem_in_tuple(reduce_axes)
+
+    if isinstance(reduce_op, str):
+        reduce_op = tirp_op.get_tirp_op(reduce_op)
+
+    return f_insert(
+        tirp_op.ReduceNegate(
+            output,
+            input,
+            reduce_axes,
+            accum,
+            reduce_op,
+            workspace=workspace,
+            schedule_config=schedule_config,
+        )
+    )
+
+
 __all__ = [
     "zero",
     "sqrt",
@@ -771,4 +1046,8 @@ __all__ = [
     "minimum",
     "exp",
     "tvm_kernel_replace_point",
+    "binary_reduce",
+    "unary_reduce",
+    "binary_chain",
+    "reduce_negate",
 ]

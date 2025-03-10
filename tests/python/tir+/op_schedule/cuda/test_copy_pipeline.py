@@ -181,7 +181,7 @@ def generate_tma_test_cases():
             shared_layout = TileLayout.from_tuple(task[2])
             yield task + (shared_layout, dtype)
 
-
+@tvm.testing.requires_cuda_compute_version(9)
 @pytest.mark.parametrize("inp", generate_tma_test_cases())
 def test_copy_g2s_cta_tma_load(inp):
     g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, dev, layoutS, dtype = inp
