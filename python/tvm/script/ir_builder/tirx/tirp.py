@@ -21,13 +21,9 @@ from tvm.ir import Op
 from tvm.tirx.async_structs import CopyPipeline
 from tvm.tirx.exec_scope import ExecScope
 from tvm.tirx.expr import FloatImm
+import tvm.tirp.operator as tirp_op
 
 from . import _ffi_api, frame
-
-
-def _get_tirp_op(op_name: str):
-    assert isinstance(op_name, str)
-    return Op.get("tirp." + op_name)
 
 
 def _to_region(buffer: Union[BufferRegion, Buffer]):
@@ -41,6 +37,9 @@ def _wrap_elem_in_tuple(e):
     if isinstance(e, (tuple, list)):
         return e
     return (e,)
+
+
+f_insert = _ffi_api.OpCall
 
 
 def zero(
@@ -64,10 +63,7 @@ def zero(
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    # TODO: check each key in schedule_config are valid. Same for other ops.
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("zero"), [dst, src], workspace, schedule_config
-    )
+    return f_insert(tirp_op.Zero(dst, src, workspace=workspace, schedule_config=schedule_config))
 
 
 def sqrt(
@@ -105,8 +101,8 @@ def sqrt(
         workspace = {}
     if bias is not None and isinstance(bias, Buffer):
         bias = _to_region(bias)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("sqrt"), [dst, src, bias, scale], workspace, schedule_config
+    return f_insert(
+        tirp_op.Sqrt(dst, src, bias, scale, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -138,8 +134,8 @@ def add(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("add"), [dst, src1, src2], workspace, schedule_config
+    return f_insert(
+        tirp_op.Add(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -171,8 +167,8 @@ def sub(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("sub"), [dst, src1, src2], workspace, schedule_config
+    return f_insert(
+        tirp_op.Sub(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -204,8 +200,8 @@ def mul(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("mul"), [dst, src1, src2], workspace, schedule_config
+    return f_insert(
+        tirp_op.Mul(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -236,8 +232,8 @@ def fdiv(
     src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("fdiv"), [dst, src1, src2], workspace, schedule_config
+    return f_insert(
+        tirp_op.FDiv(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -262,9 +258,7 @@ def copy(
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("copy"), [dst, src], workspace, schedule_config
-    )
+    return f_insert(tirp_op.Copy(dst, src, workspace=workspace, schedule_config=schedule_config))
 
 
 def fill(
@@ -287,9 +281,7 @@ def fill(
         The workspace of the operator.
     """
     dst = _to_region(dst)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("fill"), [dst, value], workspace, schedule_config
-    )
+    return f_insert(tirp_op.Fill(dst, value, workspace=workspace, schedule_config=schedule_config))
 
 
 def gemm(
@@ -343,11 +335,19 @@ def gemm(
     C = _to_region(C)
     if workspace is None:
         workspace = {}
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("gemm"),
-        [D, A, B, C, transpose_A, transpose_B, alpha, beta],
-        workspace,
-        schedule_config,
+    return f_insert(
+        tirp_op.Gemm(
+            D,
+            A,
+            B,
+            C,
+            transpose_A,
+            transpose_B,
+            alpha,
+            beta,
+            workspace=workspace,
+            schedule_config=schedule_config,
+        )
     )
 
 
@@ -384,8 +384,8 @@ def sum(
     axes = _wrap_elem_in_tuple(axes)
     if workspace is None:
         workspace = {}
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("sum"), [dst, src, axes, accum], workspace, schedule_config
+    return f_insert(
+        tirp_op.Sum(dst, src, axes, accum, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -422,8 +422,8 @@ def max(
     axes = _wrap_elem_in_tuple(axes)
     if workspace is None:
         workspace = {}
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("max"), [dst, src, axes, accum], workspace, schedule_config
+    return f_insert(
+        tirp_op.Max(dst, src, axes, accum, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -460,8 +460,8 @@ def min(
     axes = _wrap_elem_in_tuple(axes)
     if workspace is None:
         workspace = {}
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("min"), [dst, src, axes, accum], workspace, schedule_config
+    return f_insert(
+        tirp_op.Min(dst, src, axes, accum, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -486,8 +486,8 @@ def reciprocal(
     """
     dst = _to_region(dst)
     src = _to_region(src)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("reciprocal"), [dst, src], workspace, schedule_config
+    return f_insert(
+        tirp_op.Reciprocal(dst, src, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -513,8 +513,8 @@ def memset(
     if workspace is None:
         workspace = {}
     dst = _to_region(dst)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("memset"), [dst, value], workspace, schedule_config
+    return f_insert(
+        tirp_op.Memset(dst, value, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -546,8 +546,8 @@ def maximum(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("maximum"), [dst, src1, src2], workspace, schedule_config
+    return f_insert(
+        tirp_op.Maximum(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -579,8 +579,8 @@ def minimum(
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("minimum"), [dst, src1, src2], workspace, schedule_config
+    return f_insert(
+        tirp_op.Minimum(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -615,8 +615,8 @@ def exp(
     src = _to_region(src)
     if bias is not None and isinstance(bias, Buffer):
         bias = _to_region(bias)
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("exp"), [dst, src, bias, scale], workspace, schedule_config
+    return f_insert(
+        tirp_op.Exp(dst, src, bias, scale, workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -689,9 +689,7 @@ def compose_op(
 
 def tvm_kernel_replace_point():
     """A placeholder for the kernel replace point, used in TIRp op scheduling."""
-    return _ffi_api.OpCall(  # pylint: disable=no-member
-        _get_tirp_op("tvm_kernel_replace_point"), [], {}, {}
-    )
+    return f_insert(tirp_op.KernelReplacePoint(workspace={}, schedule_config={}))
 
 
 __all__ = [

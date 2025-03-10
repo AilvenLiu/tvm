@@ -26,6 +26,7 @@
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/layout.h>
 #include <tvm/tirx/op.h>
+#include <tvm/tirx/tirp_stmt.h>
 
 namespace tvm {
 namespace script {
@@ -148,8 +149,7 @@ SBlockFrame Block(ffi::String name, bool no_realize = false, ffi::String exec_sc
                   ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents = std::nullopt,
                   ffi::String scope_slice_parent = "");
 
-void OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace = {},
-            Map<String, ObjectRef> schedule_config = {});
+void OpCall(tvm::tirx::tirp::OpCall op_call);
 
 BlockFrame BlockFrameSlice(BlockFrame block, ffi::Variant<ffi::Array<Range>, PrimExpr> slice);
 
@@ -603,7 +603,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

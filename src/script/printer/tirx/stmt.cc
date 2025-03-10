@@ -194,6 +194,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             return OpCallDoc(TIRp(d, name), args, {}, {});
           }
         });
+TVM_SCRIPT_REPR(tir::tirp::OpCallNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Evaluate>("", [](tirx::Evaluate eval, AccessPath p, IRDocsifier d) -> Doc {

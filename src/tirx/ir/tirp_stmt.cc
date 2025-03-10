@@ -35,10 +35,6 @@ OpCall::OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace,
   // Check if the op is a TIR+ op.
   static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
   ICHECK_EQ(tirp_op_map.count(op), 1) << "Only TIR+ ops can be used in tirx::tirp::OpCall";
-  // Args sanitizer.
-  static const auto& arg_sanitizer_map = Op::GetAttrMap<FArgSanitizer>("FArgSanitizer");
-  ICHECK_EQ(arg_sanitizer_map.count(op), 1) << "No arg sanitizer found for TIR+ op " << op;
-  arg_sanitizer_map[op](op, args);
   // Construct the OpCall.
   ObjectPtr<OpCallNode> n = make_object<OpCallNode>();
   n->op = std::move(op);
@@ -54,6 +50,6 @@ TVM_REGISTER_GLOBAL("tirx.OpCall").set_body_typed([](tvm::Op op, Array<ObjectRef
 
 TVM_REGISTER_NODE_TYPE(OpCallNode);
 
-}  // namespace tirxxxp
-}  // namespace tirxxx
+}  // namespace tirxxxxp
+}  // namespace tirxxxx
 }  // namespace tvm

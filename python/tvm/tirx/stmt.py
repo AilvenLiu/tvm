@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import tvm_ffi
 from tvm.ir import PrimExpr, Range, Span, Op
+from tvm.tir import FloatImm
 from tvm.runtime import Object, Scriptable, const, Tensor
 
 from . import _ffi_api
@@ -721,6 +722,10 @@ def stmt_list(stmt: Stmt) -> list[Stmt]:
     return [stmt]
 
 
+def normalize_const_arg(arg) -> PrimExpr:
+    if isinstance(arg, float):
+        return FloatImm("float32", arg)
+    return arg
 @tvm._ffi.register_object("tir.OpCall")
 class OpCall(Stmt):
     """OpCall node.
@@ -744,11 +749,12 @@ class OpCall(Stmt):
     args: List[PrimExpr]
     workspace: Dict[str, Buffer]
     schedule_config: Dict[str, Any]
+    _registry = {}
 
     def __init__(
         self,
-        op: Op,
-        args: List[PrimExpr],
+        *args: List[PrimExpr],
+        op: Optional[Op] = None,
         workspace: Dict[str, Buffer] = None,
         schedule_config: Dict[str, Any] = None,
     ) -> None:
@@ -756,6 +762,41 @@ class OpCall(Stmt):
             workspace = {}
         if schedule_config is None:
             schedule_config = {}
+        if op is None:
+            assert self.__class__ != OpCall, "Directly instantiating OpCall needs to specify the op"
+            op = self.__class__.op
+        else:
+            assert (
+                not hasattr(self.__class__, "op") or self.__class__.op == op
+            ), f"op {op} conflicts with subclass {self.__class__}"
+        args = list(map(normalize_const_arg, args))
         self.__init_handle_by_constructor__(
             _ffi_api.OpCall, op, args, workspace, schedule_config  # pylint: disable=no-member
         )
+        casted_op = OpCall.downcast(self)
+        casted_op.validate()
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if hasattr(cls, "op"):
+            cls._registry[cls.op] = cls
+
+    @classmethod
+    def downcast(cls, instance: "OpCall") -> "OpCall":
+        subclass = cls._registry.get(instance.op)
+        if subclass is None:
+            raise ValueError(f"No subclass registered for op: {instance.op}")
+        new_instance = subclass.__new__(subclass)
+        new_instance.__setstate__(instance.__getstate__())
+        return new_instance
+
+    @property
+    def srcs(self) -> List[PrimExpr]:
+        raise NotImplementedError("Subclass must implement this method")
+
+    @property
+    def dsts(self) -> List[PrimExpr]:
+        raise NotImplementedError("Subclass must implement this method")
+
+    def validate(self) -> None:
+        pass

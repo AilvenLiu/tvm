@@ -22,7 +22,7 @@ from typing import Union, Dict, Any
 from tvm._ffi import register_object
 from tvm.runtime import Object
 from tvm.ir import Op
-from tvm.tirx import BufferRegion, Buffer
+from tvm.tirx import BufferRegion, Buffer, OpCall
 from tvm.tirx.exec_scope import ExecScope
 
 from . import _ffi_api
@@ -65,7 +65,7 @@ def make_op_call(
     if workspace is None:
         workspace = {}
     f = tvm.get_global_func("script.ir_builder.tir.OpCall")
-    return f(_get_tirp_op(op_name), args, workspace, schedule_config)
+    return f(OpCall(*args, op=_get_tirp_op(op_name), workspace=workspace, schedule_config=schedule_config))
 
 
 @register_object("tirx.Pipeline")

@@ -258,9 +258,8 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
   return SBlockFrame(n);
 }
 
-void OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace,
-            Map<String, ObjectRef> schedule_config) {
-  AddToParent(tvm::tirx::tirp::OpCall(op, args, workspace, schedule_config));
+void OpCall(tvm::tirx::tirp::OpCall op_call) {
+  AddToParent(op_call);
 }
 
 BlockFrame BlockFrameSlice(BlockFrame block, Variant<Array<Range>, PrimExpr> slice) {
@@ -1169,7 +1168,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -19,13 +19,11 @@ import tvm
 from tvm.ir import Op
 from tvm.tir.buffer import decl_buffer
 from tvm.script import tirp as Tp
+from tvm.tir.stmt import OpCall
 
 
 def _test(op: str, *args):
-    f = tvm.get_global_func("tir.OpCall")
-    assert isinstance(op, str)
-    op = Op.get("tirp." + op)
-    f(op, args, {}, {})
+    return OpCall(*args, op=Op.get("tirp." + op), workspace={}, schedule_config={})
 
 
 def test_copy():
@@ -34,11 +32,11 @@ def test_copy():
     A_sm = decl_buffer((64, 64), "float32", scope="shared")
 
     _test("copy", A[0:64, 0:64], A_sm[0:64, 0:64])
-    with pytest.raises(Exception):
+    with pytest.raises(AssertionError):
         _test("copy", A[0:64, 0:64], A_sm[0:64, 0:64], 1)
-    with pytest.raises(Exception):
+    with pytest.raises(AssertionError):
         _test("copy", 1, A_sm[0:64, 0:64])
-    with pytest.raises(Exception):
+    with pytest.raises(AssertionError):
         _test("copy", A[0:64, 0:64], A_sm)
 
 
@@ -47,9 +45,9 @@ def test_fill():
     A = decl_buffer((64, 64), "float32", scope="global")
 
     _test("fill", A[0:64, 0:64], 1.0)
-    with pytest.raises(Exception):
+    with pytest.raises(AssertionError):
         _test("fill", A[0:64, 0:64], 1.0, 1)
-    with pytest.raises(Exception):
+    with pytest.raises(AssertionError):
         _test("fill", 1, 1.0)
 
 
@@ -61,7 +59,7 @@ def test_gemm():
     D = decl_buffer((64, 64), "float32", scope="global")
 
     _test("gemm", D[:, :], A[:, :], B[:, :], C[:, :], True, False, 1.0, 0.0)
-    with pytest.raises(Exception):
+    with pytest.raises(AssertionError):
         _test("gemm", D[:, :], A[:, :], B[:, :], C[:, :], True, False, 1.0, 0.0, 1)
 
 
