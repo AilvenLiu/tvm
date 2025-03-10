@@ -65,7 +65,11 @@ def make_op_call(
     if workspace is None:
         workspace = {}
     f = tvm.get_global_func("script.ir_builder.tir.OpCall")
-    return f(OpCall(*args, op=_get_tirp_op(op_name), workspace=workspace, schedule_config=schedule_config))
+    return f(
+        OpCall(
+            *args, op=_get_tirp_op(op_name), workspace=workspace, schedule_config=schedule_config
+        )
+    )
 
 
 @register_object("tirx.Pipeline")
@@ -85,14 +89,21 @@ class Pipeline(Object):
         depth: int = 0,
         separate_pc: bool = False,
         name_hint: str = "",
+        workspace: Dict[str, Buffer] = {},
         schedule_config: Dict[str, Any] = {},
     ):
         if workspace is None:
             workspace = {}
-        if strategy is None:
-            strategy = {}
+        if schedule_config is None:
+            schedule_config = {}
         self.__init_handle_by_constructor__(
-            _ffi_api.Pipeline, thread_scope, name_hint, depth, separate_pc, schedule_config
+            _ffi_api.Pipeline,
+            thread_scope,
+            name_hint,
+            depth,
+            separate_pc,
+            workspace,
+            schedule_config,
         )
 
     def init(self):

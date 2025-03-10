@@ -726,6 +726,8 @@ def normalize_const_arg(arg) -> PrimExpr:
     if isinstance(arg, float):
         return FloatImm("float32", arg)
     return arg
+
+
 @tvm._ffi.register_object("tir.OpCall")
 class OpCall(Stmt):
     """OpCall node.

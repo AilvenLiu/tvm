@@ -85,7 +85,8 @@ class PipelineNode : public Object {
 class Pipeline : public ObjectRef {
  public:
   TVM_DLL explicit Pipeline(ExecScope thread_scope, size_t depth = 0, bool separate_pc = false,
-                            String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {}, Map<String, ObjectRef> schedule_config = {});
+                            String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {},
+                            Map<String, ObjectRef> schedule_config = {});
 
   TVM_DEFINE_OBJECT_REF_METHODS(Pipeline, ObjectRef, PipelineNode);
 };
@@ -102,13 +103,14 @@ class CopyPipelineNode : public PipelineNode {
 class CopyPipeline : public Pipeline {
  public:
   TVM_DLL explicit CopyPipeline(ExecScope thread_scope, size_t depth = 0, bool separate_pc = false,
-                                String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {}, Map<String, ObjectRef> schedule_config = {});
+                                String name_hint = "", Map<String, tvm::tirx::Buffer> workspace = {},
+                                Map<String, ObjectRef> schedule_config = {});
 
   TVM_DEFINE_OBJECT_REF_METHODS(CopyPipeline, Pipeline, CopyPipelineNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(CopyPipelineNode);
 };
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_ASYNC_STRUCTS_H_

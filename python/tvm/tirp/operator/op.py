@@ -17,10 +17,10 @@
 
 """Implementation of TIR operator."""
 
-from typing import Optional, Union, List, Tuple, Dict, Any
+from typing import List, Tuple
 
 from tvm.tir.stmt import OpCall
-from tvm.tir import PrimExpr, Buffer, BufferRegion, FloatImm
+from tvm.tir import PrimExpr, BufferRegion, FloatImm
 from tvm.ir import Op
 from tvm.tir.async_structs import Pipeline
 
