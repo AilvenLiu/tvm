@@ -522,8 +522,6 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
                       const Target& target) {
     arith::Analyzer ana;
     StorageLower storage_lower(&ana, target);
-    for (const auto& kv : buffer_map) {
-    }
     return storage_lower(stmt);
   }
 
@@ -553,6 +551,16 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     }
 
     return StmtExprMutator::VisitStmt_(block.get());
+  }
+
+  Stmt VisitStmt_(const DeclBufferNode* op) final {
+    auto buffer = GetFlattenedBuffer(op->buffer);
+
+    DeclBuffer decl_buffer = GetRef<DeclBuffer>(op);
+    auto n = decl_buffer.CopyOnWrite();
+    n->buffer = buffer;
+
+    return StmtExprMutator::VisitStmt_(decl_buffer.get());
   }
 
   virtual Buffer GetFlattenedBuffer(Buffer buf) {

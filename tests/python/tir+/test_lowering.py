@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import pytest
-import numpy as np
+
 import tvm
 import tvm.testing
 from tvm.script import tir as T
@@ -112,9 +112,7 @@ def test_lower_view_get():
                 A = T.alloc_buffer([4, 2], dtype="float32", scope="local",
                                    layout=atom.tile(tile, (2, 2), (1, 2)))
                 B_layout = warp_atom.tile(tile, (2, 2), (8, 8))
-                """
-                load in_buf into A
-                """
+                # load in_buf into A
                 with T.warp():
                     # warp view of this load
                     B = T.view(A, layout=B_layout, shape=(16, 16))
@@ -124,9 +122,7 @@ def test_lower_view_get():
                         for i in T.unroll(4):
                             for j in T.vectorized(2):
                                 A_local[i, j] = in_buf[i // 2 * 8 + lane_id // 4, i % 2 * 8 + lane_id % 4 + j]
-                """
-                write A into out
-                """
+                # write A into out
                 with T.warp():
                     # warp view of this write
                     B = T.view(A, layout=B_layout, shape=(16, 16))
@@ -429,9 +425,4 @@ def test_lower_decl_buffer_access_ptr():
 
 
 if __name__ == "__main__":
-    test_lower_view_get()
-    test_lower_scope_id()
-    test_lower_scope_slice()
-    test_lower_layout()
-    test_lower_opcall_fail()
-    test_lower_decl_buffer_access_ptr()
+    tvm.testing.main()

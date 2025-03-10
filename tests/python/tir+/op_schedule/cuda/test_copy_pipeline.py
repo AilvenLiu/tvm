@@ -137,8 +137,7 @@ def test_copy_g2s_s2g_cta_vec_load(input, dtype):
 
 
 def generate_tma_test_cases():
-    # dtypes = ["int8", "e4m3_float8", "e5m2_float8", "float16", "float32"]
-    dtypes = ["float16"]
+    dtypes = ["int8", "uint8", "e4m3_float8", "e5m2_float8", "float16", "float32"]
 
     tasks = [
         (
@@ -151,16 +150,16 @@ def generate_tma_test_cases():
             TileLayout.from_tuple((64, 256)),  # global_layout_dst
             tvm.cuda(0),
         ),
-        # (
-        #     (64, 256),  # global_shape
-        #     ((0, 64), (0, 256)),  # global_region
-        #     (3, 64, 256),  # shared_shape
-        #     ((1, 2), (0, 64), (0, 256)),  # shared_region
-        #     64,  # thread cnt per CTA
-        #     TileLayout.from_tuple((64, 256)),  # global_layout_src
-        #     TileLayout.from_tuple((64, 256)),  # global_layout_dst
-        #     tvm.cuda(0),
-        # ),
+        (
+            (64, 256),  # global_shape
+            ((0, 64), (0, 256)),  # global_region
+            (3, 64, 256),  # shared_shape
+            ((1, 2), (0, 64), (0, 256)),  # shared_region
+            64,  # thread cnt per CTA
+            TileLayout.from_tuple((64, 256)),  # global_layout_src
+            TileLayout.from_tuple((64, 256)),  # global_layout_dst
+            tvm.cuda(0),
+        ),
     ]
 
     for task in tasks:
@@ -189,6 +188,9 @@ def test_copy_g2s_cta_tma_load(inp):
     total_bytes = functools.reduce(lambda acc, region: acc * (region[1] - region[0]), s_region, 1)
     total_bytes = total_bytes * tvm.DataType(dtype).bits // 8
 
+    smem_bytes = functools.reduce(lambda acc, extent: acc * extent, s_shape, 1)
+    smem_bytes = smem_bytes * tvm.DataType(dtype).bits // 8
+
     r_smem = list(slice(s_region[i][0], s_region[i][1]) for i in range(len(s_shape)))
     r_gmem = list(slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape)))
 
@@ -203,10 +205,10 @@ def test_copy_g2s_cta_tma_load(inp):
             tx = T.thread_id([thread_cnt], parent="cta")
 
             # TODO(@bohan): remove this 
-            with T.cta():
-                dyn = T.alloc_buffer([total_bytes + 8], "uint8", scope="shared.dyn")
+            with T.thread():
+                dyn = T.alloc_buffer([smem_bytes + 8], "uint8", scope="shared.dyn")
                 A_smem = T.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=layoutS)
-                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=total_bytes // 8, layout=TileLayout.from_tuple((1,)))
+                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8, layout=TileLayout.from_tuple((1,)))
 
                 with T.cta():
                     pipeline = Tp.alloc_copy_pipeline("cta", depth=0, separate_pc=False,
@@ -221,6 +223,7 @@ def test_copy_g2s_cta_tma_load(inp):
 
     np_dtype = ml_dtypes_dict[dtype] if dtype in ml_dtypes_dict else np.dtype(dtype)
     target = tvm.target.Target.from_device(dev)
+
     with target:
         mod = tvm.IRModule({"main": copy_async})
         mod = tvm.build(mod, target=target, pipeline="tirp")

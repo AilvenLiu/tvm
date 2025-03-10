@@ -20,9 +20,8 @@ import numpy as np
 
 import tvm
 from tvm.tir import Buffer
-from tvm.script import tir as T, ir as I
+from tvm.script import tir as T
 import tvm.testing
-from tvm.tir.transform import LowerTIRp
 
 
 def _get_source(func: tvm.tir.PrimFunc) -> str:
@@ -985,16 +984,4 @@ def test_warp_shuffle_xor_sync():
 
 
 if __name__ == "__main__":
-    test_stmatrix_sync_aligned()
-    test_bar_sync()
-    test_elect_sync()
-    test_barrier_cluster()
-    test_fence_proxy_async()
-    test_cp_async_bulk_tensor_global_to_shared_unicast()
-    test_cp_async_bulk_tensor_global_to_shared_swizzle()
-    test_cp_async_bulk_tensor_global_to_shared_multicast1()
-    test_cp_async_bulk_tensor_global_to_shared_multicast2()
-    test_cp_async_bulk_tensor_shared_to_global()
-    test_wgmma_ss_nt()
-    test_wgmma_rs_nt()
-    test_warp_shuffle_xor_sync()
+    tvm.testing.main()
