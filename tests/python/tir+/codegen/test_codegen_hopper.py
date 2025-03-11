@@ -219,7 +219,7 @@ def test_fence_proxy_async():
 
 
 @tvm.testing.requires_cuda_compute_version(9)
-@pytest.mark.parametrize("dtype", ["float16", "float32", "e4m3_float8", "e5m2_float8"])
+@pytest.mark.parametrize("dtype", ["float16", "float32", "float8_e4m3fn", "float8_e5m2"])
 @pytest.mark.parametrize(
     "inputs",
     [
@@ -288,9 +288,9 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     A_np = np.random.randn(math.prod(shape))
 
     def get_np_dtype(dtype):
-        if dtype == "e4m3_float8":
+        if dtype == "float8_e4m3fn":
             return ml_dtypes.float8_e4m3fn
-        if dtype == "e5m2_float8":
+        if dtype == "float8_e5m2":
             return ml_dtypes.float8_e5m2
         return np.dtype(dtype)
 

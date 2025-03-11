@@ -184,7 +184,7 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
     scale_type = CUDA_R_32I;
     alpha = &one_i32;
     beta = &zero_i32;
-  } else if (TypeMatch(C->dtype, DataType::TypeCode::kE4M3Float, 8)) {
+  } else if (TypeMatch(C->dtype, DataType::TypeCode::kFloat8_e4m3fn, 8)) {
     d_type = CUDA_R_8F_E4M3;
   }
 

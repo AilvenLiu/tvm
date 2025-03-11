@@ -54,7 +54,7 @@ enum class DataType : int {
   kUInt32 = 7,
   kInt64 = 8,
   kUInt64 = 9,
-  kFloat8_e4m3 = 10,
+  kFloat8_e4m3fn = 10,
   kFloat8_e5m2 = 11,
   kFloat16 = 12,
   kBFloat16 = 13,
@@ -101,7 +101,7 @@ inline DataType DTypeFromString(const std::string str) {
   } else if (str == "uint64" || str == ".u64") {
     return DataType::kUInt64;
   } else if (str == "e4m3" || str == ".e4m3") {
-    return DataType::kFloat8_e4m3;
+    return DataType::kFloat8_e4m3fn;
   } else if (str == "e5m2" || str == ".e5m2") {
     return DataType::kFloat8_e5m2;
   } else if (str == "float16" || str == "fp16" || str == ".f16") {
@@ -126,9 +126,9 @@ inline DataType DTypeFromString(const std::string str) {
     return DataType::kBit32;
   } else if (str == ".b64") {
     return DataType::kBit64;
-  } else if (str == "e4m3_float8") {
-    return DataType::kFloat8_e4m3;
-  } else if (str == "e5m2_float8") {
+  } else if (str == "float8_e4m3fn") {
+    return DataType::kFloat8_e4m3fn;
+  } else if (str == "float8_e5m2fn") {
     return DataType::kFloat8_e5m2;
   } else {
     TVM_FFI_THROW(InternalError) << "Unrecognized PTX data type " << str;
@@ -150,7 +150,7 @@ inline uint32_t DTypeBits(DataType dtype) { return num_bits[static_cast<int>(dty
  */
 inline std::tuple<int, int, int> ParseMMAShape(const std::string& str) {
   size_t pos_m = str.find("m"), pos_n = str.find("n"), pos_k = str.find("k");
-  TVM_FFI_ICHECK(pos_m != str.npos && pos_n != str.npos && pos_k != str.npos)
+  TVM_FFI_CHECK(pos_m != str.npos && pos_n != str.npos && pos_k != str.npos)
       << "Cannot parse MMA shape " << str;
   int m = std::stoi(str.substr(pos_m + 1, pos_n - pos_m - 1)),
       n = std::stoi(str.substr(pos_n + 1, pos_k - pos_n - 1)), k = std::stoi(str.substr(pos_k + 1));
@@ -243,8 +243,8 @@ const MMAConfig valid_mma_configs[] = {
     MMAConfig(16, 8, 128, DataType::kInt4, false, true),
     MMAConfig(16, 8, 64, DataType::kUInt4, false, true),
     MMAConfig(16, 8, 128, DataType::kUInt4, false, true),
-    MMAConfig(16, 8, 32, DataType::kFloat8_e4m3, false, false),
-    MMAConfig(16, 8, 64, DataType::kFloat8_e4m3, false, true),
+    MMAConfig(16, 8, 32, DataType::kFloat8_e4m3fn, false, false),
+    MMAConfig(16, 8, 64, DataType::kFloat8_e4m3fn, false, true),
     MMAConfig(16, 8, 32, DataType::kFloat8_e5m2, false, false),
     MMAConfig(16, 8, 64, DataType::kFloat8_e5m2, false, true),
 };
@@ -268,26 +268,24 @@ void CheckMMADTypeCompatible(DataType dtype_a, DataType dtype_b, DataType dtype_
     case DataType::kBFloat16:
     case DataType::kTensorFloat32:
     case DataType::kFloat64:
-      TVM_FFI_ICHECK(dtype_a == dtype_b) << ab_not_match_err_str;
+      TVM_FFI_CHECK(dtype_a == dtype_b) << ab_not_match_err_str;
       break;
     case DataType::kInt4:
     case DataType::kUInt4:
-      TVM_FFI_ICHECK(dtype_b == DataType::kInt4 || dtype_b == DataType::kUInt4)
-          << ab_not_match_err_str;
+      TVM_FFI_CHECK(dtype_b == DataType::kInt4 || dtype_b == DataType::kUInt4) << ab_not_match_err_str;
       break;
     case DataType::kInt8:
     case DataType::kUInt8:
-      TVM_FFI_ICHECK(dtype_b == DataType::kInt8 || dtype_b == DataType::kUInt8)
-          << ab_not_match_err_str;
+      TVM_FFI_CHECK(dtype_b == DataType::kInt8 || dtype_b == DataType::kUInt8) << ab_not_match_err_str;
       break;
-    case DataType::kFloat8_e4m3:
+    case DataType::kFloat8_e4m3fn:
     case DataType::kFloat8_e5m2:
-      TVM_FFI_ICHECK(dtype_b == DataType::kFloat8_e4m3 || dtype_b == DataType::kFloat8_e5m2)
+      TVM_FFI_CHECK(dtype_b == DataType::kFloat8_e4m3fn || dtype_b == DataType::kFloat8_e5m2)
           << ab_not_match_err_str;
       break;
     default:
-      TVM_FFI_ICHECK(false) << "Invalid multiplicand data types: " << DTypeToString(dtype_a)
-                            << DTypeToString(dtype_b);
+      TVM_FFI_CHECK(false) << "Invalid multiplicand data types: " << DTypeToString(dtype_a)
+                   << DTypeToString(dtype_b);
   }
   // check a,b and c
   switch (dtype_a) {
@@ -296,32 +294,31 @@ void CheckMMADTypeCompatible(DataType dtype_a, DataType dtype_b, DataType dtype_
     case DataType::kUInt4:
     case DataType::kInt8:
     case DataType::kUInt8:
-      TVM_FFI_ICHECK(dtype_c == DataType::kInt32)
+      TVM_FFI_CHECK(dtype_c == DataType::kInt32)
           << "For multiplicand data type " << DTypeToString(dtype_a) << DTypeToString(dtype_b)
           << ", accumulator data type should be s32.";
       break;
     case DataType::kFloat16:
-      TVM_FFI_ICHECK(dtype_c == DataType::kFloat16 || dtype_c == DataType::kFloat32)
+      TVM_FFI_CHECK(dtype_c == DataType::kFloat16 || dtype_c == DataType::kFloat32)
           << "For multiplicand data type f16, accumulator data type should be f16/f32.";
       break;
     case DataType::kBFloat16:
     case DataType::kTensorFloat32:
-      TVM_FFI_ICHECK(dtype_c == DataType::kFloat32)
+      TVM_FFI_CHECK(dtype_c == DataType::kFloat32)
           << "For multiplicand data type bf16/tf32, accumulator data type can only be f32.";
       break;
     case DataType::kFloat64:
-      TVM_FFI_ICHECK(dtype_c == DataType::kFloat64)
+      TVM_FFI_CHECK(dtype_c == DataType::kFloat64)
           << "For multiplicand data type f64, accumulator data type can only be f64.";
       break;
-    case DataType::kFloat8_e4m3:
+    case DataType::kFloat8_e4m3fn:
     case DataType::kFloat8_e5m2:
-      TVM_FFI_ICHECK(dtype_c == DataType::kFloat32)
+      TVM_FFI_CHECK(dtype_c == DataType::kFloat32)
           << "For multiplicand data type e4m3/e5m2, accumulator data type can only be f32.";
       break;
     default:
-      TVM_FFI_ICHECK(false) << "Invalid multiplicand/accumulator data types: "
-                            << DTypeToString(dtype_a) << DTypeToString(dtype_b)
-                            << DTypeToString(dtype_c) << ".";
+      TVM_FFI_CHECK(false) << "Invalid multiplicand/accumulator data types: " << DTypeToString(dtype_a)
+                   << DTypeToString(dtype_b) << DTypeToString(dtype_c) << ".";
   }
 }
 
@@ -343,23 +340,22 @@ void CheckMMADTypeCompatible(DataType dtype_a, DataType dtype_b, DataType dtype_
 void CheckMMAConfigValidity(int m, int n, int k, LayoutType layout_a, LayoutType layout_b,
                             DataType dtype_a, DataType dtype_b, DataType dtype_c,
                             const std::string& bit_op, bool sparse, bool saturate) {
-  TVM_FFI_ICHECK(bit_op == "xor" || bit_op == "and" || bit_op == "")
+  TVM_FFI_CHECK(bit_op == "xor" || bit_op == "and" || bit_op == "")
       << "Unrecognized 1-bit operation " << bit_op << " , can only be xor/and.";
   bool use_bit_op = !bit_op.empty();
   if (use_bit_op) {
-    TVM_FFI_ICHECK(dtype_a == DataType::kBit1)
-        << "Bit operator is only compatible with 1-bit multiplicand.";
+    TVM_FFI_CHECK(dtype_a == DataType::kBit1) << "Bit operator is only compatible with 1-bit multiplicand.";
   }
   CheckMMADTypeCompatible(dtype_a, dtype_b, dtype_c);
   if (saturate) {
-    TVM_FFI_ICHECK(dtype_a == DataType::kInt4 || dtype_a == DataType::kUInt4 ||
-                   dtype_a == DataType::kInt8 || dtype_a == DataType::kUInt8)
+    TVM_FFI_CHECK(dtype_a == DataType::kInt4 || dtype_a == DataType::kUInt4 || dtype_a == DataType::kInt8 ||
+          dtype_a == DataType::kUInt8)
         << "Output saturation only applicable to multiplicand type s4/u4/s8/u8.";
   }
 
   if (!(m == 8 && n == 8 && k == 4 && dtype_a == ptx::DataType::kFloat16)) {
     // Only MMA on m8n8k4 for fp16 supports customized layouts.
-    TVM_FFI_ICHECK(layout_a == LayoutType::kRowMajor && layout_b == LayoutType::kColumnMajor)
+    TVM_FFI_CHECK(layout_a == LayoutType::kRowMajor && layout_b == LayoutType::kColumnMajor)
         << "Invalid layout combination " << LayoutTypeToString(layout_a) << ","
         << LayoutTypeToString(layout_b) << ".";
   }
@@ -372,7 +368,7 @@ void CheckMMAConfigValidity(int m, int n, int k, LayoutType layout_a, LayoutType
       break;
     }
   }
-  TVM_FFI_ICHECK(match) << "Cannot find matched MMA configurations.";
+  TVM_FFI_CHECK(match) << "Cannot find matched MMA configurations.";
 }
 
 /*!
@@ -400,7 +396,7 @@ inline FragAttrs GetFragAttrs(DataType dtype) {
     case DataType::kUInt4:
     case DataType::kInt8:
     case DataType::kUInt8:
-    case DataType::kFloat8_e4m3:
+    case DataType::kFloat8_e4m3fn:
     case DataType::kFloat8_e5m2:
     case DataType::kBit16:
     case DataType::kFloat16:  // .f16x2 register
@@ -629,11 +625,9 @@ std::string PrintLoadMatrixAssembly(bool trans, int num, const std::string& type
                                     const std::string& local_elem_offset,
                                     const std::string& smem_ptr,
                                     const std::string& smem_elem_offset) {
-  TVM_FFI_ICHECK(num == 1 || num == 2 || num == 4)
-      << "ldmatrix only accept loading 1/2/4 matrices.";
+  TVM_FFI_CHECK(num == 1 || num == 2 || num == 4) << "ldmatrix only accept loading 1/2/4 matrices.";
   ptx::DataType data_type = ptx::DTypeFromString(type);
-  TVM_FFI_ICHECK(data_type == ptx::DataType::kBit16)
-      << "ldmatrix only accept matrix with type .b16.";
+  TVM_FFI_CHECK(data_type == ptx::DataType::kBit16) << "ldmatrix only accept matrix with type .b16.";
   std::string asm_code = R"(
   {
     unsigned int addr = __cvta_generic_to_shared({smem_addr});
@@ -692,8 +686,8 @@ std::string PrintPredicatedCpAsyncAssembly(const std::string& shared_ptr,
                                            const std::string& global_elem_offset,
                                            const std::string& bytes,
                                            const std::string& predicate_value) {
-  TVM_FFI_ICHECK(bytes == "16" || bytes == "12" || bytes == "8" || bytes == "4" || bytes == "2" ||
-                 bytes == "1")
+  TVM_FFI_CHECK(bytes == "16" || bytes == "12" || bytes == "8" || bytes == "4" || bytes == "2" ||
+        bytes == "1")
       << "Only support 16, 12, 8, 4, 2, 1 bytes for predicated cp.async";
   std::string predicated_asm_code = R"(
   {
@@ -1216,7 +1210,8 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
   return caller_code;
 }
 
-std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(codegen::CodeGenCUDA* cg, int dim, const std::string& src,
+std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(codegen::CodeGenCUDA* cg, int dim,
+                                                         const std::string& src,
                                                          const std::string& tensormap,
                                                          std::vector<std::string> coords) {
   std::string func_code = R"(
@@ -1298,7 +1293,8 @@ __forceinline__ __device__ void {func_name}() {
   return func_name + "();\n";
 }
 
-std::string PrintCpAsyncBulkTensorWaitGroupAssembly(codegen::CodeGenCUDA* cg, const std::string& N, bool read) {
+std::string PrintCpAsyncBulkTensorWaitGroupAssembly(codegen::CodeGenCUDA* cg, const std::string& N,
+                                                    bool read) {
   std::string func_code = R"(
 template <int N, bool read>
 __forceinline__ __device__ void {func_name}() {
@@ -1326,7 +1322,7 @@ __forceinline__ __device__ int{bits}_t {func_name}() {
   return (int{bits}_t)x;
 }
 )";
-  CHECK(bits == 32 || bits == 64) << "Only support 32/64 bits for ptx_fetch_register.";
+  TVM_FFI_CHECK(bits == 32 || bits == 64) << "Only support 32/64 bits for ptx_fetch_register.";
 
   std::string reg_rp = reg;
   std::replace(reg_rp.begin(), reg_rp.end(), '.', '_');
@@ -1358,7 +1354,7 @@ __forceinline__ __device__ void {func_name}({dtype} reg) {
     format = "f";
     dtype_str = "float";
   } else {
-    LOG(FATAL) << "Only support uint32/float32 for wgmma_fence.";
+    TVM_FFI_THROW(InternalError) << "Only support uint32/float32 for wgmma_fence.";
   }
   {
     // func name
@@ -1410,12 +1406,12 @@ std::string PrintWGMMAasyncSSAssembly(int M, int N, int K, const std::string& in
   }
   bool allow_transpose = in_dtype == "float16" || in_dtype == "bfloat16";
   if (!allow_transpose) {
-    CHECK(transA == false && transB == false)
+    TVM_FFI_CHECK(transA == false && transB == false)
         << "Matrices A and B are stored in row-major and column-major format respectively. The "
            "transpose operation is only supported for the wgmma.mma_async variants with .f16/ "
            ".bf16 types on matrices accessed from shared memory using matrix descriptors.";
   }
-  CHECK(out_dtype == "float32")
+  TVM_FFI_CHECK(out_dtype == "float32")
       << "ValueError: codegen only support float32 as output dtype for WGMMMA.";
   std::string accum_list = "\"+f\"(" + accums[0] + ")";
   for (size_t i = 1; i < accums.size(); ++i) {
@@ -1497,12 +1493,12 @@ std::string PrintWGMMAasyncRSAssembly(int M, int N, int K, const std::string& in
   }
   bool allow_transpose = in_dtype == "float16" || in_dtype == "bfloat16";
   if (!allow_transpose) {
-    CHECK(transA == false && transB == false)
+    TVM_FFI_CHECK(transA == false && transB == false)
         << "Matrices A and B are stored in row-major and column-major format respectively. The "
            "transpose operation is only supported for the wgmma.mma_async variants with .f16/ "
            ".bf16 types on matrices accessed from shared memory using matrix descriptors.";
   }
-  CHECK(out_dtype == "float32")
+  TVM_FFI_CHECK(out_dtype == "float32")
       << "ValueError: codegen only support float32 as output dtype for WGMMMA.";
   std::string accum_list = "\"+f\"(" + accums[0] + ")";
   for (size_t i = 1; i < accums.size(); ++i) {
@@ -1749,7 +1745,7 @@ std::string PrintStmatrixSyncAlignedAssembly(int num, bool trans, const std::str
   replacer.register_rule("{trans}", trans ? ".trans" : "");
 
   std::string assign_half_code;
-  ICHECK_EQ(vars.size(), 2 * num);
+  TVM_FFI_ICHECK_EQ(vars.size(), 2 * num);
   for (int i = 0; i < num; ++i) {
     assign_half_code += "   half_pairs[" + std::to_string(i) + "] = {" + vars[2 * i] + ", " +
                         vars[2 * i + 1] + "};\n";

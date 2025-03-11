@@ -258,9 +258,7 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
   return SBlockFrame(n);
 }
 
-void OpCall(tvm::tirx::tirp::OpCall op_call) {
-  AddToParent(op_call);
-}
+void OpCall(tvm::tirx::tirp::OpCall op_call) { AddToParent(op_call); }
 
 BlockFrame BlockFrameSlice(BlockFrame block, Variant<Array<Range>, PrimExpr> slice) {
   ICHECK(block->exec_scope.defined()) << "InternalError: Block frame must have an execution scope";
@@ -474,7 +472,7 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                          ffi::String logical_scope, ffi::Optional<TLayout> layout,
                          ffi::Array<Integer> allocated_addr) {
   Buffer buffer =
-      BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align, offset_factor,
+      BufferDecl(shape, dtype, "", NullOpt, strides, NullOpt, storage_scope, align, 0,
                  buffer_type_str, axis_separators, logical_scope, layout, allocated_addr);
   IRBuilder builder = IRBuilder::Current();
   auto opt_func_frame = builder->FindFrame<PrimFuncFrame>();
@@ -1168,7 +1166,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

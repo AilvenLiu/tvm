@@ -14,22 +14,19 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import numpy as np
-
+import pytest
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.transform import LowerTIRp
-import pytest
 from .utils import run_on_remote_and_check_correct, ssh_client
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
-seqlen_q=16*1024
-seqlen_kv=16*1024
-d=128
-softmax_scale=1.0 / (d ** 0.5)
+seqlen_q = 16 * 1024
+seqlen_kv = 16 * 1024
+d = 128
+softmax_scale = 1.0 / (d**0.5)
 head_q = 1
 head_kv = 1
 p_size = 128
@@ -40,19 +37,27 @@ BLOCK_Q = 128
 NUM_BLOCKS_Q = seqlen_q // BLOCK_Q
 
 NUM_MM1_PER_BLOCK = BLOCK_KV // 512
+
+
+@pytest.mark.dependency(depends=["ssh_success"])
 def test_flash_attn(ssh_client):
-    
+
     running_max_shape = (seqlen_q, 1)
-    running_max_layout = T.TrainiumLayout("FP", T.TileLayout.from_tuple((seqlen_q // p_size, p_size), (1, 1)))
-    
+    running_max_layout = T.TrainiumLayout(
+        "FP", T.TileLayout.from_tuple((seqlen_q // p_size, p_size), (1, 1))
+    )
+
+    # fmt: off
     @T.macro
     def mm1(q_loaded, k_loaded, qk, mm1_dot_partial_max):
-        mm1_dot_psum = T.alloc_buffer((8, BLOCK_Q, 512), dtype="float32", scope="trn.psum", layout= T.TrainiumPSUMLayout("FPF", T.TileLayout.from_tuple((8, BLOCK_Q, 512), (512, 1, 1))), allocated_addr=(0,0))
+        mm1_dot_psum = T.alloc_buffer((8, BLOCK_Q, 512), dtype="float32", scope="trn.psum",
+                                      layout= T.TrainiumPSUMLayout("FPF", T.TileLayout.from_tuple((8, BLOCK_Q, 512), (512, 1, 1))), allocated_addr=(0,0))
         for i in T.serial(0, NUM_MM1_PER_BLOCK):
             Tp.gemm(mm1_dot_psum[i % 8], q_loaded, k_loaded[i * 512: (i + 1) * 512, :], mm1_dot_psum[i % 8], transpose_B=True)
             with Tp.compose_op():
                 Tp.mul(qk[:, i * 512: (i + 1) * 512], mm1_dot_psum[i % 8], T.float32(softmax_scale))
                 Tp.max(mm1_dot_partial_max[:, i], qk[:, i * 512: (i + 1) * 512], axes=-1)
+    # fmt: on
 
     class SimpleSBUFAllocator:
         def __init__(self):
@@ -63,8 +68,9 @@ def test_flash_attn(ssh_client):
             self.allocated_addr += size
             return addr
 
-    allocator = SimpleSBUFAllocator()   
-    
+    allocator = SimpleSBUFAllocator()
+
+    # fmt: off
     @T.prim_func(tirp=True)
     def flash_attn(q_ptr: T.handle, k_ptr: T.handle, v_ptr: T.handle, out_ptr: T.handle):
         T.func_attr({"num_inputs": 3})
@@ -153,7 +159,7 @@ def test_flash_attn(ssh_client):
     with target:
         mod = tvm.IRModule({"main": flash_attn})
         func = mod["main"]
-        #FIXME: the correctness is not verified due to a bug in neuron compiler
+        # FIXME: the correctness is not verified due to a bug in neuron compiler
         run_on_remote_and_check_correct(func, None, target)
 
 

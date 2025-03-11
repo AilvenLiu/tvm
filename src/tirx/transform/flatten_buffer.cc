@@ -39,11 +39,11 @@ namespace tirx {
  * \brief Transform multi-dimension BufferLoad/BufferStore into device-supported dimension
  *        for the TIR not contains opaque block.
  */
-class Flattener : public arith::IRMutatorWithAnalyzer {
+class BufferFlattener : public arith::IRMutatorWithAnalyzer {
  public:
   static PrimFunc Flatten(PrimFunc func) {
     arith::Analyzer ana;
-    auto pass = Flattener(&ana);
+    auto pass = BufferFlattener(&ana);
     auto writer = func.CopyOnWrite();
     pass.MarkBufferMapShapes(func);
     auto body = pass.VisitStmt(func->body);
@@ -77,7 +77,7 @@ class Flattener : public arith::IRMutatorWithAnalyzer {
   using IRMutatorWithAnalyzer::VisitStmt;
   using IRMutatorWithAnalyzer::VisitStmt_;
 
-  explicit Flattener(arith::Analyzer* ana) : IRMutatorWithAnalyzer(ana) {}
+  explicit BufferFlattener(arith::Analyzer* ana) : IRMutatorWithAnalyzer(ana) {}
 
   Stmt VisitStmt_(const SBlockNode* op) final {
     TVM_FFI_ICHECK_EQ(op->match_buffers.size(), 0)

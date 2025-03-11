@@ -209,12 +209,9 @@ void BlockAttrs(ffi::Map<ffi::String, ffi::Any> attrs);
  * \brief The buffer allocation function.
  * \param shape The type of the buffer prior to flattening.
  * \param dtype The data type in the content of the buffer.
- * \param data The pointer to the head of the data.
  * \param strides The strides of each dimension.
- * \param elem_offset The offset in terms of number of dtype elements (including lanes).
  * \param storage_scope The optional storage scope of buffer data pointer.
  * \param align The alignment requirement of data pointer in bytes.
- * \param offset_factor The factor of elem_offset field.
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
  * \param logical_scope The logical scope of the buffer.

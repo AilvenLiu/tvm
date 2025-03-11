@@ -779,6 +779,9 @@ def sblock_alloc_buffer(
 
     allocated_addr: Optional[Union[int, Tuple[int]]]
         The address of the allocated buffer. Might be multi-dimensional.
+        There can be pooled storage scopes on some devices. For example,
+        the Trainium device has a pooled storage scope for the SRAN buffers. ("trn.sbuf")
+        CUDA has a pooled storage scope for the shared memory ("shared.dyn")
 
     Returns
     -------

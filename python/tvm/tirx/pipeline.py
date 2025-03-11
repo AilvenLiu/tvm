@@ -145,7 +145,7 @@ def tirp_pipeline():
             tir.transform.ConvertBlocksToOpaque(),
             tir.transform.LiftThreadBinding(),
             tir.transform.ManifestSharedMemoryLocalStage(),
-            tir.transform.CompactBufferAllocation(),
+            # tir.transform.CompactBufferAllocation(),
             tir.transform.LowerAutoCopy(),
             tir.transform.UnifyThreadBinding(),
             tir.transform.LowerMatchBuffer(),

@@ -29,8 +29,8 @@ from tvm.tir.async_structs import CopyPipeline
 
 
 ml_dtypes_dict = {
-    "e4m3_float8": ml_dtypes.float8_e4m3fn,
-    "e5m2_float8": ml_dtypes.float8_e5m2,
+    "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
+    "float8_e5m2": ml_dtypes.float8_e5m2,
     # "bfloat16": ml_dtypes.bfloat16,
     "int4": ml_dtypes.int4,
 }
@@ -89,7 +89,7 @@ ml_dtypes_dict = {
         ),
     ],
 )
-@pytest.mark.parametrize("dtype", ["int8", "e4m3_float8", "e5m2_float8", "float16", "float32"])
+@pytest.mark.parametrize("dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "float32"])
 def test_copy_g2s_s2g_cta_vec_load(input, dtype):
     g_shape, s_shape, g_st, g_extent, thread_cnt, layoutA, layoutB, layoutS, dev = input
 
@@ -137,7 +137,7 @@ def test_copy_g2s_s2g_cta_vec_load(input, dtype):
 
 
 def generate_tma_test_cases():
-    dtypes = ["int8", "uint8", "e4m3_float8", "e5m2_float8", "float16", "float32"]
+    dtypes = ["int8", "uint8", "float8_e4m3fn", "float8_e5m2", "float16", "float32"]
 
     tasks = [
         (

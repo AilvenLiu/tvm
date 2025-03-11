@@ -111,7 +111,7 @@ def test_fp8_gemm_hopper_no_ws():
             B_offset = T.meta_var(inner_k * WGMMA_K)
             T.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
             T.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
-            T.wgmma_mma_async_ss(WGMMA_M, WGMMA_N, WGMMA_K, "e4m3_float8", "float32", False, False, 1.0, 1.0, True,
+            T.wgmma_mma_async_ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True,
                                 descA[0], descB[0], *get_accum_list(accum, 128))
         T.wgmma_commit_group()
 
@@ -153,16 +153,16 @@ def test_fp8_gemm_hopper_no_ws():
 
     @T.prim_func(tirp=True)
     def manual(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (M, K), "e4m3_float8", scope="global", layout=T.TileLayout.from_tuple((M, K)))
-        B = T.match_buffer(B_ptr, (N, K), "e4m3_float8", scope="global", layout=T.TileLayout.from_tuple((N, K)))
+        A = T.match_buffer(A_ptr, (M, K), "float8_e4m3fn", scope="global", layout=T.TileLayout.from_tuple((M, K)))
+        B = T.match_buffer(B_ptr, (N, K), "float8_e4m3fn", scope="global", layout=T.TileLayout.from_tuple((N, K)))
         C = T.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=T.TileLayout.from_tuple((M, N)))
 
         A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         C_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
 
-        T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "e4m3_float8", 2, A.data, K, M, f8_bytes * K, BLK_K, BLK_M, 1, 1, 0, swizzleA, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "e4m3_float8", 2, B.data, K, N, f8_bytes * K, BLK_K, BLK_N, 1, 1, 0, swizzleB, 0, 0)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float8_e4m3fn", 2, A.data, K, M, f8_bytes * K, BLK_K, BLK_M, 1, 1, 0, swizzleA, 0, 0)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", B_map, "float8_e4m3fn", 2, B.data, K, N, f8_bytes * K, BLK_K, BLK_N, 1, 1, 0, swizzleB, 0, 0)
         T.call_packed("runtime.cuTensorMapEncodeTiled", C_map, "float16", 2, C.data, N, M, f16_bytes * N, 64, BLK_M, 1, 1, 0, swizzleC, 0, 0)
 
         with T.kernel():
@@ -174,8 +174,8 @@ def test_fp8_gemm_hopper_no_ws():
 
             with T.cta():
                 # tensor stroage
-                A_smem = T.alloc_buffer([STAGES_TMA, BLK_M * BLK_K], "e4m3_float8", scope="shared.dyn", align=128)
-                B_smem = T.alloc_buffer([STAGES_TMA, BLK_K * BLK_N], "e4m3_float8", scope="shared.dyn", align=128)
+                A_smem = T.alloc_buffer([STAGES_TMA, BLK_M * BLK_K], "float8_e4m3fn", scope="shared.dyn", align=128)
+                B_smem = T.alloc_buffer([STAGES_TMA, BLK_K * BLK_N], "float8_e4m3fn", scope="shared.dyn", align=128)
                 C_smem = T.alloc_buffer([STAGES_EPI, BLK_M, 64], "float16", scope="shared.dyn", align=1024)
                 # barriers
                 bars = T.alloc_buffer([STAGES_TMA], "uint64", scope="shared.dyn", align=8)
