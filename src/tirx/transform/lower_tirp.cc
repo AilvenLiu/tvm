@@ -717,6 +717,7 @@ Pass LowerTIRp() {
     while (!NoOpCallVerifier::Verify(n->body, false)) {
       n->body = TIRpOpScheduler::LowerOpCalls(n->body, target.value());
       n->body = ScopeMerger::Merge(n->body);
+      LOG(INFO) << f;
     }
 
     // Lower other TIRp aux data structures

@@ -89,7 +89,9 @@ ml_dtypes_dict = {
         ),
     ],
 )
-@pytest.mark.parametrize("dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "float32"])
+@pytest.mark.parametrize(
+    "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
+)
 def test_copy_g2s_s2g_cta_vec_load(input, dtype):
     g_shape, s_shape, g_st, g_extent, thread_cnt, layoutA, layoutB, layoutS, dev = input
 
@@ -137,7 +139,7 @@ def test_copy_g2s_s2g_cta_vec_load(input, dtype):
 
 
 def generate_tma_test_cases():
-    dtypes = ["int8", "uint8", "float8_e4m3fn", "float8_e5m2", "float16", "float32"]
+    dtypes = ["int8", "uint8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
 
     tasks = [
         (
@@ -181,6 +183,7 @@ def generate_tma_test_cases():
             shared_layout = TileLayout.from_tuple(task[2])
             yield task + (shared_layout, dtype)
 
+
 @tvm.testing.requires_cuda_compute_version(9)
 @pytest.mark.parametrize("inp", generate_tma_test_cases())
 def test_copy_g2s_cta_tma_load(inp):
@@ -204,7 +207,7 @@ def test_copy_g2s_cta_tma_load(inp):
             bx = T.cta_id([1], parent="kernel")
             tx = T.thread_id([thread_cnt], parent="cta")
 
-            # TODO(@bohan): remove this 
+            # TODO(@bohan): remove this
             with T.thread():
                 dyn = T.alloc_buffer([smem_bytes + 8], "uint8", scope="shared.dyn")
                 A_smem = T.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=layoutS)

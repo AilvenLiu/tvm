@@ -225,7 +225,6 @@ def tirp_pipeline():
                 tir.transform.FP8StorageLegalize(),
                 tir.transform.BF16StorageLegalize(),
                 tir.transform.LowerDeviceKernelLaunch(),
-                tvm.ir.transform.PrintIR(),
             ]
         )
         mod = tvm.ir.transform.Sequential(passes)(mod)

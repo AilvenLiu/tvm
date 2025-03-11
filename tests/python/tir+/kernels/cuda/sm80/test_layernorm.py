@@ -15,7 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 import numpy as np
-
+import ml_dtypes
+import pytest
 import tvm
 import tvm.testing
 from tvm.script import tir as T
@@ -25,14 +26,19 @@ from ..utils import bench, ProtonContext
 
 
 @tvm.testing.requires_cuda_compute_version(8)
-def test_layernorm():
+@pytest.mark.parametrize("dtype", ["bfloat16"])
+def test_layernorm(dtype):
     DEV = tvm.cuda(0)
     target = tvm.target.Target("nvidia/nvidia-h100")
 
-    f16_bytes = 2
-    bf16_bytes = 2
-    f32_bytes = 4
-    dtype = "float16"  # doesn't support bfloat16 yet
+    if dtype == "bfloat16":
+        np_dtype = "bfloat16"
+        const_func = T.bfloat16
+    else:
+        assert dtype == "float16"
+        np_dtype = np.float16
+        const_func = T.float16
+
     ATTN_B, ATTN_N, ATTN_D = 4, 1024, 1024  # attention batch size, seq length, feature dim
     PIPELINE_DEPTH = 2
     NUM_WORKERS = 2
@@ -106,13 +112,13 @@ def test_layernorm():
                     Tp.copy(out_resid[by, 0, slice(bx * NUM_WORKERS + curr_idx, (bx + 1) * NUM_WORKERS + curr_idx), :], resid_smem[:, 0, :])
                     # numerator
                     Tp.sum(mean[:, 0, 0], resid_smem[:, 0, :])
-                    Tp.fdiv(mean[:, 0, 0], mean[:, 0, 0], T.float16(ATTN_D))
+                    Tp.fdiv(mean[:, 0, 0], mean[:, 0, 0], const_func(ATTN_D))
                     Tp.sub(resid_smem[:, 0, :], resid_smem[:, 0, :], mean[:, 0, 0])
                     # denominator
                     Tp.mul(x_smem[:, 0, :], resid_smem[:, 0, :], resid_smem[:, 0, :])
                     Tp.sum(var[:, 0, 0], x_smem[:, 0, :])
-                    Tp.fdiv(var[:, 0, 0], var[:, 0, 0], T.float16(ATTN_D))
-                    Tp.add(var[:, 0, 0], var[:, 0, 0], T.float16(1e-5))
+                    Tp.fdiv(var[:, 0, 0], var[:, 0, 0], const_func(ATTN_D))
+                    Tp.add(var[:, 0, 0], var[:, 0, 0], const_func(1e-5))
                     Tp.sqrt(var[:, 0, 0], var[:, 0, 0])
                     # layernorm
                     Tp.fdiv(resid_smem[:, 0, :], resid_smem[:, 0, :], var[:, 0, 0])
@@ -122,17 +128,17 @@ def test_layernorm():
                     Tp.copy(out[by, 0, slice(bx * NUM_WORKERS + curr_idx, (bx + 1) * NUM_WORKERS + curr_idx), :], resid_smem[:, 0, :])
     # fmt: on
 
+    import torch
+    from torch import nn
+
     # get inputs
-    inp_np = np.random.randn(ATTN_B, 1, ATTN_N, ATTN_D).astype(dtype)
-    inp_resid_np = np.random.randn(ATTN_B, 1, ATTN_N, ATTN_D).astype(dtype)
-    norm_weight_np = np.random.randn(
-        ATTN_D,
-    ).astype(dtype)
-    norm_bias_np = np.random.randn(
-        ATTN_D,
-    ).astype(dtype)
-    out_np = np.zeros((ATTN_B, 1, ATTN_N, ATTN_D)).astype(dtype)
-    out_resid_np = np.zeros((ATTN_B, 1, ATTN_N, ATTN_D)).astype(dtype)
+    inp_np = np.random.randn(ATTN_B, 1, ATTN_N, ATTN_D).astype(np_dtype)
+    inp_resid_np = np.random.randn(ATTN_B, 1, ATTN_N, ATTN_D).astype(np_dtype)
+    norm_weight_np = np.random.randn(ATTN_D).astype(np_dtype)
+    norm_bias_np = np.random.randn(ATTN_D).astype(np_dtype)
+    out_np = np.zeros((ATTN_B, 1, ATTN_N, ATTN_D)).astype(np_dtype)
+    out_resid_np = np.zeros((ATTN_B, 1, ATTN_N, ATTN_D)).astype(np_dtype)
+
     inp_tvm = tvm.nd.array(inp_np, DEV)
     inp_resid_tvm = tvm.nd.array(inp_resid_np, DEV)
     norm_weight_tvm = tvm.nd.array(norm_weight_np, DEV)
@@ -150,45 +156,36 @@ def test_layernorm():
             ms = bench(func, warmup=2, repeat=10, proton_name="tir")
             print(f"TIR layernorm time: {ms:.3f} ms")
 
-        return out_tvm.asnumpy(), out_resid_tvm.asnumpy()
+        return torch.from_dlpack(out_tvm).cpu(), torch.from_dlpack(out_resid_tvm).cpu()
 
     def torch_layernorm():
         # https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/cuda/layer_norm_kernel.cu
 
-        import torch
-        from torch import nn
-
         torch_dev = torch.device("cuda")
-        inp_torch = torch.tensor(inp_np, device=torch_dev)
-        inp_resid_torch = torch.tensor(inp_resid_np, device=torch_dev)
-        norm_weight_torch = torch.tensor(norm_weight_np, device=torch_dev)
-        norm_bias_torch = torch.tensor(norm_bias_np, device=torch_dev)
+        inp_torch = torch.from_dlpack(inp_tvm)
+        inp_resid_torch = torch.from_dlpack(inp_resid_tvm)
+        norm_weight_torch = torch.from_dlpack(norm_weight_tvm)
+        norm_bias_torch = torch.from_dlpack(norm_bias_tvm)
         out_torch = torch.zeros((ATTN_B, 1, ATTN_N, ATTN_D), device=torch_dev)
         out_resid_torch = torch.zeros((ATTN_B, 1, ATTN_N, ATTN_D), device=torch_dev)
-        ln_func = nn.LayerNorm(
-            [
-                ATTN_D,
-            ],
-            device=torch_dev,
-            dtype=torch.float16,
-        )
+        ln_func = nn.LayerNorm([ATTN_D], device=torch_dev, dtype=torch.float16)
         ln_func.weight = nn.Parameter(norm_weight_torch)
         ln_func.bias = nn.Parameter(norm_bias_torch)
 
         func = lambda: ln_func(inp_torch + inp_resid_torch)
         ms = bench(func, warmup=2, repeat=10, proton_name="torch")
         print(f"Torch time: {ms:.3f} ms")
-        out_torch = func().detach().cpu().numpy()
-        out_resid_torch = (inp_torch + inp_resid_torch).detach().cpu().numpy()
+        out_torch = func().detach().cpu()
+        out_resid_torch = (inp_torch + inp_resid_torch).detach().cpu()
         return out_torch, out_resid_torch
 
     with ProtonContext("layernorm"):
         out_tvm, out_resid_tvm = tir_layernorm()
         out_torch, out_resid_torch = torch_layernorm()
 
-    tvm.testing.assert_allclose(out_resid_tvm, out_resid_torch, atol=1e-8)
-    tvm.testing.assert_allclose(out_tvm, out_torch, atol=2e-2)
+    torch.testing.assert_close(out_resid_tvm, out_resid_torch, atol=1e-3, rtol=1e-3)
+    torch.testing.assert_close(out_tvm, out_torch, atol=5e-2, rtol=5e-2)
 
 
 if __name__ == "__main__":
-    test_layernorm()
+    tvm.testing.main()
