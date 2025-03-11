@@ -122,6 +122,7 @@ TIRP_DEFINE_SCHEDULE_OP(reduce_negate);
 TIRP_DEFINE_SCHEDULE_OP(binary_reduce);
 TIRP_DEFINE_SCHEDULE_OP(unary_reduce);
 TIRP_DEFINE_SCHEDULE_OP(binary_chain);
+TIRP_DEFINE_SCHEDULE_OP(select);
 
 /********************* Compose Ops **********************/
 #define TIRP_DEFINE_COMPOSE_OP(OpName) \

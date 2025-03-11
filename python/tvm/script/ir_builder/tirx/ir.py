@@ -2299,7 +2299,7 @@ nki_tensorscalar_reduce = _op_wrapper(_tir_op.nki_tensorscalar_reduce)
 nki_identity = _op_wrapper(_tir_op.nki_identity)
 nki_scalar_tensor_tensor = _op_wrapper(_tir_op.nki_scalar_tensor_tensor)
 nki_scalar_tensor_scalar = _op_wrapper(_tir_op.nki_scalar_tensor_scalar)
-
+nki_affine_select = _op_wrapper(_tir_op.nki_affine_select)
 
 def _dtype_forward(func):
     @functools.wraps(func)
@@ -2699,6 +2699,7 @@ __all__ = float_types + [
     "nki_identity",
     "nki_scalar_tensor_tensor",
     "nki_scalar_tensor_scalar",
+    "nki_affine_select",
     # tvm.tirx.expr
     "Var",
     "SizeVar",

@@ -122,7 +122,7 @@ def test_flash_attn(ssh_client):
                         if block_kv == 0:
                             Tp.copy(running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], mm1_dot_max)
                         else:
-                            Tp.mul(prev_running_max, prev_running_max, T.float32(-1.0))
+                            Tp.mul(prev_running_max, running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], T.float32(-1.0))
                             Tp.minimum(running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], mm1_dot_max)
                             Tp.exp(scaling_factor, prev_running_max, bias=running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0])
                         # p = exp(Q@K.T + running_max)

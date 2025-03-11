@@ -43,18 +43,6 @@ from ..common import ReduceOpType
 from ..registry import f_op_scheduler
 
 
-vector_ops = [
-    Op.get("tirp.add"),
-    Op.get("tirp.sub"),
-    Op.get("tirp.mul"),
-    Op.get("tirp.maximum"),
-    Op.get("tirp.minimum"),
-]
-act_ops = [Op.get("tirp.sqrt"), Op.get("tirp.exp")]
-reduce_ops = [Op.get("tirp.sum"), Op.get("tirp.max"), Op.get("tirp.min")]
-reduce_ops_after_act = [Op.get("tirp.sum")]
-reduce_ops_after_vector = [Op.get("tirp.sum"), Op.get("tirp.max"), Op.get("tirp.min")]
-
 opcode_table = {
     Op.get("tirp.add"): "add",
     Op.get("tirp.sub"): "sub",

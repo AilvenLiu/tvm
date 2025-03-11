@@ -23,6 +23,7 @@ from tvm.tir.stmt import OpCall
 from tvm.tir import PrimExpr, BufferRegion, FloatImm
 from tvm.ir import Op
 from tvm.tir.async_structs import Pipeline
+from tvm.tir.predicate import Predicate
 
 
 def get_tirp_op(op_name: str):
@@ -343,6 +344,33 @@ class Exp(UnaryOpWithBiasScale):
     """
 
     op = get_tirp_op("exp")
+
+
+class Select(BinaryOp):
+    """Select elements from src1 or src2 based on the predicate.
+
+    select(dst, src1, src2, predicate)
+    """
+
+    op = get_tirp_op("select")
+
+    @property
+    def predicate(self) -> Predicate:
+        """Get the predicate."""
+        return self.args[3]
+
+    def validate(self) -> None:
+        """Validate that the operator has the correct number and types of arguments."""
+        assert len(self.args) == 4, f"{self} expects 4 arguments, got {len(self.args)}"
+        assert isinstance(
+            self.dsts[0], BufferRegion
+        ), f"{self} expects BufferRegion as output, got {self.dsts[0]}"
+        assert all(
+            isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
+        ), f"{self} expects BufferRegion or FloatImm arguments as inputs, got {self.srcs}"
+        assert isinstance(
+            self.args[3], Predicate
+        ), f"{self} expects Predicate as predicate, got {self.args[3]}"
 
 
 ### Pipeline Ops ###

@@ -4869,3 +4869,28 @@ def nki_scalar_tensor_scalar(
         reverse0,
         reverse1,
     )
+
+
+def nki_affine_select(result, pred, true_value, false_value):
+    """TVM intrinsic to call nki affine select instruction
+
+    Parameters
+    ----------
+    result : BufferLoad
+        The result buffer.
+
+    pred: PrimExpr
+        The predicate.
+
+    true_value: PrimExpr
+        The true value.
+
+    false_value: PrimExpr
+        The false value.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.nki_affine_select", result, pred, true_value, false_value)

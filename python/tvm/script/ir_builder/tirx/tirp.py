@@ -15,14 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 """Builtin ops in TIR+"""
-from typing import Union, Optional, Dict, Any, Tuple
+from typing import Union, Optional, Dict, Any, Tuple, Callable, List
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
 from tvm.tirx.async_structs import CopyPipeline
 from tvm.tirx.exec_scope import ExecScope
 from tvm.tirx.expr import FloatImm
 import tvm.tirp.operator as tirp_op
-
+from tvm.tirx.predicate import Predicate
 from . import _ffi_api, frame
 
 
@@ -1025,6 +1025,38 @@ def reduce_negate(
     )
 
 
+def select(
+    dst: Union[BufferRegion, Buffer],
+    true_value: Union[BufferRegion, Buffer, FloatImm],
+    false_value: Union[BufferRegion, Buffer, FloatImm],
+    pred: Union[Predicate, Callable[..., PrimExpr]],
+):
+    """Select between two values based on a predicate.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for the result.
+
+    true_value : Union[BufferRegion, Buffer, FloatImm]
+        The value to select if the predicate is true.
+
+    false_value : Union[BufferRegion, Buffer, FloatImm]
+        The value to select if the predicate is false.
+
+    pred : Union[Predicate, Callable[..., PrimExpr]]
+        The predicate to evaluate. The callable should take the same number of arguments as the dimensions of the destination buffer.
+    """
+    dst = _to_region(dst)
+    if isinstance(true_value, Buffer):
+        true_value = _to_region(true_value)
+    if isinstance(false_value, Buffer):
+        false_value = _to_region(false_value)
+    if not isinstance(pred, Predicate):
+        pred = Predicate(pred)
+    return f_insert(tirp_op.Select(dst, true_value, false_value, pred))
+
+
 __all__ = [
     "zero",
     "sqrt",
@@ -1050,4 +1082,5 @@ __all__ = [
     "unary_reduce",
     "binary_chain",
     "reduce_negate",
+    "select",
 ]

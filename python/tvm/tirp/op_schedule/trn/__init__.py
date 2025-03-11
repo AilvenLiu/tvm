@@ -20,3 +20,4 @@ from .gemm import *
 from .maps import *
 from .reduction import *
 from .compose_op import *
+from .select import *

@@ -230,6 +230,22 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           }
         });
 
+LambdaDoc PrintPredicate(const ObjectRef& pred, const Array<tirx::Var>& vs, const ObjectPath& vs_p,
+                         const PrimExpr& p, const ObjectPath& p_p, const IRDocsifier& d) {
+  With<TIRFrame> f(d, pred);
+  Array<IdDoc> vars;
+  for (int i = 0, l = vs.size(); i < l; ++i) {
+    vars.push_back(Downcast<IdDoc>(DefineVar(vs[i], *f, d)));
+  }
+  ExprDoc pred_doc = d->AsDoc<ExprDoc>(p, p_p);
+  return LambdaDoc(vars, pred_doc);
+}
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::Predicate>("", [](tirx::Predicate pred, ObjectPath p, IRDocsifier d) -> Doc {
+      return PrintPredicate(pred, pred->vars, p->Attr("vars"), pred->pred, p->Attr("pred"), d);
+    });
+
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Let>("", [](tirx::Let let, AccessPath p, IRDocsifier d) -> Doc {
       DictDoc where({d->AsDoc<ExprDoc>(let->var, p->Attr("var"))},
@@ -421,6 +437,7 @@ TVM_SCRIPT_REPR(tirx::ShuffleNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::CommReducerNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::IndexMapNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::ReduceNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::PredicateNode, ReprPrintTIR);
 
 }  // namespace printer
 }  // namespace script

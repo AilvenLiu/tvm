@@ -723,5 +723,19 @@ def test_roundtrip_compose_op_call_schedule_config():
     assert_structural_equal(test, from_source(code))
 
 
+def test_predicate():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        with T.kernel():
+            A = T.alloc_buffer([10, 10], "float32")
+            B = T.alloc_buffer([10, 10], "float32")
+            Tp.select(B, A, 1.0, lambda i, j: i < j)
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
 if __name__ == "__main__":
     tvm.testing.main()

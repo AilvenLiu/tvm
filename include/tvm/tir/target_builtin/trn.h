@@ -110,7 +110,8 @@ TVM_DLL const Op& nki_activation_reduce();
 /*!
  * \brief nki intrinsics for tensorscalar reduce operation.
  *
- * nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand0, operand1, opcode, reduce_opcode, reverse)
+ * nki_tensorscalar_reduce(reduce_res, tensorscalar_res, operand0, operand1, opcode, reduce_opcode,
+ * reverse)
  */
 TVM_DLL const Op& nki_tensorscalar_reduce();
 
@@ -127,7 +128,7 @@ TVM_DLL const Op& nki_identity();
  * (data op1 operand1) op2 (operand2) where op1 is tensor-scalar and op2 is tensor-tensor
  *
  * nki_scalar_tensor_tensor(result, data, operand0, operand1, opcode0, opcode1, reverse0, reverse1)
- * 
+ *
  */
 TVM_DLL const Op& nki_scalar_tensor_tensor();
 
@@ -137,9 +138,16 @@ TVM_DLL const Op& nki_scalar_tensor_tensor();
  * (data op1 operand1) op2 (operand2) where op1 and op2 are tensor-scalar
  *
  * nki_scalar_tensor_scalar(result, data, operand0, operand1, opcode0, opcode1, reverse0, reverse1)
- * 
+ *
  */
 TVM_DLL const Op& nki_scalar_tensor_scalar();
+
+/*!
+ * \brief nki intrinsics for affine_select operation.
+ *
+ * nki_affine_select(result, pred, true_value, false_value)
+ */
+TVM_DLL const Op& nki_affine_select();
 
 }  // namespace builtin
 }  // namespace tir
