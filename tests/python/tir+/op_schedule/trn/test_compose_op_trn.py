@@ -17,10 +17,8 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TrainiumLayout, TileLayout
-import numpy as np
+from tvm.tir.layout import TrainiumLayout
 import tvm.testing
-from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.ir import assert_structural_equal

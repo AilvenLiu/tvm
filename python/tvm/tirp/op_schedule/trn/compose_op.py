@@ -18,16 +18,15 @@
 """Implementation of compose operator schedules."""
 
 
-from typing import Optional, Union, List
+from typing import Optional, List
 import operator
-
-from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T
-from tvm.tir import BufferRegion, PrimFunc, FloatImm, OpCall
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
-from tvm.ir import Op, assert_structural_equal, structural_equal
-from tvm.tirp.operator.op import BinaryReduce, UnaryReduce, BinaryChain, ReduceNegate
 from functools import reduce
+
+from tvm.script import tir as T
+from tvm.tir import BufferRegion, PrimFunc, OpCall
+from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.ir import Op
+from tvm.tirp.operator.op import BinaryReduce, UnaryReduce, BinaryChain, ReduceNegate
 from .common import (
     get_ewise_dim_map,
     init_analyzer,
