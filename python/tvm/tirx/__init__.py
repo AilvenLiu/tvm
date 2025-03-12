@@ -85,6 +85,11 @@ from .op import (
     simdgroup_multiply_accumulate,
     simdgroup_store,
 )
+from .op import (
+    cuda_timer_init,
+    cuda_timer_start,
+    cuda_timer_end,
+)
 from .op import vectorlow, vectorhigh, vectorcombine
 from .op import infinity, reinterpret
 from .op import exp, exp2, exp10, log, log2, log10, log1p, ldexp, clz

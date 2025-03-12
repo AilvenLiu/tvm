@@ -389,6 +389,11 @@ std::string PrintStmatrixSyncAlignedAssembly(int num, bool trans, const std::str
  */
 std::string PrintSetMaxNRegAssembly(bool inc, int reg_count);
 
+/*!
+ * \brief Print mov.u32 %0, %globaltimer_lo.
+ */
+std::string PrintGetTimestampAssembly(CodeGenCUDA* cg);
+
 }  // namespace codegen
 }  // namespace tvm
 #endif  // TVM_TARGET_SOURCE_PTX_H_

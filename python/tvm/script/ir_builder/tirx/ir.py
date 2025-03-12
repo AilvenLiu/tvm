@@ -2284,6 +2284,9 @@ anylist_setitem_call_cpacked = _op_wrapper(_tir_op.anylist_setitem_call_cpacked)
 vscale = _op_wrapper(_tir_op.vscale)
 ignore_loop_partition = _op_wrapper(_tir_op.ignore_loop_partition)
 print_buffer = _op_wrapper(_tir_op.print_buffer)
+cuda_timer_init = _op_wrapper(_tir_op.cuda_timer_init)
+cuda_timer_start = _op_wrapper(_tir_op.cuda_timer_start)
+cuda_timer_end = _op_wrapper(_tir_op.cuda_timer_end)
 nki_load = _op_wrapper(_tir_op.nki_load)
 nki_store = _op_wrapper(_tir_op.nki_store)
 nki_tensor_copy = _op_wrapper(_tir_op.nki_tensor_copy)
@@ -2745,6 +2748,9 @@ __all__ = float_types + [
     "call_kernel",
     "ignore_loop_partition",
     "print_buffer",
+    "cuda_timer_init",
+    "cuda_timer_start",
+    "cuda_timer_end",
 ]
 
 __all__ += [

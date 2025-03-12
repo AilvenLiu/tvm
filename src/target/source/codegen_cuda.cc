@@ -1820,6 +1820,107 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     bool inc = Downcast<Bool>(op->args[0])->value;
     int nregs = Downcast<IntImm>(op->args[1])->value;
     print(PrintSetMaxNRegAssembly(inc, nregs));
+  } else if (op->op.same_as(builtin::cuda_timer_init())) {
+    // arg 0: profiler buffer
+    // arg 1: base tag
+    // arg 2: offset
+    ICHECK_EQ(op->args.size(), 3U);
+    std::string NBLOCKS = "(uint32_t)(gridDim.x * gridDim.y * gridDim.z)";
+    std::string BLOCK_IDX = "(uint32_t)((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x)";
+    std::string NGROUPS = "(uint32_t)(blockDim.x >> 7)";
+    std::string WG_IDX = "(uint32_t)(threadIdx.x >> 7)";
+    std::string BLOCK_GROUP_IDX = BLOCK_IDX + " * " + NGROUPS + " + " + WG_IDX;
+    this->PrintIndent();
+    this->stream << "// timer init\n";
+    this->PrintIndent();
+    this->stream << "if ((blockIdx.x == 0) && (blockIdx.y == 0) && (blockIdx.z == 0) &&";
+    this->stream << " (threadIdx.x == 0)) {\n";
+    int if_scope = BeginScope();
+    // buffer write
+    this->PrintIndent();
+    this->stream << this->PrintExpr(op->args[0]) << "[0] = ";
+    // ngroups
+    // (static_cast<uint64_t>(ngroups) << 32) | nblocks;
+    this->stream << "((uint64_t)" << NGROUPS << " << 32) | " << NBLOCKS << ";\n";
+    EndScope(if_scope);
+    this->PrintIndent();
+    this->stream << "}\n";
+    // offset
+    this->PrintIndent();
+    this->stream << this->PrintExpr(op->args[2]) << "[0] = 1 + " << BLOCK_GROUP_IDX << ";\n";
+    // base tag
+    this->PrintIndent();
+    const int BLOCK_GROUP_IDX_SHIFT = 12;
+    this->stream << this->PrintExpr(op->args[1]) << "[0] = ";
+    this->stream << "(uint64_t)(" << BLOCK_GROUP_IDX << ") << " << BLOCK_GROUP_IDX_SHIFT << ";\n";
+  } else if (op->op.same_as(builtin::cuda_timer_start())) {
+    // arg 0: type of event to record
+    // arg 1: profiler buffer
+    // arg 2: base tag
+    // arg 3: offset
+    // arg 4: stride
+    ICHECK_EQ(op->args.size(), 5U);
+    this->PrintIndent();
+    this->stream << "// timer start\n";
+    this->PrintIndent();
+    this->stream << "if (threadIdx.x % 128 == 0) {\n";
+    int if_scope = BeginScope();
+    // buffer write
+    this->PrintIndent();
+    this->stream << this->PrintExpr(op->args[1]) << "[" << this->PrintExpr(op->args[3]) << "[0]] = ";
+    // (static_cast<uint64_t>(delta_time) << 32) | tag;
+    const int EVENT_IDX_SHIFT = 2;
+    const int EVENT_BEGIN = 0x0;
+    int event_type = Downcast<Integer>(op->args[0])->value;
+    this->stream << "((uint64_t)" << PrintGetTimestampAssembly(this) << " << 32) | ";
+    this->stream << "(";
+    this->stream << this->PrintExpr(op->args[2]) << "[0]";
+    this->stream << " | (uint32_t)" << event_type << " << " << EVENT_IDX_SHIFT;
+    this->stream << " | " << EVENT_BEGIN;
+    this->stream << ");\n";
+    // advance offset
+    int stride = Downcast<Integer>(op->args[4])->value;
+    this->PrintIndent();
+    this->stream << this->PrintExpr(op->args[3]) << "[0] += " << stride << ";\n";
+    EndScope(if_scope);
+    this->PrintIndent();
+    this->stream << "}\n";
+    this->PrintIndent();
+    this->stream << "__threadfence_block();\n";
+  } else if (op->op.same_as(builtin::cuda_timer_end())) {
+    // arg 0: type of event to record
+    // arg 1: profiler buffer
+    // arg 2: base tag
+    // arg 3: offset
+    // arg 4: stride
+    ICHECK_EQ(op->args.size(), 5U);
+    this->PrintIndent();
+    this->stream << "// timer end\n";
+    this->PrintIndent();
+    this->stream << "__threadfence_block();\n";
+    this->PrintIndent();
+    this->stream << "if (threadIdx.x % 128 == 0) {\n";
+    int if_scope = BeginScope();
+    // buffer write
+    this->PrintIndent();
+    this->stream << this->PrintExpr(op->args[1]) << "[" << this->PrintExpr(op->args[3]) << "[0]] = ";
+    // (static_cast<uint64_t>(delta_time) << 32) | tag;
+    const int EVENT_IDX_SHIFT = 2;
+    const int EVENT_END = 0x1;
+    int event_type = Downcast<Integer>(op->args[0])->value;
+    this->stream << "((uint64_t)" << PrintGetTimestampAssembly(this) << " << 32) | ";
+    this->stream << "(";
+    this->stream << this->PrintExpr(op->args[2]) << "[0]";
+    this->stream << " | (uint32_t)" << event_type << " << " << EVENT_IDX_SHIFT;
+    this->stream << " | " << EVENT_END;
+    this->stream << ");\n";
+    // advance offset
+    int stride = Downcast<Integer>(op->args[4])->value;
+    this->PrintIndent();
+    this->stream << this->PrintExpr(op->args[3]) << "[0] += " << stride << ";\n";
+    EndScope(if_scope);
+    this->PrintIndent();
+    this->stream << "}\n";
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {

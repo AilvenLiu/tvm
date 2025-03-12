@@ -4423,6 +4423,112 @@ def print_buffer(buffer_var, dtype, shape_size, *dims):
     return _ffi_api.print_buffer(buffer_var, dtype, shape_size, *dims)
 
 
+def cuda_timer_init(profiler_buffer, profiler_tag, profiler_write_offset):
+    """TVM intrinsic for initializing the CUDA profiler, and store profiling result in a buffer.
+
+    Parameters
+    ----------
+    profiler_buffer: Var
+        The buffer to store the profiling result.
+
+    profiler_tag: Var
+        Buffer of length 1 storing the base tag of the current thread.
+
+    profiler_write_offset: Var
+        Buffer of length 1 storing the offset in buffer to write the next
+        profiling result for the current thread.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin(
+        "handle",
+        "tir.cuda_timer_init",
+        profiler_buffer,
+        profiler_tag,
+        profiler_write_offset,
+    )
+
+
+def cuda_timer_start(event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride):
+    """TVM intrinsic for starting the timer for profiling a specific event, and storing profiling result in a buffer.
+
+    Parameters
+    ----------
+    event_type: Enum
+        The event to profile.
+
+    profiler_buffer: Var
+        The buffer to store the profiling result.
+
+    profiler_tag: Var
+        Buffer of length 1 storing the base tag of the current thread.
+
+    profiler_write_offset: Var
+        Buffer of length 1 storing the offset in buffer to write the next
+        profiling result for the current thread.
+
+    profiler_write_stride: int
+        The stride to advance in buffer in the next write.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin(
+        "handle",
+        "tir.cuda_timer_start",
+        event_type.value,
+        profiler_buffer,
+        profiler_tag,
+        profiler_write_offset,
+        profiler_write_stride,
+    )
+
+
+def cuda_timer_end(event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride):
+    """TVM intrinsic for ending the timer for profiling a specific event, and storing profiling result in a buffer.
+
+    Parameters
+    ----------
+    event_type: Enum
+        The event to profile.
+
+    profiler_buffer: Var
+        The buffer to store the profiling result.
+
+    profiler_tag: Var
+        Buffer of length 1 storing the base tag of the current thread.
+
+    profiler_write_offset: Var
+        Buffer of length 1 storing the offset in buffer to write the next
+        profiling result for the current thread.
+
+    profiler_write_stride: int
+        The stride to advance in buffer in the next write.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin(
+        "handle",
+        "tir.cuda_timer_end",
+        event_type.value,
+        profiler_buffer,
+        profiler_tag,
+        profiler_write_offset,
+        profiler_write_stride,
+    )
+
+
 # pylint: disable=unnecessary-lambda
 sum = comm_reducer(lambda x, y: x + y, lambda t: const(0, dtype=t), name="sum")
 min = comm_reducer(lambda x, y: _ffi_api._OpMin(x, y, None), max_value, name="min")  # type: ignore

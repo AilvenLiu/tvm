@@ -16,6 +16,9 @@
 # under the License.
 
 import os
+import numpy as np
+from enum import Enum
+from typing import List
 
 import argparse
 import subprocess
@@ -81,3 +84,97 @@ class ProtonContext:
                 ["proton-viewer", "-m", "avg_time/ms", f"{self.name}.hatchet"], check=True
             )
             os.remove(f"{self.name}.hatchet")
+
+
+# utils for tg4perfetto profiler, adapted from https://github.com/flashinfer-ai/flashinfer
+class ProfileEventType(Enum):
+    IssueLoadQ = 0
+    IssueLoadKV = 1
+    WriteO = 2
+    SoftmaxUpdate = 3
+    GemmQK = 4
+    GemmPV = 5
+    ScaleO = 6
+    WritePReg = 7
+    SplitK = 8
+
+event_type_names = [
+    "issue-load-q",
+    "issue-load-kv",
+    "write-o",
+    "softmax-update",
+    "gemm-qk",
+    "gemm-pv",
+    "scale-o",
+    "write-p-reg",
+    "split-k",
+]
+
+class EventType(Enum):
+    kBegin = 0
+    kEnd = 1
+    kInstant = 2
+
+
+def decode_tag(tag, num_groups):
+    block_group_tag = tag >> 12
+    event_idx = (tag >> 2) & 0x3FF
+    event_type = tag & 0x3
+    return (
+        block_group_tag // num_groups,
+        block_group_tag % num_groups,
+        event_idx,
+        event_type,
+    )
+
+
+def export_to_perfetto_trace(
+    profiler_buffer: np.ndarray,
+    file_name: str,
+) -> None:
+
+    import torch
+    # pip install git+https://github.com/ihavnoid/tg4perfetto.git
+    from tg4perfetto import TraceGenerator
+
+    profiler_buffer_host = torch.tensor(profiler_buffer)
+    num_blocks, num_groups = profiler_buffer_host[:1].view(dtype=torch.int32)
+    num_blocks = int(num_blocks)
+    num_groups = int(num_groups)
+
+    tgen = TraceGenerator(file_name)
+
+    tid_map = {}
+    track_map = {}
+    for block_idx in range(num_blocks):
+        pid = tgen.create_group(f"block_{block_idx}")
+        for group_idx in range(num_groups):
+            tid = pid.create_group(f"group_{group_idx}")
+            tid_map[(block_idx, group_idx)] = tid
+
+    for i in range(1, len(profiler_buffer_host)):
+        if profiler_buffer_host[i] == 0:
+            continue
+        tag, timestamp = profiler_buffer_host[i : i + 1].view(dtype=torch.uint32)
+        tag = int(tag)
+        timestamp = int(timestamp)
+        block_idx, group_idx, event_idx, event_type = decode_tag(
+            tag, num_groups
+        )
+        event = event_type_names[event_idx]
+        tid = tid_map[(block_idx, group_idx)]
+
+        if (block_idx, group_idx, event_idx) in track_map:
+            track = track_map[(block_idx, group_idx, event_idx)]
+        else:
+            track = tid.create_track()
+            track_map[(block_idx, group_idx, event_idx)] = track
+
+        if event_type == EventType.kBegin.value:
+            track.open(timestamp, event)
+        elif event_type == EventType.kEnd.value:
+            track.close(timestamp)
+        elif event_type == EventType.kInstant.value:
+            track.instant(timestamp, event)
+
+    tgen.flush()

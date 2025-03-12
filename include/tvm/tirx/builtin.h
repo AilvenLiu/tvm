@@ -780,6 +780,42 @@ enum TVMStructFieldKind : int {
  */
 TVM_DLL const Op& print_buffer();
 
+/*!
+ * \brief tvm intrinsic for initializing the CUDA profiler, and store profiling result in a buffer.
+ *
+ *  void cuda_timer_init(Var profiler_buffer, Var profiler_tag, Var profiler_write_offset) {
+ *    // initialize the tag and write to pos 0 in the buffer
+ *    // initialize write offset for every leader thread in warp group across all blocks
+ *  }
+ */
+TVM_DLL const Op& cuda_timer_init();
+
+/*!
+ * \brief tvm intrinsic for starting the timer for profiling a specific event,
+ *        and storing profiling result in a buffer.
+ *
+ *  void cuda_timer_start(IntImm event_type, Var profiler_buffer, Var profiler_tag,
+ *                        Var profiler_write_offset, IntImm profiler_write_stride) {
+ *    // each leader thread in warp group gets the time stamp and event type, combine with the tag
+ *    // and write to corresponding offset in buffer
+ *    // each leader thread advance offset by stride
+ *  }
+ */
+TVM_DLL const Op& cuda_timer_start();
+
+/*!
+ * \brief tvm intrinsic for ending the timer for profiling a specific event,
+ *        and storing profiling result in a buffer.
+ *
+ *  void cuda_timer_end(IntImm event_type, Var profiler_buffer, Var profiler_tag,
+ *                      Var profiler_write_offset, IntImm profiler_write_stride) {
+ *    // each leader thread in warp group gets the time stamp and event type, combine with the tag
+ *    // and write to corresponding offset in buffer
+ *    // each leader thread advance offset by stride
+ *  }
+ */
+TVM_DLL const Op& cuda_timer_end();
+
 }  // namespace builtin
 }  // namespace tirx
 }  // namespace tvm

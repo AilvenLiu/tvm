@@ -1775,5 +1775,21 @@ std::string PrintSetMaxNRegAssembly(bool inc, int reg_count) {
   return replacer.rewrite(asm_code);
 }
 
+std::string PrintGetTimestampAssembly(codegen::CodeGenCUDA* cg) {
+  std::string func_code = R"(
+__forceinline__ __device__ uint32_t {func_name}() {
+  volatile uint32_t ret;
+  asm volatile("mov.u32 %0, %globaltimer_lo;" : "=r"(ret));
+  return ret;
+}
+)";
+  std::string func_name = "ptx_get_timestamp";
+  Replacer replacer;
+  replacer.register_rule("{func_name}", func_name);
+  func_code = replacer.rewrite(func_code);
+  cg->AddUtilFunction(func_name, func_code);
+  return func_name + "()";
+}
+
 }  // namespace codegen
 }  // namespace tvm
