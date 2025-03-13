@@ -533,5 +533,96 @@ def test_unary_with_bias_scale_2(op_type):
         assert_structural_equal(mod["main"], expected)
 
 
+def test_binary_with_guard():
+    src1_shape = [32, 128, 512]
+    src1_layout = TrainiumLayout(
+        dimension_types="FFFP",
+        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 4, 128), (128, 1, 32 * 128, 1)),
+    )
+    src2_shape = [128, 512]
+    src2_layout = TrainiumLayout(
+        dimension_types="FFP",
+        combined_1d_layout=T.TileLayout.from_tuple((128, 4, 128), (1, 128, 1)),
+    )
+    dst_shape = src1_shape
+    dst_layout = src1_layout
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def binary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
+            B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            for j in range(4):
+                Tp.add(C_sbuf[:, :, 0:j*128], A_sbuf[:, :, 0:j*128], B_sbuf[:, 0:j*128])
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "binary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            for j, b_loop, additional_b_loop in T.grid(4, 96, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 128):
+                    if b_loop % 3 - j < 0:
+                        T.nki_tensortensor(C_sbuf[p_loop, b_loop % 3 * 4096 + b_loop // 3 * 128 + f_loop], A_sbuf[p_loop, b_loop % 3 * 4096 + b_loop // 3 * 128 + f_loop], B_sbuf[p_loop, b_loop % 3 * 128 + f_loop], "add")
+
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": binary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.tir.transform.Simplify()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+def test_unary_with_guard():
+    src_shape = [512, 1024]
+    src_layout = TrainiumLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 1024), (1024, 1, 1)),
+    )
+    dst_shape = src_shape
+    dst_layout = src_layout
+    bias_shape = [512, 1]
+    bias_layout = TrainiumLayout(
+        dimension_types="FP",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128), (1, 1)),
+    )
+    scale = T.float32(2.0)
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def unary() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(bias_shape, "float32", scope="trn.sbuf", layout=bias_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            for i in range(4):
+                for j in range(4):
+                    Tp.sqrt(C_sbuf[0: (i+1) * 128, 0: (j+1)*256], A_sbuf[0: (i+1) * 128, 0: (j+1)*256], bias=B_sbuf[0: (i+1) * 128, 0], scale=scale)
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "unary"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            for i, j, b_loop, additional_b_loop in T.grid(4, 4, 4, 2):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    if b_loop - i < 1 and additional_b_loop * 512 + f_loop < j * 256 + 256:
+                        T.nki_activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], "sqrt", B_sbuf[p_loop, b_loop], T.float32(2.0))
+     # fmt: off
+    with target:
+        mod = tvm.IRModule({"main": unary})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.tir.transform.Simplify()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

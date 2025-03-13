@@ -39,6 +39,8 @@ from .common import (
     f_gen_idx_mapped,
     check_partition_dim_match,
     _refine_inst_tile,
+    bound_buffer_region,
+    make_guard,
 )
 from ..common import MapOpType
 
@@ -251,20 +253,38 @@ def try_find_inst_nary(
         raise ValueError(f"Invalid buffer region: dst: {_dst}, srcs: {_srcs}")
     # Switch broadcasting
     dst_non_unit_extent = [r.extent for r in dst_region if r.extent != 1]
-    NUM_ELEMENTS = functools.reduce(operator.mul, dst_non_unit_extent, 1)
 
-    src0_num_elements = functools.reduce(operator.mul, [r.extent for r in _srcs[0].region], 1)
-    src1_num_elements = (
-        functools.reduce(operator.mul, [r.extent for r in _srcs[1].region], 1)
-        if not isinstance(_srcs[1], FloatImm)
-        else 0
-    )
-    if src0_num_elements < src1_num_elements:
-        _srcs[0], _srcs[1] = _srcs[1], _srcs[0]
-        reverse[0] = True
-    assert (
-        max(src0_num_elements, src1_num_elements) == NUM_ELEMENTS
-    ), f"the larger between src0 and src1 must have the same number of elements as dst, src0: {src0_num_elements}, src1: {src1_num_elements}, dst: {NUM_ELEMENTS}"
+    if not isinstance(_srcs[1], FloatImm):
+        src0_extent = [r.extent for r in _srcs[0].region]
+        src1_extent = [r.extent for r in _srcs[1].region]
+        shared_dim_num = min(len(src0_extent), len(src1_extent))
+        if all(
+            analyzer.can_prove(e0 == e1)
+            for e0, e1 in zip(src0_extent[-shared_dim_num:], src1_extent[-shared_dim_num:])
+        ):
+            if len(src0_extent) < len(src1_extent) and not all(
+                analyzer.can_prove(e1 == 1) for e1 in src1_extent[:-shared_dim_num]
+            ):
+                _srcs[0], _srcs[1] = _srcs[1], _srcs[0]
+                reverse[0] = True
+        elif all(
+            analyzer.can_prove(e0 == e1 or e0 == 1)
+            for e0, e1 in zip(src0_extent[-shared_dim_num:], src1_extent[-shared_dim_num:])
+        ):
+            _srcs[0], _srcs[1] = _srcs[1], _srcs[0]
+            reverse[0] = True
+            assert shared_dim_num == len(src0_extent) or all(
+                analyzer.can_prove(e0 == 1) for e0 in src0_extent[:-shared_dim_num]
+            ), f"Shape mismatch: src0: {_srcs[0]}, src1: {_srcs[1]}"
+        elif all(
+            analyzer.can_prove(e0 == e1 or e1 == 1)
+            for e0, e1 in zip(src0_extent[-shared_dim_num:], src1_extent[-shared_dim_num:])
+        ):
+            assert shared_dim_num == len(src1_extent) or all(
+                analyzer.can_prove(e1 == 1) for e1 in src1_extent[:-shared_dim_num]
+            ), f"Shape mismatch: src0: {_srcs[0]}, src1: {_srcs[1]}"
+        else:
+            raise ValueError(f"Shape mismatch: src0: {_srcs[0]}, src1: {_srcs[1]}")
 
     src0_non_unit_extent = [r.extent for r in _srcs[0].region if r.extent != 1]
     assert all(
@@ -283,20 +303,29 @@ def try_find_inst_nary(
         if isinstance(src, FloatImm):
             broadcast_dims.append(None)
             continue
-        assert check_partition_dim_match(
-            _srcs[0], src, analyzer
-        ), f"partition dimension mismatch: src0: {_srcs[0]}, src: {src}"
         src_extent = [r.extent for r in src.region]
         assert len(src_extent) <= len(src0_extent) or all(
-            src_extent[i] == 1 for i in range(len(src_extent) - len(src0_extent))
+            analyzer.can_prove(src_extent[i] == 1)
+            for i in range(len(src_extent) - len(src0_extent))
         )
         local_broadcast_dims = []
         for i in range(1, min(len(src_extent), len(src0_extent)) + 1):
-            if src_extent[-i] != 1 and src_extent[-i] != src0_extent[-i]:
+            if analyzer.can_prove(src_extent[-i] != 1) and analyzer.can_prove(
+                src_extent[-i] != src0_extent[-i]
+            ):
                 raise ValueError(f"Shape mismatch: src0: {_srcs[0]}, src: {src}")
-            elif src_extent[-i] != src0_extent[-i]:
+            elif analyzer.can_prove(src_extent[-i] != src0_extent[-i]):
                 local_broadcast_dims.append(len(src0_extent) - i)
         local_broadcast_dims += list(range(0, len(src0_extent) - len(src_extent)))
+        src0_to_src_dim_map = {
+            i: i + len(src_extent) - len(src0_extent)
+            for i in range(len(src0_extent))
+            if i not in local_broadcast_dims
+        }
+        print(src0_to_src_dim_map)
+        assert check_partition_dim_match(
+            _srcs[0], src, src0_to_src_dim_map, analyzer
+        ), f"partition dimension mismatch: src0: {_srcs[0]}, src: {src}"
         broadcast_dims.append(local_broadcast_dims)
 
     inst_size, inst_stride, inst_data_iters, inst_types = None, None, None, []
@@ -337,12 +366,14 @@ def binary_trn(
     assert binary_op in binary_map_ops, f"Unsupported binary operation {binary_op}"
     analyzer = init_analyzer(sctx)
     _dst, _src1, _src2 = op.args
+    bound_dst = bound_buffer_region(_dst, analyzer)
+    bound_src1 = bound_buffer_region(_src1, analyzer)
+    bound_src2 = bound_buffer_region(_src2, analyzer)
     inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
-        _dst, _src1, _src2, analyzer
+        bound_dst, bound_src1, bound_src2, analyzer
     )
     if reverse:
-        _src1, _src2 = _src2, _src1
-    dst_extent = [r.extent for r in _dst.region]
+        _src1, _src2, bound_src1, bound_src2 = _src2, _src1, bound_src2, bound_src1
     f_gen_dst_idx = f_gen_idx_anchor(_dst, f_gen_axes)
     dst_to_src1_dim_map = get_ewise_dim_map(_dst, _src1, analyzer)
     f_gen_src1_idx = f_gen_idx_mapped(_src1, f_gen_axes, dst_to_src1_dim_map)
@@ -355,11 +386,14 @@ def binary_trn(
         }
         f_gen_src2_idx = f_gen_idx_mapped(_src2, f_gen_axes, dst_to_src2_dim_map)
 
-    NUM_ELEMENTS = functools.reduce(operator.mul, dst_extent, 1)
     CONST = _src2 if isinstance(_src2, FloatImm) else None
     dst, src1, src2 = _dst.buffer, _src1.buffer, None if CONST is not None else _src2.buffer
     p_size = dst.layout.partition_size
-    b_extent = NUM_ELEMENTS // p_size // inst_size
+    b_extent = (
+        functools.reduce(operator.mul, [r.extent for r in bound_dst.region], 1)
+        // p_size
+        // inst_size
+    )
     opcode = binary_map_ops[binary_op]
     # fmt: off
     _func = T.nki_tensortensor if inst_type == InstType.TENSOR_TENSOR else T.nki_tensorscalar
@@ -367,6 +401,7 @@ def binary_trn(
     
     inst_size_limit = get_hardware_inst_size_limit(is_dma=False)
     actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
+    f_guard = make_guard(_dst, analyzer)
     
     @T.prim_func(tirp=True)
     def impl():
@@ -374,13 +409,14 @@ def binary_trn(
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop, f_loop in T.grid(p_size, actual_inst_size):
                         f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                        src1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                        if CONST is None:
-                            src2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                            T.evaluate(func(dst[*dst_indices], src1[*src1_indices], src2[*src2_indices], opcode))
-                        else:
-                            T.evaluate(func(dst[*dst_indices], src1[*src1_indices], CONST, opcode))
+                        if f_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
+                            dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                            src1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                            if CONST is None:
+                                src2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                                T.evaluate(func(dst[*dst_indices], src1[*src1_indices], src2[*src2_indices], opcode))
+                            else:
+                                T.evaluate(func(dst[*dst_indices], src1[*src1_indices], CONST, opcode))
 
     # fmt: on
     return impl

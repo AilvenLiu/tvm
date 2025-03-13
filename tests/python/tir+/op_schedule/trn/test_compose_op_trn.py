@@ -501,5 +501,139 @@ def test_reduce_negate():
         assert_structural_equal(mod["main"], expected)
 
 
+def test_binary_reduce_guard():
+    src_shape = [512, 512]
+    src_layout = TrainiumLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
+    )
+    dst_shape = src_shape
+    dst_layout = src_layout
+    reduce_dst_shape = [512]
+    reduce_dst_layout = TrainiumLayout(
+        dimension_types="FP",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128), (1, 1)),
+    )
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def binary_reduce() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            C_sbuf = T.alloc_buffer(reduce_dst_shape, "float32", scope="trn.sbuf", layout=reduce_dst_layout)
+            for j in range(4):
+                for i in range(4):
+                    Tp.binary_reduce(B_sbuf[0:128*(j+1), 0:128*(i+1)], C_sbuf[0:128*(j+1)], A_sbuf[0:128*(j+1), 0:128*(i+1)], 0.0, "add", "sum", [-1])
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "binary_reduce"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            for j, i, b_loop in T.grid(4, 4, 4):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    if b_loop - j < 1 and f_loop < i * 128 + 128:
+                        T.nki_tensorscalar_reduce(C_sbuf[p_loop, b_loop], B_sbuf[p_loop, b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0), "add", "add", T.bool(False))
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": binary_reduce})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.tir.transform.Simplify()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+def test_unary_reduce_guard():
+    src_shape = [512, 512]
+    src_layout = TrainiumLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
+    )
+    dst_shape = src_shape
+    dst_layout = src_layout
+    reduce_dst_shape = [512]
+    reduce_dst_layout = TrainiumLayout(
+        dimension_types="FP",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128), (1, 1)),
+    )
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def unary_reduce() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            C_sbuf = T.alloc_buffer(reduce_dst_shape, "float32", scope="trn.sbuf", layout=reduce_dst_layout)
+            for j in range(4):
+                for i in range(4):
+                    Tp.unary_reduce(B_sbuf[0:128*(j+1), 0:128*(i+1)], C_sbuf[0:128*(j+1)], A_sbuf[0:128*(j+1), 0:128*(i+1)], "sqrt", "sum", reduce_axes=[-1])
+    
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "unary_reduce"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            for j, i, b_loop in T.grid(4, 4, 4):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    if b_loop - j < 1 and f_loop < i * 128 + 128:
+                        T.nki_activation_reduce(C_sbuf[p_loop, b_loop], B_sbuf[p_loop, b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 512 + f_loop], "sqrt", "add", T.float32(0.0), T.float32(1.0))
+
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": unary_reduce})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.tir.transform.Simplify()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
+def test_binary_chain_guard():
+    src_shape = [512, 512]
+    src_layout = TrainiumLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
+    )
+    dst_shape = src_shape
+    dst_layout = src_layout
+    src2_shape = [512, 1]
+    src2_layout = TrainiumLayout(
+        dimension_types="FP",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128), (1, 1)),
+    )
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def binary_chain() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
+            C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            for j in range(4):
+                for i in range(4):
+                    Tp.binary_chain(C_sbuf[0:128*(j+1), 0:128*(i+1)], A_sbuf[0:128*(j+1), 0:128*(i+1)], B_sbuf[0:128*(j+1), 0], 1.0, "add", "sub", reverse1=True)
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "binary_chain"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            C_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            for j, i, b_loop, additional_b_loop in T.grid(4, 4, 4, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 512):
+                    if b_loop - j < 1 and f_loop < i * 128 + 128:
+                        T.nki_scalar_tensor_scalar(C_sbuf[p_loop, b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 512 + f_loop], B_sbuf[p_loop, b_loop], T.float32(1.0), "add", "sub", T.bool(False), T.bool(True))
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": binary_chain})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.tir.transform.Simplify()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

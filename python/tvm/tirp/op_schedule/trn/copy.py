@@ -43,6 +43,8 @@ from .common import (
     check_workspace_buffer,
     get_largest_psum_per_bank,
     target_trn,
+    bound_buffer_region,
+    make_guard,
 )
 
 
@@ -55,15 +57,16 @@ def transpose_schedule(
     assert (
         not src_buffer_region.buffer.scope() == "trn.psum"
     ), "Transpose on psum buffer is not supported"
-
+    bound_src_region = bound_buffer_region(src_buffer_region, analyzer)
+    bound_dst_region = bound_buffer_region(dst_buffer_region, analyzer)
     first_inst_stride, first_inst_data_iters, second_inst_stride, second_inst_data_iters = (
-        find_max_inst_size_transpose(dst_buffer_region, src_buffer_region, analyzer)
+        find_max_inst_size_transpose(bound_dst_region, bound_src_region, analyzer)
     )
     f_gen_axes_dst = generate_axes_in_region(
-        dst_buffer_region, first_inst_stride, first_inst_data_iters, analyzer
+        bound_dst_region, first_inst_stride, first_inst_data_iters, analyzer
     )
     f_gen_axes_src = generate_axes_in_region(
-        src_buffer_region, second_inst_stride, second_inst_data_iters, analyzer
+        bound_src_region, second_inst_stride, second_inst_data_iters, analyzer
     )
     f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes_dst)
     f_gen_src_idx = f_gen_idx_anchor(src_buffer_region, f_gen_axes_src)
@@ -72,9 +75,7 @@ def transpose_schedule(
     lhs_f_size = dst_buffer_region.buffer.layout.partition_size
     rhs_f_size = p_size
     b_extent = (
-        reduce(operator.mul, [r.extent for r in dst_buffer_region.region], 1)
-        // p_size
-        // lhs_f_size
+        reduce(operator.mul, [r.extent for r in bound_dst_region.region], 1) // p_size // lhs_f_size
     )
     if "identity" not in op.workspace:
         identity_tensor = T.buffer(
@@ -102,17 +103,23 @@ def transpose_schedule(
     max_psum_slots = get_max_psum_banks()
     largest_psum_per_bank = get_largest_psum_per_bank()
     inst_num_per_slot = largest_psum_per_bank // rhs_f_size
+    f_src_guard = make_guard(src_buffer_region, analyzer)
+    f_dst_guard = make_guard(dst_buffer_region, analyzer)
     # fmt: off
     @T.macro
     def matmul_inst_macro(b_loop, dst, use_dst_indices, max_psum_slots):
         with T.attr(0, "tensorized_nki_instruction", 1):
             for p_loop, lhs_f_loop, rhs_f_loop in T.grid(p_size, lhs_f_size, rhs_f_size):
                 src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), lhs_f_loop, p_loop))
-                if use_dst_indices:
-                    dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop))
-                    T.evaluate(T.nki_matmul(dst[*dst_indices], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
-                else:
-                    T.evaluate(T.nki_matmul(dst[b_loop // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_loop % inst_num_per_slot * rhs_f_size + rhs_f_loop], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
+                src_guard = T.meta_var(f_src_guard(f_gen_axes_src(((b_loop, b_extent),), lhs_f_loop, p_loop)))
+                dst_guard = T.meta_var(f_dst_guard(f_gen_axes_dst(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop)))
+                if src_guard and dst_guard:
+                    if use_dst_indices:
+                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop))
+                        T.evaluate(T.nki_matmul(dst[*dst_indices], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
+                    else:
+                        if src_guard:
+                            T.evaluate(T.nki_matmul(dst[b_loop // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_loop % inst_num_per_slot * rhs_f_size + rhs_f_loop], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
     # fmt: on
     if dst_buffer.scope() == "trn.psum":
 
@@ -145,8 +152,10 @@ def transpose_schedule(
                 matmul_inst_macro(b_loop, acc_psum, False, max_psum_slots)
                 with T.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop, f_loop in T.grid(lhs_f_size, rhs_f_size):
+                        dst_guard = T.meta_var(f_dst_guard(f_gen_axes_dst(((b_loop, b_extent),), f_loop, p_loop)))
                         dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        T.evaluate(T.nki_tensor_copy(dst_buffer[*dst_indices], acc_psum[b_loop // inst_num_per_slot % max_psum_slots, p_loop, b_loop % inst_num_per_slot * rhs_f_size + f_loop]))
+                        if dst_guard:
+                            T.evaluate(T.nki_tensor_copy(dst_buffer[*dst_indices], acc_psum[b_loop // inst_num_per_slot % max_psum_slots, p_loop, b_loop % inst_num_per_slot * rhs_f_size + f_loop]))
     # fmt: on
 
     return transpose_sbuf_output
@@ -195,7 +204,12 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     ):
         return None
 
-    if not check_partition_dim_match(src_buffer_region, dst_buffer_region, analyzer):
+    bound_src_region = bound_buffer_region(src_buffer_region, analyzer)
+    bound_dst_region = bound_buffer_region(dst_buffer_region, analyzer)
+    src_to_dst_dim_map = get_ewise_dim_map(src_buffer_region, dst_buffer_region, analyzer)
+    if not check_partition_dim_match(
+        bound_src_region, bound_dst_region, src_to_dst_dim_map, analyzer
+    ):
         return transpose_schedule(op, analyzer, sctx)
     inst_size = None
     inst_stride = None
@@ -203,19 +217,19 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     src_to_dst = None
     if isinstance(src.layout, T.TrainiumLayout):
         inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-            src_buffer_region, dst_buffer_region, analyzer
+            bound_src_region, bound_dst_region, analyzer
         )
         src_to_dst = True
     if inst_size is None and isinstance(dst.layout, T.TrainiumLayout):
         inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-            dst_buffer_region, src_buffer_region, analyzer
+            bound_dst_region, bound_src_region, analyzer
         )
         src_to_dst = False
     assert src_to_dst is not None
     if src_to_dst:
         p_size = src_buffer_region.buffer.layout.partition_size
         f_gen_axes = generate_axes_in_region(
-            src_buffer_region, inst_stride, inst_data_iters, analyzer
+            bound_src_region, inst_stride, inst_data_iters, analyzer
         )
         dim_map = get_ewise_dim_map(src_buffer_region, dst_buffer_region, analyzer)
         f_gen_src_idx = f_gen_idx_anchor(src_buffer_region, f_gen_axes)
@@ -223,13 +237,15 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     else:
         p_size = dst_buffer_region.buffer.layout.partition_size
         f_gen_axes = generate_axes_in_region(
-            dst_buffer_region, inst_stride, inst_data_iters, analyzer
+            bound_dst_region, inst_stride, inst_data_iters, analyzer
         )
         dim_map = get_ewise_dim_map(dst_buffer_region, src_buffer_region, analyzer)
         f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
         f_gen_src_idx = f_gen_idx_mapped(src_buffer_region, f_gen_axes, dim_map)
 
-    b_extent = reduce(operator.mul, src_extent, 1) // p_size // inst_size
+    b_extent = (
+        reduce(operator.mul, [r.extent for r in bound_dst_region.region], 1) // p_size // inst_size
+    )
     # fmt: off
     if src.scope() == "global":
         func = T.nki_load
@@ -240,7 +256,8 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     
     inst_size_limit = get_hardware_inst_size_limit(func!=T.nki_tensor_copy)
     actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
-    
+    f_guard = make_guard(dst_buffer_region, analyzer)
+
     @T.prim_func(tirp=True)
     def impl():
         # the additional b loop is to satisfy hardware instuction size limit
@@ -249,9 +266,9 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                 for p_loop in T.serial(0, p_size):
                     for f_loop in T.serial(0, actual_inst_size):
                         f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                        src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                        func(dst[*dst_indices], src[*src_indices])
+                        if f_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
+                            src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                            dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                            func(dst[*dst_indices], src[*src_indices])
     # fmt: on
-
     return impl

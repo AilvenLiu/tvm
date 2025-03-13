@@ -194,5 +194,45 @@ def test_reduction_two_stage():
         assert_structural_equal(mod["main"], expected)
 
 
+def test_reduction_with_guard():
+    src_shape = [512, 2048]
+    src_layout = TrainiumLayout(
+        dimension_types="FPF",
+        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2048), (2048, 1, 1)),
+    )
+    dst_shape = [512, 1]
+    dst_layout = TrainiumLayout(
+        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((4, 128), (1, 1))
+    )
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def reduction() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            for i in range(4):
+                for j in range(4):
+                    Tp.sum(B_sbuf[0: (i+1) * 128, 0], A_sbuf[0: (i+1) * 128, 0: (j+1) * 256], axes=-1)
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "reduction"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            for i, j, b_loop in T.grid(4, 4, 4):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop, f_loop in T.grid(128, 1024):
+                    if b_loop - i < 1 and f_loop < j * 256 + 256:
+                        T.nki_tensorreduce(B_sbuf[p_loop, b_loop], A_sbuf[p_loop, b_loop * 2048 + f_loop], "add", T.bool(False), -1)
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": reduction})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.tir.transform.Simplify()(mod)
+        assert_structural_equal(mod["main"], expected)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

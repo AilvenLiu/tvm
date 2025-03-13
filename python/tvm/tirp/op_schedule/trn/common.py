@@ -20,9 +20,11 @@
 from collections import namedtuple
 from typing import Tuple, Optional, Dict, Callable
 from functools import wraps
+from functools import reduce
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
+from tvm.ir import Range
 from tvm.tir import BufferRegion, Buffer
 from tvm._ffi import get_global_func
 from tvm.tir import PrimFunc
@@ -56,6 +58,32 @@ def get_layout_data_iters(layout):
 RangeInfo = namedtuple(
     "RangeInfo", ["start", "extent", "dim_in_data_iter", "dim_in_shape", "dim_type"]
 )
+
+
+# bound_buffer_region must be called on the arguments of any function involving range_info (e.g. generate_axes_in_region, find_max_inst_size_*, etc.)
+def bound_buffer_region(buffer_region: BufferRegion, analyzer: Analyzer):
+    if not isinstance(buffer_region, BufferRegion):
+        return buffer_region
+    region = []
+    for r in buffer_region.region:
+        bound = analyzer.const_int_bound(r.extent)
+        region.append(Range.from_min_extent(r.min, bound.max_value))
+    return BufferRegion(buffer_region.buffer, region)
+
+
+def make_guard(buffer_region: BufferRegion, analyzer: Analyzer):
+    bound_region = bound_buffer_region(buffer_region, analyzer)
+    relaxed_dims = [
+        i
+        for i, (r1, r2) in enumerate(zip(bound_region.region, buffer_region.region))
+        if not analyzer.can_prove(r1.extent == r2.extent)
+    ]
+    guard = lambda axes: reduce(
+        T.And,
+        [axes[i] < r.extent for i, r in enumerate(buffer_region.region) if i in relaxed_dims],
+        True,
+    )
+    return guard
 
 
 def infer_range_info(buffer_region: BufferRegion, analyzer: Analyzer):
@@ -206,7 +234,10 @@ def get_ewise_dim_map(
 
 # src -> dst
 def get_reduction_dim_map(
-    src_buffer_region: BufferRegion, dst_buffer_region: BufferRegion, axes: Tuple[int]
+    src_buffer_region: BufferRegion,
+    dst_buffer_region: BufferRegion,
+    axes: Tuple[int],
+    analyzer: Analyzer,
 ):
     dst_region = dst_buffer_region.region
     dst_extent = [r.extent for r in dst_region]
@@ -217,11 +248,11 @@ def get_reduction_dim_map(
     src_non_reduction_extents = [(i, e) for i, e in src_non_unit_extent_ if i not in axes]
     assert len(src_non_reduction_extents) == len(
         dst_non_unit_extent_
-    ), "Source and destination must have the same number of non-reduction extents"
+    ), f"Source and destination must have the same number of non-reduction extents: {len(src_non_reduction_extents)} != {len(dst_non_unit_extent_)}"
     for i in range(len(src_non_reduction_extents)):
-        assert (
-            src_non_reduction_extents[i][1] == dst_non_unit_extent_[i][1]
-        ), "Source and destination must have the same extent for non-reduction axes"
+        assert analyzer.can_prove_equal(
+            src_non_reduction_extents[i][1], dst_non_unit_extent_[i][1]
+        ), f"Source and destination must have the same extent for non-reduction axes: {src_non_reduction_extents[i][1]} != {dst_non_unit_extent_[i][1]}"
     dim_map = {s[0]: d[0] for s, d in zip(src_non_reduction_extents, dst_non_unit_extent_)}
     return dim_map
 
@@ -364,12 +395,6 @@ def _refine_inst_tile(
                     == data_iters[dim_in_data_iter].stride
                     and second_extent == data_iters[dim_in_data_iter].extent
                 ):
-                    print(
-                        second_data_iters[second_data_iter].stride,
-                        data_iters[dim_in_data_iter].stride,
-                        second_extent,
-                        data_iters[dim_in_data_iter].extent,
-                    )
                     # mismatch P dim
                     raise ValueError(
                         f"Partition dimension mismatch. Cannot perform ewise operation."
@@ -389,8 +414,7 @@ def _refine_inst_tile(
                 break
             new_first_inst_stride = data_iters[dim_in_data_iter].stride
             new_second_inst_stride = second_data_iters[second_data_iter].stride
-
-        if analyzer.can_prove(second_extent >= st + ext):
+        if analyzer.can_prove(second_extent >= ext):
             new_inst_size = ext if new_inst_size is None else new_inst_size * ext
             new_inst_data_iters[dim_in_data_iter] = ext
             if not analyzer.can_prove(st == 0) or not analyzer.can_prove(
@@ -615,7 +639,10 @@ def f_gen_idx_mapped(buffer_region: BufferRegion, f_gen_axes, dim_map):
 
 
 def check_partition_dim_match(
-    buffer_region: BufferRegion, second_buffer_region: BufferRegion, analyzer: Analyzer
+    buffer_region: BufferRegion,
+    second_buffer_region: BufferRegion,
+    dim_map: Dict[int, int],
+    analyzer: Analyzer,
 ):
     if buffer_region.buffer.scope() == "global" or second_buffer_region.buffer.scope() == "global":
         return True
@@ -650,8 +677,11 @@ def check_partition_dim_match(
     )
     src1_partition_logical_data_iters.sort(key=lambda x: (x[0], x[2]))
     src2_partition_logical_data_iters.sort(key=lambda x: (x[0], x[2]))
-    src1_partition_logical_data_iters = [x[1:] for x in src1_partition_logical_data_iters]
-    src2_partition_logical_data_iters = [x[1:] for x in src2_partition_logical_data_iters]
+    if not all(x[0] in dim_map for x in src1_partition_logical_data_iters):
+        return False
+    src1_partition_logical_data_iters = [
+        (dim_map[x[0]], x[1], x[2]) for x in src1_partition_logical_data_iters
+    ]
     return src1_partition_logical_data_iters == src2_partition_logical_data_iters
 
 

@@ -35,6 +35,8 @@ from .common import (
     init_analyzer,
     f_gen_idx_anchor,
     f_gen_idx_mapped,
+    bound_buffer_region,
+    make_guard,
 )
 from ..common import MapOpType
 from .binary import try_find_inst_binary
@@ -106,6 +108,7 @@ def generate_unary_func(
     dst_buffer_region,
     _src,
     inst_size,
+    f_gen_axes,
     f_gen_dst_idx,
     f_gen_src_idx,
     f_gen_bias_idx,
@@ -114,9 +117,9 @@ def generate_unary_func(
     scale,
     analyzer,
 ):
-    dst_extent = [r.extent for r in dst_buffer_region.region]
+    bound_dst = bound_buffer_region(dst_buffer_region, analyzer)
     p_size = dst_buffer_region.buffer.layout.partition_size
-    b_extent = reduce(operator.mul, dst_extent, 1) // p_size // inst_size
+    b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // p_size // inst_size
     inst_size_limit = get_hardware_inst_size_limit(is_dma=False)
     actual_inst_size, additional_b_size = bound_inst_with_limit(
         inst_size, inst_size_limit, analyzer
@@ -125,6 +128,8 @@ def generate_unary_func(
     dst = dst_buffer_region.buffer
     src = _src.buffer if isinstance(_src, BufferRegion) else None
     bias_buffer = bias.buffer if isinstance(bias, BufferRegion) else None
+
+    f_dst_guard = make_guard(dst_buffer_region, analyzer)
     # fmt: off
     @T.prim_func(tirp=True)
     def impl():
@@ -134,21 +139,22 @@ def generate_unary_func(
                     for f_loop in T.serial(0, actual_inst_size):
                         f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
                         dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                        if unary_op == MapOpType.MEMSET:
-                            T.evaluate(T.nki_memset(dst[*dst_indices], _src))
-                        else:
-                            src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop) )
-                            if unary_op == MapOpType.RECIPROCAL:
-                                T.evaluate(T.nki_reciprocal(dst[*dst_indices], src[*src_indices]))
+                        if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
+                            if unary_op == MapOpType.MEMSET:
+                                T.evaluate(T.nki_memset(dst[*dst_indices], _src))
                             else:
-                                #todo: if we use direct allocation, nki activation should take zero bias tensor
-                                if bias is None:
-                                    T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale))
-                                elif isinstance(bias, BufferRegion):
-                                    bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                                    T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[*bias_indices]))
+                                src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop) )
+                                if unary_op == MapOpType.RECIPROCAL:
+                                    T.evaluate(T.nki_reciprocal(dst[*dst_indices], src[*src_indices]))
                                 else:
-                                    T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias))
+                                    #todo: if we use direct allocation, nki activation should take zero bias tensor
+                                    if bias is None:
+                                        T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale))
+                                    elif isinstance(bias, BufferRegion):
+                                        bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                                        T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[*bias_indices]))
+                                    else:
+                                        T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias))
     # fmt: on
     return impl
 
@@ -173,8 +179,10 @@ def unary_trn(
         src_buffer_region = _src
     analyzer = init_analyzer(sctx)
     assert unary_op in non_activation_unary_map_ops, f"Unsupported unary operation {unary_op}"
+    bound_dst = bound_buffer_region(dst_buffer_region, analyzer)
     if CONST is None:
-        inst_size, f_gen_axes = try_find_inst_unary(dst_buffer_region, src_buffer_region, analyzer)
+        bound_src = bound_buffer_region(src_buffer_region, analyzer)
+        inst_size, f_gen_axes = try_find_inst_unary(bound_dst, bound_src, analyzer)
         f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
         f_gen_src_idx = f_gen_idx_mapped(
             src_buffer_region,
@@ -182,7 +190,7 @@ def unary_trn(
             get_ewise_dim_map(dst_buffer_region, src_buffer_region, analyzer),
         )
     else:
-        inst_size, f_gen_axes = try_find_inst_unary(dst_buffer_region, dst_buffer_region, analyzer)
+        inst_size, f_gen_axes = try_find_inst_unary(bound_dst, bound_dst, analyzer)
         f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
         f_gen_src_idx = None
 
@@ -190,6 +198,7 @@ def unary_trn(
         dst_buffer_region,
         _src,
         inst_size,
+        f_gen_axes,
         f_gen_dst_idx,
         f_gen_src_idx,
         None,
@@ -212,19 +221,21 @@ def unary_with_bias_scale_trn(
 
     analyzer = init_analyzer(sctx)
     assert unary_op in activation_map_ops, f"Unsupported activation operation {unary_op}"
-
+    bound_dst = bound_buffer_region(dst_buffer_region, analyzer)
+    bound_src = bound_buffer_region(src_buffer_region, analyzer)
     if _bias is not None:
+        bound_bias = bound_buffer_region(_bias, analyzer)
         inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
-            dst_buffer_region,
-            src_buffer_region,
-            _bias,
+            bound_dst,
+            bound_src,
+            bound_bias,
             analyzer,
             allow_tensortensor=False,
             allow_reverse=False,
         )
-        assert inst_size is not None, "Failed to find a valid instruction"
+        assert inst_size is not None, f"Failed to find a valid instruction: {op}"
     else:
-        inst_size, f_gen_axes = try_find_inst_unary(dst_buffer_region, src_buffer_region, analyzer)
+        inst_size, f_gen_axes = try_find_inst_unary(bound_dst, bound_src, analyzer)
 
     f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
     dst_to_src_dim_map = get_ewise_dim_map(dst_buffer_region, src_buffer_region, analyzer)
@@ -242,6 +253,7 @@ def unary_with_bias_scale_trn(
         dst_buffer_region,
         src_buffer_region,
         inst_size,
+        f_gen_axes,
         f_gen_dst_idx,
         f_gen_src_idx,
         f_gen_bias_idx,
