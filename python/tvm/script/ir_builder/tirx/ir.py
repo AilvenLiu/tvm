@@ -107,13 +107,21 @@ from .external_kernel import call_kernel
 # pylint: enable=unused-import
 
 
-def _get_layout(layout: Optional[Union[str, TLayout]], shape: List[PrimExpr]) -> Optional[TLayout]:
+def _get_layout(
+    layout: Optional[Union[str, TLayout]], shape: List[PrimExpr], scope: str
+) -> Optional[TLayout]:
     if layout is None:
         return None
-    if isinstance(layout, str):
+    if isinstance(layout, TLayout):
+        return layout
+    assert isinstance(layout, str)
+    if scope == "trn.sbuf":
+        layout = TrainiumLayout.from_annotation(layout, shape)
+    elif scope == "trn.psum":
+        layout = TrainiumPSUMLayout.from_annotation(layout, shape)
+    else:
         assert layout == "default"
-        return TileLayout.from_tuple(shape)
-    assert isinstance(layout, TLayout)
+        layout = TileLayout.from_tuple(shape)
     return layout
 
 
@@ -226,7 +234,7 @@ def buffer(
         buffer_type,
         axis_separators,
         logical_scope,
-        _get_layout(layout, shape),
+        _get_layout(layout, shape, scope),
         allocated_addr,
     )
 
@@ -418,7 +426,7 @@ def match_buffer(
         buffer_type,
         axis_separators,
         logical_scope,
-        _get_layout(layout, shape),
+        _get_layout(layout, shape, scope),
     )
 
 
@@ -809,7 +817,7 @@ def sblock_alloc_buffer(
         buffer_type,
         axis_separators,
         logical_scope,
-        _get_layout(layout, shape),
+        _get_layout(layout, shape, scope),
         allocated_addr,
     )
 
@@ -2303,6 +2311,7 @@ nki_identity = _op_wrapper(_tir_op.nki_identity)
 nki_scalar_tensor_tensor = _op_wrapper(_tir_op.nki_scalar_tensor_tensor)
 nki_scalar_tensor_scalar = _op_wrapper(_tir_op.nki_scalar_tensor_scalar)
 nki_affine_select = _op_wrapper(_tir_op.nki_affine_select)
+
 
 def _dtype_forward(func):
     @functools.wraps(func)

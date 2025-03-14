@@ -18,11 +18,13 @@
 """Definition of layout."""
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
+import re
+import functools
+import operator
 
 from . import _ffi_api
 from tvm._ffi import register_object
 from tvm.runtime import Object, ShapeTuple
-
 from .expr import Var, PrimExpr
 from .exec_scope import ExecScope
 
@@ -474,6 +476,58 @@ class TrainiumLayout(TLayout):
     @property
     def partition_size(self):
         return _ffi_api.TrainiumLayoutGetPartitionSize(self)  # pylint: disable=no-member
+
+    @classmethod
+    def from_annotation(cls, annotation: str, shape: Tuple[PrimExpr]) -> "TrainiumLayout":
+        from tvm.arith import Analyzer
+
+        analyzer = Analyzer()
+        assert re.fullmatch(
+            r"[PF]*", annotation
+        ), f"annotation {annotation} must be a string of 'P' and 'F'"
+        assert len(annotation) == len(
+            shape
+        ), f"annotation {annotation} and shape {shape} must have the same length"
+        num_p_dim = annotation.count("P")
+        if num_p_dim == 1:
+            p_idx = annotation.index("P")
+            p_dim = shape[p_idx]
+            assert analyzer.can_prove(
+                p_dim <= 128 or p_dim % 128 == 0
+            ), f"There is only 1 P in the annotation. Partition size {p_dim} must be less than or equal to 128 or a multiple of 128"
+            if analyzer.can_prove(p_dim > 128):
+                # split out the P dimension and put the higher part on the free dimension with largest stride
+                annotation = "F" + annotation
+                shape = (p_dim // 128,) + shape[:p_idx] + (128,) + shape[p_idx + 1 :]
+        elif num_p_dim > 1:
+            p_dim_prod = functools.reduce(
+                operator.mul, [s for s, c in zip(shape, annotation) if c == "P"]
+            )
+            assert analyzer.can_prove(
+                p_dim_prod <= 128
+            ), f"There are {num_p_dim} Ps in the annotation. Partition size {p_dim_prod} must be less than or equal to 128"
+
+        f_shape = [shape[i] for i, c in enumerate(annotation) if c == "F"]
+        p_shape = [shape[i] for i, c in enumerate(annotation) if c == "P"]
+        f_tile_layout = TileLayout.from_tuple(f_shape)
+        p_tile_layout = TileLayout.from_tuple(p_shape)
+        result = []
+        f_index = p_index = 0
+
+        for char in annotation:
+            if char == "F":
+                result.append(f_tile_layout.data_iter_array[f_index])
+                f_index += 1
+            else:  # char == 'P'
+                result.append(p_tile_layout.data_iter_array[p_index])
+                p_index += 1
+        if num_p_dim == 1 and analyzer.can_prove(p_dim > 128):
+            # put higher part of P to where it belongs
+            higher_P = result[0]
+            result = result[1:]
+            result = result[:p_idx] + [higher_P] + result[p_idx:]
+        combined_1d_layout = TileLayout(result)
+        return cls(annotation, combined_1d_layout)
 
 
 @register_object("tirx.TrainiumPSUMLayout")

@@ -1208,6 +1208,31 @@ def test_size_cosize():
         layout_free = T.TrainiumLayout(dimension_types="F", combined_1d_layout=layout)
         assert layout_free.partition_size == 1 and layout_free.size == 8
 
+        layout = T.TrainiumLayout.from_annotation("PF", (128, 128))
+        assert layout.partition_size == 128 and layout.size == 128
+
+        layout = T.TrainiumLayout.from_annotation("FPF", (32, 512, 512))
+        assert_structural_equal(
+            layout,
+            T.TrainiumLayout(
+                dimension_types="FFPF",
+                combined_1d_layout=T.TileLayout.from_tuple(
+                    (32, 4, 128, 512), strides=(512, 512 * 32, 1, 1)
+                ),
+            ),
+        )
+
+        layout = T.TrainiumLayout.from_annotation("FPPF", (2, 4, 32, 512))
+        assert_structural_equal(
+            layout,
+            T.TrainiumLayout(
+                dimension_types="FPPF",
+                combined_1d_layout=T.TileLayout.from_tuple(
+                    (2, 4, 32, 512), strides=(512, 32, 1, 1)
+                ),
+            ),
+        )
+
     trainium_layout_tests()
 
 

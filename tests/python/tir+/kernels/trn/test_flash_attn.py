@@ -19,7 +19,7 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from .utils import run_on_remote_and_check_correct, ssh_client
+from utils import run_on_remote_and_check_correct, ssh_client
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -41,18 +41,15 @@ NUM_MM1_PER_BLOCK = BLOCK_KV // INST_SIZE
 
 
 @pytest.mark.dependency(depends=["ssh_success"])
-def test_flash_attn(ssh_client, causal=True):
+def test_flash_attn(causal=True):
 
     running_max_shape = (seqlen_q, 1)
-    running_max_layout = T.TrainiumLayout(
-        "FP", T.TileLayout.from_tuple((seqlen_q // p_size, p_size), (1, 1))
-    )
+    running_max_layout = "PF"
 
     # fmt: off
     @T.macro
     def mm1(q_loaded, k_loaded, qk, mm1_dot_partial_max, block_q, block_kv):
-        mm1_dot_psum = T.alloc_buffer((8, BLOCK_Q, 512), dtype="float32", scope="trn.psum",
-                                      layout= T.TrainiumPSUMLayout("FPF", T.TileLayout.from_tuple((8, BLOCK_Q, 512), (512, 1, 1))), allocated_addr=(0,0))
+        mm1_dot_psum = T.alloc_buffer((8, BLOCK_Q, 512), dtype="float32", scope="trn.psum",layout="FPF", allocated_addr=(0,0))
         for i in T.serial(0, NUM_MM1_PER_BLOCK):
             k_mm_range = T.meta_var(T.max(0, T.min((block_q//4*4+4) * BLOCK_Q - block_kv * BLOCK_KV - i * 512, 512)) if causal else 512)
             Tp.gemm(mm1_dot_psum[i % 8, :, 0:k_mm_range], q_loaded, k_loaded[i * 512: i * 512 + k_mm_range, :], mm1_dot_psum[i % 8, :, 0:k_mm_range], transpose_B=True)
@@ -98,28 +95,27 @@ def test_flash_attn(ssh_client, causal=True):
                 running_max = T.alloc_buffer(running_max_shape, dtype="float32", scope="trn.sbuf", layout=running_max_layout, allocated_addr=allocator.allocate(seqlen_q // 128 * 4))
                 l = T.alloc_buffer(running_max_shape, dtype="float32", scope="trn.sbuf", layout=running_max_layout, allocated_addr=allocator.allocate(seqlen_q // 128 * 4))
                 for block_kv in T.serial(0, NUM_BLOCKS_KV):
-                    k_loaded = T.alloc_buffer((BLOCK_KV, d), dtype=k.dtype, scope="trn.sbuf", layout = T.TrainiumLayout("FP", T.TileLayout.from_tuple((BLOCK_KV, d), (1, 1))), allocated_addr=allocator.allocate(BLOCK_KV * 2))
-                    v_loaded = T.alloc_buffer((BLOCK_KV, d), dtype=v.dtype, scope="trn.sbuf", layout = T.TrainiumLayout("FPF", T.TileLayout.from_tuple((BLOCK_KV // p_size, p_size, d), (d, 1, 1))), allocated_addr=allocator.allocate(BLOCK_KV * 2))
+                    k_loaded = T.alloc_buffer((BLOCK_KV, d), dtype=k.dtype, scope="trn.sbuf", layout = "FP", allocated_addr=allocator.allocate(BLOCK_KV * 2))
+                    v_loaded = T.alloc_buffer((BLOCK_KV, d), dtype=v.dtype, scope="trn.sbuf", layout = "PF", allocated_addr=allocator.allocate(BLOCK_KV * 2))
                     # load k and v
                     Tp.copy(k_loaded, k[block_kv * BLOCK_KV: (block_kv + 1) * BLOCK_KV, head, :])
                     Tp.copy(v_loaded, v[block_kv * BLOCK_KV: (block_kv + 1) * BLOCK_KV, head, :])
                     for block_q in T.serial(0, NUM_BLOCKS_Q):
-                        #TODO: use PF annotation to simplify layout definition
                         #TODO: integrate neuron runtime
-                        q_loaded = T.alloc_buffer((BLOCK_Q, d), dtype=q.dtype, scope="trn.sbuf", layout= T.TrainiumLayout("FP", T.TileLayout.from_tuple((BLOCK_Q, d), (1, 1))), allocated_addr=allocator.allocate(d * 2))
-                        qk = T.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float32", scope="trn.sbuf", layout= T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, BLOCK_KV), (1, 1))), allocated_addr=allocator.allocate(BLOCK_KV*4))
-                        mm1_dot_partial_max = T.alloc_buffer((BLOCK_Q, NUM_MM1_PER_BLOCK), dtype="float32", scope="trn.sbuf", layout= T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, NUM_MM1_PER_BLOCK), (1, 1))), allocated_addr=allocator.allocate(NUM_MM1_PER_BLOCK*4))
-                        mm1_dot_max = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, 1), (1, 1))), allocated_addr=allocator.allocate(4))
-                        scaling_factor = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, 1), (1, 1))), allocated_addr=allocator.allocate(4))
-                        prev_running_max = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout=T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, 1), (1, 1))), allocated_addr=allocator.allocate(4))
-                        p = T.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout=T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, BLOCK_KV), (1, 1))), allocated_addr=allocator.allocate(BLOCK_KV*2))
-                        partial_rowsum_p = T.alloc_buffer((BLOCK_Q, BLOCK_KV//INST_SIZE), dtype="float32", scope="trn.sbuf", layout=T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, BLOCK_KV//INST_SIZE), (1, 1))), allocated_addr=allocator.allocate(BLOCK_KV*2))
-                        rowsum_p = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout=T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, 1), (1, 1))), allocated_addr=allocator.allocate(BLOCK_KV*2))
-                        p_transposed = T.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout=T.TrainiumLayout("FFP", T.TileLayout.from_tuple((BLOCK_Q, BLOCK_KV//p_size, p_size), (1, BLOCK_Q, 1))), allocated_addr=allocator.allocate(BLOCK_KV*2))
-                        mm2_out = T.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout=T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, d), (1, 1))), allocated_addr=allocator.allocate(d*2))
-                        prev_output = T.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout=T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, d), (1, 1))), allocated_addr=allocator.allocate(d*2))
-                        scaled_output = T.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout=T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, d), (1, 1))), allocated_addr=allocator.allocate(d*2))
-                        l_reciprocal = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout=T.TrainiumLayout("PF", T.TileLayout.from_tuple((BLOCK_Q, 1), (1, 1))), allocated_addr=allocator.allocate(4))
+                        q_loaded = T.alloc_buffer((BLOCK_Q, d), dtype=q.dtype, scope="trn.sbuf", layout= "FP", allocated_addr=allocator.allocate(d * 2))
+                        qk = T.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(BLOCK_KV*4))
+                        mm1_dot_partial_max = T.alloc_buffer((BLOCK_Q, NUM_MM1_PER_BLOCK), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(NUM_MM1_PER_BLOCK*4))
+                        mm1_dot_max = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(4))
+                        scaling_factor = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(4))
+                        prev_running_max = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(4))
+                        p = T.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(BLOCK_KV*2))
+                        partial_rowsum_p = T.alloc_buffer((BLOCK_Q, BLOCK_KV//INST_SIZE), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(BLOCK_KV*2))
+                        rowsum_p = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(BLOCK_KV*2))
+                        p_transposed = T.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout= "FP", allocated_addr=allocator.allocate(BLOCK_KV*2))
+                        mm2_out = T.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(d*2))
+                        prev_output = T.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(d*2))
+                        scaled_output = T.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(d*2))
+                        l_reciprocal = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(4))
                         # we enforce kv_range to be a multiple of 512
                         # this is to prevent having f_loop/p_loop in the mask of matmul.
                         # Neuron compiler does not support this in a proper way.
@@ -142,6 +138,7 @@ def test_flash_attn(ssh_client, causal=True):
                         p_reshape = T.view(p, p.layout, (BLOCK_Q, BLOCK_KV // INST_SIZE, INST_SIZE))
                         qk_reshape = T.view(qk, qk.layout, (BLOCK_Q, BLOCK_KV // INST_SIZE, INST_SIZE))
                         running_max_reshape = T.view(running_max, running_max.layout, (seqlen_q, 1, 1))
+                        # FIXME: this still fails to be simplified. Try to use explicit mask later
                         Tp.unary_reduce(p_reshape[:, 0:kv_range // INST_SIZE, :], partial_rowsum_p[:, 0:kv_range // INST_SIZE], qk_reshape[:, 0:kv_range//INST_SIZE, :], unary_op="exp", reduce_op="sum", bias=running_max_reshape[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0, 0], reduce_axes=-1)
                         Tp.sum(rowsum_p, partial_rowsum_p[:, 0:kv_range // INST_SIZE], axes=-1)
                         # transpose p
