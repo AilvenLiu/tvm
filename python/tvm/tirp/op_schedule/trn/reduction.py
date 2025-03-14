@@ -36,6 +36,7 @@ from .common import (
     f_gen_idx_mapped,
     bound_buffer_region,
     make_guard,
+    nki_dim,
 )
 from ..common import register_unary_binary_schedule, ReduceOpType
 from .common import target_trn
@@ -126,11 +127,12 @@ def reduction_trn(
         def impl():
             for b_loop in T.serial(0, b_extent):
                 with T.attr(0, "tensorized_nki_instruction", 1):
-                    for p_loop, f_loop in T.grid(p_size, inst_size):
-                        if f_src_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
-                            src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop, p_loop))
-                            dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                            T.evaluate(T.nki_tensorreduce(dst[dst_indices], src[src_indices], opcode, negate, -1))
+                    for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                        for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
+                            if f_src_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
+                                src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop, p_loop))
+                                dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
+                                T.evaluate(T.nki_tensorreduce(dst[dst_indices], src[src_indices], opcode, negate, -1))
         # fmt: on
         return impl
     else:
@@ -143,15 +145,17 @@ def reduction_trn(
                 for b_loop in T.serial(0, b_extent):
                     for reduction_b_loop in T.serial(0, reduction_b_extent):
                         with T.attr(0, "tensorized_nki_instruction", 1):
-                            for p_loop, f_loop in T.grid(p_size, inst_size):
-                                if f_src_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
-                                    src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                    T.evaluate(T.nki_tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, False, -1))
+                            for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                                for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
+                                    if f_src_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
+                                        src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                        T.evaluate(T.nki_tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, False, -1))
                     with T.attr(0, "tensorized_nki_instruction", 1):
-                        for p_loop, f_loop in T.grid(p_size, reduction_b_extent):
-                            if f_src_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
-                                dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                T.evaluate(T.nki_tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))
+                        for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                            for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
+                                if f_src_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
+                                    dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                    T.evaluate(T.nki_tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))
         # fmt: on
         return two_stage_reduction
 

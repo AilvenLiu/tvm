@@ -37,6 +37,7 @@ from .common import (
     bound_inst_with_limit,
     bound_buffer_region,
     make_guard,
+    nki_dim,
 )
 from .unary import try_find_inst_unary
 from .binary import try_find_inst_binary, InstType, try_find_inst_nary
@@ -139,16 +140,17 @@ def binary_reduce_trn(
         def impl():
             for b_loop in T.serial(0, b_extent):
                 with T.attr(0, "tensorized_nki_instruction", 1):
-                    for p_loop, f_loop in T.grid(p_size, inst_size):
-                        src_1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        vec_dst_idx = T.meta_var(f_gen_vec_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        reduce_dst_idx = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
-                            if CONST is None:
-                                src_2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent),), f_loop, p_loop))
-                                T.nki_tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse)
-                            else:
-                                T.nki_tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse)
+                    for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                        for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
+                            src_1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent),), f_loop, p_loop))
+                            vec_dst_idx = T.meta_var(f_gen_vec_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
+                            reduce_dst_idx = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
+                            if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
+                                if CONST is None:
+                                    src_2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent),), f_loop, p_loop))
+                                    T.nki_tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse)
+                                else:
+                                    T.nki_tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse)
         # fmt: on
         return impl
     else:
@@ -162,20 +164,22 @@ def binary_reduce_trn(
                 for b_loop in T.serial(0, b_extent):
                     for reduction_b_loop in T.serial(0, reduction_b_extent):
                         with T.attr(0, "tensorized_nki_instruction", 1):
-                            for p_loop, f_loop in T.grid(p_size, inst_size):
-                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
-                                    src_1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                    vec_dst_idx = T.meta_var(f_gen_vec_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                    if CONST is None:
-                                        src_2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                        T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse)
-                                    else:
-                                        T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse)
+                            for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                                for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
+                                    if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
+                                        src_1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                        vec_dst_idx = T.meta_var(f_gen_vec_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                        if CONST is None:
+                                            src_2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                            T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse)
+                                        else:
+                                            T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse)
                     with T.attr(0, "tensorized_nki_instruction", 1):
-                        for p_loop, f_loop in T.grid(p_size, reduction_b_extent):
-                            if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
-                                dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                T.nki_tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1)
+                        for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                            for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
+                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
+                                    dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                    T.nki_tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1)
         # fmt: on
         return impl
 
@@ -240,24 +244,27 @@ def unary_reduce_trn(
     unary_opcode, reduce_opcode = opcode_table[op.unary_op], opcode_table[op.reduce_op]
     bias_buffer = bias.buffer if isinstance(bias, BufferRegion) else None
     f_dst_guard = make_guard(unary_output, analyzer)
+    # TODO: let user define inst size here
+    # TODO: user pass partial reduce buffer in workspace
     if intermediate_shape is None:
         # fmt: off
         @T.prim_func(tirp=True)
         def impl():
             for b_loop in T.serial(0, b_extent):
                 with T.attr(0, "tensorized_nki_instruction", 1):
-                    for p_loop, f_loop in T.grid(p_size, inst_size):
-                        src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
-                            if bias is None:
-                                T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode))
-                            elif isinstance(bias, BufferRegion):
-                                src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop, p_loop))
-                                T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
-                            else:
-                                T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias, scale))
+                    for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                        for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
+                            src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent),), f_loop, p_loop))
+                            dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
+                            dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
+                            if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
+                                if bias is None:
+                                    T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode))
+                                elif isinstance(bias, BufferRegion):
+                                    src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop, p_loop))
+                                    T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
+                                else:
+                                    T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias, scale))
         # fmt: on
         import tvm
 
@@ -275,22 +282,24 @@ def unary_reduce_trn(
                 for b_loop in T.serial(0, b_extent):
                     for reduction_b_loop in T.serial(0, reduction_b_extent):
                         with T.attr(0, "tensorized_nki_instruction", 1):
-                            for p_loop, f_loop in T.grid(p_size, inst_size):
-                                src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
-                                    if bias is None:
-                                        T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode))
-                                    elif isinstance(bias, BufferRegion):
-                                        src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                        T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
-                                    else:
-                                        T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias, scale))
+                            for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                                for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
+                                    src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                    dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                    if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
+                                        if bias is None:
+                                            T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode))
+                                        elif isinstance(bias, BufferRegion):
+                                            src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                            T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
+                                        else:
+                                            T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias, scale))
                     with T.attr(0, "tensorized_nki_instruction", 1):
-                        for p_loop, f_loop in T.grid(p_size, reduction_b_extent):
-                            if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
-                                dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                T.evaluate(T.nki_tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1))
+                        for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                            for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
+                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
+                                    dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                    T.evaluate(T.nki_tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1))
         # fmt: on
         return impl
 
@@ -365,12 +374,13 @@ def binary_chain_trn(
     def impl():
         for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop, f_loop in T.grid(p_size, actual_inst_size):
-                    f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                    dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                    srcs = T.meta_var(get_srcs(b_loop, f_loop_wo_limit, p_loop))
-                    if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
-                        T.evaluate(func(dst[*dst_indices], *srcs, opcode0, opcode1, reverse[0], reverse[1]))
+                for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                    for f_loop in T.serial(0, actual_inst_size, annotations={nki_dim: "F"}):
+                        f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
+                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                        srcs = T.meta_var(get_srcs(b_loop, f_loop_wo_limit, p_loop))
+                        if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
+                            T.evaluate(func(dst[*dst_indices], *srcs, opcode0, opcode1, reverse[0], reverse[1]))
     # fmt: on
     return impl
 

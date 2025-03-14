@@ -45,6 +45,7 @@ from .common import (
     target_trn,
     bound_buffer_region,
     make_guard,
+    nki_dim,
 )
 
 
@@ -89,8 +90,9 @@ def transpose_schedule(
         @T.prim_func(tirp=True)
         def identity_init():
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop, rhs_f_loop in T.grid(p_size, rhs_f_size):
-                    T.evaluate(T.nki_identity(identity_tensor[p_loop, rhs_f_loop], p_size))
+                for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                    for rhs_f_loop in T.serial(0, rhs_f_size, annotations={nki_dim: "F"}):
+                        T.evaluate(T.nki_identity(identity_tensor[p_loop, rhs_f_loop], p_size))
             Tp.tvm_kernel_replace_point()
 
         sctx.add_init_stmt(identity_init.body)
@@ -109,17 +111,19 @@ def transpose_schedule(
     @T.macro
     def matmul_inst_macro(b_loop, dst, use_dst_indices, max_psum_slots):
         with T.attr(0, "tensorized_nki_instruction", 1):
-            for p_loop, lhs_f_loop, rhs_f_loop in T.grid(p_size, lhs_f_size, rhs_f_size):
-                src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), lhs_f_loop, p_loop))
-                src_guard = T.meta_var(f_src_guard(f_gen_axes_src(((b_loop, b_extent),), lhs_f_loop, p_loop)))
-                dst_guard = T.meta_var(f_dst_guard(f_gen_axes_dst(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop)))
-                if src_guard and dst_guard:
-                    if use_dst_indices:
-                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop))
-                        T.evaluate(T.nki_matmul(dst[*dst_indices], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
-                    else:
-                        if src_guard:
-                            T.evaluate(T.nki_matmul(dst[b_loop // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_loop % inst_num_per_slot * rhs_f_size + rhs_f_loop], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
+            for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                for lhs_f_loop in T.serial(0, lhs_f_size, annotations={nki_dim: "lhs_F"}):
+                    for rhs_f_loop in T.serial(0, rhs_f_size, annotations={nki_dim: "rhs_F"}):
+                        src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), lhs_f_loop, p_loop))
+                        src_guard = T.meta_var(f_src_guard(f_gen_axes_src(((b_loop, b_extent),), lhs_f_loop, p_loop)))
+                        dst_guard = T.meta_var(f_dst_guard(f_gen_axes_dst(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop)))
+                        if src_guard and dst_guard:
+                            if use_dst_indices:
+                                dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop))
+                                T.evaluate(T.nki_matmul(dst[*dst_indices], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
+                            else:
+                                if src_guard:
+                                    T.evaluate(T.nki_matmul(dst[b_loop // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_loop % inst_num_per_slot * rhs_f_size + rhs_f_loop], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
     # fmt: on
     if dst_buffer.scope() == "trn.psum":
 
@@ -151,11 +155,12 @@ def transpose_schedule(
             for b_loop in T.serial(0, b_extent):
                 matmul_inst_macro(b_loop, acc_psum, False, max_psum_slots)
                 with T.attr(0, "tensorized_nki_instruction", 1):
-                    for p_loop, f_loop in T.grid(lhs_f_size, rhs_f_size):
-                        dst_guard = T.meta_var(f_dst_guard(f_gen_axes_dst(((b_loop, b_extent),), f_loop, p_loop)))
-                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                        if dst_guard:
-                            T.evaluate(T.nki_tensor_copy(dst_buffer[*dst_indices], acc_psum[b_loop // inst_num_per_slot % max_psum_slots, p_loop, b_loop % inst_num_per_slot * rhs_f_size + f_loop]))
+                    for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                        for f_loop in T.serial(0, rhs_f_size, annotations={nki_dim: "F"}):
+                            dst_guard = T.meta_var(f_dst_guard(f_gen_axes_dst(((b_loop, b_extent),), f_loop, p_loop)))
+                            dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
+                            if dst_guard:
+                                T.evaluate(T.nki_tensor_copy(dst_buffer[*dst_indices], acc_psum[b_loop // inst_num_per_slot % max_psum_slots, p_loop, b_loop % inst_num_per_slot * rhs_f_size + f_loop]))
     # fmt: on
 
     return transpose_sbuf_output
@@ -263,8 +268,8 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         # the additional b loop is to satisfy hardware instuction size limit
         for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop in T.serial(0, p_size):
-                    for f_loop in T.serial(0, actual_inst_size):
+                for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                    for f_loop in T.serial(0, actual_inst_size, annotations={nki_dim: "F"}):
                         f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
                         if f_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
                             src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))

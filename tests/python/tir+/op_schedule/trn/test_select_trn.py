@@ -54,8 +54,9 @@ def test_select():
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             for b_loop, additional_b_loop in T.grid(1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_affine_select(B_sbuf[p_loop, f_loop], p_loop < f_loop, A_sbuf[p_loop, f_loop], T.float32(0.0))
+                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                    for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
+                        T.nki_affine_select(B_sbuf[p_loop, f_loop], p_loop < f_loop, A_sbuf[p_loop, f_loop], T.float32(0.0))
     # fmt: on
 
     with target:
@@ -93,8 +94,9 @@ def test_select_in_loop():
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             for i, b_loop, additional_b_loop in T.grid(2, 1, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_affine_select(B_sbuf[p_loop, f_loop], (i + 1) * p_loop < f_loop, A_sbuf[p_loop, i * 8192 + f_loop], T.float32(0.0))
+                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                    for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
+                        T.nki_affine_select(B_sbuf[p_loop, f_loop], (i + 1) * p_loop < f_loop, A_sbuf[p_loop, i * 8192 + f_loop], T.float32(0.0))
 
     # fmt: on
     with target:
@@ -128,8 +130,9 @@ def test_select_expr_affine():
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             for b_loop, additional_b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0))
+                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                    for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
+                        T.nki_affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0))
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": select})
@@ -164,9 +167,10 @@ def test_select_with_guard():
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             for i, j, b_loop, additional_b_loop in T.grid(4, 4, 4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, f_loop in T.grid(128, 512):
-                    if b_loop - i < 1 and f_loop < j * 128 + 128:
-                        T.nki_affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0))         
+                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                    for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
+                        if b_loop - i < 1 and f_loop < j * 128 + 128:
+                            T.nki_affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0))         
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": select})

@@ -34,6 +34,9 @@ from tvm.tirp.op_schedule import ScheduleContext
 f_normalize_trn_layout_with_shape = get_global_func("tir.NormalizeTrainiumLayoutWithShape")
 f_normalize_tile_layout_with_shape = get_global_func("tir.NormalizeTileLayoutWithShape")
 
+# nki dim is used to generate the correct [:, None] for mask / predicate
+# can be used on any operators other than matmul
+nki_dim = "nki_dim"
 
 def normalize_layout_with_shape(layout, shape):
     if isinstance(layout, T.TrainiumLayout):

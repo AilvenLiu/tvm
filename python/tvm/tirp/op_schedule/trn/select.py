@@ -37,6 +37,7 @@ from .common import (
     bound_inst_with_limit,
     bound_buffer_region,
     make_guard,
+    nki_dim,
 )
 
 
@@ -82,6 +83,7 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         bound_dst, bound_true_value, analyzer
     )
     # affine_select only takes linear expression, so we can only extract instruction from one data iter
+    # TODO: other operators should also restrict free dim if free dimensions have guard
     _, layout, _ = infer_range_info(dst, analyzer)
     data_iter_array = layout.combined_1d_layout.data_iter_array
     min_stride_iter = min(
@@ -108,8 +110,8 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     def impl():
         for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop in T.serial(0, p_size):
-                    for f_loop in T.serial(0, actual_inst_size):
+                for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                    for f_loop in T.serial(0, actual_inst_size, annotations={nki_dim: "F"}):
                         f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
                         if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
                             dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))

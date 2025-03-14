@@ -36,9 +36,12 @@ namespace codegen {
 
 struct NKIInstructionCtx {
   std::unordered_set<const VarNode*> tensorized_loop_vars;
+  std::unordered_map<const VarNode*, String> loopvar2dim;
+  bool is_matmul_input = false;
   int buffer_index = -1;
   int used_var_cnt = 0;
   DataType dst_dtype;
+  PrimExpr mask;
   bool tensorizing = false;
 };
 
@@ -68,6 +71,7 @@ class CodeGenTrainium final : public CodeGenC {
   void VisitExpr_(const FloorModNode* op, std::ostream& os) final;    // NOLINT(*)
   void VisitStmt_(const DeclBufferNode* op) final;                    // NOLINT(*)
   void VisitStmt_(const IfThenElseNode* op) final;                    // NOLINT(*)
+  void VisitExpr_(const AndNode* op, std::ostream& os) final;         // NOLINT(*)
 
  private:
   Target target_;

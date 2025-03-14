@@ -69,8 +69,9 @@ def test_simple_reduction(op_type):
             B_sbuf = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
             for b_loop in range(1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_tensorreduce(B_sbuf[p_loop, 0], A_sbuf[p_loop, f_loop], opcode, False, -1)
+                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                    for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
+                        T.nki_tensorreduce(B_sbuf[p_loop, 0], A_sbuf[p_loop, f_loop], opcode, False, -1)
 
     # fmt: on
     with target:
@@ -106,8 +107,9 @@ def test_reduction_with_multiple_axes():
             B_sbuf = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
             for b_loop in range(1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, f_loop in T.grid(128, 2048):
-                    T.nki_tensorreduce(B_sbuf[p_loop, 0], A_sbuf[p_loop, f_loop], "add", False, -1)
+                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                    for f_loop in T.serial(0, 2048, annotations={"nki_dim":"F"}):
+                        T.nki_tensorreduce(B_sbuf[p_loop, 0], A_sbuf[p_loop, f_loop], "add", False, -1)
 
     # fmt: on
     with target:
@@ -143,8 +145,9 @@ def test_reduction_in_loop():
             B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
             for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, f_loop in T.grid(128, 512):
-                    T.nki_tensorreduce(B_sbuf[p_loop, i], A_sbuf[p_loop, f_loop * 4 + i], "add", False, -1)
+                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                    for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
+                        T.nki_tensorreduce(B_sbuf[p_loop, i], A_sbuf[p_loop, f_loop * 4 + i], "add", False, -1)
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
@@ -181,11 +184,13 @@ def test_reduction_two_stage():
                 for b_loop in range(4):
                     for reduction_b_loop in range(32):
                         T.attr(0, "tensorized_nki_instruction", 1)
-                        for p_loop, f_loop in T.grid(128, 32):
-                            T.nki_tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], A_sbuf[p_loop, reduction_b_loop * 128 + b_loop * 32 + f_loop], "add", False, -1)
+                        for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                            for f_loop in T.serial(0, 32, annotations={"nki_dim":"F"}):
+                                T.nki_tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], A_sbuf[p_loop, reduction_b_loop * 128 + b_loop * 32 + f_loop], "add", False, -1)
                     T.attr(0, "tensorized_nki_instruction", 1)
-                    for p_loop, f_loop in T.grid(128, 32):
-                        T.nki_tensorreduce(B_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", False, -1)
+                    for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                        for f_loop in T.serial(0, 32, annotations={"nki_dim":"F"}):
+                            T.nki_tensorreduce(B_sbuf[p_loop, b_loop], intermediate_buffer[p_loop, f_loop], "add", False, -1)
 
     # fmt: on
     with target:
@@ -223,9 +228,10 @@ def test_reduction_with_guard():
             B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
             for i, j, b_loop in T.grid(4, 4, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop, f_loop in T.grid(128, 1024):
-                    if b_loop - i < 1 and f_loop < j * 256 + 256:
-                        T.nki_tensorreduce(B_sbuf[p_loop, b_loop], A_sbuf[p_loop, b_loop * 2048 + f_loop], "add", T.bool(False), -1)
+                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
+                    for f_loop in T.serial(0, 1024, annotations={"nki_dim":"F"}):
+                        if b_loop - i < 1 and f_loop < j * 256 + 256:
+                            T.nki_tensorreduce(B_sbuf[p_loop, b_loop], A_sbuf[p_loop, b_loop * 2048 + f_loop], "add", T.bool(False), -1)
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
