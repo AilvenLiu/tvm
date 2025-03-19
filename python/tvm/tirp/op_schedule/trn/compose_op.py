@@ -39,7 +39,7 @@ from .common import (
     make_guard,
     nki_dim,
 )
-from .unary import try_find_inst_unary
+from .unary import try_find_inst_unary, get_const_bias_tensor
 from .binary import try_find_inst_binary, InstType, try_find_inst_nary
 from .reduction import generate_intermediate_buffer, reduction_trn
 from ..common import ReduceOpType
@@ -196,11 +196,12 @@ def unary_reduce_trn(
     analyzer = init_analyzer(sctx)
     reduce_axes = [i if i >= 0 else len(unary_output.buffer.shape) + i for i in op.reduce_axes]
     scale = 1.0 if scale is None else scale
+    bias = 0.0 if bias is None else bias
     bound_unary_output = bound_buffer_region(unary_output, analyzer)
     bound_unary_input = bound_buffer_region(unary_input, analyzer)
     bound_bias = bound_buffer_region(bias, analyzer)
     bound_reduce_output = bound_buffer_region(reduce_output, analyzer)
-    if bias is not None:
+    if isinstance(bias, BufferRegion):
         inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
             bound_unary_output,
             bound_unary_input,
@@ -226,7 +227,7 @@ def unary_reduce_trn(
         f_gen_axes,
         get_reduction_dim_map(unary_output, reduce_output, reduce_axes, analyzer),
     )
-    if bias is not None and isinstance(bias, BufferRegion):
+    if isinstance(bias, BufferRegion):
         offset = len(unary_input.region) - len(bias.region)
         dst_to_bias_dim_map = {
             d: s - offset for d, s in dst_to_src_dim_map.items() if s not in broadcast_dims
@@ -242,7 +243,11 @@ def unary_reduce_trn(
     )
     src, dst1, dst2 = unary_input.buffer, unary_output.buffer, reduce_output.buffer
     unary_opcode, reduce_opcode = opcode_table[op.unary_op], opcode_table[op.reduce_op]
-    bias_buffer = bias.buffer if isinstance(bias, BufferRegion) else None
+    bias_buffer = (
+        bias.buffer
+        if isinstance(bias, BufferRegion)
+        else get_const_bias_tensor(bias, (p_size, inst_size), dst1.dtype, op.workspace, sctx)
+    )
     f_dst_guard = make_guard(unary_output, analyzer)
     # TODO: let user define inst size here
     # TODO: user pass partial reduce buffer in workspace
@@ -258,13 +263,11 @@ def unary_reduce_trn(
                             dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
                             dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
                             if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
-                                if bias is None:
-                                    T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode))
-                                elif isinstance(bias, BufferRegion):
+                                if isinstance(bias, BufferRegion):
                                     src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop, p_loop))
                                     T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
                                 else:
-                                    T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias, scale))
+                                    T.evaluate(T.nki_activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))
         # fmt: on
         import tvm
 
@@ -287,13 +290,11 @@ def unary_reduce_trn(
                                     src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
                                     dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
                                     if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
-                                        if bias is None:
-                                            T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode))
-                                        elif isinstance(bias, BufferRegion):
+                                        if isinstance(bias, BufferRegion):
                                             src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
                                             T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
                                         else:
-                                            T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias, scale))
+                                            T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
                             for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):

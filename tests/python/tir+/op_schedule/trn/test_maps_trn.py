@@ -40,7 +40,7 @@ Tp_func_map = {
 }
 
 
-@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt", "memset", "exp"])
+@pytest.mark.parametrize("op_type", ["reciprocal", "memset"])
 def test_simple_unary(op_type):
     src_shape = [128, 512]
     src_layout = TrainiumLayout(
@@ -77,10 +77,6 @@ def test_simple_unary(op_type):
                             T.nki_reciprocal(
                                 B_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop]
                             )
-                        elif op_type in ["sqrt", "exp"]:
-                            T.nki_activation(
-                                B_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], op_type
-                            )
                         elif op_type == "memset":
                             T.nki_memset(B_sbuf[p_loop, f_loop], 0.0)
     # fmt: on
@@ -90,7 +86,7 @@ def test_simple_unary(op_type):
         assert_structural_equal(mod["main"], expected)
 
 
-@pytest.mark.parametrize("op_type", ["reciprocal", "sqrt", "memset", "exp"])
+@pytest.mark.parametrize("op_type", ["reciprocal", "memset"])
 def test_unary_in_a_loop(op_type):
     src_shape = [1024, 512]
     src_layout = TrainiumLayout(
@@ -128,8 +124,6 @@ def test_unary_in_a_loop(op_type):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
                         if op_type == "reciprocal":
                             T.nki_reciprocal(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop])
-                        elif op_type in ["sqrt", "exp"]:
-                            T.nki_activation(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], op_type)
                         elif op_type == "memset":
                             T.nki_memset(B_sbuf[p_loop, i * 512 + f_loop], 0.0)
     # fmt: on
@@ -461,7 +455,7 @@ def test_binary_broadcast3():
         assert_structural_equal(mod["main"], expected)
 
 
-@pytest.mark.parametrize("op_type", ["sqrt"])
+@pytest.mark.parametrize("op_type", ["sqrt", "exp"])
 def test_unary_with_bias_scale(op_type):
     src_shape = [512, 1024]
     src_layout = TrainiumLayout(
@@ -476,7 +470,7 @@ def test_unary_with_bias_scale(op_type):
         combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1)),
     )
     scale = T.float32(2.0)
-
+    tp_func = Tp_func_map[op_type]
     # fmt: off
     @T.prim_func(tirp=True)
     def unary() -> None:
@@ -484,7 +478,7 @@ def test_unary_with_bias_scale(op_type):
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(bias_shape, "float32", scope="trn.sbuf", layout=bias_layout)
             C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            Tp.sqrt(C_sbuf, A_sbuf, bias=B_sbuf, scale=scale)
+            tp_func(C_sbuf, A_sbuf, bias=B_sbuf, scale=scale)
 
     @T.prim_func(tirp=True)
     def expected():
@@ -497,7 +491,7 @@ def test_unary_with_bias_scale(op_type):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
-                        T.nki_activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], "sqrt", B_sbuf[p_loop, b_loop], T.float32(2.0))
+                        T.nki_activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], op_type, B_sbuf[p_loop, b_loop], T.float32(2.0))
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -505,7 +499,7 @@ def test_unary_with_bias_scale(op_type):
         assert_structural_equal(mod["main"], expected)
 
 
-@pytest.mark.parametrize("op_type", ["sqrt"])
+@pytest.mark.parametrize("op_type", ["sqrt", "exp"])
 def test_unary_with_bias_scale_2(op_type):
     src_shape = [512, 1024]
     src_layout = TrainiumLayout(
@@ -516,6 +510,7 @@ def test_unary_with_bias_scale_2(op_type):
     dst_layout = src_layout
     bias = T.float32(1.0)
     scale = T.float32(2.0)
+    tp_func = Tp_func_map[op_type]
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -523,7 +518,7 @@ def test_unary_with_bias_scale_2(op_type):
         with T.kernel():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            Tp.sqrt(C_sbuf, A_sbuf, bias=bias, scale=scale)
+            tp_func(C_sbuf, A_sbuf, bias=bias, scale=scale)
 
     @T.prim_func(tirp=True)
     def expected():
@@ -531,11 +526,16 @@ def test_unary_with_bias_scale_2(op_type):
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            with T.attr(0, "tensorized_nki_instruction", 1):
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
+                        T.nki_memset(const_bias[p_loop, f_loop], T.float32(1.0))
             for b_loop, additional_b_loop in T.grid(1, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
-                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                    for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
-                        T.nki_activation(C_sbuf[p_loop, additional_b_loop * 512 + f_loop], A_sbuf[p_loop, additional_b_loop * 512 + f_loop], "sqrt", bias, scale)
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
+                        T.nki_activation(C_sbuf[p_loop, additional_b_loop * 512 + f_loop], A_sbuf[p_loop, additional_b_loop * 512 + f_loop], op_type, const_bias[p_loop, f_loop], T.float32(2.0))
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": unary})

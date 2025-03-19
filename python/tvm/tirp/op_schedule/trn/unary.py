@@ -21,7 +21,7 @@ from typing import Optional, Union, Tuple
 import operator
 
 from tvm.arith.analyzer import Analyzer
-from tvm.script import tir as T
+from tvm.script import tir as T, tirp as Tp
 from tvm.tir import BufferRegion, PrimFunc, FloatImm
 from tvm.tirp.op_schedule import ScheduleContext
 from tvm.tir.stmt import OpCall
@@ -37,6 +37,7 @@ from .common import (
     f_gen_idx_mapped,
     bound_buffer_region,
     make_guard,
+    check_workspace_buffer,
     nki_dim,
 )
 from ..common import MapOpType
@@ -105,6 +106,26 @@ def try_find_inst_unary(
     return inst_size, f_gen_axes
 
 
+def get_const_bias_tensor(bias, shape, dtype, workspace, sctx):
+    if "const_bias" not in workspace:
+        bias_buffer = T.buffer(shape, dtype, scope="trn.sbuf", buffer_name="const_bias")
+        sctx.add_alloc_buffer(bias_buffer)
+
+        @T.prim_func(tirp=True)
+        def const_bias_init():
+            with T.attr(0, "tensorized_nki_instruction", 1):
+                for p_loop in T.serial(0, shape[0], annotations={nki_dim: "P"}):
+                    for f_loop in T.serial(0, shape[1], annotations={nki_dim: "F"}):
+                        T.evaluate(T.nki_memset(bias_buffer[p_loop, f_loop], bias))
+            Tp.tvm_kernel_replace_point()
+
+        sctx.add_init_stmt(const_bias_init.body)
+    else:
+        bias_buffer = workspace["const_bias"]
+        check_workspace_buffer(bias_buffer, shape, "trn.sbuf")
+    return bias_buffer
+
+
 def generate_unary_func(
     dst_buffer_region,
     _src,
@@ -117,6 +138,8 @@ def generate_unary_func(
     bias,
     scale,
     analyzer,
+    workspace,
+    sctx,
 ):
     bound_dst = bound_buffer_region(dst_buffer_region, analyzer)
     p_size = dst_buffer_region.buffer.layout.partition_size
@@ -128,9 +151,14 @@ def generate_unary_func(
     opcode = opcode_table[unary_op] if unary_op in opcode_table else None
     dst = dst_buffer_region.buffer
     src = _src.buffer if isinstance(_src, BufferRegion) else None
-    bias_buffer = bias.buffer if isinstance(bias, BufferRegion) else None
-
     f_dst_guard = make_guard(dst_buffer_region, analyzer)
+    if isinstance(bias, (FloatImm, float)):
+        bias_buffer = get_const_bias_tensor(
+            bias, (p_size, actual_inst_size), dst.dtype, workspace, sctx
+        )
+    elif isinstance(bias, BufferRegion):
+        bias_buffer = bias.buffer
+
     # fmt: off
     @T.prim_func(tirp=True)
     def impl():
@@ -147,15 +175,11 @@ def generate_unary_func(
                                 src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop) )
                                 if unary_op == MapOpType.RECIPROCAL:
                                     T.evaluate(T.nki_reciprocal(dst[*dst_indices], src[*src_indices]))
+                                elif isinstance(bias, BufferRegion):
+                                    bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                                    T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[*bias_indices]))
                                 else:
-                                    #todo: if we use direct allocation, nki activation should take zero bias tensor
-                                    if bias is None:
-                                        T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale))
-                                    elif isinstance(bias, BufferRegion):
-                                        bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                                        T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[*bias_indices]))
-                                    else:
-                                        T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias))
+                                    T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[p_loop, f_loop]))
     # fmt: on
     return impl
 
@@ -207,6 +231,8 @@ def unary_trn(
         None,
         None,
         analyzer,
+        op.workspace,
+        sctx,
     )
 
 
@@ -219,12 +245,13 @@ def unary_with_bias_scale_trn(
         return None
     dst_buffer_region, src_buffer_region, _bias, scale = op.args
     scale = 1.0 if scale is None else scale
+    _bias = 0.0 if _bias is None else _bias
 
     analyzer = init_analyzer(sctx)
     assert unary_op in activation_map_ops, f"Unsupported activation operation {unary_op}"
     bound_dst = bound_buffer_region(dst_buffer_region, analyzer)
     bound_src = bound_buffer_region(src_buffer_region, analyzer)
-    if _bias is not None:
+    if isinstance(_bias, BufferRegion):
         bound_bias = bound_buffer_region(_bias, analyzer)
         inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
             bound_dst,
@@ -262,4 +289,6 @@ def unary_with_bias_scale_trn(
         _bias,
         scale,
         analyzer,
+        op.workspace,
+        sctx,
     )

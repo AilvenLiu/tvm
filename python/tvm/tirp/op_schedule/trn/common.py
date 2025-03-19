@@ -38,6 +38,7 @@ f_normalize_tile_layout_with_shape = get_global_func("tir.NormalizeTileLayoutWit
 # can be used on any operators other than matmul
 nki_dim = "nki_dim"
 
+
 def normalize_layout_with_shape(layout, shape):
     if isinstance(layout, T.TrainiumLayout):
         ret = f_normalize_trn_layout_with_shape(layout, shape)
@@ -702,13 +703,13 @@ def check_workspace_buffer(buffer: Buffer, shape: Tuple[int], scope: str):
     if scope == "trn.psum":
         # the number of psum banks used is inferred from the shape
         # only check p and f dims
-        assert tuple(buffer.shape[1:]) == tuple(
-            shape
-        ), f"workspace buffer must have the correct shape, {buffer.shape[1:]} != {shape[1:]}"
+        assert all(
+            x >= y for x, y in zip(buffer.shape[1:], shape)
+        ), f"workspace buffer must have enough size, {buffer.shape[1:]} cannot cover {shape}"
     else:
-        assert tuple(buffer.shape) == tuple(
-            shape
-        ), f"workspace buffer must have the correct shape, {buffer.shape} != {shape}"
+        assert all(
+            x >= y for x, y in zip(buffer.shape, shape)
+        ), f"workspace buffer must have enough size, {buffer.shape} cannot cover {shape}"
 
 
 def target_trn(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):

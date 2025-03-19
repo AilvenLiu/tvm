@@ -19,7 +19,7 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from utils import run_on_remote_and_check_correct, ssh_client
+from .utils import run_on_remote_and_check_correct, ssh_client
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -41,7 +41,7 @@ NUM_MM1_PER_BLOCK = BLOCK_KV // INST_SIZE
 
 
 @pytest.mark.dependency(depends=["ssh_success"])
-def test_flash_attn(causal=True):
+def test_flash_attn(ssh_client, causal=True):
 
     running_max_shape = (seqlen_q, 1)
     running_max_layout = "PF"
@@ -139,6 +139,9 @@ def test_flash_attn(causal=True):
                         qk_reshape = T.view(qk, qk.layout, (BLOCK_Q, BLOCK_KV // INST_SIZE, INST_SIZE))
                         running_max_reshape = T.view(running_max, running_max.layout, (seqlen_q, 1, 1))
                         # FIXME: this still fails to be simplified. Try to use explicit mask later
+                        # Most masks are of 2 kinds: 1. out-of-bound mask, 2. mask that reduce redundant computation.
+                        # We can set an attribute to the mask, showing that the second kind of mask can be relaxed.
+                        # F loop can always be relaxed to a constant, so that the mask only contains out-of-bound mask.
                         Tp.unary_reduce(p_reshape[:, 0:kv_range // INST_SIZE, :], partial_rowsum_p[:, 0:kv_range // INST_SIZE], qk_reshape[:, 0:kv_range//INST_SIZE, :], unary_op="exp", reduce_op="sum", bias=running_max_reshape[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0, 0], reduce_axes=-1)
                         Tp.sum(rowsum_p, partial_rowsum_p[:, 0:kv_range // INST_SIZE], axes=-1)
                         # transpose p
