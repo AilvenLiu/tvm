@@ -32,7 +32,6 @@ from .common import (
     find_max_inst_size_unary,
     infer_range_info,
     get_ewise_dim_map,
-    get_hardware_inst_size_limit,
     bound_inst_with_limit,
     init_analyzer,
     f_gen_idx_anchor,
@@ -197,21 +196,23 @@ def try_find_inst_binary(
     allow_tensortensor: bool = True,
     allow_reverse: bool = True,
 ):
-    inst_size, f_gen_axes, inst_types, reverse, broadcast_dims = try_find_inst_nary(
-        _dst,
-        [_src1, _src2],
-        analyzer,
-        allowed_f_dim_dst,
-        (allowed_f_dim_src1, allowed_f_dim_src2),
-        allow_tensortensor,
+    inst_size, inst_stride, inst_data_iters, inst_types, reverse, broadcast_dims = (
+        try_find_inst_nary(
+            _dst,
+            [_src1, _src2],
+            analyzer,
+            allowed_f_dim_dst,
+            (allowed_f_dim_src1, allowed_f_dim_src2),
+            allow_tensortensor,
+        )
     )
     if inst_size is None:
-        return None, None, None, None, None
+        return None, None, None, None, None, None
     if inst_types[0] == InstType.TENSOR_TENSOR and not allow_tensortensor:
-        return None, None, None, None, None
+        return None, None, None, None, None, None
     if reverse[0] and not allow_reverse:
-        return None, None, None, None, None
-    return inst_size, f_gen_axes, inst_types[0], reverse[0], broadcast_dims[0]
+        return None, None, None, None, None, None
+    return inst_size, inst_stride, inst_data_iters, inst_types[0], reverse[0], broadcast_dims[0]
 
 
 def try_find_inst_nary(
@@ -323,7 +324,6 @@ def try_find_inst_nary(
             for i in range(len(src0_extent))
             if i not in local_broadcast_dims
         }
-        print(src0_to_src_dim_map)
         assert check_partition_dim_match(
             _srcs[0], src, src0_to_src_dim_map, analyzer
         ), f"partition dimension mismatch: src0: {_srcs[0]}, src: {src}"
@@ -353,8 +353,7 @@ def try_find_inst_nary(
             refine_inst=refine_inst,
         )
         inst_types.append(inst_type)
-    f_gen_axes = generate_axes_in_region(_dst, inst_stride, inst_data_iters, analyzer)
-    return inst_size, f_gen_axes, inst_types, reverse, broadcast_dims
+    return inst_size, inst_stride, inst_data_iters, inst_types, reverse, broadcast_dims
 
 
 def binary_trn(
@@ -370,9 +369,10 @@ def binary_trn(
     bound_dst = bound_buffer_region(_dst, analyzer)
     bound_src1 = bound_buffer_region(_src1, analyzer)
     bound_src2 = bound_buffer_region(_src2, analyzer)
-    inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
-        bound_dst, bound_src1, bound_src2, analyzer
+    inst_size, inst_stride, inst_data_iters, inst_type, reverse, broadcast_dims = (
+        try_find_inst_binary(bound_dst, bound_src1, bound_src2, analyzer)
     )
+    f_gen_axes = generate_axes_in_region(bound_dst, inst_stride, inst_data_iters, analyzer)
     if reverse:
         _src1, _src2, bound_src1, bound_src2 = _src2, _src1, bound_src2, bound_src1
     f_gen_dst_idx = f_gen_idx_anchor(_dst, f_gen_axes)
@@ -400,7 +400,7 @@ def binary_trn(
     _func = T.nki_tensortensor if inst_type == InstType.TENSOR_TENSOR else T.nki_tensorscalar
     func = lambda *args: _func(*args, reverse) if inst_type == InstType.TENSOR_SCALAR else _func(*args)
     
-    inst_size_limit = get_hardware_inst_size_limit(is_dma=False)
+    inst_size_limit = op.schedule_config.get("max_inst_size", None)
     actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
     f_guard = make_guard(_dst, analyzer)
     

@@ -28,13 +28,14 @@ from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from tvm.ir import Op
 from tvm.tirp.operator.op import BinaryReduce, UnaryReduce, BinaryChain, ReduceNegate
 from .common import (
+    generate_axes_in_region,
     get_ewise_dim_map,
     init_analyzer,
     get_reduction_dim_map,
     f_gen_idx_anchor,
     f_gen_idx_mapped,
-    get_hardware_inst_size_limit,
     bound_inst_with_limit,
+    bound_inst_data_iter_with_limit,
     bound_buffer_region,
     make_guard,
     nki_dim,
@@ -82,13 +83,22 @@ def binary_reduce_trn(
     bound_binary_input1 = bound_buffer_region(binary_input1, analyzer)
     bound_binary_input2 = bound_buffer_region(binary_input2, analyzer)
     bound_reduce_output = bound_buffer_region(reduce_output, analyzer)
-    inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
-        bound_binary_output,
-        bound_binary_input1,
-        bound_binary_input2,
-        analyzer,
-        allowed_f_dim_dst=reduce_axes,
-        allow_tensortensor=False,
+    inst_size, inst_stride, inst_data_iters, inst_type, reverse, broadcast_dims = (
+        try_find_inst_binary(
+            bound_binary_output,
+            bound_binary_input1,
+            bound_binary_input2,
+            analyzer,
+            allowed_f_dim_dst=reduce_axes,
+            allow_tensortensor=False,
+        )
+    )
+    inst_size_limit = op.schedule_config.get("max_inst_size", None)
+    inst_size, inst_data_iters = bound_inst_data_iter_with_limit(
+        bound_binary_output, inst_data_iters, inst_size_limit, analyzer
+    )
+    f_gen_axes = generate_axes_in_region(
+        bound_binary_output, inst_stride, inst_data_iters, analyzer
     )
     assert inst_size is not None, f"Failed to find a valid instruction: {op}"
     assert (
@@ -98,8 +108,14 @@ def binary_reduce_trn(
     if reverse:
         binary_input1, binary_input2 = binary_input2, binary_input1
         bound_binary_input1, bound_binary_input2 = bound_binary_input2, bound_binary_input1
-    intermediate_shape, intermediate_layout, reduction_b_extent = generate_intermediate_buffer(
-        bound_reduce_output, bound_binary_output, reduce_axes, inst_size, analyzer
+    intermediate_buffer, reduction_b_extent = generate_intermediate_buffer(
+        bound_reduce_output,
+        bound_binary_output,
+        reduce_axes,
+        inst_size,
+        op.workspace,
+        sctx,
+        analyzer,
     )
     f_gen_vec_dst_idx = f_gen_idx_anchor(binary_output, f_gen_axes)
     vec_dst_to_src1_dim_map = get_ewise_dim_map(binary_output, binary_input1, analyzer)
@@ -134,7 +150,7 @@ def binary_reduce_trn(
     )
     binary_opcode, reduce_opcode = opcode_table[op.binary_op], opcode_table[op.reduce_op]
     f_dst_guard = make_guard(binary_output, analyzer)
-    if intermediate_shape is None:
+    if intermediate_buffer is None:
         # fmt: off
         @T.prim_func(tirp=True)
         def impl():
@@ -159,27 +175,25 @@ def binary_reduce_trn(
         # fmt: off
         @T.prim_func(tirp=True)
         def impl():
-            with T.kernel():
-                intermediate_buffer = T.alloc_buffer(intermediate_shape, dtype=dst2.dtype, layout=intermediate_layout, scope="trn.sbuf")
-                for b_loop in T.serial(0, b_extent):
-                    for reduction_b_loop in T.serial(0, reduction_b_extent):
-                        with T.attr(0, "tensorized_nki_instruction", 1):
-                            for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                                for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
-                                    if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
-                                        src_1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                        vec_dst_idx = T.meta_var(f_gen_vec_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                        if CONST is None:
-                                            src_2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                            T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse)
-                                        else:
-                                            T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse)
+            for b_loop in T.serial(0, b_extent):
+                for reduction_b_loop in T.serial(0, reduction_b_extent):
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                            for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
-                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
-                                    dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                    T.nki_tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1)
+                            for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
+                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
+                                    src_1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                    vec_dst_idx = T.meta_var(f_gen_vec_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                    if CONST is None:
+                                        src_2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                        T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse)
+                                    else:
+                                        T.nki_tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse)
+                with T.attr(0, "tensorized_nki_instruction", 1):
+                    for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                        for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
+                            if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
+                                dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                T.nki_tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1)
         # fmt: on
         return impl
 
@@ -202,22 +216,35 @@ def unary_reduce_trn(
     bound_bias = bound_buffer_region(bias, analyzer)
     bound_reduce_output = bound_buffer_region(reduce_output, analyzer)
     if isinstance(bias, BufferRegion):
-        inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
-            bound_unary_output,
-            bound_unary_input,
-            bound_bias,
-            analyzer,
-            allow_tensortensor=False,
-            allow_reverse=False,
-            allowed_f_dim_dst=reduce_axes,
+        inst_size, inst_stride, inst_data_iters, inst_type, reverse, broadcast_dims = (
+            try_find_inst_binary(
+                bound_unary_output,
+                bound_unary_input,
+                bound_bias,
+                analyzer,
+                allow_tensortensor=False,
+                allow_reverse=False,
+                allowed_f_dim_dst=reduce_axes,
+            )
         )
     else:
-        inst_size, f_gen_axes = try_find_inst_unary(
+        inst_size, inst_stride, inst_data_iters = try_find_inst_unary(
             bound_unary_output, bound_unary_input, analyzer, allowed_f_dim_dst=reduce_axes
         )
+    inst_size_limit = op.schedule_config.get("max_inst_size", None)
+    inst_size, inst_data_iters = bound_inst_data_iter_with_limit(
+        bound_unary_output, inst_data_iters, inst_size_limit, analyzer
+    )
+    f_gen_axes = generate_axes_in_region(bound_unary_output, inst_stride, inst_data_iters, analyzer)
     assert analyzer.can_prove(inst_size > 1), "Instruction size must be greater than 1"
-    intermediate_shape, intermediate_layout, reduction_b_extent = generate_intermediate_buffer(
-        bound_reduce_output, bound_unary_output, reduce_axes, inst_size, analyzer
+    intermediate_buffer, reduction_b_extent = generate_intermediate_buffer(
+        bound_reduce_output,
+        bound_unary_output,
+        reduce_axes,
+        inst_size,
+        op.workspace,
+        sctx,
+        analyzer,
     )
     f_gen_act_dst_idx = f_gen_idx_anchor(unary_output, f_gen_axes)
     dst_to_src_dim_map = get_ewise_dim_map(unary_output, unary_input, analyzer)
@@ -249,9 +276,7 @@ def unary_reduce_trn(
         else get_const_bias_tensor(bias, (p_size, inst_size), dst1.dtype, op.workspace, sctx)
     )
     f_dst_guard = make_guard(unary_output, analyzer)
-    # TODO: let user define inst size here
-    # TODO: user pass partial reduce buffer in workspace
-    if intermediate_shape is None:
+    if intermediate_buffer is None:
         # fmt: off
         @T.prim_func(tirp=True)
         def impl():
@@ -280,27 +305,26 @@ def unary_reduce_trn(
         # fmt: off
         @T.prim_func(tirp=True)
         def impl():
-            with T.kernel():
-                intermediate_buffer = T.alloc_buffer(intermediate_shape, dtype=dst2.dtype, layout=intermediate_layout, scope="trn.sbuf")
-                for b_loop in T.serial(0, b_extent):
-                    for reduction_b_loop in T.serial(0, reduction_b_extent):
-                        with T.attr(0, "tensorized_nki_instruction", 1):
-                            for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                                for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
-                                    src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                    dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                    if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
-                                        if isinstance(bias, BufferRegion):
-                                            src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                            T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
-                                        else:
-                                            T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))
+            for b_loop in T.serial(0, b_extent):
+                for reduction_b_loop in T.serial(0, reduction_b_extent):
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                            for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
-                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
-                                    dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                    T.evaluate(T.nki_tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1))
+                            for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
+                                src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
+                                    if isinstance(bias, BufferRegion):
+                                        src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                        T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
+                                    else:
+                                        T.evaluate(T.nki_activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))
+                with T.attr(0, "tensorized_nki_instruction", 1):
+                    for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                        for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
+                            if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
+                                dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                # TODO: we should use nki_activation_reduce as second stage reduction
+                                T.evaluate(T.nki_tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1))
         # fmt: on
         return impl
 
@@ -318,9 +342,10 @@ def binary_chain_trn(
     analyzer = init_analyzer(sctx)
     bound_output = bound_buffer_region(output, analyzer)
     bound_srcs = [bound_buffer_region(src, analyzer) for src in srcs]
-    inst_size, f_gen_axes, inst_types, _reverse, broadcast_dims = try_find_inst_nary(
-        bound_output, bound_srcs, analyzer, allow_first_op_tensortensor=False
+    inst_size, inst_stride, inst_data_iters, inst_types, _reverse, broadcast_dims = (
+        try_find_inst_nary(bound_output, bound_srcs, analyzer, allow_first_op_tensortensor=False)
     )
+    f_gen_axes = generate_axes_in_region(bound_output, inst_stride, inst_data_iters, analyzer)
     assert inst_size is not None, "Failed to find a valid instruction"
     assert (
         inst_types[0] == InstType.TENSOR_SCALAR
@@ -354,7 +379,7 @@ def binary_chain_trn(
         if inst_types[1] == InstType.TENSOR_SCALAR
         else T.nki_scalar_tensor_tensor
     )
-    inst_size_limit = get_hardware_inst_size_limit(is_dma=False)
+    inst_size_limit = op.schedule_config.get("max_inst_size", None)
     actual_inst_size, additional_b_size = bound_inst_with_limit(
         inst_size, inst_size_limit, analyzer
     )

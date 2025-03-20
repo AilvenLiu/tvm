@@ -33,7 +33,6 @@ from .common import (
     f_gen_idx_anchor,
     f_gen_idx_mapped,
     get_ewise_dim_map,
-    get_hardware_inst_size_limit,
     bound_inst_with_limit,
     bound_buffer_region,
     make_guard,
@@ -98,7 +97,7 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     )
     p_size = dst.buffer.layout.partition_size
     b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // inst_size // p_size
-    inst_size_limit = get_hardware_inst_size_limit(is_dma=False)
+    inst_size_limit = op.schedule_config.get("max_inst_size", None)
     actual_inst_size, additional_b_size = bound_inst_with_limit(
         inst_size, inst_size_limit, analyzer
     )

@@ -32,7 +32,6 @@ from .common import (
     generate_axes_in_region,
     get_ewise_dim_map,
     find_max_inst_size_unary,
-    get_hardware_inst_size_limit,
     bound_inst_with_limit,
     init_analyzer,
     check_partition_dim_match,
@@ -259,8 +258,13 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     else:
         func = T.nki_tensor_copy
     
-    inst_size_limit = get_hardware_inst_size_limit(func!=T.nki_tensor_copy)
-    actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
+    if func == T.nki_tensor_copy:
+        inst_size_limit = op.schedule_config.get("max_inst_size", None)
+        actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
+    else:
+        assert "max_inst_size" not in op.schedule_config, "max_inst_size is not supported for load/store"
+        actual_inst_size, additional_b_size = inst_size, 1
+        
     f_guard = make_guard(dst_buffer_region, analyzer)
 
     @T.prim_func(tirp=True)

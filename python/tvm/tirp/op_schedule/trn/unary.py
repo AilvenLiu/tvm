@@ -30,7 +30,6 @@ from .common import (
     generate_axes_in_region,
     get_ewise_dim_map,
     find_max_inst_size_unary,
-    get_hardware_inst_size_limit,
     bound_inst_with_limit,
     init_analyzer,
     f_gen_idx_anchor,
@@ -100,10 +99,7 @@ def try_find_inst_unary(
     inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
         dst_buffer_region, src_buffer_region, analyzer, allowed_f_dim_dst, allowed_f_dim_src
     )
-
-    f_gen_axes = generate_axes_in_region(dst_buffer_region, inst_stride, inst_data_iters, analyzer)
-
-    return inst_size, f_gen_axes
+    return inst_size, inst_stride, inst_data_iters
 
 
 def get_const_bias_tensor(bias, shape, dtype, workspace, sctx):
@@ -139,12 +135,13 @@ def generate_unary_func(
     scale,
     analyzer,
     workspace,
+    schedule_config,
     sctx,
 ):
     bound_dst = bound_buffer_region(dst_buffer_region, analyzer)
     p_size = dst_buffer_region.buffer.layout.partition_size
     b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // p_size // inst_size
-    inst_size_limit = get_hardware_inst_size_limit(is_dma=False)
+    inst_size_limit = schedule_config.get("max_inst_size", None)
     actual_inst_size, additional_b_size = bound_inst_with_limit(
         inst_size, inst_size_limit, analyzer
     )
@@ -207,17 +204,24 @@ def unary_trn(
     bound_dst = bound_buffer_region(dst_buffer_region, analyzer)
     if CONST is None:
         bound_src = bound_buffer_region(src_buffer_region, analyzer)
-        inst_size, f_gen_axes = try_find_inst_unary(bound_dst, bound_src, analyzer)
-        f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
-        f_gen_src_idx = f_gen_idx_mapped(
+        inst_size, inst_stride, inst_data_iters = try_find_inst_unary(
+            bound_dst, bound_src, analyzer
+        )
+    else:
+        inst_size, inst_stride, inst_data_iters = try_find_inst_unary(
+            bound_dst, bound_dst, analyzer
+        )
+    f_gen_axes = generate_axes_in_region(dst_buffer_region, inst_stride, inst_data_iters, analyzer)
+    f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
+    f_gen_src_idx = (
+        f_gen_idx_mapped(
             src_buffer_region,
             f_gen_axes,
             get_ewise_dim_map(dst_buffer_region, src_buffer_region, analyzer),
         )
-    else:
-        inst_size, f_gen_axes = try_find_inst_unary(bound_dst, bound_dst, analyzer)
-        f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
-        f_gen_src_idx = None
+        if CONST is None
+        else None
+    )
 
     return generate_unary_func(
         dst_buffer_region,
@@ -232,6 +236,7 @@ def unary_trn(
         None,
         analyzer,
         op.workspace,
+        op.schedule_config,
         sctx,
     )
 
@@ -253,18 +258,22 @@ def unary_with_bias_scale_trn(
     bound_src = bound_buffer_region(src_buffer_region, analyzer)
     if isinstance(_bias, BufferRegion):
         bound_bias = bound_buffer_region(_bias, analyzer)
-        inst_size, f_gen_axes, inst_type, reverse, broadcast_dims = try_find_inst_binary(
-            bound_dst,
-            bound_src,
-            bound_bias,
-            analyzer,
-            allow_tensortensor=False,
-            allow_reverse=False,
+        inst_size, inst_stride, inst_data_iters, inst_type, reverse, broadcast_dims = (
+            try_find_inst_binary(
+                bound_dst,
+                bound_src,
+                bound_bias,
+                analyzer,
+                allow_tensortensor=False,
+                allow_reverse=False,
+            )
         )
         assert inst_size is not None, f"Failed to find a valid instruction: {op}"
     else:
-        inst_size, f_gen_axes = try_find_inst_unary(bound_dst, bound_src, analyzer)
-
+        inst_size, inst_stride, inst_data_iters = try_find_inst_unary(
+            bound_dst, bound_src, analyzer
+        )
+    f_gen_axes = generate_axes_in_region(bound_dst, inst_stride, inst_data_iters, analyzer)
     f_gen_dst_idx = f_gen_idx_anchor(dst_buffer_region, f_gen_axes)
     dst_to_src_dim_map = get_ewise_dim_map(dst_buffer_region, src_buffer_region, analyzer)
     f_gen_src_idx = f_gen_idx_mapped(src_buffer_region, f_gen_axes, dst_to_src_dim_map)
@@ -290,5 +299,6 @@ def unary_with_bias_scale_trn(
         scale,
         analyzer,
         op.workspace,
+        op.schedule_config,
         sctx,
     )

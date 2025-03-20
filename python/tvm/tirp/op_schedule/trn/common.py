@@ -557,11 +557,9 @@ def find_max_inst_size_matmul(
     )
 
 
-def get_hardware_inst_size_limit(is_dma: bool) -> int:
-    return 1e9 if is_dma else 512
-
-
 def bound_inst_with_limit(inst_size, inst_size_limit, analyzer):
+    # default instruction size limit is 512
+    inst_size_limit = 512 if inst_size_limit is None else inst_size_limit
     if not analyzer.can_prove(inst_size <= inst_size_limit):
         # FIXME: this constraint can be relaxed if we support mask
         assert analyzer.can_prove(inst_size % inst_size_limit == 0)
@@ -571,6 +569,33 @@ def bound_inst_with_limit(inst_size, inst_size_limit, analyzer):
         actual_inst_size = inst_size
         additional_b_size = 1
     return actual_inst_size, additional_b_size
+
+
+# this function cannot handle non-affine case (e.g. data iter is 1023, but inst size is 512), while bound_inst_with_limit can
+def bound_inst_data_iter_with_limit(buffer_region, inst_data_iters, inst_size_limit, analyzer):
+    # default instruction size limit is 512
+    inst_size_limit = 512 if inst_size_limit is None else inst_size_limit
+    _, layout, _ = infer_range_info(buffer_region, analyzer)
+    data_iter_array = layout.combined_1d_layout.data_iter_array
+    sorted_data_iters = sorted(
+        ((idx, ext, data_iter_array[idx].stride) for (idx, ext) in inst_data_iters.items()),
+        key=lambda tup: tup[-1],
+    )
+    actual_inst_size = 1
+    actual_inst_data_iters = {}
+    for idx, ext, stride in sorted_data_iters:
+        if analyzer.can_prove(actual_inst_size * ext <= inst_size_limit):
+            actual_inst_data_iters[idx] = ext
+            actual_inst_size *= ext
+        elif analyzer.can_prove(
+            (actual_inst_size * ext) % inst_size_limit == 0
+            and inst_size_limit % actual_inst_size == 0
+        ):
+            actual_inst_data_iters[idx] = inst_size_limit // actual_inst_size
+            actual_inst_size = inst_size_limit
+        else:
+            break
+    return actual_inst_size, actual_inst_data_iters
 
 
 def find_max_inst_size_from_one_region(
