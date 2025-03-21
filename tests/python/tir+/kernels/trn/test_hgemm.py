@@ -92,8 +92,6 @@ def test_gemm(ssh_client):
         A = T.match_buffer(A_ptr, (M, K), dtype, layout = T.TileLayout.from_tuple((M, K), (1, M)))
         B = T.match_buffer(B_ptr, (K, N), dtype, layout=T.TileLayout.from_tuple(K * N))
         C = T.match_buffer(C_ptr, (M, N), dtype, layout=T.TileLayout.from_tuple(N * M))
-        # todo: we should allow alloc_buffer under for loops
-        # todo: can we skip the first T.kernel()?
         with T.kernel():
             result_tiles = T.alloc_buffer((M, BLOCK_N), dtype, scope="trn.sbuf", layout=T.TrainiumLayout("FPF", T.TileLayout.from_tuple((M // 128, 128, BLOCK_N), (BLOCK_N, 1, 1))), allocated_addr=0)
             b_sbuf = T.alloc_buffer((2, BLOCK_K, BLOCK_N), dtype, scope="trn.sbuf", layout = T.TrainiumLayout("FFPF", T.TileLayout.from_tuple((2, BLOCK_K // 128, 128, BLOCK_N), (BLOCK_K*BLOCK_N//128,BLOCK_N, 1, 1))), allocated_addr=M*BLOCK_N//128*2)

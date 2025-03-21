@@ -55,58 +55,72 @@ def get_pf_dim_from_buffer_region(
     operator_kind: OperatorKind,
     transposed: bool = False,
 ):
-    non_unit_dims = []
-    for i in range(len(buffer_region.buffer.shape)):
-        r = buffer_region.region[i]
-        if not analyzer.can_prove_equal(r.extent, 1):
-            non_unit_dims.append(i)
+    """Extract partition and free dimensions from buffer region."""
+    # Find non-unit dimensions
+    non_unit_dims = [
+        i
+        for i in range(len(buffer_region.buffer.shape))
+        if not analyzer.can_prove_equal(buffer_region.region[i].extent, 1)
+    ]
     assert len(non_unit_dims) == 2, "Only 2D matrix is supported for gemm"
+
     _, layout, seps = infer_range_info(buffer_region, analyzer)
+
+    # Determine partition and free dimensions based on operator kind
     if operator_kind == OperatorKind.A:
-        p_dim = non_unit_dims[1]
-        f_dim = non_unit_dims[0]
+        p_dim, f_dim = non_unit_dims[1], non_unit_dims[0]
     elif operator_kind == OperatorKind.B:
-        p_dim = non_unit_dims[0]
-        f_dim = non_unit_dims[1]
+        p_dim, f_dim = non_unit_dims[0], non_unit_dims[1]
     else:
         assert (
             not transposed
         ), "Transposed C is implemented by swapping lhs and rhs. No need to specify by user."
-        if any(
+        # For C, determine dimensions based on layout
+        has_partition = any(
             layout.dimension_types[i] == T.TrainiumLayout.Partition
             for i in range(seps[non_unit_dims[0]], seps[non_unit_dims[0] + 1])
-        ):
-            p_dim = non_unit_dims[0]
-            f_dim = non_unit_dims[1]
-        else:
-            # need swap lhs and rhs
-            p_dim = non_unit_dims[1]
-            f_dim = non_unit_dims[0]
+        )
+        p_dim, f_dim = (
+            (non_unit_dims[0], non_unit_dims[1])
+            if has_partition
+            else (non_unit_dims[1], non_unit_dims[0])
+        )
+
+    # Swap dimensions if transposed
     if transposed:
         p_dim, f_dim = f_dim, p_dim
+
+    # Validate partition dimension
     p_exts = [
         layout.combined_1d_layout.data_iter_array[i].extent
         for i in range(seps[p_dim], seps[p_dim + 1])
         if layout.dimension_types[i] == T.TrainiumLayout.Partition
     ]
-    assert (
-        functools.reduce(operator.mul, p_exts, 1) == layout.partition_size
-    ), f"Acuumulation dimension and output non-streaming dimension must contain whole P dimension. However, the {p_dim} dimension of {buffer_region} does not."
+
+    assert functools.reduce(operator.mul, p_exts, 1) == layout.partition_size, (
+        f"Accumulation dimension and output non-streaming dimension must contain whole P dimension. "
+        f"However, the {p_dim} dimension of {buffer_region} does not."
+    )
+
+    # Validate free dimension
     assert all(
         layout.dimension_types[i] == T.TrainiumLayout.Free
         or layout.combined_1d_layout.data_iter_array[i].extent == 1
         for i in range(seps[f_dim], seps[f_dim + 1])
     ), f"Spatial dimension must not contain P. However, the {f_dim} dimension of {buffer_region} does."
+
     return p_dim, f_dim
 
 
 @register_schedule("gemm", "trn")
 @target_trn
 def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Schedule copy operation between global and shared memory on CUDA."""
+    """Schedule GEMM operation on Trainium."""
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
+
+    # Extract arguments
     (
         D_buffer_region,
         A_buffer_region,
@@ -124,11 +138,16 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         C_buffer_region.buffer,
         D_buffer_region.buffer,
     )
+
+    # Validate alpha, beta
     assert analyzer.can_prove_equal(alpha, 1) and analyzer.can_prove_equal(
         beta, 0
     ), "Only alpha=1 and beta=0 are supported"
+
     # D and C must be the same buffer region
     assert_structural_equal(D_buffer_region, C_buffer_region)
+
+    # Validate buffer properties
     assert all(
         [
             A.layout and B.layout and C.layout,
@@ -145,10 +164,12 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     p_size = A.layout.partition_size
     assert p_size == B.layout.partition_size, "Partition size mismatch"
 
+    # Bound buffer regions
     bound_A = bound_buffer_region(A_buffer_region, analyzer)
     bound_B = bound_buffer_region(B_buffer_region, analyzer)
     bound_C = bound_buffer_region(C_buffer_region, analyzer)
 
+    # Get partition and free dimensions
     lhs_p_dim, lhs_f_dim = get_pf_dim_from_buffer_region(
         bound_A, analyzer, OperatorKind.A, transpose_A
     )
@@ -156,43 +177,34 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         bound_B, analyzer, OperatorKind.B, transpose_B
     )
     acc_p_dim, acc_f_dim = get_pf_dim_from_buffer_region(bound_C, analyzer, OperatorKind.C)
+
+    # Swap LHS and RHS if needed based on accumulator dimensions
     swap_lhs_rhs = acc_p_dim > acc_f_dim
     if swap_lhs_rhs:
-        (
-            lhs_p_dim,
-            rhs_p_dim,
-            lhs_f_dim,
-            rhs_f_dim,
-            A,
-            B,
-            A_buffer_region,
-            B_buffer_region,
-            bound_A,
-            bound_B,
-        ) = (
-            rhs_p_dim,
-            lhs_p_dim,
-            rhs_f_dim,
-            lhs_f_dim,
-            B,
-            A,
-            B_buffer_region,
-            A_buffer_region,
-            bound_B,
-            bound_A,
-        )
+        lhs_p_dim, rhs_p_dim = rhs_p_dim, lhs_p_dim
+        lhs_f_dim, rhs_f_dim = rhs_f_dim, lhs_f_dim
+        A, B = B, A
+        A_buffer_region, B_buffer_region = B_buffer_region, A_buffer_region
+        bound_A, bound_B = bound_B, bound_A
+
+    # Validate dimension compatibility
     assert analyzer.can_prove(
         A_buffer_region.region[lhs_p_dim].extent == B_buffer_region.region[rhs_p_dim].extent
-    ), f"Reduction dimension must match, but the {lhs_p_dim} dimension of {A_buffer_region} ({A_buffer_region.region[lhs_p_dim].extent}) != the {rhs_p_dim} dimension of {B_buffer_region} ({B_buffer_region.region[rhs_p_dim].extent})"
+    ), f"Reduction dimension must match, but the {lhs_p_dim} dimension of {A_buffer_region} != the {rhs_p_dim} dimension of {B_buffer_region}"
+
     assert analyzer.can_prove(
         A_buffer_region.region[lhs_f_dim].extent == C_buffer_region.region[acc_p_dim].extent
-    ), f"Spatial dimension must match, but the {lhs_f_dim} dimension of {A_buffer_region} ({A_buffer_region.region[lhs_f_dim].extent}) != the {acc_p_dim} dimension of {C_buffer_region} ({C_buffer_region.region[acc_p_dim].extent})"
+    ), f"Spatial dimension must match, but the {lhs_f_dim} dimension of {A_buffer_region} != the {acc_p_dim} dimension of {C_buffer_region}"
+
     assert analyzer.can_prove(
         B_buffer_region.region[rhs_f_dim].extent == C_buffer_region.region[acc_f_dim].extent
-    ), f"Spatial dimension must match, but the {rhs_f_dim} dimension of {B_buffer_region} ({B_buffer_region.region[rhs_f_dim].extent}) != the {acc_f_dim} dimension of {C_buffer_region} ({C_buffer_region.region[acc_f_dim].extent})"
+    ), f"Spatial dimension must match, but the {rhs_f_dim} dimension of {B_buffer_region} != the {acc_f_dim} dimension of {C_buffer_region}"
+
+    # Find instruction sizes
     lhs_f_size, lhs_f_stride, lhs_f_data_iters = find_max_inst_size_from_one_region(
         bound_A, analyzer, [lhs_f_dim]
     )
+
     rhs_f_size, rhs_f_stride, acc_f_stride, rhs_f_data_iters = find_max_inst_size_matmul(
         bound_B,
         bound_C,
@@ -205,6 +217,7 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     if C.scope() == "trn.psum":
         assert acc_f_stride == 1, "psum_f_stride must be 1"
 
+    # Set up dimension mapping and access generation
     dim2block_var_lhs = {lhs_f_dim: 0, lhs_p_dim: 1}
     dim2block_var_rhs = {rhs_f_dim: 0, rhs_p_dim: 1}
     f_gen_lhs_axes = generate_axes_in_region(bound_A, lhs_f_stride, lhs_f_data_iters, analyzer)
@@ -233,20 +246,26 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         acc_indices[acc_f_dim] += rhs_axes[rhs_f_dim]
         return acc_indices
 
+    # Validate extents
     assert analyzer.can_prove(
         bound_A.region[lhs_f_dim].extent % lhs_f_size == 0
     ) and analyzer.can_prove(bound_B.region[rhs_f_dim].extent % rhs_f_size == 0), "Invalid extent"
 
+    # Calculate block extents
     lhs_b_extent = bound_A.region[lhs_f_dim].extent // lhs_f_size
     rhs_b_extent = bound_B.region[rhs_f_dim].extent // rhs_f_size
     reduction_b_extent = bound_A.region[lhs_p_dim].extent // p_size
-    max_lhs_size, max_rhs_size = (128, 512)
+
+    # Apply size limits
+    max_lhs_size, max_rhs_size = 128, 512
     actual_lhs_f_size, additional_lhs_b_size = bound_inst_with_limit(
         lhs_f_size, max_lhs_size, analyzer
     )
     actual_rhs_f_size, additional_rhs_b_size = bound_inst_with_limit(
         rhs_f_size, max_rhs_size, analyzer
     )
+
+    # Get psum configuration
     max_psum_slots = get_max_psum_banks()
     largest_psum_per_bank = get_largest_psum_per_bank()
     inst_num_per_slot = largest_psum_per_bank // rhs_f_size
@@ -255,6 +274,7 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # so we need to separate the guard for lhs_f, rhs_f and p
     f_lhs_guard = make_guard(A_buffer_region, analyzer)
     f_rhs_guard = make_guard(B_buffer_region, analyzer)
+
     # fmt: off
     @T.macro
     def matmul_inst_macro(lhs_b_loop, rhs_b_loop, reduction_b_loop, additional_lhs_b_loop, additional_rhs_b_loop, b_idx, acc, C_as_output, max_psum_slots):

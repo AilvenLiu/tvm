@@ -17,7 +17,6 @@
 
 """Implementation of reduction schedules."""
 
-
 from typing import Optional, Tuple
 import operator
 from functools import reduce
@@ -62,20 +61,21 @@ def generate_intermediate_buffer(
     """Generate an intermediate buffer for two-stage reduction if needed.
 
     Returns:
-        Tuple[Optional[List[int]], Optional[T.TrainiumLayout], int]:
-            The intermediate shape, layout, and reduction factor size.
+        Tuple[Optional[buffer], int]: The intermediate buffer and reduction factor size.
     """
     reduction_size = reduce(operator.mul, [src_buffer_region.region[i].extent for i in axes], 1)
-    # use <= to handle symbolic reduction size
+    # No need to split into 2 stages
     if analyzer.can_prove(reduction_size <= inst_size):
-        # No need to split into 2 stages
         return None, 1
+
     assert analyzer.can_prove(
         reduction_size % inst_size == 0
     ), f"Reduction size {reduction_size} must be divisible by instruction size {inst_size}"
+
     rfactor_size = reduction_size // inst_size
     dst_layout = dst_buffer_region.buffer.layout
     intermediate_shape = [dst_layout.partition_size, rfactor_size]
+
     if "partial_reduce" in workspace:
         intermediate_buffer = workspace["partial_reduce"]
         check_workspace_buffer(intermediate_buffer, intermediate_shape, "trn.sbuf")
@@ -87,6 +87,7 @@ def generate_intermediate_buffer(
             buffer_name="partial_reduce",
         )
         sctx.add_alloc_buffer(intermediate_buffer)
+
     return intermediate_buffer, rfactor_size
 
 
@@ -107,15 +108,15 @@ def reduction_trn(
     Returns:
         Optional[PrimFunc]: The scheduled function, or None if not applicable.
     """
-    # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
         return None
+
     dst_buffer_region, src_buffer_region, axes, accum = op.args[:4]
     assert not accum, "Accumulation is not supported for reduction on Trainium"
     analyzer = init_analyzer(sctx)
     assert reduce_op in reduce_ops, f"Unsupported reduce operation {reduce_op}"
 
-    # Extract buffers and check layouts
+    # Extract buffers
     dst = dst_buffer_region.buffer
     src = src_buffer_region.buffer
     axes = [i if i >= 0 else len(src.shape) + i for i in axes]
@@ -149,10 +150,10 @@ def reduction_trn(
 
     # Handle instruction size limit from config
     inst_size_limit = op.schedule_config.get("max_inst_size", None)
-    # actual_inst_size, additional_reduction_b_extent = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
     inst_size, inst_data_iters = bound_inst_data_iter_with_limit(
         bound_src, inst_data_iters, inst_size_limit, analyzer
     )
+
     # Get reduction operation code
     opcode = reduce_ops[reduce_op]
 
@@ -166,6 +167,7 @@ def reduction_trn(
     intermediate_buffer, reduction_b_extent = generate_intermediate_buffer(
         bound_dst, bound_src, axes, inst_size, op.workspace, sctx, analyzer
     )
+
     # fmt: off
     # Define reduction instruction macro
     @T.macro

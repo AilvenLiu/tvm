@@ -18,28 +18,50 @@
 """Common utilities for operator scheduling."""
 
 from collections import namedtuple
-from typing import Tuple, Optional, Dict, Callable
-from functools import wraps
-from functools import reduce
+from typing import Tuple, Optional, Dict, Callable, List
+from functools import wraps, reduce
+import operator
 
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.ir import Range
-from tvm.tir import BufferRegion, Buffer
-from tvm._ffi import get_global_func
-from tvm.tir import PrimFunc
+from tvm.tir import BufferRegion, Buffer, PrimFunc
 from tvm.tir.stmt import OpCall
+from tvm._ffi import get_global_func
 from tvm.tirp.op_schedule import ScheduleContext
 
 f_normalize_trn_layout_with_shape = get_global_func("tir.NormalizeTrainiumLayoutWithShape")
 f_normalize_tile_layout_with_shape = get_global_func("tir.NormalizeTileLayoutWithShape")
 
-# nki dim is used to generate the correct [:, None] for mask / predicate
-# can be used on any operators other than matmul
+# Used to generate the correct [:, None] for mask/predicate
 nki_dim = "nki_dim"
+
+# Represents the part of data iter covered by the buffer region
+RangeInfo = namedtuple(
+    "RangeInfo", ["start", "extent", "dim_in_data_iter", "dim_in_shape", "dim_type"]
+)
 
 
 def normalize_layout_with_shape(layout, shape):
+    """Normalize a layout with a given shape.
+
+    Parameters
+    ----------
+    layout : Union[T.TrainiumLayout, T.TileLayout]
+        The layout to normalize
+    shape : List[int]
+        The shape to normalize with
+
+    Returns
+    -------
+    Tuple[Union[T.TrainiumLayout, T.TileLayout], List[int]] :
+        Normalized layout and separators
+
+    Raises
+    ------
+    ValueError :
+        If layout is not a valid layout type
+    """
     if isinstance(layout, T.TrainiumLayout):
         ret = f_normalize_trn_layout_with_shape(layout, shape)
         return ret[0], ret[1]
@@ -51,6 +73,23 @@ def normalize_layout_with_shape(layout, shape):
 
 
 def get_layout_data_iters(layout):
+    """Get the data iterators from a layout.
+
+    Parameters
+    ----------
+    layout : Union[T.TrainiumLayout, T.TileLayout]
+        The layout to get data iterators from
+
+    Returns
+    -------
+    List :
+        Data iterators
+
+    Raises
+    ------
+    ValueError :
+        If layout is not a valid layout type
+    """
     if isinstance(layout, T.TrainiumLayout):
         return layout.combined_1d_layout.data_iter_array
     elif isinstance(layout, T.TileLayout):
@@ -59,13 +98,22 @@ def get_layout_data_iters(layout):
         raise ValueError("Invalid layout")
 
 
-RangeInfo = namedtuple(
-    "RangeInfo", ["start", "extent", "dim_in_data_iter", "dim_in_shape", "dim_type"]
-)
-
-
-# bound_buffer_region must be called on the arguments of any function involving range_info (e.g. generate_axes_in_region, find_max_inst_size_*, etc.)
 def bound_buffer_region(buffer_region: BufferRegion, analyzer: Analyzer):
+    """Relax the bounds of the buffer region to the maximum possible constant value.
+        bound_buffer_region must be called on the arguments of any function involving range_info
+    (e.g. generate_axes_in_region, find_max_inst_size_*, etc.)
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The buffer region to bound
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    BufferRegion :
+        The bounded buffer region
+    """
     if not isinstance(buffer_region, BufferRegion):
         return buffer_region
     region = []
@@ -76,6 +124,22 @@ def bound_buffer_region(buffer_region: BufferRegion, analyzer: Analyzer):
 
 
 def make_guard(buffer_region: BufferRegion, analyzer: Analyzer):
+    """Make a guard function for the buffer region.
+    The guard function takes in the axes of the buffer region and
+    checks if the buffer region is accessed within the bounds.
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The buffer region to make a guard for
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    Callable :
+        A function that takes axes and returns a guard expression
+    """
     bound_region = bound_buffer_region(buffer_region, analyzer)
     relaxed_dims = [
         i
@@ -91,11 +155,33 @@ def make_guard(buffer_region: BufferRegion, analyzer: Analyzer):
 
 
 def infer_range_info(buffer_region: BufferRegion, analyzer: Analyzer):
+    """Infer the range information for a buffer region.
+    The range information is a list of RangeInfo, which contains information of
+    data iter that is covered by the buffer region.
+
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The buffer region to infer range information for
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    Tuple[List[RangeInfo], Union[T.TrainiumLayout, T.TileLayout], List[int]] :
+        The range information, normalized layout, and separators
+
+    Raises
+    ------
+    AssertionError :
+        If the layout is invalid
+    """
     layout = buffer_region.buffer.layout
     layout, seps = normalize_layout_with_shape(layout, buffer_region.buffer.shape)
-    # (start, extent, dim_in_data_iter, dim_in_shape, dim_type)
     data_iters = get_layout_data_iters(layout)
     tiled_range_infos_per_dim = []
+
     for i in range(len(seps) - 1):
         r = buffer_region.region[i]
         st = r.min
@@ -119,9 +205,9 @@ def infer_range_info(buffer_region: BufferRegion, analyzer: Analyzer):
             if analyzer.can_prove(st + ext <= data_iters[j].extent):
                 tiled_range_infos_per_dim.append(RangeInfo(st, ext, j, i, dim_type))
                 break
-            assert False, f"Cannot analyze the physical tensor region for: {buffer_region}"
-    # put partition axis at the front
-    # then put free axis with lower stride at the front
+            assert False, f"Cannot analyze physical tensor region for: {buffer_region}"
+
+    # Put partition axis at front, then free axis with lower stride at front
     tiled_range_infos_per_dim = sorted(
         tiled_range_infos_per_dim, key=lambda x: (x.dim_type, data_iters[x.dim_in_data_iter].stride)
     )
@@ -134,6 +220,26 @@ def generate_axes_in_region(
     inst_data_iters,
     analyzer,
 ):
+    """Generate axes function for a buffer region.
+    The function takes in the block loops, the f loop, the p loop, and the dim2block_var
+    (for each shape dim which block var it should use as part of the axes).
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The buffer region to generate axes for
+    inst_stride : int
+        The instruction stride
+    inst_data_iters : Dict[int, int]
+        The instruction data iterators
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    Callable :
+        A function that takes block loops, f loop, p loop, and dim2block_var and returns axes
+    """
     range_info, tiled_layout, seps = infer_range_info(buffer_region, analyzer)
     dim_in_region = {
         range_info[i].dim_in_data_iter: range_info[i].extent for i in range(len(range_info))
@@ -208,6 +314,27 @@ def generate_axes_in_region(
 def get_ewise_dim_map(
     buffer_region: BufferRegion, second_buffer_region: BufferRegion, analyzer: Analyzer
 ):
+    """Get the dimension map between two elementwise buffer regions.
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The first buffer region
+    second_buffer_region : BufferRegion
+        The second buffer region
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    Dict[int, int] :
+        A dimension map from first to second buffer region
+
+    Raises
+    ------
+    AssertionError :
+        If dimensions do not match
+    """
     extent_1 = [r.extent for r in buffer_region.region]
     extent_2 = [r.extent for r in second_buffer_region.region]
     extent_1_non_unit = [e for e in extent_1 if e != 1]
@@ -236,13 +363,35 @@ def get_ewise_dim_map(
     return dim_map
 
 
-# src -> dst
 def get_reduction_dim_map(
     src_buffer_region: BufferRegion,
     dst_buffer_region: BufferRegion,
     axes: Tuple[int],
     analyzer: Analyzer,
 ):
+    """Get the dimension map between source and destination buffer regions for reduction.
+
+    Parameters
+    ----------
+    src_buffer_region : BufferRegion
+        The source buffer region
+    dst_buffer_region : BufferRegion
+        The destination buffer region
+    axes : Tuple[int]
+        The reduction axes
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    Dict[int, int] :
+        A dimension map from source to destination buffer region
+
+    Raises
+    ------
+    AssertionError :
+        If dimensions do not match
+    """
     dst_region = dst_buffer_region.region
     dst_extent = [r.extent for r in dst_region]
     dst_non_unit_extent_ = [(i, e) for i, e in enumerate(dst_extent) if e != 1]
@@ -319,7 +468,6 @@ def _refine_inst_tile(
     buffer_dim_map: Optional[Dict[int, int]] = None,
     check_partition=True,
 ):
-
     if allowed_f_dim_1 is None:
         allowed_f_dim_1 = tuple(range(len(buffer_region.buffer.shape)))
     if allowed_f_dim_2 is None:
@@ -438,7 +586,137 @@ def _refine_inst_tile(
     return new_inst_size, new_first_inst_stride, new_second_inst_stride, new_inst_data_iters
 
 
-# use the first buffer region's P dim to find the corresponding F dim on the second buffer region
+def find_max_inst_size_from_one_region(
+    buffer_region: BufferRegion,
+    analyzer: Analyzer,
+    allowed_f_dim: Optional[Tuple[int]] = None,
+):
+    """Find the maximum possible instruction size for an operation on a single buffer region.
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The buffer region to analyze
+    analyzer : Analyzer
+        The analyzer to use
+    allowed_f_dim : Optional[Tuple[int]]
+        The allowed free dimensions
+
+    Returns
+    -------
+    Tuple[int, int, Dict[int, int]] :
+        Instruction size, stride, and data iterators
+    """
+    tiled_range_infos_per_dim, layout, seps = infer_range_info(buffer_region, analyzer)
+    data_iters = get_layout_data_iters(layout)
+    if allowed_f_dim is None:
+        allowed_f_dim = tuple(range(len(buffer_region.buffer.shape)))
+    # check largest inst size
+    inst_size = 1
+    inst_stride = 1
+    inst_data_iters = {}
+    prod_p_size = 1
+    while len(tiled_range_infos_per_dim) > 0:
+        range_info = tiled_range_infos_per_dim[0]
+        tiled_range_infos_per_dim = tiled_range_infos_per_dim[1:]
+        st, ext, dim_in_data_iter, dim_in_shape, dim_type = range_info
+        if dim_type == T.TrainiumLayout.Partition:
+            prod_p_size *= ext
+            continue
+        if dim_in_shape not in allowed_f_dim:
+            if inst_size != 1:
+                break
+            else:
+                continue
+        if inst_size != 1 and not analyzer.can_prove(
+            inst_stride * inst_size == data_iters[dim_in_data_iter].stride
+        ):
+            # the stride of the found data iter is not compatible with previous data iters
+            break
+        if inst_size == 1:
+            inst_stride = data_iters[dim_in_data_iter].stride
+        inst_data_iters[dim_in_data_iter] = ext
+        inst_size *= ext
+    # check p_dim covers whole partition
+    assert analyzer.can_prove(
+        prod_p_size == layout.partition_size
+    ), "Partition size of the instruction must match that of the buffer region"
+
+    return inst_size, inst_stride, inst_data_iters
+
+
+def find_max_inst_size_unary(
+    buffer_region: BufferRegion,
+    second_buffer_region: BufferRegion,
+    analyzer: Analyzer,
+    allowed_f_dim_1: Optional[Tuple[int]] = None,
+    allowed_f_dim_2: Optional[Tuple[int]] = None,
+):
+    """Find the maximum possible instruction size for a unary operation.
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The destination buffer region
+    second_buffer_region : BufferRegion
+        The source buffer region
+    analyzer : Analyzer
+        The analyzer to use
+    allowed_f_dim_1 : Optional[Tuple[int]]
+        Allowed free dimensions for destination
+    allowed_f_dim_2 : Optional[Tuple[int]]
+        Allowed free dimensions for source
+
+    Returns
+    -------
+    Tuple[int, int, Dict[int, int]] :
+        Instruction size, first stride, and first data iterators
+    """
+    inst_size, inst_stride, _ = find_max_inst_size_from_one_region(
+        buffer_region=buffer_region, analyzer=analyzer, allowed_f_dim=allowed_f_dim_1
+    )
+    inst_size, first_inst_stride, _, first_inst_data_iters = _refine_inst_tile(
+        buffer_region,
+        second_buffer_region,
+        inst_size,
+        inst_stride,
+        analyzer,
+        allowed_f_dim_1,
+        allowed_f_dim_2,
+    )
+    return inst_size, first_inst_stride, first_inst_data_iters
+
+
+def find_max_inst_size_transpose(
+    buffer_region: BufferRegion, second_buffer_region: BufferRegion, analyzer: Analyzer
+):
+    """Find the maximum possible instruction size for a transpose operation.
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The destination buffer region
+    second_buffer_region : BufferRegion
+        The source buffer region
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    Tuple[int, Dict[int, int], int, Dict[int, int]] :
+        First stride, first data iterators, second stride, second data iterators
+    """
+    inst_size, second_inst_stride, second_inst_data_iters = _find_max_inst_size_transpose(
+        buffer_region, second_buffer_region, analyzer
+    )
+    assert inst_size == buffer_region.buffer.layout.partition_size
+    inst_size, first_inst_stride, first_inst_data_iters = _find_max_inst_size_transpose(
+        second_buffer_region, buffer_region, analyzer
+    )
+    assert inst_size == second_buffer_region.buffer.layout.partition_size
+    return first_inst_stride, first_inst_data_iters, second_inst_stride, second_inst_data_iters
+
+
 def _find_max_inst_size_transpose(
     buffer_region: BufferRegion,
     second_buffer_region: BufferRegion,
@@ -497,42 +775,6 @@ def _find_max_inst_size_transpose(
         return inst_size, second_inst_stride, inst_data_iters
 
 
-def find_max_inst_size_unary(
-    buffer_region: BufferRegion,
-    second_buffer_region: BufferRegion,
-    analyzer: Analyzer,
-    allowed_f_dim_1: Optional[Tuple[int]] = None,
-    allowed_f_dim_2: Optional[Tuple[int]] = None,
-):
-    inst_size, inst_stride, _ = find_max_inst_size_from_one_region(
-        buffer_region=buffer_region, analyzer=analyzer, allowed_f_dim=allowed_f_dim_1
-    )
-    inst_size, first_inst_stride, _, first_inst_data_iters = _refine_inst_tile(
-        buffer_region,
-        second_buffer_region,
-        inst_size,
-        inst_stride,
-        analyzer,
-        allowed_f_dim_1,
-        allowed_f_dim_2,
-    )
-    return inst_size, first_inst_stride, first_inst_data_iters
-
-
-def find_max_inst_size_transpose(
-    buffer_region: BufferRegion, second_buffer_region: BufferRegion, analyzer: Analyzer
-):
-    inst_size, second_inst_stride, second_inst_data_iters = _find_max_inst_size_transpose(
-        buffer_region, second_buffer_region, analyzer
-    )
-    assert inst_size == buffer_region.buffer.layout.partition_size
-    inst_size, first_inst_stride, first_inst_data_iters = _find_max_inst_size_transpose(
-        second_buffer_region, buffer_region, analyzer
-    )
-    assert inst_size == second_buffer_region.buffer.layout.partition_size
-    return first_inst_stride, first_inst_data_iters, second_inst_stride, second_inst_data_iters
-
-
 def find_max_inst_size_matmul(
     rhs_buffer_region: BufferRegion,
     output_buffer_region: BufferRegion,
@@ -541,6 +783,29 @@ def find_max_inst_size_matmul(
     allowed_f_dim_output: Optional[Tuple[int]] = None,
     f_dim_map: Optional[Dict[int, int]] = None,
 ):
+    """Find the maximum possible instruction size for a matrix multiplication operation.
+    The instruction must be linear, which means the access pattern must be a * f_loop + b.
+
+    Parameters
+    ----------
+    rhs_buffer_region : BufferRegion
+        The right-hand-side buffer region
+    output_buffer_region : BufferRegion
+        The output buffer region
+    analyzer : Analyzer
+        The analyzer to use
+    allowed_f_dim_rhs : Optional[Tuple[int]]
+        Allowed free dimensions for RHS
+    allowed_f_dim_output : Optional[Tuple[int]]
+        Allowed free dimensions for output
+    f_dim_map : Optional[Dict[int, int]]
+        Dimension map from RHS to output
+
+    Returns
+    -------
+    Tuple[int, int, int, Dict[int, int]] :
+        Instruction size, RHS stride, output stride, and RHS data iterators
+    """
     inst_size, inst_stride, _ = find_max_inst_size_from_one_region(
         buffer_region=rhs_buffer_region, analyzer=analyzer, allowed_f_dim=allowed_f_dim_rhs
     )
@@ -558,7 +823,22 @@ def find_max_inst_size_matmul(
 
 
 def bound_inst_with_limit(inst_size, inst_size_limit, analyzer):
-    # default instruction size limit is 512
+    """Bound the instruction size with a limit.
+
+    Parameters
+    ----------
+    inst_size : int
+        The instruction size
+    inst_size_limit : Optional[int]
+        The instruction size limit (default: 512)
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    Tuple[int, int] :
+        The actual instruction size and additional block size
+    """
     inst_size_limit = 512 if inst_size_limit is None else inst_size_limit
     if not analyzer.can_prove(inst_size <= inst_size_limit):
         # FIXME: this constraint can be relaxed if we support mask
@@ -571,8 +851,25 @@ def bound_inst_with_limit(inst_size, inst_size_limit, analyzer):
     return actual_inst_size, additional_b_size
 
 
-# this function cannot handle non-affine case (e.g. data iter is 1023, but inst size is 512), while bound_inst_with_limit can
 def bound_inst_data_iter_with_limit(buffer_region, inst_data_iters, inst_size_limit, analyzer):
+    """Bound the instruction data iterators with a limit.
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The buffer region
+    inst_data_iters : Dict[int, int]
+        The instruction data iterators
+    inst_size_limit : Optional[int]
+        The instruction size limit (default: 512)
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    Tuple[int, Dict[int, int]] :
+        The actual instruction size and data iterators
+    """
     # default instruction size limit is 512
     inst_size_limit = 512 if inst_size_limit is None else inst_size_limit
     _, layout, _ = infer_range_info(buffer_region, analyzer)
@@ -598,57 +895,22 @@ def bound_inst_data_iter_with_limit(buffer_region, inst_data_iters, inst_size_li
     return actual_inst_size, actual_inst_data_iters
 
 
-def find_max_inst_size_from_one_region(
-    buffer_region: BufferRegion,
-    analyzer: Analyzer,
-    allowed_f_dim: Optional[Tuple[int]] = None,
-):
-    tiled_range_infos_per_dim, layout, seps = infer_range_info(buffer_region, analyzer)
-    data_iters = get_layout_data_iters(layout)
-    if allowed_f_dim is None:
-        allowed_f_dim = tuple(range(len(buffer_region.buffer.shape)))
-    # check largest inst size
-    inst_size = 1
-    inst_stride = 1
-    inst_data_iters = {}
-    prod_p_size = 1
-    while len(tiled_range_infos_per_dim) > 0:
-        range_info = tiled_range_infos_per_dim[0]
-        tiled_range_infos_per_dim = tiled_range_infos_per_dim[1:]
-        st, ext, dim_in_data_iter, dim_in_shape, dim_type = range_info
-        if dim_type == T.TrainiumLayout.Partition:
-            prod_p_size *= ext
-            continue
-        if dim_in_shape not in allowed_f_dim:
-            if inst_size != 1:
-                break
-            else:
-                continue
-        if inst_size != 1 and not analyzer.can_prove(
-            inst_stride * inst_size == data_iters[dim_in_data_iter].stride
-        ):
-            # the stride of the found data iter is not compatible with previous data iters
-            break
-        if inst_size == 1:
-            inst_stride = data_iters[dim_in_data_iter].stride
-        inst_data_iters[dim_in_data_iter] = ext
-        inst_size *= ext
-    # check p_dim covers whole partition
-    assert analyzer.can_prove(
-        prod_p_size == layout.partition_size
-    ), "Partition size of the instruction must match that of the buffer region"
-
-    return inst_size, inst_stride, inst_data_iters
-
-
-def init_analyzer(sctx: ScheduleContext):
-    analyzer = Analyzer()
-    for v, r in sctx.var_range_map.items():
-        analyzer.bind(v, r)
-    return analyzer
-
-
 def f_gen_idx_anchor(buffer_region: BufferRegion, f_gen_axes):
+    """Generate index function for a buffer region based on axes function.
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The buffer region
+    f_gen_axes : Callable
+        The function to generate axes
+
+    Returns
+    -------
+    Callable :
+        A function to generate indices
+    """
+
     def f(b_loops, f_loop, p_loop, dim2block_var=None):
         region_axes = f_gen_axes(b_loops, f_loop, p_loop, dim2block_var)
         return [buffer_region.region[i].min + region_axes[i] for i in range(len(region_axes))]
@@ -657,6 +919,23 @@ def f_gen_idx_anchor(buffer_region: BufferRegion, f_gen_axes):
 
 
 def f_gen_idx_mapped(buffer_region: BufferRegion, f_gen_axes, dim_map):
+    """Generate index function for a buffer region based on axes function from another region.
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The buffer region
+    f_gen_axes : Callable
+        The function to generate axes from another region
+    dim_map : Dict[int, int]
+        The dimension map from other region to this region
+
+    Returns
+    -------
+    Callable :
+        A function to generate indices
+    """
+
     def f(b_loops, f_loop, p_loop, dim2block_var=None):
         region_axes = f_gen_axes(b_loops, f_loop, p_loop, dim2block_var)
         indices = [buffer_region.region[i].min for i in range(len(buffer_region.region))]
@@ -673,6 +952,24 @@ def check_partition_dim_match(
     dim_map: Dict[int, int],
     analyzer: Analyzer,
 ):
+    """Check if partition dimensions match between two buffer regions.
+
+    Parameters
+    ----------
+    buffer_region : BufferRegion
+        The first buffer region
+    second_buffer_region : BufferRegion
+        The second buffer region
+    dim_map : Dict[int, int]
+        The dimension map from first to second buffer region
+    analyzer : Analyzer
+        The analyzer to use
+
+    Returns
+    -------
+    bool :
+        Whether partition dimensions match
+    """
     if buffer_region.buffer.scope() == "global" or second_buffer_region.buffer.scope() == "global":
         return True
     src1_range_info, src1_layout, src1_seps = infer_range_info(buffer_region, analyzer)
@@ -715,14 +1012,44 @@ def check_partition_dim_match(
 
 
 def get_largest_psum_per_bank():
+    """Get the largest partial sum per bank.
+
+    Returns
+    -------
+    int :
+        The largest partial sum per bank (default: 512)
+    """
     return 512
 
 
 def get_max_psum_banks():
+    """Get the maximum number of partial sum banks.
+
+    Returns
+    -------
+    int :
+        The maximum number of partial sum banks (default: 8)
+    """
     return 8
 
 
 def check_workspace_buffer(buffer: Buffer, shape: Tuple[int], scope: str):
+    """Check if a workspace buffer is valid.
+
+    Parameters
+    ----------
+    buffer : Buffer
+        The workspace buffer to check
+    shape : Tuple[int]
+        The required shape
+    scope : str
+        The required scope
+
+    Raises
+    ------
+    AssertionError :
+        If the buffer is invalid
+    """
     assert buffer.scope() == scope, f"workspace buffer must be a {scope} buffer"
     assert buffer.layout is None, "workspace buffer must not have a layout"
     if scope == "trn.psum":
@@ -737,8 +1064,38 @@ def check_workspace_buffer(buffer: Buffer, shape: Tuple[int], scope: str):
         ), f"workspace buffer must have enough size, {buffer.shape} cannot cover {shape}"
 
 
+def init_analyzer(sctx: ScheduleContext):
+    """Initialize an analyzer with the schedule context.
+
+    Parameters
+    ----------
+    sctx : ScheduleContext
+        The schedule context
+
+    Returns
+    -------
+    Analyzer :
+        The initialized analyzer
+    """
+    analyzer = Analyzer()
+    for v, r in sctx.var_range_map.items():
+        analyzer.bind(v, r)
+    return analyzer
+
+
 def target_trn(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
-    """Decorator that ensures the function is only executed for CUDA targets."""
+    """Decorator that ensures a function is only executed for TRN targets.
+
+    Parameters
+    ----------
+    fn : Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]
+        The function to decorate
+
+    Returns
+    -------
+    Callable :
+        The decorated function
+    """
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
