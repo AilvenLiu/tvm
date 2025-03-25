@@ -134,5 +134,34 @@ def test_pass_incorrect_variant_type():
         func(float_arg)
 
 
+def test_tuple_roundtrip():
+    func = tvm.get_global_func("testing.ReturnsTupleStringInteger")
+    res_tuple = func()
+    assert len(res_tuple) == 2
+    assert isinstance(res_tuple[0], tvm.runtime.String)
+    assert isinstance(res_tuple[1], tvm.tir.IntImm)
+    assert res_tuple[0] == "TVM"
+    assert res_tuple[1] == 42
+
+    func1 = tvm.get_global_func("testing.AcceptsTupleStringInteger")
+    res = func1(res_tuple)
+    assert isinstance(res, tvm.runtime.String)
+    assert res == "TVM"
+
+
+def test_incorrect_tuple_type():
+    func = tvm.get_global_func("testing.ReturnsTupleIntegerString")
+    res_tuple = func()
+    assert len(res_tuple) == 2
+    assert isinstance(res_tuple[0], tvm.tir.IntImm)
+    assert isinstance(res_tuple[1], tvm.runtime.String)
+    assert res_tuple[0] == 42
+    assert res_tuple[1] == "TVM"
+
+    func1 = tvm.get_global_func("testing.AcceptsTupleStringInteger")
+    with pytest.raises(Exception):
+        func1(res_tuple)
+
+
 if __name__ == "__main__":
     tvm.testing.main()
