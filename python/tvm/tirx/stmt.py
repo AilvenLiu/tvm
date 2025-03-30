@@ -677,6 +677,27 @@ class SBlockRealize(Stmt):
             span,
         )  # type: ignore
 
+@tvm._ffi.register_object("tir.Break")
+class Break(Stmt):
+    """Break node.
+
+    Parameters
+    ----------
+    """
+
+    def __init__(self, span: Optional[Span] = None) -> None:
+        self.__init_handle_by_constructor__(_ffi_api.Break, span)  # type: ignore
+
+@tvm._ffi.register_object("tir.Continue")
+class Continue(Stmt):
+    """Continue node.
+
+    Parameters
+    ----------
+    """     
+
+    def __init__(self, span: Optional[Span] = None) -> None:
+        self.__init_handle_by_constructor__(_ffi_api.Continue, span)  # type: ignore
 
 def stmt_seq(*args: PrimExpr | Stmt) -> SeqStmt:
     """Make sequence of statements
