@@ -567,9 +567,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 // BufferView
-BufferView::BufferView(Buffer src_buufer, TLayout layout, Buffer dst_buffer) {
+BufferView::BufferView(Buffer src_buffer, TLayout layout, Buffer dst_buffer) {
   ObjectPtr<BufferViewNode> node = make_object<BufferViewNode>();
-  node->src_buffer = std::move(src_buufer);
+  node->src_buffer = std::move(src_buffer);
   node->layout = std::move(layout);
   node->dst_buffer = std::move(dst_buffer);
   data_ = std::move(node);

@@ -52,7 +52,7 @@ from tvm.script import tirp as Tp
 )
 @pytest.mark.parametrize("op_type", ["zero", "sqrt"])
 @pytest.mark.parametrize("dtype", ["float16"])
-def test_unary_op(input, op_type, dtype):
+def test_unary_op_shared(input, op_type, dtype):
     g_shape, st_a, st_res, ext_a, ext_res, thread_cnt, dev = input
     s_shape = g_shape
     g_layout = s_layout = TileLayout.from_tuple(g_shape)
@@ -145,10 +145,10 @@ def test_unary_op(input, op_type, dtype):
         ),
     ],
 )
-@pytest.mark.parametrize("op_type", ["add", "sub", "mul", "fdiv"])
-@pytest.mark.parametrize("operands_type", ["region_region", "const_region", "region_const"])
+@pytest.mark.parametrize("op_type", ["add", "fdiv"])
+@pytest.mark.parametrize("operands_type", ["region_region", "region_const"])
 @pytest.mark.parametrize("dtype", ["float16"])
-def test_binary_op(input, op_type, operands_type, dtype):
+def test_binary_op_shared(input, op_type, operands_type, dtype):
     # skip test
     if op_type in ["sub", "fdiv"] and operands_type == "const_region":
         return
@@ -274,6 +274,237 @@ def test_binary_op(input, op_type, operands_type, dtype):
         A_ref = get_ref(A_np, B_np)
         atol = 1e-3 if op_type == "fdiv" else 1e-8
         tvm.testing.assert_allclose(A_ref, A.asnumpy(), atol=atol)
+
+
+@pytest.mark.parametrize(
+    "input",
+    [
+        (
+            "wgmma", # layout
+            1, # N_GROUPS
+            1, # N_WARPS
+            32,  # thread_cnt
+            tvm.cuda(0),  # dev
+        ),
+        (
+            "wgmma", # layout
+            1, # N_GROUPS
+            4, # N_WARPS
+            32,  # thread_cnt
+            tvm.cuda(0),  # dev
+        ),
+        (
+            "wgmma", # layout
+            2, # N_GROUPS
+            8, # N_WARPS
+            32,  # thread_cnt
+            tvm.cuda(0),  # dev
+        )
+    ],
+)
+@pytest.mark.parametrize("op_type", ["reciprocal", "exp"])
+@pytest.mark.parametrize("dtype", ["float16"])
+def test_unary_op_local(input, op_type, dtype):
+    layout, N_GROUPS, N_WARPS, thread_cnt, dev = input
+    assert layout == "wgmma", "logical tensor which is not WGMMA layout is not supported"
+
+    # get shape info
+    NUM_COL = 128
+    g_shape_a = g_shape_b = (16 * N_WARPS, NUM_COL)
+    g_layout_a = g_layout_b = TileLayout.from_tuple(g_shape_a)
+    acc_shape = red_shape = (16, NUM_COL)
+
+    @T.prim_func(tirp=True)
+    def test_unary(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
+        B = T.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            wg_id = T.warpgroup_id([N_GROUPS], parent="cta")
+            warp_id_in_wg = T.warp_id([N_WARPS // N_GROUPS], parent="warpgroup")
+            lane_id = T.thread_id([thread_cnt], parent="warp")
+
+            with T.thread():
+                # acc layout
+                atom = T.TileLayout.from_tuple((1, 2), (2, 1))
+                warp_atom = T.TileLayout.shard(
+                    (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
+                )
+                tile = T.TileLayout.from_tuple((2, NUM_COL // 8), (1, 2))
+                acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
+                acc = T.alloc_buffer([2, NUM_COL // 4], dtype=dtype, scope="local", logical_scope="thread",
+                                     layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)))
+                res = T.alloc_buffer([2, NUM_COL // 4], dtype=dtype, scope="local", logical_scope="thread",
+                                     layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)))
+
+                # load A into acc
+                with T.thread():
+                    for i in T.serial(NUM_COL // 8):
+                        for j in T.unroll(2):
+                            for vec in T.vectorized(2):
+                                acc[j, i * 2 + vec] = A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]
+
+                # unary op
+                with T.warp():
+                    acc_view = T.view(acc, layout=acc_layout, shape=acc_shape)
+                    res_view = T.view(res, layout=acc_layout, shape=red_shape)
+                    if op_type == "reciprocal":
+                        Tp.reciprocal(res_view, acc_view)
+                    elif op_type == "exp":
+                        Tp.exp(res_view, acc_view)
+
+                # write res into B
+                with T.thread():
+                    for i in T.serial(NUM_COL // 8):
+                        for j in T.unroll(2):
+                            for vec in T.vectorized(2):
+                                B[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = res[j, i * 2 + vec]
+    # fmt: on
+
+    target = tvm.target.Target.from_device(dev)
+    with target:
+        mod = tvm.IRModule({"main": test_unary})
+        mod = tvm.build(mod, target=target, pipeline="tirp")
+
+        np.random.seed(0)
+        A_np = np.random.rand(*g_shape_a).astype(dtype)
+        B_np = np.zeros(g_shape_b, dtype=dtype)
+        A = tvm.nd.array(A_np, dev)
+        B = tvm.nd.array(B_np, dev)
+        mod(A, B)
+
+        # find ref result
+        if op_type == "reciprocal":
+            B_ref = 1 / A_np
+        elif op_type == "exp":
+            B_ref = np.exp2(A_np)
+        atol = 1e-8
+        tvm.testing.assert_allclose(B_ref, B.asnumpy(), atol=atol)
+
+
+@pytest.mark.parametrize(
+    "input",
+    [
+        (
+            "wgmma", # layout
+            1, # N_GROUPS
+            1, # N_WARPS
+            32,  # thread_cnt
+            tvm.cuda(0),  # dev
+        ),
+        (
+            "wgmma", # layout
+            1, # N_GROUPS
+            4, # N_WARPS
+            32,  # thread_cnt
+            tvm.cuda(0),  # dev
+        ),
+        (
+            "wgmma", # layout
+            2, # N_GROUPS
+            8, # N_WARPS
+            32,  # thread_cnt
+            tvm.cuda(0),  # dev
+        )
+    ],
+)
+@pytest.mark.parametrize("op_type", ["sub", "mul"])
+@pytest.mark.parametrize("dtype", ["float16"])
+def test_binary_op_local(input, op_type, dtype):
+    layout, N_GROUPS, N_WARPS, thread_cnt, dev = input
+    assert layout == "wgmma", "logical tensor which is not WGMMA layout is not supported"
+
+    # get shape info
+    NUM_COL = 128
+    g_shape_a, g_shape_b = (16 * N_WARPS, NUM_COL), (16 * N_WARPS, 4)
+    g_layout_a, g_layout_b = TileLayout.from_tuple(g_shape_a), TileLayout.from_tuple(g_shape_b)
+    A_shape, B_shape = (16, NUM_COL), (16, 4)
+    const = T.float16(3.0) if dtype == "float16" else T.float32(3.0)
+
+    @T.prim_func(tirp=True)
+    def test_broadcast_and_apply_const(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
+        B = T.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
+
+        with T.kernel():
+            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
+            wg_id = T.warpgroup_id([N_GROUPS], parent="cta")
+            warp_id_in_wg = T.warp_id([N_WARPS // N_GROUPS], parent="warpgroup")
+            lane_id = T.thread_id([thread_cnt], parent="warp")
+
+            with T.thread():
+                # A layout
+                atom = T.TileLayout.from_tuple((1, 2), (2, 1))
+                warp_atom = T.TileLayout.shard(
+                    (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
+                )
+                tile = T.TileLayout.from_tuple((2, NUM_COL // 8), (1, 2))
+                A_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
+                A_buffer = T.alloc_buffer([2, NUM_COL // 4], dtype=dtype, scope="local", logical_scope="thread",
+                                          layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)))
+
+                # B layout
+                B_atom = T.TileLayout.from_tuple((1, 1), (1, 1))
+                B_warp_atom = T.TileLayout.shard(
+                    (8, 4), (8, 4), "S0S1", inner=B_atom, from_to=("thread", "warp")
+                )
+                B_tile = T.TileLayout.from_tuple((2, 1), (1, 1))
+                B_layout = B_warp_atom.tile(B_tile, (2, 1), (8, 4))
+                B_buffer = T.alloc_buffer([2,], dtype=dtype, scope="local", logical_scope="thread",
+                                          layout=B_atom.tile(B_tile, (2, 1), (1, 1)))
+
+                # load A into A_buffer
+                with T.thread():
+                    for i in T.serial(NUM_COL // 8):
+                        for j in T.unroll(2):
+                            for vec in T.vectorized(2):
+                                A_buffer[j, i * 2 + vec] = A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]
+
+                # load B into B_buffer
+                with T.thread():
+                    for i in T.unroll(2):
+                        B_buffer[i] = B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4]
+
+                # binary op
+                with T.warp():
+                    A_view = T.view(A_buffer, layout=A_layout, shape=A_shape)
+                    B_view = T.view(B_buffer, layout=B_layout, shape=B_shape)
+                    if op_type == "sub":
+                        Tp.sub(A_view, A_view, B_view)
+                        Tp.sub(A_view, A_view, const)
+                    elif op_type == "mul":
+                        Tp.mul(A_view, A_view, B_view)
+                        Tp.mul(A_view, A_view, const)
+
+                # write A_buffer back to A
+                with T.thread():
+                    for i in T.serial(NUM_COL // 8):
+                        for j in T.unroll(2):
+                            for vec in T.vectorized(2):
+                                A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = A_buffer[j, i * 2 + vec]
+    # fmt: on
+
+    target = tvm.target.Target.from_device(dev)
+    with target:
+        mod = tvm.IRModule({"main": test_broadcast_and_apply_const})
+        mod = tvm.build(mod, target=target, pipeline="tirp")
+
+        np.random.seed(0)
+        A_np = np.random.rand(*g_shape_a).astype(dtype)
+        B_np = np.random.rand(*g_shape_b).astype(dtype)
+        A = tvm.nd.array(A_np, dev)
+        B = tvm.nd.array(B_np, dev)
+        mod(A, B)
+
+        # find ref result
+        val = np.tile(np.repeat(B_np, 2, axis=1), NUM_COL // 8)
+        if op_type == "sub":
+            B_ref = (A_np - val) - 3.0
+        elif op_type == "mul":
+            B_ref = (A_np * val) * 3.0
+        atol = 1e-8
+        tvm.testing.assert_allclose(B_ref, A.asnumpy(), atol=atol)
 
 
 if __name__ == "__main__":

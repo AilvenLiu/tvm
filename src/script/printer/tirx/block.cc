@@ -262,9 +262,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     tir::BufferGet buffer_get = block->buffer_gets[i];
     ObjectPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayIndex(i);
     IdDoc lhs = DefineBuffer(buffer_get->dst_buffer, *frame, d);
-    ExprDoc rhs = TIR(d, "get")->Call({
-        d->AsDoc<ExprDoc>(buffer_get->src_buffer, buffer_get_p->Attr("src_buffer")),
-    });
+    ExprDoc rhs = d->AsDoc<ExprDoc>(buffer_get, buffer_get_p);
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
   }
 
@@ -343,10 +341,10 @@ TVM_SCRIPT_REPR(tirx::SBlockRealizeNode, ReprPrintTIR);
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tir::BufferGet>(
         "", [](tir::BufferGet buffer_get, ObjectPath p, IRDocsifier d) -> Doc {
-          Doc doc = TIR(d, "get")->Call({
-              d->AsDoc<ExprDoc>(buffer_get->src_buffer, p->Attr("src_buffer")),
-              d->AsDoc<ExprDoc>(buffer_get->dst_buffer, p->Attr("dst_buffer")),
-          });
+          Doc doc =
+              TIR(d, "get")->Call({d->AsDoc<ExprDoc>(buffer_get->src_buffer, p->Attr("src_buffer")),
+                                   d->AsDoc<ExprDoc>(buffer_get->dst_buffer->shape,
+                                                     p->Attr("dst_buffer")->Attr("shape"))});
           return doc;
         });
 

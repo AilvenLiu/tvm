@@ -183,7 +183,7 @@ def test_roundtrip_buffer_view_get1():
                 A_warp = T.view(A, layout=A_warp_layout, shape=(8, 8))
 
                 with T.thread():
-                    A_local = T.get(A_warp)
+                    A_local = T.get(A_warp, shape=(2,))
                     A_local[0] = T.float16(0)
 
     # fmt: on
@@ -211,7 +211,7 @@ def test_roundtrip_buffer_view_get2():
                     (8, 8), (8, 4), "S0S1", inner=A_layout, from_to=("thread", "warp")
                 )
                 B = T.view(A, layout=B_layout, shape=(8, 8))
-                D = T.get(B)
+                D = T.get(B, shape=(2,))
 
                 with T.thread():
                     out[0] = A[0] + B[0, 0] + D[0]

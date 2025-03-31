@@ -293,6 +293,7 @@ class ScopeMerger : public StmtExprMutator {
         if (auto* realize = n->seq[i].as<BlockRealizeNode>()) {
           // Find a sequence of blocks with the same exec_scope
           auto block = realize->block;
+          auto* new_block = block.CopyOnWrite();
           std::vector<Stmt> new_body{block->body};
           ICHECK(block->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
           auto scope = block->exec_scope.value();
@@ -302,13 +303,18 @@ class ScopeMerger : public StmtExprMutator {
               ICHECK(next_block->exec_scope.defined())
                   << "Internal Error: exec_scope is not defined";
               if (scope.Is(next_block->exec_scope.value())) {
+                new_block->buffer_views.insert(new_block->buffer_views.end(),
+                                               next_block->buffer_views.begin(),
+                                               next_block->buffer_views.end());
+                new_block->buffer_gets.insert(new_block->buffer_gets.end(),
+                                              next_block->buffer_gets.begin(),
+                                              next_block->buffer_gets.end());
                 new_body.push_back(next_block->body);
                 continue;
               }
             }
             break;
           }
-          auto* new_block = block.CopyOnWrite();
           new_block->body = SeqStmt::Flatten(new_body);
           seq.push_back(BlockRealize({}, Bool(true), block));
         } else {

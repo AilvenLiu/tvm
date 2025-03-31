@@ -525,6 +525,7 @@ class BufferGet(Object, Scriptable):
     ----------
     src_buffer : Buffer
         The source buffer.
+
     dst_buffer : Buffer
         The destination buffer.
     """

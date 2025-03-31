@@ -49,7 +49,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
   TVM_FFI_CHECK(buffer_type == "auto" || buffer_type == "default" || buffer_type.empty())
       << "ValueError: `buffer_type` must be `auto` or `default` or empty";
   if (!allocated_addr.empty()) {
-    ICHECK(!data.defined() && !elem_offset.defined() && !offset_factor)
+    TVM_FFI_ICHECK(!data.defined() && !elem_offset.defined() && !offset_factor)
         << "ValueError: `allocated_addr` can only be used with `data`, `elem_offset`, and "
            "`offset_factor` undefined";
   }
@@ -85,7 +85,6 @@ PrimFuncFrame PrimFunc(bool is_private, bool is_tirp) {
   n->env_threads.clear();
   n->root_alloc_buffers.clear();
   n->is_tirp = is_tirp;
-  n->buffer_view_map.clear();
   return PrimFuncFrame(n);
 }
 
@@ -181,9 +180,9 @@ Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Array<Pri
   String logical_scope = buffer.logical_scope();
   if (auto tile_layout = layout.as<tvm::tirx::TileLayoutNode>()) {
     if (tile_layout->from.defined()) {
-      ICHECK(tile_layout->to.defined())
+      TVM_FFI_ICHECK(tile_layout->to.defined())
           << "ValueError: The from scope of the layout must match the to scope of the layout.";
-      ICHECK(tvm::tirx::ExecScope::Create(logical_scope).Is(tile_layout->from.value()))
+      TVM_FFI_ICHECK(tvm::tirx::ExecScope::Create(logical_scope).Is(tile_layout->from.value()))
           << "ValueError: The logical scope of the buffer must match the from scope of the layout.";
       logical_scope = tile_layout->to.value()->name;
     }
@@ -192,41 +191,24 @@ Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Array<Pri
                                  buffer.scope(), 1, 1, "auto", NullOpt, logical_scope, layout);
 
   frame->buffer_views.push_back(tvm::tirx::BufferView(buffer, layout, dst_buffer));
-  {
-    // Update BufferView tree
-    Optional<PrimFuncFrame> func_frame_opt = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
-    TVM_FFI_ICHECK(func_frame_opt.defined()) << "ValueError: Block must be defined within a PrimFunc";
-    PrimFuncFrame func_frame = func_frame_opt.value();
-    func_frame->buffer_view_map.Set(dst_buffer, buffer);
-  }
+
   return dst_buffer;
 }
 
-Buffer BufferGet(tvm::tirx::Buffer buffer) {
+Buffer BufferGet(tvm::tirx::Buffer buffer, Array<PrimExpr> shape) {
   SBlockFrame frame = FindSBlockFrame("T.Get");
-  Buffer dst_buffer;
-  {
-    // Get the dst buffer from the buffer map
-    Optional<PrimFuncFrame> func_frame_opt = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
-    TVM_FFI_ICHECK(func_frame_opt.defined()) << "ValueError: Block must be defined within a PrimFunc";
-    PrimFuncFrame func_frame = func_frame_opt.value();
 
-    // Find the root of view tree
-    auto it = func_frame->buffer_view_map.find(buffer);
-    TVM_FFI_ICHECK(it != func_frame->buffer_view_map.end());
-    do {
-      dst_buffer = (*it).second;
-      it = func_frame->buffer_view_map.find(dst_buffer);
-    } while (it != func_frame->buffer_view_map.end());
+  String logical_scope = tvm::tirx::StorageToLogicalScope(buffer.scope());
+  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", NullOpt, NullOpt, NullOpt,
+                                 buffer.scope(), 1, 1, "auto", NullOpt, logical_scope, NullOpt);
+  // Check if the buffer is a storage buffer
+  TVM_FFI_ICHECK(tvm::tirx::IsStorageBuffer(dst_buffer.scope(), dst_buffer.logical_scope()));
 
-    // Check if the buffer is a stroage buffer
-    TVM_FFI_ICHECK(tvm::tirx::IsStorageBuffer(dst_buffer.scope(), dst_buffer.logical_scope()));
-
-    // Copy the dst buffer
-    auto n = dst_buffer.CopyOnWrite();
-    n->data = buffer->data.copy_with_suffix("");
-  }
+  // Copy the dst buffer
+  auto n = dst_buffer.CopyOnWrite();
+  n->data = buffer->data.copy_with_suffix("");
   frame->buffer_gets.push_back(tvm::tirx::BufferGet(buffer, dst_buffer));
+
   return dst_buffer;
 }
 
@@ -261,10 +243,10 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
 void OpCall(tvm::tirx::tirp::OpCall op_call) { AddToParent(op_call); }
 
 BlockFrame BlockFrameSlice(BlockFrame block, Variant<Array<Range>, PrimExpr> slice) {
-  ICHECK(block->exec_scope.defined()) << "InternalError: Block frame must have an execution scope";
-  ICHECK(block->scope_slice_parent.defined())
+  TVM_FFI_ICHECK(block->exec_scope.defined()) << "InternalError: Block frame must have an execution scope";
+  TVM_FFI_ICHECK(block->scope_slice_parent.defined())
       << "InternalError: Block frame must have an execution scope slice parent";
-  ICHECK(!block->exec_scope->IsInstance<tvm::tirx::ExecScopeSliceNode>())
+  TVM_FFI_ICHECK(!block->exec_scope->IsInstance<tvm::tirx::ExecScopeSliceNode>())
       << "InternalError: Block frame already has an execution scope slice";
   block->exec_scope =
       tvm::tirx::ExecScopeSlice(slice, block->scope_slice_extents, block->scope_slice_parent,
@@ -476,7 +458,7 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                  buffer_type_str, axis_separators, logical_scope, layout, allocated_addr);
   IRBuilder builder = IRBuilder::Current();
   auto opt_func_frame = builder->FindFrame<PrimFuncFrame>();
-  ICHECK(opt_func_frame.defined()) << "ValueError: PrimFunc frame not find. Please ensure "
+  TVM_FFI_ICHECK(opt_func_frame.defined()) << "ValueError: PrimFunc frame not find. Please ensure "
                                    << "'T.alloc_buffer' is called under T.prim_func()";
   auto func_frame = opt_func_frame.value();
 
@@ -485,7 +467,7 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
   } else if (ffi::Optional<PrimFuncFrame> frame = builder->GetLastFrame<PrimFuncFrame>()) {
     frame.value()->root_alloc_buffers.push_back(buffer);
   } else if (!func_frame->is_tirp) {
-    LOG(FATAL) << "ValueError: Block frame or PrimFunc frame not find. Please ensure "
+    TVM_FFI_THROW(InternalError) << "ValueError: Block frame or PrimFunc frame not find. Please ensure "
                   "'T.alloc_buffer' is called under T.block() or T.prim_func()";
   } else if (ffi::Optional<SBlockFrame> frame = builder->FindFrame<SBlockFrame>()) {
     frame.value()->alloc_buffers.push_back(buffer);
@@ -507,7 +489,7 @@ CopyPipeline AllocCopyPipeline(ExecScope thread_scope, size_t depth, bool separa
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->pipelines.push_back(pipeline);
   } else {
-    LOG(FATAL) << "ValueError: Block frame not find. Please ensure 'T.alloc_copy_pipeline' is "
+    TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_copy_pipeline' is "
                   "called under T.block()";
   }
   return pipeline;
@@ -1166,7 +1148,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

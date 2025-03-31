@@ -30,6 +30,15 @@ from tvm.tir import BufferRegion, PrimFunc, Buffer
 from tvm.tir.stmt import OpCall
 
 
+def get_indices(nth, start, extent):
+    """Convert a fused index into multi-dimensional indices."""
+    relative = []
+    for e in reversed(extent):
+        relative.append(nth % e)
+        nth //= e
+    return [r + s for r, s in zip(reversed(relative), start)]
+
+
 def target_cuda(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
     """Decorator that ensures the function is only executed for CUDA targets."""
 
