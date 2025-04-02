@@ -21,7 +21,7 @@ from collections import namedtuple
 from typing import Tuple, Optional, Dict, Callable, List
 from functools import wraps, reduce
 import operator
-
+import functools
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.ir import Range
@@ -839,7 +839,8 @@ def bound_inst_with_limit(inst_size, inst_size_limit, analyzer):
     Tuple[int, int] :
         The actual instruction size and additional block size
     """
-    inst_size_limit = 512 if inst_size_limit is None else inst_size_limit
+    if inst_size_limit is None:
+        return inst_size, 1
     if not analyzer.can_prove(inst_size <= inst_size_limit):
         # FIXME: this constraint can be relaxed if we support mask
         assert analyzer.can_prove(inst_size % inst_size_limit == 0)
@@ -871,7 +872,11 @@ def bound_inst_data_iter_with_limit(buffer_region, inst_data_iters, inst_size_li
         The actual instruction size and data iterators
     """
     # default instruction size limit is 512
-    inst_size_limit = 512 if inst_size_limit is None else inst_size_limit
+    if inst_size_limit is None:
+        return (
+            functools.reduce(operator.mul, [ext for ext in inst_data_iters.values()]),
+            inst_data_iters,
+        )
     _, layout, _ = infer_range_info(buffer_region, analyzer)
     data_iter_array = layout.combined_1d_layout.data_iter_array
     sorted_data_iters = sorted(

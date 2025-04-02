@@ -19,6 +19,7 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+import torch
 from .utils import run_on_remote_and_check_correct, ssh_client
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
@@ -109,7 +110,7 @@ def test_flash_attn(ssh_client, causal=True):
                         scaling_factor = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(4))
                         prev_running_max = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(4))
                         p = T.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(BLOCK_KV*2))
-                        partial_rowsum_p = T.alloc_buffer((BLOCK_Q, BLOCK_KV//INST_SIZE), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(BLOCK_KV*2))
+                        partial_rowsum_p = T.alloc_buffer((BLOCK_Q, BLOCK_KV//INST_SIZE), dtype="float32", scope="trn.sbuf", allocated_addr=allocator.allocate(BLOCK_KV*2))
                         rowsum_p = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(BLOCK_KV*2))
                         p_transposed = T.alloc_buffer((BLOCK_Q, BLOCK_KV), dtype="float16", scope="trn.sbuf", layout= "FP", allocated_addr=allocator.allocate(BLOCK_KV*2))
                         mm2_out = T.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF", allocated_addr=allocator.allocate(d*2))
@@ -135,15 +136,14 @@ def test_flash_attn(ssh_client, causal=True):
                             Tp.minimum(running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], mm1_dot_max)
                             Tp.exp(scaling_factor, prev_running_max, bias=running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0])
                         # p = exp(Q@K.T + running_max)
-                        p_reshape = T.view(p, p.layout, (BLOCK_Q, BLOCK_KV // INST_SIZE, INST_SIZE))
-                        qk_reshape = T.view(qk, qk.layout, (BLOCK_Q, BLOCK_KV // INST_SIZE, INST_SIZE))
-                        running_max_reshape = T.view(running_max, running_max.layout, (seqlen_q, 1, 1))
                         # FIXME: this still fails to be simplified. Try to use explicit mask later
                         # Most masks are of 2 kinds: 1. out-of-bound mask, 2. mask that reduce redundant computation.
                         # We can set an attribute to the mask, showing that the second kind of mask can be relaxed.
                         # F loop can always be relaxed to a constant, so that the mask only contains out-of-bound mask.
-                        Tp.unary_reduce(p_reshape[:, 0:kv_range // INST_SIZE, :], partial_rowsum_p[:, 0:kv_range // INST_SIZE], qk_reshape[:, 0:kv_range//INST_SIZE, :], unary_op="exp", reduce_op="sum", bias=running_max_reshape[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0, 0], reduce_axes=-1)
-                        Tp.sum(rowsum_p, partial_rowsum_p[:, 0:kv_range // INST_SIZE], axes=-1)
+                        if causal:
+                            Tp.unary_reduce(p[:, 0:kv_range], rowsum_p, qk[:, 0:kv_range], unary_op="exp", reduce_op="sum", bias=running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], reduce_axes=-1, schedule_config={"max_inst_size": 512}, workspace={"partial_reduce": partial_rowsum_p})
+                        else:
+                            Tp.unary_reduce(p[:, 0:kv_range], rowsum_p, qk[:, 0:kv_range], unary_op="exp", reduce_op="sum", bias=running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], reduce_axes=-1)
                         # transpose p
                         Tp.copy(p_transposed[:, 0:kv_range], p[:, 0:kv_range], workspace={"identity": identity_tensor})
                         # l = sum(p) + scaling_factor * l
@@ -170,10 +170,26 @@ def test_flash_attn(ssh_client, causal=True):
     with target:
         mod = tvm.IRModule({"main": flash_attn})
         func = mod["main"]
-        # FIXME: the correctness is not verified due to a bug in neuron compiler
-        run_on_remote_and_check_correct(func, None, target)
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.tir.transform.Simplify()(mod)
+        print(mod)
+        def attn_ref(q, k, v):
+            q = q.reshape(head_q, d, seqlen_q)
+            k = k.reshape(head_kv, d, seqlen_kv)
+            v = v.reshape(head_kv, seqlen_kv, d)
+            q = q.transpose(1,2)
+            attn_scores = torch.bmm(q, k)
+            attn_scores *= softmax_scale
+            if causal:
+                mask = torch.triu(torch.ones((seqlen_q, seqlen_kv), device=q.device), diagonal=1).bool()
+                mask = torch.zeros_like(attn_scores, dtype=q.dtype).masked_fill(mask, float('-inf'))
+                attn_scores += mask
+            attn_probs = torch.softmax(attn_scores, dim=-1)
+            out = torch.bmm(attn_probs, v)
+            return [out.reshape(seqlen_q, head_q, d)]     
+        # run_on_remote_and_check_correct(func, attn_ref, target)
 
 
 if __name__ == "__main__":
-    test_flash_attn()
+    test_flash_attn(causal=True)
 

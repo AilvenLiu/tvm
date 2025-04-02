@@ -217,7 +217,7 @@ def test_reduction_with_guard():
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             for i in range(4):
                 for j in range(4):
-                    Tp.sum(B_sbuf[0: (i+1) * 128, 0], A_sbuf[0: (i+1) * 128, 0: (j+1) * 256])
+                    Tp.sum(B_sbuf[0: (i+1) * 128, 0], A_sbuf[0: (i+1) * 128, 0: (j+1) * 256], schedule_config={"max_inst_size": 512})
 
     @T.prim_func(tirp=True)
     def expected():

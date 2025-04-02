@@ -127,7 +127,7 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // inst_size // p_size
 
     # Handle instruction size limit
-    inst_size_limit = op.schedule_config.get("max_inst_size", None)
+    inst_size_limit = op.schedule_config.get("max_inst_size", 512)
     actual_inst_size, additional_b_size = bound_inst_with_limit(
         inst_size, inst_size_limit, analyzer
     )

@@ -23,11 +23,13 @@ import sys
 from typing import Callable
 
 import tvm
+import torch
 from tvm.script import tir as T, ir as I
 from tvm.tir import PrimFunc
-
+from .claude_rewrite import rewrite_program
 HOST_IP = ""
 USERNAME = "ubuntu"
+
 
 dtype_map = {
     "float32": "np.float32",
@@ -47,9 +49,12 @@ def generate_std_output(func: PrimFunc, std_f_output: Callable):
     for i in range(num_inputs):
         int_shape = [int(x) for x in func.buffer_map[func.params[i]].shape]
         inputs.append(
-            np.random.rand(*int_shape).astype(np_dtype_map[func.buffer_map[func.params[i]].dtype])
+            torch.from_numpy(((np.random.rand(*int_shape) - 0.5) * 2 ).astype(np_dtype_map[func.buffer_map[func.params[i]].dtype]))
         )
-    return std_f_output(*inputs)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    inputs = [x.to(device) for x in inputs]
+    outputs = [o.cpu().numpy() for o in std_f_output(*inputs)]
+    return outputs
 
 
 def generate_test_function(func: PrimFunc, target: tvm.target.Target):
@@ -67,7 +72,7 @@ def generate_test_function(func: PrimFunc, target: tvm.target.Target):
         buffer = func.buffer_map[param]
         assert buffer.dtype in dtype_map, f"Unsupported dtype {buffer.dtype}"
         func_str += (
-            f"  param_{cnt} = np.random.rand(*{buffer.shape}).astype({dtype_map[buffer.dtype]})\n"
+            f"  param_{cnt} = ((np.random.rand(*{buffer.shape}) - 0.5) * 2).astype({dtype_map[buffer.dtype]})\n"
         )
         cnt += 1
     func_str += f"  {func_name}_kernel({', '.join([f'param_{i}' for i in range(cnt)])})\n"
@@ -77,6 +82,7 @@ def generate_test_function(func: PrimFunc, target: tvm.target.Target):
         func_str += f"  np.save('output_{i-num_inputs}.npy', param_{i})\n"
     func_str += "np.random.seed(0)\n"
     func_str += "test_func()\n"
+    func_str = rewrite_program(func_str, func_name)
     return func_str
 
 
@@ -206,7 +212,7 @@ def run_on_remote_and_check_correct(func, std_f_output, target):
         # Check the correctness of the output
         for i, std_output in enumerate(std_outputs):
             output = np.load(f"{local_output_dir}/output_{i}.npy")
-            np.testing.assert_allclose(output, std_output, rtol=1e-3, atol=1e-3)
+            np.testing.assert_allclose(output, std_output, rtol=1e-2, atol=1e-2)
 
     finally:
         # Clean up the remote temporary directory

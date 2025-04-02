@@ -158,7 +158,7 @@ def generate_unary_func(
     b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // p_size // inst_size
 
     # Apply instruction size limits if specified
-    inst_size_limit = schedule_config.get("max_inst_size", None)
+    inst_size_limit = schedule_config.get("max_inst_size", 512)
     actual_inst_size, additional_b_size = bound_inst_with_limit(
         inst_size, inst_size_limit, analyzer
     )

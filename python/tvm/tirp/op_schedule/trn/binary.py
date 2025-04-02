@@ -464,7 +464,7 @@ def binary_trn(
     )
 
     # Handle instruction size limits
-    inst_size_limit = op.schedule_config.get("max_inst_size", None)
+    inst_size_limit = op.schedule_config.get("max_inst_size", 512)
     actual_inst_size, additional_b_size = bound_inst_with_limit(
         inst_size, inst_size_limit, analyzer
     )
