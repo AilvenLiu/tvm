@@ -74,6 +74,7 @@ def transpose_schedule(
     b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // p_size // lhs_f_size
 
     if "identity" not in op.workspace:
+        assert sctx.alloc_only, "Identity tensor must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
         identity_tensor = T.buffer(
             (p_size, rhs_f_size),
             src_region.buffer.dtype,
@@ -132,6 +133,7 @@ def transpose_schedule(
         return transpose_psum_output
 
     if "acc_psum" not in op.workspace:
+        assert sctx.alloc_only, "Accumulation psum buffer must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
         acc_psum = T.buffer(
             (max_psum_slots, p_size, largest_psum_per_bank),
             "float32",

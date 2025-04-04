@@ -14,11 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""FFI APIs for tvm.tirp"""
+import tvm._ffi
 
-from .copy import *
-from .gemm import *
-from .maps import *
-from .reduction import *
-from .compose_op import *
-from .select import *
-from .private_alloc import *
+
+tvm._ffi._init_api("tirp", __name__)

@@ -309,6 +309,7 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     
     acc_psum_shape = (max_psum_slots, p_size, largest_psum_per_bank)
     if "acc_psum" not in op.workspace:
+        assert sctx.alloc_only, "Accumulation psum buffer must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
         acc_psum = T.buffer(
                 acc_psum_shape,
                 "float32",

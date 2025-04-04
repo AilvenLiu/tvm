@@ -177,9 +177,9 @@ def test_reduction_two_stage():
     def expected():
         T.func_attr({"global_symbol": "reduction"})
         with T.kernel():
+            intermediate_buffer = T.alloc_buffer((128, 32), logical_scope="kernel", scope="trn.sbuf")
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
-            intermediate_buffer = T.alloc_buffer((128, 32), logical_scope="kernel", scope="trn.sbuf")
             for b_loop in range(4):
                 for reduction_b_loop in range(32):
                     T.attr(0, "tensorized_nki_instruction", 1)
@@ -194,6 +194,7 @@ def test_reduction_two_stage():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
@@ -223,9 +224,9 @@ def test_reduction_with_guard():
     def expected():
         T.func_attr({"global_symbol": "reduction"})
         with T.kernel():
+            intermediate_buffer = T.alloc_buffer((128, 2), scope="trn.sbuf", logical_scope="kernel")
             A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
-            intermediate_buffer = T.alloc_buffer((128, 2), scope="trn.sbuf", logical_scope="kernel")
             for i, j in T.grid(4, 4):
                 for b_loop in range(4):
                     for reduction_b_loop in range(2):
@@ -242,6 +243,7 @@ def test_reduction_with_guard():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": reduction})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)

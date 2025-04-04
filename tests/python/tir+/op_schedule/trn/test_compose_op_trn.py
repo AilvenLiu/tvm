@@ -47,10 +47,10 @@ def test_simple_activation_reduce():
     def expected():
         T.func_attr({"global_symbol": "activation_reduce"})
         with T.kernel():
+            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             A = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             B = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             C = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
-            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
@@ -63,6 +63,7 @@ def test_simple_activation_reduce():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
@@ -90,10 +91,10 @@ def test_activation_reduce_in_loop():
     def expected():
         T.func_attr({"global_symbol": "activation_reduce"})
         with T.kernel():
+            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             A = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
             C = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
-            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
@@ -106,6 +107,7 @@ def test_activation_reduce_in_loop():
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
@@ -131,10 +133,10 @@ def test_activation_reduce_in_loop2():
     def expected():
         T.func_attr({"global_symbol": "activation_reduce"})
         with T.kernel():
+            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             A = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
             C = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
-            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
@@ -147,6 +149,7 @@ def test_activation_reduce_in_loop2():
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
@@ -174,11 +177,11 @@ def test_activation_reduce_two_stage():
     def expected():
         T.func_attr({"global_symbol": "activation_reduce"})
         with T.kernel():
+            partial_reduce = T.alloc_buffer((128, 8), scope="trn.sbuf", logical_scope="kernel")
+            const_bias = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
             A = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
             C = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
-            partial_reduce = T.alloc_buffer((128, 8), scope="trn.sbuf", logical_scope="kernel")
-            const_bias = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(1024, annotations={"nki_dim": "F"}):
@@ -196,6 +199,7 @@ def test_activation_reduce_two_stage():
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
@@ -375,10 +379,10 @@ def test_tensor_scalar_reduce_two_stage():
     def expected():
         T.func_attr({"global_symbol": "tensor_scalar_reduce"})
         with T.kernel():
+            partial_reduce = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
-            partial_reduce = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
             for b_loop in range(4):
                 for reduction_b_loop in range(4):
                     T.attr(0, "tensorized_nki_instruction", 1)
@@ -392,6 +396,7 @@ def test_tensor_scalar_reduce_two_stage():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": tensor_scalar_reduce})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
@@ -605,10 +610,10 @@ def test_unary_reduce_guard():
     def expected():
         T.func_attr({"global_symbol": "unary_reduce"})
         with T.kernel():
+            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
-            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
@@ -623,6 +628,7 @@ def test_unary_reduce_guard():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary_reduce})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
@@ -697,11 +703,11 @@ def test_activation_reduce_two_stage_workspace():
     def expected():
         T.func_attr({"global_symbol": "activation_reduce"})
         with T.kernel():
+            const_bias = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
             intermediate_buffer = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
             A = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
             C = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
-            const_bias = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(1024, annotations={"nki_dim": "F"}):
@@ -720,6 +726,7 @@ def test_activation_reduce_two_stage_workspace():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": activation_reduce})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
@@ -773,4 +780,6 @@ def test_tensor_scalar_reduce_two_stage_workspace():
 
 
 if __name__ == "__main__":
-    tvm.testing.main()
+    # tvm.testing.main()
+    # test_activation_reduce_two_stage()
+    test_tensor_scalar_reduce_two_stage()

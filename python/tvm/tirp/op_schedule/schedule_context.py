@@ -19,13 +19,14 @@ from typing import Dict, List
 
 from tvm._ffi import register_object
 from tvm.ir import Range
-from tvm.tir import _ffi_api, PrimExpr, Var, Buffer, Stmt
+from tvm.tir import PrimExpr, Var, Buffer, Stmt
 from tvm.runtime import Object, Scriptable
 from tvm.target import Target
 from tvm.tir.exec_scope import ExecScope
+from tvm.tirp import _ffi_api
 
 
-@register_object("tir.ScheduleContext")
+@register_object("tirp.ScheduleContext")
 class ScheduleContext(Object, Scriptable):
     """ScheduleContext node.
 
@@ -51,7 +52,12 @@ class ScheduleContext(Object, Scriptable):
     exec_scope: ExecScope
     launch_params: Dict[str, PrimExpr]
     var_range_map: Dict[Var, Range]
+    alloc_only: bool
     callbacks: Dict[str, Object]
+
+    kPrivateAlloc = "private_alloc"
+    kDeviceInitStmt = "device_init_stmt"
+    kHostInitStmt = "host_init_stmt"
 
     def __init__(
         self,
@@ -59,7 +65,8 @@ class ScheduleContext(Object, Scriptable):
         exec_scope: ExecScope,
         launch_params: Dict[str, PrimExpr],
         var_range_map: Dict[Var, Range],
-        callbacks: Dict[str, Object],
+        alloc_only: bool = False,
+        callbacks: Dict[str, Object] = {},
     ) -> None:
         self.__init_handle_by_constructor__(
             _ffi_api.ScheduleContext,  # pylint: disable=no-member
@@ -67,12 +74,14 @@ class ScheduleContext(Object, Scriptable):
             exec_scope,
             launch_params,
             var_range_map,
+            alloc_only,
             callbacks,
         )
 
     def add_alloc_buffer(self, buffer: Buffer) -> None:
         """Add an allocated buffer to the schedule context.
-            The buffer will be added to the outermost block's alloc_buffers list.
+           Can be called only if alloc_only is True.
+           The buffer will be added to the workspace of operator (the key in the workspace is the buffer name).
 
         Parameters
         ----------
@@ -83,7 +92,9 @@ class ScheduleContext(Object, Scriptable):
 
     def add_init_stmt(self, stmt: Stmt, host: bool = False) -> None:
         """Add an initialization statement to the schedule context.
-           The statement will be added to the beginning of the kernel.
+           Device initialization statements is only allowed if alloc_only is True.
+           Host initialization statements will be ignored if alloc_only is True.
+           The statements will be added to the beginning of the kernel.
 
         Parameters
         ----------

@@ -295,10 +295,10 @@ def test_gemm_with_sbuf_output():
     def expected():
         T.func_attr({"global_symbol": "gemm"})
         with T.kernel():
+            buffer = T.alloc_buffer((8, 128, 512), scope="trn.psum",logical_scope="kernel", allocated_addr=[0, 0])
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
-            buffer = T.alloc_buffer((8, 128, 512), scope="trn.psum",logical_scope="kernel", allocated_addr=[0, 0])
             for i, k, lhs_b_loop, rhs_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(2, 2, 1, 2, 2, 1):
                 for reduction_b_loop in range(4):
                     T.attr(0, "tensorized_nki_instruction", 1)
@@ -313,6 +313,7 @@ def test_gemm_with_sbuf_output():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
@@ -593,10 +594,10 @@ def test_gemm_guard():
     def expected():
         T.func_attr({"global_symbol": "gemm"})
         with T.kernel():
+            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
-            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
             for i, j, k, lhs_b_loop, rhs_b_loop, additional_lhs_b_loop, additional_rhs_b_loop in T.grid(2, 2, 2, 1, 2, 2, 1):
                 for reduction_b_loop in range(8):
                     T.attr(0, "tensorized_nki_instruction", 1)
@@ -613,6 +614,7 @@ def test_gemm_guard():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": gemm})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)

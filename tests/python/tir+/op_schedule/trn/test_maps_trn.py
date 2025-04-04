@@ -524,9 +524,9 @@ def test_unary_with_bias_scale_2(op_type):
     def expected():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
+            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
-            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
@@ -539,6 +539,7 @@ def test_unary_with_bias_scale_2(op_type):
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": unary})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 

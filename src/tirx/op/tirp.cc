@@ -76,25 +76,27 @@ void ScheduleContextNode::AddInitStmt(Stmt stmt, bool host) {
 
 ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
                                  Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map,
-                                 Map<String, ObjectRef> callbacks) {
+                                 bool alloc_only, Map<String, ObjectRef> callbacks) {
   auto n = make_object<ScheduleContextNode>();
   n->target = std::move(target);
   n->exec_scope = std::move(exec_scope);
   n->launch_params = std::move(launch_params);
   n->var_range_map = std::move(var_range_map);
+  n->alloc_only = alloc_only;
   n->callbacks = std::move(callbacks);
   data_ = std::move(n);
 }
 
 TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
     .set_body_typed([](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params,
-                       Map<Var, Range> var_range_map, Map<String, ObjectRef> callbacks) {
-      return ScheduleContext(target, exec_scope, launch_params, var_range_map, callbacks);
+                       Map<Var, Range> var_range_map, bool alloc_only,
+                       Map<String, ObjectRef> callbacks) {
+      return ScheduleContext(target, exec_scope, launch_params, var_range_map, alloc_only, callbacks);
     });
 
-TVM_REGISTER_GLOBAL("tirx.ScheduleContextAddAllocBuffer")
+TVM_REGISTER_GLOBAL("tirp.ScheduleContextAddAllocBuffer")
     .set_body_method<ScheduleContext>(&ScheduleContextNode::AddAllocBuffer);
-TVM_REGISTER_GLOBAL("tirx.ScheduleContextAddInitStmt")
+TVM_REGISTER_GLOBAL("tirp.ScheduleContextAddInitStmt")
     .set_body_method<ScheduleContext>(&ScheduleContextNode::AddInitStmt);
 
 /********************* Schedule Ops **********************/
@@ -144,6 +146,6 @@ TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_release);
 /********************* Misc Ops **********************/
 TIRP_DEFINE_OP(tvm_kernel_replace_point);
 
-}  // namespace tirxp
-}  // namespace tirx
+}  // namespace tirxxp
+}  // namespace tirxx
 }  // namespace tvm

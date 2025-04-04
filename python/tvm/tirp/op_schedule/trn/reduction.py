@@ -80,6 +80,7 @@ def generate_intermediate_buffer(
         intermediate_buffer = workspace["partial_reduce"]
         check_workspace_buffer(intermediate_buffer, intermediate_shape, "trn.sbuf")
     else:
+        assert sctx.alloc_only, "Partial reduce buffer must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
         intermediate_buffer = T.buffer(
             intermediate_shape,
             dtype=dst_buffer_region.buffer.dtype,

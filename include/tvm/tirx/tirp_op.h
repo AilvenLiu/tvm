@@ -66,7 +66,8 @@ class ScheduleContextNode : public Object {
   Map<String, PrimExpr> launch_params;
   /*! \brief A map from loop variables to their ranges. */
   Map<Var, Range> var_range_map;
-
+  /*! \brief Whether the schedule context is only used for buffer allocation. */
+  bool alloc_only;
   /*! \brief Callback to be handled when the operator is scheduled. */
   Map<String, ObjectRef> callbacks;
 
@@ -75,6 +76,7 @@ class ScheduleContextNode : public Object {
     v->Visit("exec_scope", &exec_scope);
     v->Visit("launch_params", &launch_params);
     v->Visit("var_range_map", &var_range_map);
+    v->Visit("alloc_only", &alloc_only);
     v->Visit("callbacks", &callbacks);
   }
 
@@ -89,7 +91,7 @@ class ScheduleContextNode : public Object {
    */
   void AddInitStmt(Stmt stmt, bool host = false);
 
-  static constexpr const char* _type_key = "tirx.ScheduleContext";
+  static constexpr const char* _type_key = "tirp.ScheduleContext";
   static constexpr bool _type_has_method_sequal_reduce = false;
   static constexpr bool _type_has_method_shash_reduce = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScheduleContextNode, Object);
@@ -106,11 +108,13 @@ class ScheduleContext : public ObjectRef {
    * \param exec_scope The exec scope of the operator.
    * \param launch_params The kernel launch parameters.
    * \param var_range_map: A map from loop variables to their ranges.
+   * \param alloc_only Whether the schedule context is only used for buffer allocation.
    * \param callbacks The callbacks to be handled when the operator is scheduled.
    */
   TVM_DLL ScheduleContext(Target target, ExecScope exec_scope,
                           Map<String, PrimExpr> launch_params = {},
                           Map<Var, Range> var_range_map = {},
+                          bool alloc_only = false,
                           Map<String, ObjectRef> callbacks = {});
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ScheduleContext, ObjectRef, ScheduleContextNode);
@@ -194,8 +198,8 @@ TVM_DLL const Op& pipeline_copy();
  */
 TVM_DLL const Op& tvm_kernel_replace_point();
 
-}  // namespace tirxp
-}  // namespace tirx
+}  // namespace tirxxp
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_TIRP_OP_H_

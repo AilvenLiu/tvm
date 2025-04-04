@@ -17,18 +17,29 @@
 
 """Implementation of TIR operator."""
 
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any, Optional
 
 from tvm.tir.stmt import OpCall
-from tvm.tir import PrimExpr, BufferRegion, FloatImm
+from tvm.tir import PrimExpr, BufferRegion, FloatImm, Buffer, Stmt
 from tvm.ir import Op
 from tvm.tir.async_structs import Pipeline
 from tvm.tir.predicate import Predicate
+from tvm.script import tir as T
+from tvm.target import Target
 
 
 def get_tirp_op(op_name: str):
     assert isinstance(op_name, str)
     return Op.get("tirp." + op_name)
+
+
+class ArgProperty:
+    def __init__(self, index):
+        self.index = index
+
+    def __get__(self, obj, objtype=None):
+        assert obj is not None, "OpCall cannot be None"
+        return obj.args[self.index]
 
 
 ### Base Operator Classes ###
@@ -39,31 +50,33 @@ class UnaryOp(OpCall):
     """
 
     scalar_input = False
+    output = ArgProperty(0)
+    input = ArgProperty(1)
 
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source expression (input) of the operator."""
-        return [self.args[1]]
+        return [self.input]
 
     @property
     def dsts(self) -> List[PrimExpr]:
         """Get the destination expression (output) of the operator."""
-        return [self.args[0]]
+        return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
         assert isinstance(
-            self.args[0], BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.args[0]}"
+            self.output, BufferRegion
+        ), f"{self} expects BufferRegion as output, got {self.output}"
         if self.scalar_input:
             assert isinstance(
-                self.args[1], FloatImm
-            ), f"{self} expects FloatImm as value, got {self.args[1]}"
+                self.input, FloatImm
+            ), f"{self} expects FloatImm as value, got {self.input}"
         else:
             assert isinstance(
-                self.args[1], BufferRegion
-            ), f"{self} expects BufferRegion as value, got {self.args[1]}"
+                self.input, BufferRegion
+            ), f"{self} expects BufferRegion as value, got {self.input}"
 
 
 class UnaryOpWithBiasScale(UnaryOp):
@@ -73,16 +86,19 @@ class UnaryOpWithBiasScale(UnaryOp):
     output = unary(input * scale + bias)
     """
 
+    bias = ArgProperty(2)
+    scale = ArgProperty(3)
+
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
-        return [self.args[i] for i in range(1, 4)]
+        return [self.input, self.bias, self.scale]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 4, f"{self} expects 4 arguments, got {len(self.args)}"
         assert all(
-            isinstance(arg, BufferRegion) for arg in self.args[:2]
+            isinstance(arg, BufferRegion) for arg in (self.output, self.input)
         ), f"{self} expects BufferRegion arguments as input and output, got {self.args[:2]}"
 
 
@@ -92,15 +108,19 @@ class BinaryOp(OpCall):
     Binary operators take two input tensors and produce a single output tensor.
     """
 
+    lhs = ArgProperty(1)
+    rhs = ArgProperty(2)
+    output = ArgProperty(0)
+
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
-        return [self.args[1], self.args[2]]
+        return [self.lhs, self.rhs]
 
     @property
     def dsts(self) -> List[PrimExpr]:
         """Get the destination expression (output) of the operator."""
-        return [self.args[0]]
+        return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
@@ -119,35 +139,30 @@ class ReduceOp(OpCall):
     Reduction operators reduce one or more dimensions of the input tensor.
     """
 
+    input = ArgProperty(1)
+    output = ArgProperty(0)
+    reduce_axes = ArgProperty(2)
+    accum = ArgProperty(3)
+
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source expression (input) of the operator."""
-        return [self.args[1]]
+        return [self.input]
 
     @property
     def dsts(self) -> List[PrimExpr]:
         """Get the destination expression (output) of the operator."""
-        return [self.args[0]]
-
-    @property
-    def reduce_axes(self) -> Tuple[int]:
-        """Get the axes to reduce."""
-        return self.args[2]
-
-    @property
-    def accum(self) -> bool:
-        """Whether to accumulate the result into the output."""
-        return self.args[3]
+        return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 4, f"{self} expects 4 arguments, got {len(self.args)}"
         assert isinstance(
-            self.args[0], BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.args[0]}"
+            self.output, BufferRegion
+        ), f"{self} expects BufferRegion as output, got {self.output}"
         assert isinstance(
-            self.args[1], BufferRegion
-        ), f"{self} expects BufferRegion as input, got {self.args[1]}"
+            self.input, BufferRegion
+        ), f"{self} expects BufferRegion as input, got {self.input}"
         assert isinstance(self.accum, bool), f"{self} expects bool as accum, got {self.accum}"
 
 
@@ -156,6 +171,8 @@ class PipelineOp(OpCall):
 
     Pipeline operators manage the execution pipeline for tensor operations.
     """
+
+    pipeline = ArgProperty(0)
 
     @property
     def srcs(self) -> List[PrimExpr]:
@@ -170,8 +187,8 @@ class PipelineOp(OpCall):
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert isinstance(
-            self.args[0], Pipeline
-        ), f"{self} expects Pipeline as argument, got {self.args[0]}"
+            self.pipeline, Pipeline
+        ), f"{self} expects Pipeline as argument, got {self.pipeline}"
 
 
 ### Schedule Operators ###
@@ -242,46 +259,34 @@ class Gemm(OpCall):
     """
 
     op = get_tirp_op("gemm")
+    output = ArgProperty(0)
+    lhs = ArgProperty(1)
+    rhs = ArgProperty(2)
+    bias = ArgProperty(3)
+    transpose_A = ArgProperty(4)
+    transpose_B = ArgProperty(5)
+    alpha = ArgProperty(6)
+    beta = ArgProperty(7)
 
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source matrices."""
-        return [self.args[1], self.args[2], self.args[3]]
+        return [self.lhs, self.rhs, self.bias]
 
     @property
     def dsts(self) -> List[PrimExpr]:
         """Get the destination matrix."""
-        return [self.args[0]]
-
-    @property
-    def transpose_A(self) -> bool:
-        """Whether to transpose matrix A."""
-        return self.args[4]
-
-    @property
-    def transpose_B(self) -> bool:
-        """Whether to transpose matrix B."""
-        return self.args[5]
-
-    @property
-    def alpha(self) -> PrimExpr:
-        """Scalar multiplier for A*B."""
-        return self.args[6]
-
-    @property
-    def beta(self) -> PrimExpr:
-        """Scalar multiplier for C."""
-        return self.args[7]
+        return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 8, f"{self} expects 8 arguments, got {len(self.args)}"
         assert all(
-            isinstance(arg, BufferRegion) for arg in self.args[:3]
-        ), f"{self} expects BufferRegion arguments as A, B and D, got {self.args[:3]}"
+            isinstance(arg, BufferRegion) for arg in (self.output, self.lhs, self.rhs)
+        ), f"{self} expects BufferRegion arguments as output, lhs and rhs, got {(self.output, self.lhs, self.rhs)}"
         assert isinstance(
-            self.args[3], (BufferRegion, FloatImm)
-        ), f"{self} expects BufferRegion or FloatImm arguments as C, got {self.args[3]}"
+            self.bias, (BufferRegion, FloatImm)
+        ), f"{self} expects BufferRegion or FloatImm arguments as bias, got {self.bias}"
         assert isinstance(
             self.transpose_A, bool
         ), f"{self} expects bool arguments as transpose_A, got {self.transpose_A}"
@@ -353,24 +358,20 @@ class Select(BinaryOp):
     """
 
     op = get_tirp_op("select")
-
-    @property
-    def predicate(self) -> Predicate:
-        """Get the predicate."""
-        return self.args[3]
+    predicate = ArgProperty(3)
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 4, f"{self} expects 4 arguments, got {len(self.args)}"
         assert isinstance(
-            self.dsts[0], BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.dsts[0]}"
+            self.output, BufferRegion
+        ), f"{self} expects BufferRegion as output, got {self.output}"
         assert all(
-            isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
-        ), f"{self} expects BufferRegion or FloatImm arguments as inputs, got {self.srcs}"
+            isinstance(arg, (BufferRegion, FloatImm)) for arg in (self.lhs, self.rhs)
+        ), f"{self} expects BufferRegion or FloatImm arguments as inputs, got {(self.lhs, self.rhs)}"
         assert isinstance(
-            self.args[3], Predicate
-        ), f"{self} expects Predicate as predicate, got {self.args[3]}"
+            self.predicate, Predicate
+        ), f"{self} expects Predicate as predicate, got {self.predicate}"
 
 
 ### Pipeline Ops ###
@@ -390,27 +391,29 @@ class PipelineCopy(PipelineOp):
     """Copy data through the pipeline from src to dst."""
 
     op = get_tirp_op("pipeline_copy")
+    input = ArgProperty(2)
+    output = ArgProperty(1)
 
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source buffer region."""
-        return [self.args[2]]
+        return [self.input]
 
     @property
     def dsts(self) -> List[PrimExpr]:
         """Get the destination buffer region."""
-        return [self.args[1]]
+        return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         super().validate()
         assert len(self.args) == 3, f"{self} expects 3 arguments, got {len(self.args)}"
         assert isinstance(
-            self.dsts[0], BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.dsts[0]}"
+            self.output, BufferRegion
+        ), f"{self} expects BufferRegion as output, got {self.output}"
         assert isinstance(
-            self.srcs[0], BufferRegion
-        ), f"{self} expects BufferRegion as input, got {self.srcs[0]}"
+            self.input, BufferRegion
+        ), f"{self} expects BufferRegion as input, got {self.input}"
 
 
 class PipelineProducerCommit(PipelineOp):
@@ -460,30 +463,23 @@ class BinaryReduce(OpCall):
 
     op = get_tirp_op("binary_reduce")
 
+    binary_output = ArgProperty(0)
+    reduce_output = ArgProperty(1)
+    binary_input1 = ArgProperty(2)
+    binary_input2 = ArgProperty(3)
+    binary_op = ArgProperty(4)
+    reduce_op = ArgProperty(5)
+    reduce_axes = ArgProperty(6)
+
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
-        return [self.args[2], self.args[3]]
+        return [self.binary_input1, self.binary_input2]
 
     @property
     def dsts(self) -> List[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
-        return [self.args[0], self.args[1]]
-
-    @property
-    def reduce_axes(self) -> Tuple[int]:
-        """Get the axes to reduce."""
-        return self.args[6]
-
-    @property
-    def binary_op(self) -> Op:
-        """Get the binary operation."""
-        return self.args[4]
-
-    @property
-    def reduce_op(self) -> Op:
-        """Get the reduction operation."""
-        return self.args[5]
+        return [self.binary_output, self.reduce_output]
 
     def validate(self) -> None:
         assert len(self.args) == 7, f"{self} expects 7 arguments, got {len(self.args)}"
@@ -509,30 +505,24 @@ class UnaryReduce(OpCall):
 
     op = get_tirp_op("unary_reduce")
 
+    unary_output = ArgProperty(0)
+    reduce_output = ArgProperty(1)
+    unary_input = ArgProperty(2)
+    unary_op = ArgProperty(3)
+    reduce_op = ArgProperty(4)
+    bias = ArgProperty(5)
+    scale = ArgProperty(6)
+    reduce_axes = ArgProperty(7)
+
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
-        return [self.args[2], self.args[5], self.args[6]]
+        return [self.unary_input, self.bias, self.scale]
 
     @property
     def dsts(self) -> List[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
-        return [self.args[0], self.args[1]]
-
-    @property
-    def reduce_axes(self) -> Tuple[int]:
-        """Get the axes to reduce."""
-        return self.args[7]
-
-    @property
-    def unary_op(self) -> Op:
-        """Get the unary operation."""
-        return self.args[3]
-
-    @property
-    def reduce_op(self) -> Op:
-        """Get the reduction operation."""
-        return self.args[4]
+        return [self.unary_output, self.reduce_output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
@@ -541,8 +531,8 @@ class UnaryReduce(OpCall):
             isinstance(arg, BufferRegion) for arg in self.dsts
         ), f"{self} expects BufferRegion arguments as unary_output and reduce_output, got {self.dsts}"
         assert isinstance(
-            self.srcs[0], (BufferRegion, FloatImm)
-        ), f"{self} expects BufferRegion or FloatImm arguments as unary_input, got {self.srcs[0]}"
+            self.unary_input, (BufferRegion, FloatImm)
+        ), f"{self} expects BufferRegion or FloatImm arguments as unary_input, got {self.unary_input}"
         assert isinstance(self.unary_op, Op), f"{self} expects Op as unary_op, got {self.unary_op}"
         assert isinstance(
             self.reduce_op, Op
@@ -562,37 +552,30 @@ class BinaryChain(OpCall):
 
     op = get_tirp_op("binary_chain")
 
+    output = ArgProperty(0)
+    data = ArgProperty(1)
+    operand0 = ArgProperty(2)
+    operand1 = ArgProperty(3)
+    op0 = ArgProperty(4)
+    op1 = ArgProperty(5)
+    reverse1 = ArgProperty(6)
+
     @property
     def srcs(self) -> List[PrimExpr]:
         """Get the source expressions (inputs) of the operator."""
-        return [self.args[i] for i in range(1, 4)]
+        return [self.data, self.operand0, self.operand1]
 
     @property
     def dsts(self) -> List[PrimExpr]:
         """Get the destination expressions (outputs) of the operator."""
-        return [self.args[0]]
-
-    @property
-    def reverse1(self) -> bool:
-        """Whether to reverse the order of the second binary operation."""
-        return self.args[6]
-
-    @property
-    def op0(self) -> Op:
-        """Get the first binary operation."""
-        return self.args[4]
-
-    @property
-    def op1(self) -> Op:
-        """Get the second binary operation."""
-        return self.args[5]
+        return [self.output]
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 7, f"{self} expects 7 arguments, got {len(self.args)}"
         assert isinstance(
-            self.dsts[0], BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.dsts[0]}"
+            self.output, BufferRegion
+        ), f"{self} expects BufferRegion as output, got {self.output}"
         assert all(
             isinstance(arg, (BufferRegion, FloatImm)) for arg in self.srcs
         ), f"{self} expects BufferRegion or FloatImm arguments as data, operand0 and operand1, got {self.srcs}"
@@ -609,20 +592,17 @@ class ReduceNegate(ReduceOp):
 
     op = get_tirp_op("reduce_negate")
 
-    @property
-    def reduce_op(self) -> Op:
-        """Get the reduction operation."""
-        return self.args[4]
+    reduce_op = ArgProperty(4)
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
         assert len(self.args) == 5, f"{self} expects 5 arguments, got {len(self.args)}"
         assert isinstance(
-            self.dsts[0], BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.dsts[0]}"
+            self.output, BufferRegion
+        ), f"{self} expects BufferRegion as output, got {self.output}"
         assert isinstance(
-            self.srcs[0], BufferRegion
-        ), f"{self} expects BufferRegion as input, got {self.srcs[0]}"
+            self.input, BufferRegion
+        ), f"{self} expects BufferRegion as input, got {self.input}"
         assert isinstance(
             self.reduce_op, Op
         ), f"{self} expects Op as reduce_op, got {self.reduce_op}"

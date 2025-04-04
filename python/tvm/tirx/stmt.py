@@ -28,12 +28,13 @@ Each statement node have subfields that can be visited from python side.
 """
 from collections.abc import Mapping
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import tvm_ffi
-from tvm.ir import PrimExpr, Range, Span, Op
+
+from tvm.ir import Op, PrimExpr, Range, Span
+from tvm.runtime import NDArray, Object, Scriptable, const
 from tvm.tir import FloatImm
-from tvm.runtime import Object, Scriptable, const, Tensor
 
 from . import _ffi_api
 from .async_structs import Pipeline
@@ -500,10 +501,10 @@ class BufferView(Object, Scriptable):
     ----------
     src_buffer : Buffer
         The source buffer.
-    
+
     layout : TLayout
         The layout of the buffer view.
-    
+
     dst_buffer : Buffer
         The destination buffer.
     """
@@ -678,6 +679,7 @@ class SBlockRealize(Stmt):
             span,
         )  # type: ignore
 
+
 @tvm._ffi.register_object("tir.Break")
 class Break(Stmt):
     """Break node.
@@ -689,13 +691,14 @@ class Break(Stmt):
     def __init__(self, span: Optional[Span] = None) -> None:
         self.__init_handle_by_constructor__(_ffi_api.Break, span)  # type: ignore
 
+
 @tvm._ffi.register_object("tir.Continue")
 class Continue(Stmt):
     """Continue node.
 
     Parameters
     ----------
-    """     
+    """
 
     def __init__(self, span: Optional[Span] = None) -> None:
         self.__init_handle_by_constructor__(_ffi_api.Continue, span)  # type: ignore
@@ -813,7 +816,7 @@ class OpCall(Stmt):
         new_instance = subclass.__new__(subclass)
         new_instance.__init_handle_by_constructor__(
             _ffi_api.OpCallCopyHandle, instance  # pylint: disable=no-member
-        )   
+        )
         return new_instance
 
     @property
@@ -823,6 +826,48 @@ class OpCall(Stmt):
     @property
     def dsts(self) -> List[PrimExpr]:
         raise NotImplementedError("Subclass must implement this method")
+
+    def get_private_buffers(
+        self, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: "ScheduleContext"
+    ) -> Dict[str, Any]:
+        """
+        Create private (intermediate) buffers needed in this operator.
+
+        Parameters
+        ----------
+        buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]]
+            A dictionary containing private buffers (and their init stmts) in other operators.
+            Key can be anything to reference the buffer.
+            This is used to reuse private buffers in other operators (like identity tensor etc.).
+            If the buffer is not found in the buffer_dict, it will be created and added to the buffer_dict.
+            If the buffer is found in the buffer_dict but smaller than required, it will be enlarged and updated.
+
+        sctx: ScheduleContext
+            The schedule context.
+            This is used to get the target and reuse op schedule implementations.
+
+        Returns:
+            private_buffer_refs: Dict[str, Any]
+            The references to private buffers created in this operator.
+            Key will be the name to add into workspace.
+            private buffer can be accessed by buffer_dict[private_buffer_refs[name]]
+        """
+        if sctx.target.kind.name == "trn":
+            return self.get_private_buffers_trn(buffer_dict, sctx)
+        elif sctx.target.kind.name == "cuda":
+            return self.get_private_buffers_cuda(buffer_dict, sctx)
+        else:
+            raise ValueError(f"Unsupported target: {sctx.target.kind.name}")
+
+    def get_private_buffers_trn(
+        self, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: "ScheduleContext"
+    ) -> Dict[str, Any]:
+        return {}
+
+    def get_private_buffers_cuda(
+        self, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: "ScheduleContext"
+    ) -> Dict[str, Any]:
+        return {}
 
     def validate(self) -> None:
         pass

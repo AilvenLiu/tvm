@@ -1,0 +1,195 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+from typing import List, Tuple, Dict, Any, Optional
+
+from tvm.tir.stmt import OpCall
+from tvm.tir import FloatImm, Buffer, Stmt
+from tvm.script import tir as T, tirp as Tp
+from tvm.tirp.op_schedule.schedule_context import ScheduleContext
+from tvm.tirp.op_schedule.trn.common import (
+    nki_dim,
+    get_ewise_dim_map,
+    check_partition_dim_match,
+    bound_buffer_region,
+    init_analyzer,
+)
+from tvm.tirp.op_schedule.registry import f_op_scheduler
+from tvm.tirp.operator.op import (
+    UnaryOpWithBiasScale,
+    ReduceOp,
+    Copy,
+    Gemm,
+    BinaryReduce,
+    UnaryReduce,
+)
+
+
+def alloc_const_bias_trn(
+    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
+) -> Dict[str, Any]:
+    bias = op.bias if op.bias is not None else FloatImm(op.dsts[0].buffer.dtype, 0.0)
+    if "const_bias" in op.workspace:
+        return {}
+    if not isinstance(bias, (FloatImm)):
+        return {}
+    par_size = op.dsts[0].buffer.layout.partition_size
+    max_inst_size = op.schedule_config.get("max_inst_size", 512)
+    if ("const_bias", bias.value) in buffer_dict:
+        bias_buffer, bias_init_stmt = buffer_dict[("const_bias", bias.value)]
+        old_shape = bias_buffer.shape
+        new_shape = [max(par_size, old_shape[0]), max(max_inst_size, old_shape[1])]
+        if new_shape[0] == old_shape[0] and new_shape[1] == old_shape[1]:
+            return {"const_bias": ("const_bias", bias.value)}
+    else:
+        new_shape = (par_size, max_inst_size)
+    new_buffer = T.buffer(new_shape, dtype=bias.dtype, scope="trn.sbuf", buffer_name="const_bias")
+
+    @T.prim_func(tirp=True)
+    def const_bias_init():
+        with T.attr(0, "tensorized_nki_instruction", 1):
+            for p_loop in T.serial(0, par_size, annotations={"nki_dim": "P"}):
+                for f_loop in T.serial(0, max_inst_size, annotations={nki_dim: "F"}):
+                    T.evaluate(T.nki_memset(new_buffer[p_loop, f_loop], bias))
+        Tp.tvm_kernel_replace_point()
+
+    buffer_dict[("const_bias", bias.value)] = (new_buffer, const_bias_init.body)
+    return {"const_bias": ("const_bias", bias.value)}
+
+
+def alloc_partial_reduce_trn(
+    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
+) -> Dict[str, Any]:
+    if "partial_reduce" in op.workspace:
+        return {}
+    f_op_scheduler(op, sctx)
+    partial_reduce_buffer = None
+    for buffer in sctx.callbacks[ScheduleContext.kPrivateAlloc]:
+        if buffer.name == "partial_reduce":
+            partial_reduce_buffer = buffer
+            break
+    if partial_reduce_buffer is None:
+        return {}
+    # no reuse opportunity
+    buffer_dict[partial_reduce_buffer] = (partial_reduce_buffer, None)
+    return {"partial_reduce": partial_reduce_buffer}
+
+
+def alloc_identity_trn(
+    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
+) -> Dict[str, Any]:
+    if "identity" in op.workspace:
+        return {}
+    par_size = op.srcs[0].buffer.layout.partition_size
+    if "identity" in buffer_dict:
+        identity_buffer, identity_init_stmt = buffer_dict["identity"]
+        old_shape = identity_buffer.shape
+        new_shape = [max(par_size, old_shape[0]), max(par_size, old_shape[1])]
+        if new_shape[0] == old_shape[0] and new_shape[1] == old_shape[1]:
+            return {"identity": "identity"}
+    else:
+        new_shape = (par_size, par_size)
+    new_buffer = T.buffer(
+        new_shape, dtype=op.srcs[0].buffer.dtype, scope="trn.sbuf", buffer_name="identity"
+    )
+
+    @T.prim_func(tirp=True)
+    def identity_init():
+        with T.attr(0, "tensorized_nki_instruction", 1):
+            for p_loop in T.serial(0, par_size, annotations={nki_dim: "P"}):
+                for rhs_f_loop in T.serial(0, par_size, annotations={nki_dim: "F"}):
+                    T.evaluate(T.nki_identity(new_buffer[p_loop, rhs_f_loop], par_size))
+        Tp.tvm_kernel_replace_point()
+
+    buffer_dict["identity"] = (new_buffer, identity_init.body)
+    return {"identity": "identity"}
+
+
+def alloc_acc_psum_trn(
+    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
+) -> Dict[str, Any]:
+    if "acc_psum" in op.workspace:
+        return {}
+    par_size = op.dsts[0].buffer.layout.partition_size
+    acc_psum = T.buffer(
+        (8, par_size, 512),
+        "float32",
+        scope="trn.psum",
+        allocated_addr=(0, 0),
+        buffer_name="acc_psum",
+    )
+    # no reuse opportunity
+    buffer_dict[acc_psum] = (acc_psum, None)
+    return {"acc_psum": acc_psum}
+
+
+def alloc_copy_trn(
+    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
+) -> Dict[str, Buffer]:
+    src_region = op.srcs[0]
+    dst_region = op.dsts[0]
+    analyzer = init_analyzer(sctx)
+    bound_src = bound_buffer_region(src_region, analyzer)
+    bound_dst = bound_buffer_region(dst_region, analyzer)
+    dim_map = get_ewise_dim_map(src_region, dst_region, analyzer)
+    if check_partition_dim_match(bound_src, bound_dst, dim_map, analyzer):
+        return {}
+
+    identity_dict = alloc_identity_trn(op, buffer_dict, sctx)
+    acc_psum_dict = alloc_acc_psum_trn(op, buffer_dict, sctx)
+    return identity_dict | acc_psum_dict
+
+
+def alloc_unary_reduce_trn(
+    op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
+) -> Dict[str, Buffer]:
+    if "max_inst_size" in op.schedule_config:
+        partial_reduce_dict = alloc_partial_reduce_trn(op, buffer_dict, sctx)
+        const_bias_dict = alloc_const_bias_trn(op, buffer_dict, sctx)
+        return partial_reduce_dict | const_bias_dict
+    else:
+        if "const_bias" in op.workspace and "partial_reduce" in op.workspace:
+            return {}
+        f_op_scheduler(op, sctx)
+        partial_reduce_buffer = None
+        const_bias_buffer = None
+        for buffer in sctx.callbacks[ScheduleContext.kPrivateAlloc]:
+            if buffer.name == "partial_reduce":
+                partial_reduce_buffer = buffer
+            elif buffer.name == "const_bias":
+                const_bias_buffer = buffer
+        # no reuse opportunity
+        workspace_dict = {}
+        if partial_reduce_buffer is not None and "partial_reduce" not in op.workspace:
+            buffer_dict[partial_reduce_buffer] = (partial_reduce_buffer, None)
+            workspace_dict["partial_reduce"] = partial_reduce_buffer
+        if const_bias_buffer is not None and "const_bias" not in op.workspace:
+            assert (
+                len(sctx.callbacks[ScheduleContext.kDeviceInitStmt]) == 1
+            ), "const_bias should have init"
+            init_stmt = sctx.callbacks[ScheduleContext.kDeviceInitStmt][0]
+            buffer_dict[const_bias_buffer] = (const_bias_buffer, init_stmt)
+            workspace_dict["const_bias"] = const_bias_buffer
+        return workspace_dict
+
+
+UnaryOpWithBiasScale.get_private_buffers_trn = alloc_const_bias_trn
+ReduceOp.get_private_buffers_trn = alloc_partial_reduce_trn
+Copy.get_private_buffers_trn = alloc_copy_trn
+Gemm.get_private_buffers_trn = alloc_acc_psum_trn
+BinaryReduce.get_private_buffers_trn = alloc_partial_reduce_trn
+UnaryReduce.get_private_buffers_trn = alloc_unary_reduce_trn

@@ -217,10 +217,10 @@ def test_copy_transpose():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             buffer = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
             buffer_1 = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
@@ -240,6 +240,7 @@ def test_copy_transpose():
 
     with target:
         mod = tvm.IRModule({"main": copy})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
@@ -268,10 +269,10 @@ def test_copy_transpose_2():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             buffer = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
             dst_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
@@ -291,6 +292,7 @@ def test_copy_transpose_2():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
@@ -816,10 +818,10 @@ def test_copy_transpose_with_guard():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
             acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
@@ -841,6 +843,7 @@ def test_copy_transpose_with_guard():
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)

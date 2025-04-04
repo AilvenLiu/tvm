@@ -688,7 +688,7 @@ class StmtMutator(StmtFunctor):
         return tvm.tir.Block(
             iter_vars, reads, writes, op.name_hint, body, init,
             op.alloc_buffers, match_buffers, op.annotations, None,
-            op.exec_scope, op.buffer_views, op.buffer_gets, op.pipeline
+            op.exec_scope, op.buffer_views, op.buffer_gets, op.pipelines
         )
     
     def visit_block_realize_(self, op):

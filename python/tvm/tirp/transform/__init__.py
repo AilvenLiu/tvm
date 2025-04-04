@@ -15,10 +15,4 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .copy import *
-from .gemm import *
-from .maps import *
-from .reduction import *
-from .compose_op import *
-from .select import *
-from .private_alloc import *
+from .private_buffer_alloc import PrivateBufferAlloc

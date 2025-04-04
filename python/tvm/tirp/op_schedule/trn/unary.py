@@ -112,6 +112,7 @@ def try_find_inst_unary(
 def get_const_bias_tensor(bias, shape, dtype, workspace, sctx):
     """Create or retrieve a constant bias tensor."""
     if "const_bias" not in workspace:
+        assert sctx.alloc_only, "Constant bias tensor must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
         # Create new bias buffer
         bias_buffer = T.buffer(shape, dtype, scope="trn.sbuf", buffer_name="const_bias")
         sctx.add_alloc_buffer(bias_buffer)
