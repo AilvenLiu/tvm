@@ -15,12 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 import pytest
+import numpy as np
 
 import tvm
-from tvm.tir.layout import TileLayout
-import numpy as np
 import tvm.testing
-from tvm.script import ir as I
+from tvm.tir.layout import TileLayout
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 
@@ -30,23 +29,23 @@ from tvm.script import tirp as Tp
     [
         ######### basic test #########
         (
-            (32, 32,), # g_shape
-            (0, 0,), # st_a
-            (0, 0,), # st_res
-            (32, 32), # extent_a
-            (32, 32), # extent_res
-            64, # thread_cnt
-            tvm.cuda(0), # dev
+            (32, 32),  # g_shape
+            (0, 0),  # st_a
+            (0, 0),  # st_res
+            (32, 32),  # extent_a
+            (32, 32),  # extent_res
+            64,  # thread_cnt
+            tvm.cuda(0),  # dev
         ),
         ######### offset test #########
         (
-            (32, 8, 12), # g_shape
-            (10, 0, 3), # st_a
-            (20, 0, 2), # st_res
-            (5, 6, 7), # extent_a
-            (5, 6, 7), # extent_res
-            64, # thread_cnt
-            tvm.cuda(0), # dev
+            (32, 8, 12),  # g_shape
+            (10, 0, 3),  # st_a
+            (20, 0, 2),  # st_res
+            (5, 6, 7),  # extent_a
+            (5, 6, 7),  # extent_res
+            64,  # thread_cnt
+            tvm.cuda(0),  # dev
         ),
     ],
 )
@@ -109,39 +108,39 @@ def test_unary_op_shared(input, op_type, dtype):
     [
         ######### basic test #########
         (
-            (32, 32,), # g_shape
-            (0, 0,), # st_a
-            (0, 0,), # st_b
-            (0, 0,), # st_res
-            (32, 32), # extent_a
-            (32, 32), # extent_b
-            (32, 32), # extent_res
-            64, # thread_cnt
-            tvm.cuda(0), # dev
+            (32, 32),  # g_shape
+            (0, 0),  # st_a
+            (0, 0),  # st_b
+            (0, 0),  # st_res
+            (32, 32),  # extent_a
+            (32, 32),  # extent_b
+            (32, 32),  # extent_res
+            64,  # thread_cnt
+            tvm.cuda(0),  # dev
         ),
         ######### offset test #########
         (
-            (32, 8, 12), # g_shape
-            (10, 0, 3), # st_a
-            (14, 1, 4), # st_b
-            (20, 0, 2), # st_res
-            (5, 6, 7), # extent_a
-            (5, 6, 7), # extent_b
-            (5, 6, 7), # extent_res
-            64, # thread_cnt
-            tvm.cuda(0), # dev
+            (32, 8, 12),  # g_shape
+            (10, 0, 3),  # st_a
+            (14, 1, 4),  # st_b
+            (20, 0, 2),  # st_res
+            (5, 6, 7),  # extent_a
+            (5, 6, 7),  # extent_b
+            (5, 6, 7),  # extent_res
+            64,  # thread_cnt
+            tvm.cuda(0),  # dev
         ),
         ######### broadcast test #########
         (
-            (32, 8, 12), # g_shape
-            (10, 0, 3), # st_a
-            (14, 1, 4), # st_b
-            (20, 0, 2), # st_res
-            (5, 6, 7), # extent_a
-            (1, 6, 1), # extent_b
-            (5, 6, 7), # extent_res
-            64, # thread_cnt
-            tvm.cuda(0), # dev
+            (32, 8, 12),  # g_shape
+            (10, 0, 3),  # st_a
+            (14, 1, 4),  # st_b
+            (20, 0, 2),  # st_res
+            (5, 6, 7),  # extent_a
+            (1, 6, 1),  # extent_b
+            (5, 6, 7),  # extent_res
+            64,  # thread_cnt
+            tvm.cuda(0),  # dev
         ),
     ],
 )
@@ -280,26 +279,26 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
     "input",
     [
         (
-            "wgmma", # layout
-            1, # N_GROUPS
-            1, # N_WARPS
+            "wgmma",  # layout
+            1,  # N_GROUPS
+            1,  # N_WARPS
             32,  # thread_cnt
             tvm.cuda(0),  # dev
         ),
         (
-            "wgmma", # layout
-            1, # N_GROUPS
-            4, # N_WARPS
+            "wgmma",  # layout
+            1,  # N_GROUPS
+            4,  # N_WARPS
             32,  # thread_cnt
             tvm.cuda(0),  # dev
         ),
         (
-            "wgmma", # layout
-            2, # N_GROUPS
-            8, # N_WARPS
+            "wgmma",  # layout
+            2,  # N_GROUPS
+            8,  # N_WARPS
             32,  # thread_cnt
             tvm.cuda(0),  # dev
-        )
+        ),
     ],
 )
 @pytest.mark.parametrize("op_type", ["reciprocal", "exp"])
@@ -333,17 +332,30 @@ def test_unary_op_local(input, op_type, dtype):
                 )
                 tile = T.TileLayout.from_tuple((2, NUM_COL // 8), (1, 2))
                 acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
-                acc = T.alloc_buffer([2, NUM_COL // 4], dtype=dtype, scope="local", logical_scope="thread",
-                                     layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)))
-                res = T.alloc_buffer([2, NUM_COL // 4], dtype=dtype, scope="local", logical_scope="thread",
-                                     layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)))
+                acc = T.alloc_buffer(
+                    [2, NUM_COL // 4],
+                    dtype=dtype,
+                    scope="local",
+                    logical_scope="thread",
+                    layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+                )
+                res = T.alloc_buffer(
+                    [2, NUM_COL // 4],
+                    dtype=dtype,
+                    scope="local",
+                    logical_scope="thread",
+                    layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+                )
 
                 # load A into acc
                 with T.thread():
                     for i in T.serial(NUM_COL // 8):
                         for j in T.unroll(2):
                             for vec in T.vectorized(2):
-                                acc[j, i * 2 + vec] = A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]
+                                acc[j, i * 2 + vec] = A[
+                                    wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
+                                    i * 8 + lane_id % 4 * 2 + vec,
+                                ]
 
                 # unary op
                 with T.warp():
@@ -359,7 +371,11 @@ def test_unary_op_local(input, op_type, dtype):
                     for i in T.serial(NUM_COL // 8):
                         for j in T.unroll(2):
                             for vec in T.vectorized(2):
-                                B[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = res[j, i * 2 + vec]
+                                B[
+                                    wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
+                                    i * 8 + lane_id % 4 * 2 + vec,
+                                ] = res[j, i * 2 + vec]
+
     # fmt: on
 
     target = tvm.target.Target.from_device(dev)
@@ -379,6 +395,8 @@ def test_unary_op_local(input, op_type, dtype):
             B_ref = 1 / A_np
         elif op_type == "exp":
             B_ref = np.exp2(A_np)
+        else:
+            raise ValueError(f"op_type={op_type} is not supported")
         atol = 1e-8
         tvm.testing.assert_allclose(B_ref, B.asnumpy(), atol=atol)
 
@@ -387,26 +405,26 @@ def test_unary_op_local(input, op_type, dtype):
     "input",
     [
         (
-            "wgmma", # layout
-            1, # N_GROUPS
-            1, # N_WARPS
+            "wgmma",  # layout
+            1,  # N_GROUPS
+            1,  # N_WARPS
             32,  # thread_cnt
             tvm.cuda(0),  # dev
         ),
         (
-            "wgmma", # layout
-            1, # N_GROUPS
-            4, # N_WARPS
+            "wgmma",  # layout
+            1,  # N_GROUPS
+            4,  # N_WARPS
             32,  # thread_cnt
             tvm.cuda(0),  # dev
         ),
         (
-            "wgmma", # layout
-            2, # N_GROUPS
-            8, # N_WARPS
+            "wgmma",  # layout
+            2,  # N_GROUPS
+            8,  # N_WARPS
             32,  # thread_cnt
             tvm.cuda(0),  # dev
-        )
+        ),
     ],
 )
 @pytest.mark.parametrize("op_type", ["sub", "mul"])
@@ -441,8 +459,13 @@ def test_binary_op_local(input, op_type, dtype):
                 )
                 tile = T.TileLayout.from_tuple((2, NUM_COL // 8), (1, 2))
                 A_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
-                A_buffer = T.alloc_buffer([2, NUM_COL // 4], dtype=dtype, scope="local", logical_scope="thread",
-                                          layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)))
+                A_buffer = T.alloc_buffer(
+                    [2, NUM_COL // 4],
+                    dtype=dtype,
+                    scope="local",
+                    logical_scope="thread",
+                    layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+                )
 
                 # B layout
                 B_atom = T.TileLayout.from_tuple((1, 1), (1, 1))
@@ -451,20 +474,32 @@ def test_binary_op_local(input, op_type, dtype):
                 )
                 B_tile = T.TileLayout.from_tuple((2, 1), (1, 1))
                 B_layout = B_warp_atom.tile(B_tile, (2, 1), (8, 4))
-                B_buffer = T.alloc_buffer([2,], dtype=dtype, scope="local", logical_scope="thread",
-                                          layout=B_atom.tile(B_tile, (2, 1), (1, 1)))
+                B_buffer = T.alloc_buffer(
+                    [
+                        2,
+                    ],
+                    dtype=dtype,
+                    scope="local",
+                    logical_scope="thread",
+                    layout=B_atom.tile(B_tile, (2, 1), (1, 1)),
+                )
 
                 # load A into A_buffer
                 with T.thread():
                     for i in T.serial(NUM_COL // 8):
                         for j in T.unroll(2):
                             for vec in T.vectorized(2):
-                                A_buffer[j, i * 2 + vec] = A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]
+                                A_buffer[j, i * 2 + vec] = A[
+                                    wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
+                                    i * 8 + lane_id % 4 * 2 + vec,
+                                ]
 
                 # load B into B_buffer
                 with T.thread():
                     for i in T.unroll(2):
-                        B_buffer[i] = B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4]
+                        B_buffer[i] = B[
+                            wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4
+                        ]
 
                 # binary op
                 with T.warp():
@@ -482,7 +517,11 @@ def test_binary_op_local(input, op_type, dtype):
                     for i in T.serial(NUM_COL // 8):
                         for j in T.unroll(2):
                             for vec in T.vectorized(2):
-                                A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = A_buffer[j, i * 2 + vec]
+                                A[
+                                    wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
+                                    i * 8 + lane_id % 4 * 2 + vec,
+                                ] = A_buffer[j, i * 2 + vec]
+
     # fmt: on
 
     target = tvm.target.Target.from_device(dev)
@@ -503,6 +542,8 @@ def test_binary_op_local(input, op_type, dtype):
             B_ref = (A_np - val) - 3.0
         elif op_type == "mul":
             B_ref = (A_np * val) * 3.0
+        else:
+            raise ValueError(f"op_type={op_type} is not supported")
         atol = 1e-8
         tvm.testing.assert_allclose(B_ref, A.asnumpy(), atol=atol)
 

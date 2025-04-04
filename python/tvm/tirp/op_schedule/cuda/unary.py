@@ -38,6 +38,7 @@ unary_op_table = {
     MapOpType.EXP: T.exp2,
 }
 
+
 def unary_map_cuda_shared_nd_sync_cta_impl(
     op: OpCall,
     unary_op: MapOpType,
@@ -179,7 +180,7 @@ def unary_map_cuda_warp_logical_view_nd_impl(
         return None
 
     # layout check
-    if any (
+    if any(
         [
             src.layout != dst.layout,
             src.layout.size != dst.layout.size,
@@ -233,15 +234,14 @@ def unary_cuda_impl(
     dst_buffer_region = op.args[0]
     if dst_buffer_region.buffer.scope().startswith("shared"):
         if unary_op in {MapOpType.SQRT, MapOpType.EXP}:
-            return unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(
-                op, unary_op, sctx
-            )
+            return unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(op, unary_op, sctx)
         return unary_map_cuda_shared_nd_sync_cta_impl(op, unary_op, sctx)
-    elif dst_buffer_region.buffer.scope() == "local" and dst_buffer_region.buffer.logical_scope() == "warp":
+    elif (
+        dst_buffer_region.buffer.scope() == "local"
+        and dst_buffer_region.buffer.logical_scope() == "warp"
+    ):
         if unary_op in {MapOpType.SQRT, MapOpType.EXP}:
-            return unary_map_cuda_warp_logical_view_nd_impl_with_bias_scale(
-                op, unary_op, sctx
-            )
+            return unary_map_cuda_warp_logical_view_nd_impl_with_bias_scale(op, unary_op, sctx)
         return unary_map_cuda_warp_logical_view_nd_impl(op, unary_op, sctx)
 
     return None

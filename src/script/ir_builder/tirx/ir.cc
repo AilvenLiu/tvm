@@ -20,6 +20,8 @@
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/op.h>
+#include <tvm/runtime/container/array.h>
+#include <tvm/runtime/container/variant.h>
 #include <tvm/script/ir_builder/tir/ir.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/expr.h>
@@ -629,16 +631,26 @@ ForFrame ThreadBinding(PrimExpr start, PrimExpr stop, ffi::String thread,
   return ForFrame(n);
 }
 
-ForFrame Grid(ffi::Array<PrimExpr> extents) {
-  using namespace tvm::tirx;
+ForFrame Grid(ffi::Array<Variant<PrimExpr, Tuple<PrimExpr, PrimExpr>>> extents) {
+  using namespace tvm::tir;
   ObjectPtr<ForFrameNode> n = ffi::make_object<ForFrameNode>();
   n->vars.reserve(extents.size());
   n->doms.reserve(extents.size());
   n->steps.resize(extents.size());
   for (const auto& extent : extents) {
-    DataType dtype = extent.dtype();
-    n->vars.push_back(Var("v", extent.dtype()));
-    n->doms.push_back(Range(make_const(dtype, 0), extent));
+    if (auto prim_expr = extent.as<PrimExpr>()) {
+      // extent is a single PrimExpr
+      DataType dtype = prim_expr.value().dtype();
+      n->vars.push_back(Var("v", dtype));
+      n->doms.push_back(Range(make_const(dtype, 0), prim_expr.value()));
+    } else if (auto tuple = extent.as<Tuple<PrimExpr, PrimExpr>>()) {
+      // extent is a tuple of two PrimExpr (start, extent)
+      DataType dtype = tuple.value().GetElement<0>().dtype();
+      n->vars.push_back(Var("v", dtype));
+      n->doms.push_back(Range(tuple.value().GetElement<0>(), tuple.value().GetElement<1>()));
+    } else {
+      LOG(FATAL) << "TypeError: Invalid type for grid extent";
+    }
   }
   n->f_make_for_loop = [](ffi::Array<Var> vars, ffi::Array<Range> doms,
                           ffi::Array<ffi::Optional<PrimExpr>> steps, Stmt body) -> Stmt {
@@ -1148,7 +1160,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

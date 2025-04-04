@@ -737,5 +737,19 @@ def test_predicate():
     assert_structural_equal(test, from_source(code))
 
 
+def test_grid():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        with T.kernel():
+            with T.thread():
+                for lvs in T.grid(10, (2, 12)):
+                    T.evaluate(lvs[0] + lvs[1])
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
 if __name__ == "__main__":
     tvm.testing.main()

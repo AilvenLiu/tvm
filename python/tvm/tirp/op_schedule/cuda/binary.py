@@ -39,6 +39,7 @@ binary_op_table = {
     MapOpType.FDIV: lambda a, b: a / b,
 }
 
+
 def get_indices_zero_out(indices, src1_start, src1_extent, src2_start, src2_extent):
     """Compute src2 indices for broadcasting based on src1 indices."""
     len_diff = len(src1_extent) - len(src2_extent)
@@ -286,7 +287,11 @@ def binary_map_cuda_warp_logical_view_nd_impl(
             (src2_region[0].min == 0 and src2_region[1].min == 0) if src2 else True,
             dst_region[0].min == 0 and dst_region[1].min == 0,
             src1_region[0].extent == src1.shape[0] and src1_region[1].extent == src1.shape[1],
-            (src2_region[0].extent == src2.shape[0] and src2_region[1].extent == src2.shape[1]) if src2 else True,
+            (
+                (src2_region[0].extent == src2.shape[0] and src2_region[1].extent == src2.shape[1])
+                if src2
+                else True
+            ),
             dst_region[0].extent == dst.shape[0] and dst_region[1].extent == dst.shape[1],
         ]
     ):
@@ -348,9 +353,8 @@ def binary_map_cuda_warp_logical_view_nd_impl(
 
     # WGMMA layout check
     atom = T.TileLayout.from_tuple((1, 2), (2, 1))
-    warp_atom = T.TileLayout.shard(
-        (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
-    )
+    warp_atom = T.TileLayout.shard((8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp"))
+
     def check_wgmma(buf):
         try:
             return warp_atom.is_tile_inner(buf.layout, buf.shape, [8, 8])
@@ -362,6 +366,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     red_warp_atom = T.TileLayout.shard(
         (32,), (32,), "S0", inner=red_atom, from_to=("thread", "warp")
     )
+
     def check_row_red(buf):
         try:
             return red_warp_atom.is_tile_inner(buf.layout.normalize(), (64,), (32,))
@@ -454,7 +459,10 @@ def binary_cuda_impl(
     dst_buffer_region = op.args[0]
     if dst_buffer_region.buffer.scope().startswith("shared"):
         return binary_map_cuda_shared_nd_sync_cta_impl(op, binary_op, sctx)
-    elif dst_buffer_region.buffer.scope() == "local" and dst_buffer_region.buffer.logical_scope() == "warp":
+    elif (
+        dst_buffer_region.buffer.scope() == "local"
+        and dst_buffer_region.buffer.logical_scope() == "warp"
+    ):
         return binary_map_cuda_warp_logical_view_nd_impl(op, binary_op, sctx)
 
     return None

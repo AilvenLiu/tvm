@@ -34,6 +34,8 @@ namespace ir_builder {
 namespace tirx {
 
 using tvm::runtime::Tensor;
+using tvm::runtime::Tuple;
+using tvm::runtime::Variant;
 using tvm::tirx::Buffer;
 using tvm::tirx::ExecScope;
 using tvm::tirx::Pipeline;
@@ -358,7 +360,7 @@ ForFrame ThreadBinding(PrimExpr start, PrimExpr stop, ffi::String thread,
  * \param extents The extents of the iteration.
  * \return The ForFrame.
  */
-ForFrame Grid(ffi::Array<PrimExpr> extents);
+ForFrame Grid(ffi::Array<Variant<PrimExpr, ffi::Tuple<PrimExpr, PrimExpr>>> extents);
 
 /*!
  * \brief The assertion statement.
@@ -613,7 +615,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

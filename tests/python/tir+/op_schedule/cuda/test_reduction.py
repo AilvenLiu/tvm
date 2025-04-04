@@ -30,15 +30,9 @@ from tvm.script import tirp as Tp
     [
         ######### basic test #########
         (
-            (
-                32,
-                32,
-            ),  # g_shape_a
+            (32, 32),  # g_shape_a
             (32,),  # g_shape_b
-            (
-                0,
-                0,
-            ),  # st_a
+            (0, 0),  # st_a
             (0,),  # st_b
             (32, 32),  # extent_a
             (32,),  # extent_b
@@ -47,65 +41,29 @@ from tvm.script import tirp as Tp
         ),
         ######### large size #########
         (
-            (
-                8,
-                16,
-                2,
-                22,
-            ),  # g_shape_a
-            (
-                8,
-                16,
-            ),  # g_shape_b
-            (
-                0,
-                0,
-                0,
-                0,
-            ),  # st_a
-            (
-                0,
-                0,
-            ),  # st_b
-            (
-                8,
-                16,
-                2,
-                22,
-            ),  # extent_a
-            (
-                8,
-                16,
-            ),  # extent_b
+            (8, 16, 2, 22),  # g_shape_a
+            (8, 16),  # g_shape_b
+            (0, 0, 0, 0),  # st_a
+            (0, 0),  # st_b
+            (8, 16, 2, 22),  # extent_a
+            (8, 16),  # extent_b
             128,  # thread_cnt
             tvm.cuda(0),  # dev
         ),
         # ######### small size #########
         (
-            (
-                32,
-                7,
-            ),  # g_shape_a
+            (32, 7),  # g_shape_a
             (32,),  # g_shape_b
-            (
-                0,
-                0,
-            ),  # st_a
+            (0, 0),  # st_a
             (0,),  # st_b
-            (
-                32,
-                7,
-            ),  # extent_a
+            (32, 7),  # extent_a
             (32,),  # extent_b
             32,  # thread_cnt
             tvm.cuda(0),  # dev
         ),
         ######### offset test #########
         (
-            (
-                32,
-                32,
-            ),  # g_shape_a
+            (32, 32),  # g_shape_a
             (32,),  # g_shape_b
             (1, 1),  # st_a
             (2,),  # st_b
@@ -181,26 +139,26 @@ def test_reduction_op_shared(input, op_type, dtype):
     "input",
     [
         (
-            "wgmma", # layout
-            1, # N_GROUPS
-            1, # N_WARPS
+            "wgmma",  # layout
+            1,  # N_GROUPS
+            1,  # N_WARPS
             32,  # thread_cnt
             tvm.cuda(0),  # dev
         ),
         (
-            "wgmma", # layout
-            1, # N_GROUPS
-            4, # N_WARPS
+            "wgmma",  # layout
+            1,  # N_GROUPS
+            4,  # N_WARPS
             32,  # thread_cnt
             tvm.cuda(0),  # dev
         ),
         (
-            "wgmma", # layout
-            2, # N_GROUPS
-            8, # N_WARPS
+            "wgmma",  # layout
+            2,  # N_GROUPS
+            8,  # N_WARPS
             32,  # thread_cnt
             tvm.cuda(0),  # dev
-        )
+        ),
     ],
 )
 @pytest.mark.parametrize("op_type", ["sum", "max"])
@@ -216,6 +174,7 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
     g_layout_a, g_layout_b = TileLayout.from_tuple(g_shape_a), TileLayout.from_tuple(g_shape_b)
     acc_shape, red_shape = (16, NUM_COL), (16, 4)
 
+    # fmt: off
     @T.prim_func(tirp=True)
     def test_reduction(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
@@ -293,6 +252,8 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
             B_ref = A.asnumpy().sum(axis=-1)
         elif op_type == "max":
             B_ref = A.asnumpy().max(axis=-1)
+        else:
+            raise ValueError(f"Unsupported op_type: {op_type}")
         atol = 1e-5 if dtype == "float32" else 1e-1
         B_ref = np.tile(B_ref[:, np.newaxis], (1, 4))
         tvm.testing.assert_allclose(B_ref, B.asnumpy(), atol=atol)

@@ -37,11 +37,12 @@ reduce_op_table = {
     ReduceOpType.MIN: T.min,
 }
 
-reduce_default_value_table = lambda dtype : {
+reduce_default_value_table = lambda dtype: {
     ReduceOpType.SUM: 0.0,
     ReduceOpType.MAX: T.min_value(dtype),
     ReduceOpType.MIN: T.max_value(dtype),
 }
+
 
 def reduction_cuda_shared_nd_sync_cta_impl(
     dst_buffer_region: BufferRegion,
@@ -239,9 +240,7 @@ def reduction_cuda_warp_logical_view_impl(
         return None
 
     atom = T.TileLayout.from_tuple((1, 2), (2, 1))
-    warp_atom = T.TileLayout.shard(
-        (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
-    )
+    warp_atom = T.TileLayout.shard((8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp"))
     red_atom = T.TileLayout.from_tuple(1, 1)
     red_warp_atom = T.TileLayout.shard(
         (32,), (32,), "S0", inner=red_atom, from_to=("thread", "warp")
@@ -286,7 +285,6 @@ def reduction_cuda_warp_logical_view_impl(
         # fmt: on
 
         return impl_shuffle_only
-
 
     # case 1. normal reduction
     # src and dst are different-shaped buffer
@@ -339,7 +337,10 @@ def reduction_cuda_impl(
         return reduction_cuda_shared_nd_sync_cta_impl(
             dst_buffer_region, src_buffer_region, accum, reduce_op, sctx
         )
-    elif src_buffer_region.buffer.scope() == "local" and src_buffer_region.buffer.logical_scope() == "warp":
+    elif (
+        src_buffer_region.buffer.scope() == "local"
+        and src_buffer_region.buffer.logical_scope() == "warp"
+    ):
         return reduction_cuda_warp_logical_view_impl(
             dst_buffer_region, src_buffer_region, accum, reduce_op, schedule_config, sctx
         )

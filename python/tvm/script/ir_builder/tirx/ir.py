@@ -1222,19 +1222,33 @@ def thread_binding(
     )
 
 
-def grid(*extents: PrimExpr) -> frame.ForFrame:
+def grid(*extents: Tuple[Union[PrimExpr, Tuple[PrimExpr, PrimExpr]]]) -> frame.ForFrame:
     """The grid For statement.
 
     Parameters
     ----------
-    extents : PrimExpr
-        The extents of the iteration.
+    extents : Tuple[Union[PrimExpr, Tuple[PrimExpr, PrimExpr]]]
+        If a single PrimExpr is provided, it is used as the extent of the iteration.
+        If a tuple of two PrimExpr is provided, the first is the start of the iteration,
+        and the second is the extent of the iteration.
 
     Returns
     -------
     res : frame.ForFrame
         The ForFrame.
     """
+    # Convert integer extents to IntImm
+    # TODO(@bohan): fix this after FFI refactor
+    processed_extents = []
+    for extent in extents:
+        if isinstance(extent, tuple):
+            start, stop = extent
+            start = IntImm("int32", start) if isinstance(start, int) else start
+            stop = IntImm("int32", stop) if isinstance(stop, int) else stop
+            processed_extents.append((start, stop))
+        else:
+            processed_extents.append(IntImm("int32", extent) if isinstance(extent, int) else extent)
+    extents = tuple(processed_extents)
     return _ffi_api.Grid(extents)  # type: ignore[attr-defined] # pylint: disable=no-member
 
 
