@@ -366,6 +366,54 @@ def test_workspace_reuse():
         mod = PrivateBufferAlloc()(mod)
         assert_structural_equal(mod["main"], expected)
 
+def test_no_rewrite_with_existing_workspace():
+    src_shape = [128, 32, 4, 32]
+    src_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 32 * 32 * 4), (1, 1))
+    )
+    dst_shape = [128, 4]
+    dst_layout = TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1))
+    )
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def reduction():
+        with T.kernel():
+            intermediate_buffer = T.alloc_buffer((128, 64), logical_scope="kernel", scope="trn.sbuf")
+            A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
+            B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
+            Tp.sum(B_sbuf, A_sbuf, axes=(1, 3), workspace={"partial_reduce": intermediate_buffer})
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": reduction})
+        mod = PrivateBufferAlloc()(mod)
+        assert_structural_equal(mod["main"], reduction)
+
+def test_no_rewrite_with_psum_output():
+    A_layout = T.TrainiumLayout(
+        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
+    )
+    B_layout = T.TrainiumLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
+    )
+
+    C_layout = T.TrainiumPSUMLayout(
+        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
+    )
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def gemm() -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 128), "float32", scope="trn.sbuf", layout=A_layout)
+            B_sbuf = T.alloc_buffer((128, 128), "float32", scope="trn.sbuf", layout=B_layout)
+            C_psum = T.alloc_buffer((128, 128), "float32", scope="trn.psum", layout=C_layout)
+            Tp.gemm(C_psum, A_sbuf, B_sbuf, C_psum)
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": gemm})
+        mod = PrivateBufferAlloc()(mod)
+        assert_structural_equal(mod["main"], gemm)
 
 if __name__ == "__main__":
     tvm.testing.main()

@@ -78,6 +78,8 @@ def alloc_partial_reduce_trn(
         return {}
     f_op_scheduler(op, sctx)
     partial_reduce_buffer = None
+    if ScheduleContext.kPrivateAlloc not in sctx.callbacks:
+        return {}
     for buffer in sctx.callbacks[ScheduleContext.kPrivateAlloc]:
         if buffer.name == "partial_reduce":
             partial_reduce_buffer = buffer
@@ -122,7 +124,7 @@ def alloc_identity_trn(
 def alloc_acc_psum_trn(
     op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
 ) -> Dict[str, Any]:
-    if "acc_psum" in op.workspace:
+    if "acc_psum" in op.workspace or isinstance(op.dsts[0].buffer.layout, T.TrainiumPSUMLayout):
         return {}
     par_size = op.dsts[0].buffer.layout.partition_size
     acc_psum = T.buffer(
@@ -167,6 +169,8 @@ def alloc_unary_reduce_trn(
         f_op_scheduler(op, sctx)
         partial_reduce_buffer = None
         const_bias_buffer = None
+        if ScheduleContext.kPrivateAlloc not in sctx.callbacks:
+            return {}
         for buffer in sctx.callbacks[ScheduleContext.kPrivateAlloc]:
             if buffer.name == "partial_reduce":
                 partial_reduce_buffer = buffer

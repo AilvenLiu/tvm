@@ -27,10 +27,11 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 
 def lower_and_get_source(func):
-    mod = tvm.IRModule({"main": func})
-    mod = tvm.compile(mod, target=target, tir_pipeline="trn")
-    src = mod.mod.imported_modules[0].get_source()
-    return src
+    with target:
+        mod = tvm.IRModule({"main": func})
+        mod = tvm.compile(mod, tir_pipeline="trn")
+        src = mod.mod.imported_modules[0].get_source()
+        return src
 
 
 def compare_strings_ignore_whitespace(s1, s2):
@@ -295,20 +296,20 @@ def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
     i2 = nl.arange(16)
     i4 = nl.arange(512)
     result_tiles[i0[:, None, None, None, ], i1[None, :, None, None, ], i2[None, None, :, None, ], 0, i4[None, None, None, :, ]] = 0.000000e+00
-    for bk_r in nl.sequential_range(8, precise_schedule=True):
+    for bk_r in nl.sequential_range(8):
       i = nl.arange(128)
       j = nl.arange(512)
       rhs_tiles[i[:, None, ], bk_r, j[None, :, ]] = nl.load(rhs_buffer[((bk_r * 128) + i[:, None, ]), ((n * 512) + j[None, :, ])])
-    for m in nl.sequential_range(2, precise_schedule=True):
-      for bk_l in nl.sequential_range(8, precise_schedule=True):
+    for m in nl.sequential_range(2):
+      for bk_l in nl.sequential_range(8):
         i_1 = nl.arange(128)
         j_1 = nl.arange(2048)
         lhsT_tiles[i_1[:, None, ], bk_l, j_1[None, :, ]] = nl.load(lhsT_buffer[((bk_l * 128) + i_1[:, None, ]), ((m * 2048) + j_1[None, :, ])])
-      for bm in nl.sequential_range(16, precise_schedule=True):
+      for bm in nl.sequential_range(16):
         i_2 = nl.arange(128)
         j_2 = nl.arange(512)
         res_tile[0, i_2[:, None, ], j_2[None, :, ]] = 0.000000e+00
-        for bk in nl.sequential_range(8, precise_schedule=True):
+        for bk in nl.sequential_range(8):
           i_3 = nl.arange(128)
           j_3 = nl.arange(512)
           k = nl.arange(128)
@@ -316,8 +317,8 @@ def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
         i_4 = nl.arange(128)
         j_4 = nl.arange(512)
         result_tiles[i_4[:, None, ], m, bm, 0, j_4[None, :, ]] = nisa.tensor_tensor(result_tiles[i_4[:, None, ], m, bm, 0, j_4[None, :, ]], res_tile[0, i_4[:, None, ], j_4[None, :, ]], op=nki.language.add)
-    for m_1 in nl.sequential_range(2, precise_schedule=True):
-      for bm_1 in nl.sequential_range(16, precise_schedule=True):
+    for m_1 in nl.sequential_range(2):
+      for bm_1 in nl.sequential_range(16):
         i_5 = nl.arange(128)
         j_5 = nl.arange(512)
         result_packed[i_5[:, None, ], j_5[None, :, ]] = nisa.tensor_copy(result_tiles[i_5[:, None, ], m_1, bm_1, 0, j_5[None, :, ]])

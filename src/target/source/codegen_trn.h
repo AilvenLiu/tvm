@@ -72,12 +72,14 @@ class CodeGenTrainium final : public CodeGenC {
   void VisitStmt_(const DeclBufferNode* op) final;                    // NOLINT(*)
   void VisitStmt_(const IfThenElseNode* op) final;                    // NOLINT(*)
   void VisitExpr_(const AndNode* op, std::ostream& os) final;         // NOLINT(*)
+  void VisitExpr_(const OrNode* op, std::ostream& os) final;         // NOLINT(*)
 
  private:
   Target target_;
   NKIInstructionCtx ctx_;
   std::unordered_map<std::string, std::string> opcode_map_;
   std::unordered_map<Buffer, std::string, ObjectPtrHash, ObjectPtrEqual> buffer_idmap_;
+  bool is_outermost_loop_ = true;
 };
 }  // namespace codegen
 }  // namespace tvm

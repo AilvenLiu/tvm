@@ -44,11 +44,15 @@ def rewrite_program(program, func_name):
     )
     message = client.messages.create(
         model="claude-3-7-sonnet-20250219",
-        max_tokens=10240,
+        max_tokens=16384,
         messages=[
             {"role": "user", "content": f"""
             Below is a DSL program. For each psum tensor (variable allocated using nl.ndarray(..., buffer=ncc.psum.mod_alloc)), do the following things: 
-    1. Find out nisa.nc_matmul instructions that uses this tensor as output. For each appearance, calculate the tripcount by multipling the extent of all the spatial loops above it. Sum up the tripcounts, and this number represents the total number of instructions that writes value to this tensor.
+    1. Find out nisa.nc_matmul instructions that uses this tensor as output. For each appearance, calculate the tripcount by multipling the extent of all the spatial loops above it.     
+    We define spatial loop and reduction loop as follows (slightly different from normal understanding):
+    Spatial loop: A loop that the matmul(producer) and consumer are both under it.
+    Reduction loop: A loop that only the matmul(producer) is under it.
+    Sum up the tripcounts of **spatial loops**, and this number represents the total number of instructions that writes value to this tensor.
     2. Give each matmul instruction that access this psum tensor an unique instruction id, and rewrite the psum tensor access (along with its consumer) to tensor[id, *original_indices]
     3.  rewrite the tensor allocation to nl.ndarray(shape=[total_num_write_instr, *original_shape], ..., buffer=ncc.psum.mod_alloc(..., num_bank_tiles=(1, 8))
 
@@ -61,11 +65,8 @@ def rewrite_program(program, func_name):
       for j in T.sequential_range(32, precise_schedule=True):
         for k in T.sequential_range(16, precise_schedule=True):
           a_psum[j % 8, :, :] += nisa.nc_matmul(...)
-        ... = nl.copy(a_psum[j%8, :, :])
+        b[...] = nl.copy(a_psum[j%8, :, :])
     ```
-    We define spatial loop and reduction loop as follows (slightly different from normal understanding):
-    Spatial loop: A loop that the matmul(producer) and consumer are both under it.
-    Reduction loop: A loop that only the matmul(producer) is under it.
     Here i and j are spatial loops, and k is reduction loop, because nisa.nc_matmul and its consumer(nl.copy) are both under the i loop and j loop, while the consumer is not under the k loop.
     The tripcount is calculated as 4*32=128.
 
@@ -78,10 +79,10 @@ def rewrite_program(program, func_name):
       for j in T.sequential_range(32, precise_schedule=True):
         for k in T.sequential_range(16, precise_schedule=True):
           a_psum[j % 8, :, :] += nisa.nc_matmul(...)
-        ... = nl.copy(a_psum[j%8, :, :])
+        b[...] = nl.copy(a_psum[j%8, :, :])
       for k in T.sequential_range(16, precise_schedule=True):
         a_psum[0, :, :] += nisa.nc_matmul(...)
-      ... = nl.copy(a_psum[0, :, :])
+      b[...] = nl.copy(a_psum[0, :, :])
     ```
     The tripcount of first matmul is 128, and the tripcount of second matmul is 4.
     So the unique id of the first matmul is 0-127, and the unique id of the second matmul is 128-131.
@@ -107,7 +108,7 @@ def rewrite_program(program, func_name):
         ],
         thinking={
             "type": "enabled",
-            "budget_tokens": 4096,
+            "budget_tokens": 8192,
         }
     )
 

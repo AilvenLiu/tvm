@@ -19,13 +19,13 @@
 """The TIR backend compilation pipeline."""
 
 import tvm
-from tvm import tirx
+from tvm import tir, tirp
 
 from . import backend
 
 
 def default_tir_pipeline():
-    """The default tir pipeline used in tvm.tir.build"""
+    """The default tir pipeline used in tvm.tirx.build"""
 
     @tvm.transform.module_pass(opt_level=0)
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
@@ -130,7 +130,7 @@ def default_tir_pipeline():
 
 
 def tirp_pipeline():
-    """The TIRP pipeline used in tvm.tir.build"""
+    """The TIRP pipeline used in tvm.tirx.build"""
 
     @tvm.transform.module_pass(opt_level=0)
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
@@ -235,7 +235,7 @@ def tirp_pipeline():
 
 
 def trn_pipeline():
-    """The Trainium pipeline used in tvm.tir.build"""
+    """The Trainium pipeline used in tvm.tirx.build"""
 
     @tvm.transform.module_pass(opt_level=0)
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
@@ -243,6 +243,7 @@ def trn_pipeline():
         pass_ctx = tvm.transform.PassContext.current()
         config = pass_ctx.config
         passes = [
+            tirp.transform.PrivateBufferAlloc(),
             tir.transform.LowerTIRp(),
             tir.transform.DecorateDeviceScope(),
             tir.transform.ConvertBlocksToOpaque(),

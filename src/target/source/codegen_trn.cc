@@ -240,6 +240,8 @@ void CodeGenTrainium::VisitStmt_(const AttrStmtNode* op) {
 }
 
 void CodeGenTrainium::VisitStmt_(const ForNode* op) {
+  bool is_outermost_loop = is_outermost_loop_;
+  is_outermost_loop_ = false;
   std::string extent = PrintExpr(op->extent);
   PrintIndent();
   std::string vid = AllocVarID(op->loop_var.get());
@@ -255,12 +257,17 @@ void CodeGenTrainium::VisitStmt_(const ForNode* op) {
     PrintStmt(op->body);
     ctx_.tensorized_loop_vars.erase(op->loop_var.get());
   } else {
-    stream << "for " << vid << " in nl.sequential_range(" << extent
-           << ", precise_schedule=True):\n";
+    if (is_outermost_loop) {
+      stream << "for " << vid << " in nl.sequential_range(" << extent
+             << ", precise_schedule=True):\n";
+    } else {
+      stream << "for " << vid << " in nl.sequential_range(" << extent << "):\n";
+    }
     int for_scope = BeginScope();
     PrintStmt(op->body);
     EndScope(for_scope);
   }
+  is_outermost_loop_ = is_outermost_loop;
 }
 
 std::string CodeGenTrainium::PrintIndices(const Array<PrimExpr>& indices) {
@@ -608,6 +615,10 @@ void CodeGenTrainium::VisitStmt_(const IfThenElseNode* op) {
 
 void CodeGenTrainium::VisitExpr_(const AndNode* op, std::ostream& os) {
   os << PrintExpr(op->a) << " & " << PrintExpr(op->b);
+}
+
+void CodeGenTrainium::VisitExpr_(const OrNode* op, std::ostream& os) {
+  os << PrintExpr(op->a) << " | " << PrintExpr(op->b);
 }
 
 TVM_REGISTER_GLOBAL("target.build.trn").set_body_typed(BuildTrainium);
