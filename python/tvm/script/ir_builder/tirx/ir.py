@@ -1242,10 +1242,10 @@ def grid(*extents: Tuple[Union[PrimExpr, Tuple[PrimExpr, PrimExpr]]]) -> frame.F
     processed_extents = []
     for extent in extents:
         if isinstance(extent, tuple):
-            start, stop = extent
+            start, extent = extent
             start = IntImm("int32", start) if isinstance(start, int) else start
-            stop = IntImm("int32", stop) if isinstance(stop, int) else stop
-            processed_extents.append((start, stop))
+            extent = IntImm("int32", extent) if isinstance(extent, int) else extent
+            processed_extents.append((start, extent))
         else:
             processed_extents.append(IntImm("int32", extent) if isinstance(extent, int) else extent)
     extents = tuple(processed_extents)

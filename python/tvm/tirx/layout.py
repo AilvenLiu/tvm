@@ -16,15 +16,17 @@
 # under the License.
 # pylint: disable=super-init-not-called
 """Definition of layout."""
+import functools
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 import re
-import functools
 import operator
 
-from . import _ffi_api
 from tvm._ffi import register_object
 from tvm.runtime import Object, ShapeTuple
+from tvm.tir.expr import IntImm
+from tvm.ir.container import Array
+from . import _ffi_api
 from .expr import Var, PrimExpr
 from .exec_scope import ExecScope
 
@@ -147,6 +149,19 @@ class TLayout(Object):
         """
         raise NotImplementedError("Tile is not implemented for this layout")
 
+    def tile_to(self, to_shape: List[PrimExpr], current_shape: List[PrimExpr]) -> "TLayout":
+        """Tile the current layout to the given shape.
+
+        Parameters
+        ----------
+        to_shape : List[PrimExpr]
+            The shape to tile to
+        current_shape : List[PrimExpr]
+            The current shape of the layout
+        """
+        tile_shape = [to_shape[i] // current_shape[i] for i in range(len(to_shape))]
+        return self.tile(TileLayout.from_tuple(tile_shape), tile_shape, current_shape)
+
     def is_tile_inner(
         self,
         tile_layout: Union["TileLayout", "ComposeLayout"],
@@ -252,6 +267,23 @@ class TileLayout(TLayout):
             tile_layout, self, tiled_shape, outer_shape
         )
 
+    def group_by_logical_shape(self, shape: List[PrimExpr]) -> Tuple["TileLayout", List[int]]:
+        """Group the layout by the logical shape.
+
+        Parameters
+        ----------
+        shape : List[PrimExpr]
+            The shape to group by
+        """
+        res = _ffi_api.TileLayoutGroupByLogicalShape(self, shape)  # pylint: disable=no-member
+        assert len(res) == 2, "group_by_logical_shape must return a tuple of 2"
+        assert isinstance(res[0], TileLayout), "the first element must be a TileLayout"
+        assert isinstance(res[1], Array) and all(
+            isinstance(e, IntImm) for e in res[1]
+        ), "the second element must be a list of IntImm"
+        res = (res[0], [int(e) for e in res[1]])
+        return res[0], res[1]
+
     @staticmethod
     def _get_default_strides(data: Tuple[int], stride: int) -> Tuple:
         assert isinstance(data, tuple), "data must be a tuple"
@@ -302,7 +334,9 @@ class TileLayout(TLayout):
             # get the default strides from the data
             strides = TileLayout._get_default_strides(data, 1)
 
-        if not isinstance(strides, tuple):
+        if isinstance(strides, list):
+            strides = tuple(strides)
+        elif not isinstance(strides, tuple):
             strides = (strides,)
         assert len(data) == len(strides), "data and strides must have the same length"
 

@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: E501, RUF005, RUF012
 
 # pylint: disable=invalid-name,unnecessary-comprehension,redefined-outer-name
 """TVM testing utilities
@@ -63,14 +62,12 @@ function in this module. Then targets using this node should be added to the
 `TVM_TEST_TARGETS` environment variable in the CI.
 
 """
-
+import inspect
 import copy
 import copyreg
 import ctypes
 import functools
-import inspect
 import itertools
-import json
 import logging
 import os
 import pickle
@@ -78,21 +75,25 @@ import platform
 import shutil
 import sys
 import time
+import ml_dtypes
+
 from collections.abc import Callable
 from pathlib import Path
 
-import numpy as np
 import pytest
+import numpy as np
 
 import tvm
 import tvm.arith
-import tvm.contrib.hexagon._ci_env_check as hexagon
-import tvm.contrib.utils
+import tvm.tir
 import tvm.te
-import tvm.tirx
-from tvm.contrib import cudnn, nvcc, rocm
-from tvm.error import TVMError
+
 from tvm.target import codegen
+from tvm.contrib import nvcc, cudnn, rocm
+import tvm.contrib.hexagon._ci_env_check as hexagon
+from tvm.error import TVMError
+import tvm.contrib.utils
+
 
 SKIP_SLOW_TESTS = os.getenv("SKIP_SLOW_TESTS", "").lower() in {"true", "1", "yes"}
 IS_IN_CI = os.getenv("CI", "") == "true"
@@ -192,7 +193,9 @@ def check_numerical_grads(
     for x_name, grad in grad_values.items():
         if grad.shape != input_values[x_name].shape:
             raise AssertionError(
-                f"Gradient wrt '{x_name}' has unexpected shape {grad.shape}, expected {input_values[x_name].shape} "
+                "Gradient wrt '{}' has unexpected shape {}, expected {} ".format(
+                    x_name, grad.shape, input_values[x_name].shape
+                )
             )
 
         ngrad = np.zeros_like(grad)
@@ -232,8 +235,8 @@ def check_numerical_grads(
 
         if not (np.isfinite(dist) and np.isfinite(grad_norm)):
             raise ValueError(
-                f"NaN or infinity detected during numerical gradient checking wrt '{x_name}'\n"
-                f"analytical grad = {grad}\n numerical grad = {ngrad}\n"
+                "NaN or infinity detected during numerical gradient checking wrt '{}'\n"
+                "analytical grad = {}\n numerical grad = {}\n".format(x_name, grad, ngrad)
             )
 
         # we multiply atol by this number to make it more universal for different sizes
@@ -241,11 +244,22 @@ def check_numerical_grads(
 
         if dist > atol * sqrt_n + rtol * grad_norm:
             raise AssertionError(
-                f"Analytical and numerical grads wrt '{x_name}' differ too much\n"
-                f"analytical grad = {grad}\n numerical grad = {ngrad}\n"
-                f"{wrong_percentage}% of elements differ, first 10 of wrong positions: {wrong_positions[:10]}\n"
+                "Analytical and numerical grads wrt '{}' differ too much\n"
+                "analytical grad = {}\n numerical grad = {}\n"
+                "{}% of elements differ, first 10 of wrong positions: {}\n"
                 "distance > atol*sqrt(n) + rtol*grad_norm\n"
-                f"distance {dist} > {atol}*{sqrt_n} + {rtol}*{grad_norm}"
+                "distance {} > {}*{} + {}*{}".format(
+                    x_name,
+                    grad,
+                    ngrad,
+                    wrong_percentage,
+                    wrong_positions[:10],
+                    dist,
+                    atol,
+                    sqrt_n,
+                    rtol,
+                    grad_norm,
+                )
             )
 
         max_diff = np.max(np.abs(ngrad - grad))
@@ -274,7 +288,7 @@ def assert_prim_expr_equal(lhs, rhs):
     """
     ana = tvm.arith.Analyzer()
     if not ana.can_prove_equal(lhs, rhs):
-        raise ValueError(f"{lhs} and {rhs} are not equal")
+        raise ValueError("{} and {} are not equal".format(lhs, rhs))
 
 
 def check_bool_expr_is_true(bool_expr, vranges, cond=None):
@@ -325,8 +339,8 @@ def check_bool_expr_is_true(bool_expr, vranges, cond=None):
         counterex = ", ".join([v + " = " + str(i) for v, i in counterex])
         ana = tvm.arith.Analyzer()
         raise AssertionError(
-            f"Expression {ana.simplify(bool_expr)}\nis not true on {vranges}\n"
-            f"Counterexample: {counterex}"
+            "Expression {}\nis not true on {}\n"
+            "Counterexample: {}".format(ana.simplify(bool_expr), vranges, counterex)
         )
 
 
@@ -396,10 +410,7 @@ def _get_targets(target_names=None):
 
     targets = []
     for target in target_names:
-        if isinstance(target, dict):
-            target_kind = target["kind"]
-        else:
-            target_kind = target.split()[0]
+        target_kind = target.split()[0]
 
         if target_kind == "cuda" and "cudnn" in tvm.target.Target(target).attrs.get("libs", []):
             is_enabled = tvm.support.libinfo()["USE_CUDNN"].lower() in ["on", "true", "1"]
@@ -431,9 +442,9 @@ def _get_targets(target_names=None):
             return _get_targets(["llvm"])
 
         raise TVMError(
-            f"None of the following targets are supported by this build of TVM: {target_names}."
+            "None of the following targets are supported by this build of TVM: %s."
             " Try setting TVM_TEST_TARGETS to a supported target."
-            " Cannot default to llvm, as it is not enabled."
+            " Cannot default to llvm, as it is not enabled." % target_names
         )
 
     return targets
@@ -443,10 +454,10 @@ DEFAULT_TEST_TARGETS = [
     "llvm",
     "cuda",
     "nvptx",
-    {"kind": "vulkan", "from_device": 0},
+    "vulkan -from_device=0",
     "opencl",
-    {"kind": "opencl", "device": "mali"},
-    {"kind": "opencl", "device": "intel_graphics"},
+    "opencl -device=mali",
+    "opencl -device=intel_graphics",
     "metal",
     "rocm",
     "hexagon",
@@ -489,7 +500,9 @@ def device_enabled(target):
     elif hasattr(target, "kind"):
         target_kind = target.kind.name
     else:
-        target_kind = target
+        assert isinstance(target, str), "device_enabled requires a target as a string"
+        # Target strings may include extra flags; only compare the kind.
+        target_kind = target.split(" ")[0]
     return any(target_kind == t["target_kind"] for t in _get_targets() if t["is_runnable"])
 
 
@@ -514,7 +527,7 @@ def enabled_targets():
         A list of pairs of all enabled devices and the associated context
 
     """
-    return [(t["target"], tvm.device(t["target_kind"])) for t in _get_targets() if t["is_runnable"]]
+    return [(t["target"], tvm.device(t["target"])) for t in _get_targets() if t["is_runnable"]]
 
 
 class Feature:
@@ -653,12 +666,8 @@ class Feature:
 
         if self.target_kind_enabled is not None:
             target_kind = self.target_kind_enabled.split()[0]
-
-            def _get_target_kind(t):
-                return t["kind"] if isinstance(t, dict) else t.split()[0]
-
             yield pytest.mark.skipif(
-                all(_get_target_kind(enabled) != target_kind for enabled in _tvm_test_targets()),
+                all(enabled.split()[0] != target_kind for enabled in _tvm_test_targets()),
                 reason=(
                     f"{self.target_kind_enabled} tests disabled "
                     f"by TVM_TEST_TARGETS environment variable"
@@ -999,6 +1008,9 @@ requires_cutlass = Feature("cutlass", "CUTLASS", cmake_flag="USE_CUTLASS")
 # Mark a test as requiring rpc to run
 requires_rpc = Feature("rpc", "RPC", cmake_flag="USE_RPC")
 
+# Mark a test as requiring the MRVL Library
+requires_mrvl = Feature("mrvl", "Marvell", cmake_flag="USE_MRVL")
+
 # Mark a test as requiring Hexagon to run
 requires_hexagon = Feature(
     "hexagon",
@@ -1028,7 +1040,7 @@ requires_aprofile_aem_fvp = Feature(
 def _has_cpu_feat(features):
     cpu = codegen.llvm_get_system_cpu()
     triple = codegen.llvm_get_system_triple()
-    target = {"kind": "llvm", "mtriple": triple, "mcpu": cpu}
+    target = "llvm -mtriple=%s -mcpu=%s" % (triple, cpu)
     has_feat = codegen.target_has_features(features, tvm.target.Target(target))
 
     return has_feat
@@ -1065,7 +1077,7 @@ requires_aarch64_sme = Feature(
 requires_x86_vnni = Feature(
     "x86_vnni",
     "x86 VNNI Extensions",
-    run_time_check=lambda: _has_cpu_feat("avx512vnni") or _has_cpu_feat("avxvnni"),
+    run_time_check=lambda: (_has_cpu_feat("avx512vnni") or _has_cpu_feat("avxvnni")),
 )
 
 
@@ -1093,35 +1105,12 @@ def _cmake_flag_enabled(flag):
     return flag.lower() not in ["off", "false", "0"]
 
 
-def _parse_target_entry(entry):
-    """Parse a target entry from TVM_TEST_TARGETS env var.
-
-    Entries can be plain kind names (e.g. "llvm") or JSON dicts
-    (e.g. '{"kind": "opencl", "device": "mali"}').
-    """
-    entry = entry.strip()
-    if entry.startswith("{"):
-        return json.loads(entry)
-    return entry
-
-
 def _tvm_test_targets():
     target_str = os.environ.get("TVM_TEST_TARGETS", "").strip()
     if target_str:
         # Use dict instead of set for de-duplication so that the
         # targets stay in the order specified.
-        targets = []
-        seen = set()
-        for t in target_str.split(";"):
-            t = t.strip()
-            if not t:
-                continue
-            parsed = _parse_target_entry(t)
-            key = str(parsed)
-            if key not in seen:
-                seen.add(key)
-                targets.append(parsed)
-        return targets
+        return list({t.strip(): None for t in target_str.split(";") if t.strip()})
 
     return DEFAULT_TEST_TARGETS
 
@@ -1182,7 +1171,7 @@ def requires_nvcc_version(major_version, minor_version=0, release_version=0):
     installed version of NVCC is at least `(major_version,
     minor_version, release_version)`.
 
-    This also marks the test as requiring a CUDA support.
+    This also marks the test as requiring a cuda support.
 
     Parameters
     ----------
@@ -1225,7 +1214,7 @@ def requires_cuda_compute_version(major_version, minor_version=0):
     compute architecture of the GPU is at least `(major_version,
     minor_version)`.
 
-    This also marks the test as requiring a CUDA support.
+    This also marks the test as requiring a cuda support.
 
     Parameters
     ----------
@@ -1738,15 +1727,17 @@ class _DeepCopyAllowedClasses(dict):
             "https://github.com/apache/tvm-rfcs/blob/main/rfcs/0007-parametrized-unit-tests.md"
         )
         raise TypeError(
-            f"Cannot copy fixture of type {cls.__name__}.  TVM fixture caching "
-            "is limited to objects that explicitly provide the ability "
-            "to be copied (e.g. through __deepcopy__, __getstate__, or __setstate__),"
-            "and forbids the use of the default `object.__reduce__` and "
-            "`object.__reduce_ex__`.  For third-party classes that are "
-            "safe to use with copy.deepcopy, please add the class to "
-            "the arguments of _DeepCopyAllowedClasses in tvm.testing._fixture_cache.\n"
-            "\n"
-            f"For discussion on this restriction, please see {rfc_url}."
+            (
+                f"Cannot copy fixture of type {cls.__name__}.  TVM fixture caching "
+                "is limited to objects that explicitly provide the ability "
+                "to be copied (e.g. through __deepcopy__, __getstate__, or __setstate__),"
+                "and forbids the use of the default `object.__reduce__` and "
+                "`object.__reduce_ex__`.  For third-party classes that are "
+                "safe to use with copy.deepcopy, please add the class to "
+                "the arguments of _DeepCopyAllowedClasses in tvm.testing._fixture_cache.\n"
+                "\n"
+                f"For discussion on this restriction, please see {rfc_url}."
+            )
         )
 
 
@@ -1952,3 +1943,302 @@ def strtobool(val):
 def main():
     test_file = inspect.getsourcefile(sys._getframe(1))
     sys.exit(pytest.main([test_file] + sys.argv[1:]))
+
+
+
+class CompareBeforeAfter:
+    """Utility for comparing before/after of TIR transforms
+
+    A standard framework for writing tests that take a TIR PrimFunc as
+    input, apply a transformation, then either compare against an
+    expected output or assert that the transformation raised an error.
+    A test should subclass CompareBeforeAfter, defining class members
+    `before` / `Before`, `transform`, and `expected` / `Expected`.  CompareBeforeAfter will
+    then use these members to define a test method and test fixture.
+
+    `transform` may be one of the following.
+
+    - An instance of `tvm.ir.transform.Pass`
+
+    - A method that takes no arguments and returns a `tvm.ir.transform.Pass`
+
+    - A pytest fixture that returns a `tvm.ir.transform.Pass`
+
+    `before` / `Before` may be any one of the following.
+
+    - An instance of `tvm.tir.PrimFunc`.  This is allowed, but is not
+      the preferred method, as any errors in constructing the
+      `PrimFunc` occur while collecting the test, preventing any other
+      tests in the same file from being run.
+
+    - An TVMScript function, without the ``@T.prim_func`` decoration.
+      The ``@T.prim_func`` decoration will be applied when running the
+      test, rather than at module import.
+
+    - A method that takes no arguments and returns a `tvm.tir.PrimFunc`
+
+    - A pytest fixture that returns a `tvm.tir.PrimFunc`
+
+    `expected` / `Expected` may be any one of the following.  The type of
+    `expected` / `Expected` defines the test being performed.  If `expected`
+    provides a `tvm.tir.PrimFunc`, the result of the transformation
+    must match `expected`.  If `expected` is an exception, then the
+    transformation must raise that exception type.
+
+    - Any option supported for `before` / `Before`.
+
+    - The `Exception` class object, or a class object that inherits
+      from `Exception`.
+
+    - A method that takes no arguments and returns `Exception` or a
+      class object that inherits from `Exception`.
+
+    - A pytest fixture that returns `Exception` or an class object
+      that inherits from `Exception`.
+
+    Examples
+    --------
+
+    .. python::
+
+        class TestRemoveIf(tvm.testing.CompareBeforeAfter):
+            transform = tvm.tir.transform.Simplify()
+
+            def before(A: T.Buffer(1, "int32")):
+                if True:
+                    A[0] = 42
+                else:
+                    A[0] = 5
+
+            def expected(A: T.Buffer(1, "int32")):
+                A[0] = 42
+
+    """
+
+    check_well_formed: bool = True
+
+    def __init_subclass__(cls):
+        assert len([getattr(cls, name) for name in ["before", "Before"] if hasattr(cls, name)]) <= 1
+        assert (
+            len([getattr(cls, name) for name in ["expected", "Expected"] if hasattr(cls, name)])
+            <= 1
+        )
+        for name in ["before", "Before"]:
+            if hasattr(cls, name):
+                cls.before = cls._normalize_before(getattr(cls, name))
+                break
+        for name in ["expected", "Expected"]:
+            if hasattr(cls, name):
+                cls.expected = cls._normalize_expected(getattr(cls, name))
+                break
+        if hasattr(cls, "transform"):
+            cls.transform = cls._normalize_transform(cls.transform)
+
+    @classmethod
+    def _normalize_ir_module(cls, func):
+        if isinstance(func, (tvm.tir.PrimFunc, tvm.IRModule)):
+
+            def inner(self):
+                # pylint: disable=unused-argument
+                return func
+
+        elif cls._is_method(func):
+
+            def inner(self):
+                # pylint: disable=unused-argument
+                return func(self)
+
+        elif inspect.isclass(func):
+
+            def inner(self):
+                # pylint: disable=unused-argument
+                func_dict = {}
+                for name, method in func.__dict__.items():
+                    if name.startswith("_"):
+                        pass
+                    elif isinstance(method, tvm.ir.function.BaseFunc):
+                        func_dict[name] = method.with_attr("global_symbol", name)
+                    else:
+                        source_code = "@T.prim_func\n" + textwrap.dedent(inspect.getsource(method))
+                        prim_func = tvm.script.from_source(
+                            source_code, check_well_formed=self.check_well_formed
+                        )
+                        func_dict[name] = prim_func.with_attr("global_symbol", name)
+                return tvm.IRModule(func_dict)
+
+        else:
+
+            def inner(self):
+                # pylint: disable=unused-argument
+                source_code = "@T.prim_func\n" + textwrap.dedent(inspect.getsource(func))
+                return tvm.script.from_source(source_code, check_well_formed=self.check_well_formed)
+
+        return pytest.fixture(inner)
+
+    @classmethod
+    def _normalize_before(cls, func):
+        if hasattr(func, "_pytestfixturefunction"):
+            return func
+        else:
+            return cls._normalize_ir_module(func)
+
+    @classmethod
+    def _normalize_expected(cls, func):
+        if hasattr(func, "_pytestfixturefunction"):
+            return func
+
+        elif inspect.isclass(func) and issubclass(func, Exception):
+
+            def inner(self):
+                # pylint: disable=unused-argument
+                return func
+
+            return pytest.fixture(inner)
+
+        else:
+            return cls._normalize_ir_module(func)
+
+    @classmethod
+    def _normalize_transform(cls, transform):
+        def apply(module_transform):
+            def inner(obj):
+                if isinstance(obj, tvm.IRModule):
+                    return module_transform(obj)
+                elif isinstance(obj, tvm.tir.PrimFunc):
+                    mod = tvm.IRModule({"main": obj})
+                    mod = module_transform(mod)
+                    return mod["main"]
+                else:
+                    raise TypeError(f"Expected IRModule or PrimFunc, but received {type(obj)}")
+
+            return inner
+
+        if hasattr(transform, "_pytestfixturefunction"):
+            if not hasattr(cls, "_transform_orig"):
+                cls._transform_orig = transform
+
+            def inner(self, _transform_orig):
+                # pylint: disable=unused-argument
+                return apply(_transform_orig)
+
+        elif isinstance(transform, tvm.ir.transform.Pass):
+
+            def inner(self):
+                # pylint: disable=unused-argument
+                return apply(transform)
+
+        elif cls._is_method(transform):
+
+            def inner(self):
+                # pylint: disable=unused-argument
+                return apply(transform(self))
+
+        else:
+            raise TypeError(
+                "Expected transform to be a tvm.ir.transform.Pass, or a method returning a Pass"
+            )
+
+        return pytest.fixture(inner)
+
+    @staticmethod
+    def _is_method(func):
+        return callable(func) and "self" in inspect.signature(func).parameters
+
+    def test_compare(self, before, expected, transform):
+        """Unit test to compare the expected TIR PrimFunc to actual"""
+
+        if inspect.isclass(expected) and issubclass(expected, Exception):
+            with pytest.raises(expected):
+                after = transform(before)
+
+                # This portion through pytest.fail isn't strictly
+                # necessary, but gives a better error message that
+                # includes the before/after.
+                before_str = before.script(name="before")
+                after_str = after.script(name="after")
+
+                pytest.fail(
+                    msg=(
+                        f"Expected {expected.__name__} to be raised from transformation, "
+                        f"instead received TIR\n:{before_str}\n{after_str}"
+                    )
+                )
+
+        elif isinstance(expected, (tvm.tir.PrimFunc, tvm.ir.IRModule)):
+            after = transform(before)
+
+            try:
+                # overwrite global symbol so it doesn't come up in the comparison
+                if isinstance(after, tvm.tir.PrimFunc):
+                    after = after.with_attr("global_symbol", "main")
+                    expected = expected.with_attr("global_symbol", "main")
+                tvm.ir.assert_structural_equal(after, expected)
+            except ValueError as err:
+                before_str = before.script(name="before")
+                after_str = after.script(name="after")
+                expected_str = expected.script(name="expected")
+                raise ValueError(
+                    f"TIR after transformation did not match expected:\n"
+                    f"{before_str}\n{after_str}\n{expected_str}"
+                ) from err
+
+        else:
+            raise TypeError(
+                f"tvm.testing.CompareBeforeAfter requires the `expected` fixture "
+                f"to return either `Exception`, an `Exception` subclass, "
+                f"or an instance of `tvm.tir.PrimFunc`.  "
+                f"Instead, received {type(expected)}."
+            )
+
+
+ml_dtypes_dict = {
+    "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
+    "float8_e5m2": ml_dtypes.float8_e5m2,
+    "bfloat16": ml_dtypes.bfloat16,
+    "int4": ml_dtypes.int4,
+}
+
+
+def np_dtype_from_str(dtype: str) -> np.dtype:
+    """Convert a string dtype to a numpy dtype."""
+    return np.dtype(ml_dtypes_dict[dtype]) if dtype in ml_dtypes_dict else np.dtype(dtype)
+
+
+def generate_random_array(dtype: str, shape: tuple) -> np.ndarray:
+    """
+    Generate a random array by generating random bits and casting to the target dtype.
+
+    Supported dtypes:
+      - "int8", "uint8", "float16", "float32", "bfloat16", "float8_e4m3fn", "float8_e5m2"
+    """
+    try:
+        np_dtype = np_dtype_from_str(dtype)
+
+    except TypeError:
+        raise ValueError("Provided dtype is not a valid numpy dtype.")
+
+    # Determine the bit length for this dtype.
+    bit_length = np_dtype.itemsize * 8
+
+    # Choose an appropriate unsigned container type.
+    if bit_length <= 8:
+        container = np.uint8
+    elif bit_length <= 16:
+        container = np.uint16
+    elif bit_length <= 32:
+        container = np.uint32
+    elif bit_length <= 64:
+        container = np.uint64
+    else:
+        raise ValueError(f"Unsupported dtype bit length: {bit_length}")
+
+    # Generate random integers in the full range of the bit length.
+    random_ints = np.random.randint(0, 2**bit_length, size=shape, dtype=container)
+    # Reinterpret the bit pattern as the desired dtype.
+    res = random_ints.view(np_dtype)
+    for idx in zip(*np.where(~np.isfinite(res))):
+        while not np.isfinite(res[idx]):
+            # Generate a new random value for this specific position
+            new_random_int = np.random.randint(0, 2**bit_length, size=1, dtype=container)
+            res[idx] = new_random_int.view(np_dtype)[0]
+    return res

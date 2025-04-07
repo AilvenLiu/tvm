@@ -26,7 +26,7 @@ from ..utils import bench, ProtonContext
 
 
 @tvm.testing.requires_cuda_compute_version(8)
-@pytest.mark.parametrize("dtype", ["bfloat16"])
+@pytest.mark.parametrize("dtype", ["bfloat16", "float16"])
 def test_layernorm(dtype):
     DEV = tvm.cuda(0)
     target = tvm.target.Target("nvidia/nvidia-h100")

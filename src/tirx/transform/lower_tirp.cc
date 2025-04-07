@@ -277,7 +277,7 @@ class TIRpOpScheduler : public StmtExprMutator {
   std::vector<Stmt> device_init_stmts_;
   std::vector<Stmt> host_init_stmts_;
 
-  bool is_first_block_;
+  bool is_first_block_{true};
 };
 
 class ScopeMerger : public StmtExprMutator {

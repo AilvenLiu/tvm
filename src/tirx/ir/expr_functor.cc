@@ -32,10 +32,6 @@ void ExprVisitor::VisitExpr_(const SizeVarNode* op) {
   this->VisitExpr_(static_cast<const VarNode*>(op));
 }
 
-void ExprVisitor::VisitExpr_(const ScopeIdNode* op) {
-  this->VisitExpr_(static_cast<const VarNode*>(op));
-}
-
 void ExprVisitor::VisitExpr_(const BufferLoadNode* op) {
   VisitArray(op->indices, [this](const PrimExpr& e) { this->VisitExpr(e); });
 }

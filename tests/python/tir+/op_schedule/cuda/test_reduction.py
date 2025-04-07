@@ -194,8 +194,13 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                 )
                 tile = T.TileLayout.from_tuple((2, NUM_COL // 8), (1, 2))
                 acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
-                acc = T.alloc_buffer([2, NUM_COL // 4], dtype=dtype, scope="local", logical_scope="thread",
-                                     layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)))
+                acc = T.alloc_buffer(
+                    [2, NUM_COL // 4],
+                    dtype=dtype,
+                    scope="local",
+                    logical_scope="thread",
+                    layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
+                )
 
                 # red layout
                 red_atom = T.TileLayout.from_tuple((1, 1), (1, 1))
@@ -204,15 +209,25 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                 )
                 red_tile = T.TileLayout.from_tuple((2, 1), (1, 1))
                 red_layout = red_warp_atom.tile(red_tile, (2, 1), (8, 4))
-                red = T.alloc_buffer([2,], dtype=dtype, scope="local", logical_scope="thread",
-                                     layout=red_atom.tile(red_tile, (2, 1), (1, 1)))
+                red = T.alloc_buffer(
+                    [
+                        2,
+                    ],
+                    dtype=dtype,
+                    scope="local",
+                    logical_scope="thread",
+                    layout=red_atom.tile(red_tile, (2, 1), (1, 1)),
+                )
 
                 # load A into acc
                 with T.thread():
                     for i in T.serial(NUM_COL // 8):
                         for j in T.unroll(2):
                             for vec in T.vectorized(2):
-                                acc[j, i * 2 + vec] = A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]
+                                acc[j, i * 2 + vec] = A[
+                                    wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
+                                    i * 8 + lane_id % 4 * 2 + vec,
+                                ]
 
                 # reduce
                 with T.warp():
@@ -232,7 +247,10 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                 # write red into B
                 with T.thread():
                     for i in T.unroll(2):
-                        B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4] = red[i]
+                        B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4] = (
+                            red[i]
+                        )
+
     # fmt: on
 
     target = tvm.target.Target.from_device(dev)

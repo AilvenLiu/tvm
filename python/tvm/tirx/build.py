@@ -217,11 +217,13 @@ def build(
     # Step 4: Apply the tirx pipeline
     if pipeline is not None:
         # custom pipeline
-        if isinstance(pipeline, str):
-            pipeline, finalize_host_passes, finalize_device_passes = tvm.tirx.get_tir_pipeline(pipeline)
+        assert isinstance(pipeline, str)
+        pipeline, finalize_host_passes, finalize_device_passes = tvm.tirx.get_tir_pipeline(pipeline)
     else:
         # default pipeline depends on the target
-        pipeline, finalize_host_passes, finalize_device_passes = tvm.tirx.get_default_tir_pipeline(target)
+        pipeline, finalize_host_passes, finalize_device_passes = tvm.tirx.get_default_tir_pipeline(
+            target
+        )
     mod = pipeline(mod)
 
     # Step 5: Get host and device modules

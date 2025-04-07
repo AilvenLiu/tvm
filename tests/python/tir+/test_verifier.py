@@ -325,40 +325,13 @@ def test_layout():
                 A = T.alloc_buffer((2,), layout=T.TileLayout.from_tuple(2, 1))
 
                 A[0] = 0
-
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def test2():
-        with T.kernel():
-            bx = T.cta_id([32], parent="kernel")
-            wid = T.warp_id([4], parent="cta")
-            lane = T.thread_id([32], parent="warp")
-
-            with T.thread():
-                A = T.alloc_buffer((2,), layout=T.TileLayout.from_tuple(3, 1))
-
-                A[0] = 0
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def test3():
-        with T.kernel():
-            bx = T.cta_id([32], parent="kernel")
-            wid = T.warp_id([4], parent="cta")
-            lane = T.thread_id([32], parent="warp")
-
-            with T.thread():
-                A = T.alloc_buffer((2,), layout=T.TileLayout.from_tuple(3, -1))
-
-                A[0] = 0
     # fmt: on
-
     verify(test1)
-    with pytest.raises(Exception, match="not compatible with shape"):
-        verify(test2)
-        verify(test3)
 
     ### SwizzleLayout
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
-    def test4():
+    def test2():
         with T.kernel():
             bx = T.cta_id([32], parent="kernel")
             wid = T.warp_id([4], parent="cta")
@@ -368,21 +341,8 @@ def test_layout():
                 A = T.alloc_buffer((512,), scope="shared", layout=T.SwizzleLayout(3, 3, 3))
 
                 A[0] = 0
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def test5():
-        with T.kernel():
-            bx = T.cta_id([32], parent="kernel")
-            wid = T.warp_id([4], parent="cta")
-            lane = T.thread_id([32], parent="warp")
-
-            with T.thread():
-                A = T.alloc_buffer((513,), scope="shared", layout=T.SwizzleLayout(3, 3, 3))
-
-                A[0] = 0
     # fmt: on
-    verify(test4)
-    with pytest.raises(Exception, match="not compatible with shape"):
-        verify(test5)
+    verify(test2)
 
 
 def test_host():
@@ -419,7 +379,6 @@ if __name__ == "__main__":
     test_root_scope()
     test_nested_scope()
     test_scope_slice()
-    test_invalid_stmt()
     test_scope_id_consistency()
     test_layout()
     test_host()

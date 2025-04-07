@@ -139,6 +139,7 @@ def tirp_pipeline():
         config = pass_ctx.config
         passes = [
             tir.transform.LowerTIRp(),
+            tvm.ir.transform.PrintIR(),
             tir.transform.LowerCrossThreadReduction(),
             tir.transform.LowerInitBlock(),
             # tir.transform.PlanAndUpdateBufferAllocationLocation(),

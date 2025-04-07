@@ -259,6 +259,10 @@ class TileLayoutNode : public TLayoutNode {
   Optional<TLayout> IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
                                 const Array<PrimExpr>& outer_shape) const final;
 
+  /*! \brief Group the layout by the logical shape */
+  // TODO(@bohan): use Pair<TileLayout, Array<IntImm>> here
+  Array<ObjectRef> GroupByLogicalShape(const Array<PrimExpr>& shape) const;
+
   static constexpr const char* _type_key = "tirx.TileLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
@@ -382,9 +386,6 @@ class ComposeLayoutNode : public TLayoutNode {
     hash_reducer(layout_B);
   }
 
-  /*! \brief Check if the layout is compatible with the shape */
-  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
-
   /*! \brief Verify if the layout is well-formed */
   bool VerifyWellFormed() const final;
 
@@ -448,6 +449,7 @@ class TrainiumLayoutNode : public TLayoutNode {
     hash_reducer(dimension_types);
     hash_reducer(combined_1d_layout);
   }
+
   /*! \brief Check if the layout is compatible with the shape */
   bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
 
@@ -490,7 +492,7 @@ class TrainiumPSUMLayoutNode : public TrainiumLayoutNode {
 
   bool VerifyWellFormed() const final;
 
-  static constexpr const char* _type_key = "tir.TrainiumPSUMLayout";
+  static constexpr const char* _type_key = "tirx.TrainiumPSUMLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(TrainiumPSUMLayoutNode, TrainiumLayoutNode);
@@ -510,7 +512,7 @@ constexpr int kPSUMBankNum = 8;
 /********************* Utils *********************/
 bool IsTrivialLayout(const TLayout& layout);
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

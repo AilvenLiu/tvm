@@ -81,7 +81,6 @@ def test_fp16_fused_attn():
     PROFILER_BUFFER_SIZE = 1048576
     PROFILER_WRITE_STRIDE = SM_COUNT * NUM_WARPS // 4
 
-
     def flops(ms):
         if CAUSAL:
             return BATCH_SIZE * QO_LEN * QO_LEN * NHEADS * HEAD_DIM * 2 / ms / 1e9
@@ -394,6 +393,7 @@ def test_fp16_fused_attn():
         wgmma_fence_operand(P_reg, S_REG_COUNT // 2)
         wgmma_fence_operand(O_reg, O_REG_COUNT)
 
+    # TODO(@bohan): try hygienic=True
     @T.macro
     def consumer_body(
         do_masking, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, P_reg_fp16, O_reg,
@@ -829,9 +829,9 @@ def test_fp16_fused_attn():
         b_indices_tvm = tvm.nd.array(b_indices, DEV)
 
         with target:
-            with tvm.transform.PassContext(config={
-                "tir.RemoveNoOp": {"ignore_profiler_call": True}
-            }):
+            with tvm.transform.PassContext(
+                config={"tir.RemoveNoOp": {"ignore_profiler_call": True}}
+            ):
                 mod = tvm.IRModule({"main": manual})
                 mod = tvm.build(mod, target=target, pipeline="tirp")
                 func = lambda: mod(

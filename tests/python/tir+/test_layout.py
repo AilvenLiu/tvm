@@ -14,13 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import pytest
+# pylint: disable=missing-module-docstring, missing-function-docstring, missing-class-docstring
 import itertools
+import pytest
 
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.ir import assert_structural_equal
+from tvm.tirp.op_schedule.cuda.async_structs import tma_shared_layout, SwizzleMode
 
 
 def test_constructor_from_tuple_no_device():
@@ -960,7 +962,7 @@ def test_tile_layout():
     case_tile_compose_layout()
 
     def case_tile_swizzle_layout():
-        # tile(TileLayout, SwizzleLayout)
+        # swizzle_128B_atom
         swizzle = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
         layout = T.TileLayout.from_tuple(data=(8, 4), strides=(1, 8))
         layout_tile = swizzle.tile(layout, (8, 4), (8, 64))
@@ -970,17 +972,18 @@ def test_tile_layout():
         )
         assert_structural_equal(layout_tile.normalize(), layout_expected)
 
-        outer_res = swizzle.is_tile_inner(layout_tile, (64, 4, 64), (8, 1, 64))
+        outer_res = swizzle.is_tile_inner(layout_tile, (64, 256), (8, 64))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), layout.normalize())
 
-        inner_res = layout.is_tile_outer(layout_tile, (64, 4, 64), (8, 4, 1))
+        inner_res = layout.is_tile_outer(layout_tile, (64, 256), (8, 4))
         assert inner_res is not None
         assert_structural_equal(inner_res.normalize(), swizzle.normalize())
 
     case_tile_swizzle_layout()
 
     def case_tile_swizzle_layout2():
+        # swizzle_128B_atom
         swizzle = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
         tile = T.TileLayout.from_tuple((3, 8, 4), (8 * 4, 1, 8))
         layout_tile = swizzle.tile(tile, (3, 8, 4), (1, 8, 64))
@@ -999,6 +1002,54 @@ def test_tile_layout():
         assert_structural_equal(inner_res.normalize(), swizzle.normalize())
 
     case_tile_swizzle_layout2()
+
+    def case_tile_swizzle_layout3():
+        # swizzle_64B_atom
+        swizzle = T.SwizzleLayout(per_element=3, swizzle_len=2, atom_len=3)
+        tile = T.TileLayout.from_tuple((8, 8), (1, 8))
+        layout_tile = swizzle.tile(tile, (8, 8), (8, 32))
+        layout_expected = T.ComposeLayout(
+            swizzle, T.TileLayout.from_tuple(data=(64, 8, 32), strides=(32, 2048, 1))
+        )
+        assert_structural_equal(layout_tile.normalize(), layout_expected.normalize())
+
+        outer_res = swizzle.is_tile_inner(layout_tile, (64, 256), (8, 32))
+        assert outer_res is not None
+        assert_structural_equal(outer_res.normalize(), tile.normalize())
+
+        inner_res = tile.is_tile_outer(layout_tile, (64, 256), (8, 8))
+        assert inner_res is not None
+        assert_structural_equal(inner_res.normalize(), swizzle.normalize())
+
+    case_tile_swizzle_layout3()
+
+    def case_tile_swizzle_layout4():
+        # swizzle_64B_atom
+        swizzle = T.SwizzleLayout(per_element=3, swizzle_len=2, atom_len=3)
+        outer = swizzle.is_tile_inner(swizzle, (64, 256), (8, 32))
+        assert outer is None
+
+        outer = swizzle.is_tile_inner(swizzle, (64, 32), (8, 32))
+        assert outer is not None
+        outer_expected = T.TileLayout.from_tuple(data=(8, 1), strides=(1, 0))
+        assert_structural_equal(outer.normalize(), outer_expected.normalize())
+
+    case_tile_swizzle_layout4()
+
+    def case_tile_swizzle_layout5():
+        # swizzle_128B_atom
+        swizzle = T.SwizzleLayout(per_element=3, swizzle_len=2, atom_len=3)
+        tile1 = T.TileLayout.from_tuple((8, 8), (1, 8))
+        tile2 = T.TileLayout.from_tuple((2, 2), (1, 2))
+        layout_tile = swizzle.tile(tile1, (8, 8), (8, 32))
+        layout_tile = layout_tile.tile(tile2, (2, 2), (64, 256))
+
+        outer = swizzle.is_tile_inner(layout_tile, (128, 512), (8, 32))
+        assert outer is not None
+        outer_expected = tile1.tile(tile2, (2, 2), (8, 8))
+        assert_structural_equal(outer.normalize(), outer_expected.normalize())
+
+    case_tile_swizzle_layout5()
 
 
 def test_vec_len_layout():
@@ -1340,6 +1391,15 @@ def test_apply():
 
     test_swizzle_layout_2()
 
+    def test_swizzle_layout_3():
+        layout = T.SwizzleLayout(per_element=0, swizzle_len=2, atom_len=3)
+        for i, j in itertools.product(range(8), range(8)):
+            outer_i, inner_i = i // 4, i % 4
+            outer_j, inner_j = j // 4, j % 4
+            assert layout.apply(i * 8 + j)[0] == i * 8 + outer_j * 4 + (inner_i ^ inner_j)
+
+    test_swizzle_layout_3()
+
     ################ Compose Layout
     def test_compose_layout_0():
         layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
@@ -1471,14 +1531,58 @@ def test_normalize_trainium_layout():
     case4()
 
 
+def test_group_by_logical_shape():
+    def case1():
+        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
+        layout = layout.tile(layout, outer_shape=[8, 8], inner_shape=[8, 8])
+        outer, seps = layout.group_by_logical_shape([64, 64])
+        assert_structural_equal(outer, layout)
+        assert seps == [0, 2, 4]
+
+    case1()
+
+
+def test_tile_to():
+    def case1():
+        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
+        tiled = layout.tile_to([64, 64], [8, 8])
+        tiled_expected = layout.tile(layout, [8, 8], [8, 8])
+        assert_structural_equal(tiled, tiled_expected)
+
+    case1()
+
+
+def test_tma_shared_layout():
+    def case1():
+        layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, (64, 256))
+        layout_expected = T.ComposeLayout(
+            T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
+            T.TileLayout.from_tuple(data=(64, 4, 64), strides=(64, 4096, 1)),
+        )
+        assert_structural_equal(layout, layout_expected)
+
+    case1()
+
+    def case2():
+        layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, (3, 64, 256))
+        layout_expected = T.ComposeLayout(
+            T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
+            T.TileLayout.from_tuple(data=(3, 64, 4, 64), strides=(16384, 64, 4096, 1)),
+        )
+        assert_structural_equal(layout, layout_expected)
+
+    case2()
+
+    def case3():
+        layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_64B_ATOM, (3, 64, 256))
+        layout_expected = T.ComposeLayout(
+            T.SwizzleLayout(3, 2, 3, swizzle_inner=True),
+            T.TileLayout.from_tuple(data=(3, 64, 8, 32), strides=(16384, 32, 2048, 1)),
+        )
+        assert_structural_equal(layout, layout_expected)
+
+    case3()
+
+
 if __name__ == "__main__":
-    test_constructor_from_tuple_no_device()
-    test_constructor_from_tuple()
-    test_normalize_tile_layout()
-    test_tile_layout()
-    test_shard_layout()
-    test_size_cosize()
-    test_apply()
-    test_vec_len_layout()
-    test_normalize_compose_layout()
-    test_normalize_trainium_layout()
+    tvm.testing.main()

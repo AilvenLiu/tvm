@@ -647,7 +647,8 @@ ForFrame Grid(ffi::Array<Variant<PrimExpr, Tuple<PrimExpr, PrimExpr>>> extents) 
       // extent is a tuple of two PrimExpr (start, extent)
       DataType dtype = tuple.value().GetElement<0>().dtype();
       n->vars.push_back(Var("v", dtype));
-      n->doms.push_back(Range(tuple.value().GetElement<0>(), tuple.value().GetElement<1>()));
+      n->doms.push_back(
+          Range::FromMinExtent(tuple.value().GetElement<0>(), tuple.value().GetElement<1>()));
     } else {
       LOG(FATAL) << "TypeError: Invalid type for grid extent";
     }

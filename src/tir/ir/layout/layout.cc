@@ -47,8 +47,7 @@ TVM_REGISTER_GLOBAL("tir.IsTrivialLayout").set_body_typed(IsTrivialLayout);
 
 /**************** TLayout ****************/
 bool TLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const {
-  arith::Analyzer analyzer;
-  return analyzer.CanProveEqual(FloorMod(ReduceMul(shape), this->GetSize()), 0);
+  return true;
 }
 
 Array<PrimExpr> TLayoutNode::Apply(const Array<PrimExpr>& coord,

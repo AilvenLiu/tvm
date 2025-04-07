@@ -63,7 +63,7 @@ def bench(func, warmup=0, repeat=10, proton_name="kernel"):
 
 class ProtonContext:
     """Context manager for Proton profiling sessions."""
-    
+
     def __init__(self, name="kernel", hook="triton"):
         self.name = name
         self.hook = hook
@@ -98,6 +98,7 @@ class ProfileEventType(Enum):
     WritePReg = 7
     SplitK = 8
 
+
 event_type_names = [
     "issue-load-q",
     "issue-load-kv",
@@ -109,6 +110,7 @@ event_type_names = [
     "write-p-reg",
     "split-k",
 ]
+
 
 class EventType(Enum):
     kBegin = 0
@@ -132,8 +134,11 @@ def export_to_perfetto_trace(
     profiler_buffer: np.ndarray,
     file_name: str,
 ) -> None:
+    if is_running_under_pytest():
+        return
 
     import torch
+
     # pip install git+https://github.com/ihavnoid/tg4perfetto.git
     from tg4perfetto import TraceGenerator
 
@@ -158,9 +163,7 @@ def export_to_perfetto_trace(
         tag, timestamp = profiler_buffer_host[i : i + 1].view(dtype=torch.uint32)
         tag = int(tag)
         timestamp = int(timestamp)
-        block_idx, group_idx, event_idx, event_type = decode_tag(
-            tag, num_groups
-        )
+        block_idx, group_idx, event_idx, event_type = decode_tag(tag, num_groups)
         event = event_type_names[event_idx]
         tid = tid_map[(block_idx, group_idx)]
 

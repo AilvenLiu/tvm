@@ -17,14 +17,12 @@
 import pytest
 import ml_dtypes
 import numpy as np
-import functools
 
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.layout import TileLayout
-from tvm.tir.async_structs import CopyPipeline
 
 ml_dtypes_dict = {
     "float8_e4m3fn": ml_dtypes.float8_e4m3fn,

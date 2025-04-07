@@ -125,6 +125,20 @@ Array<PrimExpr> TileLayoutNode::Apply(const PrimExpr& coord) const {
   return {analyzer.Simplify(outer * cosize + result)};
 }
 
+Array<ObjectRef> TileLayoutNode::GroupByLogicalShape(const Array<PrimExpr>& shape) const {
+  auto res = TileLayoutGroupByLogicalShape(GetRef<TileLayout>(this), shape, nullptr);
+  std::vector<IntImm> seps;
+  for (auto sep : res.second) {
+    seps.push_back(IntImm(DataType::Int(32), sep));
+  }
+  return {res.first, Array<IntImm>(seps)};
+}
+
+TVM_REGISTER_GLOBAL("tir.TileLayoutGroupByLogicalShape")
+    .set_body_typed([](TileLayout layout, Array<PrimExpr> shape) {
+      return layout->GroupByLogicalShape(shape);
+    });
+
 /******* Vector Length ********/
 
 PrimExpr ComputeGCD(PrimExpr a, PrimExpr b, arith::Analyzer* ana) {
@@ -297,14 +311,16 @@ TVM_REGISTER_GLOBAL("tir.TileLayoutShard")
                        TileLayout inner, ExecScope from,
                        ExecScope to) { return Shard(shape, mesh, strategy, inner, from, to); });
 
-Array<PrimExpr> TileLayoutNode::Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const {
+Array<PrimExpr> TileLayoutNode::Apply(const Array<PrimExpr>& coord,
+                                      const Array<PrimExpr>& shape) const {
   if (shape.size() == 1) {
-    ICHECK_EQ(coord.size(), 1) << "ValueError: Expected a single coordinate for single-dimension shape";
+    ICHECK_EQ(coord.size(), 1)
+        << "ValueError: Expected a single coordinate for single-dimension shape";
     return Apply(coord[0]);
   }
   auto prod_shape = ReduceMul(shape);
   arith::Analyzer analyzer;
-  if(!analyzer.CanProveEqual(prod_shape, GetSize())) {
+  if (!analyzer.CanProveEqual(prod_shape, GetSize())) {
     return TLayoutNode::Apply(coord, shape);
   }
   auto pr = TileLayoutGroupByLogicalShape(GetRef<TileLayout>(this), shape, nullptr);
@@ -319,7 +335,8 @@ Array<PrimExpr> TileLayoutNode::Apply(const Array<PrimExpr>& coord, const Array<
     PrimExpr cur = coord[i];
     for (int j = seps[i + 1] - 1; j >= seps[i]; j--) {
       if (split_map.find(j) == split_map.end()) {
-        result += grouped_layout->data_iter_array[j]->stride * floormod(cur, grouped_layout->data_iter_array[j]->extent);
+        result += grouped_layout->data_iter_array[j]->stride *
+                  floormod(cur, grouped_layout->data_iter_array[j]->extent);
       }
       cur = floordiv(cur, grouped_layout->data_iter_array[j]->extent);
     }

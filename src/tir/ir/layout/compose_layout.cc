@@ -38,10 +38,6 @@ TVM_REGISTER_GLOBAL("tir.ComposeLayout")
       return ComposeLayout(layout_A, layout_B);
     });
 
-bool ComposeLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const {
-  return layout_B->CompatibleWithShape(shape);
-}
-
 bool ComposeLayoutNode::VerifyWellFormed() const {
   if (!layout_A->VerifyWellFormed() || !layout_B->VerifyWellFormed()) {
     return false;

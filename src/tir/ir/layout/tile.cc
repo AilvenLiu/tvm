@@ -291,7 +291,13 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
 
   auto factored = TileShape(tiled_shape, inner_shape, true);
   auto [grouped_tiled, tiled_seps] = TileLayoutGroupByLogicalShape(tiled, factored, nullptr);
+  CHECK(grouped_tiled.defined())
+      << "ValueError: tile layout group by logical shape failed, layout is " << tiled
+      << " and shape is " << factored;
   auto [grouped_layout, inner_seps] = TileLayoutGroupByLogicalShape(layout, inner_shape, nullptr);
+  CHECK(grouped_layout.defined())
+      << "ValueError: tile layout group by logical shape failed, layout is " << layout
+      << " and shape is " << inner_shape;
 
   if (grouped_tiled->device_iter_array.size() != grouped_layout->device_iter_array.size()) {
     // Quick device-iter check (or we do a direct extent check below).
@@ -361,6 +367,12 @@ Optional<TileLayout> SwizzleLayoutNode::IsTileInner(const TLayout& tile_layout,
     if (StructuralEqual()(comp.value()->layout_A, GetRef<SwizzleLayout>(this))) {
       auto identity = IdentityTileLayout(inner_shape);
       return identity->IsTileInner(comp.value()->layout_B, tiled_shape, inner_shape);
+    }
+  } else if (auto swizzle = tile_layout.as<SwizzleLayout>()) {
+    if (StructuralEqual()(swizzle.value(), GetRef<SwizzleLayout>(this))) {
+      auto inner_identity = IdentityTileLayout(inner_shape);
+      auto tile_identity = IdentityTileLayout(tiled_shape);
+      return inner_identity->IsTileInner(tile_identity, tiled_shape, inner_shape);
     }
   }
   return NullOpt;

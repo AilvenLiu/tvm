@@ -81,7 +81,7 @@ def copy_g2s_s2g_cta_vec_load_impl(
         [
             src.layout and dst.layout,
             src.dtype == dst.dtype,
-            src.layout.is_trivial() or dst.layout.is_trivial(),
+            src.layout.is_trivial() and dst.layout.is_trivial(),
             (src.scope() == "global" and dst.scope().startswith("shared"))
             or (src.scope().startswith("shared") and dst.scope() == "global"),
         ]
