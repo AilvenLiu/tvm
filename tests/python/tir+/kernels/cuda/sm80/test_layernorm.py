@@ -149,7 +149,7 @@ def test_layernorm(dtype):
     def tir_layernorm():
         with target:
             mod = tvm.IRModule({"main": layernorm})
-            mod = tvm.build(mod, target=target, pipeline="tirp")
+            mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
             func = lambda: mod(
                 inp_tvm, inp_resid_tvm, norm_weight_tvm, norm_bias_tvm, out_tvm, out_resid_tvm
             )

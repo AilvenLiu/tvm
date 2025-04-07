@@ -341,14 +341,14 @@ def test_hgemm_ampere():
     def tvm_gemm(func):
         with tvm.transform.PassContext(config={"tir.disable_storage_rewrite": True}):
             mod = tvm.IRModule({"main": func})
-            mod = tvm.build(mod, target=target, pipeline="tirp")
+            mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
             C_np = np.zeros((M, N), dtype=np.float32)
             C_tvm = tvm.nd.array(C_np, device=DEV)
 
             func = lambda: mod(A_tvm, B_tvm, C_tvm)
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")
             print(f"TIR time: {ms} ms")
-        return C_tvm.asnumpy()
+        return C_tvm.numpy()
 
     # cublas
     def cublas_gemm():

@@ -833,7 +833,7 @@ def test_fp16_fused_attn():
                 config={"tir.RemoveNoOp": {"ignore_profiler_call": True}}
             ):
                 mod = tvm.IRModule({"main": manual})
-                mod = tvm.build(mod, target=target, pipeline="tirp")
+                mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
                 func = lambda: mod(
                     q_tvm,
                     k_tvm,
@@ -849,11 +849,11 @@ def test_fp16_fused_attn():
                 print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
         export_to_perfetto_trace(
-            profiler_buffer_tvm.asnumpy(),
+            profiler_buffer_tvm.numpy(),
             f"mla-{BATCH_SIZE}-{QO_LEN}-{NHEADS}.perfetto-trace",
         )
 
-        return o_tvm.asnumpy()
+        return o_tvm.numpy()
 
     def flashinfer():
         import flashinfer

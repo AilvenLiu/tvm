@@ -442,7 +442,7 @@ class SwizzleLayout(TLayout):
 class ComposeLayout(TLayout):
     """A memory layout that composes 2 layouts."""
 
-    def __init__(self, layout_A: TLayout, layout_B: TLayout):
+    def __init__(self, layout_A: "SwizzleLayout", layout_B: "TileLayout"):
         self.__init_handle_by_constructor__(
             _ffi_api.ComposeLayout,  # pylint: disable=no-member
             layout_A,

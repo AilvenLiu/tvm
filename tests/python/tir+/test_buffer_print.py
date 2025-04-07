@@ -17,7 +17,7 @@ def create_tvm_arrays(data_np, device):
 
 
 def build_and_run_tvm_func(sch, target, *args):
-    func = tvm.build(sch.mod, target=target)
+    func = tvm.compile(sch.mod, target=target)
     func(*args)
     return func, args[-1]
 
@@ -35,7 +35,7 @@ def verify_tir_code(code):
 
 
 def verify_cuda_code(func, dim_num, dtype, *dims):
-    generated_code = func.imported_modules[0].get_source()
+    generated_code = func.mod.imported_modules[0].get_source()
 
     # Extract the section between "// print_buffer starts" and "// print_buffer ends"
     match = re.search(r"// print_buffer starts(.*?)// print_buffer ends", generated_code, re.DOTALL)

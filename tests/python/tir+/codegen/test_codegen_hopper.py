@@ -27,8 +27,8 @@ import tvm.testing
 def _get_source(func: tvm.tir.PrimFunc) -> str:
     target = tvm.target.Target("nvidia/nvidia-h100")
     mod = tvm.IRModule({"main": func})
-    mod = tvm.build(mod, target=target, pipeline="tirp")
-    src = mod.imported_modules[0].get_source()
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+    src = mod.mod.imported_modules[0].get_source()
     return src
 
 
@@ -81,8 +81,8 @@ def test_stmatrix_sync_aligned(trans):
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     with target:
-        mod = tvm.build(mod, target=target, pipeline="tirp")
-        src = mod.imported_modules[0].get_source()
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        src = mod.mod.imported_modules[0].get_source()
         if not trans:
             assert "stmatrix.sync.aligned.m8n8.x4.shared.b16" in src
         else:
@@ -112,7 +112,7 @@ def test_stmatrix_sync_aligned(trans):
                 A_ref[col + 1, row + 8] = tx * 8 + 5
                 A_ref[col + 8, row + 8] = tx * 8 + 6
                 A_ref[col + 9, row + 8] = tx * 8 + 7
-        np.testing.assert_allclose(A.asnumpy(), A_ref)
+        np.testing.assert_allclose(A.numpy(), A_ref)
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -281,8 +281,8 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     target = tvm.target.Target("cuda")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-    mod = tvm.build(mod, target=target, pipeline="tirp")
-    src = mod.imported_modules[0].get_source()
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+    src = mod.mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = np.random.randn(math.prod(shape))
@@ -299,7 +299,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     A = tvm.nd.array(A_np, device=DEV)
     B = tvm.nd.array(B_np, device=DEV)
     mod(A, B)
-    assert np.allclose(A.asnumpy().astype("float32"), B.asnumpy().astype("float32"))
+    assert np.allclose(A.numpy().astype("float32"), B.numpy().astype("float32"))
 
 
 @pytest.mark.parametrize("swizzle", [1, 2, 3])
@@ -369,8 +369,8 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
     target = tvm.target.Target("cuda")
     func, shape = get_ir(swizzle, dtype)
     mod = tvm.IRModule({"main": func})
-    mod = tvm.build(mod, target=target, pipeline="tirp")
-    src = mod.imported_modules[0].get_source()
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+    src = mod.mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     total_elems = math.prod(shape)
@@ -384,10 +384,10 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
     layout = T.SwizzleLayout(
         per_element=int(math.log2(128 // dtype.bits)), swizzle_len=swizzle, atom_len=3
     )
-    B_np = B.asnumpy()
+    B_np = B.numpy()
     B_swizzle = [B_np[int(layout.apply(i)[0])] for i in range(total_elems)]
     B_swizzle = np.array(B_swizzle).astype(str(dtype))
-    assert np.allclose(A.asnumpy(), B_swizzle)
+    assert np.allclose(A.numpy(), B_swizzle)
 
 
 @pytest.mark.parametrize(
@@ -458,8 +458,8 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
     target = tvm.target.Target("cuda")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-    mod = tvm.build(mod, target=target, pipeline="tirp")
-    src = mod.imported_modules[0].get_source()
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+    src = mod.mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = [i for i in range(math.prod(shape))]
@@ -548,8 +548,8 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     target = tvm.target.Target("cuda")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-    mod = tvm.build(mod, target=target, pipeline="tirp")
-    src = mod.imported_modules[0].get_source()
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+    src = mod.mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = [i for i in range(math.prod(shape))]
@@ -558,7 +558,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     A = tvm.nd.array(A_np, device=DEV)
     B = tvm.nd.array(B_np, device=DEV)
     mod(A, B)
-    assert np.allclose(A.asnumpy(), B.asnumpy())
+    assert np.allclose(A.numpy(), B.numpy())
 
 
 @pytest.mark.parametrize(
@@ -609,8 +609,8 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
     target = tvm.target.Target("cuda")
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
-    mod = tvm.build(mod, target=target, pipeline="tirp")
-    src = mod.imported_modules[0].get_source()
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+    src = mod.mod.imported_modules[0].get_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = np.zeros(shape, dtype="float32")
@@ -619,7 +619,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
 
     A_ref = [i for i in range(math.prod(shape))]
     A_ref = np.array(A_ref, dtype="float32").reshape(shape)
-    np.testing.assert_allclose(A.asnumpy(), A_ref)
+    np.testing.assert_allclose(A.numpy(), A_ref)
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -762,7 +762,7 @@ def test_wgmma_ss_nt():
         B_encode_args,
     )
     mod = tvm.IRModule({"main": func})
-    mod = tvm.build(mod, target=target, pipeline="tirp")
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
     np.random.seed(0)
     A_np = np.random.randn(*shapeA).astype(in_dtype)
@@ -775,7 +775,7 @@ def test_wgmma_ss_nt():
     mod(A_tvm, B_tvm, C_tvm)
 
     C_ref = np.dot(A_np.T, B_np).astype(out_dtype)
-    tvm.testing.assert_allclose(C_tvm.asnumpy(), C_ref, rtol=1e-3, atol=1e-3)
+    tvm.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-3)
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -927,7 +927,7 @@ def test_wgmma_rs_nt():
         B_encode_args,
     )
     mod = tvm.IRModule({"main": func})
-    mod = tvm.build(mod, target=target, pipeline="tirp")
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
     np.random.seed(0)
     A_np = np.random.randn(*shapeA).astype(in_dtype)
@@ -944,7 +944,7 @@ def test_wgmma_rs_nt():
     np.printoptions(precision=2)
 
     C_ref = np.dot(A_np, B_np).astype(out_dtype)
-    tvm.testing.assert_allclose(C_tvm.asnumpy(), C_ref, rtol=1e-3, atol=1e-3)
+    tvm.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-3)
 
 
 def test_warp_shuffle_xor_sync():
@@ -974,13 +974,13 @@ def test_warp_shuffle_xor_sync():
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
-    mod = tvm.build(mod, target=target, pipeline="tirp")
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
     A_np = np.zeros(32, dtype="float32")
     A = tvm.nd.array(A_np, device=DEV)
     mod(A)
-    assert "__shfl_xor_sync" in mod.imported_modules[0].get_source()
+    assert "__shfl_xor_sync" in mod.mod.imported_modules[0].get_source()
     A_ref = np.ones(32, dtype="float32") * 496
-    np.testing.assert_allclose(A.asnumpy(), A_ref)
+    np.testing.assert_allclose(A.numpy(), A_ref)
 
 
 if __name__ == "__main__":

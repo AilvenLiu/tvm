@@ -113,7 +113,7 @@ def test_reduction_op_shared(input, op_type, dtype):
     target = tvm.target.Target.from_device(dev)
     with target:
         mod = tvm.IRModule({"main": test_reduction})
-        mod = tvm.build(mod, target=target, pipeline="tirp")
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
         np.random.seed(0)
         A_np = np.random.rand(*g_shape_a).astype(dtype)
@@ -125,14 +125,14 @@ def test_reduction_op_shared(input, op_type, dtype):
         # find ref result
         D = len(A.shape) - len(B.shape)
         if op_type == "sum":
-            B_ref = A.asnumpy()[*reduce_slice_a].sum(axis=tuple(range(-D, 0)))
+            B_ref = A.numpy()[*reduce_slice_a].sum(axis=tuple(range(-D, 0)))
         elif op_type == "max":
-            B_ref = A.asnumpy()[*reduce_slice_a].max(axis=tuple(range(-D, 0)))
+            B_ref = A.numpy()[*reduce_slice_a].max(axis=tuple(range(-D, 0)))
         else:
             raise ValueError(f"Unsupported op_type: {op_type}")
 
         atol = 1e-5 if dtype == "float32" else 1e-1
-        tvm.testing.assert_allclose(B_ref, B.asnumpy()[*reduce_slice_b], atol=atol)
+        tvm.testing.assert_allclose(B_ref, B.numpy()[*reduce_slice_b], atol=atol)
 
 
 @pytest.mark.parametrize(
@@ -256,7 +256,7 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
     target = tvm.target.Target.from_device(dev)
     with target:
         mod = tvm.IRModule({"main": test_reduction})
-        mod = tvm.build(mod, target=target, pipeline="tirp")
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
         np.random.seed(0)
         A_np = np.random.rand(*g_shape_a).astype(dtype)
@@ -267,14 +267,14 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
 
         # find ref result
         if op_type == "sum":
-            B_ref = A.asnumpy().sum(axis=-1)
+            B_ref = A.numpy().sum(axis=-1)
         elif op_type == "max":
-            B_ref = A.asnumpy().max(axis=-1)
+            B_ref = A.numpy().max(axis=-1)
         else:
             raise ValueError(f"Unsupported op_type: {op_type}")
         atol = 1e-5 if dtype == "float32" else 1e-1
         B_ref = np.tile(B_ref[:, np.newaxis], (1, 4))
-        tvm.testing.assert_allclose(B_ref, B.asnumpy(), atol=atol)
+        tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
 
 
 if __name__ == "__main__":

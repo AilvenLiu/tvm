@@ -270,7 +270,7 @@ def test_fp8_gemm_hopper_no_ws():
 
         with target:
             mod = tvm.IRModule({"main": manual})
-            mod = tvm.build(mod, target=target, pipeline="tirp")
+            mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
             func = lambda: mod(A_tvm, B_tvm, C_tvm)
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")
             print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
@@ -281,7 +281,7 @@ def test_fp8_gemm_hopper_no_ws():
         C_cublas = cublas_gemm()
         C_tir = tir_gemm()
 
-    tvm.testing.assert_allclose(C_tir.asnumpy(), C_cublas.asnumpy(), rtol=2e-2, atol=1e-4)
+    tvm.testing.assert_allclose(C_tir.numpy(), C_cublas.numpy(), rtol=2e-2, atol=1e-4)
 
 
 if __name__ == "__main__":

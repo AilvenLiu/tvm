@@ -95,12 +95,12 @@ def test_unary_op_shared(input, op_type, dtype):
         A = tvm.nd.array(A_np, dev)
 
         mod = tvm.IRModule({"main": unary_op})
-        mod = tvm.build(mod, target=target, pipeline="tirp")
-        print(f"compiled source code: {mod.imported_modules[0].get_source()}")
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        print(f"compiled source code: {mod.mod.imported_modules[0].get_source()}")
         mod(A)
 
         A_ref = get_ref(A_np)
-        tvm.testing.assert_allclose(A_ref, A.asnumpy(), atol=1e-8)
+        tvm.testing.assert_allclose(A_ref, A.numpy(), atol=1e-8)
 
 
 @pytest.mark.parametrize(
@@ -266,13 +266,13 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
         B = tvm.nd.array(B_np, dev)
 
         mod = tvm.IRModule({"main": get_prim_func(operands_type)})
-        mod = tvm.build(mod, target=target, pipeline="tirp")
-        print(f"compiled source code: {mod.imported_modules[0].get_source()}")
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        print(f"compiled source code: {mod.mod.imported_modules[0].get_source()}")
         mod(A, B)
 
         A_ref = get_ref(A_np, B_np)
         atol = 1e-3 if op_type == "fdiv" else 1e-8
-        tvm.testing.assert_allclose(A_ref, A.asnumpy(), atol=atol)
+        tvm.testing.assert_allclose(A_ref, A.numpy(), atol=atol)
 
 
 @pytest.mark.parametrize(
@@ -381,7 +381,7 @@ def test_unary_op_local(input, op_type, dtype):
     target = tvm.target.Target.from_device(dev)
     with target:
         mod = tvm.IRModule({"main": test_unary})
-        mod = tvm.build(mod, target=target, pipeline="tirp")
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
         np.random.seed(0)
         A_np = np.random.rand(*g_shape_a).astype(dtype)
@@ -398,7 +398,7 @@ def test_unary_op_local(input, op_type, dtype):
         else:
             raise ValueError(f"op_type={op_type} is not supported")
         atol = 1e-8
-        tvm.testing.assert_allclose(B_ref, B.asnumpy(), atol=atol)
+        tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
 
 
 @pytest.mark.parametrize(
@@ -527,7 +527,7 @@ def test_binary_op_local(input, op_type, dtype):
     target = tvm.target.Target.from_device(dev)
     with target:
         mod = tvm.IRModule({"main": test_broadcast_and_apply_const})
-        mod = tvm.build(mod, target=target, pipeline="tirp")
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
         np.random.seed(0)
         A_np = np.random.rand(*g_shape_a).astype(dtype)
@@ -545,7 +545,7 @@ def test_binary_op_local(input, op_type, dtype):
         else:
             raise ValueError(f"op_type={op_type} is not supported")
         atol = 1e-8
-        tvm.testing.assert_allclose(B_ref, A.asnumpy(), atol=atol)
+        tvm.testing.assert_allclose(B_ref, A.numpy(), atol=atol)
 
 
 if __name__ == "__main__":

@@ -347,12 +347,12 @@ def test_hgemm_hopper_ws_cooperative():
 
         with target:
             mod = tvm.IRModule({"main": manual})
-            mod = tvm.build(mod, target=target, pipeline="tirp")
+            mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
             func = lambda: mod(A_tvm, B_tvm, C_tvm)
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")
             print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
-        return C_tvm.asnumpy()
+        return C_tvm.numpy()
 
     def cublas_gemm():
         import torch
@@ -606,12 +606,12 @@ def test_hgemm_hopper_no_ws():
 
         with target:
             mod = tvm.IRModule({"main": manual})
-            mod = tvm.build(mod, target=target, pipeline="tirp")
+            mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
             func = lambda: mod(A_tvm, B_tvm, C_tvm)
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")
             print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
 
-        return C_tvm.asnumpy()
+        return C_tvm.numpy()
 
     def cublas_gemm():
         import torch

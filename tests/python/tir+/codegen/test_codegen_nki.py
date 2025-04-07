@@ -28,8 +28,8 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 def lower_and_get_source(func):
     mod = tvm.IRModule({"main": func})
-    mod = tvm.build(mod, target=target, pipeline="trn")
-    src = mod.imported_modules[0].get_source()
+    mod = tvm.compile(mod, target=target, tir_pipeline="trn")
+    src = mod.mod.imported_modules[0].get_source()
     return src
 
 

@@ -30,7 +30,7 @@ from tvm.tir.async_structs import CopyPipeline
 from tvm.tir.stmt import OpCall
 from tvm.tir.layout import SwizzleLayout, TileLayout
 from tvm.arith import Analyzer
-from .common import InstType, copy_g2s_s2g_cta_vec_load_impl, target_cuda
+from .common import CopyInstType, copy_g2s_s2g_cta_vec_load_impl, target_cuda, validate_copy_op
 from ..registry import register_schedule
 
 
@@ -120,8 +120,6 @@ def copy_g2s_cta_tma_impl(
     dst: Buffer = dst_buffer_region.buffer
     if not all(
         [
-            src.layout and dst.layout,
-            src.dtype == dst.dtype,
             src.layout.is_trivial(),  # TODO(@bohan): support strided global memory
             src.scope() == "global" and dst.scope().startswith("shared"),
         ]
@@ -129,29 +127,22 @@ def copy_g2s_cta_tma_impl(
         return None
 
     # Extract regions and validate dimensions
-    analyzer = Analyzer()
     src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
     src_st = [r.min for r in src_region]
     dst_st = [r.min for r in dst_region]
     src_extent = [r.extent for r in src_region]
     dst_extent = [r.extent for r in dst_region]
 
-    # Validate non-unit dimensions match
+    # Get the axis map for the non-unit dimensions
     def dim_match(src_extent, dst_extent) -> List[int]:
         src_extent_ = [(i, e) for i, e in enumerate(src_extent) if e != 1]
         dst_extent_ = [(i, e) for i, e in enumerate(dst_extent) if e != 1]
-        if len(src_extent_) == len(dst_extent_) and all(
-            analyzer.can_prove_equal(s[1], d[1]) for s, d in zip(src_extent_, dst_extent_)
-        ):
-            axis_map = [-1] * len(src.shape)
-            for s, d in zip(src_extent_, dst_extent_):
-                axis_map[s[0]] = d[0]
-            return axis_map
-        return None
+        axis_map = [-1] * len(src.shape)
+        for s, d in zip(src_extent_, dst_extent_):
+            axis_map[s[0]] = d[0]
+        return axis_map
 
     axis_map = dim_match(src_extent, dst_extent)
-    if axis_map is None:
-        return None
 
     # Determine the swizzle mode
     swizzle_mode = None
@@ -318,8 +309,6 @@ def copy_g2s_cta_tma_impl(
 
     # insert these codes to host code before the kernel
     sctx.add_init_stmt(create_tensor_map.body, host=True)
-    impl.show()
-    create_tensor_map.show()
     return impl
 
 
@@ -360,7 +349,7 @@ def copy_pipeline_cta_impl(
             dst, src = args[1], args[2]
             # copy the data from src to dst
             for schedule in [copy_g2s_s2g_cta_vec_load_impl]:
-                res = schedule(dst, src, sctx, InstType.CP_ASYNC)
+                res = schedule(dst, src, sctx, CopyInstType.CP_ASYNC)
                 if res is not None:
                     return res
             raise ValueError(
@@ -481,9 +470,10 @@ def pipeline_consumer_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFu
 @target_cuda
 def pipeline_copy(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule pipeline copy."""
-    if sctx.exec_scope.name != "cta":
+    pipeline, dst_buffer_region, src_buffer_region = op.args
+    if not validate_copy_op(dst_buffer_region, src_buffer_region, sctx):
         return None
-    pipeline = op.args[0]
+
     if isinstance(pipeline, CopyPipeline):
         return copy_pipeline_cta_impl(PipelineOp.COPY, sctx, *op.args)
     return None

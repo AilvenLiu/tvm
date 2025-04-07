@@ -35,7 +35,7 @@ from tvm.tirp.op_schedule.cuda.async_structs import (
 
 
 @pytest.mark.parametrize(
-    "input",
+    "task",
     [
         ################ A[0:8, 0:8] -> A_smem[0:8, 0:8] -> B[0:8, 0:8] ################
         (
@@ -86,8 +86,8 @@ from tvm.tirp.op_schedule.cuda.async_structs import (
 @pytest.mark.parametrize(
     "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
 )
-def test_copy_g2s_s2g_cta_vec_load(input, dtype):
-    g_shape, s_shape, g_st, g_extent, thread_cnt, layoutA, layoutB, layoutS = input
+def test_copy_g2s_s2g_cta_vec_load(task, dtype):
+    g_shape, s_shape, g_st, g_extent, thread_cnt, layoutA, layoutB, layoutS = task
     dev = tvm.cuda(0)
 
     r_smem = list(slice(None) for i in range(len(s_shape)))
@@ -118,7 +118,7 @@ def test_copy_g2s_s2g_cta_vec_load(input, dtype):
     target = tvm.target.Target.from_device(dev)
     with target:
         mod = tvm.IRModule({"main": copy_async})
-        mod = tvm.build(mod, target=target, pipeline="tirp")
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(np_dtype)
@@ -130,7 +130,7 @@ def test_copy_g2s_s2g_cta_vec_load(input, dtype):
 
         B_ref = B_np.copy()
         B_ref[*r_gmem] = A_np[*r_gmem]
-        np.testing.assert_allclose(B_ref, B.asnumpy())
+        np.testing.assert_allclose(B_ref, B.numpy())
 
 
 @tvm.testing.requires_cuda_compute_version(9)
@@ -199,31 +199,6 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len):
     r_smem = [slice(s_region[i][0], s_region[i][1]) for i in range(len(s_shape))]
     r_gmem = [slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape))]
 
-    def copy(dst, src):
-        dst_indices = [i for i in range(len(dst.shape)) if g_region[i][1] != g_region[i][0] + 1]
-        src_indices = [i for i in range(len(src.shape)) if s_region[i][1] != s_region[i][0] + 1]
-        assert len(dst_indices) == len(src_indices)
-        copy_extents = [g_region[i][1] - g_region[i][0] for i in dst_indices]
-
-        def get_dst_coord(lvs):
-            if isinstance(lvs, tvm.tir.Var):
-                lvs = [lvs]
-            coord = [g_region[i][0] for i in range(len(dst.shape))]
-            for i, lv in enumerate(lvs):
-                coord[dst_indices[i]] += lv
-            return coord
-
-        def get_src_coord(lvs):
-            if isinstance(lvs, tvm.tir.Var):
-                lvs = [lvs]
-            coord = [s_region[i][0] for i in range(len(src.shape))]
-            for i, lv in enumerate(lvs):
-                coord[src_indices[i]] += lv
-            return coord
-
-        with T.grid(*copy_extents) as lvs:
-            T.buffer_store(dst, src[*get_src_coord(lvs)], get_dst_coord(lvs))
-
     # fmt: off
     @T.prim_func(tirp=True)
     def copy_async(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -250,15 +225,15 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len):
                     pipeline.consumer_wait()
 
                     # we manually write a copy here, insert it into schedule later
-                    copy(B, A_smem)
+                    Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
     target = tvm.target.Target.from_device(dev)
 
     with target:
         mod = tvm.IRModule({"main": copy_async})
-        mod = tvm.build(mod, target=target, pipeline="tirp")
-        print(mod.imported_modules[0].get_source())
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        print(mod.mod.imported_modules[0].get_source())
 
         np.random.seed(0)
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
@@ -270,7 +245,7 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len):
 
         B_ref = np.zeros(g_shape, dtype=np_dtype)
         B_ref[*r_gmem] = A_np[*r_gmem]
-        np.testing.assert_allclose(B_ref, B.asnumpy())
+        np.testing.assert_allclose(B_ref, B.numpy())
 
 
 def test_copy_pipeline_no_specialize_cta():
@@ -337,7 +312,7 @@ def test_copy_pipeline_no_specialize_cta():
     with target:
         mod = tvm.IRModule({"main": test})
         mod = tvm.tir.transform.LowerTIRp()(mod)
-        mod = tvm.build(mod, target=target, pipeline="tirp")
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
         np.random.seed(0)
         A_np = np.ones((N, M)).astype("float32") * 10
@@ -348,7 +323,7 @@ def test_copy_pipeline_no_specialize_cta():
         mod(A, B)
 
         B_np_ref = np.sum(A_np.reshape((N, 128, M // 128)), axis=2)
-        tvm.testing.assert_allclose(B.asnumpy(), B_np_ref)
+        tvm.testing.assert_allclose(B.numpy(), B_np_ref)
 
 
 if __name__ == "__main__":

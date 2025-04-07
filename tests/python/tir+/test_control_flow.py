@@ -25,11 +25,11 @@ def run_test_break_continue(func, shape, expected):
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     with target:
-        mod = tvm.build(mod, target=target, pipeline="tirp")
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
     arr_np = np.zeros(shape, dtype="int32")
     arr = tvm.nd.array(arr_np, device=dev)
     mod(arr)
-    np.testing.assert_allclose(arr.asnumpy(), expected)
+    np.testing.assert_allclose(arr.numpy(), expected)
 
 
 def test_break_continue1():
