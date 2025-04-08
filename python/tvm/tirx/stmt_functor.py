@@ -22,7 +22,7 @@ from typing import Callable, List, TypeVar, Union, Dict, Optional, Any
 
 import tvm
 from tvm import ir
-from tvm.ir import PrimExpr
+from tvm.ir import PrimExpr, Range
 from tvm.tir import Var, SizeVar, IterVar, Buffer, DataProducer
 from tvm.runtime import Object
 
@@ -171,6 +171,10 @@ class StmtFunctor:
     
     def visit_op_call_(self, op):
         """Visitor for OpCall nodes."""
+        return self.visit_stmt_default_(op)
+    
+    def visit_buffer_region_(self, op):
+        """Visitor for BufferRegion nodes."""
         return self.visit_stmt_default_(op)
 
     def __call__(self, stmt):
@@ -321,7 +325,16 @@ class StmtVisitor(StmtFunctor):
                 self.visit_expr(arg)
             elif isinstance(arg, tvm.tir.Stmt):
                 self.visit_stmt(arg)
+            elif isinstance(arg, tvm.tir.BufferRegion):
+                self.visit_buffer_region_(arg)
 
+    def visit_buffer_region_(self, op):
+        """Visitor implementation for BufferRegion."""
+        def _visit_range(range):
+            self.visit_expr(range.min)
+            self.visit_expr(range.extent)
+        
+        _visit_array(op.region, _visit_range)
 
 
 class StmtMutator(StmtFunctor):
@@ -717,6 +730,8 @@ class StmtMutator(StmtFunctor):
                 new_arg = self.visit_expr(arg)
             elif isinstance(arg, tvm.tir.Stmt):
                 new_arg = self.visit_stmt(arg)
+            elif isinstance(arg, tvm.tir.BufferRegion):
+                new_arg = self.visit_buffer_region_(arg)
             else:
                 new_arg = arg
                 
@@ -730,6 +745,24 @@ class StmtMutator(StmtFunctor):
         return tvm.tir.OpCall(
             *new_args, op=op.op, workspace=op.workspace, schedule_config=op.schedule_config
         )
+        
+    def visit_buffer_region_(self, op):
+        """Mutator implementation for BufferRegion."""
+        def _mutate_range(range):
+            new_min = self.visit_expr(range.min)
+            new_extent = self.visit_expr(range.extent)
+            
+            if new_min is range.min and new_extent is range.extent:
+                return range
+            else:
+                return Range.from_min_extent(new_min, new_extent)
+        
+        region = [_mutate_range(r) for r in op.region]
+        
+        if all(old_r is new_r for old_r, new_r in zip(op.region, region)):
+            return op
+        else:
+            return tvm.tir.BufferRegion(op.buffer, region)
 
     def __call__(self, stmt):
         """Call mutator on statement.

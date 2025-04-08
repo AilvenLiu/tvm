@@ -16,3 +16,4 @@
 # under the License.
 
 from .private_buffer_alloc import PrivateBufferAlloc
+from .naive_allocator import NaiveAllocator

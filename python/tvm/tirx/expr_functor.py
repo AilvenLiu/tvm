@@ -83,7 +83,6 @@ class ExprFunctor:
             "tir.IntImm": self.visit_int_imm_,
             "tir.FloatImm": self.visit_float_imm_,
             "tir.StringImm": self.visit_string_imm_,
-            "tir.Any": self.visit_any_
         }
 
     def visit_expr(self, expr: PrimExpr):
@@ -244,10 +243,6 @@ class ExprFunctor:
         """Default visitor for StringImm node."""
         return self.visit_expr_default_(op)
 
-    def visit_any_(self, op):
-        """Default visitor for Any node."""
-        return self.visit_expr_default_(op)
-
     def visit_expr_default_(self, op):
         """Default visitor implementation."""
         raise NotImplementedError(f"Do not have a default for {op.__class__.__name__}")
@@ -282,9 +277,6 @@ class ExprVisitor(ExprFunctor):
         """Visitor implementation for SizeVar."""
         self.visit_var_(op)
 
-    def visit_any_(self, op):
-        """Visitor implementation for Any."""
-        pass
 
     def visit_buffer_load_(self, op):
         """Visitor implementation for BufferLoad."""
@@ -461,10 +453,6 @@ class ExprMutator(ExprFunctor):
     def visit_size_var_(self, op):
         """Mutator implementation for SizeVar."""
         return self.visit_var_(op)
-
-    def visit_any_(self, op):
-        """Mutator implementation for Any."""
-        return op
 
     def visit_buffer_load_(self, op):
         """Mutator implementation for BufferLoad."""

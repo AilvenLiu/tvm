@@ -254,6 +254,11 @@ class Buffer : public ObjectRef {
    */
   TVM_DLL ffi::String logical_scope() const;
 
+  /*!
+   * \brief Return a new buffer with the allocated address.
+   */
+  TVM_DLL Buffer with_allocated_addr(ffi::Array<Integer> allocated_addr) const;
+
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Buffer, ObjectRef, BufferNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(BufferNode);
 };

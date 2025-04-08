@@ -185,6 +185,11 @@ class Buffer(Object, Scriptable):
         """
         return _ffi_api.BufferGetFlattenedBuffer(self)  # type: ignore
 
+    def with_allocated_addr(self, allocated_addr):
+        """Return a new buffer with the allocated address.
+        """
+        return _ffi_api.BufferWithAllocatedAddr(self, allocated_addr)  # type: ignore
+
     def offset_of(self, indices):
         """Determine the offset of the provided indices in the flattened buffer.
 
