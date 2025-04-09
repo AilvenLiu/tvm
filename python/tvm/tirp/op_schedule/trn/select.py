@@ -149,7 +149,7 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                             dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
                             true_value_indices = T.meta_var(f_gen_true_value_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
                             pred = T.meta_var(analyzer.simplify(op.predicate.apply(f_gen_axes(((b_loop, b_extent),),f_loop_wo_limit, p_loop))))
-                            T.evaluate(T.nki_affine_select(dst_buffer[*dst_indices], pred, true_value_buffer[*true_value_indices], false_value))
+                            T.evaluate(T.nki.affine_select(dst_buffer[*dst_indices], pred, true_value_buffer[*true_value_indices], false_value))
     # fmt: on
 
     return impl

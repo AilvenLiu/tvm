@@ -458,7 +458,7 @@ def binary_trn(
     opcode = binary_map_ops[binary_op]
 
     # Select appropriate NKI function based on instruction type
-    _func = T.nki_tensortensor if inst_type == InstType.TENSOR_TENSOR else T.nki_tensorscalar
+    _func = T.nki.tensortensor if inst_type == InstType.TENSOR_TENSOR else T.nki.tensorscalar
     func = lambda *args: (
         _func(*args, reverse) if inst_type == InstType.TENSOR_SCALAR else _func(*args)
     )

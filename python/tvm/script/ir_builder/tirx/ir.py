@@ -2192,6 +2192,184 @@ def _op_wrapper(func: Callable[P, T]) -> Callable[P, T]:
     return wrapped
 
 
+def _dtype_forward(func):
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        if "dtype" in kwargs:
+            args = (kwargs.pop("dtype"),) + args
+        return func(*args, **kwargs)
+
+    return wrapped
+
+
+class PTXNamespace:
+    """The PTX instruction submodule."""
+
+    def __init__(self):
+        self.ldmatrix = _dtype_forward(_tir_op.ptx_ldmatrix)
+        self.stmatrix = _op_wrapper(_tir_op.ptx_stmatrix)
+        self.setmaxnreg : Callable[..., Any] = _op_wrapper(_tir_op.ptx_setmaxnreg)
+        self.elect_sync : Callable[..., Any] = _op_wrapper(_tir_op.ptx_elect_sync)
+        self.fetch_register : Callable[..., Any] = _op_wrapper(_tir_op.ptx_fetch_register)
+        self.encode_matrix_descriptor = _op_wrapper(_tir_op.ptx_encode_matrix_descriptor)
+        self.mma = MmaNamespace()
+        self.cp_async = CpAsyncNamespace()
+        self.wgmma = WgmmaNamespace()
+        self.mbarrier = MbarrierNamespace()
+        self.bar = BarNamespace()
+        self.barrier = BarrierNamespace()
+        self.fence = FenceNamespace()
+
+class MmaNamespace:
+    """The MMA instruction submodule."""
+
+    def __init__(self):
+        self.sp = _dtype_forward(_tir_op.ptx_mma_sp)
+
+    def __call__(self, *args, **kwds):
+        return _dtype_forward(_tir_op.ptx_mma)(*args, **kwds)
+
+class CpAsyncNamespace:
+    """The CpAsync instruction submodule."""
+
+    def __init__(self):
+        self.commit_group = _op_wrapper(_tir_op.ptx_cp_async_commit_group)
+        self.wait_group = _op_wrapper(_tir_op.ptx_cp_async_wait_group)
+        self.bulk = CpAsyncBulkNamespace()
+        self.mbarrier = CpAsyncMbarrierNamespace()
+
+    def __call__(self, *args, **kwds):
+        return _dtype_forward(_tir_op.ptx_cp_async)(*args, **kwds)
+
+class CpAsyncBulkNamespace:
+    """The CpAsyncBulk instruction submodule."""
+
+    def __init__(self):
+        self.commit_group = _op_wrapper(_tir_op.ptx_cp_async_bulk_commit_group)
+        self.wait_group = _op_wrapper(_tir_op.ptx_cp_async_bulk_wait_group)
+        self.tensor = CpAsyncBulkTensorNamespace()
+
+    def __call__(self, *args, **kwds):
+        return _dtype_forward(_tir_op.ptx_cp_async_bulk)(*args, **kwds)
+
+class CpAsyncBulkTensorNamespace:
+    """The CpAsyncBulkTensor instruction submodule."""
+
+    def __init__(self):
+        self.g2c = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_global_to_cluster)
+        self.s2g = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_shared_to_global)
+
+class CpAsyncMbarrierNamespace:
+    """The CpAsyncMbarrier instruction submodule."""
+
+    def __init__(self):
+        self.arrive = _op_wrapper(_tir_op.ptx_cp_async_mbarrier_arrive)
+
+class WgmmaNamespace:
+    """The WGMMA instruction submodule."""
+
+    def __init__(self):
+        self.fence : Callable[..., Any] = _op_wrapper(_tir_op.ptx_wgmma_fence)
+        self.commit_group = _op_wrapper(_tir_op.ptx_wgmma_commit_group)
+        self.wait_group = _op_wrapper(_tir_op.ptx_wgmma_wait_group)
+        self.noop_barrier = _op_wrapper(_tir_op.ptx_wgmma_noop_barrier)
+        self.mma_async = WgmmaMmaAsyncNamespace()
+
+class WgmmaMmaAsyncNamespace:
+    """The WGMMA MMAAsync instruction submodule."""
+
+    def __init__(self):
+        self.ss = _op_wrapper(_tir_op.ptx_wgmma_mma_async_ss)
+        self.rs = _op_wrapper(_tir_op.ptx_wgmma_mma_async_rs)
+
+class MbarrierNamespace:
+    """The Mbarrier instruction submodule."""
+
+    def __init__(self):
+        self.init = _op_wrapper(_tir_op.ptx_mbarrier_init)
+        self.try_wait = _op_wrapper(_tir_op.ptx_mbarrier_try_wait)
+        self.arrive = MbarrierArriveNamespace()
+
+class MbarrierArriveNamespace:
+    """The Mbarrier Arrive instruction submodule."""
+
+    def __init__(self):
+        self.expect_tx = _op_wrapper(_tir_op.ptx_mbarrier_arrive_expect_tx)
+
+    def __call__(self, *args, **kwds):
+        return _op_wrapper(_tir_op.ptx_mbarrier_arrive)(*args, **kwds)
+
+class BarNamespace:
+    """The Bar instruction submodule."""
+
+    def __init__(self):
+        self.arrive = _op_wrapper(_tir_op.ptx_bar_arrive)
+        self.sync = _op_wrapper(_tir_op.ptx_bar_sync)
+
+class BarrierNamespace:
+    """The Barrier instruction submodule."""
+
+    def __init__(self):
+        self.cluster = BarrierClusterNamespace()
+
+class BarrierClusterNamespace:
+    """The BarrierCluster instruction submodule."""
+
+    def __init__(self):
+        self.arrive = _op_wrapper(_tir_op.ptx_barrier_cluster_arrive)
+        self.wait = _op_wrapper(_tir_op.ptx_barrier_cluster_wait)
+
+class FenceNamespace:
+    """The Fence instruction submodule."""
+
+    def __init__(self):
+        self.mbarrier_init = _op_wrapper(_tir_op.ptx_fence_mbarrier_init_release_cluster)
+        self.proxy = _op_wrapper(_tir_op.ptx_fence_proxy)
+
+class CUDANamespace:
+    """The CUDA intrinsics submodule."""
+
+    def __init__(self):
+        self.barrier = CUDABarrierNamespace()
+
+class CUDABarrierNamespace:
+    """The CUDA barrier intrinsics submodule."""
+
+    def __init__(self):
+        self.init = _op_wrapper(_tir_op.cuda_barrier_init)
+        self.arrive = _op_wrapper(_tir_op.cuda_barrier_arrive)
+        self.wait = _op_wrapper(_tir_op.cuda_barrier_wait)
+        self.arrive_and_wait = _op_wrapper(_tir_op.cuda_barrier_arrive_and_wait)
+
+    def __call__(self, *args, **kwds):
+        return _op_wrapper(_tir_op.cuda_barrier_create)(*args, **kwds)
+
+class NKINamespace:
+    """The NKI instructions submodule."""
+
+    def __init__(self):
+        self.load = _op_wrapper(_tir_op.nki_load)
+        self.store = _op_wrapper(_tir_op.nki_store)
+        self.tensor_copy = _op_wrapper(_tir_op.nki_tensor_copy)
+        self.matmul = _op_wrapper(_tir_op.nki_matmul)
+        self.activation = _op_wrapper(_tir_op.nki_activation)
+        self.activation_reduce = _op_wrapper(_tir_op.nki_activation_reduce)
+        self.reciprocal = _op_wrapper(_tir_op.nki_reciprocal)
+        self.tensorreduce = _op_wrapper(_tir_op.nki_tensorreduce)
+        self.tensortensor = _op_wrapper(_tir_op.nki_tensortensor)
+        self.tensorscalar = _op_wrapper(_tir_op.nki_tensorscalar)
+        self.tensorscalar_reduce = _op_wrapper(_tir_op.nki_tensorscalar_reduce)
+        self.scalar_tensor_tensor = _op_wrapper(_tir_op.nki_scalar_tensor_tensor)
+        self.scalar_tensor_scalar = _op_wrapper(_tir_op.nki_scalar_tensor_scalar)
+        self.memset = _op_wrapper(_tir_op.nki_memset)
+        self.identity = _op_wrapper(_tir_op.nki_identity)
+        self.affine_select = _op_wrapper(_tir_op.nki_affine_select)
+
+ptx = PTXNamespace()
+cuda = CUDANamespace()
+nki = NKINamespace()
+
+
 abs = _op_wrapper(_tir_op.abs)  # pylint: disable=redefined-builtin
 acos = _op_wrapper(_tir_op.acos)
 acosh = _op_wrapper(_tir_op.acosh)
@@ -2284,43 +2462,10 @@ tvm_warp_shuffle_up = _tir_op.tvm_warp_shuffle_up
 tvm_warp_shuffle_down = _tir_op.tvm_warp_shuffle_down
 tvm_warp_shuffle_xor = _tir_op.tvm_warp_shuffle_xor
 tvm_warp_activemask = _tir_op.tvm_warp_activemask
-ptx_wait_group = _op_wrapper(_tir_op.ptx_wait_group)
-ptx_commit_group = _op_wrapper(_tir_op.ptx_commit_group)
-ptx_cp_async_barrier = _op_wrapper(_tir_op.ptx_cp_async_barrier)
-ptx_init_barrier_thread_count = _op_wrapper(_tir_op.ptx_init_barrier_thread_count)
-ptx_arrive_barrier = _op_wrapper(_tir_op.ptx_arrive_barrier)
-ptx_arrive_barrier_expect_tx = _op_wrapper(_tir_op.ptx_arrive_barrier_expect_tx)
-ptx_wait_barrier = _op_wrapper(_tir_op.ptx_wait_barrier)
-cuda_barrier_create = _op_wrapper(_tir_op.cuda_barrier_create)
-cuda_barrier_init = _op_wrapper(_tir_op.cuda_barrier_init)
-cuda_barrier_arrive = _op_wrapper(_tir_op.cuda_barrier_arrive)
-cuda_barrier_wait = _op_wrapper(_tir_op.cuda_barrier_wait)
-cuda_barrier_arrive_and_wait = _op_wrapper(_tir_op.cuda_barrier_arrive_and_wait)
-cuda_fence_proxy_async = _op_wrapper(_tir_op.cuda_fence_proxy_async)
-cp_async_bulk_tensor_global_to_cluster = _op_wrapper(_tir_op.cp_async_bulk_tensor_global_to_cluster)
-cp_async_bulk_tensor_shared_to_global = _op_wrapper(_tir_op.cp_async_bulk_tensor_shared_to_global)
-cp_async_bulk_tensor_commit_group = _op_wrapper(_tir_op.cp_async_bulk_tensor_commit_group)
-cp_async_bulk_tensor_wait_group = _op_wrapper(_tir_op.cp_async_bulk_tensor_wait_group)
-barrier_cluster_arrive = _op_wrapper(_tir_op.barrier_cluster_arrive)
-barrier_cluster_wait = _op_wrapper(_tir_op.barrier_cluster_wait)
-elect_sync = _op_wrapper(_tir_op.elect_sync)
-fence_mbarrier_init_release_cluster = _op_wrapper(_tir_op.fence_mbarrier_init_release_cluster)
-ptx_fetch_register = _op_wrapper(_tir_op.ptx_fetch_register)
-mbarrier_init = _op_wrapper(_tir_op.mbarrier_init)
-mbarrier_arrive = _op_wrapper(_tir_op.mbarrier_arrive)
-mbarrier_arrive_expect_tx = _op_wrapper(_tir_op.mbarrier_arrive_expect_tx)
-mbarrier_wait = _op_wrapper(_tir_op.mbarrier_wait)
-named_barrier_arrive = _op_wrapper(_tir_op.named_barrier_arrive)
-named_barrier_sync = _op_wrapper(_tir_op.named_barrier_sync)
-encode_matrix_descriptor = _op_wrapper(_tir_op.encode_matrix_descriptor)
-wgmma_fence_operand = _op_wrapper(_tir_op.wgmma_fence_operand)
-wgmma_mma_async_ss = _op_wrapper(_tir_op.wgmma_mma_async_ss)
-wgmma_mma_async_rs = _op_wrapper(_tir_op.wgmma_mma_async_rs)
-wgmma_arrive = _op_wrapper(_tir_op.wgmma_arrive)
-wgmma_commit_group = _op_wrapper(_tir_op.wgmma_commit_group)
-wgmma_wait_group = _op_wrapper(_tir_op.wgmma_wait_group)
-stmatrix_sync_aligned = _op_wrapper(_tir_op.stmatrix_sync_aligned)
-setmaxnreg = _op_wrapper(_tir_op.setmaxnreg)
+init_barrier_thread_count = _op_wrapper(_tir_op.init_barrier_thread_count)
+arrive_barrier = _op_wrapper(_tir_op.arrive_barrier)
+arrive_barrier_expect_tx = _op_wrapper(_tir_op.arrive_barrier_expect_tx)
+wait_barrier = _op_wrapper(_tir_op.wait_barrier)
 make_filled_simdgroup_matrix = _op_wrapper(_tir_op.make_filled_simdgroup_matrix)
 simdgroup_load = _op_wrapper(_tir_op.simdgroup_load)
 simdgroup_store = _op_wrapper(_tir_op.simdgroup_store)
@@ -2339,36 +2484,9 @@ anylist_setitem_call_cpacked = _op_wrapper(_tir_op.anylist_setitem_call_cpacked)
 vscale = _op_wrapper(_tir_op.vscale)
 ignore_loop_partition = _op_wrapper(_tir_op.ignore_loop_partition)
 print_buffer = _op_wrapper(_tir_op.print_buffer)
-cuda_timer_init = _op_wrapper(_tir_op.cuda_timer_init)
-cuda_timer_start = _op_wrapper(_tir_op.cuda_timer_start)
-cuda_timer_end = _op_wrapper(_tir_op.cuda_timer_end)
-nki_load = _op_wrapper(_tir_op.nki_load)
-nki_store = _op_wrapper(_tir_op.nki_store)
-nki_tensor_copy = _op_wrapper(_tir_op.nki_tensor_copy)
-nki_matmul = _op_wrapper(_tir_op.nki_matmul)
-nki_activation = _op_wrapper(_tir_op.nki_activation)
-nki_reciprocal = _op_wrapper(_tir_op.nki_reciprocal)
-nki_tensortensor = _op_wrapper(_tir_op.nki_tensortensor)
-nki_tensorscalar = _op_wrapper(_tir_op.nki_tensorscalar)
-nki_tensorreduce = _op_wrapper(_tir_op.nki_tensorreduce)
-nki_memset = _op_wrapper(_tir_op.nki_memset)
-nki_activation_reduce = _op_wrapper(_tir_op.nki_activation_reduce)
-nki_tensorscalar_reduce = _op_wrapper(_tir_op.nki_tensorscalar_reduce)
-nki_identity = _op_wrapper(_tir_op.nki_identity)
-nki_scalar_tensor_tensor = _op_wrapper(_tir_op.nki_scalar_tensor_tensor)
-nki_scalar_tensor_scalar = _op_wrapper(_tir_op.nki_scalar_tensor_scalar)
-nki_affine_select = _op_wrapper(_tir_op.nki_affine_select)
-
-
-def _dtype_forward(func):
-    @functools.wraps(func)
-    def wrapped(*args, **kwargs):
-        if "dtype" in kwargs:
-            args = (kwargs.pop("dtype"),) + args
-        return func(*args, **kwargs)
-
-    return wrapped
-
+timer_init_cuda = _op_wrapper(_tir_op.timer_init_cuda)
+timer_start_cuda = _op_wrapper(_tir_op.timer_start_cuda)
+timer_end_cuda = _op_wrapper(_tir_op.timer_end_cuda)
 
 reinterpret = _dtype_forward(_tir_op.reinterpret)
 call_extern = _dtype_forward(_tir_op.call_extern)
@@ -2376,11 +2494,6 @@ call_intrin = _dtype_forward(_tir_op.call_intrin)
 call_llvm_intrin = _dtype_forward(_tir_op.call_llvm_intrin)
 call_llvm_pure_intrin = _dtype_forward(_tir_op.call_llvm_pure_intrin)
 call_pure_extern = _dtype_forward(_tir_op.call_pure_extern)
-ptx_mma = _dtype_forward(_tir_op.ptx_mma)
-ptx_mma_sp = _dtype_forward(_tir_op.ptx_mma_sp)
-ptx_ldmatrix = _dtype_forward(_tir_op.ptx_ldmatrix)
-ptx_cp_async = _dtype_forward(_tir_op.ptx_cp_async)
-ptx_cp_async_bulk = _dtype_forward(_tir_op.ptx_cp_async_bulk)
 mma_store = _dtype_forward(_tir_op.mma_store)
 mma_fill = _dtype_forward(_tir_op.mma_fill)
 vectorlow = _dtype_forward(_tir_op.vectorlow)
@@ -2670,48 +2783,10 @@ __all__ = float_types + [
     "tvm_warp_shuffle_down",
     "tvm_warp_shuffle_xor",
     "tvm_warp_activemask",
-    "ptx_mma",
-    "ptx_mma_sp",
-    "ptx_ldmatrix",
-    "ptx_cp_async",
-    "ptx_cp_async_bulk",
-    "ptx_wait_group",
-    "ptx_commit_group",
-    "ptx_cp_async_barrier",
-    "ptx_init_barrier_thread_count",
-    "ptx_arrive_barrier",
-    "ptx_arrive_barrier_expect_tx",
-    "ptx_wait_barrier",
-    "cuda_barrier_create",
-    "cuda_barrier_init",
-    "cuda_barrier_arrive",
-    "cuda_barrier_wait",
-    "cuda_barrier_arrive_and_wait",
-    "cuda_fence_proxy_async",
-    "mbarrier_init",
-    "mbarrier_arrive",
-    "mbarrier_arrive_expect_tx",
-    "mbarrier_wait",
-    "named_barrier_arrive",
-    "named_barrier_sync",
-    "encode_matrix_descriptor",
-    "wgmma_fence_operand",
-    "wgmma_mma_async_ss",
-    "wgmma_mma_async_rs",
-    "wgmma_arrive",
-    "wgmma_commit_group",
-    "wgmma_wait_group",
-    "stmatrix_sync_aligned",
-    "setmaxnreg",
-    "cp_async_bulk_tensor_global_to_cluster",
-    "cp_async_bulk_tensor_shared_to_global",
-    "cp_async_bulk_tensor_commit_group",
-    "cp_async_bulk_tensor_wait_group",
-    "barrier_cluster_arrive",
-    "barrier_cluster_wait",
-    "elect_sync",
-    "fence_mbarrier_init_release_cluster",
-    "ptx_fetch_register",
+    "init_barrier_thread_count",
+    "arrive_barrier",
+    "arrive_barrier_expect_tx",
+    "wait_barrier",
     "make_filled_simdgroup_matrix",
     "simdgroup_load",
     "simdgroup_store",
@@ -2743,22 +2818,6 @@ __all__ = float_types + [
     "broadcast",
     "ramp",
     "cast",
-    "nki_load",
-    "nki_store",
-    "nki_tensor_copy",
-    "nki_matmul",
-    "nki_activation",
-    "nki_reciprocal",
-    "nki_tensorreduce",
-    "nki_tensortensor",
-    "nki_tensorscalar",
-    "nki_memset",
-    "nki_activation_reduce",
-    "nki_tensorscalar_reduce",
-    "nki_identity",
-    "nki_scalar_tensor_tensor",
-    "nki_scalar_tensor_scalar",
-    "nki_affine_select",
     # tvm.tirx.expr
     "Var",
     "SizeVar",
@@ -2804,12 +2863,15 @@ __all__ = float_types + [
     "call_kernel",
     "ignore_loop_partition",
     "print_buffer",
-    "cuda_timer_init",
-    "cuda_timer_start",
-    "cuda_timer_end",
+    "timer_init_cuda",
+    "timer_start_cuda",
+    "timer_end_cuda",
 ]
 
 __all__ += [
+    "ptx",
+    "cuda",
+    "nki",
     "world",
     "kernel",
     "cluster",

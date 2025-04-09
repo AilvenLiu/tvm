@@ -1093,7 +1093,7 @@ __forceinline__ __device__ void {func_name}(void* barrier, int phase) {
 
 std::string PrintNamedBarrierArriveAssembly(const std::string& name_bar_id,
                                             const std::string& thread_count) {
-  std::string asm_code = R"(/* T.named_barrier_arrive() */ {
+  std::string asm_code = R"(/* T.ptx_bar_arrive() */ {
   asm volatile("bar.arrive %0, %1;" : : "r"({name_bar_id}), "r"({thread_count}));
 }
 )";
@@ -1106,7 +1106,7 @@ std::string PrintNamedBarrierArriveAssembly(const std::string& name_bar_id,
 
 std::string PrintNamedBarrierSyncAssembly(const std::string& name_bar_id,
                                           const std::string& thread_count) {
-  std::string asm_code = R"(/* T.named_barrier_sync() */ {
+  std::string asm_code = R"(/* T.ptx_bar_sync() */ {
   asm volatile("bar.sync %0, %1;" : : "r"({name_bar_id}), "r"({num_threads}));
 }
 )";
@@ -1379,7 +1379,7 @@ std::string PrintWGMMAasyncSSAssembly(int M, int N, int K, const std::string& in
                                       float scaleA, float scaleB, const std::string& scaleD,
                                       const std::string& descA, const std::string& descB,
                                       const std::vector<std::string>& accums) {
-  std::string asm_code = R"(/* T.wgmma_mma_async_ss() */ {
+  std::string asm_code = R"(/* T.ptx_wgmma_mma_async_ss() */ {
   asm volatile(
     "{\n"
     ".reg .pred p;\n"
@@ -1461,7 +1461,7 @@ std::string PrintWGMMAasyncRSAssembly(int M, int N, int K, const std::string& in
                                       const std::vector<std::string>& A_regs,
                                       const std::string& descB,
                                       const std::vector<std::string>& accums) {
-  std::string asm_code = R"(/* T.wgmma_mma_async_rs() */ {
+  std::string asm_code = R"(/* T.ptx_wgmma_mma_async_rs() */ {
   asm volatile(
     "{\n"
     ".reg .pred p;\n"
@@ -1550,7 +1550,7 @@ __forceinline__ __device__ void {func_name}() {
 )";
   std::string caller_code = "{func_name}();\n";
 
-  std::string func_name = "ptx_wgmma_arrive";
+  std::string func_name = "ptx_wgmma_fence";
   {  // func code
     Replacer replacer;
     replacer.register_rule("{func_name}", func_name);
@@ -1641,7 +1641,7 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo,
 )";
   std::string caller_code = "{func_name}({desc}, {addr}, {ldo}, {sdo}, {swizzle});\n";
 
-  std::string func_name = "encode_matrix_descriptor";
+  std::string func_name = "ptx_encode_matrix_descriptor";
   {  // func code
     Replacer replacer;
     replacer.register_rule("{func_name}", func_name);
@@ -1662,7 +1662,7 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo,
 }
 
 std::string PrintBarrierClusterArriveAssembly(const std::string& sem, bool aligned) {
-  std::string asm_code = R"(/* T.barrier_cluster_arrive() */ {
+  std::string asm_code = R"(/* T.ptx_barrier_cluster_arrive() */ {
   asm volatile("barrier.cluster.arrive{sem}{aligned};\n" : :);
 }
 )";
@@ -1673,7 +1673,7 @@ std::string PrintBarrierClusterArriveAssembly(const std::string& sem, bool align
 }
 
 std::string PrintBarrierClusterWaitAssembly(bool acquire, bool aligned) {
-  std::string asm_code = R"(/* T.barrier_cluster_wait() */ {
+  std::string asm_code = R"(/* T.ptx_barrier_cluster_wait() */ {
   asm volatile("barrier.cluster.wait{acquire}{aligned};\n" : :);
 }
 )";
@@ -1720,7 +1720,7 @@ __forceinline__ __device__ void {func_name}() {
       "}" ::);
 }
 )";
-  std::string func_name = "fence_mbarrier_init_release_cluster";
+  std::string func_name = "ptx_fence_mbarrier_init_release_cluster";
 
   Replacer replacer;
   replacer.register_rule("{func_name}", func_name);

@@ -153,39 +153,39 @@ def test_fp16_fused_attn():
         def init(self, tid):
             with T.thread()[tid == 0]:
                 for i in T.serial(KV_STAGES):
-                    T.mbarrier_init(self.full.access_ptr("rw", offset=i), 1)
-                    T.mbarrier_init(self.empty.access_ptr("rw", offset=i), 2 * WG_SIZE)  # 2 consumers
+                    T.ptx.mbarrier.init(self.full.access_ptr("rw", offset=i), 1)
+                    T.ptx.mbarrier.init(self.empty.access_ptr("rw", offset=i), 2 * WG_SIZE)  # 2 consumers
             # fence the barrier init, the memory ordering is visible across the whole block
-            T.fence_mbarrier_init_release_cluster()
+            T.ptx.fence.mbarrier_init()
 
         @T.macro
         def producer_acquire(self, state, profiler_buffer, profiler_tag, profiler_write_offset):
             stage = T.meta_var(state.index[0])
             cur_empty = T.meta_var(self.empty.access_ptr("rw", offset=stage))
             cur_full = T.meta_var(self.full.access_ptr("rw", offset=stage))
-            T.mbarrier_wait(cur_empty, state.phase[0])
-            T.cuda_timer_start(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-            T.mbarrier_arrive_expect_tx(cur_full, self.bytes)
+            T.ptx.mbarrier.try_wait(cur_empty, state.phase[0])
+            T.timer_start_cuda(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+            T.ptx.mbarrier.arrive.expect_tx(cur_full, self.bytes)
 
         @T.macro
         def producer_tail(self, state):
             stage = T.meta_var(state.index[0])
             cur_empty = T.meta_var(self.empty.access_ptr("rw", offset=stage))
             for _ in T.serial(KV_STAGES):
-                T.mbarrier_wait(cur_empty, state.phase[0])
+                T.ptx.mbarrier.try_wait(cur_empty, state.phase[0])
                 state.advance()
 
         @T.macro
         def consumer_wait(self, state):
             stage = T.meta_var(state.index[0])
             cur_full = T.meta_var(self.full.access_ptr("rw", offset=stage))
-            T.mbarrier_wait(cur_full, state.phase[0])
+            T.ptx.mbarrier.try_wait(cur_full, state.phase[0])
 
         @T.macro
         def consumer_release(self, state):
             stage = T.meta_var(state.index[0])
             cur_empty = T.meta_var(self.empty.access_ptr("rw", offset=stage))
-            T.mbarrier_arrive(cur_empty)
+            T.ptx.mbarrier.arrive(cur_empty)
 
         @T.macro
         def copy(self, state, smem, tmap, *coord):
@@ -194,7 +194,7 @@ def test_fp16_fused_attn():
             stage = T.meta_var(state.index[0])
             cur_full = T.meta_var(self.full.access_ptr("rw", offset=stage))
             for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
-                T.cp_async_bulk_tensor_global_to_cluster(
+                T.ptx.cp_async.bulk.tensor.g2c(
                     4, smem.access_ptr("w", offset=smem.offset_of_p([stage, tma_tile * TMA_TILE * BLK_KV])), cur_full,
                     tmap, coord[0] + tma_tile * TMA_TILE, coord[1], coord[2], coord[3],
                 )
@@ -224,9 +224,9 @@ def test_fp16_fused_attn():
                 self.phase[0] = self.phase[0] ^ 1
 
     @T.macro
-    def wgmma_fence_operand(accum, accum_count):
+    def ptx_wgmma_noop_barrier(accum, accum_count):
         for i in T.serial(accum_count):
-            T.wgmma_fence_operand(accum[i])
+            T.ptx.wgmma.noop_barrier(accum[i])
 
     def get_elems_list(arr, count, start=0):
         return [arr[start + i] for i in range(count)]
@@ -346,20 +346,20 @@ def test_fp16_fused_attn():
 
     @T.macro
     def gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, consumer_id, consumer_k):
-        wgmma_fence_operand(S_reg, S_REG_COUNT)
-        T.wgmma_arrive()
+        ptx_wgmma_noop_barrier(S_reg, S_REG_COUNT)
+        T.ptx.wgmma.fence()
 
         k_stage = T.meta_var(consumer_k.index[0])
         with T.thread():
             scaleD = int_var()
             scaleD[0] = 0
-            T.encode_matrix_descriptor(desc_Q.data, smem_q.access_ptr("r", offset=consumer_id * BLK_Q // 2 * TMA_TILE),
+            T.ptx.encode_matrix_descriptor(desc_Q.data, smem_q.access_ptr("r", offset=consumer_id * BLK_Q // 2 * TMA_TILE),
                                        BLK_Q * 8, 64, SWIZZLE)
-            T.encode_matrix_descriptor(desc_K.data, smem_k.access_ptr("r", offset=smem_k.offset_of_p([k_stage, 0])),
+            T.ptx.encode_matrix_descriptor(desc_K.data, smem_k.access_ptr("r", offset=smem_k.offset_of_p([k_stage, 0])),
                                        BLK_KV * 8, 64, SWIZZLE)
             for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
                 for wgmma_tile in T.serial(TMA_TILE // WGMMA_QK_K):
-                    T.wgmma_mma_async_ss(
+                    T.ptx.wgmma.mma_async.ss(
                         WGMMA_QK_M, WGMMA_QK_N, WGMMA_QK_K, "float16", "float32", False, False,
                         1.0, 1.0, scaleD[0], desc_Q[0], desc_K[0], *get_elems_list(S_reg, S_REG_COUNT)
                     )
@@ -369,29 +369,29 @@ def test_fp16_fused_attn():
                 desc_Q[0] = desc_Q[0] + (2 * (-TMA_TILE + BLK_Q * TMA_TILE) >> 4)
                 desc_K[0] = desc_K[0] + (2 * (-TMA_TILE + BLK_KV * TMA_TILE) >> 4)
                 
-        T.wgmma_commit_group()
-        wgmma_fence_operand(S_reg, S_REG_COUNT)
+        T.ptx.wgmma.commit_group()
+        ptx_wgmma_noop_barrier(S_reg, S_REG_COUNT)
 
     @T.macro
     def gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v):
-        wgmma_fence_operand(P_reg, S_REG_COUNT // 2)
-        wgmma_fence_operand(O_reg, O_REG_COUNT)
-        T.wgmma_arrive()
+        ptx_wgmma_noop_barrier(P_reg, S_REG_COUNT // 2)
+        ptx_wgmma_noop_barrier(O_reg, O_REG_COUNT)
+        T.ptx.wgmma.fence()
 
         v_stage = T.meta_var(consumer_v.index[0])
-        T.encode_matrix_descriptor(desc_V.data, smem_v.access_ptr("r", offset=smem_v.offset_of_p([v_stage, 0])),
+        T.ptx.encode_matrix_descriptor(desc_V.data, smem_v.access_ptr("r", offset=smem_v.offset_of_p([v_stage, 0])),
                                    BLK_KV * 8, 64, SWIZZLE)
         for wgmma_tile in T.serial(BLK_KV // WGMMA_PV_K):
             P_offset = T.meta_var(wgmma_tile * WGMMA_PV_K // 4)
-            T.wgmma_mma_async_rs(
+            T.ptx.wgmma.mma_async.rs(
                 WGMMA_PV_M, WGMMA_PV_N, WGMMA_PV_K, "float16", "float32", False, True,
                 1.0, 1.0, True, desc_V[0], *(get_elems_list(P_reg, WGMMA_PV_K // 4, P_offset) + get_elems_list(O_reg, O_REG_COUNT, 0))
             )
             desc_V[0] = desc_V[0] + (2 * (WGMMA_PV_K * TMA_TILE) >> 4)
 
-        T.wgmma_commit_group()
-        wgmma_fence_operand(P_reg, S_REG_COUNT // 2)
-        wgmma_fence_operand(O_reg, O_REG_COUNT)
+        T.ptx.wgmma.commit_group()
+        ptx_wgmma_noop_barrier(P_reg, S_REG_COUNT // 2)
+        ptx_wgmma_noop_barrier(O_reg, O_REG_COUNT)
 
     # TODO(@bohan): try hygienic=True
     @T.macro
@@ -400,46 +400,46 @@ def test_fp16_fused_attn():
         wg_id, warp_id_in_wg, lane_id, q_idx, kv_tile_idx_read, profiler_buffer, profiler_tag, profiler_write_offset
     ):
         pipeline_k.consumer_wait(consumer_k)
-        T.cuda_timer_start(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.timer_start_cuda(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
         # commit S_i = Q^TK_i but do not wait
         gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)
-        T.cuda_timer_start(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.timer_start_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
         # scale O_{i-1} with scale_{i-1}
         softmax.scale_o(O_reg)
-        T.cuda_timer_end(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.timer_end_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
         # wait V_{i-1} to be loaded
         pipeline_v.consumer_wait(consumer_v)
-        T.cuda_timer_start(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.timer_start_cuda(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
         # commit O_{i-1} += P_{i-1}V_{i-1} but do not wait
         gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v)
         # wait for the gemm result of S_i = Q^TK_i
-        T.wgmma_wait_group(1)
-        T.cuda_timer_end(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.ptx.wgmma.wait_group(1)
+        T.timer_end_cuda(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
         # release the current K tile
         pipeline_k.consumer_release(consumer_k)
-        T.cuda_timer_start(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.timer_start_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
         # mask S_i
         if do_masking:
             mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read[0] * BLK_KV, QO_LEN, KV_LEN)
         # update m, P, l for the current tile
         softmax.update_m_P_l(S_reg)
-        T.cuda_timer_end(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.timer_end_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
         # wait for P_{i-1}V_{i-1} to be computed
-        T.wgmma_wait_group(0)
-        T.cuda_timer_end(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.ptx.wgmma.wait_group(0)
+        T.timer_end_cuda(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
         # release the previous V tile
         pipeline_v.consumer_release(consumer_v)
         consumer_k.advance()
         consumer_v.advance()
-        T.cuda_timer_start(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.timer_start_cuda(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
         # copy to P_{i-1} and downcast to float16
         for i in T.serial(S_REG_COUNT):
             P_reg_fp16[i] = T.Cast("float16", S_reg[i])
-        T.cuda_timer_end(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+        T.timer_end_cuda(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
 
     @T.macro
     def r2S(warp_id, lane_id, smem_o, O_reg, n_tile):
-        T.named_barrier_sync(NameBarrier.EPILOGUE, MMA_THREADS)
+        T.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
         with T.thread():
             O_half = T.alloc_buffer([8], "float32", scope="local")
             for st_tile in T.serial(4):
@@ -448,18 +448,18 @@ def test_fp16_fused_attn():
                 col_noswizzle = T.meta_var(st_tile * 2 + lane_id // 16)
                 col = T.meta_var((lane_id % 8) ^ col_noswizzle)
                 row = T.meta_var(warp_id * 16 + lane_id % 16)
-                T.stmatrix_sync_aligned(4, False, smem_o.access_ptr("w", offset=smem_o.offset_of_p([n_tile % STAGES_EPI, row, col * 8])),
-                                        O_half[0], O_half[1], O_half[2], O_half[3], O_half[4], O_half[5], O_half[6], O_half[7])
+                T.ptx.stmatrix(4, False, smem_o.access_ptr("w", offset=smem_o.offset_of_p([n_tile % STAGES_EPI, row, col * 8])),
+                               O_half[0], O_half[1], O_half[2], O_half[3], O_half[4], O_half[5], O_half[6], O_half[7])
 
     @T.macro
     def s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, n_tile):
-        T.cuda_fence_proxy_async("shared")
-        T.named_barrier_sync(NameBarrier.EPILOGUE, MMA_THREADS)
+        T.ptx.fence.proxy("shared")
+        T.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
         with T.thread()[warp_id == 0 and lane_id == 0]:
-            T.cp_async_bulk_tensor_shared_to_global(4, smem_o.access_ptr("r", offset=smem_o.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
-                                                    O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)
-            T.cp_async_bulk_tensor_commit_group()
-            T.cp_async_bulk_tensor_wait_group(1, read=True)
+            T.ptx.cp_async.bulk.tensor.s2g(4, smem_o.access_ptr("r", offset=smem_o.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
+                                           O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)
+            T.ptx.cp_async.bulk.commit_group()
+            T.ptx.cp_async.bulk.wait_group(1, read=True)
 
     @T.macro
     def write_epilogue(warp_id, lane_id, q_idx, h_idx, b_idx, smem_o, O_map, O_reg):
@@ -557,7 +557,7 @@ def test_fp16_fused_attn():
                     # profiler
                     profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
                     profiler_tag = T.alloc_buffer([1], "uint32", scope="local", align=8)
-                    T.cuda_timer_init(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data)
+                    T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data)
 
                     # softmax
                     softmax = T.meta_var(Softmax("softmax"))
@@ -566,9 +566,9 @@ def test_fp16_fused_attn():
                     tile_scheduler.init(bx)
                     # barriers
                     with T.thread()[tid == 0]:
-                        T.mbarrier_init(bar_Q.access_ptr("rw", offset=0), 1)
-                        T.mbarrier_init(bar_O.access_ptr("rw", offset=0), 1)
-                    T.fence_mbarrier_init_release_cluster()
+                        T.ptx.mbarrier.init(bar_Q.access_ptr("rw", offset=0), 1)
+                        T.ptx.mbarrier.init(bar_O.access_ptr("rw", offset=0), 1)
+                    T.ptx.fence.mbarrier_init()
                     # pipelines
                     pipeline_k.init(tid)
                     pipeline_v.init(tid)
@@ -587,7 +587,7 @@ def test_fp16_fused_attn():
                     b_idx = T.meta_var(tile_scheduler.b_idx[0])
                     attend_kv_len = T.meta_var(KV_LEN - QO_LEN + (q_idx + 1) * BLK_Q if CAUSAL else KV_LEN) # the kvlen to attend of the current q tile
                     num_kv_tiles = T.meta_var(ceildiv(attend_kv_len, BLK_KV)) # number of kv tiles to attend
-                    is_leader = T.meta_var(T.elect_sync(0xFFFFFFFF))
+                    is_leader = T.meta_var(T.ptx.elect_sync(0xFFFFFFFF))
 
                     P_reg_fp16 = T.decl_buffer([S_REG_COUNT], "float16", data=P_reg.data, elem_offset=0)
                     with T.cta():
@@ -595,7 +595,7 @@ def test_fp16_fused_attn():
                         with T.warpgroup()[0:1]:
                             ############################################################################## PRODUCER
                             # deallocate registers
-                            T.setmaxnreg(False, 24)
+                            T.ptx.setmaxnreg(False, 24)
                             # only 1 warp is responsible for the producer
                             with T.warp()[0:1]:
                                 while (tile_scheduler.valid()):
@@ -606,38 +606,38 @@ def test_fp16_fused_attn():
                                     with T.thread()[is_leader]:
                                         pipeline_k.producer_acquire(producer_k, profiler_buffer, profiler_tag, profiler_write_offset)
                                         pipeline_k.copy(producer_k, smem_k, K_map, 0, h_idx, kv_tile_idx_load[0] * BLK_KV, b_idx)
-                                        T.cuda_timer_end(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        T.timer_end_cuda(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                         producer_k.advance()
                                     # wait for consumers to finish the previous Q tile, then load the current Q tile
-                                    T.named_barrier_sync(NameBarrier.Q_EMPTY, 32 + MMA_THREADS) # 32 threads in producer, 256 threads in consumer
-                                    T.cuda_timer_start(ProfileEventType.IssueLoadQ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                    T.ptx.bar.sync(NameBarrier.Q_EMPTY, 32 + MMA_THREADS) # 32 threads in producer, 256 threads in consumer
+                                    T.timer_start_cuda(ProfileEventType.IssueLoadQ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                     with T.thread()[is_leader]:
-                                        T.mbarrier_arrive_expect_tx(bar_Q_ptr, TMA_BYTES_Q)
+                                        T.ptx.mbarrier.arrive.expect_tx(bar_Q_ptr, TMA_BYTES_Q)
                                         for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
-                                            T.cp_async_bulk_tensor_global_to_cluster(
+                                            T.ptx.cp_async.bulk.tensor.g2c(
                                                 4, smem_q.access_ptr("w", offset=tma_tile * TMA_TILE * BLK_Q), bar_Q_ptr, Q_map,
                                                 tma_tile * TMA_TILE, h_idx, q_idx * BLK_Q, b_idx
                                             )
-                                    T.cuda_timer_end(ProfileEventType.IssueLoadQ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                    T.timer_end_cuda(ProfileEventType.IssueLoadQ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                     # wait for the consumers to finish writing last O_tile to gmem to reuse for Vsmem
-                                    T.named_barrier_sync(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
+                                    T.ptx.bar.sync(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
                                     with T.thread()[is_leader]:
                                         while kv_tile_idx_load[0] > 0:
                                             # load k tiles
                                             pipeline_k.producer_acquire(producer_k, profiler_buffer, profiler_tag, profiler_write_offset)
                                             pipeline_k.copy(producer_k, smem_k, K_map, 0, h_idx, (kv_tile_idx_load[0] - 1) * BLK_KV, b_idx)
-                                            T.cuda_timer_end(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                            T.timer_end_cuda(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                             producer_k.advance()
                                             # load v tiles
                                             pipeline_v.producer_acquire(producer_v, profiler_buffer, profiler_tag, profiler_write_offset)
                                             pipeline_v.copy(producer_v, smem_v, V_map, 0, h_idx, kv_tile_idx_load[0] * BLK_KV, b_idx)
-                                            T.cuda_timer_end(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                            T.timer_end_cuda(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                             producer_v.advance()
                                             kv_tile_idx_load[0] = kv_tile_idx_load[0] - 1
                                         # load the last v tile
                                         pipeline_v.producer_acquire(producer_v, profiler_buffer, profiler_tag, profiler_write_offset)
                                         pipeline_v.copy(producer_v, smem_v, V_map, 0, h_idx, 0, b_idx)
-                                        T.cuda_timer_end(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        T.timer_end_cuda(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                         producer_v.advance()
                                 # move to the next tile
                                     tile_scheduler.next_tile()
@@ -649,15 +649,15 @@ def test_fp16_fused_attn():
                         with T.warpgroup()[1:3]:
                             ############################################################################## CONSUMER
                             # allocate registers
-                            T.setmaxnreg(True, 240)
+                            T.ptx.setmaxnreg(True, 240)
                             # inform the producer to Q is ready to be loaded
-                            T.named_barrier_arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)
+                            T.ptx.bar.arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)
                             while (tile_scheduler.valid()):
                                 if q_idx * BLK_Q >= QO_LEN:
                                     break
                                 kv_tile_idx_read[0] = num_kv_tiles - 1
                                 # wait Q to be loaded
-                                T.mbarrier_wait(bar_Q_ptr, q_phase[0])
+                                T.ptx.mbarrier.try_wait(bar_Q_ptr, q_phase[0])
                                 q_phase[0] = q_phase[0] ^ 1
                                 # wait first K tile to be loaded
                                 pipeline_k.consumer_wait(consumer_k)
@@ -668,29 +668,29 @@ def test_fp16_fused_attn():
                                     O_reg[i] = T.float16(0)
                                 # initialize the softmax (m=-INF, l=0)
                                 softmax.init()
-                                T.cuda_timer_start(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_start_cuda(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # calculate S_0 = Q^TK_0
                                 gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)
                                 # wait for O of last tile to be written back to gmem, notifify the producer to load V
-                                T.cp_async_bulk_tensor_wait_group(0)
-                                T.named_barrier_arrive(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
+                                T.ptx.cp_async.bulk.wait_group(0)
+                                T.ptx.bar.arrive(NameBarrier.V_LOAD_READY, 32 + MMA_THREADS)
                                 # wait for the gemm result of S_0 = Q^TK_0
-                                T.wgmma_wait_group(0)
-                                T.cuda_timer_end(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.ptx.wgmma.wait_group(0)
+                                T.timer_end_cuda(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # release the first K tile
                                 pipeline_k.consumer_release(consumer_k)
                                 consumer_k.advance()
-                                T.cuda_timer_start(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_start_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # mask S_0
                                 mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read[0] * BLK_KV, QO_LEN, KV_LEN)
                                 # softmax, initialize m, P, l for the first tile
                                 softmax.init_m_P_l(S_reg)
-                                T.cuda_timer_end(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-                                T.cuda_timer_start(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_end_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_start_cuda(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # copy to P_0 and downcast to float16
                                 for i in T.serial(S_REG_COUNT):
                                     P_reg_fp16[i] = T.Cast("float16", S_reg[i])
-                                T.cuda_timer_end(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_end_cuda(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 with T.thread():
                                     masking_step = int_var()
                                     n_masking_steps = int_var()
@@ -713,37 +713,37 @@ def test_fp16_fused_attn():
                                         )
                                         kv_tile_idx_read[0] = kv_tile_idx_read[0] - 1
                                 # notify the producer to load the next Q tile
-                                T.named_barrier_arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)
-                                T.cuda_timer_start(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.ptx.bar.arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)
+                                T.timer_start_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # scale O for the last tile
                                 softmax.scale_o(O_reg)
-                                T.cuda_timer_end(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_end_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # wait for the last V tile to be loaded
                                 pipeline_v.consumer_wait(consumer_v)
-                                T.cuda_timer_start(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_start_cuda(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # commit the last O += PV
                                 gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v)
-                                T.cuda_timer_start(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_start_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # get final l, do quad reduce and l^(-1)
                                 softmax.finalize()
-                                T.cuda_timer_end(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_end_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # wait for the last O += PV to be computed
-                                T.wgmma_wait_group(0)
-                                T.cuda_timer_end(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.ptx.wgmma.wait_group(0)
+                                T.timer_end_cuda(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # release the last V tile
                                 pipeline_v.consumer_release(consumer_v)
                                 consumer_v.advance()
-                                T.cuda_timer_start(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_start_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # final scale o using diagonal l^(-1)
                                 softmax.scale_o(O_reg)
-                                T.cuda_timer_end(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_end_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 ####### Epilogue, write O back to gmem
                                 # make sure all consumer threads finish V consumption, so Vsmem can be reused for Osmem
-                                T.named_barrier_sync(NameBarrier.O_LOAD_READY, MMA_THREADS)
-                                T.cuda_timer_start(ProfileEventType.WriteO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.ptx.bar.sync(NameBarrier.O_LOAD_READY, MMA_THREADS)
+                                T.timer_start_cuda(ProfileEventType.WriteO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
                                 # write O back to gmem
                                 write_epilogue(warp_id - 4, lane_id, q_idx, h_idx, b_idx, smem_o, O_map, O_reg)
-                                T.cuda_timer_end(ProfileEventType.WriteO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                T.timer_end_cuda(ProfileEventType.WriteO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
 
                                 # move to the next tile
                                 tile_scheduler.next_tile()

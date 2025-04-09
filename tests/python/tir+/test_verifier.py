@@ -135,7 +135,7 @@ def test_scope_slice():
                     with T.warpgroup()[1:2]:
                         pass
                     with T.warpgroup()[2:3]:
-                        with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                        with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
                             pass
     @T.prim_func(tirp=True, check_well_formed=False)
     def test3() -> None:
@@ -149,20 +149,20 @@ def test_scope_slice():
         with T.kernel():
             with T.cta():
                 with T.thread()[0:3]:
-                    with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                    with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
                         pass
     @T.prim_func(tirp=True, check_well_formed=False)
     def test5() -> None:
         with T.kernel():
             with T.cta():
-                with T.thread()[T.elect_sync(0xFFFFFFFF)]:
-                    with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
+                    with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
                         pass
     @T.prim_func(tirp=True, check_well_formed=False)
     def test6() -> None:
         with T.kernel():
             with T.cta():
-                with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
                     with T.thread()[T.int32(0)]:
                         pass
     # fmt: on
@@ -364,11 +364,11 @@ def test_host():
 
                         phase[0] = 0
                         if threadIdx == 0:
-                            T.mbarrier_init(bar.data, 1)
-                            T.cuda_fence_proxy_async("shared")
-                            T.cp_async_bulk_tensor_global_to_cluster(2, A_smem.data, bar.data, A_map, 0, 0)
-                            T.mbarrier_arrive_expect_tx(bar.data, 16*16*4)
-                        T.mbarrier_wait(bar.data, phase[0])
+                            T.ptx.mbarrier.init(bar.data, 1)
+                            T.ptx.fence.proxy("shared")
+                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.data, bar.data, A_map, 0, 0)
+                            T.ptx.mbarrier.arrive.expect_tx(bar.data, 16*16*4)
+                        T.ptx.mbarrier.try_wait(bar.data, phase[0])
                         phase[0] = phase[0] ^ 1
                         T.print_buffer(A_smem.data, "float32", 2, 16*16)
     # fmt: on

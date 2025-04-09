@@ -100,8 +100,6 @@ def test_roundtrip_exec_scope():
                             T.evaluate(0)
                         with T.thread([16, 8])[0:8, 0:4]:
                             T.evaluate(0)
-                        with T.thread()[T.elect_sync(0xFFFFFFFF)]:
-                            T.evaluate(0)
     # fmt: on
 
     code = test.script()

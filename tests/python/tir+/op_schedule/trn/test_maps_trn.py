@@ -74,11 +74,11 @@ def test_simple_unary(op_type):
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
                         if op_type == "reciprocal":
-                            T.nki_reciprocal(
+                            T.nki.reciprocal(
                                 B_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop]
                             )
                         elif op_type == "memset":
-                            T.nki_memset(B_sbuf[p_loop, f_loop], 0.0)
+                            T.nki.memset(B_sbuf[p_loop, f_loop], 0.0)
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -123,9 +123,9 @@ def test_unary_in_a_loop(op_type):
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
                         if op_type == "reciprocal":
-                            T.nki_reciprocal(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop])
+                            T.nki.reciprocal(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop])
                         elif op_type == "memset":
-                            T.nki_memset(B_sbuf[p_loop, i * 512 + f_loop], 0.0)
+                            T.nki.memset(B_sbuf[p_loop, i * 512 + f_loop], 0.0)
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -186,15 +186,15 @@ def test_simple_binary(op_type, operands_type):
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
                         if operands_type == "region_region":
-                            T.nki_tensortensor(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], B_sbuf[p_loop, f_loop], op_type)
+                            T.nki.tensortensor(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], B_sbuf[p_loop, f_loop], op_type)
                         elif operands_type == "region_const":
-                            T.nki_tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], T.float32(3.0), op_type, T.bool(False))
+                            T.nki.tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], T.float32(3.0), op_type, T.bool(False))
                         elif operands_type == "const_region":
-                            T.nki_tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], T.float32(3.0), op_type, T.bool(True))
+                            T.nki.tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], T.float32(3.0), op_type, T.bool(True))
                         elif operands_type == "region_broadcast_rhs":
-                            T.nki_tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], B_sbuf[p_loop, 0], op_type, T.bool(False))
+                            T.nki.tensorscalar(C_sbuf[p_loop, f_loop], A_sbuf[p_loop, f_loop], B_sbuf[p_loop, 0], op_type, T.bool(False))
                         elif operands_type == "region_broadcast_lhs":
-                            T.nki_tensorscalar(C_sbuf[p_loop, f_loop], B_sbuf[p_loop, f_loop], A_sbuf[p_loop, 0], op_type, T.bool(True))
+                            T.nki.tensorscalar(C_sbuf[p_loop, f_loop], B_sbuf[p_loop, f_loop], A_sbuf[p_loop, 0], op_type, T.bool(True))
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": binary})
@@ -279,15 +279,15 @@ def test_binary_complex(op_type, operands_type):
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, f_extent, annotations={"nki_dim":"F"}):
                         if operands_type == "region_region":
-                            T.nki_tensortensor(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], B_sbuf[p_loop, i * 512 + f_loop], op_type)
+                            T.nki.tensortensor(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], B_sbuf[p_loop, i * 512 + f_loop], op_type)
                         elif operands_type == "const_region":
-                            T.nki_tensorscalar(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(True))
+                            T.nki.tensorscalar(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(True))
                         elif operands_type == "region_const":
-                            T.nki_tensorscalar(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(False))
+                            T.nki.tensorscalar(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(False))
                         elif operands_type == "region_broadcast_lhs":
-                            T.nki_tensorscalar(C_sbuf[p_loop, i * 512 + b_loop * 128 + f_loop], B_sbuf[p_loop, i * 512 + b_loop * 128 + f_loop], A_sbuf[p_loop, i * 8 + b_loop], op_type, T.bool(True))
+                            T.nki.tensorscalar(C_sbuf[p_loop, i * 512 + b_loop * 128 + f_loop], B_sbuf[p_loop, i * 512 + b_loop * 128 + f_loop], A_sbuf[p_loop, i * 8 + b_loop], op_type, T.bool(True))
                         elif operands_type == "region_broadcast_rhs":
-                            T.nki_tensortensor(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], B_sbuf[p_loop, f_loop], op_type)
+                            T.nki.tensortensor(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], B_sbuf[p_loop, f_loop], op_type)
 
     # fmt: on
 
@@ -330,7 +330,7 @@ def test_binary_broadcast1():
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 32, annotations={"nki_dim":"F"}):
-                        T.nki_tensorscalar(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], "add", T.bool(False))
+                        T.nki.tensorscalar(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 32 + f_loop], B_sbuf[p_loop, b_loop], "add", T.bool(False))
     # fmt: on
 
     with target:
@@ -373,7 +373,7 @@ def test_binary_broadcast2():
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
-                        T.nki_tensortensor(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], B_sbuf[p_loop, b_loop % 4 * 128 + f_loop], "add")
+                        T.nki.tensortensor(C_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], A_sbuf[p_loop, b_loop % 4 * 4096 + b_loop // 4 * 128 + f_loop], B_sbuf[p_loop, b_loop % 4 * 128 + f_loop], "add")
     # fmt: on
 
     with target:
@@ -404,7 +404,7 @@ def test_unary_complex1():
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
-                        T.nki_memset(A_sbuf[p_loop, additional_b_loop * 512 + f_loop], T.float32(0.0))       
+                        T.nki.memset(A_sbuf[p_loop, additional_b_loop * 512 + f_loop], T.float32(0.0))       
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -446,7 +446,7 @@ def test_binary_broadcast3():
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
-                        T.nki_tensortensor(C_sbuf[p_loop, b_loop * 128 + f_loop], A_sbuf[p_loop, b_loop * 128 + f_loop], B_sbuf[p_loop, b_loop * 4096 + f_loop], "add")
+                        T.nki.tensortensor(C_sbuf[p_loop, b_loop * 128 + f_loop], A_sbuf[p_loop, b_loop * 128 + f_loop], B_sbuf[p_loop, b_loop * 4096 + f_loop], "add")
     # fmt: on
 
     with target:
@@ -491,7 +491,7 @@ def test_unary_with_bias_scale(op_type):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
-                        T.nki_activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], op_type, B_sbuf[p_loop, b_loop], T.float32(2.0))
+                        T.nki.activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], op_type, B_sbuf[p_loop, b_loop], T.float32(2.0))
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -530,12 +530,12 @@ def test_unary_with_bias_scale_2(op_type):
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
-                        T.nki_memset(const_bias[p_loop, f_loop], T.float32(1.0))
+                        T.nki.memset(const_bias[p_loop, f_loop], T.float32(1.0))
             for b_loop, additional_b_loop in T.grid(1, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
-                        T.nki_activation(C_sbuf[p_loop, additional_b_loop * 512 + f_loop], A_sbuf[p_loop, additional_b_loop * 512 + f_loop], op_type, const_bias[p_loop, f_loop], T.float32(2.0))
+                        T.nki.activation(C_sbuf[p_loop, additional_b_loop * 512 + f_loop], A_sbuf[p_loop, additional_b_loop * 512 + f_loop], op_type, const_bias[p_loop, f_loop], T.float32(2.0))
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -580,7 +580,7 @@ def test_binary_with_guard():
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
                         if b_loop % 3 - j < 0:
-                            T.nki_tensortensor(C_sbuf[p_loop, b_loop % 3 * 4096 + b_loop // 3 * 128 + f_loop], A_sbuf[p_loop, b_loop % 3 * 4096 + b_loop // 3 * 128 + f_loop], B_sbuf[p_loop, b_loop % 3 * 128 + f_loop], "add")
+                            T.nki.tensortensor(C_sbuf[p_loop, b_loop % 3 * 4096 + b_loop // 3 * 128 + f_loop], A_sbuf[p_loop, b_loop % 3 * 4096 + b_loop // 3 * 128 + f_loop], B_sbuf[p_loop, b_loop % 3 * 128 + f_loop], "add")
 
     # fmt: on
     with target:
@@ -628,7 +628,7 @@ def test_unary_with_guard():
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
                         if b_loop - i < 1 and additional_b_loop * 512 + f_loop < j * 256 + 256:
-                            T.nki_activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], "sqrt", B_sbuf[p_loop, b_loop], T.float32(2.0))
+                            T.nki.activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], "sqrt", B_sbuf[p_loop, b_loop], T.float32(2.0))
      # fmt: off
     with target:
         mod = tvm.IRModule({"main": unary})

@@ -70,13 +70,13 @@ from .op import (
     ptx_ldmatrix,
     ptx_cp_async,
     ptx_cp_async_bulk,
-    ptx_commit_group,
-    ptx_wait_group,
-    ptx_cp_async_barrier,
-    ptx_init_barrier_thread_count,
-    ptx_arrive_barrier,
-    ptx_arrive_barrier_expect_tx,
-    ptx_wait_barrier,
+    ptx_cp_async_commit_group,
+    ptx_cp_async_wait_group,
+    ptx_cp_async_mbarrier_arrive,
+    init_barrier_thread_count,
+    arrive_barrier,
+    arrive_barrier_expect_tx,
+    wait_barrier,
     create_barriers,
 )
 from .op import (
@@ -86,9 +86,9 @@ from .op import (
     simdgroup_store,
 )
 from .op import (
-    cuda_timer_init,
-    cuda_timer_start,
-    cuda_timer_end,
+    timer_init_cuda,
+    timer_start_cuda,
+    timer_end_cuda,
 )
 from .op import vectorlow, vectorhigh, vectorcombine
 from .op import infinity, reinterpret

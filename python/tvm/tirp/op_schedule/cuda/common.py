@@ -175,7 +175,7 @@ def copy_g2s_s2g_cta_vec_load_impl(
                     fused = T.meta_var((s * tx + tid_x) * vec_len)
                     dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
                     src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
-                    T.evaluate(T.ptx_cp_async(dst.dtype, dst.data, dst.offset_of_p([*dst_indices]),
+                    T.evaluate(T.ptx.cp_async(dst.dtype, dst.data, dst.offset_of_p([*dst_indices]),
                                               src.data, src.offset_of_p([*src_indices]), cp_size))
         if dst.scope().startswith("shared") and inst_type == CopyInstType.NORMAL:
             T.tvm_storage_sync("shared")

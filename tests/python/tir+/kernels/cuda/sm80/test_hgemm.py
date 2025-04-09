@@ -58,7 +58,7 @@ def test_hgemm_ampere():
 
             smem_offset = T.meta_var(slice_idx * (MI * KI) + row * 64 + col)
             global_offset = T.meta_var((by * 128 + logic_row) * K + (ko * KI + logic_col))
-            T.ptx_cp_async(
+            T.ptx.cp_async(
                 dtype="float16",
                 shared_ptr=SA.data,
                 shared_offset=smem_offset,
@@ -89,7 +89,7 @@ def test_hgemm_ampere():
 
             smem_offset = T.meta_var(slice_idx * (NI * KI) + row * 64 + col)
             global_offset = T.meta_var((bx * 128 + logic_row) * K + (ko * KI + logic_col))
-            T.ptx_cp_async(
+            T.ptx.cp_async(
                 dtype="float16",
                 shared_ptr=SB.data,
                 shared_offset=smem_offset,
@@ -114,7 +114,7 @@ def test_hgemm_ampere():
             )
             smem_offset = T.meta_var(slice_idx * (MI * KI) + row * 64 + col)
 
-            T.ptx_ldmatrix(
+            T.ptx.ldmatrix(
                 dtype="float16",
                 trans=False,
                 num=4,
@@ -144,7 +144,7 @@ def test_hgemm_ampere():
             )
             smem_offset = T.meta_var(slice_idx * (NI * KI) + row * 64 + col)
 
-            T.ptx_ldmatrix(
+            T.ptx.ldmatrix(
                 dtype="float16",
                 trans=False,
                 num=4,
@@ -209,7 +209,7 @@ def test_hgemm_ampere():
         """Matrix multiply-accumulate operation using tensor cores"""
 
         # First MMA operation - for accum[0:4]
-        T.ptx_mma(
+        T.ptx.mma(
             dtype="float32",
             shape="m16n8k16",
             A_layout="row",
@@ -227,7 +227,7 @@ def test_hgemm_ampere():
         )
 
         # Second MMA operation - for accum[4:8]
-        T.ptx_mma(
+        T.ptx.mma(
             dtype="float32",
             shape="m16n8k16",
             A_layout="row",
@@ -270,17 +270,17 @@ def test_hgemm_ampere():
 
                     load_global_to_shared_A(tz, ty, tx, by, SA, 0, A, 0, KI, K)
                     load_global_to_shared_B(tz, ty, tx, bx, SB, 0, B, 0, KI, K)
-                    T.ptx_commit_group()
+                    T.ptx.cp_async.commit_group()
 
                     load_global_to_shared_A(tz, ty, tx, by, SA, 1, A, 1, KI, K)
                     load_global_to_shared_B(tz, ty, tx, bx, SB, 1, B, 1, KI, K)
-                    T.ptx_commit_group()
+                    T.ptx.cp_async.commit_group()
 
                     load_global_to_shared_A(tz, ty, tx, by, SA, 2, A, 2, KI, K)
                     load_global_to_shared_B(tz, ty, tx, bx, SB, 2, B, 2, KI, K)
-                    T.ptx_commit_group()
+                    T.ptx.cp_async.commit_group()
 
-                    T.ptx_wait_group(2)
+                    T.ptx.cp_async.wait_group(2)
                     T.tvm_storage_sync("shared")
 
                     loadFragA(fragA, 0, SA, 0, 0, tx, tz)
@@ -303,8 +303,8 @@ def test_hgemm_ampere():
                             load_global_to_shared_A(tz, ty, tx, by, SA, slice_out, A, ko + 3, KI, K)
                             load_global_to_shared_B(tz, ty, tx, bx, SB, slice_out, B, ko + 3, KI, K)
 
-                        T.ptx_commit_group()
-                        T.ptx_wait_group(2)
+                        T.ptx.cp_async.commit_group()
+                        T.ptx.cp_async.wait_group(2)
                         T.tvm_storage_sync("shared")
 
                         next_slice = (ko + 1) % 4

@@ -88,12 +88,12 @@ def test_fp8_gemm_hopper_no_ws():
     def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, A_map, B_map, bars: tvm.tir.Buffer):
         with T.thread()[tid == 0]:
             stage = T.meta_var(k_tile % STAGES_TMA)
-            T.mbarrier_arrive_expect_tx(bars.access_ptr("rw", offset=stage), TMA_BYTES)
-            T.cp_async_bulk_tensor_global_to_cluster(
+            T.ptx.mbarrier.arrive.expect_tx(bars.access_ptr("rw", offset=stage), TMA_BYTES)
+            T.ptx.cp_async.bulk.tensor.g2c(
                 2, A_smem.access_ptr("w", offset=A_smem.offset_of_p([stage, 0])),
                 bars.access_ptr("rw", offset=stage), A_map, k_tile * BLK_K, m_idx * BLK_M,
             )
-            T.cp_async_bulk_tensor_global_to_cluster(
+            T.ptx.cp_async.bulk.tensor.g2c(
                 2, B_smem.access_ptr("w", offset=B_smem.offset_of_p([stage, 0])),
                 bars.access_ptr("rw", offset=stage), B_map, k_tile * BLK_K, n_idx * BLK_N,
             )
@@ -105,15 +105,15 @@ def test_fp8_gemm_hopper_no_ws():
     def mma_compute(wg_id, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, accum, bars: tvm.tir.Buffer, descA, descB):
         stage = T.meta_var(k_tile % STAGES_TMA)
         parity = T.meta_var((k_tile // STAGES_TMA) % 2)
-        T.mbarrier_wait(bars.access_ptr("rw", offset=stage), parity)
+        T.ptx.mbarrier.try_wait(bars.access_ptr("rw", offset=stage), parity)
         for inner_k in T.serial(BLK_K // WGMMA_K):
             A_offset = T.meta_var(wg_id * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)
             B_offset = T.meta_var(inner_k * WGMMA_K)
-            T.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
-            T.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
-            T.wgmma_mma_async_ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True,
-                                descA[0], descB[0], *get_accum_list(accum, 128))
-        T.wgmma_commit_group()
+            T.ptx.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
+            T.ptx.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
+            T.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True,
+                                     descA[0], descB[0], *get_accum_list(accum, 128))
+        T.ptx.wgmma.commit_group()
 
     @T.macro
     def r2S(warp_id, lane_id, C_smem: tvm.tir.Buffer, accum, accum_half, n_tile):
@@ -124,19 +124,19 @@ def test_fp8_gemm_hopper_no_ws():
             col_noswizzle = T.meta_var(st_tile * 2 + lane_id // 16)
             col = T.meta_var((lane_id % 8) ^ col_noswizzle)
             row = T.meta_var(warp_id * 16 + lane_id % 16)
-            T.stmatrix_sync_aligned(4, False, C_smem.access_ptr("w", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, row, col * 8])),
-                                    accum_half[0], accum_half[1], accum_half[2], accum_half[3],
-                                    accum_half[4], accum_half[5], accum_half[6], accum_half[7])
+            T.ptx.stmatrix(4, False, C_smem.access_ptr("w", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, row, col * 8])),
+                           accum_half[0], accum_half[1], accum_half[2], accum_half[3],
+                           accum_half[4], accum_half[5], accum_half[6], accum_half[7])
 
     @T.macro
     def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):
-        T.cuda_fence_proxy_async("shared")
+        T.ptx.fence.proxy("shared")
         T.tvm_storage_sync("shared")
         with T.thread()[warp_id == 0 and lane_id == 0]:
-            T.cp_async_bulk_tensor_shared_to_global(2, C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
-                                                    C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
-            T.cp_async_bulk_tensor_commit_group()
-            T.cp_async_bulk_tensor_wait_group(1, read=True)
+            T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
+                                           C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
+            T.ptx.cp_async.bulk.commit_group()
+            T.ptx.cp_async.bulk.wait_group(1, read=True)
 
     @T.macro
     def write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem: tvm.tir.Buffer, C_map, accum, accum_half):
@@ -149,7 +149,7 @@ def test_fp8_gemm_hopper_no_ws():
             r2S(warp_id, lane_id, C_smem, accum, accum_half, n_tile)
         # s2G for the last stage
         s2G(warp_id, lane_id, C_smem, C_map, m_idx, n_idx, BLK_N // 64 - 1)
-        T.cp_async_bulk_tensor_wait_group(0, read=False)
+        T.ptx.cp_async.bulk.wait_group(0, read=False)
 
     @T.prim_func(tirp=True)
     def manual(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
@@ -199,7 +199,7 @@ def test_fp8_gemm_hopper_no_ws():
                         # initialize the barriers
                         with T.thread()[tid == 0]:
                             for i in range(STAGES_TMA):
-                                T.mbarrier_init(bars.access_ptr("rw", offset=i), 1)
+                                T.ptx.mbarrier.init(bars.access_ptr("rw", offset=i), 1)
                         T.tvm_storage_sync("shared")
                         # initialize the index
                         tma_index[0] = 0
@@ -227,9 +227,9 @@ def test_fp8_gemm_hopper_no_ws():
                                 mma_index[0] = mma_index[0] + 1
                             # wait for oldest one stage to finish
                             if _ == k_tile_count - 1:
-                                T.wgmma_wait_group(0)
+                                T.ptx.wgmma.wait_group(0)
                             else:
-                                T.wgmma_wait_group(STAGES_WGMMA - 1)
+                                T.ptx.wgmma.wait_group(STAGES_WGMMA - 1)
                             T.tvm_storage_sync("shared")
                             # load the next tile
                             if tma_index[0] < k_tile_count:

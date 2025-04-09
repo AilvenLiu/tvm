@@ -368,13 +368,13 @@ TIR_DEFINE_BUILTIN_FUNC(buffer_offset)
 TIR_DEFINE_BUILTIN_FUNC(print_buffer)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cuda_timer_init)
+TIR_DEFINE_BUILTIN_FUNC(timer_init_cuda)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cuda_timer_start)
+TIR_DEFINE_BUILTIN_FUNC(timer_start_cuda)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cuda_timer_end)
+TIR_DEFINE_BUILTIN_FUNC(timer_end_cuda)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 }  // namespace builtin

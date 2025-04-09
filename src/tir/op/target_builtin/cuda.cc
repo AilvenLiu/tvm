@@ -82,25 +82,25 @@ TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk)
     .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
                                          Integer(ScriptDtypePrintLocation::kFirst));
 
-TIR_DEFINE_BUILTIN_FUNC(ptx_commit_group)
+TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_commit_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(ptx_wait_group)
+TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_wait_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_barrier)
+TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_mbarrier_arrive)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(ptx_init_barrier_thread_count)
+TIR_DEFINE_BUILTIN_FUNC(init_barrier_thread_count)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(ptx_arrive_barrier)
+TIR_DEFINE_BUILTIN_FUNC(arrive_barrier)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(ptx_arrive_barrier_expect_tx)
+TIR_DEFINE_BUILTIN_FUNC(arrive_barrier_expect_tx)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(ptx_wait_barrier)
+TIR_DEFINE_BUILTIN_FUNC(wait_barrier)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(create_barriers)
@@ -121,49 +121,49 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_barrier_wait)
 TIR_DEFINE_BUILTIN_FUNC(cuda_barrier_arrive_and_wait)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cuda_fence_proxy_async)
+TIR_DEFINE_BUILTIN_FUNC(ptx_fence_proxy)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(mbarrier_init)
+TIR_DEFINE_BUILTIN_FUNC(ptx_mbarrier_init)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(mbarrier_arrive)
+TIR_DEFINE_BUILTIN_FUNC(ptx_mbarrier_arrive)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(mbarrier_arrive_expect_tx)
+TIR_DEFINE_BUILTIN_FUNC(ptx_mbarrier_arrive_expect_tx)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(mbarrier_wait)
+TIR_DEFINE_BUILTIN_FUNC(ptx_mbarrier_try_wait)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(named_barrier_arrive)
+TIR_DEFINE_BUILTIN_FUNC(ptx_bar_arrive)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(named_barrier_sync)
+TIR_DEFINE_BUILTIN_FUNC(ptx_bar_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_global_to_cluster)
+TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk_tensor_global_to_cluster)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_shared_to_global)
+TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk_tensor_shared_to_global)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_commit_group)
+TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk_commit_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cp_async_bulk_tensor_wait_group)
+TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_bulk_wait_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(barrier_cluster_arrive)
+TIR_DEFINE_BUILTIN_FUNC(ptx_barrier_cluster_arrive)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(barrier_cluster_wait)
+TIR_DEFINE_BUILTIN_FUNC(ptx_barrier_cluster_wait)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(elect_sync)
+TIR_DEFINE_BUILTIN_FUNC(ptx_elect_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(fence_mbarrier_init_release_cluster)
+TIR_DEFINE_BUILTIN_FUNC(ptx_fence_mbarrier_init_release_cluster)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(ptx_fetch_register)
@@ -179,31 +179,31 @@ TIR_DEFINE_BUILTIN_FUNC(mma_fill)
     .set_attr<TScriptDtypePrintLocation>("TScriptDtypePrintLocation",
                                          Integer(ScriptDtypePrintLocation::kFirst));
 
-TIR_DEFINE_BUILTIN_FUNC(encode_matrix_descriptor)
+TIR_DEFINE_BUILTIN_FUNC(ptx_encode_matrix_descriptor)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(wgmma_fence_operand)
+TIR_DEFINE_BUILTIN_FUNC(ptx_wgmma_noop_barrier)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(wgmma_mma_async_ss)
+TIR_DEFINE_BUILTIN_FUNC(ptx_wgmma_mma_async_ss)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(wgmma_mma_async_rs)
+TIR_DEFINE_BUILTIN_FUNC(ptx_wgmma_mma_async_rs)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(wgmma_arrive)
+TIR_DEFINE_BUILTIN_FUNC(ptx_wgmma_fence)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(wgmma_commit_group)
+TIR_DEFINE_BUILTIN_FUNC(ptx_wgmma_commit_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(wgmma_wait_group)
+TIR_DEFINE_BUILTIN_FUNC(ptx_wgmma_wait_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(stmatrix_sync_aligned)
+TIR_DEFINE_BUILTIN_FUNC(ptx_stmatrix)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(setmaxnreg)
+TIR_DEFINE_BUILTIN_FUNC(ptx_setmaxnreg)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 }  // namespace builtin

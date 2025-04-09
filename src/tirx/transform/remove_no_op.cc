@@ -251,9 +251,9 @@ class NoOpRemover : public arith::IRMutatorWithAnalyzer {
   bool HasSideEffect(const PrimExpr& value) {
     if (ignore_profiler_call_) {
       if (const CallNode* call = value.as<CallNode>()) {
-        if (call->op.same_as(builtin::cuda_timer_init()) ||
-            call->op.same_as(builtin::cuda_timer_start()) ||
-            call->op.same_as(builtin::cuda_timer_end())) {
+        if (call->op.same_as(builtin::timer_init_cuda()) ||
+            call->op.same_as(builtin::timer_start_cuda()) ||
+            call->op.same_as(builtin::timer_end_cuda())) {
           return false;
         }
       }

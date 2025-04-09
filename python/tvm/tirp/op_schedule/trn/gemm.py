@@ -290,9 +290,9 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                         if f_lhs_guard(f_gen_lhs_axes(((lhs_b_loop, lhs_b_extent), (reduction_b_loop, reduction_b_extent)), lhs_f_loop_wo_limit, p_loop, dim2block_var_lhs)) and \
                             f_rhs_guard(f_gen_rhs_axes(((rhs_b_loop, rhs_b_extent), (reduction_b_loop, reduction_b_extent)), rhs_f_loop_wo_limit, p_loop, dim2block_var_rhs)):
                             if C_as_output:
-                                T.evaluate(T.nki_matmul(acc[C_indices], A[lhs_indices], B[rhs_indices]))
+                                T.evaluate(T.nki.matmul(acc[C_indices], A[lhs_indices], B[rhs_indices]))
                             else:
-                                T.evaluate(T.nki_matmul(acc[b_idx // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_idx % inst_num_per_slot * rhs_f_size + rhs_f_loop], A[lhs_indices], B[rhs_indices]))
+                                T.evaluate(T.nki.matmul(acc[b_idx // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_idx % inst_num_per_slot * rhs_f_size + rhs_f_loop], A[lhs_indices], B[rhs_indices]))
 
     if C.scope() == "trn.psum":
         @T.prim_func(tirp=True)
@@ -337,6 +337,6 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                             if f_lhs_guard(f_gen_lhs_axes([(lhs_b_loop, lhs_b_extent), (0, reduction_b_extent)], lhs_f_loop_wo_limit, 0, dim2block_var_lhs)) and \
                                 f_rhs_guard(f_gen_rhs_axes([(rhs_b_loop, rhs_b_extent), (0, reduction_b_extent)], rhs_f_loop_wo_limit, 0, dim2block_var_rhs)):
                                 acc_indices = T.meta_var(f_gen_acc_indices(lhs_b_loop, lhs_b_extent, rhs_b_loop, rhs_b_extent, reduction_b_extent, lhs_f_loop_wo_limit, rhs_f_loop_wo_limit))
-                                T.evaluate(T.nki_tensor_copy(C[acc_indices], acc_psum[b_idx // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_idx % inst_num_per_slot * rhs_f_size + rhs_f_loop]))
+                                T.evaluate(T.nki.tensor_copy(C[acc_indices], acc_psum[b_idx // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_idx % inst_num_per_slot * rhs_f_size + rhs_f_loop]))
     # fmt: on
     return impl_C_sbuf

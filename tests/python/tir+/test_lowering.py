@@ -386,7 +386,7 @@ def test_lower_scope_id():
                     with T.thread():
                         T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z)
                         T.evaluate(clusterCtaIdx_x + clusterCtaIdx_y + clusterCtaIdx_z)
-                        T.evaluate(T.ptx_fetch_register(32, "clusterid.x") + T.ptx_fetch_register(32, "clusterid.y") + T.ptx_fetch_register(32, "clusterid.z"))
+                        T.evaluate(T.ptx.fetch_register(32, "clusterid.x") + T.ptx.fetch_register(32, "clusterid.y") + T.ptx.fetch_register(32, "clusterid.z"))
                         T.evaluate(threadIdx_x // 128 + threadIdx_x % 128 // 32 + threadIdx_x % 32 + threadIdx_x % 128)
     # fmt: on
 
@@ -406,7 +406,7 @@ def test_lower_scope_slice():
                 with T.thread()[0:64]:
                     T.evaluate(tx)
                     T.evaluate(warp_id)
-                with T.thread()[T.elect_sync(0xFFFFFFFF)]:
+                with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
                     T.evaluate(tx)
                 with T.thread()[tx == 0]:
                     T.evaluate(tx)
@@ -422,7 +422,7 @@ def test_lower_scope_slice():
                 if threadIdx_x >= 0 and threadIdx_x < 64:
                     T.evaluate(threadIdx_x)
                     T.evaluate(threadIdx_x // 32)
-                if T.elect_sync(0xFFFFFFFF):
+                if T.ptx.elect_sync(0xFFFFFFFF):
                     T.evaluate(threadIdx_x)
                 if threadIdx_x == 0:
                     T.evaluate(threadIdx_x)

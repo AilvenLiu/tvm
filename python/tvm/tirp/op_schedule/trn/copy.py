@@ -88,7 +88,7 @@ def transpose_schedule(
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
                     for rhs_f_loop in T.serial(0, rhs_f_size, annotations={nki_dim: "F"}):
-                        T.evaluate(T.nki_identity(identity_tensor[p_loop, rhs_f_loop], p_size))
+                        T.evaluate(T.nki.identity(identity_tensor[p_loop, rhs_f_loop], p_size))
             Tp.tvm_kernel_replace_point()
 
         sctx.add_init_stmt(identity_init.body)
@@ -117,10 +117,10 @@ def transpose_schedule(
                         if src_guard and dst_guard:
                             if use_dst_indices:
                                 dst_indices = T.meta_var(gen_dst_idx(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop))
-                                T.evaluate(T.nki_matmul(dst[*dst_indices], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
+                                T.evaluate(T.nki.matmul(dst[*dst_indices], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
                             else:
                                 if src_guard:
-                                    T.evaluate(T.nki_matmul(dst[b_loop // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_loop % inst_num_per_slot * rhs_f_size + rhs_f_loop], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
+                                    T.evaluate(T.nki.matmul(dst[b_loop // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_loop % inst_num_per_slot * rhs_f_size + rhs_f_loop], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
     # fmt: on
 
     if dst_buffer.scope() == "trn.psum":
@@ -159,7 +159,7 @@ def transpose_schedule(
                             dst_guard = T.meta_var(f_dst_guard(gen_axes_dst(((b_loop, b_extent),), f_loop, p_loop)))
                             dst_indices = T.meta_var(gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
                             if dst_guard:
-                                T.evaluate(T.nki_tensor_copy(dst_buffer[*dst_indices], acc_psum[b_loop // inst_num_per_slot % max_psum_slots, p_loop, b_loop % inst_num_per_slot * rhs_f_size + f_loop]))
+                                T.evaluate(T.nki.tensor_copy(dst_buffer[*dst_indices], acc_psum[b_loop // inst_num_per_slot % max_psum_slots, p_loop, b_loop % inst_num_per_slot * rhs_f_size + f_loop]))
     # fmt: on
 
     return transpose_sbuf_output
@@ -252,13 +252,13 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 
     # fmt: off
     if src.scope() == "global":
-        func = T.nki_load
+        func = T.nki.load
     elif dst.scope() == "global":
-        func = T.nki_store
+        func = T.nki.store
     else:
-        func = T.nki_tensor_copy
+        func = T.nki.tensor_copy
     
-    if func == T.nki_tensor_copy:
+    if func == T.nki.tensor_copy:
         inst_size_limit = op.schedule_config.get("max_inst_size", 512)
         actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
     else:

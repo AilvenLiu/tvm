@@ -242,7 +242,8 @@ std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(
  * \param tensormap: The pointer to the CUtensorMap object.
  * \param coords: The coordinates of the tensor.
  */
-std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(codegen::CodeGenCUDA* cg, int dim, const std::string& src,
+std::string PrintCpAsyncBulkTensorSharedToGlobalAssembly(codegen::CodeGenCUDA* cg, int dim,
+                                                         const std::string& src,
                                                          const std::string& tensormap,
                                                          std::vector<std::string> coords);
 
@@ -368,7 +369,7 @@ std::string PrintBarrierClusterWaitAssembly(bool acquire, bool aligned);
 std::string PrintElectSyncAssembly(CodeGenCUDA* cg, uint32_t membermask);
 
 /*!
- * \brief Print fence_mbarrier_init_release_cluster
+ * \brief Print ptx_fence_mbarrier_init_release_cluster
  */
 std::string PrintFenceMbarrierInitReleaseClusterAssembly(codegen::CodeGenCUDA* cg);
 

@@ -176,20 +176,20 @@ def reduction_trn(
         if f_src_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
             src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop, p_loop))
             dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-            T.evaluate(T.nki_tensorreduce(dst_buffer[dst_indices], src_buffer[src_indices], opcode, negate, -1))
+            T.evaluate(T.nki.tensorreduce(dst_buffer[dst_indices], src_buffer[src_indices], opcode, negate, -1))
 
     # Define two-stage reduction macro
     @T.macro
     def two_stage_reduction_macro(b_loop, reduction_b_loop, p_loop, f_loop, intermediate_buffer, dim2block_var):
         if f_src_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
             src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-            T.evaluate(T.nki_tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, False, -1))
+            T.evaluate(T.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, False, -1))
 
     @T.macro
     def two_stage_final_reduction_macro(b_loop, p_loop, f_loop, intermediate_buffer, dim2block_var):
         if f_src_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
             dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-            T.evaluate(T.nki_tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))    
+            T.evaluate(T.nki.tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))    
     # Single-stage reduction implementation
     if intermediate_buffer is None:
         @T.prim_func(tirp=True)

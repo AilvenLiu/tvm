@@ -122,7 +122,7 @@ def get_const_bias_tensor(bias, shape, dtype, workspace, sctx):
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, shape[0], annotations={nki_dim: "P"}):
                     for f_loop in T.serial(0, shape[1], annotations={nki_dim: "F"}):
-                        T.evaluate(T.nki_memset(bias_buffer[p_loop, f_loop], bias))
+                        T.evaluate(T.nki.memset(bias_buffer[p_loop, f_loop], bias))
             Tp.tvm_kernel_replace_point()
 
         sctx.add_init_stmt(const_bias_init.body)
@@ -193,16 +193,16 @@ def generate_unary_func(
                         dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
                         if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
                             if unary_op == MapOpType.MEMSET:
-                                T.evaluate(T.nki_memset(dst[*dst_indices], _src))
+                                T.evaluate(T.nki.memset(dst[*dst_indices], _src))
                             else:
                                 src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop) )
                                 if unary_op == MapOpType.RECIPROCAL:
-                                    T.evaluate(T.nki_reciprocal(dst[*dst_indices], src[*src_indices]))
+                                    T.evaluate(T.nki.reciprocal(dst[*dst_indices], src[*src_indices]))
                                 elif isinstance(bias, BufferRegion):
                                     bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                                    T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[*bias_indices]))
+                                    T.evaluate(T.nki.activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[*bias_indices]))
                                 else:
-                                    T.evaluate(T.nki_activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[p_loop, f_loop]))
+                                    T.evaluate(T.nki.activation(dst[*dst_indices], src[*src_indices], opcode, scale=scale, bias=bias_buffer[p_loop, f_loop]))
     # fmt: on
 
     return impl

@@ -1279,14 +1279,14 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintCpAsyncBulkAsm(dst, dst_offset, src, src_offset, size, barrier);
-  } else if (op->op.same_as(builtin::ptx_commit_group())) {
+  } else if (op->op.same_as(builtin::ptx_cp_async_commit_group())) {
     this->PrintIndent();
     this->stream << "__asm__ __volatile__(\"cp.async.commit_group;\");\n";
-  } else if (op->op.same_as(builtin::ptx_wait_group())) {
+  } else if (op->op.same_as(builtin::ptx_cp_async_wait_group())) {
     int n = Downcast<IntImm>(op->args[0])->value;
     this->PrintIndent();
     this->stream << "__asm__ __volatile__(\"cp.async.wait_group " << n << ";\");\n";
-  } else if (op->op.same_as(builtin::ptx_cp_async_barrier())) {
+  } else if (op->op.same_as(builtin::ptx_cp_async_mbarrier_arrive())) {
     need_cast_smem_ptr_to_int_ = true;
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
@@ -1296,7 +1296,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintCpAsyncBarrierAsm(barrier);
-  } else if (op->op.same_as(builtin::ptx_init_barrier_thread_count())) {
+  } else if (op->op.same_as(builtin::init_barrier_thread_count())) {
     need_cast_smem_ptr_to_int_ = true;
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
@@ -1307,7 +1307,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     std::string thread_count = this->PrintExpr(op->args[2]);
     this->stream << PrintInitBarrierThreadCountAsm(barrier, thread_count);
-  } else if (op->op.same_as(builtin::ptx_arrive_barrier())) {
+  } else if (op->op.same_as(builtin::arrive_barrier())) {
     need_cast_smem_ptr_to_int_ = true;
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
@@ -1317,7 +1317,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintArriveBarrierAsm(barrier);
-  } else if (op->op.same_as(builtin::ptx_arrive_barrier_expect_tx())) {
+  } else if (op->op.same_as(builtin::arrive_barrier_expect_tx())) {
     need_cast_smem_ptr_to_int_ = true;
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
@@ -1328,7 +1328,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     std::string byte_count = this->PrintExpr(op->args[2]);
     this->stream << PrintArriveBarrierExpectTxAsm(barrier, byte_count);
-  } else if (op->op.same_as(builtin::ptx_wait_barrier())) {
+  } else if (op->op.same_as(builtin::wait_barrier())) {
     need_cast_smem_ptr_to_int_ = true;
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
@@ -1643,46 +1643,48 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier_arr = cuda_barrier_name_ + "_" + std::to_string(barrier_arr_id);
     this->PrintIndent();
     this->stream << barrier_arr << "[" << barrier_id << "].arrive_and_wait();\n";
-  } else if (op->op.same_as(builtin::cuda_fence_proxy_async())) {
+  } else if (op->op.same_as(builtin::ptx_fence_proxy())) {
     std::string scope = Downcast<StringImm>(op->args[0])->value;
     print(PrintCudaFenceProxyAsyncAssembly(this, scope));
-  } else if (op->op.same_as(builtin::mbarrier_init())) {
+  } else if (op->op.same_as(builtin::ptx_mbarrier_init())) {
     need_cast_smem_ptr_to_int_ = true;
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string num_threads = this->PrintExpr(op->args[1]);
     print(PrintMbarrierInitAssembly(this, mbarrier, num_threads));
-  } else if (op->op.same_as(builtin::mbarrier_arrive())) {
+  } else if (op->op.same_as(builtin::ptx_mbarrier_arrive())) {
     need_cast_smem_ptr_to_int_ = true;
-    CHECK(op->args.size() == 1 || op->args.size() == 3) << "mbarrier_arrive() expects 1 or 3 args";
+    CHECK(op->args.size() == 1 || op->args.size() == 3)
+        << "ptx_mbarrier_arrive() expects 1 or 3 args";
     std::string mbarrier = this->PrintExpr(op->args[0]);
     bool remote = op->args.size() == 3;
     std::string cta_id = remote ? this->PrintExpr(op->args[1]) : "";
     std::string pred = remote ? this->PrintExpr(op->args[2]) : "";
     print(PrintMbarrierArriveAssembly(this, mbarrier, remote, cta_id, pred));
-  } else if (op->op.same_as(builtin::mbarrier_arrive_expect_tx())) {
+  } else if (op->op.same_as(builtin::ptx_mbarrier_arrive_expect_tx())) {
     need_cast_smem_ptr_to_int_ = true;
-    CHECK(op->args.size() == 2 || op->args.size() == 4) << "mbarrier_arrive_expect_tx() expects 2 "
-                                                           "or 4 args";
+    CHECK(op->args.size() == 2 || op->args.size() == 4)
+        << "ptx_mbarrier_arrive_expect_tx() expects 2 "
+           "or 4 args";
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string byte_count = this->PrintExpr(op->args[1]);
     bool remote = op->args.size() == 4;
     std::string cta_id = remote ? this->PrintExpr(op->args[2]) : "";
     std::string pred = remote ? this->PrintExpr(op->args[3]) : "";
     print(PrintMbarrierArriveExpectTxAssembly(this, mbarrier, byte_count, remote, cta_id, pred));
-  } else if (op->op.same_as(builtin::mbarrier_wait())) {
+  } else if (op->op.same_as(builtin::ptx_mbarrier_try_wait())) {
     need_cast_smem_ptr_to_int_ = true;
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string phase = this->PrintExpr(op->args[1]);
     print(PrintMbarrierWaitAssembly(this, mbarrier, phase));
-  } else if (op->op.same_as(builtin::named_barrier_arrive())) {
+  } else if (op->op.same_as(builtin::ptx_bar_arrive())) {
     std::string name_bar_id = this->PrintExpr(op->args[0]);
     std::string thread_count = this->PrintExpr(op->args[1]);
     print(PrintNamedBarrierArriveAssembly(name_bar_id, thread_count));
-  } else if (op->op.same_as(builtin::named_barrier_sync())) {
+  } else if (op->op.same_as(builtin::ptx_bar_sync())) {
     std::string name_bar_id = this->PrintExpr(op->args[0]);
     std::string thread_count = this->PrintExpr(op->args[1]);
     print(PrintNamedBarrierSyncAssembly(name_bar_id, thread_count));
-  } else if (op->op.same_as(builtin::cp_async_bulk_tensor_global_to_cluster())) {
+  } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_global_to_cluster())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
     CHECK_EQ(op->args.size(), 5 + dim);
@@ -1696,7 +1698,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int cta_mask = Downcast<IntImm>(op->args[4 + dim])->value;
     print(PrintCpAsyncBulkTensorGlobalToClusterAssembly(this, dim, dst, bar, tensormap, cta_mask,
                                                         coords));
-  } else if (op->op.same_as(builtin::cp_async_bulk_tensor_shared_to_global())) {
+  } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_shared_to_global())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
     CHECK_EQ(op->args.size(), 3 + dim);
@@ -1707,30 +1709,30 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       coords.push_back(this->PrintExpr(op->args[3 + i]));
     }
     print(PrintCpAsyncBulkTensorSharedToGlobalAssembly(this, dim, src, tensormap, coords));
-  } else if (op->op.same_as(builtin::cp_async_bulk_tensor_commit_group())) {
+  } else if (op->op.same_as(builtin::ptx_cp_async_bulk_commit_group())) {
     print(PrintCpAsyncBulkTensorCommitGroupAssembly(this));
-  } else if (op->op.same_as(builtin::cp_async_bulk_tensor_wait_group())) {
+  } else if (op->op.same_as(builtin::ptx_cp_async_bulk_wait_group())) {
     std::string wait_cnt = this->PrintExpr(op->args[0]);
     bool read = Downcast<Bool>(op->args[1])->value;
     print(PrintCpAsyncBulkTensorWaitGroupAssembly(this, wait_cnt, read));
-  } else if (op->op.same_as(builtin::barrier_cluster_arrive())) {
+  } else if (op->op.same_as(builtin::ptx_barrier_cluster_arrive())) {
     std::string sem = Downcast<StringImm>(op->args[0])->value;
     bool aligned = Downcast<Bool>(op->args[1])->value;
     print(PrintBarrierClusterArriveAssembly(sem, aligned));
-  } else if (op->op.same_as(builtin::barrier_cluster_wait())) {
+  } else if (op->op.same_as(builtin::ptx_barrier_cluster_wait())) {
     bool acquire = Downcast<Bool>(op->args[0])->value;
     bool aligned = Downcast<Bool>(op->args[1])->value;
     print(PrintBarrierClusterWaitAssembly(acquire, aligned));
-  } else if (op->op.same_as(builtin::elect_sync())) {
+  } else if (op->op.same_as(builtin::ptx_elect_sync())) {
     uint32_t mask = Downcast<IntImm>(op->args[0])->value;
     os << PrintElectSyncAssembly(this, mask);
-  } else if (op->op.same_as(builtin::fence_mbarrier_init_release_cluster())) {
+  } else if (op->op.same_as(builtin::ptx_fence_mbarrier_init_release_cluster())) {
     print(PrintFenceMbarrierInitReleaseClusterAssembly(this));
   } else if (op->op.same_as(builtin::ptx_fetch_register())) {
     int bits = Downcast<IntImm>(op->args[0])->value;
     std::string reg = Downcast<StringImm>(op->args[1])->value;
     os << PrintPtxFetchRegisterAssembly(this, bits, reg);
-  } else if (op->op.same_as(builtin::encode_matrix_descriptor())) {
+  } else if (op->op.same_as(builtin::ptx_encode_matrix_descriptor())) {
     need_smem_descriptor_ = true;
     need_cast_smem_ptr_to_int_ = true;
     std::string desc = this->PrintExpr(op->args[0]);
@@ -1739,11 +1741,12 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string sdo = this->PrintExpr(op->args[3]);
     int swizzle = Downcast<IntImm>(op->args[4])->value;
     print(PrintEncodeMatrixDescriptor(this, desc, addr, ldo, sdo, swizzle));
-  } else if (op->op.same_as(builtin::wgmma_fence_operand())) {
+  } else if (op->op.same_as(builtin::ptx_wgmma_noop_barrier())) {
     std::string fence = this->PrintExpr(op->args[0]);
     print(PrintWGMMAFenceOpearandAssembly(this, fence, op->args[0]->dtype));
-  } else if (op->op.same_as(builtin::wgmma_mma_async_ss())) {
-    CHECK_LE(12, op->args.size()) << "The number of arguments for wgmma_mma_async_ss is incorrect";
+  } else if (op->op.same_as(builtin::ptx_wgmma_mma_async_ss())) {
+    CHECK_LE(12, op->args.size())
+        << "The number of arguments for ptx_wgmma_mma_async_ss is incorrect";
     int M = Downcast<IntImm>(op->args[0])->value;
     int N = Downcast<IntImm>(op->args[1])->value;
     int K = Downcast<IntImm>(op->args[2])->value;
@@ -1759,14 +1762,14 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     size_t expected_accm_cnt = M * N / 128;
     CHECK(out_dtype == "float32") << "Now codegen only support float32 output";
     CHECK_EQ(12 + expected_accm_cnt, op->args.size())
-        << "The number of arguments for wgmma_mma_async_ss is incorrect";
+        << "The number of arguments for ptx_wgmma_mma_async_ss is incorrect";
     std::vector<std::string> accum;
     for (size_t i = 0; i < expected_accm_cnt; ++i) {
       accum.push_back(this->PrintExpr(op->args[12 + i]));
     }
     print(PrintWGMMAasyncSSAssembly(M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB,
                                     scaleD, descA, descB, accum));
-  } else if (op->op.same_as(builtin::wgmma_mma_async_rs())) {
+  } else if (op->op.same_as(builtin::ptx_wgmma_mma_async_rs())) {
     int M = Downcast<IntImm>(op->args[0])->value;
     int N = Downcast<IntImm>(op->args[1])->value;
     int K = Downcast<IntImm>(op->args[2])->value;
@@ -1784,7 +1787,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     size_t expected_A_cnt = M * K / 128 / (32 / in_dtype_tvm.bits());
     size_t expected_accm_cnt = M * N / 128;
     CHECK_EQ(11 + expected_A_cnt + expected_accm_cnt, op->args.size())
-        << "wgmma_mma_async_rs with shape " << M << "x" << N << "x" << K << " and input dtype "
+        << "ptx_wgmma_mma_async_rs with shape " << M << "x" << N << "x" << K << " and input dtype "
         << in_dtype << " expects " << 11 + expected_A_cnt + expected_accm_cnt << " arguments, got "
         << op->args.size();
     std::vector<std::string> A_regs_str;
@@ -1797,18 +1800,18 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
     print(PrintWGMMAasyncRSAssembly(M, N, K, in_dtype, out_dtype, transA, transB, scaleA, scaleB,
                                     scaleD, A_regs_str, descB, accum));
-  } else if (op->op.same_as(builtin::wgmma_arrive())) {
+  } else if (op->op.same_as(builtin::ptx_wgmma_fence())) {
     print(PrintWGMMAArriveAssembly(this));
-  } else if (op->op.same_as(builtin::wgmma_commit_group())) {
+  } else if (op->op.same_as(builtin::ptx_wgmma_commit_group())) {
     print(PrintWGMMACommitGroupAssembly(this));
-  } else if (op->op.same_as(builtin::wgmma_wait_group())) {
+  } else if (op->op.same_as(builtin::ptx_wgmma_wait_group())) {
     std::string wait_cnt = this->PrintExpr(op->args[0]);
     print(PrintWGMMAWaitGroupAssembly(this, wait_cnt));
-  } else if (op->op.same_as(builtin::stmatrix_sync_aligned())) {
+  } else if (op->op.same_as(builtin::ptx_stmatrix())) {
     int num = Downcast<IntImm>(op->args[0])->value;
     bool trans = Downcast<Bool>(op->args[1])->value;
     std::string ptr = this->PrintExpr(op->args[2]);
-    ICHECK_EQ(op->args.size(), 3 + num * 2) << "The number of arguments for stmatrix_sync_aligned "
+    ICHECK_EQ(op->args.size(), 3 + num * 2) << "The number of arguments for ptx_stmatrix "
                                                "is incorrect, expected "
                                             << 3 + num * 2 << ", got " << op->args.size();
     std::vector<std::string> regs;
@@ -1816,17 +1819,18 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       regs.push_back(this->PrintExpr(op->args[3 + i]));
     }
     print(PrintStmatrixSyncAlignedAssembly(num, trans, ptr, regs));
-  } else if (op->op.same_as(builtin::setmaxnreg())) {
+  } else if (op->op.same_as(builtin::ptx_setmaxnreg())) {
     bool inc = Downcast<Bool>(op->args[0])->value;
     int nregs = Downcast<IntImm>(op->args[1])->value;
     print(PrintSetMaxNRegAssembly(inc, nregs));
-  } else if (op->op.same_as(builtin::cuda_timer_init())) {
+  } else if (op->op.same_as(builtin::timer_init_cuda())) {
     // arg 0: profiler buffer
     // arg 1: base tag
     // arg 2: offset
     ICHECK_EQ(op->args.size(), 3U);
     std::string NBLOCKS = "(uint32_t)(gridDim.x * gridDim.y * gridDim.z)";
-    std::string BLOCK_IDX = "(uint32_t)((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x)";
+    std::string BLOCK_IDX =
+        "(uint32_t)((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x)";
     std::string NGROUPS = "(uint32_t)(blockDim.x >> 7)";
     std::string WG_IDX = "(uint32_t)(threadIdx.x >> 7)";
     std::string BLOCK_GROUP_IDX = BLOCK_IDX + " * " + NGROUPS + " + " + WG_IDX;
@@ -1853,7 +1857,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     const int BLOCK_GROUP_IDX_SHIFT = 12;
     this->stream << this->PrintExpr(op->args[1]) << "[0] = ";
     this->stream << "(uint64_t)(" << BLOCK_GROUP_IDX << ") << " << BLOCK_GROUP_IDX_SHIFT << ";\n";
-  } else if (op->op.same_as(builtin::cuda_timer_start())) {
+  } else if (op->op.same_as(builtin::timer_start_cuda())) {
     // arg 0: type of event to record
     // arg 1: profiler buffer
     // arg 2: base tag
@@ -1867,7 +1871,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int if_scope = BeginScope();
     // buffer write
     this->PrintIndent();
-    this->stream << this->PrintExpr(op->args[1]) << "[" << this->PrintExpr(op->args[3]) << "[0]] = ";
+    this->stream << this->PrintExpr(op->args[1]) << "[" << this->PrintExpr(op->args[3])
+                 << "[0]] = ";
     // (static_cast<uint64_t>(delta_time) << 32) | tag;
     const int EVENT_IDX_SHIFT = 2;
     const int EVENT_BEGIN = 0x0;
@@ -1887,7 +1892,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->stream << "}\n";
     this->PrintIndent();
     this->stream << "__threadfence_block();\n";
-  } else if (op->op.same_as(builtin::cuda_timer_end())) {
+  } else if (op->op.same_as(builtin::timer_end_cuda())) {
     // arg 0: type of event to record
     // arg 1: profiler buffer
     // arg 2: base tag
@@ -1903,7 +1908,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int if_scope = BeginScope();
     // buffer write
     this->PrintIndent();
-    this->stream << this->PrintExpr(op->args[1]) << "[" << this->PrintExpr(op->args[3]) << "[0]] = ";
+    this->stream << this->PrintExpr(op->args[1]) << "[" << this->PrintExpr(op->args[3])
+                 << "[0]] = ";
     // (static_cast<uint64_t>(delta_time) << 32) | tag;
     const int EVENT_IDX_SHIFT = 2;
     const int EVENT_END = 0x1;
@@ -1941,7 +1947,7 @@ void CodeGenCUDA::VisitStmt_(const AttrStmtNode* op) {
     const IntImmNode* queue_id = op->value.as<IntImmNode>();
     TVM_FFI_ICHECK(queue_id && queue_id->value == 0) << "For CUDA, the index of an async queue must be 0.";
     this->VisitStmt(op->body);
-    auto commit_group = Call(DataType::Void(), builtin::ptx_commit_group(), {});
+    auto commit_group = Call(DataType::Void(), builtin::ptx_cp_async_commit_group(), {});
     this->VisitExpr(commit_group, this->stream);
     return;
   } else if (op->attr_key == s_tir::attr::async_wait_queue_scope) {
@@ -1949,7 +1955,7 @@ void CodeGenCUDA::VisitStmt_(const AttrStmtNode* op) {
     auto queue_id = wait_attrs.first.as<IntImmNode>();
     TVM_FFI_ICHECK(queue_id && queue_id->value == 0) << "For CUDA, the index of an async queue must be 0.";
     auto wait_cnt = wait_attrs.second;
-    auto wait_group = Call(DataType::Void(), builtin::ptx_wait_group(), {wait_cnt});
+    auto wait_group = Call(DataType::Void(), builtin::ptx_cp_async_wait_group(), {wait_cnt});
     this->VisitExpr(wait_group, this->stream);
     auto inner = op->body.as<AttrStmtNode>();
     TVM_FFI_ICHECK(inner);

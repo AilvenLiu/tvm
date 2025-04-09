@@ -157,7 +157,7 @@ TVM_DLL const Op& ptx_cp_async();
 /*!
  * \brief tvm intrinsics for ptx async copy from global to shared memory using cp.async.bulk
  *
- * void ptx_cp_async(Var shared_ptr,
+ * void ptx_cp_async_bulk(Var shared_ptr,
  *                   Expr shared_offset,
  *                   Var global_ptr,
  *                   Expr global_offset,
@@ -170,52 +170,52 @@ TVM_DLL const Op& ptx_cp_async_bulk();
 /*!
  * \brief tvm intrinsics for ptx async copy commit and wait.
  *
- * void ptx_commit_group();
- * void ptx_wait_group(int num);
+ * void ptx_cp_async_commit_group();
+ * void ptx_cp_async_wait_group(int num);
  *
  */
-TVM_DLL const Op& ptx_commit_group();
-TVM_DLL const Op& ptx_wait_group();
+TVM_DLL const Op& ptx_cp_async_commit_group();
+TVM_DLL const Op& ptx_cp_async_wait_group();
 
 /*!
  * \brief tvm intrinsics for ptx async copy barrier using cp.async.mbarrier.arrive
  *
- * ptx_cp_async_barrier(int barrier_arr_id, int barrier_id)
+ * ptx_cp_async_mbarrier_arrive(int barrier_arr_id, int barrier_id)
  *
  */
-TVM_DLL const Op& ptx_cp_async_barrier();
+TVM_DLL const Op& ptx_cp_async_mbarrier_arrive();
 
 /*!
  * \brief tvm intrinsics for ptx barrier initialization of thread count using mbarrier.init
  *
- * ptx_init_barrier_thread_count(int barrier_arr_id, int barrier_id, int thread_count)
+ * init_barrier_thread_count(int barrier_arr_id, int barrier_id, int thread_count)
  *
  */
-TVM_DLL const Op& ptx_init_barrier_thread_count();
+TVM_DLL const Op& init_barrier_thread_count();
 
 /*!
  * \brief tvm intrinsics for ptx barrier arrival using mbarrier.arrive
  *
- * ptx_arrive_barrier(int barrier_arr_id, int barrier_id)
+ * arrive_barrier(int barrier_arr_id, int barrier_id)
  *
  */
-TVM_DLL const Op& ptx_arrive_barrier();
+TVM_DLL const Op& arrive_barrier();
 
 /*!
  * \brief tvm intrinsic for ptx barrier arrival with expect tx using mbarrier.arrive.expect_tx
  *
- * ptx_arrive_barrier_expect_tx(int barrier_arr_id, int barrier_id, int byte_count)
+ * arrive_barrier_expect_tx(int barrier_arr_id, int barrier_id, int byte_count)
  *
  */
-TVM_DLL const Op& ptx_arrive_barrier_expect_tx();
+TVM_DLL const Op& arrive_barrier_expect_tx();
 
 /*!
  * \brief tvm intrinsics for ptx barrier wait using mbarrier.try_wait
  *
- * ptx_wait_barrier(int barrier_arr_id, int barrier_id)
+ * wait_barrier(int barrier_arr_id, int barrier_id)
  *
  */
-TVM_DLL const Op& ptx_wait_barrier();
+TVM_DLL const Op& wait_barrier();
 
 /*!
  * \brief tvm intrinsics to create N barriers
@@ -279,14 +279,14 @@ TVM_DLL const Op& cuda_barrier_arrive_and_wait();
  *
  * cuda_fence_proxy_sync(StringImm scope)
  */
-TVM_DLL const Op& cuda_fence_proxy_async();
+TVM_DLL const Op& ptx_fence_proxy();
 
 /*!
  * \brief tvm instrinsics to call mbarrier.init.shared::cta.b64
  *
- * mbarrier_init(uint64_t* bar_ptr, int thread_count)
+ * ptx_mbarrier_init(uint64_t* bar_ptr, int thread_count)
  */
-TVM_DLL const Op& mbarrier_init();
+TVM_DLL const Op& ptx_mbarrier_init();
 
 /*!
  * \brief tvm instrinsics to call
@@ -295,7 +295,7 @@ TVM_DLL const Op& mbarrier_init();
  *             @p mapa.shared::cluster.u32
  *             @p mbarrier.arrive.shared::cluster.b64
  */
-TVM_DLL const Op& mbarrier_arrive();
+TVM_DLL const Op& ptx_mbarrier_arrive();
 
 /*!
  * \brief tvm instrinsics to call
@@ -304,30 +304,30 @@ TVM_DLL const Op& mbarrier_arrive();
  *             @p mapa.shared::cluster.u32
  *             @p mbarrier.arrive.expect_tx.shared.b64
  *
- * mbarrier_arrive_expect_tx(uint64_t* bar_ptr, int byte_count)
+ * ptx_mbarrier_arrive_expect_tx(uint64_t* bar_ptr, int byte_count)
  */
-TVM_DLL const Op& mbarrier_arrive_expect_tx();
+TVM_DLL const Op& ptx_mbarrier_arrive_expect_tx();
 
 /*!
  * \brief tvm instrinsics to call mbarrier.try_wait.parity repeatedly until it returns true
  *
- * mbarrier_wait(uint64_t* bar_ptr, int phase)
+ * ptx_mbarrier_try_wait(uint64_t* bar_ptr, int phase)
  */
-TVM_DLL const Op& mbarrier_wait();
+TVM_DLL const Op& ptx_mbarrier_try_wait();
 
 /*!
  * \brief tvm instrinsics to call bar.arrive a, b
  *
  * bar_arrive(int name_bar_id, int thread_count)
  */
-TVM_DLL const Op& named_barrier_arrive();
+TVM_DLL const Op& ptx_bar_arrive();
 
 /*!
  * \brief tvm instrinsics to call bar.sync a, {b}
  *
  * bar_sync(int name_bar_id, int thread_count)
  */
-TVM_DLL const Op& named_barrier_sync();
+TVM_DLL const Op& ptx_bar_sync();
 
 /*!
  * \brief tvm instrinsics to call
@@ -336,10 +336,10 @@ TVM_DLL const Op& named_barrier_sync();
  * TMA alignment requirement:
  * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#table-alignment-multi-dim-tma
  *
- * cp_async_bulk_tensor_global_to_cluster(int dim, PrimExpr dst_ptr, PrimExpr bar_ptr, Var
+ * ptx_cp_async_bulk_tensor_global_to_cluster(int dim, PrimExpr dst_ptr, PrimExpr bar_ptr, Var
  * tensormap_ptr, int cta_mask, int...coords)
  */
-TVM_DLL const Op& cp_async_bulk_tensor_global_to_cluster();
+TVM_DLL const Op& ptx_cp_async_bulk_tensor_global_to_cluster();
 
 /*!
  * \brief tvm instrinsics to call
@@ -348,51 +348,52 @@ TVM_DLL const Op& cp_async_bulk_tensor_global_to_cluster();
  * TMA alignment requirement:
  * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#table-alignment-multi-dim-tma
  *
- * cp_async_bulk_tensor_shared_to_global(int dim, PrimExpr src_ptr, Var tensormap_ptr, int...coords)
+ * ptx_cp_async_bulk_tensor_shared_to_global(int dim, PrimExpr src_ptr, Var tensormap_ptr,
+ * int...coords)
  */
-TVM_DLL const Op& cp_async_bulk_tensor_shared_to_global();
+TVM_DLL const Op& ptx_cp_async_bulk_tensor_shared_to_global();
 
 /*!
  * \brief tvm instrinsics to call cp.async.bulk.commit_group
  *
- * cp_async_bulk_tensor_commit_group()
+ * ptx_cp_async_bulk_commit_group()
  */
-TVM_DLL const Op& cp_async_bulk_tensor_commit_group();
+TVM_DLL const Op& ptx_cp_async_bulk_commit_group();
 
 /*!
  * \brief tvm instrinsics to call cp.async.bulk.wait_group{.read} N
  *
- * cp_async_bulk_tensor_wait_group(int N, bool read)
+ * ptx_cp_async_bulk_wait_group(int N, bool read)
  */
-TVM_DLL const Op& cp_async_bulk_tensor_wait_group();
+TVM_DLL const Op& ptx_cp_async_bulk_wait_group();
 
 /*!
  * \brief tvm instrinsics to call barrier.cluster.arrive{.sem}{.aligned}
  *
- * barrier_cluster_arrive(string sem, bool aligned)
+ * ptx_barrier_cluster_arrive(string sem, bool aligned)
  */
-TVM_DLL const Op& barrier_cluster_arrive();
+TVM_DLL const Op& ptx_barrier_cluster_arrive();
 
 /*!
  * \brief tvm instrinsics to call barrier.cluster.wait.{acquire}{.aligned}
  *
- * barrier_cluster_wait(bool acquire, bool aligned)
+ * ptx_barrier_cluster_wait(bool acquire, bool aligned)
  */
-TVM_DLL const Op& barrier_cluster_wait();
+TVM_DLL const Op& ptx_barrier_cluster_wait();
 
 /*!
  * \brief tvm instrinsics to call elect.sync _|p, membermask and return the predicate
  *
  * elect_sync(membermask)
  */
-TVM_DLL const Op& elect_sync();
+TVM_DLL const Op& ptx_elect_sync();
 
 /*!
  * \brief tvm instrinsics to call fence.mbarrier_init.release.cluster
  *
- * fence_mbarrier_init_release_cluster()
+ * ptx_fence_mbarrier_init_release_cluster()
  */
-TVM_DLL const Op& fence_mbarrier_init_release_cluster();
+TVM_DLL const Op& ptx_fence_mbarrier_init_release_cluster();
 
 /*!
  * \brief tvm instrinsics to fetch PTX pre-defined registers
@@ -431,65 +432,65 @@ TVM_DLL const Op& mma_fill();
 /*!
  * \brief tvm intrinsic to encode shared memory matrix descriptor.
  *
- * encode_matrix_descriptor(PrimExpr ptr, PrimExpr ldo, PrimExpr sdo, int swizzle)
+ * ptx_encode_matrix_descriptor(PrimExpr ptr, PrimExpr ldo, PrimExpr sdo, int swizzle)
  */
-TVM_DLL const Op& encode_matrix_descriptor();
+TVM_DLL const Op& ptx_encode_matrix_descriptor();
 
 /*!
  * \brief tvm intrinsic to call "" : "+r"(reg) :: "memory"
  *
- * wgmma_fence_operand()
+ * ptx_wgmma_noop_barrier()
  */
-TVM_DLL const Op& wgmma_fence_operand();
+TVM_DLL const Op& ptx_wgmma_noop_barrier();
 
 /*!
  * \brief tvm intrinsic to call wgmma.mma_async.sync.aligned.shape.dtype.atype.btype
  * where both A and B are in shared memory.
  *
- * wgmma_mma_async_ss()
+ * ptx_wgmma_mma_async_ss()
  */
-TVM_DLL const Op& wgmma_mma_async_ss();
+TVM_DLL const Op& ptx_wgmma_mma_async_ss();
 
 /*!
  * \brief tvm intrinsic to call wgmma.mma_async.sync.aligned.shape.dtype.atype.btype
  * where A is in register and B is in shared memory.
- * 
- * wgmma_mma_async_rs()
+ *
+ * ptx_wgmma_mma_async_rs()
  */
-TVM_DLL const Op& wgmma_mma_async_rs();
+TVM_DLL const Op& ptx_wgmma_mma_async_rs();
 
 /*!
  * \brief tvm intrinsic to call wgmma.fence.sync.aligned;
  *
- * wgmma_arrive()
+ * ptx_wgmma_fence()
  */
-TVM_DLL const Op& wgmma_arrive();
+TVM_DLL const Op& ptx_wgmma_fence();
 
 /*!
  * \brief tvm intrinsic to call wgmma.commit_group.sync.aligned;
  *
- * wgmma_commit_group()
+ * ptx_wgmma_commit_group()
  */
-TVM_DLL const Op& wgmma_commit_group();
+TVM_DLL const Op& ptx_wgmma_commit_group();
 
 /*!
  * \brief tvm intrinsic to call wgmma.wait_group.sync.aligned;
  *
- * wgmma_wait_group(int N)
+ * ptx_wgmma_wait_group(int N)
  */
-TVM_DLL const Op& wgmma_wait_group();
+TVM_DLL const Op& ptx_wgmma_wait_group();
 
 /*!
  * \brief tvm intrinsic to call stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r;
  *
- * stmatrix_sync_aligned(int num, bool trans, PrimExpr ptr, PrimExpr... vars)
+ * ptx_stmatrix(int num, bool trans, PrimExpr ptr, PrimExpr... vars)
  */
-TVM_DLL const Op& stmatrix_sync_aligned();
+TVM_DLL const Op& ptx_stmatrix();
 
 /*!
  * \brief tvm intrinsic to call setmaxnreg.action.sync.aligned.u32 imm-reg-count
  */
-TVM_DLL const Op& setmaxnreg();
+TVM_DLL const Op& ptx_setmaxnreg();
 
 }  // namespace builtin
 }  // namespace tir

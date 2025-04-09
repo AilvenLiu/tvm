@@ -58,7 +58,7 @@ def test_copy_transpose():
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
-                        T.nki_identity(identity[p_loop, rhs_f_loop], 128)
+                        T.nki.identity(identity[p_loop, rhs_f_loop], 128)
             Tp.copy(B_sbuf[0:512, 0:512], A_sbuf[0:512, 0:512], workspace={"acc_psum": acc_psum, "identity": identity})
 
     # fmt: on
@@ -117,7 +117,7 @@ def test_unary_with_bias_scale():
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
-                        T.nki_memset(const_bias[p_loop, f_loop], T.float32(1.0))
+                        T.nki.memset(const_bias[p_loop, f_loop], T.float32(1.0))
             Tp.exp(C_sbuf[0:512, 0:1024], A_sbuf[0:512, 0:1024], T.float32(1.0), T.float32(2.0), workspace={"const_bias": const_bias})
     # fmt: on
     with target:
@@ -275,7 +275,7 @@ def test_activation_reduce_two_stage():
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(1024, annotations={"nki_dim": "F"}):
-                        T.nki_memset(const_bias[p_loop, f_loop], T.float32(0.0))
+                        T.nki.memset(const_bias[p_loop, f_loop], T.float32(0.0))
             for i in range(2):
                 Tp.unary_reduce(B[0:16, 0:512, 0:128], C[0, 0:128], A[i * 16:i * 16 + 16, 0:512, 0:128], "sqrt", "sum", None, None, [0, 1], workspace={"const_bias": const_bias, "partial_reduce": partial_reduce})
     # fmt: on
@@ -317,7 +317,7 @@ def test_partial_workspace_specify():
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(1024, annotations={"nki_dim": "F"}):
-                        T.nki_memset(const_bias[p_loop, f_loop], T.float32(0.0))
+                        T.nki.memset(const_bias[p_loop, f_loop], T.float32(0.0))
             for i in range(2):
                 Tp.unary_reduce(B[0:16, 0:512, 0:128], C[0, 0:128], A[i * 16:i * 16 + 16, 0:512, 0:128], "sqrt", "sum", None, None, [0, 1], workspace={"const_bias": const_bias, "partial_reduce": partial_reduce})
     # fmt: on
@@ -355,7 +355,7 @@ def test_workspace_reuse():
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(1024, annotations={"nki_dim": "F"}):
-                        T.nki_memset(const_bias[p_loop, f_loop], T.float32(0.0))
+                        T.nki.memset(const_bias[p_loop, f_loop], T.float32(0.0))
             Tp.exp(C_sbuf[0:512, 0:1024], A_sbuf[0:512, 0:1024], T.float32(0.0), T.float32(2.0), workspace={"const_bias": const_bias}, schedule_config={"max_inst_size": 1024})
             Tp.exp(C_sbuf[0:512, 0:1024], C_sbuf[0:512, 0:1024], None, None, workspace={"const_bias": const_bias})
 

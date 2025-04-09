@@ -64,7 +64,7 @@ def alloc_const_bias_trn(
         with T.attr(0, "tensorized_nki_instruction", 1):
             for p_loop in T.serial(0, par_size, annotations={"nki_dim": "P"}):
                 for f_loop in T.serial(0, max_inst_size, annotations={nki_dim: "F"}):
-                    T.evaluate(T.nki_memset(new_buffer[p_loop, f_loop], bias))
+                    T.evaluate(T.nki.memset(new_buffer[p_loop, f_loop], bias))
         Tp.tvm_kernel_replace_point()
 
     buffer_dict[("const_bias", bias.value)] = (new_buffer, const_bias_init.body)
@@ -114,7 +114,7 @@ def alloc_identity_trn(
         with T.attr(0, "tensorized_nki_instruction", 1):
             for p_loop in T.serial(0, par_size, annotations={nki_dim: "P"}):
                 for rhs_f_loop in T.serial(0, par_size, annotations={nki_dim: "F"}):
-                    T.evaluate(T.nki_identity(new_buffer[p_loop, rhs_f_loop], par_size))
+                    T.evaluate(T.nki.identity(new_buffer[p_loop, rhs_f_loop], par_size))
         Tp.tvm_kernel_replace_point()
 
     buffer_dict["identity"] = (new_buffer, identity_init.body)

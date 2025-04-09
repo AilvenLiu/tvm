@@ -258,7 +258,7 @@ def copy_g2s_cta_tma_impl(
         for tid_x in T.thread_binding(tx, "threadIdx.x"):
             with T.thread()[tid_x == 0]:
                 if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
-                    T.cp_async_bulk_tensor_global_to_cluster(
+                    T.ptx.cp_async.bulk.tensor.g2c(
                         len(src.shape), # rank of global coordinate
                         dst.access_ptr("w", offset=dst.offset_of_p(dst_st)), # dst pointer
                         mbarrier.access_ptr("rw", offset=0), # mbarrier pointer
@@ -270,7 +270,7 @@ def copy_g2s_cta_tma_impl(
                     for lvs in T.grid(*iter_ranges):
                         dst_coord = T.meta_var(get_dst_coord(dst_st, lvs))
                         src_coord = T.meta_var(get_src_coord(src_st, dst_st, dst_coord))
-                        T.cp_async_bulk_tensor_global_to_cluster(
+                        T.ptx.cp_async.bulk.tensor.g2c(
                             len(src.shape), # rank of global coordinate
                             dst.access_ptr("w", offset=dst.offset_of_p(dst_coord)), # dst pointer
                             mbarrier.access_ptr("rw", offset=0), # mbarrier pointer
@@ -389,7 +389,7 @@ def copy_pipeline_cta_impl(
                 # TODO(@bohan): fetch env variables from the launch parameters
                 for tid in T.thread_binding(tx, "threadIdx.x"):
                     with T.thread()[tid == 0]:
-                        T.mbarrier_arrive_expect_tx(mbarrier.access_ptr("rw"), tma_bytes)
+                        T.ptx.mbarrier.arrive.expect_tx(mbarrier.access_ptr("rw"), tma_bytes)
 
             return func
         if op_type == PipelineOp.CONSUMER_WAIT:
@@ -397,7 +397,7 @@ def copy_pipeline_cta_impl(
             @T.prim_func(check_well_formed=False, tirp=True)
             def func():  # pylint: disable=function-redefined
                 # TODO(@bohan): fix the phase issue
-                T.mbarrier_wait(mbarrier.access_ptr("rw"), 0)
+                T.ptx.mbarrier.try_wait(mbarrier.access_ptr("rw"), 0)
                 T.tvm_storage_sync("shared")
 
             return func
@@ -416,8 +416,8 @@ def copy_pipeline_cta_impl(
             def func():  # pylint: disable=function-redefined
                 for tid in T.thread_binding(tx, "threadIdx.x"):
                     with T.thread()[tid == 0]:
-                        T.mbarrier_init(mbarrier.access_ptr("rw"), 1)
-                        T.cuda_fence_proxy_async("shared")
+                        T.ptx.mbarrier.init(mbarrier.access_ptr("rw"), 1)
+                        T.ptx.fence.proxy("shared")
                 T.tvm_storage_sync("shared")
 
             return func
