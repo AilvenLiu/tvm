@@ -244,6 +244,7 @@ def trn_pipeline():
         config = pass_ctx.config
         passes = [
             tirp.transform.PrivateBufferAlloc(),
+            tirp.transform.NaiveAllocator(),
             tir.transform.LowerTIRp(),
             tir.transform.DecorateDeviceScope(),
             tir.transform.ConvertBlocksToOpaque(),

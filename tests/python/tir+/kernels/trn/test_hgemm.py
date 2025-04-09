@@ -26,18 +26,6 @@ from .utils import run_on_remote_and_check_correct, ssh_client
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
-
-class SimpleSBUFAllocator:
-    def __init__(self):
-        self.allocated_addr = 0
-
-    def allocate(self, size):
-        addr = self.allocated_addr
-        self.allocated_addr += size
-        return addr
-
-allocator = SimpleSBUFAllocator()
-
 @pytest.mark.dependency(depends=["ssh_success"])
 def test_gemm2(ssh_client):
     K = 4096
@@ -110,9 +98,9 @@ def test_gemm2(ssh_client):
         B = T.match_buffer(B_ptr, (K, N), dtype, layout="default")
         C = T.match_buffer(C_ptr, (M, N), dtype, layout="default")
         with T.kernel():
-            result_tiles = T.alloc_buffer((2, BLOCK_M, BLOCK_N), "float32", scope="trn.sbuf", layout="FPF", allocated_addr=allocator.allocate(4*2*BLOCK_M*BLOCK_N//128))
-            b_sbuf = T.alloc_buffer((3, BLOCK_K, BLOCK_N), dtype, scope="trn.sbuf", layout="FPF", allocated_addr=allocator.allocate(2*3*BLOCK_K*BLOCK_N//128))
-            a_sbuf = T.alloc_buffer((3, BLOCK_K, BLOCK_M), dtype, scope="trn.sbuf", layout="FPF", allocated_addr=allocator.allocate(2*3*BLOCK_M*BLOCK_K//128))
+            result_tiles = T.alloc_buffer((2, BLOCK_M, BLOCK_N), "float32", scope="trn.sbuf", layout="FPF")
+            b_sbuf = T.alloc_buffer((3, BLOCK_K, BLOCK_N), dtype, scope="trn.sbuf", layout="FPF")
+            a_sbuf = T.alloc_buffer((3, BLOCK_K, BLOCK_M), dtype, scope="trn.sbuf", layout="FPF")
             c_psum = T.alloc_buffer((8, TILE_M, TILE_N), "float32", scope="trn.psum", layout="FPF", allocated_addr=(0, 0))
             load_A(0, a_sbuf, A)
             load_B(0, b_sbuf, B)

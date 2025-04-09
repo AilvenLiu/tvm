@@ -76,8 +76,8 @@ import neuronxcc.nki.compiler as ncc
 def func_kernel(A, B: nt.mutable_tensor, ):
   B_buffer = B.reshape([128, 512])
   A_buffer = A.reshape([128, 512])
-  A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
-  B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
+  A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
+  B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=2048))
   i = nl.arange(128)
   j = nl.arange(512)
   A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[i[:, None, ], j[None, :, ]])
@@ -131,8 +131,8 @@ import neuronxcc.nki.compiler as ncc
 def func_kernel(A, B: nt.mutable_tensor, ):
   B_buffer = B.reshape([128, 2048])
   A_buffer = A.reshape([128, 2048])
-  A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
-  B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
+  A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
+  B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=2048))
   for k in nl.sequential_range(4, precise_schedule=True):
     i = nl.arange(128)
     j = nl.arange(512)
@@ -285,11 +285,11 @@ def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
   result_buffer = result.reshape([4096, 2048])
   lhsT_buffer = lhsT.reshape([1024, 4096])
   rhs_buffer = rhs.reshape([1024, 2048])
-  result_tiles = nl.ndarray(shape=[128, 2, 16, 1, 512], dtype=np.float32, buffer=nl.sbuf)
-  rhs_tiles = nl.ndarray(shape=[128, 8, 512], dtype=np.float16, buffer=nl.sbuf)
-  lhsT_tiles = nl.ndarray(shape=[128, 8, 2048], dtype=np.float16, buffer=nl.sbuf)
+  result_tiles = nl.ndarray(shape=[128, 2, 16, 1, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
+  rhs_tiles = nl.ndarray(shape=[128, 8, 512], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=65536))
+  lhsT_tiles = nl.ndarray(shape=[128, 8, 2048], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=73728))
   res_tile = nl.ndarray(shape=[1, nl.par_dim(128), 512], dtype=np.float32, buffer=nl.psum)
-  result_packed = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=nl.sbuf)
+  result_packed = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=106496))
   for n in nl.sequential_range(4, precise_schedule=True):
     i0 = nl.arange(128)
     i1 = nl.arange(2)

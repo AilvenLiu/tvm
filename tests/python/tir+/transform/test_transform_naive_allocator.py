@@ -127,8 +127,55 @@ def test_workspace():
     assert_structural_equal(mod["copy"], expected)
 
 
+def test_other_scope_alloc():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def copy(A_ptr: T.handle) -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
+            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
+            C_sbuf = T.alloc_buffer([8, 128, 512], "float32", scope="global")
+            Tp.copy(B_sbuf[0:256, :], A_sbuf, workspace={"C": C_sbuf})
+
+    @T.prim_func(tirp=True)
+    def expected(A_ptr: T.handle) -> None:
+        T.func_attr({"global_symbol": "copy"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
+            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
+            C_sbuf = T.alloc_buffer([8, 128, 512], "float32", scope="global")
+            Tp.copy(B_sbuf[0:256, :], A_sbuf, workspace={"C": C_sbuf})
+    # fmt: on
+
+    mod = tvm.IRModule({"copy": copy})
+    mod = NaiveAllocator()(mod)
+    assert_structural_equal(mod["copy"], expected)
+
+
+def test_buffer_views():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def copy(A_ptr: T.handle) -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
+            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
+            B_view = T.view(B_sbuf, B_sbuf.layout, [2, 256, 512])
+            Tp.copy(B_view[0], A_sbuf)
+    
+    @T.prim_func(tirp=True)
+    def expected(A_ptr: T.handle) -> None:
+        T.func_attr({"global_symbol": "copy"})
+        with T.kernel():
+            A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
+            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
+            B_view = T.view(B_sbuf, B_sbuf.layout, [2, 256, 512])
+            Tp.copy(B_view[0], A_sbuf)
+    # fmt: on
+
+    mod = tvm.IRModule({"copy": copy})
+    mod = NaiveAllocator()(mod)
+    assert_structural_equal(mod["copy"], expected)
+
+
 if __name__ == "__main__":
-    test_one_alloc()
-    test_two_alloc()
-    test_existing_alloc()
-    test_workspace()
+    tvm.testing.main()

@@ -41,7 +41,7 @@ from .stmt import (
 from .stmt import SeqStmt
 from .stmt import IfThenElse, Evaluate, stmt_seq, stmt_list
 from .stmt import BufferRegion, MatchBufferRegion, SBlock, SBlockRealize
-from .stmt import OpCall
+from .stmt import OpCall, BufferView, BufferGet
 
 from .function import PrimFunc, TensorIntrin, IndexMap
 
