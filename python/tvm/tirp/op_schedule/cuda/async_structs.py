@@ -330,7 +330,7 @@ def copy_pipeline_cta_impl(
             # cp.async.commit_group()
             @T.prim_func
             def func():
-                T.evaluate(T.ptx_commit_group())
+                T.evaluate(T.ptx.cp_async.commit_group())
 
             return func
 
@@ -340,7 +340,7 @@ def copy_pipeline_cta_impl(
 
             @T.prim_func
             def func():  # pylint: disable=function-redefined
-                T.evaluate(T.ptx_wait_group(num_stages))
+                T.evaluate(T.ptx.cp_async.wait_group(num_stages))
                 T.tvm_storage_sync("shared")
 
             return func
