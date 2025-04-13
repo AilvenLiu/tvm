@@ -93,7 +93,7 @@ def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape):
         return TileLayout.from_tuple(shape).normalize()
     atom_shape = tma_atom_shape(dtype, swizzle_mode, shape)
     layout = tma_atom_layout(dtype, swizzle_mode)
-    tile_to_shape = copy.deepcopy(atom_shape)
+    tile_to_shape = copy.copy(atom_shape)
     tile_to_shape[-2] = shape[-2]
     return layout.tile_to(tile_to_shape, atom_shape).tile_to(shape, tile_to_shape).normalize()
 
@@ -198,7 +198,7 @@ def copy_g2s_cta_tma_impl(
             # set the box dimension
             if outer.data_iter_array[seps[-2] - 1].stride == 1:
                 # can load multiple TMA atoms at once,
-                box_dim = copy.deepcopy(atom_shape)
+                box_dim = copy.copy(atom_shape)
                 box_dim[-2] *= outer.data_iter_array[seps[-2] - 1].extent
                 # remove the last iterator
                 iter_ranges.pop(iters[-1][0])
@@ -228,7 +228,7 @@ def copy_g2s_cta_tma_impl(
     # Device-side implementation
     def get_src_coord(src_st, dst_st, dst_coord):
         """Convert the coordinates to the global coordinates."""
-        coord = copy.deepcopy(src_st)
+        coord = copy.copy(src_st)
         for i in range(len(src.shape)):
             if axis_map[i] != -1:
                 coord[i] += dst_coord[axis_map[i]] - dst_st[axis_map[i]]
@@ -241,7 +241,7 @@ def copy_g2s_cta_tma_impl(
         lv_shuffled = [0] * len(outer.data_iter_array)
         for iter_, lv in zip(iters, lvs):
             lv_shuffled[iter_[0]] = lv
-        coord = copy.deepcopy(st)
+        coord = copy.copy(st)
         for i in range(len(dst.shape)):
             grouped_shape = [outer.data_iter_array[j].extent for j in range(seps[i], seps[i + 1])]
             grouped_outer = TileLayout.from_tuple(grouped_shape)
@@ -371,7 +371,9 @@ def copy_pipeline_cta_impl(
     if impl == CopyPipeline.Impl.TMA:
         # TODO(@bohan): support private memory allocation
         mbarrier: Optional[Buffer] = pipeline.workspace.get("mbarrier", None)
+        phase: Optional[Buffer] = pipeline.workspace.get("phase", None)
         assert mbarrier is not None, "mbarrier is not found in the workspace"
+        assert phase is not None, "phase is not found in the workspace"
         # TODO(@bohan): support other pipeline configurations
         assert pipeline.depth == 0 and not pipeline.separate_pc
         # TODO(@bohan): consider cluster multicasting cases
@@ -393,12 +395,12 @@ def copy_pipeline_cta_impl(
 
             return func
         if op_type == PipelineOp.CONSUMER_WAIT:
-            # wait mbarrier to flip
+            # wait mbarrier to flip the phase
             @T.prim_func(check_well_formed=False, tirp=True)
             def func():  # pylint: disable=function-redefined
-                # TODO(@bohan): fix the phase issue
-                T.ptx.mbarrier.try_wait(mbarrier.access_ptr("rw"), 0)
+                T.ptx.mbarrier.try_wait(mbarrier.access_ptr("rw"), phase[0])
                 T.tvm_storage_sync("shared")
+                phase[0] = phase[0] ^ 1
 
             return func
         if op_type == PipelineOp.COPY:
@@ -412,12 +414,14 @@ def copy_pipeline_cta_impl(
             )
         if op_type == PipelineOp.INIT:
             # initialize the mbarrier, make sure the initialization is visible to all threads
+            # and the phase is initialized to 0
             @T.prim_func(check_well_formed=False, tirp=True)
             def func():  # pylint: disable=function-redefined
                 for tid in T.thread_binding(tx, "threadIdx.x"):
                     with T.thread()[tid == 0]:
                         T.ptx.mbarrier.init(mbarrier.access_ptr("rw"), 1)
                         T.ptx.fence.proxy("shared")
+                    phase[0] = 0
                 T.tvm_storage_sync("shared")
 
             return func
