@@ -179,7 +179,11 @@ ffi::Map<ffi::String, ffi::Any> UpdateCUDAAttrs(ffi::Map<ffi::String, ffi::Any> 
     } else {
       archInt = std::stod(version.cast<std::string>()) * 10 + 0.1;
     }
-    target.Set("arch", ffi::String("sm_") + std::to_string(archInt));
+    if (archInt >= 90) {
+      target.Set("arch", String("sm_") + std::to_string(archInt) + "a");
+    } else {
+      target.Set("arch", ffi::String("sm_") + std::to_string(archInt));
+    }
   }
   return target;
 }

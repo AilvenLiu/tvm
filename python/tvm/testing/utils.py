@@ -1207,7 +1207,7 @@ def requires_nvcc_version(major_version, minor_version=0, release_version=0):
     return inner
 
 
-def requires_cuda_compute_version(major_version, minor_version=0):
+def requires_cuda_compute_version(major_version, minor_version=0, exact=False):
     """Mark a test as requiring at least a compute architecture
 
     Unit test marked with this decorator will run only if the CUDA
@@ -1239,7 +1239,7 @@ def requires_cuda_compute_version(major_version, minor_version=0):
     compute_version_str = ".".join(str(v) for v in compute_version)
     requires = [
         pytest.mark.skipif(
-            compute_version < min_version,
+            compute_version < min_version or (exact and compute_version != min_version),
             reason=f"Requires CUDA compute >= {min_version_str}, but have {compute_version_str}",
         ),
         *requires_cuda.marks(),

@@ -24,14 +24,14 @@ from tvm.script import tir as T
 from ..utils import bench, ProtonContext, ProfileEventType, export_to_perfetto_trace
 
 
-@tvm.testing.requires_cuda_compute_version(9)
+@tvm.testing.requires_cuda_compute_version(9, exact=True)
 def test_fp16_fused_attn():
     def ceildiv(a, b):
         return (a + b - 1) // b
 
     np.random.seed(0)
     DEV = tvm.cuda(0)
-    target = tvm.target.Target("nvidia/nvidia-h100")
+    target = tvm.target.Target("cuda")
 
     F16_BYTES = 2
     SM_COUNT = DEV.multi_processor_count

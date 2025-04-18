@@ -25,10 +25,10 @@ from tvm.script import tir as T
 from ..utils import bench, ProtonContext
 
 
-@tvm.testing.requires_cuda_compute_version(9)
+@tvm.testing.requires_cuda_compute_version(9, exact=True)
 def test_fp8_gemm_hopper_no_ws():
     DEV = tvm.cuda(0)
-    target = tvm.target.Target("nvidia/nvidia-h100")
+    target = tvm.target.Target("cuda")
 
     f8_bytes = 1
     f16_bytes = 2

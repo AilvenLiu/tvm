@@ -25,7 +25,7 @@ import tvm.testing
 
 
 def _get_source(func: tvm.tir.PrimFunc) -> str:
-    target = tvm.target.Target("nvidia/nvidia-h100")
+    target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
     src = mod.mod.imported_modules[0].get_source()
@@ -621,7 +621,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
     np.testing.assert_allclose(A.numpy(), A_ref)
 
 
-@tvm.testing.requires_cuda_compute_version(9)
+@tvm.testing.requires_cuda_compute_version(9, exact=True)
 def test_wgmma_ss_nt():
     def get_ir(
         shapeA,
@@ -731,7 +731,7 @@ def test_wgmma_ss_nt():
     elem_bytes = t_in_dtype.bits // 8
 
     DEV = tvm.cuda(0)
-    target = tvm.target.Target("nvidia/nvidia-h100")
+    target = tvm.target.Target("cuda")
     M = 64
     N = 64
     K = 256 // t_in_dtype.bits
@@ -777,7 +777,7 @@ def test_wgmma_ss_nt():
     tvm.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-3)
 
 
-@tvm.testing.requires_cuda_compute_version(9)
+@tvm.testing.requires_cuda_compute_version(9, exact=True)
 def test_wgmma_rs_nt():
     def get_ir(
         shapeA,
@@ -901,7 +901,7 @@ def test_wgmma_rs_nt():
     elem_bytes = t_in_dtype.bits // 8
 
     DEV = tvm.cuda(0)
-    target = tvm.target.Target("nvidia/nvidia-h100")
+    target = tvm.target.Target("cuda")
     M = 64
     N = 64
     K = 256 // t_in_dtype.bits

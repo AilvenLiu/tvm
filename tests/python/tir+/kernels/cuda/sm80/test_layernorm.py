@@ -29,7 +29,7 @@ from ..utils import bench, ProtonContext
 @pytest.mark.parametrize("dtype", ["bfloat16", "float16"])
 def test_layernorm(dtype):
     DEV = tvm.cuda(0)
-    target = tvm.target.Target("nvidia/nvidia-h100")
+    target = tvm.target.Target("cuda")
 
     if dtype == "bfloat16":
         np_dtype = "bfloat16"

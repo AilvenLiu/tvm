@@ -23,10 +23,10 @@ from tvm.script import tir as T
 from ..utils import bench, ProtonContext
 
 
-@tvm.testing.requires_cuda_compute_version(9)
+@tvm.testing.requires_cuda_compute_version(9, exact=True)
 def test_hgemm_hopper_ws_cooperative():
     DEV = tvm.cuda(0)
-    target = tvm.target.Target("nvidia/nvidia-h100")
+    target = tvm.target.Target("cuda")
 
     f16_bytes = 2
     f32_bytes = 4
@@ -374,10 +374,10 @@ def test_hgemm_hopper_ws_cooperative():
     tvm.testing.assert_allclose(C_tvm, C_cublas, rtol=1e-3, atol=1e-3)
 
 
-@tvm.testing.requires_cuda_compute_version(9)
+@tvm.testing.requires_cuda_compute_version(9, exact=True)
 def test_hgemm_hopper_no_ws():
     DEV = tvm.cuda(0)
-    target = tvm.target.Target("nvidia/nvidia-h100")
+    target = tvm.target.Target("cuda")
 
     f16_bytes = 2
     SM_COUNT = DEV.multi_processor_count

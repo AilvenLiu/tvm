@@ -173,6 +173,8 @@ TVM_REGISTER_CUDA_TAG("nvidia/nvidia-h100", "sm_90a", 49152, 65536)
     .with_config("l2_cache_size_bytes", 52428800);
 TVM_REGISTER_CUDA_TAG("nvidia/nvidia-b100", "sm_100a", 49152, 65536)
     .with_config("l2_cache_size_bytes", 52428800);
+TVM_REGISTER_CUDA_TAG("nvidia/nvidia-b200", "sm_100a", 49152, 65536)
+    .with_config("l2_cache_size_bytes", runtime::Int(132644864));
 TVM_REGISTER_CUDA_TAG("nvidia/nvidia-a40", "sm_86", 49152, 65536);
 TVM_REGISTER_CUDA_TAG("nvidia/nvidia-a30", "sm_80", 49152, 65536);
 TVM_REGISTER_CUDA_TAG("nvidia/nvidia-a10", "sm_86", 49152, 65536);
@@ -475,7 +477,7 @@ TVM_REGISTER_METAL_GPU_TAG("apple/m2-gpu", 1024, 32768, 32);
 
 #define TVM_REGISTER_TAG_AWS_TRN1(Name, Cores)                \
   TVM_REGISTER_TARGET_TAG(Name).set_config(                   \
-      {{"kind", String("trn")},                              \
+      {{"kind", String("trn")},                               \
        {"num-cores", runtime::Int(Cores)},                    \
        {"partition_size", runtime::Int(128)},                 \
        {"max_sbuf_size_per_partition", runtime::Int(196608)}, \
@@ -484,6 +486,5 @@ TVM_REGISTER_METAL_GPU_TAG("apple/m2-gpu", 1024, 32768, 32);
 TVM_REGISTER_TAG_AWS_TRN1("aws/trn1/trn1.2xlarge", 2);
 TVM_REGISTER_TAG_AWS_TRN1("aws/trn1/trn1.32xlarge", 32);
 #undef TVM_REGISTER_TAG_AWS_TRN1
-
 
 }  // namespace tvm
