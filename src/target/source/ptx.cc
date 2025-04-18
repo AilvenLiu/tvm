@@ -1791,5 +1791,44 @@ __forceinline__ __device__ uint32_t {func_name}() {
   return func_name + "()";
 }
 
+std::string PrintLdGlobalAcquireAssembly(codegen::CodeGenCUDA* cg, const std::string& res,
+                                         const std::string& addr, DataType dtype) {
+  std::string func_code = R"(
+__forceinline__ __device__ {dtype} {func_name}({dtype}* addr) {
+  {dtype} res;
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+  asm volatile ("ld.global.acquire.gpu.{type} %0, [%1];\n" : "=r"(res) : "l"(addr));  
+  #else
+  asm volatile ("ld.global.cg.{type} %0, [%1];\n" : "=r"(res) : "l"(addr));  
+  #endif
+  return res;
+}
+)";
+  std::string dtype_str;
+  std::string type;
+  if (dtype == DataType::UInt(32)) {
+    dtype_str = "uint32_t";
+    type = "b32";
+  } else if (dtype == DataType::Int(32)) {
+    dtype_str = "int32_t";
+    type = "b32";
+  } else if (dtype == DataType::UInt(64)) {
+    dtype_str = "uint64_t";
+    type = "b64";
+  } else if (dtype == DataType::Int(64)) {
+    dtype_str = "int64_t";
+    type = "b64";
+  } else {
+    LOG(FATAL) << "Only support uint32/int32/uint64/int64 for ld.global.acquire.";
+  }
+  std::string func_name = "ptx_ld_global_acquire";
+  Replacer replacer;
+  replacer.register_rule("{func_name}", func_name);
+  replacer.register_rule("{dtype}", dtype_str);
+  replacer.register_rule("{type}", type);
+  func_code = replacer.rewrite(func_code);
+  cg->AddUtilFunction(func_name, func_code);
+  return res + " = " + func_name + "(" + addr + ")";
+}
 }  // namespace codegen
 }  // namespace tvm

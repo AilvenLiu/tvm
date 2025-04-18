@@ -5024,3 +5024,79 @@ def nki_affine_select(result, pred, true_value, false_value):
         The call expression.
     """
     return call_intrin("", "tir.nki_affine_select", result, pred, true_value, false_value)
+
+def cuda_atomic_add(res_addr, value):
+    """TVM intrinsic to call cuda atomic add instruction
+
+    Parameters
+    ----------
+    res_addr : PrimExpr
+        The result address.  
+
+    value: PrimExpr
+        The value to add.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_atomic_add", res_addr, value)
+
+def cuda_thread_fence():
+    """TVM intrinsic to call cuda thread fence instruction
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_thread_fence")
+
+def cuda_syncthreads_and(cond):
+    """TVM intrinsic to call cuda syncthreads_and instruction
+
+    Parameters
+    ----------
+    cond: PrimExpr
+        The condition.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("int64", "tir.cuda_syncthreads_and", cond)
+
+def cuda_nano_sleep(time):
+    """TVM intrinsic to call cuda nano sleep instruction
+
+    Parameters
+    ----------
+    time: PrimExpr
+        The time to sleep.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_nano_sleep", time)
+
+def ptx_ld_global_acquire(res, addr):
+    """TVM intrinsic to call ptx ld.global.acquire instruction
+
+    Parameters
+    ----------
+    res : PrimExpr
+        The result of the load.
+
+    addr : PrimExpr
+        The memory address to load.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.ptx_ld_global_acquire", res, addr)

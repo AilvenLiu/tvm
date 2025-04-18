@@ -395,6 +395,14 @@ std::string PrintSetMaxNRegAssembly(bool inc, int reg_count);
  */
 std::string PrintGetTimestampAssembly(CodeGenCUDA* cg);
 
+/*!
+ * \brief Print ld.global.acquire.gpu.{type} %0, [%1].
+ * \param res: The register to store the result.
+ * \param addr: The address of the global memory.
+ * \param dtype: The data type of the global memory.
+ */
+std::string PrintLdGlobalAcquireAssembly(codegen::CodeGenCUDA* cg, const std::string& res,
+                                         const std::string& addr, DataType dtype);
 }  // namespace codegen
 }  // namespace tvm
 #endif  // TVM_TARGET_SOURCE_PTX_H_

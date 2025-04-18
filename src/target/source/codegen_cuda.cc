@@ -1927,6 +1927,31 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     EndScope(if_scope);
     this->PrintIndent();
     this->stream << "}\n";
+  } else if (op->op.same_as(builtin::cuda_atomic_add())) { 
+    ICHECK_EQ(op->args.size(), 2U);
+    this->PrintIndent();
+    this->stream << "atomicAdd(";
+    this->stream << this->PrintExpr(op->args[0]);
+    this->stream << ", ";
+    this->stream << this->PrintExpr(op->args[1]);
+    this->stream << ");\n";
+  } else if (op->op.same_as(builtin::cuda_thread_fence())) {
+    this->PrintIndent();
+    this->stream << "__threadfence();\n";
+  } else if (op->op.same_as(builtin::cuda_syncthreads_and())) {
+    os << "__syncthreads_and(";
+    os << this->PrintExpr(op->args[0]);
+    os << ")";
+  } else if (op->op.same_as(builtin::cuda_nano_sleep())) {
+    this->PrintIndent();
+    this->stream << "__nanosleep(";
+    this->stream << this->PrintExpr(op->args[0]);
+    this->stream << ");\n";
+  } else if (op->op.same_as(builtin::ptx_ld_global_acquire())) {
+    ICHECK_EQ(op->args.size(), 2U);
+    this->PrintIndent();
+    this->stream << PrintLdGlobalAcquireAssembly(this, this->PrintExpr(op->args[0]), this->PrintExpr(op->args[1]), op->args[0]->dtype);
+    this->stream << ";\n";
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {

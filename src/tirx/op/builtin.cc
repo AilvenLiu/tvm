@@ -377,6 +377,20 @@ TIR_DEFINE_BUILTIN_FUNC(timer_start_cuda)
 TIR_DEFINE_BUILTIN_FUNC(timer_end_cuda)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(cuda_atomic_add)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(cuda_thread_fence)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(cuda_syncthreads_and)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(cuda_nano_sleep)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+
+
 }  // namespace builtin
 }  // namespace tirx
 }  // namespace tvm

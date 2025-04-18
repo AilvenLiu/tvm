@@ -492,6 +492,13 @@ TVM_DLL const Op& ptx_stmatrix();
  */
 TVM_DLL const Op& ptx_setmaxnreg();
 
+/*!
+ * \brief tvm intrinsic to call ld.global.acquire.gpu.b32
+ *
+ * ptx_ld_global_acquire()
+ */
+TVM_DLL const Op& ptx_ld_global_acquire();
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

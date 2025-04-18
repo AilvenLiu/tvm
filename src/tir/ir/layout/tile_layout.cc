@@ -31,7 +31,7 @@ TileLayout::TileLayout(Array<DataIterAttr> data_iter_array, Array<DeviceIterAttr
   n->to = std::move(to);
   if (n->from.defined()) {
     ICHECK(n->to.defined()) << "ValueError: The to scope must be defined if the from scope is";
-    ICHECK(n->to.value().Higher(n->from.value()))
+    ICHECK(n->to.value()->Higher(n->from.value()))
         << "ValueError: The from scope must be higher than the to scope";
   }
   data_ = std::move(n);
@@ -297,7 +297,7 @@ TileLayout Shard(Array<PrimExpr> shape, Array<PrimExpr> mesh, String strategy, T
   // Construct the from and to scopes
   if (!inner->device_iter_array.empty()) {
     ICHECK(inner->to.defined()) << "ValueError: The inner layout must have the to scope";
-    ICHECK(inner->to.value().Is((from)))
+    ICHECK(inner->to.value()->Is((from)))
         << "ValueError: The from scope of the inner layout must be the same as the to scope of "
            "the outer layout";
   }

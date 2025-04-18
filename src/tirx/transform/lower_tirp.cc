@@ -53,7 +53,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
     Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(op));
     ICHECK(op->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
     const auto& scope = op->exec_scope.value();
-    ICHECK(!scope.Is("world")) << "Internal Error: world scope is not supported at the moment";
+    ICHECK(!scope->Is("world")) << "Internal Error: world scope is not supported at the moment";
     // Resolve under kernel exec scope
     auto opt_kernel = scope.as<KernelScope>();
     if (!opt_kernel) {
@@ -302,7 +302,7 @@ class ScopeMerger : public StmtExprMutator {
               const auto& next_block = next_realize->block;
               ICHECK(next_block->exec_scope.defined())
                   << "Internal Error: exec_scope is not defined";
-              if (scope.Is(next_block->exec_scope.value())) {
+              if (scope->Is(next_block->exec_scope.value())) {
                 new_block->buffer_views.insert(new_block->buffer_views.end(),
                                                next_block->buffer_views.begin(),
                                                next_block->buffer_views.end());
@@ -400,9 +400,11 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     auto resolved = ScopeIdResolveTable::Resolve(scope, scope_slice->extents, out_dim,
                                                  target_->kind->name, launch_params_);
     ICHECK_EQ(resolved.size(), out_dim);
-    Stmt body = StmtExprMutator::VisitStmt(op->body);
+    Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(op));
+    auto n = block.CopyOnWrite();
+    n->exec_scope = NullOpt;
     if (auto select_cond = scope_slice->slice.as<PrimExpr>()) {
-      body = IfThenElse(select_cond.value(), body);
+      n->body = IfThenElse(select_cond.value(), n->body);
     } else {
       auto slices = scope_slice->slice.as<Array<Range>>().value();
       PrimExpr cond = Bool(true);
@@ -410,9 +412,9 @@ class ExecScopeSliceResolver : public StmtExprMutator {
         cond = cond && resolved[i] >= slices[i]->min &&
                resolved[i] < slices[i]->extent + slices[i]->min;
       }
-      body = IfThenElse(cond, body);
+      n->body = IfThenElse(cond, n->body);
     }
-    return body;
+    return std::move(block);
   }
 
   LaunchParams launch_params_;

@@ -206,6 +206,9 @@ TIR_DEFINE_BUILTIN_FUNC(ptx_stmatrix)
 TIR_DEFINE_BUILTIN_FUNC(ptx_setmaxnreg)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(ptx_ld_global_acquire)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

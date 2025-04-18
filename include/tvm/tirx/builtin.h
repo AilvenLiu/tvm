@@ -816,6 +816,27 @@ TVM_DLL const Op& timer_start_cuda();
  */
 TVM_DLL const Op& timer_end_cuda();
 
+/*!
+ * \brief tvm intrinsic for cuda atomic add instruction
+ */
+TVM_DLL const Op& cuda_atomic_add();
+
+
+/*!
+ * \brief tvm intrinsic for cuda thread fence instruction
+ */
+TVM_DLL const Op& cuda_thread_fence();
+
+/*!
+ * \brief tvm intrinsic for cuda syncthreads_and instruction
+ */
+TVM_DLL const Op& cuda_syncthreads_and();
+
+/*!
+ * \brief tvm intrinsic for cuda nano sleep instruction
+ */
+TVM_DLL const Op& cuda_nano_sleep();
+
 }  // namespace builtin
 }  // namespace tirx
 }  // namespace tvm

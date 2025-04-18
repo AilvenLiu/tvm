@@ -183,10 +183,23 @@ class ScopeIdResolveTable {
 };
 
 /******** Definition of Execution Scope ********/
+class ExecScope;
 class ExecScopeNode : public Object {
  public:
   /*! \brief scope name, used when printing */
   String name;
+
+  /*! \brief scope's are the same */
+  virtual bool Is(const ExecScope& other) const;
+
+  /*! \brief scope is identified by name */
+  bool Is(const String& name) const;
+
+  /*! \brief scope is higher than other sope */
+  bool Higher(const ExecScope& other) const;
+
+  /*! \brief scope is higher than other sope */
+  bool Higher(const String& other) const;
 
   void VisitAttrs(AttrVisitor* v) { v->Visit("name", &name); }
 
@@ -211,18 +224,6 @@ class ExecScope : public ObjectRef {
 
   /*! \brief check if a scope name is valid */
   static bool Valid(const String& name);
-
-  /*! \brief scope's are the same */
-  bool Is(const ExecScope& other) const;
-
-  /*! \brief scope is identified by name */
-  bool Is(const String& name) const;
-
-  /*! \brief scope is higher than other sope */
-  bool Higher(const ExecScope& other) const;
-
-  /*! \brief scope is higher than other sope */
-  bool Higher(const String& other) const;
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScope, ObjectRef, ExecScopeNode);
 };
@@ -300,6 +301,8 @@ class ExecScopeSliceNode : public ExecScopeNode {
   Optional<Array<PrimExpr>> extents;
   /*! \brief parent scope name */
   String parent;
+
+  bool Is(const ExecScope& other) const final;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("slice", &slice);

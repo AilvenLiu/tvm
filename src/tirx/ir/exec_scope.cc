@@ -47,17 +47,17 @@ ExecScope ExecScope::Create(String name) {
 
 bool ExecScope::Valid(const String& name) { return ScopeOrder.find(name) != ScopeOrder.end(); }
 
-bool ExecScope::Is(const String& name) const { return name == this->get()->name; }
+bool ExecScopeNode::Is(const String& name) const { return name == this->name; }
 
-bool ExecScope::Is(const ExecScope& other) const { return Is(other->name); }
+bool ExecScopeNode::Is(const ExecScope& other) const { return Is(other->name); }
 
-bool ExecScope::Higher(const String& other) const {
-  CHECK(Valid(this->get()->name)) << "ValueError: Unknown scope name";
-  CHECK(Valid(other)) << "ValueError: Unknown scope name";
-  return ScopeOrder.at(this->get()->name) < ScopeOrder.at(other);
+bool ExecScopeNode::Higher(const String& other) const {
+  CHECK(ExecScope::Valid(this->name)) << "ValueError: Unknown scope name";
+  CHECK(ExecScope::Valid(other)) << "ValueError: Unknown scope name";
+  return ScopeOrder.at(this->name) < ScopeOrder.at(other);
 }
 
-bool ExecScope::Higher(const ExecScope& other) const { return Higher(other->name); }
+bool ExecScopeNode::Higher(const ExecScope& other) const { return Higher(other->name); }
 
 TVM_REGISTER_NODE_TYPE(ExecScopeNode);
 
@@ -113,6 +113,14 @@ ExecScopeSlice::ExecScopeSlice(Variant<Array<Range>, PrimExpr> slice,
   }
   n->slice = std::move(slice);
   data_ = std::move(n);
+}
+
+bool ExecScopeSliceNode::Is(const ExecScope& other) const {
+  auto other_slice = other.as<ExecScopeSliceNode>();
+  if (!other_slice) {
+    return false;
+  }
+  return ExecScopeNode::Is(other) && StructuralEqual()(this->slice, other_slice->slice);
 }
 
 TVM_REGISTER_NODE_TYPE(ExecScopeSliceNode);
@@ -204,12 +212,12 @@ Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
 
 Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
   if (lhs->scope->parent == rhs->scope->parent &&
-      ExecScope::Create(rhs->scope->cur).Higher(lhs->scope->cur)) {
+      ExecScope::Create(rhs->scope->cur)->Higher(lhs->scope->cur)) {
     return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
                       ScopePair(rhs->scope->cur, lhs->scope->cur));
   }
   if (lhs->scope->cur == rhs->scope->cur &&
-      ExecScope::Create(lhs->scope->parent).Higher(rhs->scope->parent)) {
+      ExecScope::Create(lhs->scope->parent)->Higher(rhs->scope->parent)) {
     return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
                       ScopePair(lhs->scope->parent, rhs->scope->parent));
   }

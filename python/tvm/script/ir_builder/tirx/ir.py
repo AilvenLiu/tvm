@@ -2212,6 +2212,7 @@ class PTXNamespace:
         self.elect_sync : Callable[..., Any] = _op_wrapper(_tir_op.ptx_elect_sync)
         self.fetch_register : Callable[..., Any] = _op_wrapper(_tir_op.ptx_fetch_register)
         self.encode_matrix_descriptor = _op_wrapper(_tir_op.ptx_encode_matrix_descriptor)
+        self.ld_global_acquire = _op_wrapper(_tir_op.ptx_ld_global_acquire)
         self.mma = MmaNamespace()
         self.cp_async = CpAsyncNamespace()
         self.wgmma = WgmmaNamespace()
@@ -2331,6 +2332,10 @@ class CUDANamespace:
 
     def __init__(self):
         self.barrier = CUDABarrierNamespace()
+        self.atomic_add = _op_wrapper(_tir_op.cuda_atomic_add)
+        self.thread_fence = _op_wrapper(_tir_op.cuda_thread_fence)
+        self.syncthreads_and = _op_wrapper(_tir_op.cuda_syncthreads_and)
+        self.nano_sleep = _op_wrapper(_tir_op.cuda_nano_sleep)
 
 class CUDABarrierNamespace:
     """The CUDA barrier intrinsics submodule."""

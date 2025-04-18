@@ -90,18 +90,18 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
         << "TIRpError: Block at " << path << " has unknown exec_scope " << scope->name;
     // C2: exec_scope is valid for root
     if (scope_stack_.empty()) {
-      Verify(scope.Is("world") || scope.Is("kernel"))
+      Verify(scope->Is("world") || scope->Is("kernel"))
           << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
           << " as root";
     } else {
       // C3: exec_scope is valid for nested scope
-      if (scope_stack_.back().Higher(scope)) {
+      if (scope_stack_.back()->Higher(scope)) {
         cur_roof_ = scope_stack_.back();
-      } else if (scope_stack_.back().Is(scope->name)) {
+      } else if (scope_stack_.back()->Is(scope->name)) {
         // do nothing
       } else {
         ICHECK(cur_roof_.defined()) << "TIRpError: root scope should be the highest scope";
-        Verify(!scope.Higher(cur_roof_.value()))
+        Verify(!scope->Higher(cur_roof_.value()))
             << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
             << " under " << cur_roof_.value()->name;
       }

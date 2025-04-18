@@ -184,7 +184,7 @@ Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Array<Pri
     if (tile_layout->from.defined()) {
       TVM_FFI_ICHECK(tile_layout->to.defined())
           << "ValueError: The from scope of the layout must match the to scope of the layout.";
-      TVM_FFI_ICHECK(tvm::tirx::ExecScope::Create(logical_scope).Is(tile_layout->from.value()))
+      TVM_FFI_ICHECK(tvm::tirx::ExecScope::Create(logical_scope)->Is(tile_layout->from.value()))
           << "ValueError: The logical scope of the buffer must match the from scope of the layout.";
       logical_scope = tile_layout->to.value()->name;
     }
@@ -650,7 +650,7 @@ ForFrame Grid(ffi::Array<Variant<PrimExpr, Tuple<PrimExpr, PrimExpr>>> extents) 
       n->doms.push_back(
           Range::FromMinExtent(tuple.value().GetElement<0>(), tuple.value().GetElement<1>()));
     } else {
-      LOG(FATAL) << "TypeError: Invalid type for grid extent";
+      TVM_FFI_THROW(InternalError) << "TypeError: Invalid type for grid extent";
     }
   }
   n->f_make_for_loop = [](ffi::Array<Var> vars, ffi::Array<Range> doms,
@@ -1161,7 +1161,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm
