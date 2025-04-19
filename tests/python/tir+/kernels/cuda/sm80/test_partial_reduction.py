@@ -26,16 +26,17 @@ import functools
 
 @tvm.testing.requires_cuda_compute_version(8)
 def test_partial_reduction():
-    
+
     M = 1024
     N = 1024
-    
+
     BLOCK_M = 64
     BLOCK_N = 64
-    
+
     NUM_BLOCK_M = M // BLOCK_M
     NUM_BLOCK_N = N // BLOCK_N
-    
+
+    # fmt: off
     class Semaphore:
         def __init__(self, cnt, buffer):
             self.cnt = cnt
@@ -170,39 +171,35 @@ def test_partial_reduction():
                     Tp.sum(C_smem, B_smem)
                     Tp.copy(C_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, 0], C_smem)
                     stage2_scheduler.next_tile()
-    
-    
+    # fmt: on
+
     A_np = np.random.randn(M, N).astype(np.float32)
     B_np = np.zeros((M, NUM_BLOCK_N), dtype=np.float32)
     C_np = np.zeros((M, 1), dtype=np.float32)
     DEV = tvm.cuda(0)
-    target = tvm.target.Target("nvidia/nvidia-h100")
-
+    target = tvm.target.Target("cuda")
 
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
     C_tvm = tvm.nd.array(C_np, device=DEV)
-    sem_tvm = tvm.nd.array(np.zeros((NUM_BLOCK_M, ), dtype=np.int32), device=DEV)
+    sem_tvm = tvm.nd.array(np.zeros((NUM_BLOCK_M,), dtype=np.int32), device=DEV)
     with target:
 
         ref_mod_stage_1 = tvm.IRModule({"main": partial_reduction_ref_stage1})
         ref_mod_stage_1 = tvm.compile(ref_mod_stage_1, target=target, tir_pipeline="tirp")
         ref_mod_stage_1(A_tvm, B_tvm)
-        
+
         ref_mod_stage_2 = tvm.IRModule({"main": partial_reduction_ref_stage2})
         ref_mod_stage_2 = tvm.compile(ref_mod_stage_2, target=target, tir_pipeline="tirp")
         ref_mod_stage_2(B_tvm, C_tvm)
         ret_ref_stage_2 = C_tvm.numpy()
-    
+
         fused_mod = tvm.IRModule({"main": partial_reduction_fused})
         fused_mod = tvm.compile(fused_mod, target=target, tir_pipeline="tirp")
         fused_mod(A_tvm, B_tvm, C_tvm, sem_tvm)
         ret_fused = C_tvm.numpy()
         tvm.testing.assert_allclose(ret_fused, ret_ref_stage_2, rtol=1e-3, atol=1e-3)
-        
-        
+
+
 if __name__ == "__main__":
     test_partial_reduction()
-            
-            
-    
