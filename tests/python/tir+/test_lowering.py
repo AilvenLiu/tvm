@@ -419,13 +419,17 @@ def test_lower_scope_slice():
             blockIdx_y = T.launch_thread("blockIdx.y", 4)
             blockIdx_z = T.launch_thread("blockIdx.z", 5)
             if blockIdx_x >= 0 and blockIdx_x < 1 and blockIdx_y >= 0 and blockIdx_y < 2 and blockIdx_z >= 0 and blockIdx_z < 3:
-                if threadIdx_x >= 0 and threadIdx_x < 64:
-                    T.evaluate(threadIdx_x)
-                    T.evaluate(threadIdx_x // 32)
-                if T.ptx.elect_sync(0xFFFFFFFF):
-                    T.evaluate(threadIdx_x)
-                if threadIdx_x == 0:
-                    T.evaluate(threadIdx_x)
+                with T.cta():
+                    if threadIdx_x >= 0 and threadIdx_x < 64:
+                        with T.thread():
+                            T.evaluate(threadIdx_x)
+                            T.evaluate(threadIdx_x // 32)
+                    if T.ptx.elect_sync(0xFFFFFFFF):
+                        with T.thread():
+                            T.evaluate(threadIdx_x)
+                    if threadIdx_x == 0:
+                        with T.thread():
+                            T.evaluate(threadIdx_x)
     # fmt: on
 
     compare(before, after, LowerTIRp)
@@ -459,13 +463,17 @@ def test_lower_scope_partition():
             blockIdx_y = T.launch_thread("blockIdx.y", 4)
             blockIdx_z = T.launch_thread("blockIdx.z", 5)
             if threadIdx_x >= 0 and threadIdx_x < 32:
-                T.evaluate(threadIdx_x)
+                with T.thread():
+                    T.evaluate(threadIdx_x)
             elif threadIdx_x >= 32 and threadIdx_x < 64:
-                T.evaluate(threadIdx_x)
+                with T.thread():
+                    T.evaluate(threadIdx_x)
             elif threadIdx_x >= 64 and threadIdx_x < 96:
-                T.evaluate(threadIdx_x)
+                with T.thread():
+                    T.evaluate(threadIdx_x)
             elif threadIdx_x >= 96 and threadIdx_x < 128:
-                T.evaluate(threadIdx_x)
+                with T.thread():
+                    T.evaluate(threadIdx_x)
     # fmt: on
 
     compare(before, main, LowerTIRp)
@@ -569,3 +577,4 @@ def test_lower_decl_buffer_access_ptr():
 
 if __name__ == "__main__":
     tvm.testing.main()
+    # test_lower_scope_partition()

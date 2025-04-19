@@ -402,9 +402,9 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     ICHECK_EQ(resolved.size(), out_dim);
     Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(op));
     auto n = block.CopyOnWrite();
-    n->exec_scope = NullOpt;
+    n->exec_scope = ExecScope::Create(scope_slice->name);
     if (auto select_cond = scope_slice->slice.as<PrimExpr>()) {
-      n->body = IfThenElse(select_cond.value(), n->body);
+      return IfThenElse(select_cond.value(), BlockRealize({}, Bool(true), block));
     } else {
       auto slices = scope_slice->slice.as<Array<Range>>().value();
       PrimExpr cond = Bool(true);
@@ -412,9 +412,8 @@ class ExecScopeSliceResolver : public StmtExprMutator {
         cond = cond && resolved[i] >= slices[i]->min &&
                resolved[i] < slices[i]->extent + slices[i]->min;
       }
-      n->body = IfThenElse(cond, n->body);
+      return IfThenElse(cond, BlockRealize({}, Bool(true), block));
     }
-    return std::move(block);
   }
 
   LaunchParams launch_params_;
