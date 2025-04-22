@@ -29,7 +29,6 @@ from tvm.tir import Buffer, PrimFunc, BufferRegion
 from tvm.tir.async_structs import CopyPipeline
 from tvm.tir.stmt import OpCall
 from tvm.tir.layout import SwizzleLayout, TileLayout
-from tvm.arith import Analyzer
 from .common import CopyInstType, copy_g2s_s2g_cta_vec_load_impl, target_cuda, validate_copy_op
 from ..registry import register_schedule
 
@@ -106,143 +105,180 @@ def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
     return True
 
 
-def copy_g2s_cta_tma_impl(
-    pipeline: CopyPipeline,
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
-    sctx: ScheduleContext,
-) -> Optional[PrimFunc]:
-    """Schedule copy operation between global and shared memory on CUDA."""
+def copy_tma_impl(
+    pipeline: "CopyPipeline",
+    dst_buffer_region: "BufferRegion",
+    src_buffer_region: "BufferRegion",
+    sctx: "ScheduleContext",
+) -> Optional["PrimFunc"]:
+    """Schedule a copy between global <‑> shared memory using CUDA TMA.
+
+    This is a unified replacement for the previous
+    ``copy_g2s_cta_tma_impl`` and ``copy_s2g_cta_tma_impl`` helpers.  The
+    direction is inferred from the scopes of *src* and *dst* buffers:
+
+    * **global → shared**  ⇒  ``cp_async.bulk.tensor.g2c``
+    * **shared → global**  ⇒  ``cp_async.bulk.tensor.s2g``
+
+    If neither pattern matches, the function returns *None* so that other
+    schedule rules may attempt to handle the copy.
+    """
+
+    # ---------------------------------------------------------------------
+    # Guard: CTA scope only
+    # ---------------------------------------------------------------------
     if sctx.exec_scope.name != "cta":
         return None
 
-    src: Buffer = src_buffer_region.buffer
-    dst: Buffer = dst_buffer_region.buffer
-    if not all(
-        [
-            src.layout.is_trivial(),  # TODO(@bohan): support strided global memory
-            src.scope() == "global" and dst.scope().startswith("shared"),
-        ]
-    ):
+    # ---------------------------------------------------------------------
+    # Identify direction & basic legality checks
+    # ---------------------------------------------------------------------
+    src: "Buffer" = src_buffer_region.buffer
+    dst: "Buffer" = dst_buffer_region.buffer
+
+    src_scope, dst_scope = src.scope(), dst.scope()
+    if src_scope == "global" and dst_scope.startswith("shared"):
+        direction = "g2s"  # global → shared
+        s_buf, g_buf = dst, src
+        shared_region, global_region = dst_buffer_region, src_buffer_region
+    elif src_scope.startswith("shared") and dst_scope == "global":
+        direction = "s2g"  # shared → global
+        s_buf, g_buf = src, dst
+        shared_region, global_region = src_buffer_region, dst_buffer_region
+    else:
+        # Unsupported combination (e.g. global→global, shared→shared, etc.)
         return None
 
-    # Extract regions and validate dimensions
-    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
-    src_st = [r.min for r in src_region]
-    dst_st = [r.min for r in dst_region]
-    src_extent = [r.extent for r in src_region]
-    dst_extent = [r.extent for r in dst_region]
+    # For now, we require that the global side layout is trivial.
+    # TODO(bohan): support strided global memory in the future.
+    if not g_buf.layout.is_trivial():
+        return None
 
-    # Get the axis map for the non-unit dimensions
-    def dim_match(src_extent, dst_extent) -> List[int]:
-        src_extent_ = [(i, e) for i, e in enumerate(src_extent) if e != 1]
-        dst_extent_ = [(i, e) for i, e in enumerate(dst_extent) if e != 1]
-        axis_map = [-1] * len(src.shape)
-        for s, d in zip(src_extent_, dst_extent_):
-            axis_map[s[0]] = d[0]
+    # ---------------------------------------------------------------------
+    # Region metadata & axis‑matching between global and shared coordinates
+    # ---------------------------------------------------------------------
+    g_st = [r.min for r in global_region.region]
+    g_ext = [r.extent for r in global_region.region]
+    s_st = [r.min for r in shared_region.region]
+    s_ext = [r.extent for r in shared_region.region]
+
+    def dim_match(a_ext: List[int], b_ext: List[int], rank: int) -> List[int]:
+        """Return a map from *a*'s logical axes to *b*'s axes ignoring unit dims."""
+        a_nu = [(i, e) for i, e in enumerate(a_ext) if e != 1]
+        b_nu = [(i, e) for i, e in enumerate(b_ext) if e != 1]
+        axis_map = [-1] * rank
+        for (ai, _), (bi, _) in zip(a_nu, b_nu):
+            axis_map[ai] = bi
         return axis_map
 
-    axis_map = dim_match(src_extent, dst_extent)
+    # Map *global axis* → *shared axis*
+    axis_map = dim_match(g_ext, s_ext, len(g_buf.shape))
 
-    # Determine the swizzle mode
-    swizzle_mode = None
-    box_dim = None
-    if dst.layout.is_trivial():
+    # ---------------------------------------------------------------------
+    # Determine swizzle mode for the *shared* side (if any)
+    # ---------------------------------------------------------------------
+    swizzle_mode = None  # type: Optional["SwizzleMode"]
+    box_dim: List[int]
+
+    if s_buf.layout.is_trivial():
+        # No swizzling – straightforward copy of a rectangular box.
         swizzle_mode = SwizzleMode.SWIZZLE_NONE
-        box_dim = src_extent
+        box_dim = g_ext
     else:
+        # Try the standard TMA atom swizzles in decreasing size.
         for mode in (
             SwizzleMode.SWIZZLE_128B_ATOM,
             SwizzleMode.SWIZZLE_64B_ATOM,
             SwizzleMode.SWIZZLE_32B_ATOM,
         ):
-            swizzle_atom = tma_atom_layout(src.dtype, mode)
-            atom_shape = tma_atom_shape(src.dtype, mode, dst.shape)
-            outer = swizzle_atom.is_tile_inner(dst.layout, dst.shape, atom_shape)
+            swizzle_atom = tma_atom_layout(s_buf.dtype, mode)
+            atom_shape = tma_atom_shape(s_buf.dtype, mode, s_buf.shape)
+            outer = swizzle_atom.is_tile_inner(s_buf.layout, s_buf.shape, atom_shape)
             if outer is None:
                 continue
 
-            # check if copy region in dst is compatible with the TMA atom shape
-            if not tma_atom_compatible(dst.shape, dst_st, dst_extent, atom_shape):
+            # Check the region is compatible with the atom shape.
+            if not tma_atom_compatible(s_buf.shape, s_st, s_ext, atom_shape):
                 continue
 
-            # swizzle mode found
+            # Swizzle mode selected
             swizzle_mode = mode
-            outer_shape = [s // a for s, a in zip(dst.shape, atom_shape)]
+            outer_shape = [s // a for s, a in zip(s_buf.shape, atom_shape)]
             outer, seps = outer.normalize().group_by_logical_shape(outer_shape)
 
-            # Derive the iters to traverse the TMA atoms
+            # -------------- iterator derivation (mostly unchanged) ----------
             def derive_iters(outer, seps):
-                iters = list(enumerate(outer.data_iter_array))
-                # given dst_st, dst_extent, derive the iter ranges
-                iter_ranges = [0] * len(iters)  # extent for each iterator
+                iters_ = list(enumerate(outer.data_iter_array))
+                iter_ranges_ = [0] * len(iters_)
                 for i in range(len(seps) - 1):
-                    dst_st_, dst_extent_ = dst_st[i], dst_extent[i]
+                    st_i, ext_i = s_st[i], s_ext[i]
                     for j in reversed(range(seps[i], seps[i + 1])):
-                        if dst_st_ % outer.data_iter_array[j].extent == 0:
-                            # TODO(@bohan): let each schedule report the failure reason
-                            assert dst_extent_ % outer.data_iter_array[j].extent == 0
-                            iter_ranges[j] = outer.data_iter_array[j].extent
-                            dst_st_ //= outer.data_iter_array[j].extent
-                            dst_extent_ //= outer.data_iter_array[j].extent
+                        if st_i % outer.data_iter_array[j].extent == 0:
+                            assert ext_i % outer.data_iter_array[j].extent == 0
+                            iter_ranges_[j] = outer.data_iter_array[j].extent
+                            st_i //= outer.data_iter_array[j].extent
+                            ext_i //= outer.data_iter_array[j].extent
                         else:
-                            assert dst_st_ < outer.data_iter_array[j].extent
-                            assert dst_st_ + dst_extent_ <= outer.data_iter_array[j].extent
-                            iter_ranges[j] = dst_extent_
+                            # Region falls within a partial tile
+                            assert st_i < outer.data_iter_array[j].extent
+                            assert st_i + ext_i <= outer.data_iter_array[j].extent
+                            iter_ranges_[j] = ext_i
                             break
-                # set iterators to traverse the TMA atom in the descending order of the strides
-                iters.sort(key=lambda x: x[1].stride, reverse=True)
-                return iters, iter_ranges
+                iters_.sort(key=lambda x: x[1].stride, reverse=True)
+                return iters_, iter_ranges_
 
             iters, iter_ranges = derive_iters(outer, seps)
-            # set the box dimension
+
+            # -------- derive box_dim (how many atoms per cp.async) ----------
             if outer.data_iter_array[seps[-2] - 1].stride == 1:
-                # can load multiple TMA atoms at once,
                 box_dim = copy.copy(atom_shape)
                 box_dim[-2] *= outer.data_iter_array[seps[-2] - 1].extent
-                # remove the last iterator
                 iter_ranges.pop(iters[-1][0])
                 iters.pop()
             else:
-                # can only load one TMA atom at a time
                 box_dim = atom_shape
-            # turn box_dim from dst_wise to src_wise
-            box_dim_src = [1] * len(src.shape)
-            for i in range(len(src.shape)):
+
+            # Convert box_dim to *global* axis order for tensor‑map encode.
+            box_dim_global = [1] * len(g_buf.shape)
+            for i in range(len(g_buf.shape)):
                 if axis_map[i] != -1:
-                    box_dim_src[i] = box_dim[axis_map[i]]
-            box_dim = box_dim_src
-            break
+                    box_dim_global[i] = box_dim[axis_map[i]]
+            box_dim = box_dim_global
+            break  # swizzle mode found
 
         if swizzle_mode is None:
             raise ValueError(
-                f"No valid swizzle mode found for TMA copy. The destination layout is {dst.layout}"
+                "No valid swizzle mode found for TMA copy. Shared layout is " f"{s_buf.layout}"
             )
 
+    # ---------------------------------------------------------------------
+    # Launch configuration & common symbols
+    # ---------------------------------------------------------------------
     tx = sctx.launch_params["threadIdx.x"]
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
-    tensor_map = T.Var(src.data.name + "_tensormap", dtype=T.handle("tensormap").type_annotation)
-    mbarrier: Optional[Buffer] = pipeline.workspace.get("mbarrier", None)
+    tensor_map = T.Var(g_buf.data.name + "_tensormap", dtype=T.handle("tensormap").type_annotation)
 
-    # Device-side implementation
-    def get_src_coord(src_st, dst_st, dst_coord):
-        """Convert the coordinates to the global coordinates."""
-        coord = copy.copy(src_st)
-        for i in range(len(src.shape)):
-            if axis_map[i] != -1:
-                coord[i] += dst_coord[axis_map[i]] - dst_st[axis_map[i]]
+    # ---------------------------------------------------------------------
+    # Coordinate helpers (captures *axis_map*)
+    # ---------------------------------------------------------------------
+    def make_global_coord(shared_coord):
+        """Project *shared_coord* → global‑space coord (apply inverse map)."""
+        coord = copy.copy(g_st)
+        for g_ax in range(len(g_buf.shape)):
+            s_ax = axis_map[g_ax]
+            if s_ax != -1:
+                coord[g_ax] += shared_coord[s_ax] - s_st[s_ax]
         return coord
 
-    def get_dst_coord(st, lvs):
-        """Convert the coordinates to the smem coordinates."""
+    def make_shared_coord(st, lvs):
         if isinstance(lvs, tvm.tir.Var):
             lvs = [lvs]
         lv_shuffled = [0] * len(outer.data_iter_array)
-        for iter_, lv in zip(iters, lvs):
-            lv_shuffled[iter_[0]] = lv
+        for (idx, data_iter), lv in zip(iters, lvs):
+            lv_shuffled[idx] = lv
         coord = copy.copy(st)
-        for i in range(len(dst.shape)):
+        for i in range(len(s_buf.shape)):
             grouped_shape = [outer.data_iter_array[j].extent for j in range(seps[i], seps[i + 1])]
             grouped_outer = TileLayout.from_tuple(grouped_shape)
             coord[i] += grouped_outer.apply(
@@ -251,64 +287,90 @@ def copy_g2s_cta_tma_impl(
             coord[i] *= atom_shape[i]
         return coord
 
+    # ---------------------------------------------------------------------
+    # Device‑side TIR implementation
+    # ---------------------------------------------------------------------
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def impl():
-        """Implement copy operation with TMA."""
+        rank = len(g_buf.shape)
+        # TODO(@bohan): reconsider this under warp specialized scenario. Q: should we place the fence here?
+        # make sure smem write is visible to tma proxy
+        T.ptx.fence.proxy("shared")
+        T.tvm_storage_sync("shared")
         for tid_x in T.thread_binding(tx, "threadIdx.x"):
             with T.thread()[tid_x == 0]:
                 if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
-                    T.ptx.cp_async.bulk.tensor.g2c(
-                        len(src.shape), # rank of global coordinate
-                        dst.access_ptr("w", offset=dst.offset_of_p(dst_st)), # dst pointer
-                        mbarrier.access_ptr("rw", offset=0), # mbarrier pointer
-                        tensor_map, # tensor map
-                        *reversed(src_st), # global coordinate
-                    )
-                else:
-                    # TODO(@bohan): enhance T.grid to support non-zero start
-                    for lvs in T.grid(*iter_ranges):
-                        dst_coord = T.meta_var(get_dst_coord(dst_st, lvs))
-                        src_coord = T.meta_var(get_src_coord(src_st, dst_st, dst_coord))
+                    if direction == "g2s":
                         T.ptx.cp_async.bulk.tensor.g2c(
-                            len(src.shape), # rank of global coordinate
-                            dst.access_ptr("w", offset=dst.offset_of_p(dst_coord)), # dst pointer
-                            mbarrier.access_ptr("rw", offset=0), # mbarrier pointer
-                            tensor_map, # tensor map
-                            *reversed(src_coord), # global coordinate
+                            rank,
+                            s_buf.access_ptr("w", offset=s_buf.offset_of_p(s_st)),
+                            pipeline.workspace.get("mbarrier", None).access_ptr("rw", offset=0)  # type: ignore
+                            if direction == "g2s" else 0,  # dummy when not needed
+                            tensor_map,
+                            *reversed(g_st),
                         )
+                    else:
+                        T.ptx.cp_async.bulk.tensor.s2g(
+                            rank,
+                            s_buf.access_ptr("r", offset=s_buf.offset_of_p(s_st)),
+                            tensor_map,
+                            *reversed(g_st),
+                        )
+                else:
+                    for lvs in T.grid(*iter_ranges):
+                        if direction == "g2s":
+                            s_coord = T.meta_var(make_shared_coord(s_st, lvs))
+                            g_coord = T.meta_var(make_global_coord(s_coord))
+                            T.ptx.cp_async.bulk.tensor.g2c(
+                                rank,
+                                s_buf.access_ptr("w", offset=s_buf.offset_of_p(s_coord)),
+                                pipeline.workspace.get("mbarrier", None).access_ptr("rw", offset=0),  # type: ignore
+                                tensor_map,
+                                *reversed(g_coord),
+                            )
+                        else:
+                            s_coord = T.meta_var(make_shared_coord(s_st, lvs))
+                            g_coord = T.meta_var(make_global_coord(s_coord))
+                            T.ptx.cp_async.bulk.tensor.s2g(
+                                rank,
+                                s_buf.access_ptr("r", offset=s_buf.offset_of_p(s_coord)),
+                                tensor_map,
+                                *reversed(g_coord),
+                            )
     # fmt: on
-    element_strides = [1 for _ in range(len(src.shape))]
-    # TODO(@bohan): make better APIs to access extents/strides of layouts
-    dtype_bytes = tvm.DataType(src.dtype).bits // 8
-    src_strides = [
-        src.layout.data_iter_array[i].stride * dtype_bytes for i in range(len(src.shape))
+    # ---------------------------------------------------------------------
+    # Host‑side tensor‑map creation
+    # ---------------------------------------------------------------------
+    element_strides = [1] * len(g_buf.shape)
+    dtype_bytes = tvm.DataType(g_buf.dtype).bits // 8
+    g_strides = [
+        g_buf.layout.data_iter_array[i].stride * dtype_bytes for i in range(len(g_buf.shape))
     ]
-
-    # Host-side implementation
+    # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def create_tensor_map():
-        """Create the tensor map."""
         with T.LetStmt(T.tvm_stack_alloca("tensormap", 1), var=tensor_map):
             T.call_packed(
                 "runtime.cuTensorMapEncodeTiled",
-                tensor_map,  # pointer to the tensor map
-                src.dtype,  # tensor_dtype
-                len(src.shape),  # global_rank
-                src.data,  # global_ptr
-                *reversed(src.shape),  # global_shape
-                *reversed(src_strides[:-1]),  # global_strides
-                *reversed(box_dim),  # boxDim
-                *element_strides,  # element_strides
+                tensor_map,
+                g_buf.dtype,
+                len(g_buf.shape),
+                g_buf.data,
+                *reversed(g_buf.shape),
+                *reversed(g_strides[:-1]),
+                *reversed(box_dim),
+                *element_strides,
                 0,  # CU_TENSOR_MAP_INTERLEAVE_NONE
-                swizzle_mode.value,  # CU_TENSOR_MAP_SWIZZLE_NONE
+                swizzle_mode.value,
                 0,  # CU_TENSOR_MAP_L2PROMOTION_NONE
                 0,  # CU_TENSOR_MAP_FLOAT_OOBFILL_NONE
             )
             Tp.tvm_kernel_replace_point()
-
-    # insert these codes to host code before the kernel
+    # fmt: on
+    # Insert host‑side initialization
     sctx.add_init_stmt(create_tensor_map.body, host=True)
+
     return impl
 
 
@@ -368,7 +430,7 @@ def copy_pipeline_cta_impl(
             f"Copy pipeline {op_type} is not supported for strategy={pipeline.strategy}"
         )
 
-    if impl == CopyPipeline.Impl.TMA:
+    if impl == CopyPipeline.Impl.TMA_LOAD:
         # TODO(@bohan): support private memory allocation
         mbarrier: Optional[Buffer] = pipeline.workspace.get("mbarrier", None)
         phase: Optional[Buffer] = pipeline.workspace.get("phase", None)
@@ -405,7 +467,7 @@ def copy_pipeline_cta_impl(
             return func
         if op_type == PipelineOp.COPY:
             dst, src = args[1], args[2]
-            for schedule in [copy_g2s_cta_tma_impl]:
+            for schedule in [copy_tma_impl]:
                 res = schedule(pipeline, dst, src, sctx)
                 if res is not None:
                     return res
@@ -423,6 +485,44 @@ def copy_pipeline_cta_impl(
                         T.ptx.fence.proxy("shared")
                     phase[0] = 0
                 T.tvm_storage_sync("shared")
+
+            return func
+        # other ops are not supported
+        raise ValueError(
+            f"Copy pipeline {op_type} is not supported for strategy={pipeline.strategy}"
+        )
+
+    if impl == CopyPipeline.Impl.TMA_STORE:
+        if op_type == PipelineOp.PRODUCER_COMMIT:
+
+            @T.prim_func(check_well_formed=False, tirp=True)
+            def func():  # pylint: disable=function-redefined
+                T.ptx.cp_async.bulk.commit_group()
+
+            return func
+        if op_type == PipelineOp.CONSUMER_WAIT:
+            n = args[1]
+
+            @T.prim_func(check_well_formed=False, tirp=True)
+            def func():  # pylint: disable=function-redefined
+                T.ptx.cp_async.bulk.wait_group(n)
+
+            return func
+        if op_type == PipelineOp.COPY:
+            dst, src = args[1], args[2]
+            for schedule in [copy_tma_impl]:
+                res = schedule(pipeline, dst, src, sctx)
+                if res is not None:
+                    return res
+            raise ValueError(
+                f"No valid implementation found for copy pipeline with strategy={pipeline.strategy}"
+            )
+
+        if op_type == PipelineOp.INIT:
+
+            @T.prim_func(check_well_formed=False, tirp=True)
+            def func():  # pylint: disable=function-redefined
+                pass
 
             return func
         # other ops are not supported

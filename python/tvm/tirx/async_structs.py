@@ -16,19 +16,18 @@
 # under the License.
 # pylint: disable=no-member
 """Async structures for TIR+"""
-from . import _ffi_api
-import tvm
 from typing import Union, Dict, Any
+
+import tvm
 from tvm._ffi import register_object
 from tvm.runtime import Object
-from tvm.ir import Op
 from tvm.tirx import BufferRegion, Buffer, OpCall
 from tvm.tirx.exec_scope import ExecScope
 from . import _ffi_api
 
 
 def make_op_call(
-    op_name: str, args, workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}
+    op_name: str, args, workspace: Dict[str, Buffer] = None, schedule_config: Dict[str, Any] = None
 ):
     """Create a call to a TIR+ operator.
 
@@ -46,12 +45,14 @@ def make_op_call(
     """
     if workspace is None:
         workspace = {}
+    if schedule_config is None:
+        schedule_config = {}
+
     from tvm.tirp.operator import get_tirp_op
+
     f = tvm.get_global_func("script.ir_builder.tir.OpCall")
     return f(
-        OpCall(
-            *args, op=get_tirp_op(op_name), workspace=workspace, schedule_config=schedule_config
-        )
+        OpCall(*args, op=get_tirp_op(op_name), workspace=workspace, schedule_config=schedule_config)
     )
 
 
@@ -72,8 +73,8 @@ class Pipeline(Object):
         depth: int = 0,
         separate_pc: bool = False,
         name_hint: str = "",
-        workspace: Dict[str, Buffer] = {},
-        schedule_config: Dict[str, Any] = {},
+        workspace: Dict[str, Buffer] = None,
+        schedule_config: Dict[str, Any] = None,
     ):
         if workspace is None:
             workspace = {}
@@ -123,7 +124,8 @@ class CopyPipeline(Pipeline):
         """Strategy: The implementation of the pipeline."""
 
         VEC_LOAD = "vec_load"
-        TMA = "tma"
+        TMA_LOAD = "tma_load"
+        TMA_STORE = "tma_store"
 
     def copy(self, dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
         """Copy data asynchronously from the source to the destination."""
