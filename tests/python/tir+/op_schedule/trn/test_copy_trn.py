@@ -54,7 +54,7 @@ def test_simple_copy():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(1, 1):
+            for b_loop in T.serial(0, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim": "F"}):
@@ -95,7 +95,7 @@ def test_simple_copy_2():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(512, 1):
+            for b_loop in T.serial(0, 512):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 1, annotations={"nki_dim": "F"}):
@@ -136,7 +136,7 @@ def test_copy_in_a_loop():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
+            for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim": "F"}):
@@ -180,7 +180,7 @@ def test_copy_in_a_loop_2():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
+            for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim": "F"}):
@@ -217,25 +217,25 @@ def test_copy_transpose():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            buffer = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
-            buffer_1 = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
+            identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
+            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                    for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
-                        T.nki.identity(buffer[p_loop, rhs_f_loop], 128)
-            with T.kernel():
-                for b_loop in range(16):
-                    with T.attr(0, "tensorized_nki_instruction", 1):
-                        for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                          for lhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
-                            for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                                T.nki.matmul(buffer_1[b_loop // 4, lhs_f_loop, b_loop % 4 * 128 + rhs_f_loop], A_sbuf[p_loop, b_loop * 128 + lhs_f_loop], buffer[p_loop, rhs_f_loop], T.bool(True))
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
+                        T.nki.identity(identity[p_loop, rhs_f_loop], 128)
+            for b_loop in range(16):
+                for extend_b_loop in range(1):
                     T.attr(0, "tensorized_nki_instruction", 1)
-                    for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                        for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
-                            T.nki.tensor_copy(B_sbuf[p_loop, f_loop * 16 + b_loop], buffer_1[b_loop // 4, p_loop, b_loop % 4 * 128 + f_loop])    
+                    for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                        for lhs_f_loop in T.serial(128, annotations={"nki_dim": "lhs_F"}):
+                            for rhs_f_loop in T.serial(128, annotations={"nki_dim": "rhs_F"}):
+                                T.nki.matmul(acc_psum[b_loop % 8, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, b_loop * 128 + lhs_f_loop], identity[p_loop, rhs_f_loop], T.bool(True))
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for f_loop in T.serial(128, annotations={"nki_dim": "F"}):
+                        T.nki.tensor_copy(B_sbuf[p_loop, f_loop * 16 + b_loop], acc_psum[b_loop % 8, p_loop, f_loop])
     # fmt: on
 
     with target:
@@ -269,26 +269,26 @@ def test_copy_transpose_2():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            buffer = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
-            dst_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
+            identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
+            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                    for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
-                        T.nki.identity(buffer[p_loop, rhs_f_loop], 128)
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
+                        T.nki.identity(identity[p_loop, rhs_f_loop], 128)
             for i in range(4):
-                with T.kernel():
-                    for b_loop in range(4):
-                        with T.attr(0, "tensorized_nki_instruction", 1):
-                            for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                              for lhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
-                                for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                                    T.nki.matmul(dst_psum[0, lhs_f_loop, b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, lhs_f_loop * 4 + b_loop], buffer[p_loop, rhs_f_loop], T.bool(True))
+                for b_loop in range(4):
+                    for extend_b_loop in range(1):
                         T.attr(0, "tensorized_nki_instruction", 1)
-                        for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                            for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
-                                T.nki.tensor_copy(B_sbuf[p_loop, f_loop * 16 + i * 4 + b_loop], dst_psum[0, p_loop, b_loop * 128 + f_loop])
+                        for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                            for lhs_f_loop in T.serial(128, annotations={"nki_dim": "lhs_F"}):
+                                for rhs_f_loop in T.serial(128, annotations={"nki_dim": "rhs_F"}):
+                                    T.nki.matmul(acc_psum[b_loop, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, lhs_f_loop * 4 + b_loop], identity[p_loop, rhs_f_loop], T.bool(True))
+                    T.attr(0, "tensorized_nki_instruction", 1)
+                    for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                        for f_loop in T.serial(128, annotations={"nki_dim": "F"}):
+                            T.nki.tensor_copy(B_sbuf[p_loop, f_loop * 16 + i * 4 + b_loop], acc_psum[b_loop, p_loop, f_loop])
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -323,7 +323,7 @@ def test_copy_different_f():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(64, 1):
+            for b_loop in T.serial(0, 64):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 4, annotations={"nki_dim": "F"}):
@@ -367,7 +367,7 @@ def test_copy_different_shape():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(4, 1):
+            for b_loop in T.serial(0, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 4, annotations={"nki_dim": "F"}):
@@ -409,7 +409,7 @@ def test_copy_irregular_shape():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
+            for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim": "F"}):
@@ -444,7 +444,7 @@ def test_copy_different_shape_dim():
         A = T.match_buffer(A_ptr, (32, 128, 512), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(32, 128, 512), strides=(65536, 128, 1)))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(32, 1, 1):
+            for i, b_loop in T.grid(32, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
@@ -485,7 +485,7 @@ def test_copy_with_offset():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(2, 2, 1):
+            for i, b_loop in T.grid(2, 2):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim": "F"}):
@@ -529,7 +529,7 @@ def test_large_dma_copy():
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
+            for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 4096, annotations={"nki_dim": "F"}):
@@ -568,13 +568,13 @@ def test_copy_with_inst_size_limit():
         with T.kernel():
             B_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(4, 1, 8):
+            for i, b_loop in T.grid(4, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim": "F"}):
                         T.nki.tensor_copy(
-                            A_sbuf[p_loop, i * 4096 + additional_b_loop * 512 + f_loop],
-                            B_sbuf[p_loop, i * 4096 + additional_b_loop * 512 + f_loop],
+                            A_sbuf[p_loop, i * 4096 + b_loop * 512 + f_loop],
+                            B_sbuf[p_loop, i * 4096 + b_loop * 512 + f_loop],
                         )
 
     with target:
@@ -605,7 +605,7 @@ def test_copy_with_complex_index():
         A = T.match_buffer(A_ptr, (4096, 4096), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(4096, 4096), strides=(1, 4096)))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 32768), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(8, 1):
+            for b_loop in T.serial(0, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 2048, annotations={"nki_dim":"F"}):
@@ -645,7 +645,7 @@ def test_copy_with_complex_index_2():
         A = T.match_buffer(A_ptr, (2, 2048, 1024), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(2, 2048, 1024), strides=(2097152, 1, 2048)))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 131072), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(8, 1):
+            for b_loop in T.serial(0, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 2048, annotations={"nki_dim":"F"}):
@@ -692,20 +692,20 @@ def test_copy_transpose_with_workspace():
             identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
             acc_psum = T.alloc_buffer((1, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                    for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
                         T.nki.identity(identity[p_loop, rhs_f_loop], 128)
-            with T.kernel():
-                for b_loop in range(16):
-                    with T.attr(0, "tensorized_nki_instruction", 1):
-                        for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                          for lhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
-                            for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                                T.nki.matmul(acc_psum[0, lhs_f_loop, b_loop % 4 * 128 + rhs_f_loop], A_sbuf[p_loop, b_loop * 128 + lhs_f_loop], identity[p_loop, rhs_f_loop], T.bool(True))
+            for b_loop in range(16):
+                for extend_b_loop in range(1):
                     T.attr(0, "tensorized_nki_instruction", 1)
-                    for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                        for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
-                            T.nki.tensor_copy(B_sbuf[p_loop, f_loop * 16 + b_loop], acc_psum[0, p_loop, b_loop % 4 * 128 + f_loop])
+                    for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                        for lhs_f_loop in T.serial(128, annotations={"nki_dim": "lhs_F"}):
+                            for rhs_f_loop in T.serial(128, annotations={"nki_dim": "rhs_F"}):
+                                T.nki.matmul(acc_psum[0, lhs_f_loop, extend_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, b_loop * 128 + lhs_f_loop], identity[p_loop, rhs_f_loop], T.bool(True))
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for f_loop in T.serial(128, annotations={"nki_dim": "F"}):
+                        T.nki.tensor_copy(B_sbuf[p_loop, f_loop * 16 + b_loop], acc_psum[0, p_loop, f_loop])
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -738,7 +738,7 @@ def test_copy_with_guard():
         A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(4, 128, 512), strides=(65536, 512, 1)))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for j, i, b_loop, additional_b_loop in T.grid(4, 4, 1, 1):
+            for j, i, b_loop in T.grid(4, 4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 384, annotations={"nki_dim":"F"}):
@@ -778,7 +778,7 @@ def test_copy_with_guard_2():
         A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(4, 128, 512), strides=(65536, 512, 1)))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for j, i, b_loop, additional_b_loop in T.grid(4, 4, 3, 1):
+            for j, i, b_loop in T.grid(4, 4, 3):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 384, annotations={"nki_dim":"F"}):
@@ -823,23 +823,22 @@ def test_copy_transpose_with_guard():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             with T.attr(0, "tensorized_nki_instruction", 1):
-                for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                    for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
                         T.nki.identity(identity[p_loop, rhs_f_loop], 128)
-            for i, j in T.grid(4, 4):
-                with T.kernel():
-                    for b_loop in range(3):
-                        with T.attr(0, "tensorized_nki_instruction", 1):
-                            for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                              for lhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
-                                for rhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"rhs_F"}):
-                                    if b_loop - j < 0 and b_loop - j < 0:
-                                        T.nki.matmul(acc_psum[0, lhs_f_loop, b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, i * 512 + b_loop * 128 + lhs_f_loop], identity[p_loop, rhs_f_loop], T.bool(True))
-                        T.attr(0, "tensorized_nki_instruction", 1)
-                        for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
-                            for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
+            for i, j, b_loop in T.grid(4, 4, 3):
+                for extend_b_loop in range(1):
+                    T.attr(0, "tensorized_nki_instruction", 1)
+                    for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                        for lhs_f_loop in T.serial(128, annotations={"nki_dim": "lhs_F"}):
+                            for rhs_f_loop in T.serial(128, annotations={"nki_dim": "rhs_F"}):
                                 if b_loop - j < 0:
-                                    T.nki.tensor_copy(B_sbuf[p_loop, i * 512 + f_loop * 4 + b_loop], acc_psum[0, p_loop, b_loop * 128 + f_loop])
+                                    T.nki.matmul(acc_psum[b_loop, lhs_f_loop, rhs_f_loop], A_sbuf[p_loop, i * 512 + b_loop * 128 + lhs_f_loop], identity[p_loop, rhs_f_loop], T.bool(True))
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for f_loop in T.serial(128, annotations={"nki_dim": "F"}):
+                        if b_loop - j < 0:
+                            T.nki.tensor_copy(B_sbuf[p_loop, i * 512 + f_loop * 4 + b_loop], acc_psum[b_loop, p_loop, f_loop])
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -868,17 +867,58 @@ def test_copy_with_specified_max_inst_size():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(1, 4):
+            for b_loop in T.serial(0, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(128, annotations={"nki_dim": "F"}):
-                        T.nki.tensor_copy(A_sbuf[p_loop, additional_b_loop * 128 + f_loop], B_sbuf[p_loop, additional_b_loop * 128 + f_loop])
+                        T.nki.tensor_copy(A_sbuf[p_loop, b_loop * 128 + f_loop], B_sbuf[p_loop, b_loop * 128 + f_loop])
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRp()(mod)
         assert_structural_equal(mod["main"], expected)
 
+
+def test_copy_transpose_with_extended_f():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def copy(A_ptr: T.handle) -> None:
+        with T.kernel():
+            A_sbuf = T.alloc_buffer((128, 2048), "float32", scope="trn.sbuf", layout="PF")
+            B_sbuf = T.alloc_buffer((128, 2048), "float32", scope="trn.sbuf", layout="FP")
+            Tp.copy(B_sbuf, A_sbuf)
+            
+    @T.prim_func(tirp=True)
+    def expected(A_ptr: T.handle):
+        T.func_attr({"global_symbol": "copy"})
+        with T.kernel():
+            identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
+            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            with T.attr(0, "tensorized_nki_instruction", 1):
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
+                        T.nki.identity(identity[p_loop, rhs_f_loop], 128)
+            for b_loop in range(4):
+                for extend_b_loop in range(4):
+                    T.attr(0, "tensorized_nki_instruction", 1)
+                    for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                        for lhs_f_loop in T.serial(128, annotations={"nki_dim": "lhs_F"}):
+                            for rhs_f_loop in T.serial(128, annotations={"nki_dim": "rhs_F"}):
+                                T.nki.matmul(acc_psum[b_loop, lhs_f_loop, extend_b_loop * 128 + rhs_f_loop], A_sbuf[p_loop, b_loop * 512 + extend_b_loop * 128 + lhs_f_loop], identity[p_loop, rhs_f_loop], T.bool(True))
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
+                        T.nki.tensor_copy(B_sbuf[p_loop, b_loop * 512 + f_loop], acc_psum[b_loop, p_loop, f_loop])        
+    
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": copy})
+        mod = tvm.tirp.transform.PrivateBufferAlloc()(mod)
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod = tvm.tir.transform.Simplify()(mod)
+        assert_structural_equal(mod["main"], expected)
 
 if __name__ == "__main__":
     tvm.testing.main()

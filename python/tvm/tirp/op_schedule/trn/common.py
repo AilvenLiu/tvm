@@ -17,16 +17,19 @@
 
 """Common utilities for operator scheduling."""
 
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 from typing import Tuple, Optional, Dict, Callable, List
 from functools import wraps, reduce
 import operator
 import functools
+import itertools
+from dataclasses import dataclass
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.ir import Range
-from tvm.tir import BufferRegion, Buffer, PrimFunc
+from tvm.tir import BufferRegion, Buffer, PrimFunc, Var, PrimExpr
 from tvm.tir.stmt import OpCall
+from tvm.tir.expr_functor import ExprMutator
 from tvm._ffi import get_global_func
 from tvm.tirp.op_schedule import ScheduleContext
 
@@ -96,6 +99,9 @@ def get_layout_data_iters(layout):
         return layout.data_iter_array
     else:
         raise ValueError("Invalid layout")
+
+
+# TODO: refactor all instruction-generation logic to use InstructionGenerator
 
 
 def bound_buffer_region(buffer_region: BufferRegion, analyzer: Analyzer):
@@ -874,7 +880,7 @@ def bound_inst_data_iter_with_limit(buffer_region, inst_data_iters, inst_size_li
     # default instruction size limit is 512
     if inst_size_limit is None:
         return (
-            functools.reduce(operator.mul, [ext for ext in inst_data_iters.values()]),
+            functools.reduce(operator.mul, [ext for ext in inst_data_iters.values()], 1),
             inst_data_iters,
         )
     _, layout, _ = infer_range_info(buffer_region, analyzer)
@@ -1016,27 +1022,8 @@ def check_partition_dim_match(
     return src1_partition_logical_data_iters == src2_partition_logical_data_iters
 
 
-def get_largest_psum_per_bank():
-    """Get the largest partial sum per bank.
-
-    Returns
-    -------
-    int :
-        The largest partial sum per bank (default: 512)
-    """
-    return 512
-
-
-def get_max_psum_banks():
-    """Get the maximum number of partial sum banks.
-
-    Returns
-    -------
-    int :
-        The maximum number of partial sum banks (default: 8)
-    """
-    return 8
-
+largest_psum_per_bank = 512
+max_psum_banks = 8
 
 def check_workspace_buffer(buffer: Buffer, shape: Tuple[int], scope: str):
     """Check if a workspace buffer is valid.
@@ -1115,3 +1102,733 @@ def target_trn(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
         return fn(*args, **kwargs)
 
     return wrapper
+
+
+class DimensionMapper:
+    """
+    A class to manage dimension mappings between tensors.
+
+    A dimension mapping (dim_map) has type Dict[int, int]. dim_map[i] = j means
+    dimension i in the first tensor should be mapped to dimension j in the second tensor.
+    """
+
+    def __init__(self):
+        self.mappings = {}  # Dictionary to store mappings between tensors
+
+    def register_dim_map(self, first_tensor, second_tensor, dim_map):
+        """
+        Register a dimension mapping between two tensors.
+
+        Args:
+            first_tensor: The first tensor
+            second_tensor: The second tensor
+            dim_map: A dictionary mapping dimensions from first_tensor to second_tensor
+        """
+        # Initialize dictionaries if they don't exist
+        if first_tensor not in self.mappings:
+            self.mappings[first_tensor] = {}
+
+        # Register the mapping
+        self.mappings[first_tensor][second_tensor] = dim_map
+
+        # Register the reverse mapping
+        reverse_dim_map = {dim_map[i]: i for i in dim_map}
+
+        if second_tensor not in self.mappings:
+            self.mappings[second_tensor] = {}
+
+        self.mappings[second_tensor][first_tensor] = reverse_dim_map
+
+    def compose_mappings(self, map1, map2):
+        """
+        Compose two mappings: map1 followed by map2.
+
+        Args:
+            map1: The first mapping
+            map2: The second mapping
+
+        Returns:
+            A composition of the two mappings, or None if the composition is empty
+        """
+        result = {}
+        for i, j in map1.items():
+            if j in map2:
+                result[i] = map2[j]
+
+        # If the result is empty, return None
+        return result if result else None
+
+    def get_dim_map(self, first_tensor, second_tensor):
+        """
+        Get the dimension mapping between two tensors.
+
+        Args:
+            first_tensor: The first tensor
+            second_tensor: The second tensor
+
+        Returns:
+            A dictionary mapping dimensions from first_tensor to second_tensor,
+            or {} if no mapping exists
+        """
+        # Check if there is a direct mapping
+        if first_tensor in self.mappings and second_tensor in self.mappings[first_tensor]:
+            return self.mappings[first_tensor][second_tensor]
+
+        # No direct mapping, try to find a path using BFS
+        visited = {first_tensor}
+        queue = []
+
+        # Add all direct neighbors of the first tensor to the queue
+        if first_tensor in self.mappings:
+            for neighbor, direct_mapping in self.mappings[first_tensor].items():
+                visited.add(neighbor)
+                queue.append((neighbor, direct_mapping))
+
+        while queue:
+            current_tensor, mapping_from_first = queue.pop(0)
+
+            if current_tensor == second_tensor:
+                # Found a path to the second tensor
+                self.register_dim_map(first_tensor, second_tensor, mapping_from_first)
+                return mapping_from_first
+
+            if current_tensor not in self.mappings:
+                continue
+
+            for neighbor, direct_mapping in self.mappings[current_tensor].items():
+                if neighbor not in visited:
+                    visited.add(neighbor)
+
+                    # Compose the mappings: first_tensor -> current_tensor -> neighbor
+                    composed_mapping = self.compose_mappings(mapping_from_first, direct_mapping)
+
+                    # Only add to the queue if the composed mapping is not None
+                    if composed_mapping is not None:
+                        queue.append((neighbor, composed_mapping))
+
+        # No mapping found
+        return {}
+
+
+@dataclass
+class LogicalIterDim:
+    logical_stride: int
+    extent: int
+    bind_expr: PrimExpr
+
+    @staticmethod
+    def default():
+        return LogicalIterDim(1, 1, T.int32(0))
+
+
+LogicalIterList = Tuple[Tuple[Tuple[LogicalIterDim]]]
+
+
+class VarReplacer(ExprMutator):
+    def __init__(self, var_map: Dict[Var, PrimExpr]):
+        super().__init__()
+        self.var_map = var_map
+
+    def visit_var_(self, op):
+        if op in self.var_map:
+            return self.var_map[op]
+        return op
+
+    @staticmethod
+    def replace_vars(expr: PrimExpr, var_map: Dict[Var, PrimExpr]) -> PrimExpr:
+        return VarReplacer(var_map).visit_expr(expr)
+
+
+@dataclass
+class InstructionRepr:
+    buffer_region: BufferRegion
+    size: int
+    stride: int
+    selected_data_iter_ids: List[int]
+
+    def __init__(
+        self,
+        buffer_region: BufferRegion,
+        inst_size: int,
+        inst_stride: int,
+        selected_data_iter_ids: List[int],
+    ):
+        self.buffer_region = buffer_region
+        self.size = inst_size if inst_size is not None else 1
+        self.stride = inst_stride if inst_stride is not None else 1
+        self.selected_data_iter_ids = selected_data_iter_ids
+
+    def bound_inst_size(self, max_inst_size: int, analyzer: Analyzer):
+        if analyzer.can_prove(self.size <= max_inst_size):
+            return
+        assert analyzer.can_prove(
+            self.size % max_inst_size == 0
+        ), f"The instruction size {self.size} is not a multiple of the max instruction size {max_inst_size}"
+        self.size = max_inst_size
+        self.selected_data_iter_ids = None
+
+
+class InstructionGenerator:
+    def __init__(self, buffer_regions: Tuple[BufferRegion], analyzer: Analyzer):
+        self.buffer_regions = buffer_regions
+        self.analyzer = analyzer
+        self.split_shape_views = {}
+        self.split_layout_views = {}
+        self.seps = {}
+        self.bound_regions = {}
+        self.bind_iters: Dict[BufferRegion, LogicalIterList] = None
+        self.bind_maps: Dict[BufferRegion, Dict[Var, PrimExpr]] = {}
+        for buffer_region in buffer_regions:
+            bound_buffer_region = self._bound_buffer_region(buffer_region)
+            layout, seps = self._get_sub_layout(bound_buffer_region)
+            self.split_shape_views[buffer_region] = self._get_flattened_shape_view_from_layout_seps(
+                layout, seps
+            )
+            self.split_layout_views[buffer_region] = layout
+            self.seps[buffer_region] = seps
+        self.dim_mapper = DimensionMapper()
+
+    def _bound_buffer_region(self, buffer_region: BufferRegion):
+        region = []
+        changed = False
+        for r in buffer_region.region:
+            bound = self.analyzer.const_int_bound(r.extent)
+            if not self.analyzer.can_prove_equal(bound.max_value, r.extent):
+                changed = True
+            region.append(Range.from_min_extent(r.min, bound.max_value))
+        if changed:
+            bound_region = BufferRegion(buffer_region.buffer, region)
+            self.bound_regions[buffer_region] = bound_region
+            return bound_region
+        return buffer_region
+
+    def _get_sub_layout(self, buffer_region: BufferRegion):
+        layout = buffer_region.buffer.layout
+        layout, seps = normalize_layout_with_shape(layout, buffer_region.buffer.shape)
+        tile_layout = layout.combined_1d_layout if isinstance(layout, T.TrainiumLayout) else layout
+        data_iters = tile_layout.data_iter_array
+        tiled_range_infos_per_dim = []
+        new_data_iters = []
+        new_dim_types = []
+        new_seps = [0]
+        for i in range(len(seps) - 1):
+            r = buffer_region.region[i]
+            st = r.min
+            ext = r.extent
+            reversed_data_iters = []
+            reversed_dim_types = []
+            for j in reversed(range(seps[i], seps[i + 1])):
+                dim_type = layout.dimension_types[j] if isinstance(layout, T.TrainiumLayout) else -1
+                if self.analyzer.can_prove_equal(ext, 1):
+                    break
+                if dim_type == T.TrainiumLayout.Partition and (
+                    not self.analyzer.can_prove(st % data_iters[j].extent == 0)
+                    or not self.analyzer.can_prove(ext % data_iters[j].extent == 0)
+                ):
+                    assert False, "Invalid layout"
+                if self.analyzer.can_prove(
+                    ext % data_iters[j].extent == 0
+                ) and self.analyzer.can_prove(st % data_iters[j].extent == 0):
+                    st = st // data_iters[j].extent
+                    ext = ext // data_iters[j].extent
+                    tiled_range_infos_per_dim.append(
+                        RangeInfo(0, data_iters[j].extent, j, i, dim_type)
+                    )
+                    reversed_data_iters.append(data_iters[j])
+                    reversed_dim_types.append(dim_type)
+                    continue
+                if self.analyzer.can_prove(st + ext <= data_iters[j].extent):
+                    tiled_range_infos_per_dim.append(RangeInfo(st, ext, j, i, dim_type))
+                    reversed_data_iters.append(T.DataIterAttr(ext, data_iters[j].stride))
+                    reversed_dim_types.append(dim_type)
+                    break
+                assert False, f"Cannot analyze physical tensor region for: {buffer_region}"
+            new_data_iters += reversed(reversed_data_iters)
+            new_dim_types += reversed(reversed_dim_types)
+            new_seps.append(len(reversed_data_iters) + new_seps[-1])
+        # FIXME: device_iter_array and from_scope/to_scope are not set
+        new_tile_layout = T.TileLayout(new_data_iters)
+        if isinstance(layout, T.TrainiumLayout):
+            return T.TrainiumLayout(new_dim_types, new_tile_layout), new_seps
+        else:
+            return new_tile_layout, new_seps
+
+    def _init_bind_iters(self):
+        self.bind_iters = {}
+        for buffer_region in self.buffer_regions:
+            seps = self.seps[buffer_region]
+            self.bind_iters[buffer_region] = [
+                [[] for _ in range(seps[i], seps[i + 1])] for i in range(len(buffer_region.region))
+            ]
+
+    def _normalize_bind_iters(self):
+        for buffer_region in self.buffer_regions:
+            seps = self.seps[buffer_region]
+            self.bind_iters[buffer_region] = [
+                [
+                    sorted(
+                        self.bind_iters[buffer_region][i][j - seps[i]],
+                        key=lambda x: (x.logical_stride, x.extent),
+                    )
+                    for j in range(seps[i], seps[i + 1])
+                ]
+                for i in range(len(buffer_region.region))
+            ]
+
+    def _get_flattened_shape_view_from_layout_seps(self, layout, seps):
+        data_iters = get_layout_data_iters(layout)
+        return [
+            [data_iters[j].extent for j in range(seps[i], seps[i + 1])]
+            for i in range(len(seps) - 1)
+        ]
+
+    def _link_buffer_regions(
+        self, buffer_region: BufferRegion, to_link: BufferRegion, dim_map: Dict[int, int]
+    ):
+        split_shape_view_1 = self.split_shape_views[buffer_region]
+        split_layout_view_1 = self.split_layout_views[buffer_region]
+        split_shape_view_2 = self.split_shape_views[to_link]
+
+        # adapt to the shape view of the to_link buffer region
+        new_split_shape_view_1 = [
+            split_shape_view_2[dim_map[i]] if i in dim_map else split_shape_view_1[i]
+            for i in range(len(buffer_region.region))
+        ]
+        flattened_shape_view_1 = list(itertools.chain(*new_split_shape_view_1))
+        layout, tiled_seps = normalize_layout_with_shape(
+            split_layout_view_1, flattened_shape_view_1
+        )
+        actual_seps = [0]
+        ptr = 0
+        for i in range(len(buffer_region.region)):
+            ptr += len(new_split_shape_view_1[i])
+            actual_seps.append(tiled_seps[ptr])
+        self.split_shape_views[buffer_region] = self._get_flattened_shape_view_from_layout_seps(
+            layout, actual_seps
+        )
+        self.split_layout_views[buffer_region] = layout
+        self.seps[buffer_region] = actual_seps
+
+    def _get_reverse_dim_map(self, dim_map: Dict[int, int]) -> Dict[int, int]:
+        return {dim_map[i]: i for i in dim_map}
+
+    def link_buffer_regions(
+        self, buffer_region: BufferRegion, to_link: BufferRegion, dim_map: Dict[int, int]
+    ):
+        self.dim_mapper.register_dim_map(buffer_region, to_link, dim_map)
+        for r in self.buffer_regions:
+            if r == to_link:
+                continue
+            dim_map = self.dim_mapper.get_dim_map(r, to_link)
+            reverse_dim_map = self._get_reverse_dim_map(dim_map)
+            self._link_buffer_regions(r, to_link, dim_map)
+            self._link_buffer_regions(to_link, r, reverse_dim_map)
+            seps_1 = self.seps[r]
+            seps_2 = self.seps[to_link]
+            for i, j in dim_map.items():
+                assert (
+                    seps_1[i + 1] - seps_1[i] == seps_2[j + 1] - seps_2[j]
+                ), f"The number of data iters at dim {i} of {buffer_region.buffer.name} is not equal to the number of data iters at dim {j} of {to_link.buffer.name}"
+
+    def bind_inst_iter(
+        self,
+        buffer_region: BufferRegion,
+        bind: Var,
+        inst_size: int,
+        inst_stride: int,
+        is_free_dim: bool,
+        no_propagate: bool = False,
+    ):
+        logical_iter_list = self._get_inst_logical_iter_list(
+            buffer_region, bind, inst_stride, inst_size, is_free_dim
+        )
+        self._add_bind_iter_list(buffer_region, logical_iter_list)
+        if no_propagate:
+            return
+        self._propagate_bind_iter(buffer_region, logical_iter_list)
+
+    def _propagate_bind_iter(self, buffer_region: BufferRegion, logical_iter_list: LogicalIterList):
+        for to_propagate in self.buffer_regions:
+            if to_propagate == buffer_region:
+                continue
+            dim_map = self.dim_mapper.get_dim_map(buffer_region, to_propagate)
+            reverse_dim_map = self._get_reverse_dim_map(dim_map)
+            seps = self.seps[to_propagate]
+            propagated_logical_iter = [
+                (
+                    logical_iter_list[reverse_dim_map[i]]
+                    if i in reverse_dim_map
+                    else [[] for _ in range(seps[i], seps[i + 1])]
+                )
+                for i in range(len(to_propagate.region))
+            ]
+            self._add_bind_iter_list(to_propagate, propagated_logical_iter)
+
+    def _add_bind_iter_list(self, buffer_region: BufferRegion, bind_iter_list: LogicalIterList):
+        if self.bind_iters is None:
+            self._init_bind_iters()
+        seps = self.seps[buffer_region]
+        for i in range(len(buffer_region.region)):
+            for j in range(seps[i], seps[i + 1]):
+                self.bind_iters[buffer_region][i][j - seps[i]].extend(
+                    bind_iter_list[i][j - seps[i]]
+                )
+
+    def fill_in_block_dim(
+        self, buffer_region: BufferRegion, bind: Var, dims: Optional[List[int]] = None
+    ):
+        # fixme: be cautious of the min of buffer region. This implementation is not correct.
+        #        we need to first take a view of sub-layout (keep strides, but reduce the extent
+        #        then we analyze the relationship between data iter of sub-layout
+        dims = dims or list(range(len(buffer_region.buffer.shape)))
+        layout = self.split_layout_views[buffer_region]
+        data_iters = get_layout_data_iters(layout)
+        self._normalize_bind_iters()
+        bind_iters = self.bind_iters[buffer_region]
+        seps = self.seps[buffer_region]
+        logical_iter_list_block = [
+            [[] for _ in range(seps[i], seps[i + 1])] for i in range(len(buffer_region.region))
+        ]
+        acc_block_ext = 1
+        for i in reversed(dims):
+            for j in reversed(range(seps[i], seps[i + 1])):
+                data_iter = data_iters[j]
+                is_partition = (
+                    layout.dimension_types[j] == T.TrainiumLayout.Partition
+                    if isinstance(layout, T.TrainiumLayout)
+                    else False
+                )
+                logical_iter_dims = bind_iters[i][j - seps[i]]
+                for d in range(-1, len(logical_iter_dims)):
+                    next_logical_stride = (
+                        logical_iter_dims[d + 1].logical_stride
+                        if d + 1 < len(logical_iter_dims)
+                        else data_iter.extent
+                    )
+                    cur = (
+                        logical_iter_dims[d].logical_stride * logical_iter_dims[d].extent
+                        if d >= 0
+                        else 1
+                    )
+                    assert (
+                        next_logical_stride % cur == 0
+                    ), f"Fail to infer block dim for {buffer_region.buffer.name} at dim {i}"
+                    gap = next_logical_stride // cur
+                    if is_partition:
+                        assert (
+                            gap == 1
+                        ), f"Fail to propagate partition dim. The propagated dim does not cover the whole partition on {buffer_region.buffer.name} at dim {i}"
+                    elif gap > 1:
+                        new_acc_block_ext = acc_block_ext * gap
+                        logical_iter_list_block[i][j - seps[i]].append(
+                            LogicalIterDim(cur, gap, bind % new_acc_block_ext // acc_block_ext)
+                        )
+                        acc_block_ext = new_acc_block_ext
+        self._add_bind_iter_list(buffer_region, logical_iter_list_block)
+        self._propagate_bind_iter(buffer_region, logical_iter_list_block)
+        return acc_block_ext
+
+    def _check_bind_iter_coverage(self, buffer_region: BufferRegion):
+        self._normalize_bind_iters()
+        seps = self.seps[buffer_region]
+        data_iters = get_layout_data_iters(self.split_layout_views[buffer_region])
+        bind_iters = self.bind_iters[buffer_region]
+        for i in range(len(buffer_region.region)):
+            for j in range(seps[i], seps[i + 1]):
+                data_iter = data_iters[j]
+                logical_iter_dims = bind_iters[i][j - seps[i]]
+                for d in range(len(logical_iter_dims)):
+                    next_logical_stride = (
+                        logical_iter_dims[d + 1].logical_stride
+                        if d + 1 < len(logical_iter_dims)
+                        else data_iter.extent
+                    )
+                    assert (
+                        next_logical_stride
+                        % (logical_iter_dims[d].logical_stride * logical_iter_dims[d].extent)
+                        == 0
+                    ), f"Fail to infer block dim for {buffer_region.buffer.name} at dim {i}"
+                    gap = next_logical_stride // (
+                        logical_iter_dims[d].logical_stride * logical_iter_dims[d].extent
+                    )
+                    assert gap == 1, f"Call fill_in_block_dim() before calling generate_indices()"
+
+    def set_bind_map(self, buffer_region: BufferRegion, bind_map: Dict[Var, PrimExpr]):
+        self.bind_maps[buffer_region] = bind_map
+
+    def generate_axes(self, buffer_region: BufferRegion) -> List[PrimExpr]:
+        self._check_bind_iter_coverage(buffer_region)
+        layout = self.split_layout_views[buffer_region]
+        data_iters = get_layout_data_iters(layout)
+        bind_iters = self.bind_iters[buffer_region]
+        seps = self.seps[buffer_region]
+        axes = []
+        for i in range(len(bind_iters)):
+            index = 0
+            acc_logical_stride = 1
+            for j in reversed(range(seps[i], seps[i + 1])):
+                logical_iter_dims = bind_iters[i][j - seps[i]]
+                for d in reversed(logical_iter_dims):
+                    if d.extent == 1:
+                        continue
+                    index += (
+                        d.logical_stride
+                        * VarReplacer.replace_vars(d.bind_expr, self.bind_maps[buffer_region])
+                        * acc_logical_stride
+                    )
+                acc_logical_stride *= data_iters[j].extent
+            axes.append(index)
+        return axes
+
+    def generate_indices(self, buffer_region: BufferRegion) -> List[PrimExpr]:
+        axes = self.generate_axes(buffer_region)
+        return [axes[i] + r.min for i, r in enumerate(buffer_region.region)]
+
+    def _get_inst_logical_iter_list(
+        self,
+        buffer_region: BufferRegion,
+        bind: Var,
+        stride: int,
+        size: int,
+        is_free_dim: bool = True,
+    ) -> LogicalIterList:
+        layout = self.split_layout_views[buffer_region]
+        assert isinstance(
+            layout, T.TrainiumLayout
+        ), " Cannot propagate instruction information from HBM tensor"
+        data_iters = get_layout_data_iters(layout)
+        seps = self.seps[buffer_region]
+        ret = [[[] for _ in range(seps[i], seps[i + 1])] for i in range(len(buffer_region.region))]
+        for i in range(len(buffer_region.region)):
+            for j in range(seps[i], seps[i + 1]):
+                if (layout.dimension_types[j] == T.TrainiumLayout.Free) ^ is_free_dim:
+                    continue
+                data_iter = data_iters[j]
+                if (
+                    data_iter.stride * data_iter.extent <= stride
+                    or data_iter.stride >= size * stride
+                ):
+                    continue
+                if (
+                    data_iter.stride * data_iter.extent < size * stride
+                    and stride <= data_iter.stride
+                ):
+                    assert (size * stride) % (
+                        data_iter.stride * data_iter.extent
+                    ) == 0 and data_iter.stride % stride == 0
+                    ret[i][j - seps[i]].append(
+                        LogicalIterDim(
+                            1,
+                            data_iter.extent,
+                            bind
+                            % (data_iter.stride * data_iter.extent // stride)
+                            // (data_iter.stride // stride),
+                        )
+                    )
+                elif (
+                    data_iter.stride * data_iter.extent < size * stride
+                    and stride > data_iter.stride
+                ):
+                    assert (size * stride) % (
+                        data_iter.stride * data_iter.extent
+                    ) == 0 and stride % data_iter.stride == 0
+                    ret[i][j - seps[i]].append(
+                        LogicalIterDim(
+                            stride // data_iter.stride,
+                            data_iter.stride * data_iter.extent // stride,
+                            bind % (data_iter.stride * data_iter.extent // stride),
+                        )
+                    )
+                elif (
+                    data_iter.stride * data_iter.extent >= size * stride
+                    and stride <= data_iter.stride
+                ):
+                    assert (data_iter.stride * data_iter.extent) % (
+                        size * stride
+                    ) == 0 and data_iter.stride % stride == 0
+                    ret[i][j - seps[i]].append(
+                        LogicalIterDim(
+                            1,
+                            size * stride // data_iter.stride,
+                            bind // (data_iter.stride // stride),
+                        )
+                    )
+        return ret
+
+    def make_guard(self, buffer_region: BufferRegion):
+        if buffer_region not in self.bound_regions:
+            return True
+        bound_region = self.bound_regions[buffer_region]
+        relaxed_dims = [
+            i
+            for i, (r1, r2) in enumerate(zip(bound_region.region, buffer_region.region))
+            if not self.analyzer.can_prove(r1.extent == r2.extent)
+        ]
+        axes = self.generate_axes(buffer_region)
+        guard = reduce(
+            T.And,
+            [axes[i] < r.extent for i, r in enumerate(buffer_region.region) if i in relaxed_dims],
+            True,
+        )
+        return guard
+
+    def _find_max_linear_inst(self, indexed_data_iters, min_stride: Optional[int] = None):
+        min_stride = min_stride or 1
+        indexed_data_iters = sorted(indexed_data_iters, key=lambda x: x[1].stride)
+        inst_size = 1
+        inst_stride = None
+        idx_list = []
+        for idx, data_iter in indexed_data_iters:
+            if data_iter.extent == 1 or data_iter.stride * data_iter.extent < min_stride:
+                continue
+            assert (
+                data_iter.stride % min_stride == 0 or min_stride % data_iter.stride == 0
+            ), f"Invalid instruction stride {min_stride}"
+            if inst_stride is not None and inst_stride * inst_size != data_iter.stride:
+                # the stride of the found data iter is not compatible with previous data iters
+                break
+            elif inst_stride is None:
+                inst_stride = max(min_stride, data_iter.stride)
+            if min_stride % data_iter.stride == 0:
+                inst_size = data_iter.extent * data_iter.stride // inst_stride
+            else:
+                inst_size *= data_iter.extent
+            idx_list.append(idx)
+        return inst_size, inst_stride, idx_list
+
+    def find_max_inst_size_from_one_region(
+        self,
+        buffer_region: BufferRegion,
+        allowed_f_dim: Optional[Tuple[int]] = None,
+        min_stride: Optional[int] = None,
+    ):
+        allowed_f_dim = allowed_f_dim or tuple(range(len(buffer_region.region)))
+        layout = self.split_layout_views[buffer_region]
+        data_iters = get_layout_data_iters(layout)
+        seps = self.seps[buffer_region]
+        allowed_data_iter_idx = itertools.chain.from_iterable(
+            range(seps[dim], seps[dim + 1]) for dim in allowed_f_dim
+        )
+        filtered_data_iters = [
+            (i, data_iters[i])
+            for i in allowed_data_iter_idx
+            if layout.dimension_types[i] == T.TrainiumLayout.Free
+        ]
+        inst_size, inst_stride, idx_list = self._find_max_linear_inst(
+            filtered_data_iters, min_stride
+        )
+        return InstructionRepr(buffer_region, inst_size, inst_stride, idx_list)
+
+    def fit_inst_tile_to_region(
+        self,
+        inst_repr: InstructionRepr,
+        to_region: BufferRegion,
+        allowed_to_f_dim: Optional[Tuple[int]] = None,
+    ):
+        allowed_to_f_dim = allowed_to_f_dim or tuple(range(len(to_region.region)))
+        from_region = inst_repr.buffer_region
+        from_layout = self.split_layout_views[from_region]
+        from_data_iters = get_layout_data_iters(from_layout)
+        to_layout = self.split_layout_views[to_region]
+        to_data_iters = get_layout_data_iters(to_layout)
+        from_seps = self.seps[from_region]
+        to_seps = self.seps[to_region]
+        dim_map = self.dim_mapper.get_dim_map(from_region, to_region)
+        dim_map = {i: j for i, j in dim_map.items() if j in allowed_to_f_dim}
+        data_iter_map = {
+            from_seps[i] + idx: to_seps[j] + idx
+            for i, j in dim_map.items()
+            for idx in range(from_seps[i + 1] - from_seps[i])
+        }
+        indexed_selected_data_iters = [
+            (i, from_data_iters[i]) for i in inst_repr.selected_data_iter_ids
+        ]
+        indexed_selected_data_iters = sorted(indexed_selected_data_iters, key=lambda x: x[1].stride)
+        inst_size = 1
+        inst_stride_from = None
+        inst_stride_to = None
+        idx_list = []
+        for i, data_iter in indexed_selected_data_iters:
+            if i not in data_iter_map:
+                if inst_stride_from is None:
+                    continue
+                break
+            mapped_data_iter = to_data_iters[data_iter_map[i]]
+            if inst_stride_from is None:
+                inst_stride_from = data_iter.stride
+                if not isinstance(to_layout, T.TrainiumLayout) and mapped_data_iter.stride != 1:
+                    # dma copy must be contiguous on hbm
+                    break
+                inst_stride_to = mapped_data_iter.stride
+            elif inst_stride_to * inst_size != mapped_data_iter.stride:
+                break
+            inst_size *= data_iter.extent
+            idx_list.append(i)
+        return InstructionRepr(from_region, inst_size, inst_stride_from, idx_list)
+
+    def check_partition_dim_match(
+        self, buffer_region_1: BufferRegion, buffer_region_2: BufferRegion
+    ):
+        dim_map = self.dim_mapper.get_dim_map(buffer_region_1, buffer_region_2)
+        layout_1 = self.split_layout_views[buffer_region_1]
+        layout_2 = self.split_layout_views[buffer_region_2]
+        if not isinstance(layout_1, T.TrainiumLayout) or not isinstance(layout_2, T.TrainiumLayout):
+            return True
+        data_iters_1 = get_layout_data_iters(layout_1)
+        data_iters_2 = get_layout_data_iters(layout_2)
+        seps_1 = self.seps[buffer_region_1]
+        seps_2 = self.seps[buffer_region_2]
+        for i, j in dim_map.items():
+            for k in range(seps_1[i + 1] - seps_1[i]):
+                if (
+                    layout_1.dimension_types[seps_1[i] + k]
+                    != layout_2.dimension_types[seps_2[j] + k]
+                ):
+                    return False
+                if layout_1.dimension_types[seps_1[i] + k] == T.TrainiumLayout.Free:
+                    continue
+                if data_iters_1[seps_1[i] + k].stride != data_iters_2[seps_2[j] + k].stride:
+                    return False
+                if data_iters_1[seps_1[i] + k].extent != data_iters_2[seps_2[j] + k].extent:
+                    return False
+        return True
+
+    def find_max_inst_size_transpose(
+        self, buffer_region_1: BufferRegion, buffer_region_2: BufferRegion
+    ):
+        dim_map = self.dim_mapper.get_dim_map(buffer_region_1, buffer_region_2)
+        layout_1 = self.split_layout_views[buffer_region_1]
+
+        layout_2 = self.split_layout_views[buffer_region_2]
+        data_iters_1 = get_layout_data_iters(layout_1)
+        data_iters_2 = get_layout_data_iters(layout_2)
+        seps_1 = self.seps[buffer_region_1]
+        seps_2 = self.seps[buffer_region_2]
+        indexed_data_iters_1 = []
+        indexed_data_iters_2 = []
+        for i, j in dim_map.items():
+            for k in range(seps_1[i + 1] - seps_1[i]):
+                if (
+                    layout_1.dimension_types[seps_1[i] + k]
+                    == layout_2.dimension_types[seps_2[j] + k]
+                ):
+                    if layout_1.dimension_types[seps_1[i] + k] == T.TrainiumLayout.Free:
+                        continue
+                    raise ValueError(f"Transpose only part of P dimension is not supported")
+                if layout_1.dimension_types[seps_1[i] + k] == T.TrainiumLayout.Partition:
+                    indexed_data_iters_2.append((seps_2[j] + k, data_iters_2[seps_2[j] + k]))
+                else:
+                    indexed_data_iters_1.append((seps_1[i] + k, data_iters_1[seps_1[i] + k]))
+        inst_repr_1 = InstructionRepr(
+            buffer_region_1, *self._find_max_linear_inst(indexed_data_iters_1)
+        )
+        inst_repr_2 = InstructionRepr(
+            buffer_region_2, *self._find_max_linear_inst(indexed_data_iters_2)
+        )
+        assert (
+            inst_repr_1.size == layout_2.partition_size
+        ), f"The instruction size of {buffer_region_1.buffer.name} does not match the partition size of {buffer_region_2.buffer.name}"
+        assert (
+            inst_repr_2.size == layout_1.partition_size
+        ), f"The instruction size of {buffer_region_2.buffer.name} does not match the partition size of {buffer_region_1.buffer.name}"
+        return inst_repr_1, inst_repr_2

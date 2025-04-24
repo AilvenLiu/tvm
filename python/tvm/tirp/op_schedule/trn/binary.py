@@ -96,14 +96,21 @@ def get_inst_tile_with_broadcast(
     dst_range_info, dst_layout, dst_seps = infer_range_info(dst, analyzer)
     f_data_iters_in_broadcast_dim = []
     f_data_iters_in_non_broadcast_dim = []
-
+    # Map dimensions between buffers
+    dst_to_src1_dim_map = get_ewise_dim_map(dst, src1, analyzer)
+    src1_src2_offset = len(src1.region) - len(src2.region)
+    dst_to_src2_dim_map = {
+        d: s - src1_src2_offset for d, s in dst_to_src1_dim_map.items() if s not in broadcast_dims
+    }
     for i in range(len(dst_seps) - 1):
         for j in range(dst_seps[i], dst_seps[i + 1]):
+            dim_in_src1 = dst_to_src1_dim_map.get(i, None)
+            dim_in_src2 = dst_to_src2_dim_map.get(i, None)
             if j not in inst_data_iters:
                 continue
-            if i in broadcast_dims:
+            if dim_in_src1 in broadcast_dims:
                 f_data_iters_in_broadcast_dim.append((j, inst_data_iters[j]))
-            elif allowed_f_dim_dst is None or i in allowed_f_dim_src2:
+            elif allowed_f_dim_src2 is None or dim_in_src2 in allowed_f_dim_src2:
                 f_data_iters_in_non_broadcast_dim.append((j, inst_data_iters[j]))
 
     def try_f_data_iters(f_data_iters):
@@ -131,13 +138,6 @@ def get_inst_tile_with_broadcast(
     tensortensor_inst_size, tensortensor_inst_stride, _ = try_f_data_iters(
         f_data_iters_in_non_broadcast_dim
     )
-
-    # Map dimensions between buffers
-    dst_to_src1_dim_map = get_ewise_dim_map(dst, src1, analyzer)
-    src1_src2_offset = len(src1.region) - len(src2.region)
-    dst_to_src2_dim_map = {
-        d: s - src1_src2_offset for d, s in dst_to_src1_dim_map.items() if s not in broadcast_dims
-    }
 
     # Refine instruction tiles
     tensortensor_inst_size, tensortensor_inst_stride, _, tensortensor_inst_data_iters = (

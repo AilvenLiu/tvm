@@ -779,7 +779,36 @@ def test_tensor_scalar_reduce_two_stage_workspace():
         assert_structural_equal(mod["main"], expected)
 
 
+def test_unary_reduce_complex():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def unary_reduce():
+        with T.kernel():
+            p = T.alloc_buffer((128, 8192), "float16", scope="trn.sbuf", layout="PF")
+            rowsum_p = T.alloc_buffer((2, 128, 1), scope="trn.sbuf", layout="FPF")
+            qk = T.alloc_buffer((2, 128, 8192), scope="trn.sbuf", layout="FPF")
+            running_max = T.alloc_buffer((16384, 1), dtype="float32", scope="trn.sbuf", layout="PF")
+            for i in range(4):
+                Tp.unary_reduce(p[0:128, 0:8192], rowsum_p[i % 2, 0:128, 0], qk[i % 2, 0:128, 0:8192], "exp", "sum", bias=running_max[i * 128:i * 128 + 128, 0])
+
+    @T.prim_func(tirp=True)
+    def expected():
+        T.func_attr({"global_symbol": "unary_reduce"})
+        with T.kernel():
+            p = T.alloc_buffer((128, 8192), "float16", scope="trn.sbuf", logical_scope="kernel")
+            rowsum_p = T.alloc_buffer((128, 2), scope="trn.sbuf", logical_scope="kernel")
+            qk = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            running_max = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
+            for i, b_loop in T.grid(4, 1):
+                T.attr(0, "tensorized_nki_instruction", 1)
+                for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
+                    for f_loop in T.serial(8192, annotations={"nki_dim": "F"}):
+                        T.nki.activation_reduce(rowsum_p[p_loop, i % 2], p[p_loop, f_loop], qk[p_loop, i % 2 * 8192 + f_loop], "exp", "add", running_max[p_loop, i], T.float32(1.0))
+    # fmt: on
+    with target:
+        mod = tvm.IRModule({"main": unary_reduce})
+        mod = tvm.tir.transform.LowerTIRp()(mod)
+        assert_structural_equal(mod["main"], expected)
+
 if __name__ == "__main__":
-    # tvm.testing.main()
-    # test_activation_reduce_two_stage()
-    test_tensor_scalar_reduce_two_stage()
+    tvm.testing.main()

@@ -29,52 +29,74 @@ from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
 from .common import (
-    generate_axes_in_region,
     get_ewise_dim_map,
-    find_max_inst_size_unary,
-    bound_inst_with_limit,
     init_analyzer,
-    check_partition_dim_match,
-    find_max_inst_size_transpose,
-    f_gen_idx_anchor,
-    f_gen_idx_mapped,
-    get_max_psum_banks,
+    max_psum_banks,
     check_workspace_buffer,
-    get_largest_psum_per_bank,
+    largest_psum_per_bank,
     target_trn,
-    bound_buffer_region,
-    make_guard,
     nki_dim,
+    InstructionGenerator,
 )
 
 
 def transpose_schedule(
     op: OpCall,
-    analyzer: Analyzer,
+    inst_gen: InstructionGenerator,
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
     dst_region, src_region = op.args
     assert src_region.buffer.scope() != "trn.psum", "Transpose on psum buffer is not supported"
 
-    bound_src = bound_buffer_region(src_region, analyzer)
-    bound_dst = bound_buffer_region(dst_region, analyzer)
+    inst_repr_dst, inst_repr_src = inst_gen.find_max_inst_size_transpose(dst_region, src_region)
 
-    inst1_stride, inst1_iters, inst2_stride, inst2_iters = find_max_inst_size_transpose(
-        bound_dst, bound_src, analyzer
-    )
-
-    gen_axes_dst = generate_axes_in_region(bound_dst, inst1_stride, inst1_iters, analyzer)
-    gen_axes_src = generate_axes_in_region(bound_src, inst2_stride, inst2_iters, analyzer)
-    gen_dst_idx = f_gen_idx_anchor(dst_region, gen_axes_dst)
-    gen_src_idx = f_gen_idx_anchor(src_region, gen_axes_src)
-
+    lhs_f = T.var("int32", name="lhs_F")
+    lhs_p = T.var("int32", name="lhs_P")
+    dst_f = T.var("int32", name="dst_F")
+    b_var = T.var("int32", name="B")
+    extend_b = T.var("int32", name="extend_B")
     p_size = src_region.buffer.layout.partition_size
     lhs_f_size = dst_region.buffer.layout.partition_size
     rhs_f_size = p_size
-    b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // p_size // lhs_f_size
+    inst_gen.bind_inst_iter(
+        src_region, lhs_f, inst_repr_src.size, inst_repr_src.stride, is_free_dim=True
+    )
+    inst_gen.bind_inst_iter(
+        dst_region,
+        dst_f,
+        inst_repr_dst.size,
+        inst_repr_dst.stride,
+        is_free_dim=True,
+        no_propagate=True,
+    )
+    inst_gen.bind_inst_iter(src_region, lhs_p, p_size, 1, is_free_dim=False, no_propagate=True)
+    if dst_region.buffer.scope() == "trn.sbuf":
+        max_extend_num = (
+            inst_gen.find_max_inst_size_from_one_region(
+                dst_region, min_stride=inst_repr_dst.stride
+            ).size
+            // rhs_f_size
+        )
+        max_elem_in_a_bank = largest_psum_per_bank // rhs_f_size
+        if max_extend_num < max_elem_in_a_bank:
+            extend_len = max_extend_num
+        elif max_extend_num % max_elem_in_a_bank == 0:
+            extend_len = max_elem_in_a_bank
+        else:
+            extend_len = 1
+        inst_gen.bind_inst_iter(
+            dst_region,
+            extend_b,
+            extend_len,
+            inst_repr_dst.stride * inst_repr_dst.size,
+            is_free_dim=True,
+        )
+    b_extent = inst_gen.fill_in_block_dim(dst_region, b_var)
 
     if "identity" not in op.workspace:
-        assert sctx.alloc_only, "Identity tensor must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
+        assert (
+            sctx.alloc_only
+        ), "Identity tensor must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
         identity_tensor = T.buffer(
             (p_size, rhs_f_size),
             src_region.buffer.dtype,
@@ -98,50 +120,52 @@ def transpose_schedule(
 
     dst_buffer = dst_region.buffer
     src_buffer = src_region.buffer
-    max_psum_slots = get_max_psum_banks()
-    largest_psum_per_bank = get_largest_psum_per_bank()
-    inst_num_per_slot = largest_psum_per_bank // rhs_f_size
-    f_src_guard = make_guard(src_region, analyzer)
-    f_dst_guard = make_guard(dst_region, analyzer)
-
-    # fmt: off
-    @T.macro
-    def matmul_inst_macro(b_loop, dst, use_dst_indices, max_psum_slots):
-        with T.attr(0, "tensorized_nki_instruction", 1):
-            for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                for lhs_f_loop in T.serial(0, lhs_f_size, annotations={nki_dim: "lhs_F"}):
-                    for rhs_f_loop in T.serial(0, rhs_f_size, annotations={nki_dim: "rhs_F"}):
-                        src_indices = T.meta_var(gen_src_idx(((b_loop, b_extent),), lhs_f_loop, p_loop))
-                        src_guard = T.meta_var(f_src_guard(gen_axes_src(((b_loop, b_extent),), lhs_f_loop, p_loop)))
-                        dst_guard = T.meta_var(f_dst_guard(gen_axes_dst(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop)))
-                        if src_guard and dst_guard:
-                            if use_dst_indices:
-                                dst_indices = T.meta_var(gen_dst_idx(((b_loop, b_extent),), rhs_f_loop, lhs_f_loop))
-                                T.evaluate(T.nki.matmul(dst[*dst_indices], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
-                            else:
-                                if src_guard:
-                                    T.evaluate(T.nki.matmul(dst[b_loop // inst_num_per_slot % max_psum_slots, lhs_f_loop, b_loop % inst_num_per_slot * rhs_f_size + rhs_f_loop], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
-    # fmt: on
-
     if dst_buffer.scope() == "trn.psum":
 
         @T.prim_func(tirp=True)
         def transpose_psum_output():
             for b_loop in T.serial(0, b_extent):
-                matmul_inst_macro(b_loop, dst_buffer, True, max_psum_slots)
+                with T.attr(0, "tensorized_nki_instruction", 1):
+                    for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                        for lhs_f_loop in T.serial(0, lhs_f_size, annotations={nki_dim: "lhs_F"}):
+                            for rhs_f_loop in T.serial(
+                                0, rhs_f_size, annotations={nki_dim: "rhs_F"}
+                            ):
+                                inst_gen.set_bind_map(
+                                    dst_region,
+                                    {b_var: b_loop, lhs_f: lhs_f_loop, dst_f: rhs_f_loop},
+                                )
+                                inst_gen.set_bind_map(
+                                    src_region, {b_var: b_loop, lhs_f: lhs_f_loop, lhs_p: p_loop}
+                                )
+                                src_indices = T.meta_var(inst_gen.generate_indices(src_region))
+                                dst_indices = T.meta_var(inst_gen.generate_indices(dst_region))
+                                src_guard = T.meta_var(inst_gen.make_guard(src_region))
+                                dst_guard = T.meta_var(inst_gen.make_guard(dst_region))
+                                if src_guard and dst_guard:
+                                    T.evaluate(
+                                        T.nki.matmul(
+                                            dst_buffer[*dst_indices],
+                                            src_buffer[*src_indices],
+                                            identity_tensor[p_loop, rhs_f_loop],
+                                        )
+                                    )
 
         return transpose_psum_output
 
     if "acc_psum" not in op.workspace:
-        assert sctx.alloc_only, "Accumulation psum buffer must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
+        assert (
+            sctx.alloc_only
+        ), "Accumulation psum buffer must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
         acc_psum = T.buffer(
-            (max_psum_slots, p_size, largest_psum_per_bank),
+            (max_psum_banks, p_size, largest_psum_per_bank),
             "float32",
             scope="trn.psum",
             allocated_addr=(0, 0),
             buffer_name="acc_psum",
         )
         sctx.add_alloc_buffer(acc_psum)
+        max_psum_slots = max_psum_banks
     else:
         acc_psum = op.workspace["acc_psum"]
         check_workspace_buffer(acc_psum, (p_size, largest_psum_per_bank), "trn.psum")
@@ -150,18 +174,26 @@ def transpose_schedule(
     # fmt: off
     @T.prim_func(tirp=True)
     def transpose_sbuf_output():
-        with T.kernel():
-            for b_loop in T.serial(0, b_extent):
-                matmul_inst_macro(b_loop, acc_psum, False, max_psum_slots)
+        for b_loop in T.serial(0, b_extent):
+            for extend_b_loop in T.serial(0, extend_len):
                 with T.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                        for f_loop in T.serial(0, rhs_f_size, annotations={nki_dim: "F"}):
-                            dst_guard = T.meta_var(f_dst_guard(gen_axes_dst(((b_loop, b_extent),), f_loop, p_loop)))
-                            dst_indices = T.meta_var(gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                            if dst_guard:
-                                T.evaluate(T.nki.tensor_copy(dst_buffer[*dst_indices], acc_psum[b_loop // inst_num_per_slot % max_psum_slots, p_loop, b_loop % inst_num_per_slot * rhs_f_size + f_loop]))
+                        for lhs_f_loop in T.serial(0, lhs_f_size, annotations={nki_dim: "lhs_F"}):
+                            for rhs_f_loop in T.serial(0, rhs_f_size, annotations={nki_dim: "rhs_F"}):
+                                inst_gen.set_bind_map(src_region, {b_var: b_loop, lhs_f: lhs_f_loop, lhs_p: p_loop, extend_b: extend_b_loop})
+                                src_indices = T.meta_var(inst_gen.generate_indices(src_region))
+                                src_guard = T.meta_var(inst_gen.make_guard(src_region))
+                                if src_guard:
+                                    T.evaluate(T.nki.matmul(acc_psum[b_loop % max_psum_slots, lhs_f_loop,extend_b_loop * rhs_f_size + rhs_f_loop], src_buffer[*src_indices], identity_tensor[p_loop, rhs_f_loop]))
+            with T.attr(0, "tensorized_nki_instruction", 1):
+                for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
+                    for f_loop in T.serial(0, rhs_f_size * extend_len, annotations={nki_dim: "F"}):
+                        inst_gen.set_bind_map(dst_region, {b_var: b_loop, lhs_f: p_loop, dst_f: f_loop % rhs_f_size, extend_b: f_loop // rhs_f_size})
+                        dst_guard = T.meta_var(inst_gen.make_guard(dst_region))
+                        dst_indices = T.meta_var(inst_gen.generate_indices(dst_region))
+                        if dst_guard:
+                            T.evaluate(T.nki.tensor_copy(dst_buffer[*dst_indices], acc_psum[b_loop % max_psum_slots, p_loop, f_loop]))
     # fmt: on
-
     return transpose_sbuf_output
 
 
@@ -211,73 +243,61 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     if not dims_match:
         return None
 
-    bound_src = bound_buffer_region(src_region, analyzer)
-    bound_dst = bound_buffer_region(dst_region, analyzer)
     dim_map = get_ewise_dim_map(src_region, dst_region, analyzer)
+    inst_gen = InstructionGenerator([src_region, dst_region], analyzer)
+    inst_gen.link_buffer_regions(src_region, dst_region, dim_map)
 
-    if not check_partition_dim_match(bound_src, bound_dst, dim_map, analyzer):
-        return transpose_schedule(op, analyzer, sctx)
-
-    inst_size, inst_stride, inst_data_iters = None, None, None
-    src_to_dst = None
+    if not inst_gen.check_partition_dim_match(src_region, dst_region):
+        return transpose_schedule(op, inst_gen, sctx)
 
     if isinstance(src.layout, T.TrainiumLayout):
-        inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-            bound_src, bound_dst, analyzer
-        )
+        inst = inst_gen.find_max_inst_size_from_one_region(src_region)
+        inst = inst_gen.fit_inst_tile_to_region(inst, dst_region)
         src_to_dst = True
-
-    if inst_size is None and isinstance(dst.layout, T.TrainiumLayout):
-        inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-            bound_dst, bound_src, analyzer
-        )
+    else:
+        inst = inst_gen.find_max_inst_size_from_one_region(dst_region)
+        inst = inst_gen.fit_inst_tile_to_region(inst, src_region)
         src_to_dst = False
 
-    assert src_to_dst is not None
-
-    if src_to_dst:
-        p_size = src_region.buffer.layout.partition_size
-        gen_axes = generate_axes_in_region(bound_src, inst_stride, inst_data_iters, analyzer)
-        dim_map = get_ewise_dim_map(src_region, dst_region, analyzer)
-        gen_src_idx = f_gen_idx_anchor(src_region, gen_axes)
-        gen_dst_idx = f_gen_idx_mapped(dst_region, gen_axes, dim_map)
-    else:
-        p_size = dst_region.buffer.layout.partition_size
-        gen_axes = generate_axes_in_region(bound_dst, inst_stride, inst_data_iters, analyzer)
-        dim_map = get_ewise_dim_map(dst_region, src_region, analyzer)
-        gen_dst_idx = f_gen_idx_anchor(dst_region, gen_axes)
-        gen_src_idx = f_gen_idx_mapped(src_region, gen_axes, dim_map)
-
-    b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // p_size // inst_size
-
-    # fmt: off
     if src.scope() == "global":
         func = T.nki.load
     elif dst.scope() == "global":
         func = T.nki.store
     else:
         func = T.nki.tensor_copy
-    
+
     if func == T.nki.tensor_copy:
         inst_size_limit = op.schedule_config.get("max_inst_size", 512)
-        actual_inst_size, additional_b_size = bound_inst_with_limit(inst_size, inst_size_limit, analyzer)
+        inst.bound_inst_size(inst_size_limit, analyzer)
     else:
-        assert "max_inst_size" not in op.schedule_config, "max_inst_size is not supported for load/store"
-        actual_inst_size, additional_b_size = inst_size, 1
-        
-    f_guard = make_guard(dst_region, analyzer)
+        assert (
+            "max_inst_size" not in op.schedule_config
+        ), "max_inst_size is not supported for load/store"
 
+    p_var = T.var("int32", name="P")
+    f_var = T.var("int32", name="F")
+    b_var = T.var("int32", name="B")
+    if src_to_dst:
+        from_region, to_region = src_region, dst_region
+    else:
+        from_region, to_region = dst_region, src_region
+    p_size = from_region.buffer.layout.partition_size
+    inst_gen.bind_inst_iter(from_region, p_var, p_size, 1, is_free_dim=False)
+    inst_gen.bind_inst_iter(from_region, f_var, inst.size, inst.stride, is_free_dim=True)
+    b_extent = inst_gen.fill_in_block_dim(from_region, b_var)
+    # fmt: off
     @T.prim_func(tirp=True)
     def impl():
         # the additional b loop is to satisfy hardware instuction size limit
-        for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
+        for b_loop in T.serial(0, b_extent):
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                    for f_loop in T.serial(0, actual_inst_size, annotations={nki_dim: "F"}):
-                        f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                        if f_guard(gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
-                            src_indices = T.meta_var(gen_src_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                            dst_indices = T.meta_var(gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
+                    for f_loop in T.serial(0, inst.size, annotations={nki_dim: "F"}):
+                        inst_gen.set_bind_map(dst_region, {b_var: b_loop, p_var: p_loop, f_var: f_loop})
+                        inst_gen.set_bind_map(src_region, {b_var: b_loop, p_var: p_loop, f_var: f_loop})
+                        if inst_gen.make_guard(dst_region):
+                            src_indices = T.meta_var(inst_gen.generate_indices(src_region))
+                            dst_indices = T.meta_var(inst_gen.generate_indices(dst_region))
                             func(dst[*dst_indices], src[*src_indices])
     # fmt: on
     return impl

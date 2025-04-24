@@ -44,7 +44,7 @@ def rewrite_program(program, func_name):
     )
     message = client.messages.create(
         model="claude-3-7-sonnet-20250219",
-        max_tokens=16384,
+        max_tokens=30000,
         messages=[
             {"role": "user", "content": f"""
             Below is a DSL program. For each psum tensor (variable allocated using nl.ndarray(..., buffer=ncc.psum.mod_alloc)), do the following things: 
@@ -108,8 +108,9 @@ def rewrite_program(program, func_name):
         ],
         thinking={
             "type": "enabled",
-            "budget_tokens": 8192,
-        }
+            "budget_tokens": 10000,
+        },
+        timeout=900
     )
 
     content_str = message.content[1].text
