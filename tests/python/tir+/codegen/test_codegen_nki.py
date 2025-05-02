@@ -133,7 +133,7 @@ def func_kernel(A, B: nt.mutable_tensor, ):
   A_buffer = A.reshape([128, 2048])
   A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
   B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=2048))
-  for k in nl.sequential_range(4, precise_schedule=True):
+  for k in nl.sequential_range(4, body_no_reorder=True):
     i = nl.arange(128)
     j = nl.arange(512)
     A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[i[:, None, ], ((k * 512) + j[None, :, ])])
@@ -290,7 +290,7 @@ def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
   lhsT_tiles = nl.ndarray(shape=[128, 8, 2048], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=73728))
   res_tile = nl.ndarray(shape=[1, nl.par_dim(128), 512], dtype=np.float32, buffer=nl.psum)
   result_packed = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=106496))
-  for n in nl.sequential_range(4, precise_schedule=True):
+  for n in nl.sequential_range(4, body_no_reorder=True):
     i0 = nl.arange(128)
     i1 = nl.arange(2)
     i2 = nl.arange(16)

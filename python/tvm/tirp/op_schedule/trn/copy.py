@@ -293,8 +293,7 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
                     for f_loop in T.serial(0, inst.size, annotations={nki_dim: "F"}):
-                        inst_gen.set_bind_map(dst_region, {b_var: b_loop, p_var: p_loop, f_var: f_loop})
-                        inst_gen.set_bind_map(src_region, {b_var: b_loop, p_var: p_loop, f_var: f_loop})
+                        inst_gen.set_bind_map_all({b_var: b_loop, p_var: p_loop, f_var: f_loop})
                         if inst_gen.make_guard(dst_region):
                             src_indices = T.meta_var(inst_gen.generate_indices(src_region))
                             dst_indices = T.meta_var(inst_gen.generate_indices(dst_region))

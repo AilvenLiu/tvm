@@ -24,8 +24,7 @@ from tvm.tirp.op_schedule.schedule_context import ScheduleContext
 from tvm.tirp.op_schedule.trn.common import (
     nki_dim,
     get_ewise_dim_map,
-    check_partition_dim_match,
-    bound_buffer_region,
+    InstructionGenerator,
     init_analyzer,
 )
 from tvm.tirp.op_schedule.registry import f_op_scheduler
@@ -145,10 +144,10 @@ def alloc_copy_trn(
     src_region = op.srcs[0]
     dst_region = op.dsts[0]
     analyzer = init_analyzer(sctx)
-    bound_src = bound_buffer_region(src_region, analyzer)
-    bound_dst = bound_buffer_region(dst_region, analyzer)
     dim_map = get_ewise_dim_map(src_region, dst_region, analyzer)
-    if check_partition_dim_match(bound_src, bound_dst, dim_map, analyzer):
+    inst_gen = InstructionGenerator([src_region, dst_region], analyzer)
+    inst_gen.link_buffer_regions(src_region, dst_region, dim_map)
+    if inst_gen.check_partition_dim_match(src_region, dst_region):
         return {}
 
     identity_dict = alloc_identity_trn(op, buffer_dict, sctx)

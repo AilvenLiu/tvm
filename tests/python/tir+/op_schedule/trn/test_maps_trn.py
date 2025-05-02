@@ -69,7 +69,7 @@ def test_simple_unary(op_type):
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(1, 1):
+            for b_loop in T.serial(0, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
@@ -118,7 +118,7 @@ def test_unary_in_a_loop(op_type):
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(4, 1, 1):
+            for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
@@ -181,7 +181,7 @@ def test_simple_binary(op_type, operands_type):
             A_sbuf = T.alloc_buffer(src1_shape, scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer(src2_shape, scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer(dst_shape, scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(1, 1):
+            for b_loop in T.serial(0, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
@@ -274,7 +274,7 @@ def test_binary_complex(op_type, operands_type):
             A_sbuf = T.alloc_buffer(src1_layout_data_iter, scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer(src2_layout_data_iter, scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(4, b_extent, 1):
+            for i, b_loop in T.grid(4, b_extent):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, f_extent, annotations={"nki_dim":"F"}):
@@ -326,7 +326,7 @@ def test_binary_broadcast1():
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(512, 1):
+            for b_loop in T.serial(0, 512):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 32, annotations={"nki_dim":"F"}):
@@ -369,7 +369,7 @@ def test_binary_broadcast2():
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(128, 1):
+            for b_loop in T.serial(0, 128):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
@@ -400,11 +400,11 @@ def test_unary_complex1():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(1, 16):
+            for b_loop in T.serial(0, 16):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
-                        T.nki.memset(A_sbuf[p_loop, additional_b_loop * 512 + f_loop], T.float32(0.0))       
+                        T.nki.memset(A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0))       
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -442,7 +442,7 @@ def test_binary_broadcast3():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(4, 1):
+            for b_loop in T.serial(0, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
@@ -487,11 +487,11 @@ def test_unary_with_bias_scale(op_type):
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(4, 2):
+            for b_loop in T.serial(0, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
-                        T.nki.activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], op_type, B_sbuf[p_loop, b_loop], T.float32(2.0))
+                        T.nki.activation(C_sbuf[p_loop, b_loop * 512  + f_loop], A_sbuf[p_loop, b_loop * 512 + f_loop], op_type, B_sbuf[p_loop, b_loop//2], T.float32(2.0))
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -531,11 +531,11 @@ def test_unary_with_bias_scale_2(op_type):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
                         T.nki.memset(const_bias[p_loop, f_loop], T.float32(1.0))
-            for b_loop, additional_b_loop in T.grid(1, 8):
+            for b_loop in T.serial(0, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
-                        T.nki.activation(C_sbuf[p_loop, additional_b_loop * 512 + f_loop], A_sbuf[p_loop, additional_b_loop * 512 + f_loop], op_type, const_bias[p_loop, f_loop], T.float32(2.0))
+                        T.nki.activation(C_sbuf[p_loop, b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 512 + f_loop], op_type, const_bias[p_loop, f_loop], T.float32(2.0))
     # fmt: off
     with target:
         mod = tvm.IRModule({"main": unary})
@@ -575,7 +575,7 @@ def test_binary_with_guard():
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            for j, b_loop, additional_b_loop in T.grid(4, 96, 1):
+            for j, b_loop in T.grid(4, 96):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 128, annotations={"nki_dim":"F"}):
@@ -623,12 +623,12 @@ def test_unary_with_guard():
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
-            for i, j, b_loop, additional_b_loop in T.grid(4, 4, 4, 2):
+            for i, j, b_loop in T.grid(4, 4, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
-                        if b_loop - i < 1 and additional_b_loop * 512 + f_loop < j * 256 + 256:
-                            T.nki.activation(C_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 1024 + additional_b_loop * 512 + f_loop], "sqrt", B_sbuf[p_loop, b_loop], T.float32(2.0))
+                        if b_loop // 2 - i < 1 and b_loop % 2 * 512 + f_loop < j * 256 + 256:
+                            T.nki.activation(C_sbuf[p_loop, b_loop * 512 + f_loop], A_sbuf[p_loop, b_loop * 512 + f_loop], "sqrt", B_sbuf[p_loop, b_loop // 2], T.float32(2.0))
      # fmt: off
     with target:
         mod = tvm.IRModule({"main": unary})

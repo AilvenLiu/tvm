@@ -27,15 +27,8 @@ from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from tvm.tirp.operator.op import Select
 from .common import (
     init_analyzer,
-    find_max_inst_size_unary,
-    infer_range_info,
-    generate_axes_in_region,
-    f_gen_idx_anchor,
-    f_gen_idx_mapped,
     get_ewise_dim_map,
-    bound_inst_with_limit,
-    bound_buffer_region,
-    make_guard,
+    InstructionGenerator,
     nki_dim,
 )
 
@@ -95,60 +88,37 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         assert False, f"shape or dimension mismatch, {dst} vs {true_value}"
 
     # Bound buffer regions and find instruction size
-    bound_dst = bound_buffer_region(dst, analyzer)
-    bound_true_value = bound_buffer_region(true_value, analyzer)
-    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-        bound_dst, bound_true_value, analyzer
-    )
+    inst_gen = InstructionGenerator([dst, true_value], analyzer)
+    dim_map = get_ewise_dim_map(dst, true_value, analyzer)
+    inst_gen.link_buffer_regions(dst, true_value, dim_map)
+    inst_repr = inst_gen.find_max_inst_size_from_one_region(dst)
+    inst_repr = inst_gen.fit_inst_tile_to_region(inst_repr, true_value)
+    inst_repr = inst_gen.restrict_inst_to_one_dim(inst_repr)
+    inst_repr.bound_inst_size(op.schedule_config.get("max_inst_size", 512), analyzer)
 
-    # affine_select only takes linear expression, so we can only extract instruction from one data iter
-    # TODO: other operators should also restrict free dim if free dimensions have guard
-    _, layout, _ = infer_range_info(dst, analyzer)
-    data_iter_array = layout.combined_1d_layout.data_iter_array
-
-    # Find iteration with minimum stride
-    min_stride_iter = min(
-        ((i, data_iter_array[i].stride) for i in inst_data_iters), key=lambda tup: tup[1]
-    )[0]
-
-    # Update instruction size and data iterators
-    inst_size = inst_data_iters[min_stride_iter]
-    inst_data_iters = {min_stride_iter: inst_data_iters[min_stride_iter]}
-
-    # Generate index functions
-    f_gen_axes = generate_axes_in_region(bound_dst, inst_stride, inst_data_iters, analyzer)
-    f_gen_dst_idx = f_gen_idx_anchor(dst, f_gen_axes)
-    f_gen_true_value_idx = f_gen_idx_mapped(
-        true_value, f_gen_axes, get_ewise_dim_map(dst, true_value, analyzer)
-    )
-
-    # Calculate loop bounds
+    p_var = T.var("int32", name="p")
+    b_var = T.var("int32", name="b")
+    f_var = T.var("int32", name="f")
     p_size = dst.buffer.layout.partition_size
-    b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // inst_size // p_size
-
-    # Handle instruction size limit
-    inst_size_limit = op.schedule_config.get("max_inst_size", 512)
-    actual_inst_size, additional_b_size = bound_inst_with_limit(
-        inst_size, inst_size_limit, analyzer
-    )
-
+    inst_gen.bind_inst_iter(dst, f_var, inst_repr.size, inst_repr.stride, True)
+    inst_gen.bind_inst_iter(dst, p_var, p_size, 1, False)
+    b_extent = inst_gen.fill_in_block_dim(dst, b_var)
+    
     # Get buffer references and guard function
     dst_buffer = dst.buffer
     true_value_buffer = true_value.buffer
-    f_dst_guard = make_guard(dst, analyzer)
-
     # fmt: off
     @T.prim_func(tirp=True)
     def impl():
-        for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
+        for b_loop in T.serial(0, b_extent):
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                    for f_loop in T.serial(0, actual_inst_size, annotations={nki_dim: "F"}):
-                        f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                        if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
-                            dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                            true_value_indices = T.meta_var(f_gen_true_value_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                            pred = T.meta_var(analyzer.simplify(op.predicate.apply(f_gen_axes(((b_loop, b_extent),),f_loop_wo_limit, p_loop))))
+                    for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+                        inst_gen.set_bind_map_all({f_var: f_loop, p_var: p_loop, b_var: b_loop})
+                        if inst_gen.make_guard(dst):
+                            dst_indices = T.meta_var(inst_gen.generate_indices(dst))
+                            true_value_indices = T.meta_var(inst_gen.generate_indices(true_value))
+                            pred = T.meta_var(analyzer.simplify(op.predicate.apply(inst_gen.generate_axes(dst))))
                             T.evaluate(T.nki.affine_select(dst_buffer[*dst_indices], pred, true_value_buffer[*true_value_indices], false_value))
     # fmt: on
 

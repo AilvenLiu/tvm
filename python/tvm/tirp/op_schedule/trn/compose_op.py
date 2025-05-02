@@ -27,23 +27,15 @@ from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from tvm.ir import Op
 from tvm.tirp.operator.op import BinaryReduce, UnaryReduce, BinaryChain, ReduceNegate
 from .common import (
-    generate_axes_in_region,
-    get_ewise_dim_map,
     init_analyzer,
     get_reduction_dim_map,
-    f_gen_idx_anchor,
-    f_gen_idx_mapped,
-    bound_inst_with_limit,
-    bound_inst_data_iter_with_limit,
-    bound_buffer_region,
-    make_guard,
+    InstructionGenerator,
     nki_dim,
 )
 from .unary import try_find_inst_unary, get_const_bias_tensor
-from .binary import try_find_inst_binary, InstType, try_find_inst_nary
+from .binary import InstType, try_find_inst_nary
 from .reduction import generate_intermediate_buffer, reduction_trn
 from ..common import ReduceOpType
-from ..registry import f_op_scheduler
 
 # Operation code mappings
 opcode_table = {
@@ -81,148 +73,104 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # Normalize negative axes
     reduce_axes = [i if i >= 0 else len(binary_output.buffer.shape) + i for i in reduce_axes]
 
-    # Bind buffer regions
-    bound_regions = [
-        bound_buffer_region(buf, analyzer)
-        for buf in (binary_output, binary_input1, binary_input2, reduce_output)
-    ]
-    bound_binary_output, bound_binary_input1, bound_binary_input2, bound_reduce_output = (
-        bound_regions
-    )
-
     # Find instruction patterns
-    inst_result = try_find_inst_binary(
-        bound_binary_output,
-        bound_binary_input1,
-        bound_binary_input2,
+    inst_gen = InstructionGenerator([binary_output, binary_input1, binary_input2, reduce_output], analyzer)
+    reduce_dim_map = get_reduction_dim_map(binary_output, reduce_output, reduce_axes, analyzer)
+    inst_gen.link_buffer_regions(binary_output, reduce_output, reduce_dim_map)
+    inst_repr, inst_type, reverse = try_find_inst_nary(
+        binary_output,
+        [binary_input1, binary_input2],
         analyzer,
+        inst_gen,
         allowed_f_dim_dst=reduce_axes,
-        allow_tensortensor=False,
+        allow_first_op_tensortensor=False,
     )
-    inst_size, inst_stride, inst_data_iters, inst_type, reverse, broadcast_dims = inst_result
 
     # Apply instruction size limits
     inst_size_limit = op.schedule_config.get("max_inst_size", None)
-    inst_size, inst_data_iters = bound_inst_data_iter_with_limit(
-        bound_binary_output, inst_data_iters, inst_size_limit, analyzer
-    )
+    inst_repr.bound_inst_size(inst_size_limit, analyzer)
 
     # Generate axes and validate
-    f_gen_axes = generate_axes_in_region(
-        bound_binary_output, inst_stride, inst_data_iters, analyzer
-    )
-    assert inst_size is not None, f"Failed to find a valid instruction: {op}"
     assert (
-        inst_type == InstType.TENSOR_SCALAR
+        inst_type[0] == InstType.TENSOR_SCALAR
     ), f"TensorTensor is not supported for vector reduce: {op}"
-    assert analyzer.can_prove(inst_size > 1), f"Instruction size must be greater than 1: {op}"
 
     # Handle input reversal if needed
-    if reverse:
+    if reverse[0]:
         binary_input1, binary_input2 = binary_input2, binary_input1
-        bound_binary_input1, bound_binary_input2 = bound_binary_input2, bound_binary_input1
 
     # Generate intermediate buffer for reduction if needed
-    intermediate_result = generate_intermediate_buffer(
-        bound_reduce_output,
-        bound_binary_output,
-        reduce_axes,
-        inst_size,
-        op.workspace,
-        sctx,
-        analyzer,
-    )
-    intermediate_buffer, reduction_b_extent = intermediate_result
-
-    # Generate index functions
-    f_gen_vec_dst_idx = f_gen_idx_anchor(binary_output, f_gen_axes)
-    vec_dst_to_src1_dim_map = get_ewise_dim_map(binary_output, binary_input1, analyzer)
-    f_gen_src1_idx = f_gen_idx_mapped(binary_input1, f_gen_axes, vec_dst_to_src1_dim_map)
+    p_var = T.var("int32", "P")
+    f_var = T.var("int32", "F")
+    reduction_b_var = T.var("int32", "rB")
+    spatial_b_var = T.var("int32", "sB")
+    p_size = binary_output.buffer.layout.partition_size
+    inst_gen.bind_inst_iter(binary_output, p_var, p_size, 1, False)
+    inst_gen.bind_inst_iter(binary_output, f_var, inst_repr.size, inst_repr.stride, True)
+    reduction_b_extent = inst_gen.fill_in_block_dim(binary_output, reduction_b_var, reduce_axes)
+    spatial_b_extent = inst_gen.fill_in_block_dim(binary_output, spatial_b_var)
+    if reduction_b_extent != 1:
+        intermediate_buffer = generate_intermediate_buffer(
+            reduce_output,
+            reduction_b_extent,
+            op.workspace,
+            sctx,
+        )
 
     # Handle source 2 (either buffer region or constant)
-    if isinstance(binary_input2, BufferRegion):
-        src1_src2_offset = len(binary_input1.region) - len(binary_input2.region)
-        vec_dst_to_src2_dim_map = {
-            d: s - src1_src2_offset
-            for d, s in vec_dst_to_src1_dim_map.items()
-            if s not in broadcast_dims
-        }
-        f_gen_src2_idx = f_gen_idx_mapped(binary_input2, f_gen_axes, vec_dst_to_src2_dim_map)
-        CONST = None
-    else:
-        CONST = binary_input2
-
-    # Generate reduction destination indices
-    f_gen_reduce_dst_idx = f_gen_idx_mapped(
-        reduce_output,
-        f_gen_axes,
-        get_reduction_dim_map(binary_output, reduce_output, reduce_axes, analyzer),
-    )
-
-    # Calculate extents
-    p_size = binary_output.buffer.layout.partition_size
-    b_extent = (
-        reduce(operator.mul, [r.extent for r in bound_binary_output.region], 1)
-        // p_size
-        // inst_size
-    )
-
+    CONST = binary_input2 if not isinstance(binary_input2, BufferRegion) else None
     # Extract buffers and opcodes
     src1, src2 = binary_input1.buffer, (
         binary_input2.buffer if isinstance(binary_input2, BufferRegion) else None
     )
     dst1, dst2 = binary_output.buffer, reduce_output.buffer
     binary_opcode, reduce_opcode = opcode_table[op.binary_op], opcode_table[op.reduce_op]
-
-    # Create guard function
-    f_dst_guard = make_guard(binary_output, analyzer)
-
     # Create appropriate implementation based on intermediate buffer requirement
-    if intermediate_buffer is None:
+    if reduction_b_extent == 1:
         # Direct implementation without intermediate buffer
         # fmt: off
         @T.prim_func(tirp=True)
         def impl():
-            for b_loop in T.serial(0, b_extent):
+            for b_loop in T.serial(0, spatial_b_extent):
                 with T.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                        for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
-                            src_1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent),), f_loop, p_loop))
-                            vec_dst_idx = T.meta_var(f_gen_vec_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                            reduce_dst_idx = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                            if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
+                        for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+                            inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop})
+                            src_1_indices = T.meta_var(inst_gen.generate_indices(binary_input1))
+                            vec_dst_idx = T.meta_var(inst_gen.generate_indices(binary_output))
+                            reduce_dst_idx = T.meta_var(inst_gen.generate_indices(reduce_output))
+                            if inst_gen.make_guard(binary_output):
                                 if CONST is None:
-                                    src_2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent),), f_loop, p_loop))
-                                    T.nki.tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse)
+                                    src_2_indices = T.meta_var(inst_gen.generate_indices(binary_input2))
+                                    T.nki.tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse[0])
                                 else:
-                                    T.nki.tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse)
+                                    T.nki.tensorscalar_reduce(dst2[*reduce_dst_idx], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse[0])
         # fmt: on
     else:
         # Implementation with intermediate buffer
-        dim2block_var = {dim: 1 if dim in reduce_axes else 0 for dim in range(len(dst1.shape))}
-        b_extent //= reduction_b_extent
-
         # fmt: off
         @T.prim_func(tirp=True)
         def impl():
-            for b_loop in T.serial(0, b_extent):
+            for b_loop in T.serial(0, spatial_b_extent):
                 for reduction_b_loop in T.serial(0, reduction_b_extent):
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                            for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
-                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
-                                    src_1_indices = T.meta_var(f_gen_src1_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                    vec_dst_idx = T.meta_var(f_gen_vec_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                            for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+                                inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop, reduction_b_var: reduction_b_loop})
+                                if inst_gen.make_guard(binary_output):
+                                    src_1_indices = T.meta_var(inst_gen.generate_indices(binary_input1))
+                                    vec_dst_idx = T.meta_var(inst_gen.generate_indices(binary_output))
                                     if CONST is None:
-                                        src_2_indices = T.meta_var(f_gen_src2_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                        T.nki.tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse)
+                                        src_2_indices = T.meta_var(inst_gen.generate_indices(binary_input2))
+                                        T.nki.tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], src2[*src_2_indices], binary_opcode, reduce_opcode, reverse[0])
                                     else:
-                                        T.nki.tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse)
+                                        T.nki.tensorscalar_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*vec_dst_idx], src1[*src_1_indices], CONST, binary_opcode, reduce_opcode, reverse[0])
                 with T.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
                         for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
-                            if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
-                                dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                            inst_gen.set_bind_map_all({p_var: p_loop, spatial_b_var: b_loop})
+                            if inst_gen.make_guard(reduce_output):
+                                dst_2_indices = T.meta_var(inst_gen.generate_indices(reduce_output))
                                 T.nki.tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1)
         # fmt: on
 
@@ -245,80 +193,44 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     scale = 1.0 if scale is None else scale
     bias = 0.0 if bias is None else bias
 
-    # Bind buffer regions
-    bound_regions = [
-        bound_buffer_region(buf, analyzer)
-        for buf in (unary_output, unary_input, bias, reduce_output)
-    ]
-    bound_unary_output, bound_unary_input, bound_bias, bound_reduce_output = bound_regions
-
+    inst_gen = InstructionGenerator([unary_output, unary_input, bias, reduce_output], analyzer)
+    reduce_dim_map = get_reduction_dim_map(unary_output, reduce_output, reduce_axes, analyzer)
+    inst_gen.link_buffer_regions(unary_output, reduce_output, reduce_dim_map)
     # Find instruction patterns based on bias type
     if isinstance(bias, BufferRegion):
-        inst_result = try_find_inst_binary(
-            bound_unary_output,
-            bound_unary_input,
-            bound_bias,
+        inst_repr, _, _ = try_find_inst_nary(
+            unary_output,
+            [unary_input, bias],
             analyzer,
-            allow_tensortensor=False,
-            allow_reverse=False,
+            inst_gen,
+            allow_first_op_tensortensor=False,
             allowed_f_dim_dst=reduce_axes,
         )
-        inst_size, inst_stride, inst_data_iters, inst_type, reverse, broadcast_dims = inst_result
     else:
-        inst_size, inst_stride, inst_data_iters = try_find_inst_unary(
-            bound_unary_output, bound_unary_input, analyzer, allowed_f_dim_dst=reduce_axes
+        inst_repr = try_find_inst_unary(
+            unary_output, unary_input, analyzer, inst_gen, allowed_f_dim_dst=reduce_axes
         )
 
     # Apply instruction size limits
     inst_size_limit = op.schedule_config.get("max_inst_size", None)
-    inst_size, inst_data_iters = bound_inst_data_iter_with_limit(
-        bound_unary_output, inst_data_iters, inst_size_limit, analyzer
-    )
-
-    # Generate axes and validate
-    f_gen_axes = generate_axes_in_region(bound_unary_output, inst_stride, inst_data_iters, analyzer)
-    assert analyzer.can_prove(inst_size > 1), "Instruction size must be greater than 1"
-
-    # Generate intermediate buffer if needed
-    intermediate_result = generate_intermediate_buffer(
-        bound_reduce_output,
-        bound_unary_output,
-        reduce_axes,
-        inst_size,
-        op.workspace,
-        sctx,
-        analyzer,
-    )
-    intermediate_buffer, reduction_b_extent = intermediate_result
-
-    # Generate index functions
-    f_gen_act_dst_idx = f_gen_idx_anchor(unary_output, f_gen_axes)
-    dst_to_src_dim_map = get_ewise_dim_map(unary_output, unary_input, analyzer)
-    f_gen_act_src_idx = f_gen_idx_mapped(unary_input, f_gen_axes, dst_to_src_dim_map)
-    f_gen_reduce_dst_idx = f_gen_idx_mapped(
-        reduce_output,
-        f_gen_axes,
-        get_reduction_dim_map(unary_output, reduce_output, reduce_axes, analyzer),
-    )
-
-    # Handle bias indices based on type
-    if isinstance(bias, BufferRegion):
-        offset = len(unary_input.region) - len(bias.region)
-        dst_to_bias_dim_map = {
-            d: s - offset for d, s in dst_to_src_dim_map.items() if s not in broadcast_dims
-        }
-        f_gen_bias_idx = f_gen_idx_mapped(bias, f_gen_axes, dst_to_bias_dim_map)
-    else:
-        f_gen_bias_idx = None
-
-    # Calculate extents
+    inst_repr.bound_inst_size(inst_size_limit, analyzer)
+    
+    p_var = T.var("int32", "P")
+    f_var = T.var("int32", "F")
+    reduction_b_var = T.var("int32", "rB")
+    spatial_b_var = T.var("int32", "sB")
     p_size = unary_output.buffer.layout.partition_size
-    b_extent = (
-        reduce(operator.mul, [r.extent for r in bound_unary_output.region], 1)
-        // p_size
-        // inst_size
-    )
-
+    inst_gen.bind_inst_iter(unary_output, p_var, p_size, 1, False)
+    inst_gen.bind_inst_iter(unary_output, f_var, inst_repr.size, inst_repr.stride, True)
+    reduction_b_extent = inst_gen.fill_in_block_dim(unary_output, reduction_b_var, reduce_axes)
+    spatial_b_extent = inst_gen.fill_in_block_dim(unary_output, spatial_b_var)
+    if reduction_b_extent != 1:
+        intermediate_buffer = generate_intermediate_buffer(
+            reduce_output,
+            reduction_b_extent,
+            op.workspace,
+            sctx,
+        )
     # Extract buffers and opcodes
     src, dst1, dst2 = unary_input.buffer, unary_output.buffer, reduce_output.buffer
     unary_opcode = opcode_table[op.unary_op]
@@ -328,28 +240,26 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     bias_buffer = (
         bias.buffer
         if isinstance(bias, BufferRegion)
-        else get_const_bias_tensor(bias, (p_size, inst_size), dst1.dtype, op.workspace, sctx)
+        else get_const_bias_tensor(bias, (p_size, inst_repr.size), dst1.dtype, op.workspace, sctx)
     )
 
-    # Create guard function
-    f_dst_guard = make_guard(unary_output, analyzer)
-
     # Create appropriate implementation based on intermediate buffer requirement
-    if intermediate_buffer is None:
+    if reduction_b_extent == 1:
         # Direct implementation without intermediate buffer
         # fmt: off
         @T.prim_func(tirp=True)
         def impl():
-            for b_loop in T.serial(0, b_extent):
+            for b_loop in T.serial(0, spatial_b_extent):
                 with T.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                        for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
-                            src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent),), f_loop, p_loop))
-                            dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                            dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-                            if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
+                        for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+                            inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop})
+                            src_1_indices = T.meta_var(inst_gen.generate_indices(unary_input))
+                            dst_1_indices = T.meta_var(inst_gen.generate_indices(unary_output))
+                            dst_2_indices = T.meta_var(inst_gen.generate_indices(reduce_output))
+                            if inst_gen.make_guard(unary_output):
                                 if isinstance(bias, BufferRegion):
-                                    src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent),), f_loop, p_loop))
+                                    src_bias_indices = T.meta_var(inst_gen.generate_indices(bias))
                                     T.evaluate(T.nki.activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
                                 else:
                                     T.evaluate(T.nki.activation_reduce(dst2[*dst_2_indices], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))
@@ -361,31 +271,29 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         mod = tvm.tir.transform.Simplify()(mod)
         return mod["main"]
     else:
-        # Implementation with intermediate buffer
-        dim2block_var = {dim: 1 if dim in reduce_axes else 0 for dim in range(len(dst1.shape))}
-        b_extent //= reduction_b_extent
-
         # fmt: off
         @T.prim_func(tirp=True)
         def impl():
-            for b_loop in T.serial(0, b_extent):
+            for b_loop in T.serial(0, spatial_b_extent):
                 for reduction_b_loop in T.serial(0, reduction_b_extent):
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                            for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
-                                src_1_indices = T.meta_var(f_gen_act_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                dst_1_indices = T.meta_var(f_gen_act_dst_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-                                if f_dst_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
+                            for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+                                inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop, reduction_b_var: reduction_b_loop})
+                                src_1_indices = T.meta_var(inst_gen.generate_indices(unary_input))
+                                dst_1_indices = T.meta_var(inst_gen.generate_indices(unary_output))
+                                if inst_gen.make_guard(unary_output):
                                     if isinstance(bias, BufferRegion):
-                                        src_bias_indices = T.meta_var(f_gen_bias_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                                        src_bias_indices = T.meta_var(inst_gen.generate_indices(bias))
                                         T.evaluate(T.nki.activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[*src_bias_indices], scale))
                                     else:
                                         T.evaluate(T.nki.activation_reduce(intermediate_buffer[p_loop, reduction_b_loop], dst1[*dst_1_indices], src[*src_1_indices], unary_opcode, reduce_opcode, bias_buffer[p_loop, f_loop], scale))
                 with T.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
                         for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
-                            if f_dst_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
-                                dst_2_indices = T.meta_var(f_gen_reduce_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
+                            inst_gen.set_bind_map_all({p_var: p_loop, spatial_b_var: b_loop})
+                            if inst_gen.make_guard(reduce_output):
+                                dst_2_indices = T.meta_var(inst_gen.generate_indices(reduce_output))
                                 # TODO: we should use nki.activation_reduce as second stage reduction
                                 T.evaluate(T.nki.tensorreduce(dst2[*dst_2_indices], intermediate_buffer[p_loop, f_loop], reduce_opcode, False, -1))
         # fmt: on
@@ -405,19 +313,14 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     reverse = [False, op.reverse1]
     analyzer = init_analyzer(sctx)
 
-    # Bind buffer regions
-    bound_output = bound_buffer_region(output, analyzer)
-    bound_srcs = [bound_buffer_region(src, analyzer) for src in srcs]
-
     # Find instruction patterns
+    inst_gen = InstructionGenerator([output] + srcs, analyzer)
     inst_result = try_find_inst_nary(
-        bound_output, bound_srcs, analyzer, allow_first_op_tensortensor=False
+        output, srcs, analyzer, inst_gen, allow_first_op_tensortensor=False
     )
-    inst_size, inst_stride, inst_data_iters, inst_types, _reverse, broadcast_dims = inst_result
+    inst_repr, inst_types, _reverse = inst_result
 
     # Generate axes and validate
-    f_gen_axes = generate_axes_in_region(bound_output, inst_stride, inst_data_iters, analyzer)
-    assert inst_size is not None, "Failed to find a valid instruction"
     assert (
         inst_types[0] == InstType.TENSOR_SCALAR
     ), "The first operator must be a tensor scalar operator"
@@ -426,31 +329,16 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     reverse[0] = _reverse[0]
     if reverse[0]:
         srcs[0], srcs[1] = srcs[1], srcs[0]
-        bound_srcs[0], bound_srcs[1] = bound_srcs[1], bound_srcs[0]
-
-    # Generate index functions
-    f_gen_dst_idx = f_gen_idx_anchor(output, f_gen_axes)
-    dst_to_src0_dim_map = get_ewise_dim_map(output, srcs[0], analyzer)
-    f_gen_src_idx_array = [f_gen_idx_mapped(srcs[0], f_gen_axes, dst_to_src0_dim_map)]
-
-    # Handle additional sources
-    for i, src in enumerate(srcs[1:]):
-        if isinstance(src, BufferRegion):
-            src_src0_offset = len(srcs[0].region) - len(src.region)
-            dst_to_src_dim_map = {
-                d: s - src_src0_offset
-                for d, s in dst_to_src0_dim_map.items()
-                if s not in broadcast_dims[i]
-            }
-            f_gen_src_idx_array.append(f_gen_idx_mapped(src, f_gen_axes, dst_to_src_dim_map))
-        else:
-            f_gen_src_idx_array.append(None)
-
-    # Calculate extents
+        
+    p_var = T.var("int32", name="P")
+    b_var = T.var("int32", name="B")
+    f_var = T.var("int32", name="F")
     p_size = output.buffer.layout.partition_size
-    b_extent = (
-        reduce(operator.mul, [r.extent for r in bound_output.region], 1) // p_size // inst_size
-    )
+    inst_size_limit = op.schedule_config.get("max_inst_size", 512)
+    inst_repr.bound_inst_size(inst_size_limit, analyzer)
+    inst_gen.bind_inst_iter(output, p_var, p_size, 1, False)
+    inst_gen.bind_inst_iter(output, f_var, inst_repr.size, inst_repr.stride, True)
+    b_extent = inst_gen.fill_in_block_dim(output, b_var)
 
     # Extract buffers and opcodes
     src, dst = srcs[0].buffer, output.buffer
@@ -462,21 +350,11 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         if inst_types[1] == InstType.TENSOR_SCALAR
         else T.nki.scalar_tensor_tensor
     )
-
-    # Apply instruction size limits
-    inst_size_limit = op.schedule_config.get("max_inst_size", 512)
-    actual_inst_size, additional_b_size = bound_inst_with_limit(
-        inst_size, inst_size_limit, analyzer
-    )
-
-    # Create guard function
-    f_dst_guard = make_guard(output, analyzer)
-
     # Helper function to get source indices
-    def get_srcs(b_loop, f_loop, p_loop):
+    def get_srcs(inst_gen):
         return [
             (
-                srcs[i].buffer[f_gen_src_idx_array[i](((b_loop, b_extent),), f_loop, p_loop)]
+                srcs[i].buffer[inst_gen.generate_indices(srcs[i])]
                 if isinstance(srcs[i], BufferRegion)
                 else srcs[i]
             )
@@ -487,14 +365,14 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # fmt: off
     @T.prim_func(tirp=True)
     def impl():
-        for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
+        for b_loop in T.serial(0, b_extent):
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                    for f_loop in T.serial(0, actual_inst_size, annotations={nki_dim: "F"}):
-                        f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                        dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop))
-                        srcs = T.meta_var(get_srcs(b_loop, f_loop_wo_limit, p_loop))
-                        if f_dst_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
+                    for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+                        inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, b_var: b_loop})
+                        dst_indices = T.meta_var(inst_gen.generate_indices(output))
+                        srcs = T.meta_var(get_srcs(inst_gen))
+                        if inst_gen.make_guard(output):
                             T.evaluate(func(dst[*dst_indices], *srcs, opcode0, opcode1, reverse[0], reverse[1]))
     # fmt: on
 

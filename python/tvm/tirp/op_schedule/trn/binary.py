@@ -28,18 +28,9 @@ from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext
 
 from .common import (
-    generate_axes_in_region,
-    find_max_inst_size_unary,
-    infer_range_info,
     get_ewise_dim_map,
-    bound_inst_with_limit,
     init_analyzer,
-    f_gen_idx_anchor,
-    f_gen_idx_mapped,
-    check_partition_dim_match,
-    _refine_inst_tile,
-    bound_buffer_region,
-    make_guard,
+    InstructionGenerator,
     nki_dim,
 )
 from ..common import MapOpType
@@ -57,184 +48,11 @@ class InstType(Enum):
     TENSOR_TENSOR = 0
     TENSOR_SCALAR = 1
 
-
-def get_inst_tile_with_const(
-    dst: BufferRegion,
-    src1: BufferRegion,
-    analyzer: Analyzer,
-    allowed_f_dim_dst: Optional[Tuple[int]] = None,
-    allowed_f_dim_src1: Optional[Tuple[int]] = None,
-):
-    """Find instruction tile size for tensor-scalar operations."""
-    inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-        dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1
-    )
-    return inst_size, inst_stride, inst_data_iters, InstType.TENSOR_SCALAR
-
-
-def get_inst_tile_with_broadcast(
-    dst: BufferRegion,
-    src1: BufferRegion,
-    src2: BufferRegion,
-    broadcast_dims: List[int],
-    analyzer: Analyzer,
-    allow_tensortensor: bool = True,
-    allowed_f_dim_dst: Optional[Tuple[int]] = None,
-    allowed_f_dim_src1: Optional[Tuple[int]] = None,
-    allowed_f_dim_src2: Optional[Tuple[int]] = None,
-    refine_inst: Optional[Tuple[int, int]] = None,
-):
-    """Find instruction tile size for operations with broadcasting."""
-    if refine_inst is not None:
-        inst_size, inst_stride, inst_data_iters = refine_inst
-    else:
-        inst_size, inst_stride, inst_data_iters = find_max_inst_size_unary(
-            dst, src1, analyzer, allowed_f_dim_dst, allowed_f_dim_src1
-        )
-
-    # Extract range info and categorize iterators by broadcast dimensions
-    dst_range_info, dst_layout, dst_seps = infer_range_info(dst, analyzer)
-    f_data_iters_in_broadcast_dim = []
-    f_data_iters_in_non_broadcast_dim = []
-    # Map dimensions between buffers
-    dst_to_src1_dim_map = get_ewise_dim_map(dst, src1, analyzer)
-    src1_src2_offset = len(src1.region) - len(src2.region)
-    dst_to_src2_dim_map = {
-        d: s - src1_src2_offset for d, s in dst_to_src1_dim_map.items() if s not in broadcast_dims
-    }
-    for i in range(len(dst_seps) - 1):
-        for j in range(dst_seps[i], dst_seps[i + 1]):
-            dim_in_src1 = dst_to_src1_dim_map.get(i, None)
-            dim_in_src2 = dst_to_src2_dim_map.get(i, None)
-            if j not in inst_data_iters:
-                continue
-            if dim_in_src1 in broadcast_dims:
-                f_data_iters_in_broadcast_dim.append((j, inst_data_iters[j]))
-            elif allowed_f_dim_src2 is None or dim_in_src2 in allowed_f_dim_src2:
-                f_data_iters_in_non_broadcast_dim.append((j, inst_data_iters[j]))
-
-    def try_f_data_iters(f_data_iters):
-        """Find maximum possible instruction size from given data iterators."""
-        f_data_iters.sort(key=lambda x: dst_layout.combined_1d_layout.data_iter_array[x[0]].stride)
-        new_inst_size, new_data_iters, new_inst_stride = 1, {}, 1
-
-        for dim_in_data_iter, extent in f_data_iters:
-            if extent == 1:
-                continue
-
-            iter = dst_layout.combined_1d_layout.data_iter_array[dim_in_data_iter]
-            if new_inst_size != 1 and new_inst_size * new_inst_stride != iter.stride:
-                break
-
-            if new_inst_size == 1:
-                new_inst_stride = max(inst_stride, iter.stride)
-
-            new_inst_size *= extent
-            new_data_iters[dim_in_data_iter] = extent
-
-        return new_inst_size, new_inst_stride, new_data_iters
-
-    # Find best tile sizes for tensor-tensor and tensor-scalar
-    tensortensor_inst_size, tensortensor_inst_stride, _ = try_f_data_iters(
-        f_data_iters_in_non_broadcast_dim
-    )
-
-    # Refine instruction tiles
-    tensortensor_inst_size, tensortensor_inst_stride, _, tensortensor_inst_data_iters = (
-        _refine_inst_tile(
-            dst,
-            src2,
-            tensortensor_inst_size,
-            tensortensor_inst_stride,
-            analyzer,
-            allowed_f_dim_dst,
-            allowed_f_dim_src2,
-            dst_to_src2_dim_map,
-        )
-    )
-
-    tensorscalar_inst_size, tensorscalar_inst_stride, tensorscalar_inst_data_iters = (
-        try_f_data_iters(f_data_iters_in_broadcast_dim)
-    )
-
-    # Return tensor-scalar if tensor-tensor not allowed
-    if not allow_tensortensor:
-        return (
-            tensorscalar_inst_size,
-            tensorscalar_inst_stride,
-            tensorscalar_inst_data_iters,
-            InstType.TENSOR_SCALAR,
-        )
-
-    # Select best instruction type based on size and stride
-    if tensortensor_inst_size == 1:
-        option_chosen = "tensorscalar"
-    elif tensorscalar_inst_size == 1:
-        option_chosen = "tensortensor"
-    elif tensortensor_inst_stride == 1:
-        option_chosen = "tensortensor"
-    elif tensorscalar_inst_stride == 1:
-        option_chosen = "tensorscalar"
-    elif tensortensor_inst_size > tensorscalar_inst_size:
-        option_chosen = "tensortensor"
-    else:
-        option_chosen = "tensorscalar"
-
-    if option_chosen == "tensortensor":
-        return (
-            tensortensor_inst_size,
-            tensortensor_inst_stride,
-            tensortensor_inst_data_iters,
-            InstType.TENSOR_TENSOR,
-        )
-
-    return (
-        tensorscalar_inst_size,
-        tensorscalar_inst_stride,
-        tensorscalar_inst_data_iters,
-        InstType.TENSOR_SCALAR,
-    )
-
-
-def try_find_inst_binary(
-    _dst: BufferRegion,
-    _src1: Union[BufferRegion, FloatImm],
-    _src2: Union[BufferRegion, FloatImm],
-    analyzer: Analyzer,
-    allowed_f_dim_dst: Optional[Tuple[int]] = None,
-    allowed_f_dim_src1: Optional[Tuple[int]] = None,
-    allowed_f_dim_src2: Optional[Tuple[int]] = None,
-    allow_tensortensor: bool = True,
-    allow_reverse: bool = True,
-):
-    """Find instruction parameters for binary operations."""
-    result = try_find_inst_nary(
-        _dst,
-        [_src1, _src2],
-        analyzer,
-        allowed_f_dim_dst,
-        (allowed_f_dim_src1, allowed_f_dim_src2),
-        allow_tensortensor,
-    )
-
-    inst_size, inst_stride, inst_data_iters, inst_types, reverse, broadcast_dims = result
-
-    if inst_size is None:
-        return None, None, None, None, None, None
-
-    if inst_types[0] == InstType.TENSOR_TENSOR and not allow_tensortensor:
-        return None, None, None, None, None, None
-
-    if reverse[0] and not allow_reverse:
-        return None, None, None, None, None, None
-
-    return inst_size, inst_stride, inst_data_iters, inst_types[0], reverse[0], broadcast_dims[0]
-
-
 def try_find_inst_nary(
     _dst: BufferRegion,
     _srcs: List[Union[BufferRegion, FloatImm]],
     analyzer: Analyzer,
+    inst_gen: InstructionGenerator,
     allowed_f_dim_dst: Optional[Tuple[int]] = None,
     allowed_f_dim_srcs: Optional[Tuple[Tuple[int]]] = None,
     allow_first_op_tensortensor: bool = True,
@@ -285,7 +103,6 @@ def try_find_inst_nary(
             analyzer.can_prove(e0 == e1)
             for e0, e1 in zip(src0_extent[-shared_dim_num:], src1_extent[-shared_dim_num:])
         )
-
         if dims_equal:
             if len(src0_extent) < len(src1_extent) and not all(
                 analyzer.can_prove(e1 == 1) for e1 in src1_extent[:-shared_dim_num]
@@ -293,7 +110,7 @@ def try_find_inst_nary(
                 _srcs[0], _srcs[1] = _srcs[1], _srcs[0]
                 reverse[0] = True
         elif all(
-            analyzer.can_prove(e0 == e1 or e0 == 1)
+            analyzer.can_prove(e0 == e1) or analyzer.can_prove(e0 == 1)
             for e0, e1 in zip(src0_extent[-shared_dim_num:], src1_extent[-shared_dim_num:])
         ):
             _srcs[0], _srcs[1] = _srcs[1], _srcs[0]
@@ -302,7 +119,7 @@ def try_find_inst_nary(
                 analyzer.can_prove(e0 == 1) for e0 in src0_extent[:-shared_dim_num]
             ), f"Shape mismatch: src0: {_srcs[0]}, src1: {_srcs[1]}"
         elif all(
-            analyzer.can_prove(e0 == e1 or e1 == 1)
+            analyzer.can_prove(e0 == e1) or analyzer.can_prove(e1 == 1)
             for e0, e1 in zip(src0_extent[-shared_dim_num:], src1_extent[-shared_dim_num:])
         ):
             assert shared_dim_num == len(src1_extent) or all(
@@ -327,11 +144,11 @@ def try_find_inst_nary(
 
     # Identify broadcast dimensions for each source after src0
     src0_extent = [r.extent for r in _srcs[0].region]
-    broadcast_dims = []
+    dst_to_src0_dim_map = get_ewise_dim_map(_dst, _srcs[0], analyzer)
+    inst_gen.link_buffer_regions(_dst, _srcs[0], dst_to_src0_dim_map)
 
     for src in _srcs[1:]:
         if isinstance(src, FloatImm):
-            broadcast_dims.append(None)
             continue
 
         src_extent = [r.extent for r in src.region]
@@ -343,64 +160,66 @@ def try_find_inst_nary(
         )
 
         # Find broadcast dimensions
-        local_broadcast_dims = []
+        broadcast_dims = []
         for i in range(1, min(len(src_extent), len(src0_extent)) + 1):
             if analyzer.can_prove(src_extent[-i] != 1) and analyzer.can_prove(
                 src_extent[-i] != src0_extent[-i]
             ):
                 raise ValueError(f"Shape mismatch: src0: {_srcs[0]}, src: {src}")
             elif analyzer.can_prove(src_extent[-i] != src0_extent[-i]):
-                local_broadcast_dims.append(len(src0_extent) - i)
+                broadcast_dims.append(len(src0_extent) - i)
 
         # Add leading dimensions
-        local_broadcast_dims += list(range(0, len(src0_extent) - len(src_extent)))
+        broadcast_dims += list(range(0, len(src0_extent) - len(src_extent)))
 
         # Create dimension mapping and verify partition
         src0_to_src_dim_map = {
             i: i + len(src_extent) - len(src0_extent)
             for i in range(len(src0_extent))
-            if i not in local_broadcast_dims
+            if i not in broadcast_dims
         }
-
-        assert check_partition_dim_match(
-            _srcs[0], src, src0_to_src_dim_map, analyzer
+        inst_gen.link_buffer_regions(_srcs[0], src, src0_to_src_dim_map)
+        assert inst_gen.check_partition_dim_match(
+            _srcs[0], src
         ), f"partition dimension mismatch: src0: {_srcs[0]}, src: {src}"
 
-        broadcast_dims.append(local_broadcast_dims)
-
     # Find instruction parameters for each source
-    inst_size, inst_stride, inst_data_iters, inst_types = None, None, None, []
+    inst_types = []
     allowed_f_dim_srcs = [None] * len(_srcs) if allowed_f_dim_srcs is None else allowed_f_dim_srcs
-
-    for i, src in enumerate(_srcs[1:]):
+    inst_repr = inst_gen.find_max_inst_size_from_one_region(_dst, allowed_f_dim_dst)
+    for i, src in enumerate(_srcs):
         if isinstance(src, FloatImm):
-            if inst_size is None:
-                inst_size, inst_stride, inst_data_iters, inst_type = get_inst_tile_with_const(
-                    _dst, _srcs[0], analyzer, allowed_f_dim_dst, allowed_f_dim_srcs[0]
-                )
             inst_types.append(InstType.TENSOR_SCALAR)
             continue
 
-        refine_inst = (inst_size, inst_stride, inst_data_iters) if inst_size is not None else None
         allow_tt = allow_first_op_tensortensor or i != 0
-        src_dim = allowed_f_dim_srcs[i + 1] if i + 1 < len(allowed_f_dim_srcs) else None
-
-        inst_size, inst_stride, inst_data_iters, inst_type = get_inst_tile_with_broadcast(
-            _dst,
-            _srcs[0],
-            src,
-            broadcast_dims[i],
-            analyzer,
-            allow_tt,
-            allowed_f_dim_dst,
-            allowed_f_dim_srcs[0],
-            src_dim,
-            refine_inst,
-        )
+        inst_repr_non_bcast = inst_gen.fit_inst_tile_to_region(inst_repr, src, allowed_f_dim_srcs[i])
+        inst_repr_bcast = inst_gen.fit_inst_tile_to_region(inst_repr, src, allowed_f_dim_srcs[i], broadcast=True)
+        if i == 0:
+            inst_repr = inst_repr_non_bcast
+            continue
+        plan = None
+        if not allow_tt:
+            plan = "tensorscalar"
+        else:
+            
+            if inst_repr_bcast.stride == 1 and inst_repr_non_bcast.stride > 1 and inst_repr_bcast.size > 1:
+                plan = "tensorscalar"
+            elif inst_repr_bcast.stride > 1 and inst_repr_non_bcast.stride == 1 and inst_repr_non_bcast.size > 1:
+                plan = "tensortensor"
+            elif inst_repr_bcast.size > inst_repr_non_bcast.size:
+                plan = "tensorscalar"
+            else:
+                plan = "tensortensor"
+        if plan == "tensorscalar":
+            inst_type = InstType.TENSOR_SCALAR
+            inst_repr = inst_repr_bcast
+        else:
+            inst_type = InstType.TENSOR_TENSOR
+            inst_repr = inst_repr_non_bcast
         inst_types.append(inst_type)
 
-    return inst_size, inst_stride, inst_data_iters, inst_types, reverse, broadcast_dims
-
+    return inst_repr, inst_types, reverse
 
 def binary_trn(
     op: OpCall,
@@ -416,78 +235,56 @@ def binary_trn(
     # Initialize analyzer and buffer regions
     analyzer = init_analyzer(sctx)
     _dst, _src1, _src2 = op.args
-    bound_dst = bound_buffer_region(_dst, analyzer)
-    bound_src1 = bound_buffer_region(_src1, analyzer)
-    bound_src2 = bound_buffer_region(_src2, analyzer)
 
     # Find instruction parameters
-    inst_params = try_find_inst_binary(bound_dst, bound_src1, bound_src2, analyzer)
-    inst_size, inst_stride, inst_data_iters, inst_type, reverse, broadcast_dims = inst_params
-    f_gen_axes = generate_axes_in_region(bound_dst, inst_stride, inst_data_iters, analyzer)
-
+    inst_gen = InstructionGenerator([_dst, _src1, _src2], analyzer)
+    inst_repr, inst_types, reverse = try_find_inst_nary(_dst, [_src1, _src2], analyzer, inst_gen)
     # Handle operand swapping if needed
-    if reverse:
-        _src1, _src2, bound_src1, bound_src2 = _src2, _src1, bound_src2, bound_src1
-
-    # Generate index functions
-    f_gen_dst_idx = f_gen_idx_anchor(_dst, f_gen_axes)
-    dst_to_src1_dim_map = get_ewise_dim_map(_dst, _src1, analyzer)
-    f_gen_src1_idx = f_gen_idx_mapped(_src1, f_gen_axes, dst_to_src1_dim_map)
-
-    if isinstance(_src2, BufferRegion):
-        src1_src2_offset = len(_src1.region) - len(_src2.region)
-        dst_to_src2_dim_map = {
-            d: s - src1_src2_offset
-            for d, s in dst_to_src1_dim_map.items()
-            if s not in broadcast_dims
-        }
-        f_gen_src2_idx = f_gen_idx_mapped(_src2, f_gen_axes, dst_to_src2_dim_map)
+    if reverse[0]:
+        _src1, _src2 = _src2, _src1
 
     # Extract buffers and constants
     CONST = _src2 if isinstance(_src2, FloatImm) else None
     dst, src1 = _dst.buffer, _src1.buffer
     src2 = None if CONST is not None else _src2.buffer
 
-    # Setup execution parameters
+    p_var = T.var("int32", name="P")
+    b_var = T.var("int32", name="B")
+    f_var = T.var("int32", name="F")
     p_size = dst.layout.partition_size
-    b_extent = (
-        functools.reduce(operator.mul, [r.extent for r in bound_dst.region], 1)
-        // p_size
-        // inst_size
-    )
+    inst_size_limit = op.schedule_config.get("max_inst_size", 512)
+    inst_repr.bound_inst_size(inst_size_limit, analyzer)
+    inst_gen.bind_inst_iter(_dst, p_var, p_size, 1, False)
+    inst_gen.bind_inst_iter(_dst, f_var, inst_repr.size, inst_repr.stride, True)
+    b_extent = inst_gen.fill_in_block_dim(_dst, b_var)
+    # Setup execution parameters
     opcode = binary_map_ops[binary_op]
 
     # Select appropriate NKI function based on instruction type
-    _func = T.nki.tensortensor if inst_type == InstType.TENSOR_TENSOR else T.nki.tensorscalar
+    _func = T.nki.tensortensor if inst_types[0] == InstType.TENSOR_TENSOR else T.nki.tensorscalar
     func = lambda *args: (
-        _func(*args, reverse) if inst_type == InstType.TENSOR_SCALAR else _func(*args)
+        _func(*args, reverse[0]) if inst_types[0] == InstType.TENSOR_SCALAR else _func(*args)
     )
-
-    # Handle instruction size limits
-    inst_size_limit = op.schedule_config.get("max_inst_size", 512)
-    actual_inst_size, additional_b_size = bound_inst_with_limit(
-        inst_size, inst_size_limit, analyzer
-    )
-    f_guard = make_guard(_dst, analyzer)
 
     # Define the implementation function
     @T.prim_func(tirp=True)
     def impl():
-        for b_loop, additional_b_loop in T.grid(b_extent, additional_b_size):
+        for b_loop in T.serial(0, b_extent):
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                    for f_loop in T.serial(0, actual_inst_size, annotations={nki_dim: "F"}):
-                        f_loop_wo_limit = T.meta_var(f_loop + additional_b_loop * actual_inst_size)
-                        if f_guard(f_gen_axes(((b_loop, b_extent),), f_loop_wo_limit, p_loop)):
+                    for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+                        inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, b_var: b_loop})
+                        
+                        if inst_gen.make_guard(_dst):
                             dst_indices = T.meta_var(
-                                f_gen_dst_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop)
+                                inst_gen.generate_indices(_dst)
                             )
                             src1_indices = T.meta_var(
-                                f_gen_src1_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop)
+                                inst_gen.generate_indices(_src1)
                             )
                             if CONST is None:
                                 src2_indices = T.meta_var(
-                                    f_gen_src2_idx(((b_loop, b_extent),), f_loop_wo_limit, p_loop)
+                                    inst_gen.generate_indices(_src2)
                                 )
                                 T.evaluate(
                                     func(

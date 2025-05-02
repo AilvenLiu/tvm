@@ -27,17 +27,11 @@ from tvm.tir import BufferRegion, PrimFunc
 from tvm.tirp.op_schedule import ScheduleContext
 from tvm.tir.stmt import OpCall
 from .common import (
-    find_max_inst_size_from_one_region,
-    generate_axes_in_region,
     init_analyzer,
     get_reduction_dim_map,
-    f_gen_idx_anchor,
-    f_gen_idx_mapped,
-    bound_buffer_region,
-    make_guard,
     nki_dim,
-    bound_inst_data_iter_with_limit,
     check_workspace_buffer,
+    InstructionGenerator,
 )
 from ..common import register_unary_binary_schedule, ReduceOpType
 from .common import target_trn
@@ -50,31 +44,17 @@ reduce_ops = {
 
 
 def generate_intermediate_buffer(
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
-    axes: Tuple[int],
-    inst_size,
+    dst_buffer_region: int,
+    rfactor_size: int,
     workspace,
     sctx: ScheduleContext,
-    analyzer: Analyzer,
 ):
     """Generate an intermediate buffer for two-stage reduction if needed.
 
     Returns:
         Tuple[Optional[buffer], int]: The intermediate buffer and reduction factor size.
     """
-    reduction_size = reduce(operator.mul, [src_buffer_region.region[i].extent for i in axes], 1)
-    # No need to split into 2 stages
-    if analyzer.can_prove(reduction_size <= inst_size):
-        return None, 1
-
-    assert analyzer.can_prove(
-        reduction_size % inst_size == 0
-    ), f"Reduction size {reduction_size} must be divisible by instruction size {inst_size}"
-
-    rfactor_size = reduction_size // inst_size
-    dst_layout = dst_buffer_region.buffer.layout
-    intermediate_shape = [dst_layout.partition_size, rfactor_size]
+    intermediate_shape = [dst_buffer_region.buffer.layout.partition_size, rfactor_size]
 
     if "partial_reduce" in workspace:
         intermediate_buffer = workspace["partial_reduce"]
@@ -89,7 +69,7 @@ def generate_intermediate_buffer(
         )
         sctx.add_alloc_buffer(intermediate_buffer)
 
-    return intermediate_buffer, rfactor_size
+    return intermediate_buffer
 
 
 def reduction_trn(
@@ -135,86 +115,72 @@ def reduction_trn(
         ]
     ), "Invalid layout"
 
-    # Get bound buffer regions
-    bound_src = bound_buffer_region(src_buffer_region, analyzer)
-    bound_dst = bound_buffer_region(dst_buffer_region, analyzer)
-
     # Find maximum instruction size
-    inst_size, inst_stride, inst_data_iters = find_max_inst_size_from_one_region(
-        bound_src, analyzer, axes
-    )
-    assert analyzer.can_prove(inst_size > 1), "Instruction size must be greater than 1"
+    inst_gen = InstructionGenerator([src_buffer_region, dst_buffer_region], analyzer)
+    inst_gen.link_buffer_regions(src_buffer_region, dst_buffer_region, dim_map)
+    inst_repr = inst_gen.find_max_inst_size_from_one_region(src_buffer_region, axes)
+    inst_size_limit = op.schedule_config.get("max_inst_size", None)
+    inst_repr.bound_inst_size(inst_size_limit, analyzer)
+    assert analyzer.can_prove(inst_repr.size > 1), "Instruction size must be greater than 1"
 
     # Get partition size and extents
-    p_size = dst.layout.partition_size
-    b_extent = reduce(operator.mul, [r.extent for r in bound_dst.region], 1) // p_size
-
-    # Handle instruction size limit from config
-    inst_size_limit = op.schedule_config.get("max_inst_size", None)
-    inst_size, inst_data_iters = bound_inst_data_iter_with_limit(
-        bound_src, inst_data_iters, inst_size_limit, analyzer
-    )
-
+    p_size = src.layout.partition_size
+    f_var = T.var("int32", "F")
+    p_var = T.var("int32", "P")
+    spatial_b_var = T.var("int32", "sB")
+    reduction_b_var = T.var("int32", "rB")
+    inst_gen.bind_inst_iter(src_buffer_region, f_var, inst_repr.size, inst_repr.stride, True)
+    inst_gen.bind_inst_iter(src_buffer_region, p_var, p_size, 1, False)
+    reduction_b_extent = inst_gen.fill_in_block_dim(src_buffer_region, reduction_b_var, axes)
+    spatial_b_extent = inst_gen.fill_in_block_dim(src_buffer_region, spatial_b_var)
     # Get reduction operation code
     opcode = reduce_ops[reduce_op]
 
-    # Set up index generation functions
-    f_gen_axes = generate_axes_in_region(bound_src, inst_stride, inst_data_iters, analyzer)
-    f_gen_src_idx = f_gen_idx_anchor(src_buffer_region, f_gen_axes)
-    f_gen_dst_idx = f_gen_idx_mapped(dst_buffer_region, f_gen_axes, dim_map)
-    f_src_guard = make_guard(src_buffer_region, analyzer)
-
     # Generate intermediate buffer if needed
-    intermediate_buffer, reduction_b_extent = generate_intermediate_buffer(
-        bound_dst, bound_src, axes, inst_size, op.workspace, sctx, analyzer
-    )
+    if reduction_b_extent != 1:
+        intermediate_buffer = generate_intermediate_buffer(
+            dst_buffer_region,
+            reduction_b_extent,
+            op.workspace,
+            sctx,
+        )
 
     # fmt: off
-    # Define reduction instruction macro
-    @T.macro
-    def reduction_inst_macro(b_loop, p_loop, f_loop, dst_buffer, src_buffer):
-        if f_src_guard(f_gen_axes(((b_loop, b_extent),), f_loop, p_loop)):
-            src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent),), f_loop, p_loop))
-            dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent),), f_loop, p_loop))
-            T.evaluate(T.nki.tensorreduce(dst_buffer[dst_indices], src_buffer[src_indices], opcode, negate, -1))
-
-    # Define two-stage reduction macro
-    @T.macro
-    def two_stage_reduction_macro(b_loop, reduction_b_loop, p_loop, f_loop, intermediate_buffer, dim2block_var):
-        if f_src_guard(f_gen_axes(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var)):
-            src_indices = T.meta_var(f_gen_src_idx(((b_loop, b_extent), (reduction_b_loop, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-            T.evaluate(T.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, False, -1))
-
-    @T.macro
-    def two_stage_final_reduction_macro(b_loop, p_loop, f_loop, intermediate_buffer, dim2block_var):
-        if f_src_guard(f_gen_axes(((b_loop, b_extent), (f_loop, reduction_b_extent)), 0, p_loop, dim2block_var)):
-            dst_indices = T.meta_var(f_gen_dst_idx(((b_loop, b_extent), (0, reduction_b_extent)), f_loop, p_loop, dim2block_var))
-            T.evaluate(T.nki.tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))    
     # Single-stage reduction implementation
-    if intermediate_buffer is None:
+    if reduction_b_extent == 1:
         @T.prim_func(tirp=True)
         def impl():
-            for b_loop in T.serial(0, b_extent):
+            for b_loop in T.serial(0, spatial_b_extent):
                 with T.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                        for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
-                            reduction_inst_macro(b_loop, p_loop, f_loop, dst, src)
+                        for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+                            inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop})
+                            if inst_gen.make_guard(src_buffer_region):
+                                src_indices = T.meta_var(inst_gen.generate_indices(src_buffer_region))
+                                dst_indices = T.meta_var(inst_gen.generate_indices(dst_buffer_region))
+                                T.evaluate(T.nki.tensorreduce(dst[*dst_indices], src[*src_indices], opcode, negate, -1))
         return impl
     # Two-stage reduction implementation
     else:
-        dim2block_var = {dim: 1 if dim in axes else 0 for dim in range(len(src.shape))}
         @T.prim_func(tirp=True)
         def two_stage_reduction():
-            for b_loop in T.serial(0, b_extent):
+            for b_loop in T.serial(0, spatial_b_extent):
                 for reduction_b_loop in T.serial(0, reduction_b_extent):
                     with T.attr(0, "tensorized_nki_instruction", 1):
                         for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
-                            for f_loop in T.serial(0, inst_size, annotations={nki_dim: "F"}):
-                                two_stage_reduction_macro(b_loop, reduction_b_loop, p_loop, f_loop, intermediate_buffer, dim2block_var)
+                            for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
+                                inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, spatial_b_var: b_loop, reduction_b_var: reduction_b_loop})
+                                if inst_gen.make_guard(src_buffer_region):
+                                    src_indices = T.meta_var(inst_gen.generate_indices(src_buffer_region))
+                                    T.evaluate(T.nki.tensorreduce(intermediate_buffer[p_loop, reduction_b_loop], src[src_indices], opcode, False, -1))
                 with T.attr(0, "tensorized_nki_instruction", 1):
                     for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
                         for f_loop in T.serial(0, reduction_b_extent, annotations={nki_dim: "F"}):
-                            two_stage_final_reduction_macro(b_loop, p_loop, f_loop, intermediate_buffer, dim2block_var)
+                            inst_gen.set_bind_map(src_buffer_region, {p_var: p_loop, f_var: 0, spatial_b_var: b_loop, reduction_b_var: f_loop})
+                            inst_gen.set_bind_map(dst_buffer_region, {p_var: p_loop, spatial_b_var: b_loop})
+                            if inst_gen.make_guard(src_buffer_region):
+                                dst_indices = T.meta_var(inst_gen.generate_indices(dst_buffer_region))
+                                T.evaluate(T.nki.tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))    
         return two_stage_reduction
     # fmt: on
 

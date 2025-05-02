@@ -259,7 +259,7 @@ void CodeGenTrainium::VisitStmt_(const ForNode* op) {
   } else {
     if (is_outermost_loop) {
       stream << "for " << vid << " in nl.sequential_range(" << extent
-             << ", precise_schedule=True):\n";
+             << ", body_no_reorder=True):\n";
     } else {
       stream << "for " << vid << " in nl.sequential_range(" << extent << "):\n";
     }

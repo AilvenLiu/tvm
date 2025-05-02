@@ -52,7 +52,7 @@ def test_select():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(1, 1):
+            for b_loop in T.serial(0, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
@@ -92,7 +92,7 @@ def test_select_in_loop():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            for i, b_loop, additional_b_loop in T.grid(2, 1, 1):
+            for i, b_loop in T.grid(2, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
@@ -128,7 +128,7 @@ def test_select_expr_affine():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(4, 1):
+            for b_loop in T.serial(0, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
@@ -165,7 +165,7 @@ def test_select_with_guard():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for i, j, b_loop, additional_b_loop in T.grid(4, 4, 4, 1):
+            for i, j, b_loop in T.grid(4, 4, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):

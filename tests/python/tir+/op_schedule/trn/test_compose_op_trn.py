@@ -438,7 +438,7 @@ def test_vector_chain():
             C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             D_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
             E_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(512, 1):
+            for b_loop in T.serial(0, 512):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 32, annotations={"nki_dim":"F"}):
@@ -486,7 +486,7 @@ def test_vector_chain_2():
             C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             D_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
             E_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            for b_loop, additional_b_loop in T.grid(512, 1):
+            for b_loop in T.serial(0, 512):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 32, annotations={"nki_dim":"F"}):
@@ -665,7 +665,7 @@ def test_binary_chain_guard():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
             C_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            for j, i, b_loop, additional_b_loop in T.grid(4, 4, 4, 1):
+            for j, i, b_loop in T.grid(4, 4, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
