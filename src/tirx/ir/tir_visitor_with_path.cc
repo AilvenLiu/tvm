@@ -312,7 +312,12 @@ void TIRVisitorWithPath::VisitStmt_(const SBlockRealizeNode* op, AccessPath path
 
 void TIRVisitorWithPath::VisitStmt_(const tirp::OpCallNode* op, AccessPath path) {
   for (size_t i = 0; i < op->args.size(); i++) {
-    if (auto expr = op->args[i].as<PrimExpr>()) {
+    if (op->args[i] == nullptr) {
+      continue;
+    }
+    if (auto buf_region = op->args[i].as<BufferRegion>()) {
+      Visit(buf_region.value(), path->Attr("args")->ArrayItem(i));
+    } else if (auto expr = op->args[i].as<PrimExpr>()) {
       Visit(expr.value(), path->Attr("args")->ArrayItem(i));
     } else if (auto stmt = op->args[i].as<Stmt>()) {
       Visit(stmt.value(), path->Attr("args")->ArrayItem(i));

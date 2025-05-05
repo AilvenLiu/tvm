@@ -91,13 +91,14 @@ TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
     .set_body_typed([](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params,
                        Map<Var, Range> var_range_map, bool alloc_only,
                        Map<String, ObjectRef> callbacks) {
-      return ScheduleContext(target, exec_scope, launch_params, var_range_map, alloc_only, callbacks);
+      return ScheduleContext(target, exec_scope, launch_params, var_range_map, alloc_only,
+                             callbacks);
     });
 
 TVM_REGISTER_GLOBAL("tirp.ScheduleContextAddAllocBuffer")
-    .set_body_method<ScheduleContext>(&ScheduleContextNode::AddAllocBuffer);
+    .set_body_method(&ScheduleContextNode::AddAllocBuffer);
 TVM_REGISTER_GLOBAL("tirp.ScheduleContextAddInitStmt")
-    .set_body_method<ScheduleContext>(&ScheduleContextNode::AddInitStmt);
+    .set_body_method(&ScheduleContextNode::AddInitStmt);
 
 /********************* Schedule Ops **********************/
 #define TIRP_DEFINE_SCHEDULE_OP(OpName) \

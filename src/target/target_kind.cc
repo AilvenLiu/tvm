@@ -21,6 +21,7 @@
  * \file src/target/target_kind.cc
  * \brief Target kind registry
  */
+#include <dlpack/dlpack.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/expr.h>
@@ -509,11 +510,11 @@ TVM_REGISTER_TARGET_KIND("composite", kDLCPU)  // line break
 TVM_REGISTER_TARGET_KIND("test", kDLCPU)  // line break
     .set_target_canonicalizer(TestTargetParser);
 
-TVM_REGISTER_TARGET_KIND("trn", kDLTrn)  // line break
-    .add_attr_option<runtime::Int>("partition_size", runtime::Int(128))
-    .add_attr_option<runtime::Int>("max_sbuf_size_per_partition", runtime::Int(196608))
-    .add_attr_option<runtime::Int>("max_psum_size_per_partition", runtime::Int(16384))
-    .add_attr_option<runtime::Int>("num-cores");
+TVM_REGISTER_TARGET_KIND("trn", DLDeviceType::kDLTrn)  // line break
+    .add_attr_option<int64_t>("partition_size", 128)
+    .add_attr_option<int64_t>("max_sbuf_size_per_partition", 196608)
+    .add_attr_option<int64_t>("max_psum_size_per_partition", 16384)
+    .add_attr_option<int64_t>("num-cores");
 
 /**********  Registry  **********/
 

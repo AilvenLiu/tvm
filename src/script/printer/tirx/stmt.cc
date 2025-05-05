@@ -98,7 +98,7 @@ Doc HandlePipeline(const T& pipeline, const String& method, const ObjectPath& p,
     if (Optional<Frame> opt_f = FindLowestVarDef(pipeline, d)) {
       ExprDoc lhs = DefinePipeline(pipeline, opt_f.value(), d);
       ExprDoc rhs = PipelineDecl(pipeline, method, p, d);
-      opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+      opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
     } else {
       LOG(WARNING) << "Didn't find pipeline definition for: " << pipeline->name_hint;
     }
@@ -164,8 +164,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                 d->AsDoc<DictDoc>(op_call->schedule_config, p->Attr("schedule_config")));
           } else if (bool(pipeline_op_map.get(op, tvm::Bool(false)))) {
             // Pipeline ops
-            ICHECK(op_call->args[0]->IsInstance<tirx::PipelineNode>())
-                << "First argument must be a Pipeline";
+            ICHECK(op_call->args[0].as<tirx::PipelineNode>()) << "First argument must be a Pipeline";
             // pipeline_method_name
             std::string method = std::string(name).substr(9);
             return print_member_function_call(method);
@@ -178,7 +177,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             }
             tirx::SeqStmt seq_stmt(stmts);
             AsDocBody(seq_stmt, p->Attr("args"), f->get(), d);
-            return ScopeDoc(NullOpt,
+            return ScopeDoc(std::nullopt,
                             TIRp(d, "compose_op")
                                 ->Call({}, {"workspace", "schedule_config"},
                                        {d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")),
@@ -194,7 +193,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             return OpCallDoc(TIRp(d, name), args, {}, {});
           }
         });
-TVM_SCRIPT_REPR(tir::tirp::OpCallNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::tirp::OpCallNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Evaluate>("", [](tirx::Evaluate eval, AccessPath p, IRDocsifier d) -> Doc {

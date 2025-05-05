@@ -25,6 +25,7 @@
 #define TVM_IR_TENSORMAP_TYPE_H_
 
 #include <tvm/ir/expr.h>
+#include <tvm/tir/expr.h>
 
 namespace tvm {
 
@@ -39,6 +40,7 @@ enum class TensorMapSwizzleKind : int {
   k32B = 1,
   k64B = 2,
   k128B = 3,
+  k128B_BASE32B = 4,
 };
 
 enum class TensorMapL2PromotionKind : int {

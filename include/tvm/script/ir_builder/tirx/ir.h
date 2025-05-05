@@ -19,6 +19,8 @@
 #ifndef TVM_SCRIPT_IR_BUILDER_TIR_IR_H_
 #define TVM_SCRIPT_IR_BUILDER_TIR_IR_H_
 
+#include <tvm/ffi/container/tuple.h>
+#include <tvm/ffi/container/variant.h>
 #include <tvm/ir/tensormap_type.h>
 #include <tvm/script/ir_builder/base.h>
 #include <tvm/script/ir_builder/tir/frame.h>
@@ -33,9 +35,9 @@ namespace script {
 namespace ir_builder {
 namespace tirx {
 
+using tvm::ffi::Tuple;
+using tvm::ffi::Variant;
 using tvm::runtime::Tensor;
-using tvm::runtime::Tuple;
-using tvm::runtime::Variant;
 using tvm::tirx::Buffer;
 using tvm::tirx::ExecScope;
 using tvm::tirx::Pipeline;
@@ -615,7 +617,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

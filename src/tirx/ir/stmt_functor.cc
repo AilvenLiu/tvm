@@ -146,8 +146,11 @@ void StmtVisitor::VisitStmt_(const SBlockRealizeNode* op) {
 }
 
 void StmtVisitor::VisitStmt_(const tirp::OpCallNode* op) {
-  VisitArray(op->args, [this](const ObjectRef& e) {
-    if (auto expr = e.as<PrimExpr>()) {
+  VisitArray(op->args, [this](const ffi::Any& e) {
+    if (e == nullptr) return;
+    if (auto buffer_region = e.as<BufferRegion>()) {
+      return;
+    } else if (auto expr = e.as<PrimExpr>()) {
       this->VisitExpr(expr.value());
     } else if (auto stmt = e.as<Stmt>()) {
       this->VisitStmt(stmt.value());
@@ -320,13 +323,9 @@ Stmt StmtMutator::VisitStmt_(const WhileNode* op) {
   }
 }
 
-Stmt StmtMutator::VisitStmt_(const BreakNode* op) {
-  return GetRef<Stmt>(op);
-}
+Stmt StmtMutator::VisitStmt_(const BreakNode* op) { return GetRef<Stmt>(op); }
 
-Stmt StmtMutator::VisitStmt_(const ContinueNode* op) {
-  return GetRef<Stmt>(op);
-}
+Stmt StmtMutator::VisitStmt_(const ContinueNode* op) { return GetRef<Stmt>(op); }
 
 Buffer StmtMutator::VisitBufferDef(const Buffer& buffer, bool alloc_data) {
   if (auto it = buffer_remap_.find(buffer); it != buffer_remap_.end()) {
@@ -526,7 +525,7 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
   ffi::Array<MatchBufferRegion> match_buffers = Internal::Mutate(this, op->match_buffers);
   ffi::Optional<ExecScope> scope = op->exec_scope;
   {
-    if (scope.defined()) {
+    if (scope.has_value()) {
       // Visit the exec scope
       auto scope_slice_opt = scope.value().as<ExecScopeSlice>();
       if (scope_slice_opt.has_value()) {
@@ -541,14 +540,15 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
         if (scope_slice->extents.defined()) {
           extents = Internal::Mutate(this, scope_slice->extents.value());
         }
-        if (!slice.same_as(scope_slice->slice) || !extents.same_as(scope_slice->extents)) {
-          scope = ExecScopeSlice(slice, extents, scope_slice->parent, scope_slice->name);
-        }
+        // TODO(@bohan): fix this
+        // if (!slice.same_as(scope_slice->slice) || !extents.same_as(scope_slice->extents)) {
+        scope = ExecScopeSlice(slice, extents, scope_slice->parent, scope_slice->name);
+        // }
       }
     }
   }
   ffi::Optional<Stmt> init = std::nullopt;
-  if (op->init.defined()) {
+  if (op->init.has_value()) {
     init = VisitStmt(op->init.value());
   }
   Stmt body = VisitStmt(op->body);
@@ -587,17 +587,18 @@ Stmt StmtMutator::VisitStmt_(const SBlockRealizeNode* op) {
 }
 
 Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
-  auto fmutate = [&](const ObjectRef& e) -> ObjectRef {
-    if (auto expr = e.as<PrimExpr>()) {
+  auto fmutate = [&](const ffi::Any& e) -> ffi::Any {
+    if (e == nullptr) return e;
+    if (auto buffer_region = e.as<BufferRegion>()) {
+      return Internal::Mutate(this, {buffer_region.value()})[0];
+    } else if (auto expr = e.as<PrimExpr>()) {
       return this->VisitExpr(expr.value());
     } else if (auto stmt = e.as<Stmt>()) {
       return this->VisitStmt(stmt.value());
-    } else if (auto buffer_region = e.as<BufferRegion>()) {
-      return Internal::Mutate(this, {buffer_region.value()})[0];
     }
     return e;
   };
-  Array<ObjectRef> args = Internal::MutateArray(this, op->args, fmutate);
+  Array<ffi::Any> args = Internal::MutateArray(this, op->args, fmutate);
   if (args.same_as(op->args)) {
     return GetRef<Stmt>(op);
   } else {

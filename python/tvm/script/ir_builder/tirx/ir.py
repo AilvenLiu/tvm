@@ -834,6 +834,8 @@ def sblock_alloc_buffer(
         strides = [Var(s, "int32") if isinstance(s, str) else s for s in strides]
     else:
         strides = []
+    if axis_separators is None:
+        axis_separators = []
     if allocated_addr is None:
         allocated_addr = []
     if not isinstance(allocated_addr, (list, tuple)):
@@ -2208,18 +2210,19 @@ class PTXNamespace:
     def __init__(self):
         self.ldmatrix = _dtype_forward(_tir_op.ptx_ldmatrix)
         self.stmatrix = _op_wrapper(_tir_op.ptx_stmatrix)
-        self.setmaxnreg : Callable[..., Any] = _op_wrapper(_tir_op.ptx_setmaxnreg)
-        self.elect_sync : Callable[..., Any] = _op_wrapper(_tir_op.ptx_elect_sync)
-        self.fetch_register : Callable[..., Any] = _op_wrapper(_tir_op.ptx_fetch_register)
-        self.encode_matrix_descriptor = _op_wrapper(_tir_op.ptx_encode_matrix_descriptor)
+        self.setmaxnreg: Callable[..., Any] = _op_wrapper(_tir_op.ptx_setmaxnreg)
+        self.elect_sync: Callable[..., Any] = _op_wrapper(_tir_op.ptx_elect_sync)
+        self.fetch_register: Callable[..., Any] = _op_wrapper(_tir_op.ptx_fetch_register)
         self.ld_global_acquire = _op_wrapper(_tir_op.ptx_ld_global_acquire)
         self.mma = MmaNamespace()
         self.cp_async = CpAsyncNamespace()
         self.wgmma = WgmmaNamespace()
         self.mbarrier = MbarrierNamespace()
+        self.tcgen05 = Tcgen05Namespace()
         self.bar = BarNamespace()
         self.barrier = BarrierNamespace()
         self.fence = FenceNamespace()
+
 
 class MmaNamespace:
     """The MMA instruction submodule."""
@@ -2229,6 +2232,7 @@ class MmaNamespace:
 
     def __call__(self, *args, **kwds):
         return _dtype_forward(_tir_op.ptx_mma)(*args, **kwds)
+
 
 class CpAsyncNamespace:
     """The CpAsync instruction submodule."""
@@ -2242,6 +2246,7 @@ class CpAsyncNamespace:
     def __call__(self, *args, **kwds):
         return _dtype_forward(_tir_op.ptx_cp_async)(*args, **kwds)
 
+
 class CpAsyncBulkNamespace:
     """The CpAsyncBulk instruction submodule."""
 
@@ -2253,6 +2258,7 @@ class CpAsyncBulkNamespace:
     def __call__(self, *args, **kwds):
         return _dtype_forward(_tir_op.ptx_cp_async_bulk)(*args, **kwds)
 
+
 class CpAsyncBulkTensorNamespace:
     """The CpAsyncBulkTensor instruction submodule."""
 
@@ -2260,21 +2266,25 @@ class CpAsyncBulkTensorNamespace:
         self.g2c = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_global_to_cluster)
         self.s2g = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_shared_to_global)
 
+
 class CpAsyncMbarrierNamespace:
     """The CpAsyncMbarrier instruction submodule."""
 
     def __init__(self):
         self.arrive = _op_wrapper(_tir_op.ptx_cp_async_mbarrier_arrive)
 
+
 class WgmmaNamespace:
     """The WGMMA instruction submodule."""
 
     def __init__(self):
-        self.fence : Callable[..., Any] = _op_wrapper(_tir_op.ptx_wgmma_fence)
+        self.fence: Callable[..., Any] = _op_wrapper(_tir_op.ptx_wgmma_fence)
         self.commit_group = _op_wrapper(_tir_op.ptx_wgmma_commit_group)
         self.wait_group = _op_wrapper(_tir_op.ptx_wgmma_wait_group)
         self.noop_barrier = _op_wrapper(_tir_op.ptx_wgmma_noop_barrier)
         self.mma_async = WgmmaMmaAsyncNamespace()
+        self.encode_matrix_descriptor = _op_wrapper(_tir_op.ptx_wgmma_encode_matrix_descriptor)
+
 
 class WgmmaMmaAsyncNamespace:
     """The WGMMA MMAAsync instruction submodule."""
@@ -2283,6 +2293,7 @@ class WgmmaMmaAsyncNamespace:
         self.ss = _op_wrapper(_tir_op.ptx_wgmma_mma_async_ss)
         self.rs = _op_wrapper(_tir_op.ptx_wgmma_mma_async_rs)
 
+
 class MbarrierNamespace:
     """The Mbarrier instruction submodule."""
 
@@ -2290,6 +2301,7 @@ class MbarrierNamespace:
         self.init = _op_wrapper(_tir_op.ptx_mbarrier_init)
         self.try_wait = _op_wrapper(_tir_op.ptx_mbarrier_try_wait)
         self.arrive = MbarrierArriveNamespace()
+
 
 class MbarrierArriveNamespace:
     """The Mbarrier Arrive instruction submodule."""
@@ -2300,6 +2312,66 @@ class MbarrierArriveNamespace:
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.ptx_mbarrier_arrive)(*args, **kwds)
 
+
+class Tcgen05Namespace:
+    """The Tcgen05 instruction submodule."""
+
+    def __init__(self):
+        self.alloc = _op_wrapper(_tir_op.ptx_tcgen05_alloc)
+        self.dealloc = _op_wrapper(_tir_op.ptx_tcgen05_dealloc)
+        self.relinquish_alloc_permit = _op_wrapper(_tir_op.ptx_tcgen05_relinquish_alloc_permit)
+        self.encode_matrix_descriptor = _op_wrapper(_tir_op.ptx_tcgen05_encode_matrix_descriptor)
+        self.encode_instr_descriptor = _op_wrapper(_tir_op.ptx_tcgen05_encode_instr_descriptor)
+        self.encode_instr_descriptor_block_scaled = _op_wrapper(
+            _tir_op.ptx_tcgen05_encode_instr_descriptor_block_scaled
+        )
+        self.ld = _op_wrapper(_tir_op.ptx_tcgen05_ld)
+        self.st = _op_wrapper(_tir_op.ptx_tcgen05_st)
+        self.cp = _op_wrapper(_tir_op.ptx_tcgen05_cp)
+        self.shift = _op_wrapper(_tir_op.ptx_tcgen05_shift)
+        self.commit = _op_wrapper(_tir_op.ptx_tcgen05_commit)
+        self.wait = Tcgen05WaitNamespace()
+        self.mma = Tcgen05MmaNamespace()
+        self.fence = Tcgen05FenceNamespace()
+
+
+class Tcgen05FenceNamespace:
+    """The Tcgen05 Fence instruction submodule."""
+
+    def __init__(self):
+        self.before_thread_sync = _op_wrapper(_tir_op.ptx_tcgen05_fence_before_thread_sync)
+        self.after_thread_sync = _op_wrapper(_tir_op.ptx_tcgen05_fence_after_thread_sync)
+
+
+class Tcgen05MmaNamespace:
+    """The Tcgen05 MMA instruction submodule."""
+
+    def __init__(self):
+        self.block_scale = _op_wrapper(_tir_op.ptx_tcgen05_mma_block_scale)
+        self.sp = Tcgen05MmaSpNamespace()
+
+    def __call__(self, *args, **kwds):
+        return _op_wrapper(_tir_op.ptx_tcgen05_mma)(*args, **kwds)
+
+
+class Tcgen05MmaSpNamespace:
+    """Tcgen05 Sparse MMA instruction submodule."""
+
+    def __init__(self):
+        self.block_scale = _op_wrapper(_tir_op.ptx_tcgen05_mma_sp_block_scale)
+
+    def __call__(self, *args, **kwds):
+        return _op_wrapper(_tir_op.ptx_tcgen05_mma_sp)(*args, **kwds)
+
+
+class Tcgen05WaitNamespace:
+    """The Tcgen05 Wait instruction submodule."""
+
+    def __init__(self):
+        self.ld = _op_wrapper(_tir_op.ptx_tcgen05_wait_ld)
+        self.st = _op_wrapper(_tir_op.ptx_tcgen05_wait_st)
+
+
 class BarNamespace:
     """The Bar instruction submodule."""
 
@@ -2307,11 +2379,13 @@ class BarNamespace:
         self.arrive = _op_wrapper(_tir_op.ptx_bar_arrive)
         self.sync = _op_wrapper(_tir_op.ptx_bar_sync)
 
+
 class BarrierNamespace:
     """The Barrier instruction submodule."""
 
     def __init__(self):
         self.cluster = BarrierClusterNamespace()
+
 
 class BarrierClusterNamespace:
     """The BarrierCluster instruction submodule."""
@@ -2320,12 +2394,14 @@ class BarrierClusterNamespace:
         self.arrive = _op_wrapper(_tir_op.ptx_barrier_cluster_arrive)
         self.wait = _op_wrapper(_tir_op.ptx_barrier_cluster_wait)
 
+
 class FenceNamespace:
     """The Fence instruction submodule."""
 
     def __init__(self):
         self.mbarrier_init = _op_wrapper(_tir_op.ptx_fence_mbarrier_init_release_cluster)
         self.proxy = _op_wrapper(_tir_op.ptx_fence_proxy)
+
 
 class CUDANamespace:
     """The CUDA intrinsics submodule."""
@@ -2336,6 +2412,7 @@ class CUDANamespace:
         self.thread_fence = _op_wrapper(_tir_op.cuda_thread_fence)
         self.syncthreads_and = _op_wrapper(_tir_op.cuda_syncthreads_and)
         self.nano_sleep = _op_wrapper(_tir_op.cuda_nano_sleep)
+
 
 class CUDABarrierNamespace:
     """The CUDA barrier intrinsics submodule."""
@@ -2348,6 +2425,7 @@ class CUDABarrierNamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.cuda_barrier_create)(*args, **kwds)
+
 
 class NKINamespace:
     """The NKI instructions submodule."""
@@ -2369,6 +2447,7 @@ class NKINamespace:
         self.memset = _op_wrapper(_tir_op.nki_memset)
         self.identity = _op_wrapper(_tir_op.nki_identity)
         self.affine_select = _op_wrapper(_tir_op.nki_affine_select)
+
 
 ptx = PTXNamespace()
 cuda = CUDANamespace()

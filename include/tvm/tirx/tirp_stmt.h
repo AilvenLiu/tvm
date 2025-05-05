@@ -39,13 +39,13 @@ class OpCallNode : public StmtNode {
   tvm::Op op;
 
   // Arguments to the operator.
-  Array<ObjectRef> args;
+  Array<ffi::Any> args;
 
   // Workspace (pre-allocated buffers) for the operator.
   Map<String, Buffer> workspace;
 
   // Schedule config for the operator.
-  Map<String, ObjectRef> schedule_config;
+  Map<String, ffi::Any> schedule_config;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("op", &op);
@@ -55,7 +55,8 @@ class OpCallNode : public StmtNode {
   }
 
   bool SEqualReduce(const OpCallNode* other, SEqualReducer equal) const {
-    return equal(op, other->op) && equal(args, other->args) && equal(workspace, other->workspace) && equal(schedule_config, other->schedule_config);
+    return equal(op, other->op) && equal(args, other->args) && equal(workspace, other->workspace) &&
+           equal(schedule_config, other->schedule_config);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
@@ -75,9 +76,10 @@ class OpCallNode : public StmtNode {
  */
 class OpCall : public Stmt {
  public:
-  TVM_DLL OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace = {}, Map<String, ObjectRef> schedule_config = {});
+  TVM_DLL OpCall(tvm::Op op, Array<ffi::Any> args, Map<String, Buffer> workspace = {},
+                 Map<String, ffi::Any> schedule_config = {});
 
-  static bool IsValidOpCallArgType(const ObjectRef& arg);
+  static bool IsValidOpCallArgType(const ffi::Any& arg);
 
   TVM_DEFINE_OBJECT_REF_METHODS(OpCall, Stmt, OpCallNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(OpCallNode);

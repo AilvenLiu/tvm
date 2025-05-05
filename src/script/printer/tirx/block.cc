@@ -52,7 +52,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
                                                                              ->Attr("scope_id_def")
                                                                              ->Attr("extents")
                                                                              ->ArrayItem(0))});
-      (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+      (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
     } else if (const tvm::tir::KernelScopeNode* scope =
                    block->exec_scope.as<tvm::tir::KernelScopeNode>()) {
       for (auto scope_id_def : scope->scope_id_def) {
@@ -69,7 +69,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
                        {LiteralDoc::Str(
                            scope_id_def->scope->parent,
                            block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("parent"))});
-        (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, NullOpt));
+        (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, std::nullopt));
       }
     }
   }
@@ -245,7 +245,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
       ObjectPath pipeline_p = block_p->Attr("pipelines")->ArrayIndex(i);
       IdDoc lhs = DefinePipeline(pipeline, *frame, d);
       ExprDoc rhs = PipelineDecl(pipeline, "alloc_copy_pipeline", pipeline_p, d);
-      (*frame)->stmts.push_back(AssignDoc(lhs, rhs, NullOpt));
+      (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
     } else {
       LOG(FATAL) << "ValueError: Unknown Pipeline type in block signature: "
                  << pipeline->GetTypeKey();

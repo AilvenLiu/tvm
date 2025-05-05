@@ -356,7 +356,7 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
   for (int i = 0; i < static_cast<int>(layout->data_iter_array.size()); i++) {
     auto it = split_map.find(i);
     if (it != split_map.end()) {
-      data_docs.push_back(TIR(d, "S")->Call({LiteralDoc::Int(it->second, NullOpt)}, {}, {}));
+      data_docs.push_back(TIR(d, "S")->Call({LiteralDoc::Int(it->second, std::nullopt)}, {}, {}));
     } else {
       data_docs.push_back(
           d->AsDoc<ExprDoc>(layout->data_iter_array[i]->extent,
@@ -382,7 +382,7 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
   for (int i = 0; i < static_cast<int>(layout->device_iter_array.size()); i++) {
     auto device_attr = layout->device_iter_array[i];
     if (device_attr.IsExclusive()) {
-      ExprDoc idx = LiteralDoc::Int(i, NullOpt);
+      ExprDoc idx = LiteralDoc::Int(i, std::nullopt);
       ExprDoc owner = d->AsDoc<ExprDoc>(device_attr->owner,
                                         p->Attr("device_iter_array")->ArrayIndex(i)->Attr("owner"));
       e_docs.push_back(TupleDoc({idx, owner}));

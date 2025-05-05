@@ -40,6 +40,7 @@ class TensorMapSwizzleKind(IntEnum):
     k32B = 1
     k64B = 2
     k128B = 3
+    k128B_BASE32B = 4
 
 
 class TensorMapL2PromotionKind(IntEnum):

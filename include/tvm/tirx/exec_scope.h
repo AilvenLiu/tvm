@@ -24,10 +24,9 @@
 #ifndef TVM_TIRX_EXEC_SCOPE_H_
 #define TVM_TIRX_EXEC_SCOPE_H_
 
+#include <tvm/ffi/container/variant.h>
 #include <tvm/ir/module.h>
-#include <tvm/runtime/container/variant.h>
 #include <tvm/tirx/var.h>
-
 namespace tvm {
 namespace tirx {
 
@@ -65,14 +64,13 @@ class ScopePair : public ObjectRef {
 
   struct ScopePairEqual {
     bool operator()(const ScopePair& a, const ScopePair& b) const {
-      return tvm::runtime::ObjectEqual()(a->parent, b->parent) &&
-             tvm::runtime::ObjectEqual()(a->cur, b->cur);
+      return a->parent == b->parent && a->cur == b->cur;
     }
   };
 
   struct ScopePairHash {
     size_t operator()(const ScopePair& a) const {
-      return tvm::runtime::ObjectHash()(a->parent) ^ tvm::runtime::ObjectHash()(a->cur);
+      return std::hash<String>()(a->parent) ^ std::hash<String>()(a->cur);
     }
   };
 
@@ -143,7 +141,7 @@ class ScopeIdDefVerifier {
 class ScopeIdResolveTable {
  public:
   using ScopeIdSet = ScopeIdDefVerifier::ScopeIdSet;
-  using LaunchParams = std::unordered_map<String, IterVar, ObjectHash, ObjectEqual>;
+  using LaunchParams = std::unordered_map<String, IterVar>;
 
   typedef Array<PrimExpr> (*ResolveFunc)(const Optional<Array<PrimExpr>>& extents, int out_dim,
                                          const LaunchParams& params);
@@ -296,7 +294,7 @@ class KernelScope : public ExecScope {
 class ExecScopeSliceNode : public ExecScopeNode {
  public:
   /*! \brief slices or select condition of the execution scope */
-  Variant<Array<Range>, PrimExpr> slice;
+  Variant<Array<Range>, PrimExpr> slice = Array<Range>({});
   /*! \brief extents of the execution scope */
   Optional<Array<PrimExpr>> extents;
   /*! \brief parent scope name */
@@ -305,19 +303,19 @@ class ExecScopeSliceNode : public ExecScopeNode {
   bool Is(const ExecScope& other) const final;
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("slice", &slice);
+    // v->Visit("slice", &slice);
     v->Visit("extents", &extents);
     v->Visit("parent", &parent);
     ExecScopeNode::VisitAttrs(v);
   }
 
   bool SEqualReduce(const ExecScopeSliceNode* other, SEqualReducer equal) const {
-    return equal(slice, other->slice) && equal(extents, other->extents) &&
+    return /*equal(slice, other->slice) &&*/ equal(extents, other->extents) &&
            equal(parent, other->parent) && ExecScopeNode::SEqualReduce(other, equal);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(slice);
+    // hash_reduce(slice);
     hash_reduce(extents);
     hash_reduce(parent);
     ExecScopeNode::SHashReduce(hash_reduce);
@@ -355,7 +353,7 @@ bool IsStorageBuffer(const String& storage, const String& logical);
 /*! \brief Return the belonging logical scope of some storage scope */
 String StorageToLogicalScope(const String& storage);
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_EXEC_SCOPE_H_

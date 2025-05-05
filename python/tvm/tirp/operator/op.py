@@ -19,8 +19,9 @@
 
 from typing import List, Tuple, Dict, Any, Optional
 
+import tvm
 from tvm.tir.stmt import OpCall
-from tvm.tir import PrimExpr, BufferRegion, FloatImm, Buffer, Stmt
+from tvm.tir import PrimExpr, BufferRegion, FloatImm, Buffer, Stmt, IntImm
 from tvm.ir import Op
 from tvm.tir.async_structs import Pipeline
 from tvm.tir.predicate import Predicate
@@ -163,7 +164,9 @@ class ReduceOp(OpCall):
         assert isinstance(
             self.input, BufferRegion
         ), f"{self} expects BufferRegion as input, got {self.input}"
-        assert isinstance(self.accum, bool), f"{self} expects bool as accum, got {self.accum}"
+        assert isinstance(
+            self.accum, (bool, IntImm)
+        ), f"{self} expects bool or IntImm as accum, got {self.accum}"
 
 
 class PipelineOp(OpCall):
@@ -288,10 +291,10 @@ class Gemm(OpCall):
             self.bias, (BufferRegion, FloatImm)
         ), f"{self} expects BufferRegion or FloatImm arguments as bias, got {self.bias}"
         assert isinstance(
-            self.transpose_A, bool
-        ), f"{self} expects bool arguments as transpose_A, got {self.transpose_A}"
+            self.transpose_A, (bool, IntImm)
+        ), f"{self} expects bool or IntImm arguments as transpose_A, got {self.transpose_A}"
         assert isinstance(
-            self.transpose_B, bool
+            self.transpose_B, (bool, IntImm)
         ), f"{self} expects bool arguments as transpose_B, got {self.transpose_B}"
         assert isinstance(
             self.alpha, FloatImm

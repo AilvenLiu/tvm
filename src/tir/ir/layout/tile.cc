@@ -7,7 +7,7 @@
  * limitations under the License.
  */
 
-#include <tvm/runtime/container/variant.h>
+#include <tvm/ffi/container/variant.h>
 
 #include "utils.h"
 
@@ -279,7 +279,7 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
                                                  const Array<PrimExpr>& tiled_shape,
                                                  const Array<PrimExpr>& inner_shape) const {
   auto maybe_tile = tile_layout.as<TileLayout>();
-  if (!maybe_tile) return NullOpt;
+  if (!maybe_tile) return std::nullopt;
 
   TileLayout tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
   TileLayout layout = GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
@@ -287,7 +287,7 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
 
   // Check dimension and build a factored shape (tiled_shape -> factor = inner_shape).
   int ndim = static_cast<int>(tiled_shape.size());
-  if (ndim != static_cast<int>(inner_shape.size())) return NullOpt;
+  if (ndim != static_cast<int>(inner_shape.size())) return std::nullopt;
 
   auto factored = TileShape(tiled_shape, inner_shape, true);
   auto [grouped_tiled, tiled_seps] = TileLayoutGroupByLogicalShape(tiled, factored, nullptr);
@@ -302,10 +302,10 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
   if (grouped_tiled->device_iter_array.size() != grouped_layout->device_iter_array.size()) {
     // Quick device-iter check (or we do a direct extent check below).
     // But let's do the standard one:
-    if (!CheckTileLayoutDeviceExtentEqual(grouped_tiled, grouped_layout)) return NullOpt;
+    if (!CheckTileLayoutDeviceExtentEqual(grouped_tiled, grouped_layout)) return std::nullopt;
   }
 
-  if (tiled_seps.empty() || inner_seps.empty()) return NullOpt;
+  if (tiled_seps.empty() || inner_seps.empty()) return std::nullopt;
 
   auto tiled_seps_even = GetEvenSeps(tiled_seps);
   std::unordered_map<int, int> index_map;
@@ -318,7 +318,7 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
   for (int i = 0; i < ndim; ++i) {
     int inner_count = inner_seps[i + 1] - inner_seps[i];
     int tiled_count = tiled_seps_even[i + 1] - tiled_seps_even[i];
-    if (inner_count > tiled_count) return NullOpt;
+    if (inner_count > tiled_count) return std::nullopt;
 
     // Compare extents (and stride if not splitted).
     for (int j = 0; j < inner_count; ++j) {
@@ -327,11 +327,11 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
           grouped_tiled->data_iter_array[tiled_seps_even[i + 1] - inner_count + j];
       index_map[inner_seps[i] + j] = tiled_seps_even[i + 1] - inner_count + j;
 
-      if (!analyzer.CanProveEqual(inner_attr->extent, tiled_attr->extent)) return NullOpt;
+      if (!analyzer.CanProveEqual(inner_attr->extent, tiled_attr->extent)) return std::nullopt;
       bool is_splitted = (layout_split_map.find(inner_seps[i] + j) != layout_split_map.end());
       if (!is_splitted && !analyzer.CanProveEqual(inner_attr->stride, tiled_attr->stride) &&
           !analyzer.CanProveEqual(inner_attr->extent, 1)) {
-        return NullOpt;
+        return std::nullopt;
       }
     }
     for (int j = 0; j < tiled_count - inner_count; ++j) {
@@ -341,11 +341,11 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
 
   // Also check device-iter splits match up.
   auto tiled_split_map = grouped_tiled.GetSplitMap();
-  if (tiled_split_map.size() != layout_split_map.size()) return NullOpt;
+  if (tiled_split_map.size() != layout_split_map.size()) return std::nullopt;
 
   for (auto& kv : layout_split_map) {
     auto it = tiled_split_map.find(index_map[kv.first]);
-    if (it == tiled_split_map.end() || it->second != kv.second) return NullOpt;
+    if (it == tiled_split_map.end() || it->second != kv.second) return std::nullopt;
   }
 
   // Divide strides by inner->CoSize()
@@ -375,7 +375,7 @@ Optional<TileLayout> SwizzleLayoutNode::IsTileInner(const TLayout& tile_layout,
       return inner_identity->IsTileInner(tile_identity, tiled_shape, inner_shape);
     }
   }
-  return NullOpt;
+  return std::nullopt;
 }
 
 // ComposeLayout: check if tile_layout is Compose(A, B) and layout_A matches this->layout_A,
@@ -388,7 +388,7 @@ Optional<TileLayout> ComposeLayoutNode::IsTileInner(const TLayout& tile_layout,
       return this->layout_B->IsTileInner(comp.value()->layout_B, tiled_shape, inner_shape);
     }
   }
-  return NullOpt;
+  return std::nullopt;
 }
 
 /* Registration for Checking Inner Layout */
@@ -433,10 +433,10 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
     // Could be ComposeLayout, in which case we test layout_B of compose.
     if (auto comp = tile_layout.as<ComposeLayout>()) {
       auto inner_layout = IsTileOuter(comp.value()->layout_B, tiled_shape, outer_shape);
-      if (!inner_layout) return NullOpt;
+      if (!inner_layout) return std::nullopt;
       return ComposeLayout(comp.value()->layout_A, inner_layout.value().as<TileLayout>().value());
     }
-    return NullOpt;
+    return std::nullopt;
   }
 
   auto tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
@@ -449,19 +449,19 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
       << "Outer shape and tiled shape must have same dimension.";
   for (int i = 0; i < ndim; ++i) {
     if (!analyzer.CanProveEqual(floormod(tiled_shape[i], outer_shape[i]), 0)) {
-      return NullOpt;
+      return std::nullopt;
     }
   }
 
   // Outer layout must not have device iters if used as the outer layout.
-  if (!layout->device_iter_array.empty()) return NullOpt;
+  if (!layout->device_iter_array.empty()) return std::nullopt;
 
   // Factor tiled_shape by outer_shape.
   auto factored = TileShape(tiled_shape, outer_shape, /*is_inner=*/false);
   auto [grouped_tiled, tiled_seps] = TileLayoutGroupByLogicalShape(tiled, factored, nullptr);
   auto [grouped_layout, outer_seps] = TileLayoutGroupByLogicalShape(layout, outer_shape, nullptr);
 
-  if (tiled_seps.empty() || outer_seps.empty()) return NullOpt;
+  if (tiled_seps.empty() || outer_seps.empty()) return std::nullopt;
   auto tiled_seps_even = GetEvenSeps(tiled_seps);
 
   // We'll collect leftover data iters (which belong to the "inner" part).
@@ -473,14 +473,14 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
   for (int i = 0; i < ndim; ++i) {
     int outer_count = outer_seps[i + 1] - outer_seps[i];
     int tile_count = tiled_seps_even[i + 1] - tiled_seps_even[i];
-    if (outer_count > tile_count) return NullOpt;
+    if (outer_count > tile_count) return std::nullopt;
 
     // Compare each "outer" chunk's extents.
     for (int j = 0; j < outer_count; ++j) {
       DataIterAttr outer_attr = grouped_layout->data_iter_array[outer_seps[i] + j];
       DataIterAttr tiled_attr = grouped_tiled->data_iter_array[tiled_seps_even[i] + j];
-      if (tiled_split_map.count(tiled_seps_even[i] + j)) return NullOpt;
-      if (!analyzer.CanProveEqual(outer_attr->extent, tiled_attr->extent)) return NullOpt;
+      if (tiled_split_map.count(tiled_seps_even[i] + j)) return std::nullopt;
+      if (!analyzer.CanProveEqual(outer_attr->extent, tiled_attr->extent)) return std::nullopt;
     }
 
     // The rest belong to the "inner" side.
@@ -507,7 +507,7 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
       DataIterAttr outer_attr = grouped_layout->data_iter_array[outer_seps[i] + j];
       DataIterAttr tiled_attr = grouped_tiled->data_iter_array[tiled_seps_even[i] + j];
       if (!analyzer.CanProveEqual(outer_attr->stride * inner_cosize, tiled_attr->stride)) {
-        return NullOpt;
+        return std::nullopt;
       }
     }
   }

@@ -58,7 +58,7 @@ void FuseNeighborShardAxis(TileLayout layout, std::unordered_set<int>* fused_dat
   }
 }
 
-void FuseEquivDataIter(TileLayout layout, Optional<ShapeTuple> phys_dimension_type,
+void FuseEquivDataIter(TileLayout layout, Optional<ffi::Shape> phys_dimension_type,
                        std::unordered_set<int>* fused_data_iters,
                        std::unordered_set<int>* fused_device_iters) {
   // if the stride of data(i) is equal to the extent of data(i+1) times the stride of data(i+1),
@@ -71,7 +71,7 @@ void FuseEquivDataIter(TileLayout layout, Optional<ShapeTuple> phys_dimension_ty
     }
     auto this_data_iter = layout->data_iter_array[i];
     auto next_data_iter = layout->data_iter_array[i + 1];
-    if (phys_dimension_type.defined()) {
+    if (phys_dimension_type.has_value()) {
       if (phys_dimension_type.value()[i] != phys_dimension_type.value()[i + 1]) {
         continue;
       }
@@ -143,14 +143,14 @@ TileLayout FuseIters(TileLayout layout, std::unordered_set<int> fused_data_iters
   return TileLayout(new_data_iter_array, new_device_iter_array, layout->from, layout->to);
 }
 
-ShapeTuple EraseTupleElem(ShapeTuple tup, const std::unordered_set<int>& indices) {
+ffi::Shape EraseTupleElem(ffi::Shape tup, const std::unordered_set<int>& indices) {
   std::vector<int64_t> new_tup;
   for (size_t i = 0; i < tup.size(); i++) {
     if (indices.find(i) == indices.end()) {
       new_tup.push_back(tup[i]);
     }
   }
-  return ShapeTuple(new_tup);
+  return ffi::Shape(new_tup);
 }
 
 /******** Normalize TLayout ********/
@@ -168,7 +168,7 @@ TLayout TileLayoutNode::Normalize() const {
   fused_data_iters.clear();
   fused_device_iters.clear();
   FuseNeighborShardAxis(layout, &fused_data_iters, &fused_device_iters);
-  FuseEquivDataIter(layout, NullOpt, &fused_data_iters, &fused_device_iters);
+  FuseEquivDataIter(layout, std::nullopt, &fused_data_iters, &fused_device_iters);
   layout = FuseIters(layout, fused_data_iters, fused_device_iters);
   return SimplifyTileLayout(layout);
 }
@@ -243,13 +243,13 @@ std::pair<TrainiumLayout, std::vector<int64_t>> NormalizeTrainiumLayoutWithShape
 TVM_REGISTER_GLOBAL("tir.NormalizeTrainiumLayoutWithShape")
     .set_body_typed([](TrainiumLayout layout, Array<PrimExpr> shape) {
       auto pr = NormalizeTrainiumLayoutWithShape(layout, shape);
-      return Array<ObjectRef>{pr.first, ShapeTuple(pr.second)};
+      return Array<ObjectRef>{pr.first, ffi::Shape(pr.second)};
     });
 
 TVM_REGISTER_GLOBAL("tir.NormalizeTileLayoutWithShape")
     .set_body_typed([](TileLayout layout, Array<PrimExpr> shape) {
       auto pr = TileLayoutGroupByLogicalShape(layout, shape, nullptr);
-      return Array<ObjectRef>{pr.first, ShapeTuple(pr.second)};
+      return Array<ObjectRef>{pr.first, ffi::Shape(pr.second)};
     });
 
 }  // namespace tir

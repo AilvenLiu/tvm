@@ -23,7 +23,7 @@ namespace tvm {
 namespace tir {
 
 /**************** TrainiumLayout ****************/
-TrainiumLayout::TrainiumLayout(ShapeTuple dimension_types, TileLayout combined_1d_layout) {
+TrainiumLayout::TrainiumLayout(ffi::Shape dimension_types, TileLayout combined_1d_layout) {
   auto n = make_object<TrainiumLayoutNode>();
   n->dimension_types = dimension_types;
   n->combined_1d_layout = combined_1d_layout;
@@ -34,7 +34,7 @@ TrainiumLayout::TrainiumLayout(ShapeTuple dimension_types, TileLayout combined_1
 TVM_REGISTER_NODE_TYPE(TrainiumLayoutNode);
 
 TVM_REGISTER_GLOBAL("tir.TrainiumLayout")
-    .set_body_typed([](ShapeTuple dimension_types, TileLayout combined_1d_layout) {
+    .set_body_typed([](ffi::Shape dimension_types, TileLayout combined_1d_layout) {
       return TrainiumLayout(dimension_types, combined_1d_layout);
     });
 
@@ -200,7 +200,8 @@ Array<PrimExpr> TrainiumLayoutNode::Apply(const PrimExpr& coord) const {
 }
 /**************** TrainiumPSUMLayout ****************/
 
-Array<PrimExpr> TrainiumPSUMLayoutNode::Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const {
+Array<PrimExpr> TrainiumPSUMLayoutNode::Apply(const Array<PrimExpr>& coord,
+                                              const Array<PrimExpr>& shape) const {
   auto indices = TrainiumLayoutNode::Apply(coord, shape);
   ICHECK_EQ(indices.size(), 2);
   return {floordiv(indices[1], kPSUMMaxElemPerBank), indices[0],
@@ -221,7 +222,7 @@ bool TrainiumPSUMLayoutNode::VerifyWellFormed() const {
 
 TVM_REGISTER_NODE_TYPE(TrainiumPSUMLayoutNode);
 
-TrainiumPSUMLayout::TrainiumPSUMLayout(ShapeTuple dimension_types, TileLayout combined_1d_layout) {
+TrainiumPSUMLayout::TrainiumPSUMLayout(ffi::Shape dimension_types, TileLayout combined_1d_layout) {
   auto n = make_object<TrainiumPSUMLayoutNode>();
   n->dimension_types = dimension_types;
   n->combined_1d_layout = combined_1d_layout;
@@ -230,7 +231,7 @@ TrainiumPSUMLayout::TrainiumPSUMLayout(ShapeTuple dimension_types, TileLayout co
 }
 
 TVM_REGISTER_GLOBAL("tir.TrainiumPSUMLayout")
-    .set_body_typed([](ShapeTuple dimension_types, TileLayout combined_1d_layout) {
+    .set_body_typed([](ffi::Shape dimension_types, TileLayout combined_1d_layout) {
       return TrainiumPSUMLayout(dimension_types, combined_1d_layout);
     });
 

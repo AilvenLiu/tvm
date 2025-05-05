@@ -207,7 +207,7 @@ Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
   return (lhs->scope->cur == rhs->scope->parent)
              ? ScopeIdDef({Var("")}, {lhs.fused_extent() * rhs.fused_extent()},
                           ScopePair(lhs->scope->parent, rhs->scope->cur))
-             : Optional<ScopeIdDef>(NullOpt);
+             : Optional<ScopeIdDef>(std::nullopt);
 }
 
 Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
@@ -221,7 +221,7 @@ Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
     return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
                       ScopePair(lhs->scope->parent, rhs->scope->parent));
   }
-  return NullOpt;
+  return std::nullopt;
 }
 
 /******** Helper functions ********/

@@ -699,8 +699,8 @@ def test_wgmma_ss_nt():
                         T.ptx.wgmma.noop_barrier(C_local[i])
                     
                     # do wgmma
-                    T.ptx.encode_matrix_descriptor(descA.data, A_smem.data, *A_encode_args)
-                    T.ptx.encode_matrix_descriptor(descB.data, B_smem.data, *B_encode_args)
+                    T.ptx.wgmma.encode_matrix_descriptor(descA.data, A_smem.data, *A_encode_args)
+                    T.ptx.wgmma.encode_matrix_descriptor(descB.data, B_smem.data, *B_encode_args)
                     T.ptx.wgmma.fence()
                     T.ptx.wgmma.mma_async.ss(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False, 
                                              descA[0], descB[0], *get_accum_list(C_local, C_elems))
@@ -864,7 +864,7 @@ def test_wgmma_rs_nt():
                     for i in T.serial(0, C_elems):
                         T.ptx.wgmma.noop_barrier(C_local[i]) 
                     # do wgmma
-                    T.ptx.encode_matrix_descriptor(descB.data, B_smem.data, *B_encode_args)
+                    T.ptx.wgmma.encode_matrix_descriptor(descB.data, B_smem.data, *B_encode_args)
                     T.ptx.wgmma.fence()
                     T.ptx.wgmma.mma_async.rs(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False,
                                              descB[0], *(get_A_list(A_local_b32, A_elems_b32) + get_accum_list(C_local, C_elems)))

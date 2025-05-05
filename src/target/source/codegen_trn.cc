@@ -209,8 +209,8 @@ void CodeGenTrainium::VisitStmt_(const AllocateNode* op) {
            << ", buffer=";
   }
   auto allocated_addr = op->annotations.Get(tir::attr::buffer_allocated_addr);
-  ICHECK(allocated_addr.defined());
-  Array<Integer> addr = Downcast<Array<Integer>>(allocated_addr.value());
+  ICHECK(allocated_addr.has_value());
+  Array<IntImm> addr = Downcast<Array<IntImm>>(allocated_addr.value());
   if (addr.empty()) {
     stream << GetStorageScopeStr(scope) << ")\n";
   } else {
@@ -563,18 +563,17 @@ void CodeGenTrainium::VisitStmt_(const DeclBufferNode* op) {
 }
 
 runtime::Module BuildTrainium(IRModule mod, Target target) {
-  using tvm::runtime::Registry;
   bool output_ssa = false;
 
   std::ostringstream source_maker;
   std::unordered_map<std::string, std::string> smap;
-  const auto* fTrainium_compile = Registry::Get("tvm_callback_Trainium_compile");
-  std::string fmt = fTrainium_compile ? "Trainiumlib" : "Trainium";
+  static auto fTrainium_compile = ffi::Function::GetGlobal("tvm_callback_Trainium_compile");
+  std::string fmt = fTrainium_compile.has_value() ? "Trainiumlib" : "Trainium";
 
   for (auto kv : mod->functions) {
     ICHECK(kv.second->IsInstance<PrimFuncNode>()) << "CodeGenTrainium: Can only take PrimFunc";
     auto global_symbol = kv.second->GetAttr<String>(tvm::attr::kGlobalSymbol);
-    ICHECK(global_symbol.defined());
+    ICHECK(global_symbol.has_value());
     std::string func_name = global_symbol.value();
     source_maker << "# Function: " << func_name << "\n";
     CodeGenTrainium cg(target);

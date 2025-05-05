@@ -1002,7 +1002,6 @@ class SBlock : public Stmt {
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
       Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt,
       ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
-      ffi::Array<BarrierArray> barrier_arrays = ffi::Array<BarrierArray>(),
       ffi::Array<Pipeline> pipelines = ffi::Array<Pipeline>());
 
   TVM_DLL explicit SBlock(ffi::String name_hint, Stmt body,

@@ -38,7 +38,7 @@ namespace tirp {
  * \param op The operator.
  * \param args The arguments.
  */
-using FArgSanitizer = runtime::TypedPackedFunc<void(tvm::Op, Array<ObjectRef>)>;
+using FArgSanitizer = ffi::TypedFunction<void(tvm::Op, Array<ObjectRef>)>;
 
 namespace callback {
 /*! \brief The buffers allocated by the operator. */
@@ -113,8 +113,7 @@ class ScheduleContext : public ObjectRef {
    */
   TVM_DLL ScheduleContext(Target target, ExecScope exec_scope,
                           Map<String, PrimExpr> launch_params = {},
-                          Map<Var, Range> var_range_map = {},
-                          bool alloc_only = false,
+                          Map<Var, Range> var_range_map = {}, bool alloc_only = false,
                           Map<String, ObjectRef> callbacks = {});
 
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ScheduleContext, ObjectRef, ScheduleContextNode);
@@ -126,7 +125,7 @@ class ScheduleContext : public ObjectRef {
  * \param args The arguments.
  * \param context The schedule context.
  */
-using FOpScheduler = runtime::TypedPackedFunc<Stmt(tvm::Op, Array<ObjectRef>, ScheduleContext)>;
+using FOpScheduler = ffi::TypedFunction<Stmt(tvm::Op, Array<ObjectRef>, ScheduleContext)>;
 
 /*!
  * \brief See pesudo code below:

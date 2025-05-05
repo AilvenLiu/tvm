@@ -2068,8 +2068,8 @@ def ptx_fetch_register(bits, reg_name):
     return call_intrin("int" + str(bits), "tir.ptx_fetch_register", bits, reg_name)
 
 
-def ptx_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
-    """TVM intrinsic to create shared memory descriptor for matrix
+def ptx_wgmma_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
+    """TVM intrinsic to create memory descriptor for wgmma instructions
 
     Parameters
     ----------
@@ -2088,7 +2088,7 @@ def ptx_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
     swizzle : int
         The swizzle value (CUtensorMapSwizzle_enum).
     """
-    return call_intrin("", "tir.ptx_encode_matrix_descriptor", desc, addr, ldo, sdo, swizzle)
+    return call_intrin("", "tir.ptx_wgmma_encode_matrix_descriptor", desc, addr, ldo, sdo, swizzle)
 
 
 def ptx_wgmma_noop_barrier(reg):
@@ -2304,6 +2304,833 @@ def ptx_setmaxnreg(inc: bool, reg_count):
         The register count.
     """
     return call_intrin("", "tir.ptx_setmaxnreg", inc, reg_count)
+
+
+def ptx_tcgen05_alloc(dst_ptr, n_cols, cta_group=1):
+    """TVM intrinsic to call tcgen05.alloc.cta_group.sync.aligned
+        Dynamically allocates the number of cols in tensor memory, and write
+        the address of allocated memory to shared memory.
+
+    Parameters
+    ----------
+    dst_ptr : Var
+        The pointer to the destination shared memory.
+
+    n_cols : int
+        The number of columns to allocate in tensor memory.
+        Must be a multiple of 32 and a power of 2, and within the range [32, 512].
+
+    cta_group : int
+        The number of CTA groups involved in the allocation.
+        If cta_group=1, one warp from CTA performs the allocation. Else, if cta_group=2,
+        one warp from each of the peer CTAs perform the allocation.
+    """
+    return call_intrin("", "tir.ptx_tcgen05_alloc", dst_ptr, n_cols, cta_group)
+
+
+def ptx_tcgen05_dealloc(taddr, n_cols, cta_group=1):
+    """TVM intrinsic to call tcgen05.dealloc.cta_group.sync.aligned
+        Deallocates the tensor memory specified by the tensor memory address taddr.
+
+    Parameters
+    ----------
+    taddr : PrimExpr
+        The address of previously allocated tensor memory, should be uint32_t.
+
+    n_cols : int
+        The number of columns to deallocate in tensor memory.
+        Must be a multiple of 32 and a power of 2, and within the range [32, 512].
+
+    cta_group : int
+        The number of CTA groups involved in the deallocation.
+        If cta_group=1, one warp from CTA performs the deallocation. Else, if cta_group=2,
+        one warp from each of the peer CTAs perform the deallocation.
+    """
+    return call_intrin("", "tir.ptx_tcgen05_dealloc", taddr, n_cols, cta_group)
+
+
+def ptx_tcgen05_relinquish_alloc_permit(cta_group=1):
+    """TVM intrinsic to call tcgen05.relinquish_alloc_permit.cta_group.sync.aligned
+        The CTA of the executing thread is relinquishing the right to allocate
+        Tensor Memory after calling this op.
+
+    Parameters
+    ----------
+    cta_group : int
+        The number of CTA groups involved in relinquishing.
+        If cta_group=1, one warp from CTA performs the relinquishing. Else, if cta_group=2,
+        one warp from each of the peer CTAs perform the relinquishing.
+    """
+    return call_intrin("", "tir.ptx_tcgen05_relinquish_alloc_permit", cta_group)
+
+
+def ptx_tcgen05_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
+    """TVM intrinsic to create memory descriptor for tcgen05 instructions
+
+    Parameters
+    ----------
+    desc : PrimExpr
+        The pointer to the shared memory descriptor.
+
+    addr : PrimExpr
+        The address of the matrix.
+
+    ldo : PrimExpr
+        The leading dimension offset.
+
+    sdo : PrimExpr
+        The stride dimension offset.
+
+    swizzle : int
+        The swizzle value (CUtensorMapSwizzle_enum).
+    """
+    return call_intrin(
+        "", "tir.ptx_tcgen05_encode_matrix_descriptor", desc, addr, ldo, sdo, swizzle
+    )
+
+
+def ptx_tcgen05_encode_instr_descriptor(
+    desc,
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    M,
+    N,
+    K,
+    trans_a,
+    trans_b,
+    n_cta_groups=1,
+    neg_a=False,
+    neg_b=False,
+    sat_d=False,
+    is_sparse=False,
+):
+    """TVM intrinsic to create instruction descriptor for tcgen05 MMA without block scaling
+
+    Parameters
+    ----------
+    desc : PrimExpr
+        The pointer to the instruction descriptor.
+
+    d_dtype : str
+        The datatype of resultant matrix D.
+
+    a_dtype : str
+        The datatype of multiplicand matrix A.
+
+    b_dtype : str
+        The datatype of multiplicand matrix B.
+
+    M : int
+        The size of non-reduction dimension of Matrix A.
+
+    N : int
+        The size of non-reduction dimension of Matrix B.
+
+    K : int
+        The size of reduction dimension of Matrix A/B.
+
+    trans_a : bool
+        Whether the multiplicand matrix A is transposed.
+        True for M/N major, False for K major.
+
+    trans_b : bool
+        Whether the multiplicand matrix B is transposed.
+        True for M/N major, False for K major.
+
+    n_cta_groups : int
+        The number of CTA groups involved in the MMA operation.
+
+    neg_a : bool
+        Whether to negate the multiplicand matrix A.
+
+    neg_b : bool
+        Whether to negate the multiplicand matrix B.
+
+    sat_d : bool
+        Whether to saturate the resultant matrix D.
+
+    is_sparse : bool
+        Whether the MMA operation is sparse.
+    """
+    return call_intrin(
+        "",
+        "tir.ptx_tcgen05_encode_instr_descriptor",
+        desc,
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        M,
+        N,
+        K,
+        trans_a,
+        trans_b,
+        n_cta_groups,
+        neg_a,
+        neg_b,
+        sat_d,
+        is_sparse,
+    )
+
+
+def ptx_tcgen05_encode_instr_descriptor_block_scaled(
+    desc,
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    sfa_dtype,
+    sfb_dtype,
+    sfa_tmem_addr,
+    sfb_tmem_addr,
+    M,
+    N,
+    K,
+    trans_a,
+    trans_b,
+    n_cta_groups=1,
+    neg_a=False,
+    neg_b=False,
+    is_sparse=False,
+):
+    """TVM intrinsic to create instruction descriptor for tcgen05 MMA with block scaling
+
+    Parameters
+    ----------
+    desc : PrimExpr
+        The pointer to the instruction descriptor.
+
+    d_dtype : str
+        The datatype of resultant matrix D.
+
+    a_dtype : str
+        The datatype of multiplicand matrix A.
+
+    b_dtype : str
+        The datatype of multiplicand matrix B.
+
+    sfa_dtype : str
+        The datatype of scale factor matrix A.
+
+    sfb_dtype : str
+        The datatype of scale factor matrix B.
+
+    sfa_tmem_addr : PrimExpr
+        The address of the scale factor matrix A in tensor memory, should be uint32_t.
+
+    sfb_tmem_addr : PrimExpr
+        The address of the scale factor matrix B in tensor memory, should be uint32_t.
+
+    M : int
+        The size of non-reduction dimension of Matrix A.
+
+    N : int
+        The size of non-reduction dimension of Matrix B.
+
+    K : int
+        The size of reduction dimension of Matrix A/B.
+
+    trans_a : bool
+        Whether the multiplicand matrix A is transposed.
+        True for M/N major, False for K major.
+
+    trans_b : bool
+        Whether the multiplicand matrix B is transposed.
+        True for M/N major, False for K major.
+
+    n_cta_groups : int
+        The number of CTA groups involved in the MMA operation.
+
+    neg_a : bool
+        Whether to negate the multiplicand matrix A.
+
+    neg_b : bool
+        Whether to negate the multiplicand matrix B.
+
+    is_sparse : bool
+        Whether the MMA operation is sparse.
+    """
+    return call_intrin(
+        "",
+        "tir.ptx_tcgen05_encode_instr_descriptor_block_scaled",
+        desc,
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        sfa_dtype,
+        sfb_dtype,
+        sfa_tmem_addr,
+        sfb_tmem_addr,
+        M,
+        N,
+        K,
+        trans_a,
+        trans_b,
+        n_cta_groups,
+        neg_a,
+        neg_b,
+        is_sparse,
+    )
+
+
+def ptx_tcgen05_mma(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d=True,
+    scale_input_d=0,
+    *disable_output_lane,
+):
+    """TVM intrinsic to call tcgen05.mma.cta_group.kind without block scaling.
+
+    Parameters
+    ----------
+    d_dtype : str
+        The datatype of resultant matrix D.
+
+    a_dtype : str
+        The datatype of multiplicand matrix A.
+
+    b_dtype : str
+        The datatype of multiplicand matrix B.
+
+    d_tmem_addr : PrimExpr
+        The address of the resultant matrix D in tensor memory, should be uint32_t.
+
+    a_operand : PrimExpr
+        Either the matrix descriptor of multiplicand matrix A in shared memory,
+        or the address of the multiplicand matrix A in tensor memory (uint32_t).
+
+    b_desc : PrimExpr
+        The matrix descriptor of multiplicand matrix B in shared memory.
+
+    i_desc : PrimExpr
+        The instruction descriptor of the MMA operation.
+
+    use_a_tmem : bool
+        Whether the multiplicand matrix A is in tensor memory.
+
+    cta_group : int
+        The number of CTA groups involved in the MMA operation.
+
+    enable_input_d : bool
+        Whether to accum results into the resultant matrix D or not.
+        If enabled, D = A*B + D; else, D = A*B.
+
+    scale_input_d : int
+        The optional scaling factor to scale input matrix D.
+        D = A*B+D * (2 ^ - scale-input-d)
+
+    disable_output_lane : list
+        The lanes that should not be updated in the resultant matrix D.
+    """
+
+    # default value for disable_output_lane
+    if len(disable_output_lane) == 0:
+        if cta_group == 1:
+            disable_output_lane = [0, 0, 0, 0]
+        elif cta_group == 2:
+            disable_output_lane = [0, 0, 0, 0, 0, 0, 0, 0]
+        else:
+            raise ValueError("Number of CTA groups in ptx_tcgen05_mma is invalid, must be 1 or 2.")
+
+    return call_intrin(
+        "",
+        "tir.ptx_tcgen05_mma",
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        d_tmem_addr,
+        a_operand,
+        b_desc,
+        i_desc,
+        use_a_tmem,
+        cta_group,
+        enable_input_d,
+        scale_input_d,
+        *disable_output_lane,
+    )
+
+
+def ptx_tcgen05_mma_block_scale(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    sfa_dtype,
+    sfb_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    sfa_tmem_addr,
+    sfb_tmem_addr,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d=True,
+):
+    """TVM intrinsic to call tcgen05.mma.cta_group.kind.block_scale
+        Performs matrix multiplication with block scaling:
+        (A * scale_A)  * (B * scale_B) + D
+
+    Parameters
+    ----------
+    d_dtype : str
+        The datatype of resultant matrix D.
+
+    a_dtype : str
+        The datatype of multiplicand matrix A.
+
+    b_dtype : str
+        The datatype of multiplicand matrix B.
+
+    sfa_dtype : str
+        The datatype of scale factor matrix A.
+
+    sfb_dtype : str
+        The datatype of scale factor matrix B.
+
+    d_tmem_addr : PrimExpr
+        The address of the resultant matrix D in tensor memory, should be uint32_t.
+
+    a_operand : PrimExpr
+        Either the matrix descriptor of multiplicand matrix A in shared memory,
+        or the address of the multiplicand matrix A in tensor memory (uint32_t).
+
+    b_desc : PrimExpr
+        The matrix descriptor of multiplicand matrix B in shared memory.
+
+    sfa_tmem_addr : PrimExpr
+        The address of the scale factor matrix A in tensor memory, should be uint32_t.
+
+    sfb_tmem_addr : PrimExpr
+        The address of the scale factor matrix B in tensor memory, should be uint32_t.
+
+    i_desc : PrimExpr
+        The instruction descriptor of the MMA operation.
+
+    use_a_tmem : bool
+        Whether the multiplicand matrix A is in tensor memory.
+
+    cta_group : int
+        The number of CTA groups involved in the MMA operation.
+
+    enable_input_d : bool
+        Whether to accum results into the resultant matrix D or not.
+    """
+
+    return call_intrin(
+        "",
+        "tir.ptx_tcgen05_mma_block_scale",
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        sfa_dtype,
+        sfb_dtype,
+        d_tmem_addr,
+        a_operand,
+        b_desc,
+        sfa_tmem_addr,
+        sfb_tmem_addr,
+        i_desc,
+        use_a_tmem,
+        cta_group,
+        enable_input_d,
+    )
+
+
+def ptx_tcgen05_mma_sp(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    sp_tmem_addr,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d=True,
+    scale_input_d=0,
+    *disable_output_lane,
+):
+    """TVM intrinsic to call tcgen05.mma.sp.cta_group.kind without block scaling.
+
+    Parameters
+    ----------
+    d_dtype : str
+        The datatype of resultant matrix D.
+
+    a_dtype : str
+        The datatype of multiplicand matrix A.
+
+    b_dtype : str
+        The datatype of multiplicand matrix B.
+
+    d_tmem_addr : PrimExpr
+        The address of the resultant matrix D in tensor memory, should be uint32_t.
+
+    a_operand : PrimExpr
+        Either the matrix descriptor of multiplicand matrix A in shared memory,
+        or the address of the multiplicand matrix A in tensor memory (uint32_t).
+
+    b_desc : PrimExpr
+        The matrix descriptor of multiplicand matrix B in shared memory.
+
+    sp_tmem_addr : PrimExpr
+        The address of the metadata of sparse matrix in tensor memory, should be uint32_t.
+
+    i_desc : PrimExpr
+        The instruction descriptor of the MMA operation.
+
+    use_a_tmem : bool
+        Whether the multiplicand matrix A is in tensor memory.
+
+    cta_group : int
+        The number of CTA groups involved in the MMA operation.
+
+    enable_input_d : bool
+        Whether to accum results into the resultant matrix D or not.
+        If enabled, D = A*B + D; else, D = A*B.
+
+    scale_input_d : int
+        The optional scaling factor to scale input matrix D.
+        D = A*B+D * (2 ^ - scale-input-d)
+
+    disable_output_lane : list
+        The lanes that should not be updated in the resultant matrix D.
+    """
+
+    # default value for disable_output_lane
+    if len(disable_output_lane) == 0:
+        if cta_group == 1:
+            disable_output_lane = [0, 0, 0, 0]
+        elif cta_group == 2:
+            disable_output_lane = [0, 0, 0, 0, 0, 0, 0, 0]
+        else:
+            raise ValueError(
+                "Number of CTA groups in ptx_tcgen05_mma_sp is invalid, must be 1 or 2."
+            )
+
+    return call_intrin(
+        "",
+        "tir.ptx_tcgen05_mma_sp",
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        d_tmem_addr,
+        a_operand,
+        b_desc,
+        sp_tmem_addr,
+        i_desc,
+        use_a_tmem,
+        cta_group,
+        enable_input_d,
+        scale_input_d,
+        *disable_output_lane,
+    )
+
+
+def ptx_tcgen05_mma_sp_block_scale(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    sfa_dtype,
+    sfb_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    sfa_tmem_addr,
+    sfb_tmem_addr,
+    sp_tmem_addr,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d=True,
+):
+    """TVM intrinsic to call tcgen05.mma.sp.cta_group.kind.block_scale
+        Performs sparse matrix multiplication with block scaling:
+        (A * scale_A)  * (B * scale_B) + D
+
+    Parameters
+    ----------
+    d_dtype : str
+        The datatype of resultant matrix D.
+
+    a_dtype : str
+        The datatype of multiplicand matrix A.
+
+    b_dtype : str
+        The datatype of multiplicand matrix B.
+
+    sfa_dtype : str
+        The datatype of scale factor matrix A.
+
+    sfb_dtype : str
+        The datatype of scale factor matrix B.
+
+    d_tmem_addr : PrimExpr
+        The address of the resultant matrix D in tensor memory, should be uint32_t.
+
+    a_operand : PrimExpr
+        Either the matrix descriptor of multiplicand matrix A in shared memory,
+        or the address of the multiplicand matrix A in tensor memory (uint32_t).
+
+    b_desc : PrimExpr
+        The matrix descriptor of multiplicand matrix B in shared memory.
+
+    sfa_tmem_addr : PrimExpr
+        The address of the scale factor matrix A in tensor memory, should be uint32_t.
+
+    sfb_tmem_addr : PrimExpr
+        The address of the scale factor matrix B in tensor memory, should be uint32_t.
+
+    sp_tmem_addr : PrimExpr
+        The address of the metadata of sparse matrix in tensor memory, should be uint32_t.
+
+    i_desc : PrimExpr
+        The instruction descriptor of the MMA operation.
+
+    use_a_tmem : bool
+        Whether the multiplicand matrix A is in tensor memory.
+
+    cta_group : int
+        The number of CTA groups involved in the MMA operation.
+
+    enable_input_d : bool
+        Whether to accum results into the resultant matrix D or not.
+    """
+
+    return call_intrin(
+        "",
+        "tir.ptx_tcgen05_mma_sp_block_scale",
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        sfa_dtype,
+        sfb_dtype,
+        d_tmem_addr,
+        a_operand,
+        b_desc,
+        sfa_tmem_addr,
+        sfb_tmem_addr,
+        sp_tmem_addr,
+        i_desc,
+        use_a_tmem,
+        cta_group,
+        enable_input_d,
+    )
+
+
+def ptx_tcgen05_fence_before_thread_sync():
+    """TVM intrinsic to call tcgen05.fence::before_thread_sync
+    Orders all prior asynchronous tcgen05 operations relative to subsequent operations.
+    """
+    return call_intrin("", "tir.ptx_tcgen05_fence_before_thread_sync")
+
+
+def ptx_tcgen05_fence_after_thread_sync():
+    """TVM intrinsic to call tcgen05.fence::after_thread_sync
+    Orders all subsequent asynchronous tcgen05 operations relative to previous operations.
+    """
+    return call_intrin("", "tir.ptx_tcgen05_fence_after_thread_sync")
+
+
+def ptx_tcgen05_cp(
+    dst_addr,
+    row_offset,
+    col_offset,
+    src_desc,
+    shape,
+    dst_dtype,
+    src_dtype,
+    cta_group=1,
+    multicast="",
+):
+    """TVM intrinsic to call tcgen05.cp.cta_group
+        Asynchronous copy from shared memory to tensor memory.
+
+    Parameters
+    ----------
+    dst_addr : PrimExpr
+        The address of the destination in tensor memory, should be uint32_t.
+
+    row_offset : PrimExpr
+        The row offset of the source matrix in tensor memory.
+        Should be a multiple of 32.
+
+    col_offset : PrimExpr
+        The column offset of the source matrix in tensor memory.
+
+    src_desc : PrimExpr
+        The matrix descriptor of the source in shared memory.
+
+    shape : str
+        The data movement shape, should be lane x size, where lanes indicates the
+        number of rows in Tensor Memory, and size indicates the amount of data in
+        bits across the columns in Tensor Memory.
+
+    dst_dtype : str
+        The datatype of the destination.
+
+    src_dtype : str
+        The datatype of the source.
+
+    cta_group : int
+        The number of CTA groups involved in the copy operation.
+
+    multicast : str
+        Required by some shapes (64x128b, 32x128b).
+        Specify how to multicast the data being copied across warps.
+    """
+
+    return call_intrin(
+        "",
+        "tir.ptx_tcgen05_cp",
+        dst_addr,
+        row_offset,
+        col_offset,
+        src_desc,
+        shape,
+        dst_dtype,
+        src_dtype,
+        cta_group,
+        multicast,
+    )
+
+
+def ptx_tcgen05_shift(taddr, cta_group=1):
+    """TVM intrinsic to call tcgen05.shift.cta_group.down
+        Asynchronously shift down the rows of the matrix in Tensor Memory for a warp.
+
+    Parameters
+    ----------
+    taddr : PrimExpr
+        The address of matrix in tensor memory, should be uint32_t.
+
+    cta_group : int
+        The number of CTA groups involved in the shift.
+        If cta_group=1, shift operation is performed in the Tensor Memory of current CTA.
+        Else, shift operation is performed in the Tensor Memory of both the current CTA and
+        the peer CTA.
+    """
+    return call_intrin("", "tir.ptx_tcgen05_shift", taddr, cta_group)
+
+
+def ptx_tcgen05_ld(src_addr, row_offset, col_offset, shape, num, pack=False, *regs):
+    """TVM intrinsic to call tcgen05.ld.sync.aligned
+        Asynchronous collective load from tensor memory into registers.
+
+    Parameters
+    ----------
+    src_addr : PrimExpr
+        The address of the source matrix in tensor memory, should be uint32_t.
+
+    row_offset : PrimExpr
+        The row offset of the source matrix in tensor memory.
+        Should be a multiple of 32.
+
+    col_offset : PrimExpr
+        The column offset of the source matrix in tensor memory.
+
+    shape : str
+        The data movement shape, should be lane x size, where lanes indicates the
+        number of rows in Tensor Memory, and size indicates the amount of data in
+        bits across the columns in Tensor Memory.
+
+    num : int
+        The repeat factor along the columns of tensor memory.
+
+    pack : bool
+        Whether to pack two 16-bit chunks into a single 32-bit chunk in the register.
+
+    regs : list
+        The destination registers to copy into.
+    """
+    return call_intrin(
+        "", "tir.ptx_tcgen05_ld", src_addr, row_offset, col_offset, shape, num, pack, *regs
+    )
+
+
+def ptx_tcgen05_st(dst_addr, row_offset, col_offset, shape, num, unpack=False, *regs):
+    """TVM intrinsic to call tcgen05.st.sync.aligned
+        Asynchronous collective store to tensor memory from registers.
+
+    Parameters
+    ----------
+    dst_addr : PrimExpr
+        The address of the destination matrix in tensor memory, should be uint32_t.
+
+    row_offset : PrimExpr
+        The row offset of the destination matrix in tensor memory.
+        Should be a multiple of 32.
+
+    col_offset : PrimExpr
+        The column offset of the destination matrix in tensor memory.
+
+    shape : str
+        The data movement shape, should be lane x size, where lanes indicates the
+        number of rows in Tensor Memory, and size indicates the amount of data in
+        bits across the columns in Tensor Memory.
+
+    num : int
+        The repeat factor along the columns of tensor memory.
+
+    unpack : bool
+        Whether to unpack a single 32-bit chunk into two 16-bit chunks in the register.
+
+    regs : list
+        The source registers to copy from.
+    """
+    return call_intrin(
+        "", "tir.ptx_tcgen05_st", dst_addr, row_offset, col_offset, shape, num, unpack, *regs
+    )
+
+
+def ptx_tcgen05_wait_ld():
+    """TVM intrinsic to call tcgen05.wait::ld.sync.aligned
+    Wait for the completion of all prior async tcgen05.ld operations.
+    """
+    return call_intrin("", "tir.ptx_tcgen05_wait_ld")
+
+
+def ptx_tcgen05_wait_st():
+    """TVM intrinsic to call tcgen05.wait::st.sync.aligned
+    Wait for the completion of all prior async tcgen05.st operations.
+    """
+    return call_intrin("", "tir.ptx_tcgen05_wait_st")
+
+
+def ptx_tcgen05_commit(bar, cta_group=1, cta_mask=0):
+    """TVM intrinsic to call tcgen05.commit.cta_group
+
+    Parameters
+    ----------
+    bar : PrimExpr
+        The pointer to mbarrier variable.
+
+    cta_group: int
+        The number of CTA groups involved in previous tcgen05 operations.
+
+    cta_mask : int
+        The mask of the CTAs in the cluster, used for multicast.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "",
+        "tir.ptx_tcgen05_commit",
+        bar,
+        cta_group,
+        cta_mask,
+    )
 
 
 def make_filled_simdgroup_matrix(
@@ -4477,7 +5304,9 @@ def timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
     )
 
 
-def timer_start_cuda(event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride):
+def timer_start_cuda(
+    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride
+):
     """TVM intrinsic for starting the timer for profiling a specific event, and storing profiling result in a buffer.
 
     Parameters
@@ -4515,7 +5344,9 @@ def timer_start_cuda(event_type, profiler_buffer, profiler_tag, profiler_write_o
     )
 
 
-def timer_end_cuda(event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride):
+def timer_end_cuda(
+    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride
+):
     """TVM intrinsic for ending the timer for profiling a specific event, and storing profiling result in a buffer.
 
     Parameters
@@ -5025,13 +5856,14 @@ def nki_affine_select(result, pred, true_value, false_value):
     """
     return call_intrin("", "tir.nki_affine_select", result, pred, true_value, false_value)
 
+
 def cuda_atomic_add(res_addr, value):
     """TVM intrinsic to call cuda atomic add instruction
 
     Parameters
     ----------
     res_addr : PrimExpr
-        The result address.  
+        The result address.
 
     value: PrimExpr
         The value to add.
@@ -5043,6 +5875,7 @@ def cuda_atomic_add(res_addr, value):
     """
     return call_intrin("", "tir.cuda_atomic_add", res_addr, value)
 
+
 def cuda_thread_fence():
     """TVM intrinsic to call cuda thread fence instruction
 
@@ -5052,6 +5885,7 @@ def cuda_thread_fence():
         The call expression.
     """
     return call_intrin("", "tir.cuda_thread_fence")
+
 
 def cuda_syncthreads_and(cond):
     """TVM intrinsic to call cuda syncthreads_and instruction
@@ -5068,6 +5902,7 @@ def cuda_syncthreads_and(cond):
     """
     return call_intrin("int64", "tir.cuda_syncthreads_and", cond)
 
+
 def cuda_nano_sleep(time):
     """TVM intrinsic to call cuda nano sleep instruction
 
@@ -5082,6 +5917,7 @@ def cuda_nano_sleep(time):
         The call expression.
     """
     return call_intrin("", "tir.cuda_nano_sleep", time)
+
 
 def ptx_ld_global_acquire(res, addr):
     """TVM intrinsic to call ptx ld.global.acquire instruction

@@ -244,10 +244,9 @@ class TIRpOpScheduler : public StmtExprMutator {
 
   Stmt VisitStmt_(const tirp::OpCallNode* op) final {
     tirp::ScheduleContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_);
-    static auto f_op_scheduler_ = tvm::runtime::Registry::Get("tirp.f_op_scheduler");
-    ICHECK(f_op_scheduler_ != nullptr) << "Internal Error: tirp.f_op_scheduler is not registered";
-    PrimFunc res;
-    res = (*f_op_scheduler_)(GetRef<tirp::OpCall>(op), sctx);
+    static auto f_op_scheduler_ = ffi::Function::GetGlobal("tirp.f_op_scheduler");
+    ICHECK(f_op_scheduler_.has_value()) << "Internal Error: tirp.f_op_scheduler is not registered";
+    PrimFunc res = f_op_scheduler_.value()(GetRef<tirp::OpCall>(op), sctx).cast<PrimFunc>();
     if (res.defined()) {
       // Implmentation found, handle callbacks
       if (auto bufs = sctx->callbacks.Get(tirp::callback::kPrivateAlloc)) {
@@ -272,7 +271,7 @@ class TIRpOpScheduler : public StmtExprMutator {
   Map<Var, Range> var_range_map_;
   const Target& target_;
   std::vector<ExecScope> exec_scope_stack_;
-  std::unordered_map<String, PrimExpr, ObjectHash, ObjectEqual> launch_params_;
+  std::unordered_map<String, PrimExpr> launch_params_;
   std::vector<Buffer> alloc_buffers_;
   std::vector<Stmt> device_init_stmts_;
   std::vector<Stmt> host_init_stmts_;
@@ -342,7 +341,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   Stmt VisitStmt_(const AttrStmtNode* op) final {
     if (op->attr_key == tirx::attr::thread_extent) {
       auto iv = op->node.as<IterVar>();
-      ICHECK(iv.defined()) << "Internal Error: thread_extent should annotate an IterVar";
+      ICHECK(iv.has_value()) << "Internal Error: thread_extent should annotate an IterVar";
       launch_params_[iv.value()->thread_tag] = iv.value();
     }
     return StmtExprMutator::VisitStmt_(op);
@@ -376,7 +375,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
         Stmt result = new_seq[new_seq.size() - 1];
         for (int i = new_seq.size() - 2; i >= 0; i--) {
           auto if_then = new_seq[i].as<IfThenElse>();
-          CHECK(if_then.defined())
+          CHECK(if_then.has_value())
               << "TIRpError: Block with scope partition has invalid body " << op->body;
           result = IfThenElse(if_then.value()->condition, if_then.value()->then_case, result);
         }
@@ -388,13 +387,13 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     ICHECK(op->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
     auto exec_scope = op->exec_scope.value();
     auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
-    if (!scope_slice_opt.defined()) {
+    if (!scope_slice_opt.has_value()) {
       // No scope slice, return the block as is
       return std::move(StmtExprMutator::VisitStmt_(op));
     }
     auto scope_slice = scope_slice_opt.value();
     auto scope = ScopePair(scope_slice->parent, scope_slice->name);
-    int out_dim = scope_slice->slice.as<PrimExpr>().defined()
+    int out_dim = scope_slice->slice.as<PrimExpr>().has_value()
                       ? 1
                       : scope_slice->slice.as<Array<Range>>().value().size();
     auto resolved = ScopeIdResolveTable::Resolve(scope, scope_slice->extents, out_dim,
@@ -609,7 +608,7 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     for (size_t i = 0; i < flattened->shape.size(); ++i) {
       writer->shape.Set(i, analyzer_->canonical_simplify(flattened->shape[i]));
     }
-    writer->layout = NullOpt;
+    writer->layout = std::nullopt;
 
     buffer_remap_[buf] = flattened;
     return flattened;

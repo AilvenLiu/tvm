@@ -53,10 +53,10 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     if (op->annotations.count(attr::tirp_scope_partition)) {
       // scope partition is enabled, check if body is a list of BlockRealize
       if (auto seq = op->body.as<SeqStmt>()) {
-        Optional<ExecScopeSlice> scope_slice_chk = NullOpt;
+        Optional<ExecScopeSlice> scope_slice_chk = std::nullopt;
         for (const auto& stmt : seq.value()->seq) {
           auto block_realize = stmt.as<BlockRealize>();
-          if (!block_realize.defined()) {
+          if (!block_realize.has_value()) {
             Verify(false) << "TIRpError: Block with scope partition at " << path
                           << " has invalid body " << op->body;
           }
@@ -65,9 +65,10 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
           Verify(block->exec_scope.defined()) << "TIRpError: Block with scope partition at " << path
                                               << " has invalid body " << op->body;
           auto scope_slice = block->exec_scope.value().as<ExecScopeSlice>();
-          Verify(scope_slice.defined()) << "TIRpError: Block with scope partition at " << path
-                                        << " has invalid exec_scope " << block->exec_scope.value();
-          if (scope_slice_chk.defined()) {
+          Verify(scope_slice.has_value())
+              << "TIRpError: Block with scope partition at " << path << " has invalid exec_scope "
+              << block->exec_scope.value();
+          if (scope_slice_chk.has_value()) {
             Verify(scope_slice_chk.value()->name == scope_slice.value()->name &&
                    scope_slice_chk.value()->parent == scope_slice.value()->parent)
                 << "TIRpError: Block with scope partition at " << path << " has invalid exec_scope "
@@ -183,7 +184,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
         << "TIRpError: OpCall at " << path << " has unknown TIR+ op " << op->op;
   }
 
-  Optional<ExecScope> cur_roof_ = NullOpt;
+  Optional<ExecScope> cur_roof_ = std::nullopt;
   std::vector<ExecScope> scope_stack_;
   std::unordered_map<std::string, std::vector<Array<Range>>> scope_slices_;
   std::unordered_map<std::string, PrimExpr> scope_select_cond_;

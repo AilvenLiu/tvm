@@ -430,11 +430,11 @@ TVM_DLL const Op& mma_store();
 TVM_DLL const Op& mma_fill();
 
 /*!
- * \brief tvm intrinsic to encode shared memory matrix descriptor.
+ * \brief tvm intrinsic to encode matrix descriptor for wgmma instructions.
  *
- * ptx_encode_matrix_descriptor(PrimExpr ptr, PrimExpr ldo, PrimExpr sdo, int swizzle)
+ * ptx_wgmma_encode_matrix_descriptor(PrimExpr ptr, PrimExpr ldo, PrimExpr sdo, int swizzle)
  */
-TVM_DLL const Op& ptx_encode_matrix_descriptor();
+TVM_DLL const Op& ptx_wgmma_encode_matrix_descriptor();
 
 /*!
  * \brief tvm intrinsic to call "" : "+r"(reg) :: "memory"
@@ -498,6 +498,144 @@ TVM_DLL const Op& ptx_setmaxnreg();
  * ptx_ld_global_acquire()
  */
 TVM_DLL const Op& ptx_ld_global_acquire();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.alloc.cta_group.sync.aligned;
+ *
+ * ptx_tcgen05_alloc(Var dst_ptr, int n_cols, int cta_group)
+ */
+TVM_DLL const Op& ptx_tcgen05_alloc();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.dealloc.cta_group.sync.aligned;
+ *
+ * ptx_tcgen05_dealloc(uint32_t taddr, int n_cols, int cta_group)
+ */
+TVM_DLL const Op& ptx_tcgen05_dealloc();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.relinquish_alloc_permit.cta_group.sync.aligned;
+ *
+ * ptx_tcgen05_relinquish_alloc_permit(int cta_group)
+ */
+TVM_DLL const Op& ptx_tcgen05_relinquish_alloc_permit();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.fence::before_thread_sync;
+ *
+ * ptx_tcgen05_fence_before_thread_sync()
+ */
+TVM_DLL const Op& ptx_tcgen05_fence_before_thread_sync();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.fence::after_thread_sync;
+ *
+ * ptx_tcgen05_fence_after_thread_sync()
+ */
+TVM_DLL const Op& ptx_tcgen05_fence_after_thread_sync();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.ld.sync.aligned;
+ *
+ * ptx_tcgen05_ld()
+ */
+TVM_DLL const Op& ptx_tcgen05_ld();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.st.sync.aligned;
+ *
+ * ptx_tcgen05_st()
+ */
+TVM_DLL const Op& ptx_tcgen05_st();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.wait::ld.sync.aligned;
+ *
+ * ptx_tcgen05_wait_ld()
+ */
+TVM_DLL const Op& ptx_tcgen05_wait_ld();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.wait::st.sync.aligned;
+ *
+ * ptx_tcgen05_wait_st()
+ */
+TVM_DLL const Op& ptx_tcgen05_wait_st();
+
+/*!
+ * \brief tvm intrinsic to encode matrix descriptor for tcgen05 instructions.
+ *
+ * ptx_tcgen05_encode_matrix_descriptor(PrimExpr ptr, PrimExpr ldo, PrimExpr sdo, int swizzle)
+ */
+TVM_DLL const Op& ptx_tcgen05_encode_matrix_descriptor();
+
+/*!
+ * \brief tvm intrinsic to encode instruction descriptor for tcgen05 MMA.
+ *
+ * ptx_tcgen05_encode_instr_descriptor(PrimExpr desc, string d_dtype, string a_dtype, string
+ * b_dtype, int M, int N, int K, bool trans_a, bool trans_b, int n_cta_groups, bool neg_a, bool
+ * neg_b, bool sat_d, bool is_sparse)
+ */
+TVM_DLL const Op& ptx_tcgen05_encode_instr_descriptor();
+
+/*!
+ * \brief tvm intrinsic to encode instruction descriptor for tcgen05 MMA block scaled.
+ *
+ * ptx_tcgen05_encode_instr_descriptor_block_scaled(PrimExpr desc, string d_dtype, string a_dtype,
+ * string b_dtype, string sfa_dtype, string stb_dtype, string sfa_tmem_addr, string sfb_tmem_addr,
+ * int M, int N, int K, bool trans_a, bool trans_b, int n_cta_groups, bool neg_a, bool neg_b, bool
+ * is_sparse)
+ */
+TVM_DLL const Op& ptx_tcgen05_encode_instr_descriptor_block_scaled();
+
+/*!
+ * \brief tvm intrinsic to call tcgen05.mma.cta_group.kind without block scaling.
+ *
+ * ptx_tcgen05_mma()
+ */
+TVM_DLL const Op& ptx_tcgen05_mma();
+
+/*!
+ * \brief tvm intrinsic to call tcgen05.mma.cta_group.kind.block_scale{.scale_vec_size}
+ *
+ * ptx_tcgen05_mma_block_scale()
+ */
+TVM_DLL const Op& ptx_tcgen05_mma_block_scale();
+
+/*!
+ * \brief tvm intrinsic to call tcgen05.mma.sp.cta_group.kind without block scaling.
+ *
+ * ptx_tcgen05_mma_sp()
+ */
+TVM_DLL const Op& ptx_tcgen05_mma_sp();
+
+/*!
+ * \brief tvm intrinsic to call tcgen05.mma.sp.cta_group.kind.block_scale{.scale_vec_size}
+ *
+ * ptx_tcgen05_mma_sp_block_scale()
+ */
+TVM_DLL const Op& ptx_tcgen05_mma_sp_block_scale();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.commit.cta_group
+ *
+ * ptx_tcgen05_commit()
+ */
+TVM_DLL const Op& ptx_tcgen05_commit();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.cp.cta_group
+ *
+ * ptx_tcgen05_cp()
+ */
+TVM_DLL const Op& ptx_tcgen05_cp();
+
+/*!
+ * \brief tvm instrinsics to call tcgen05.shift.cta_group.down
+ *
+ * ptx_tcgen05_shift()
+ */
+TVM_DLL const Op& ptx_tcgen05_shift();
 
 }  // namespace builtin
 }  // namespace tir

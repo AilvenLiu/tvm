@@ -65,7 +65,8 @@ class TLayoutNode : public Object {
    * \param tile_layout The tiled layout to check
    * \param tiled_shape The shape of the tiled layout
    * \param inner_shape The shape of the inner layout
-   * \return The outer layout if this layout is the inner layout of tile_layout, NullOpt otherwise
+   * \return The outer layout if this layout is the inner layout of tile_layout, std::nullopt
+   * otherwise
    */
   virtual Optional<TileLayout> IsTileInner(const TLayout& tile_layout,
                                            const Array<PrimExpr>& tiled_shape,
@@ -75,7 +76,8 @@ class TLayoutNode : public Object {
    * \param tile_layout The tiled layout to check
    * \param tiled_shape The shape of the tiled layout
    * \param outer_shape The shape of the outer layout
-   * \return The inner layout if this layout is the outer layout of tile_layout, NullOpt otherwise
+   * \return The inner layout if this layout is the outer layout of tile_layout, std::nullopt
+   * otherwise
    */
   virtual Optional<TLayout> IsTileOuter(const TLayout& tile_layout,
                                         const Array<PrimExpr>& tiled_shape,
@@ -170,8 +172,8 @@ class DeviceIterAttrNode : public Object {
 class DeviceIterAttr : public ObjectRef {
  public:
   TVM_DLL explicit DeviceIterAttr(PrimExpr extent, ScopeIdType type,
-                                  Optional<PrimExpr> bound = NullOpt,
-                                  Optional<PrimExpr> owner = NullOpt);
+                                  Optional<PrimExpr> bound = std::nullopt,
+                                  Optional<PrimExpr> owner = std::nullopt);
 
   /*! \brief Create a replicate attribute */
   static DeviceIterAttr Replicate(PrimExpr extent);
@@ -273,7 +275,8 @@ class TileLayout : public TLayout {
  public:
   TVM_DLL explicit TileLayout(Array<DataIterAttr> data_iter_array,
                               Array<DeviceIterAttr> device_iter_array = {},
-                              Optional<ExecScope> from = NullOpt, Optional<ExecScope> to = NullOpt);
+                              Optional<ExecScope> from = std::nullopt,
+                              Optional<ExecScope> to = std::nullopt);
 
   using SplitMap = std::unordered_map<int, int>;
 
@@ -432,7 +435,7 @@ enum PhysicalDimensionType : int {
 
 class TrainiumLayoutNode : public TLayoutNode {
  public:
-  ShapeTuple dimension_types;
+  ffi::Shape dimension_types;
   TileLayout combined_1d_layout;
 
   void VisitAttrs(AttrVisitor* v) {
@@ -481,7 +484,7 @@ class TrainiumLayoutNode : public TLayoutNode {
 
 class TrainiumLayout : public TLayout {
  public:
-  TVM_DLL explicit TrainiumLayout(ShapeTuple dimension_types, TileLayout combined_1d_layout);
+  TVM_DLL explicit TrainiumLayout(ffi::Shape dimension_types, TileLayout combined_1d_layout);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TrainiumLayout, TLayout, TrainiumLayoutNode);
 };
@@ -500,7 +503,7 @@ class TrainiumPSUMLayoutNode : public TrainiumLayoutNode {
 
 class TrainiumPSUMLayout : public TrainiumLayout {
  public:
-  TVM_DLL explicit TrainiumPSUMLayout(ShapeTuple dimension_types, TileLayout combined_1d_layout);
+  TVM_DLL explicit TrainiumPSUMLayout(ffi::Shape dimension_types, TileLayout combined_1d_layout);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TrainiumPSUMLayout, TrainiumLayout, TrainiumPSUMLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TrainiumPSUMLayoutNode);

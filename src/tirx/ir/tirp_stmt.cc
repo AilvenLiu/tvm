@@ -31,7 +31,8 @@ namespace tirx {
 namespace tirp {
 
 // OpCall
-OpCall::OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config) {
+OpCall::OpCall(tvm::Op op, Array<ffi::Any> args, Map<String, Buffer> workspace,
+               Map<String, ffi::Any> schedule_config) {
   // Check if the op is a TIR+ op.
   static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
   ICHECK_EQ(tirp_op_map.count(op), 1) << "Only TIR+ ops can be used in tirx::tirp::OpCall";
@@ -44,16 +45,18 @@ OpCall::OpCall(tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace,
   data_ = std::move(n);
 }
 
-TVM_REGISTER_GLOBAL("tirx.OpCall").set_body_typed([](tvm::Op op, Array<ObjectRef> args, Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config) {
-  return OpCall(op, args, workspace, schedule_config);
-});
+TVM_REGISTER_GLOBAL("tirx.OpCall")
+    .set_body_typed([](tvm::Op op, Array<ffi::Any> args, Map<String, Buffer> workspace,
+                       Map<String, ffi::Any> schedule_config) {
+      return OpCall(op, args, workspace, schedule_config);
+    });
 
-TVM_REGISTER_GLOBAL("tir.OpCallCopyHandle").set_body_typed([](const OpCall& op) {
+TVM_REGISTER_GLOBAL("tirx.OpCallCopyHandle").set_body_typed([](const OpCall& op) {
   return OpCall(op);
 });
 
 TVM_REGISTER_NODE_TYPE(OpCallNode);
 
-}  // namespace tirxxxxp
-}  // namespace tirxxxx
+}  // namespace tirxxxxxp
+}  // namespace tirxxxxx
 }  // namespace tvm

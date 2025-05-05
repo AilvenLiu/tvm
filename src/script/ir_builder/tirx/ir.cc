@@ -17,11 +17,10 @@
  * under the License.
  */
 #include <tvm/arith/analyzer.h>
+#include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/op.h>
-#include <tvm/runtime/container/array.h>
-#include <tvm/runtime/container/variant.h>
 #include <tvm/script/ir_builder/tir/ir.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/expr.h>
@@ -189,8 +188,8 @@ Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Array<Pri
       logical_scope = tile_layout->to.value()->name;
     }
   }
-  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", NullOpt, NullOpt, NullOpt,
-                                 buffer.scope(), 1, 1, "auto", NullOpt, logical_scope, layout);
+  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", std::nullopt, std::nullopt, std::nullopt,
+                                 buffer.scope(), 1, 1, "auto", std::nullopt, logical_scope, layout);
 
   frame->buffer_views.push_back(tvm::tirx::BufferView(buffer, layout, dst_buffer));
 
@@ -201,8 +200,9 @@ Buffer BufferGet(tvm::tirx::Buffer buffer, Array<PrimExpr> shape) {
   SBlockFrame frame = FindSBlockFrame("T.Get");
 
   String logical_scope = tvm::tirx::StorageToLogicalScope(buffer.scope());
-  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", NullOpt, NullOpt, NullOpt,
-                                 buffer.scope(), 1, 1, "auto", NullOpt, logical_scope, NullOpt);
+  Buffer dst_buffer =
+      BufferDecl(shape, buffer->dtype, "", std::nullopt, std::nullopt, std::nullopt, buffer.scope(),
+                 1, 1, "auto", std::nullopt, logical_scope, std::nullopt);
   // Check if the buffer is a storage buffer
   TVM_FFI_ICHECK(tvm::tirx::IsStorageBuffer(dst_buffer.scope(), dst_buffer.logical_scope()));
 
@@ -256,7 +256,7 @@ BlockFrame BlockFrameSlice(BlockFrame block, Variant<Array<Range>, PrimExpr> sli
   return block;
 }
 
-BlockFrame World() { return Block("", false, "world", NullOpt, ""); }
+BlockFrame World() { return Block("", false, "world", std::nullopt, ""); }
 
 BlockFrame Kernel(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
                   ffi::String scope_slice_parent) {
@@ -456,12 +456,12 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                          ffi::String logical_scope, ffi::Optional<TLayout> layout,
                          ffi::Array<Integer> allocated_addr) {
   Buffer buffer =
-      BufferDecl(shape, dtype, "", NullOpt, strides, NullOpt, storage_scope, align, 0,
+      BufferDecl(shape, dtype, "", std::nullopt, strides, std::nullopt, storage_scope, align, 0,
                  buffer_type_str, axis_separators, logical_scope, layout, allocated_addr);
   IRBuilder builder = IRBuilder::Current();
   auto opt_func_frame = builder->FindFrame<PrimFuncFrame>();
-  TVM_FFI_ICHECK(opt_func_frame.defined()) << "ValueError: PrimFunc frame not find. Please ensure "
-                                   << "'T.alloc_buffer' is called under T.prim_func()";
+  TVM_FFI_ICHECK(opt_func_frame.has_value()) << "ValueError: PrimFunc frame not find. Please ensure "
+                                     << "'T.alloc_buffer' is called under T.prim_func()";
   auto func_frame = opt_func_frame.value();
 
   if (ffi::Optional<SBlockFrame> frame = builder->GetLastFrame<SBlockFrame>()) {
@@ -645,10 +645,9 @@ ForFrame Grid(ffi::Array<Variant<PrimExpr, Tuple<PrimExpr, PrimExpr>>> extents) 
       n->doms.push_back(Range(make_const(dtype, 0), prim_expr.value()));
     } else if (auto tuple = extent.as<Tuple<PrimExpr, PrimExpr>>()) {
       // extent is a tuple of two PrimExpr (start, extent)
-      DataType dtype = tuple.value().GetElement<0>().dtype();
+      DataType dtype = tuple.value().get<0>().dtype();
       n->vars.push_back(Var("v", dtype));
-      n->doms.push_back(
-          Range::FromMinExtent(tuple.value().GetElement<0>(), tuple.value().GetElement<1>()));
+      n->doms.push_back(Range::FromMinExtent(tuple.value().get<0>(), tuple.value().get<1>()));
     } else {
       TVM_FFI_THROW(InternalError) << "TypeError: Invalid type for grid extent";
     }
@@ -1161,7 +1160,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -184,6 +184,10 @@ def _compile_cuda_nvcc(
         "--ptxas-options=--verbose,--register-usage-level=10,--warn-on-local-memory-usage",  # printing out number of registers
     ]
 
+    major, _ = parse_compute_version(get_target_compute_version(Target.current(allow_none=True)))
+    if major >= 10:
+        cmd += ["--ptxas-options=--g-tensor-memory-access-check"]
+
     if options:
         if isinstance(options, str):
             cmd += [options]

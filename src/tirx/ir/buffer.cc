@@ -679,8 +679,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                     auto offset_factor = args[7].cast<int>();
                     auto axis_separators = args[9].cast<ffi::Array<IntImm>>();
                     auto span = args[10].cast<Span>();
+                    auto layout = args[11].cast<TLayout>();
                     *ret = Buffer(data, dtype, shape, strides, elem_offset, name, data_alignment,
-                                  offset_factor, type, axis_separators, span, args[11]);
+                                  offset_factor, type, axis_separators, span, layout);
                   })
       .def_method("tirx.BufferAccessPtr", &Buffer::access_ptr)
       .def_method("tirx.BufferGetFlattenedBuffer", &Buffer::GetFlattenedBuffer)

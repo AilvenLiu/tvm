@@ -353,9 +353,9 @@ def test_fp16_fused_attn():
         with T.thread():
             scaleD = int_var()
             scaleD[0] = 0
-            T.ptx.encode_matrix_descriptor(desc_Q.data, smem_q.access_ptr("r", offset=consumer_id * BLK_Q // 2 * TMA_TILE),
+            T.ptx.wgmma.encode_matrix_descriptor(desc_Q.data, smem_q.access_ptr("r", offset=consumer_id * BLK_Q // 2 * TMA_TILE),
                                        BLK_Q * 8, 64, SWIZZLE)
-            T.ptx.encode_matrix_descriptor(desc_K.data, smem_k.access_ptr("r", offset=smem_k.offset_of_p([k_stage, 0])),
+            T.ptx.wgmma.encode_matrix_descriptor(desc_K.data, smem_k.access_ptr("r", offset=smem_k.offset_of_p([k_stage, 0])),
                                        BLK_KV * 8, 64, SWIZZLE)
             for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
                 for wgmma_tile in T.serial(TMA_TILE // WGMMA_QK_K):
@@ -379,7 +379,7 @@ def test_fp16_fused_attn():
         T.ptx.wgmma.fence()
 
         v_stage = T.meta_var(consumer_v.index[0])
-        T.ptx.encode_matrix_descriptor(desc_V.data, smem_v.access_ptr("r", offset=smem_v.offset_of_p([v_stage, 0])),
+        T.ptx.wgmma.encode_matrix_descriptor(desc_V.data, smem_v.access_ptr("r", offset=smem_v.offset_of_p([v_stage, 0])),
                                    BLK_KV * 8, 64, SWIZZLE)
         for wgmma_tile in T.serial(BLK_KV // WGMMA_PV_K):
             P_offset = T.meta_var(wgmma_tile * WGMMA_PV_K // 4)

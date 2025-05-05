@@ -113,7 +113,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       // Step 2. Handle `func->attrs`
       if (func->attrs.defined() && !func->attrs->dict.empty()) {
         // for global symbol, don't display it if it matches the func name
-        std::unordered_set<String, ObjectHash, ObjectEqual> keys_to_remove;
+        std::unordered_set<String> keys_to_remove;
         if (func->attrs->dict.count(tvm::attr::kGlobalSymbol) &&
             Downcast<ffi::String>(func->attrs->dict.at(tvm::attr::kGlobalSymbol)) ==
                 func_name->name) {

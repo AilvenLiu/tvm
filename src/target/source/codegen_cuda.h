@@ -116,8 +116,16 @@ class CodeGenCUDA final : public CodeGenC {
   bool need_mma_h_{false};
   // whether need cast_smem_ptr_to_int helper function
   bool need_cast_smem_ptr_to_int_{false};
-  // whether need shared memory descriptor
+  // whether need to compute TMEM address by offset
+  bool need_tmem_offset_{false};
+  // whether need matrix descriptor for wgmma instructions
+  bool need_gmma_descriptor_{false};
+  // whether need matrix descriptor for tcgen05 instructions
   bool need_smem_descriptor_{false};
+  // whether need instruction descriptor for tcgen05 MMA
+  bool need_instr_descriptor_{false};
+  // whether need instruction descriptor for tcgen05 MMA with block scaling
+  bool need_instr_descriptor_block_scaled_{false};
   // Op attribute map
   OpAttrMap<bool> op_need_warp_shuffle_ = Op::GetAttrMap<bool>("cuda.need_warp_shuffle");
 

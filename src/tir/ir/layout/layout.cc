@@ -108,7 +108,7 @@ TVM_REGISTER_GLOBAL("tir.DeviceIterAttr")
     });
 
 DeviceIterAttr DeviceIterAttr::Replicate(PrimExpr extent) {
-  return DeviceIterAttr(extent, kReplicate, NullOpt, NullOpt);
+  return DeviceIterAttr(extent, kReplicate, std::nullopt, std::nullopt);
 }
 
 DeviceIterAttr DeviceIterAttr::Split(PrimExpr extent, PrimExpr bound) {
@@ -116,7 +116,7 @@ DeviceIterAttr DeviceIterAttr::Split(PrimExpr extent, PrimExpr bound) {
 }
 
 DeviceIterAttr DeviceIterAttr::Exclusive(PrimExpr extent, PrimExpr owner) {
-  return DeviceIterAttr(extent, kExclusive, NullOpt, owner);
+  return DeviceIterAttr(extent, kExclusive, std::nullopt, owner);
 }
 
 bool DeviceIterAttr::IsReplicate() const { return this->get()->type == kReplicate; }
