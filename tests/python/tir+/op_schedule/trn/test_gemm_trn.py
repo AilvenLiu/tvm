@@ -17,7 +17,7 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TrainiumLayout, TileLayout
+from tvm.tir.layout import TileLayout
 import numpy as np
 import tvm.testing
 from tvm.script import ir as I
@@ -29,16 +29,10 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 
 def test_simple_gemm():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
-    )
+    A_layout = TileLayout(shard=([128, 128], [(1, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([128, 128], [(1, "P"), (1, "F")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
-    )
+    C_layout = TileLayout(shard=([128, 128], [(1, "P"), (1, "F")])).to_psum()
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -69,19 +63,12 @@ def test_simple_gemm():
 
 
 def test_larger_gemm():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((2, 128, 4, 128), (512, 1, 128, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    A_layout = TileLayout(shard=([2, 128, 4, 128], [(512, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((2, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(
+        shard=([2, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
+    ).to_psum()
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -112,19 +99,12 @@ def test_larger_gemm():
 
 
 def test_gemm_in_a_loop():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(
+        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
+    ).to_psum()
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -162,19 +142,12 @@ def test_gemm_in_a_loop():
 
 
 def test_gemm_with_stride():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 128, 8), (1024, 1, 1, 128)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="PFFF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 8, 2, 128), (1, 512, 256, 2)),
-    )
+    A_layout = TileLayout(shard=([4, 128, 128, 8], [(1024, "F"), (1, "F"), (1, "P"), (128, "F")]))
+    B_layout = TileLayout(shard=([128, 8, 2, 128], [(1, "P"), (512, "F"), (256, "F"), (2, "F")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(
+        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
+    ).to_psum()
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -213,19 +186,12 @@ def test_gemm_with_stride():
 
 
 def test_gemm_swap_lhs_rhs():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(
+        shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")])
+    ).to_psum()
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -263,19 +229,10 @@ def test_gemm_swap_lhs_rhs():
 
 
 def test_gemm_with_sbuf_output():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
 
-    C_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -320,19 +277,14 @@ def test_gemm_with_sbuf_output():
 
 
 def test_gemm_different_shape():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((2, 4, 128, 8, 128), (4096, 1024, 1, 128, 1)),
+    A_layout = TileLayout(
+        shard=([2, 4, 128, 8, 128], [(4096, "F"), (1024, "F"), (1, "F"), (128, "F"), (1, "P")])
     )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(
+        shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")])
+    ).to_psum()
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -370,19 +322,10 @@ def test_gemm_different_shape():
 
 
 def test_gemm_too_large_f_size():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FP",
-        combined_1d_layout=T.TileLayout.from_tuple((256, 128), (1, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="PF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 1024), (1, 1)),
-    )
+    A_layout = TileLayout(shard=([256, 128], [(1, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([128, 1024], [(1, "P"), (1, "F")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((2, 128, 1024), (1024, 1, 1)),
-    )
+    C_layout = TileLayout(shard=([2, 128, 1024], [(1024, "F"), (1, "P"), (1, "F")])).to_psum()
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -414,19 +357,10 @@ def test_gemm_too_large_f_size():
 
 
 def test_gemm_sbuf_output_with_workspace():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
 
-    C_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -472,19 +406,12 @@ def test_gemm_sbuf_output_with_workspace():
 
 
 def test_gemm_pf_mismatch_fail():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((2, 128, 8, 128), (128, 1, 256, 1)),
-    )
+    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([2, 128, 8, 128], [(128, "F"), (1, "F"), (256, "F"), (1, "P")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(
+        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
+    ).to_psum()
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -508,19 +435,12 @@ def test_gemm_pf_mismatch_fail():
 
 
 def test_gemm_transpose_AB():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 4, 128), (128, 1, 1024, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((2, 128, 8, 128), (128, 1, 256, 1)),
-    )
+    A_layout = TileLayout(shard=([8, 128, 4, 128], [(128, "F"), (1, "P"), (1024, "F"), (1, "F")]))
+    B_layout = TileLayout(shard=([2, 128, 8, 128], [(128, "F"), (1, "F"), (256, "F"), (1, "P")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(
+        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
+    ).to_psum()
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -561,19 +481,10 @@ def test_gemm_transpose_AB():
 
 
 def test_gemm_guard():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
 
-    C_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(shard=([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -621,19 +532,12 @@ def test_gemm_guard():
 
 
 def test_gemm_guard2():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    A_layout = TileLayout(shard=([4, 128, 8, 128], [(1024, "F"), (1, "F"), (128, "F"), (1, "P")]))
+    B_layout = TileLayout(shard=([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(
+        shard=([4, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])
+    ).to_psum()
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:

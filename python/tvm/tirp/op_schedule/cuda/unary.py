@@ -183,15 +183,15 @@ def unary_map_cuda_warp_logical_view_nd_impl(
     if any(
         [
             src.layout != dst.layout,
-            src.layout.size != dst.layout.size,
-            src.layout.cosize != dst.layout.cosize,
+            src.layout.size() != dst.layout.size(),
+            src.layout.cosize() != dst.layout.cosize(),
             src.layout.is_swizzle(),
             dst.layout.is_swizzle(),
         ]
     ):
         return None
 
-    LOCAL_LEN = src.layout.cosize
+    LOCAL_LEN = src.layout.size()
     src_local_shape = dst_local_shape = (LOCAL_LEN,)
 
     # fmt: off

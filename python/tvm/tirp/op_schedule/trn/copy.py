@@ -55,8 +55,8 @@ def transpose_schedule(
     dst_f = T.var("int32", name="dst_F")
     b_var = T.var("int32", name="B")
     extend_b = T.var("int32", name="extend_B")
-    p_size = src_region.buffer.layout.partition_size
-    lhs_f_size = dst_region.buffer.layout.partition_size
+    p_size = src_region.buffer.layout.size("P")
+    lhs_f_size = dst_region.buffer.layout.size("P")
     rhs_f_size = p_size
     inst_gen.bind_inst_iter(
         src_region, lhs_f, inst_repr_src.size, inst_repr_src.stride, is_free_dim=True
@@ -216,13 +216,9 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
             dst.scope() in ["global", "trn.sbuf", "trn.psum"],
             src.scope() != "global" or dst.scope() != "global",
             (src.scope() == "global" and isinstance(src.layout, T.TileLayout))
-            or (
-                src.scope() in ["trn.sbuf", "trn.psum"] and isinstance(src.layout, T.TrainiumLayout)
-            ),
+            or (src.scope() in ["trn.sbuf", "trn.psum"] and src.layout.is_trainium()),
             (dst.scope() == "global" and isinstance(dst.layout, T.TileLayout))
-            or (
-                dst.scope() in ["trn.sbuf", "trn.psum"] and isinstance(dst.layout, T.TrainiumLayout)
-            ),
+            or (dst.scope() in ["trn.sbuf", "trn.psum"] and dst.layout.is_trainium()),
         ]
     )
 
@@ -250,7 +246,7 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     if not inst_gen.check_partition_dim_match(src_region, dst_region):
         return transpose_schedule(op, inst_gen, sctx)
 
-    if isinstance(src.layout, T.TrainiumLayout):
+    if src.layout.is_trainium():
         inst = inst_gen.find_max_inst_size_from_one_region(src_region)
         inst = inst_gen.fit_inst_tile_to_region(inst, dst_region)
         src_to_dst = True
@@ -281,7 +277,7 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         from_region, to_region = src_region, dst_region
     else:
         from_region, to_region = dst_region, src_region
-    p_size = from_region.buffer.layout.partition_size
+    p_size = from_region.buffer.layout.size("P")
     inst_gen.bind_inst_iter(from_region, p_var, p_size, 1, is_free_dim=False)
     inst_gen.bind_inst_iter(from_region, f_var, inst.size, inst.stride, is_free_dim=True)
     b_extent = inst_gen.fill_in_block_dim(from_region, b_var)

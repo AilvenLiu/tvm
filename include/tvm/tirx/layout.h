@@ -23,43 +23,53 @@
 #ifndef TVM_TIRX_LAYOUT_H_
 #define TVM_TIRX_LAYOUT_H_
 
+#include <tvm/ffi/container/tuple.h>
 #include <tvm/ir/module.h>
+#include <tvm/node/attr_registry_map.h>
 #include <tvm/runtime/object.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/var.h>
 
 namespace tvm {
+
+// Forward declaration
+template <typename, typename>
+class AttrRegistry;
+
 namespace tirx {
+template <typename>
+class AxisAttrMap;
 
 class TLayout;
 class TileLayout;
+using ffi::Tuple;
+
 // Base class for layout
 class TLayoutNode : public Object {
  public:
   /*! \brief Compatible with shape */
-  virtual bool CompatibleWithShape(const Array<PrimExpr>& shape) const;
+  virtual bool CompatibleWithShape(const Array<PrimExpr>& shape) const = 0;
 
   /*! \brief Verify if the layout is well-formed */
   virtual bool VerifyWellFormed() const = 0;
 
-  /*! \brief Get the size of the layout */
-  virtual PrimExpr GetSize() const = 0;
+  /*! \brief Get the size of the layout (of some axis) */
+  virtual PrimExpr GetSize(Optional<String> axis_name = std::nullopt) const = 0;
 
-  /*! \brief Get the cosize of the layout */
-  virtual PrimExpr GetCosize() const = 0;
+  /*! \brief Get the cosize of the layout (of some axis) */
+  virtual PrimExpr GetCosize(Optional<String> axis_name = std::nullopt) const = 0;
 
   /*! \brief Apply layout on the input coordinate and get the mapped output */
-  virtual Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
+  virtual Map<String, PrimExpr> Apply(Array<PrimExpr> coord) const = 0;
+  virtual Map<String, PrimExpr> Apply(PrimExpr coord) const = 0;
+  Map<String, PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
 
-  /*! \brief Apply layout on the flattened coordinate and get the mapped output */
-  virtual Array<PrimExpr> Apply(const PrimExpr& coord) const = 0;
+  /*! \brief Turn the layout to normalized form */
+  virtual TLayout Normalize() const = 0;
 
-  /*! \brief Normalize the layout */
-  virtual TLayout Normalize() const;
-
-  /*! \brief Tile the layout with an outer layout */
+  /*! \brief Tile the current layout with a given layout */
   virtual TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
-                       const Array<PrimExpr>& inner_shape) const;
+                       const Array<PrimExpr>& inner_shape) const = 0;
 
   /*! \brief Check if the layout is the inner layout of a tiled layout
    * \param tile_layout The tiled layout to check
@@ -70,7 +80,7 @@ class TLayoutNode : public Object {
    */
   virtual Optional<TileLayout> IsTileInner(const TLayout& tile_layout,
                                            const Array<PrimExpr>& tiled_shape,
-                                           const Array<PrimExpr>& inner_shape) const;
+                                           const Array<PrimExpr>& inner_shape) const = 0;
 
   /*! \brief Check if the layout is the outer layout of a tiled layout
    * \param tile_layout The tiled layout to check
@@ -81,7 +91,7 @@ class TLayoutNode : public Object {
    */
   virtual Optional<TLayout> IsTileOuter(const TLayout& tile_layout,
                                         const Array<PrimExpr>& tiled_shape,
-                                        const Array<PrimExpr>& outer_shape) const;
+                                        const Array<PrimExpr>& outer_shape) const = 0;
 
   static constexpr const char* _type_key = "tirx.TLayout";
   static constexpr const bool _type_has_method_sequal_reduce = false;
@@ -94,159 +104,197 @@ class TLayout : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_METHODS(TLayout, ObjectRef, TLayoutNode);
 };
 
-// DeviceIterAttr
-enum ScopeIdType : int {
-  kSplit = 0,
-  kReplicate = 1,
-  kExclusive = 2,
+// Axis
+class AxisNode : public Object {
+ public:
+  String name;
+
+  void VisitAttrs(AttrVisitor* v) { v->Visit("name", &name); }
+
+  bool SEqualReduce(const AxisNode* other, SEqualReducer equal) const {
+    return equal(name, other->name);
+  }
+
+  void SHashReduce(SHashReducer hash_reducer) const { hash_reducer(name); }
+
+  /*! \brief Check if the axis is a thread axis. */
+  bool IsThreadAxis() const;
+
+  /*! \brief Check if the axis is a memory axis. */
+  bool IsMemoryAxis() const;
+
+  static constexpr const char* _type_key = "tirx.Axis";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  TVM_DECLARE_FINAL_OBJECT_INFO(AxisNode, Object);
+
+ private:
+  // Iternals necessary for AttrRegistry
+  template <typename>
+  friend class tvm::AttrRegistryMapContainerMap;
+  template <typename, typename>
+  friend class tvm::AttrRegistry;
+  friend class AxisRegEntry;
+  /*! \brief Program internal unique index of operator. */
+  uint32_t index_{0};
+  /*! \brief Return the index stored in attr registry */
+  uint32_t AttrRegistryIndex() const { return index_; }
+  /*! \brief Return the name stored in attr registry */
+  String AttrRegistryName() const { return name; }
 };
 
-class DataIterAttrNode : public Object {
+class Axis : public ObjectRef {
+ public:
+  Axis() = default;
+
+  /*! \brief Get the axis object by name. */
+  TVM_DLL static Axis Get(const String& name);
+
+  /*! \brief Get the attribute map for the axis. */
+  template <typename ValueType>
+  inline static AxisAttrMap<ValueType> GetAttrMap(const String& attr_name);
+
+  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(Axis, ObjectRef, AxisNode);
+
+ private:
+  // Internals necessary for AttrRegistry
+  template <typename, typename>
+  friend class tvm::AttrRegistry;
+  friend class AxisRegEntry;
+};
+
+// AxisRegistry
+class AxisRegEntry {
+ public:
+  /*! \brief List all axis names. */
+  TVM_DLL static Array<String> ListAxisNames();
+
+  /*! \brief Register or get the axis entry by name. */
+  TVM_DLL static AxisRegEntry& RegisterOrGet(const String& name);
+
+  /*! \brief Set the attribute for the axis. */
+  template <typename ValueType>
+  inline AxisRegEntry& set_attr(const String& attr_name, const ValueType& value, int plevel = 10);
+
+ private:
+  // return internal pointer to op.
+  inline AxisNode* get();
+  TVM_DLL void UpdateAttr(const String& key, ffi::Any value, int plevel);
+
+  // Internals necessary for AttrRegistry
+  Axis axis_;
+  String name;
+  explicit AxisRegEntry(uint32_t index);
+  template <typename, typename>
+  friend class tvm::AttrRegistry;
+  friend class Axis;
+};
+
+using AxisRegistry = AttrRegistry<AxisRegEntry, Axis>;
+
+// AxisAttrMap
+template <typename ValueType>
+class AxisAttrMap : public AttrRegistryMap<Axis, ValueType> {
+ public:
+  using TParent = AttrRegistryMap<Axis, ValueType>;
+  using TParent::count;
+  using TParent::get;
+  using TParent::operator[];
+
+ private:
+  friend class Axis;
+  explicit AxisAttrMap(const AttrRegistryMapContainerMap<Axis>& map) : TParent(map) {}
+};
+
+// Define a macro to register the axis entry.
+#define TVM_AXIS_REGISTER_VAR_DEF \
+  static DMLC_ATTRIBUTE_UNUSED ::tvm::tirx::AxisRegEntry& __make_##Axis
+
+#define TVM_REGISTER_AXIS(AxisName)                        \
+  TVM_STR_CONCAT(TVM_AXIS_REGISTER_VAR_DEF, __COUNTER__) = \
+      ::tvm::tirx::AxisRegEntry::RegisterOrGet(AxisName)
+
+class IterNode : public Object {
  public:
   PrimExpr extent;
   PrimExpr stride;
+  Axis axis;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("extent", &extent);
     v->Visit("stride", &stride);
+    v->Visit("axis", &axis);
   }
 
-  bool SEqualReduce(const DataIterAttrNode* other, SEqualReducer equal) const {
-    return equal(extent, other->extent) && equal(stride, other->stride);
+  bool SEqualReduce(const IterNode* other, SEqualReducer equal) const {
+    return equal(extent, other->extent) && equal(stride, other->stride) && equal(axis, other->axis);
   }
 
   void SHashReduce(SHashReducer hash_reducer) const {
     hash_reducer(extent);
     hash_reducer(stride);
+    hash_reducer(axis);
   }
 
-  static constexpr const char* _type_key = "tirx.DataIterAttr";
+  static constexpr const char* _type_key = "tirx.Iter";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
-  TVM_DECLARE_FINAL_OBJECT_INFO(DataIterAttrNode, Object);
+  TVM_DECLARE_FINAL_OBJECT_INFO(IterNode, Object);
 };
 
-class DataIterAttr : public ObjectRef {
+class Iter : public ObjectRef {
  public:
-  TVM_DLL explicit DataIterAttr(PrimExpr extent, PrimExpr stride);
-
-  TVM_DEFINE_OBJECT_REF_METHODS(DataIterAttr, ObjectRef, DataIterAttrNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(DataIterAttrNode);
+  TVM_DLL explicit Iter(PrimExpr extent, PrimExpr stride, Axis axis);
+  TVM_DEFINE_OBJECT_REF_METHODS(Iter, ObjectRef, IterNode);
 };
 
-class DeviceIterAttrNode : public Object {
- public:
-  PrimExpr extent;
-  /*! \brief type of ScopeID, can be split (S), replicate (R), exclusive (E) */
-  ScopeIdType type;
-  /*! \brief If type is split, the bound leaf in DataIterTree */
-  Optional<PrimExpr> bound;
-  /*! \brief If type is exclusive, the id that owns the data */
-  Optional<PrimExpr> owner;
-
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("extent", &extent);
-    v->Visit("type", &type);
-    v->Visit("bound", &bound);
-    v->Visit("owner", &owner);
-  }
-
-  bool SEqualReduce(const DeviceIterAttrNode* other, SEqualReducer equal) const {
-    return equal(extent, other->extent) && equal(type, other->type) && equal(bound, other->bound) &&
-           equal(owner, other->owner);
-  }
-
-  void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(extent);
-    hash_reducer(type);
-    hash_reducer(bound);
-    hash_reducer(owner);
-  }
-
-  static constexpr const char* _type_key = "tirx.DeviceIterAttr";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  TVM_DECLARE_FINAL_OBJECT_INFO(DeviceIterAttrNode, Object);
-};
-
-class DeviceIterAttr : public ObjectRef {
- public:
-  TVM_DLL explicit DeviceIterAttr(PrimExpr extent, ScopeIdType type,
-                                  Optional<PrimExpr> bound = std::nullopt,
-                                  Optional<PrimExpr> owner = std::nullopt);
-
-  /*! \brief Create a replicate attribute */
-  static DeviceIterAttr Replicate(PrimExpr extent);
-
-  /*! \brief Create a split attribute */
-  static DeviceIterAttr Split(PrimExpr extent, PrimExpr bound);
-
-  /*! \brief Create an exclusive attribute */
-  static DeviceIterAttr Exclusive(PrimExpr extent, PrimExpr owner);
-
-  /*! \brief Check if the attribute is replicate */
-  bool IsReplicate() const;
-
-  /*! \brief Check if the attribute is split */
-  bool IsSplit() const;
-
-  /*! \brief Check if the attribute is exclusive */
-  bool IsExclusive() const;
-
-  /*! \brief Get the bound of the split attribute */
-  size_t GetIntBound() const;
-
-  TVM_DEFINE_OBJECT_REF_METHODS(DeviceIterAttr, ObjectRef, DeviceIterAttrNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(DeviceIterAttrNode);
-};
-
-// TileLayout
 class TileLayoutNode : public TLayoutNode {
  public:
-  /*! \brief data iter tree */
-  Array<DataIterAttr> data_iter_array;
-  /*! \brief device iter tree */
-  Array<DeviceIterAttr> device_iter_array;
-  /*! \brief From exec scope */
-  Optional<ExecScope> from;
-  /*! \brief To exec scope */
-  Optional<ExecScope> to;
+  Array<Iter> shard;
+  Array<Iter> replicate;
+  Array<Tuple<Iter, PrimExpr>> exclude;
+  Optional<ExecScope> subscope;
+  Optional<ExecScope> scope;
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("data_iter_array", &data_iter_array);
-    v->Visit("device_iter_array", &device_iter_array);
-    v->Visit("from", &from);
-    v->Visit("to", &to);
+    v->Visit("shard", &shard);
+    v->Visit("replicate", &replicate);
+    v->Visit("exclude", &exclude);
+    v->Visit("subscope", &subscope);
+    v->Visit("scope", &scope);
   }
 
   bool SEqualReduce(const TileLayoutNode* other, SEqualReducer equal) const {
-    return equal(data_iter_array, other->data_iter_array) &&
-           equal(device_iter_array, other->device_iter_array) && equal(from, other->from) &&
-           equal(to, other->to);
+    return equal(shard, other->shard) && equal(replicate, other->replicate) &&
+           equal(exclude, other->exclude) && equal(subscope, other->subscope) &&
+           equal(scope, other->scope);
   }
 
   void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(data_iter_array);
-    hash_reducer(device_iter_array);
-    hash_reducer(from);
-    hash_reducer(to);
+    hash_reducer(shard);
+    hash_reducer(replicate);
+    hash_reducer(exclude);
+    hash_reducer(subscope);
+    hash_reducer(scope);
   }
+
+  /*! \brief Check if the layout is compatible with the shape */
+  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
+
   /*! \brief Verify if the layout is well-formed */
   bool VerifyWellFormed() const final;
 
-  /*! \brief Get the size of the layout */
-  PrimExpr GetSize() const final;
+  /*! \brief Get the size of the layout (of some axis) */
+  PrimExpr GetSize(Optional<String> axis_name = std::nullopt) const final;
 
-  /*! \brief Get the cosize of the layout */
-  PrimExpr GetCosize() const final;
-
-  /*! \brief Apply the input coordinate and get the mapped output */
-  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
+  /*! \brief Get the cosize of the layout (of some axis) */
+  PrimExpr GetCosize(Optional<String> axis_name = std::nullopt) const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
+  Map<String, PrimExpr> Apply(Array<PrimExpr> coord) const final;
+  Map<String, PrimExpr> Apply(PrimExpr coord) const final;
 
-  /*! \brief Normalize the layout */
+  /*! \brief Turn the layout to normalized form */
   TLayout Normalize() const final;
 
   /*! \brief Tile the layout with an outer layout */
@@ -261,9 +309,20 @@ class TileLayoutNode : public TLayoutNode {
   Optional<TLayout> IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
                                 const Array<PrimExpr>& outer_shape) const final;
 
-  /*! \brief Group the layout by the logical shape */
-  // TODO(@bohan): use Pair<TileLayout, Array<IntImm>> here
-  Array<ObjectRef> GroupByLogicalShape(const Array<PrimExpr>& shape) const;
+  /*! \brief Get the shape of the shard */
+  Array<PrimExpr> GetShardShape() const;
+
+  /*! \brief Is the layout trivial (pure memory, identical mapping) */
+  bool IsTrivial() const;
+
+  /*! \brief Check if the layout is trainium layout */
+  bool IsTrainium() const;
+
+  /*! \brief Has Memory Axis */
+  bool HasMemoryAxis() const;
+
+  /*! \brief Has Thread Axis */
+  bool HasThreadAxis() const;
 
   static constexpr const char* _type_key = "tirx.TileLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -273,31 +332,14 @@ class TileLayoutNode : public TLayoutNode {
 
 class TileLayout : public TLayout {
  public:
-  TVM_DLL explicit TileLayout(Array<DataIterAttr> data_iter_array,
-                              Array<DeviceIterAttr> device_iter_array = {},
-                              Optional<ExecScope> from = std::nullopt,
-                              Optional<ExecScope> to = std::nullopt);
-
-  using SplitMap = std::unordered_map<int, int>;
-
-  /*! \brief Get the mapping from leaf in data tree to leaf in device tree when they are bound */
-  SplitMap GetSplitMap() const;
+  TVM_DLL explicit TileLayout(Array<Iter> shard, Array<Iter> replicate,
+                              Array<Tuple<Iter, PrimExpr>> exclude,
+                              Optional<ExecScope> subscope = std::nullopt,
+                              Optional<ExecScope> scope = std::nullopt);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);
 };
-
-/*!
- * \brief Construct a new layout to express the sharding strategy of a tensor.
- * \param shape The shape of the tensor.
- * \param mesh The device mesh
- * \param strategy The sharding strategy of the tensor.
- * \param inner The layout of the sharded partition of the tensor.
- * \param from The source scope of the layout.
- * \param to The target scope of the layout.
- */
-TileLayout Shard(Array<PrimExpr> shape, Array<PrimExpr> mesh, String strategy, TileLayout inner,
-                 ExecScope from, ExecScope to);
 
 // SwizzleLayout
 class SwizzleLayoutNode : public TLayoutNode {
@@ -326,19 +368,23 @@ class SwizzleLayoutNode : public TLayoutNode {
     hash_reducer(swizzle_inner);
   }
 
+  /*! \brief Check if the layout is compatible with the shape */
+  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
+
   /*! \brief Verify if the layout is well-formed */
   bool VerifyWellFormed() const final;
 
   /*! \brief Get the size of the layout */
-  PrimExpr GetSize() const final;
+  PrimExpr GetSize(Optional<String> axis_name = std::nullopt) const final;
 
   /*! \brief Get the cosize of the layout */
-  PrimExpr GetCosize() const final;
+  PrimExpr GetCosize(Optional<String> axis_name = std::nullopt) const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
+  Map<String, PrimExpr> Apply(Array<PrimExpr> coord) const final;
+  Map<String, PrimExpr> Apply(PrimExpr coord) const final;
 
-  /*! \brief Normalize the layout */
+  /*! \brief Turn the layout to normalized form */
   TLayout Normalize() const final;
 
   /*! \brief Tile the layout with an outer layout */
@@ -348,6 +394,10 @@ class SwizzleLayoutNode : public TLayoutNode {
   /*! \brief Check if the layout is the inner layout of a tiled layout */
   Optional<TileLayout> IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
                                    const Array<PrimExpr>& inner_shape) const final;
+
+  /*! \brief Check if the layout is the outer layout of a tiled layout */
+  Optional<TLayout> IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                                const Array<PrimExpr>& outer_shape) const final;
 
   static constexpr const char* _type_key = "tirx.SwizzleLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -389,19 +439,23 @@ class ComposeLayoutNode : public TLayoutNode {
     hash_reducer(layout_B);
   }
 
+  /*! \brief Check if the layout is compatible with the shape */
+  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
+
   /*! \brief Verify if the layout is well-formed */
   bool VerifyWellFormed() const final;
 
-  /*! \brief Get the size of the layout */
-  PrimExpr GetSize() const final;
+  /*! \brief Get the size (of some axis) of the layout */
+  PrimExpr GetSize(Optional<String> axis_name = std::nullopt) const final;
 
-  /*! \brief Get the cosize of the layout */
-  PrimExpr GetCosize() const final;
+  /*! \brief Get the cosize (of some axis) of the layout */
+  PrimExpr GetCosize(Optional<String> axis_name = std::nullopt) const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  Array<PrimExpr> Apply(const PrimExpr& coord) const final;
+  Map<String, PrimExpr> Apply(Array<PrimExpr> coord) const final;
+  Map<String, PrimExpr> Apply(PrimExpr coord) const final;
 
-  /*! \brief Normalize the layout */
+  /*! \brief Turn the layout to normalized form */
   TLayout Normalize() const final;
 
   /*! \brief Tile the layout with an outer layout */
@@ -411,6 +465,10 @@ class ComposeLayoutNode : public TLayoutNode {
   /*! \brief Check if the layout is the inner layout of a tiled layout */
   Optional<TileLayout> IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
                                    const Array<PrimExpr>& inner_shape) const final;
+
+  /*! \brief Check if the layout is the outer layout of a tiled layout */
+  Optional<TLayout> IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
+                                const Array<PrimExpr>& outer_shape) const final;
 
   static constexpr const char* _type_key = "tirx.ComposeLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -426,96 +484,10 @@ class ComposeLayout : public TLayout {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ComposeLayoutNode);
 };
 
-// Trainium Layout
-
-enum PhysicalDimensionType : int {
-  kPartition = 0,
-  kFree = 1,
-};
-
-class TrainiumLayoutNode : public TLayoutNode {
- public:
-  ffi::Shape dimension_types;
-  TileLayout combined_1d_layout;
-
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("dimension_types", &dimension_types);
-    v->Visit("combined_1d_layout", &combined_1d_layout);
-  }
-
-  bool SEqualReduce(const TrainiumLayoutNode* other, SEqualReducer equal) const {
-    return equal(dimension_types, other->dimension_types) &&
-           equal(combined_1d_layout, other->combined_1d_layout);
-  }
-
-  void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(dimension_types);
-    hash_reducer(combined_1d_layout);
-  }
-
-  /*! \brief Check if the layout is compatible with the shape */
-  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
-
-  /*! \brief Verify if the layout is well-formed */
-  virtual bool VerifyWellFormed() const;
-
-  /*! \brief Get the size of the layout */
-  PrimExpr GetSize() const;
-
-  /*! \brief Get the cosize of the layout */
-  PrimExpr GetCosize() const;
-
-  /*! \brief Get the partition dimension size */
-  PrimExpr GetPartitionSize() const;
-
-  /*! \brief Apply the input coordinate and get the mapped output */
-  virtual Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
-
-  Array<PrimExpr> Apply(const PrimExpr& coord) const;
-
-  /*! \brief Normalize the layout */
-  TLayout Normalize() const final;
-
-  static constexpr const char* _type_key = "tirx.TrainiumLayout";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  TVM_DECLARE_BASE_OBJECT_INFO(TrainiumLayoutNode, TLayoutNode);
-};
-
-class TrainiumLayout : public TLayout {
- public:
-  TVM_DLL explicit TrainiumLayout(ffi::Shape dimension_types, TileLayout combined_1d_layout);
-
-  TVM_DEFINE_OBJECT_REF_METHODS(TrainiumLayout, TLayout, TrainiumLayoutNode);
-};
-
-class TrainiumPSUMLayoutNode : public TrainiumLayoutNode {
- public:
-  Array<PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const final;
-
-  bool VerifyWellFormed() const final;
-
-  static constexpr const char* _type_key = "tirx.TrainiumPSUMLayout";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  TVM_DECLARE_FINAL_OBJECT_INFO(TrainiumPSUMLayoutNode, TrainiumLayoutNode);
-};
-
-class TrainiumPSUMLayout : public TrainiumLayout {
- public:
-  TVM_DLL explicit TrainiumPSUMLayout(ffi::Shape dimension_types, TileLayout combined_1d_layout);
-
-  TVM_DEFINE_OBJECT_REF_METHODS(TrainiumPSUMLayout, TrainiumLayout, TrainiumPSUMLayoutNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(TrainiumPSUMLayoutNode);
-};
-
 constexpr int kPSUMMaxElemPerBank = 512;
 constexpr int kPSUMBankNum = 8;
 
-/********************* Utils *********************/
-bool IsTrivialLayout(const TLayout& layout);
-
-}  // namespace tirxxxx
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

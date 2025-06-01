@@ -153,9 +153,9 @@ def test_fp8_gemm_hopper_no_ws():
 
     @T.prim_func(tirp=True)
     def manual(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (M, K), "float8_e4m3fn", scope="global", layout=T.TileLayout.from_tuple((M, K)))
-        B = T.match_buffer(B_ptr, (N, K), "float8_e4m3fn", scope="global", layout=T.TileLayout.from_tuple((N, K)))
-        C = T.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=T.TileLayout.from_tuple((M, N)))
+        A = T.match_buffer(A_ptr, (M, K), "float8_e4m3fn", scope="global", layout=T.TileLayout((M, K)))
+        B = T.match_buffer(B_ptr, (N, K), "float8_e4m3fn", scope="global", layout=T.TileLayout((N, K)))
+        C = T.match_buffer(C_ptr, (M, N), "float16", scope="global", layout=T.TileLayout((M, N)))
 
         A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

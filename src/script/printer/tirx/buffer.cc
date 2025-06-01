@@ -345,67 +345,62 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
       TVM_FFI_UNREACHABLE();
     });
 
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::Iter>("", [](tirx::Iter iter, ObjectPath p, IRDocsifier d) -> Doc {
+      return TIR(d, "Iter")->Call({d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")),
+                                   d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
+                                   d->AsDoc<ExprDoc>(iter->axis->name, p->Attr("axis"))},
+                                  {}, {});
+    });
+
 Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
   Array<String> keys;
   Array<ExprDoc> values;
 
-  auto split_map = layout.GetSplitMap();
-  // print data and strides
-  Array<ExprDoc> data_docs;
-  Array<ExprDoc> strides_docs;
-  for (int i = 0; i < static_cast<int>(layout->data_iter_array.size()); i++) {
-    auto it = split_map.find(i);
-    if (it != split_map.end()) {
-      data_docs.push_back(TIR(d, "S")->Call({LiteralDoc::Int(it->second, std::nullopt)}, {}, {}));
-    } else {
-      data_docs.push_back(
-          d->AsDoc<ExprDoc>(layout->data_iter_array[i]->extent,
-                            p->Attr("data_iter_array")->ArrayIndex(i)->Attr("extent")));
+  // print shard, replicate, and exclude
+  if (layout->shard.size() > 0) {
+    Array<ExprDoc> shard_e_docs, shard_sa_docs;
+    for (const auto& iter : layout->shard) {
+      shard_e_docs.push_back(d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")));
+      shard_sa_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
+                                        d->AsDoc<ExprDoc>(iter->axis->name, p->Attr("axis"))}));
     }
-    strides_docs.push_back(
-        d->AsDoc<ExprDoc>(layout->data_iter_array[i]->stride,
-                          p->Attr("data_iter_array")->ArrayIndex(i)->Attr("stride")));
+    keys.push_back("shard");
+    values.push_back(TupleDoc({ListDoc(shard_e_docs), ListDoc(shard_sa_docs)}));
   }
-  keys.push_back("data");
-  values.push_back(TupleDoc(data_docs));
-  keys.push_back("strides");
-  values.push_back(TupleDoc(strides_docs));
-
-  if (layout->device_iter_array.empty()) {
-    // No device tree
-    return TIR(d, "TileLayout")->Attr("from_tuple")->Call({}, {keys}, {values});
-  }
-  // print device and exclusive
-  Array<ExprDoc> device_docs;
-  Array<ExprDoc> e_docs;
-
-  for (int i = 0; i < static_cast<int>(layout->device_iter_array.size()); i++) {
-    auto device_attr = layout->device_iter_array[i];
-    if (device_attr.IsExclusive()) {
-      ExprDoc idx = LiteralDoc::Int(i, std::nullopt);
-      ExprDoc owner = d->AsDoc<ExprDoc>(device_attr->owner,
-                                        p->Attr("device_iter_array")->ArrayIndex(i)->Attr("owner"));
-      e_docs.push_back(TupleDoc({idx, owner}));
+  if (layout->replicate.size() > 0) {
+    Array<ExprDoc> replicate_e_docs, replicate_sa_docs;
+    for (const auto& iter : layout->replicate) {
+      replicate_e_docs.push_back(d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")));
+      replicate_sa_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
+                                            d->AsDoc<ExprDoc>(iter->axis->name, p->Attr("axis"))}));
     }
-    device_docs.push_back(d->AsDoc<ExprDoc>(
-        device_attr->extent, p->Attr("device_iter_array")->ArrayIndex(i)->Attr("extent")));
+    keys.push_back("replicate");
+    values.push_back(TupleDoc({ListDoc(replicate_e_docs), ListDoc(replicate_sa_docs)}));
   }
-  keys.push_back("device");
-  values.push_back(TupleDoc(device_docs));
-  if (!e_docs.empty()) {
-    keys.push_back("exclusive");
-    values.push_back(ListDoc(e_docs));
-  }
-  // print from_to scope
-  {
-    if (layout->from.defined()) {
-      ICHECK(layout->to.defined()) << "InternalError: `to` must be defined if `from` is defined";
-      keys.push_back("from_to");
-      values.push_back(TupleDoc({d->AsDoc<ExprDoc>(layout->from.value()->name, p->Attr("from")),
-                                 d->AsDoc<ExprDoc>(layout->to.value()->name, p->Attr("to"))}));
+  if (layout->exclude.size() > 0) {
+    Array<ExprDoc> exclude_e_docs, exclude_sa_docs, exclude_selector_docs;
+    for (const auto& iter_selector : layout->exclude) {
+      const auto& iter = iter_selector.get<0>();
+      const auto& selector = iter_selector.get<1>();
+      exclude_e_docs.push_back(d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")));
+      exclude_sa_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
+                                          d->AsDoc<ExprDoc>(iter->axis->name, p->Attr("axis"))}));
+      exclude_selector_docs.push_back(d->AsDoc<ExprDoc>(selector, p->Attr("selector")));
     }
+    keys.push_back("exclude");
+    values.push_back(TupleDoc({TupleDoc({ListDoc(exclude_e_docs), ListDoc(exclude_sa_docs)}),
+                               ListDoc(exclude_selector_docs)}));
   }
-  return TIR(d, "TileLayout")->Attr("from_tuple")->Call({}, {keys}, {values});
+  if (layout->subscope.defined()) {
+    keys.push_back("subscope");
+    values.push_back(d->AsDoc<ExprDoc>(layout->subscope.value()->name, p->Attr("subscope")));
+  }
+  if (layout->scope.defined()) {
+    keys.push_back("scope");
+    values.push_back(d->AsDoc<ExprDoc>(layout->scope.value()->name, p->Attr("scope")));
+  }
+  return TIR(d, "TileLayout")->Call({}, keys, values);
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
@@ -423,32 +418,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
         });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
-    .set_dispatch<tirx::TrainiumLayout>(
-        "", [](tirx::TrainiumLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
-          Array<String> keys;
-          Array<ExprDoc> values;
-          keys.push_back("dimension_types");
-          values.push_back(d->AsDoc<ExprDoc>(layout->dimension_types, p->Attr("dimension_types")));
-          keys.push_back("combined_1d_layout");
-          values.push_back(
-              d->AsDoc<ExprDoc>(layout->combined_1d_layout, p->Attr("combined_1d_layout")));
-          return TIR(d, "TrainiumLayout")->Call({}, keys, values);
-        });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
-    .set_dispatch<tirx::TrainiumPSUMLayout>(
-        "", [](tirx::TrainiumPSUMLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
-          Array<String> keys;
-          Array<ExprDoc> values;
-          keys.push_back("dimension_types");
-          values.push_back(d->AsDoc<ExprDoc>(layout->dimension_types, p->Attr("dimension_types")));
-          keys.push_back("combined_1d_layout");
-          values.push_back(
-              d->AsDoc<ExprDoc>(layout->combined_1d_layout, p->Attr("combined_1d_layout")));
-          return TIR(d, "TrainiumPSUMLayout")->Call({}, keys, values);
-        });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::SwizzleLayout>(
         "", [](tirx::SwizzleLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
           return TIR(d, "SwizzleLayout")
@@ -460,40 +429,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
                   },
                   {"swizzle_inner"},
                   {LiteralDoc::Boolean(layout->swizzle_inner, p->Attr("swizzle_inner"))});
-        });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
-    .set_dispatch<tirx::DeviceIterAttr>(
-        "", [](tirx::DeviceIterAttr attr, ObjectPath p, IRDocsifier d) -> Doc {
-          Array<String> keys;
-          Array<ExprDoc> values;
-          keys.push_back("extent");
-          values.push_back(d->AsDoc<ExprDoc>(attr->extent, p->Attr("extent")));
-          keys.push_back("type");
-          values.push_back(LiteralDoc::Int(attr->type, p->Attr("type")));
-          if (attr->bound.defined()) {
-            keys.push_back("bound");
-            values.push_back(d->AsDoc<ExprDoc>(attr->bound, p->Attr("bound")));
-          }
-          if (attr->owner.defined()) {
-            keys.push_back("owner");
-            values.push_back(d->AsDoc<ExprDoc>(attr->owner, p->Attr("owner")));
-          }
-          Doc doc = TIR(d, "DeviceIterAttr")->Call({}, keys, values);
-          return doc;
-        });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
-    .set_dispatch<tirx::DataIterAttr>(
-        "", [](tirx::DataIterAttr attr, ObjectPath p, IRDocsifier d) -> Doc {
-          Array<String> keys;
-          Array<ExprDoc> values;
-          keys.push_back("extent");
-          values.push_back(d->AsDoc<ExprDoc>(attr->extent, p->Attr("extent")));
-          keys.push_back("stride");
-          values.push_back(d->AsDoc<ExprDoc>(attr->stride, p->Attr("stride")));
-          Doc doc = TIR(d, "DataIterAttr")->Call({}, keys, values);
-          return doc;
         });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
@@ -518,12 +453,10 @@ TVM_SCRIPT_REPR(tirx::BufferRegionNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferLoadNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferStoreNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::BufferNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::IterNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::TileLayoutNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::ComposeLayoutNode, ReprPrintTIR);
-TVM_SCRIPT_REPR(tirx::TrainiumLayoutNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::SwizzleLayoutNode, ReprPrintTIR);
-TVM_SCRIPT_REPR(tirx::DeviceIterAttrNode, ReprPrintTIR);
-TVM_SCRIPT_REPR(tirx::DataIterAttrNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::MatchBufferRegionNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::ProducerLoadNode, ReprPrintTIR);
 

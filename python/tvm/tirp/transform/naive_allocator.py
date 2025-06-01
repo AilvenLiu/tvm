@@ -39,7 +39,7 @@ def get_buffer_size(buffer: Buffer) -> int:
             # the first dimension is partition size
             num_elem = functools.reduce(lambda x, y: x * y, buffer.shape[1:])
         else:
-            par_size = buffer.layout.partition_size
+            par_size = buffer.layout.size("P")
             num_elem = functools.reduce(lambda x, y: x * y, buffer.shape) // par_size
     elif buffer.scope().startswith("shared"):
         num_elem = functools.reduce(lambda x, y: x * y, buffer.shape)

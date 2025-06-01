@@ -17,7 +17,7 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TrainiumLayout, TileLayout
+from tvm.tir.layout import TileLayout
 import numpy as np
 import tvm.testing
 from tvm.script import ir as I
@@ -43,13 +43,9 @@ Tp_func_map = {
 @pytest.mark.parametrize("op_type", ["sum", "max", "min"])
 def test_simple_reduction(op_type):
     src_shape = [128, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    src_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
     dst_shape = [128, 1]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 1), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 1], [(1, "P"), (1, "F")]))
 
     opcode = opcode_map[op_type]
     tp_func = Tp_func_map[op_type]
@@ -82,14 +78,9 @@ def test_simple_reduction(op_type):
 
 def test_reduction_with_multiple_axes():
     src_shape = [128, 512, 4]
-    src_layout = TrainiumLayout(
-        dimension_types="PFF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 512, 4), (1, 1, 512)),
-    )
+    src_layout = TileLayout(shard=([128, 512, 4], [(1, "P"), (1, "F"), (512, "F")]))
     dst_shape = [128]
-    dst_layout = TrainiumLayout(
-        dimension_types="P", combined_1d_layout=T.TileLayout.from_tuple((128), (1))
-    )
+    dst_layout = TileLayout(shard=([128], [(1, "P")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -120,13 +111,9 @@ def test_reduction_with_multiple_axes():
 
 def test_reduction_in_loop():
     src_shape = [128, 512, 4]
-    src_layout = TrainiumLayout(
-        dimension_types="PFF", combined_1d_layout=T.TileLayout.from_tuple((128, 512, 4), (1, 4, 1))
-    )
+    src_layout = TileLayout(shard=([128, 512, 4], [(1, "P"), (4, "F"), (1, "F")]))
     dst_shape = [128, 4]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 4], [(1, "P"), (1, "F")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -157,13 +144,9 @@ def test_reduction_in_loop():
 
 def test_reduction_two_stage():
     src_shape = [128, 32, 4, 32]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 32 * 32 * 4), (1, 1))
-    )
+    src_layout = TileLayout(shard=([128, 32 * 32 * 4], [(1, "P"), (1, "F")]))
     dst_shape = [128, 4]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 4], [(1, "P"), (1, "F")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -201,14 +184,9 @@ def test_reduction_two_stage():
 
 def test_reduction_with_guard():
     src_shape = [512, 2048]
-    src_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2048), (2048, 1, 1)),
-    )
+    src_layout = TileLayout(shard=([4, 128, 2048], [(2048, "F"), (1, "P"), (1, "F")]))
     dst_shape = [512, 1]
-    dst_layout = TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((4, 128), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([4, 128], [(1, "F"), (1, "P")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -251,13 +229,9 @@ def test_reduction_with_guard():
 
 def test_reduction_two_stage_workspace():
     src_shape = [128, 32, 4, 32]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 32 * 32 * 4), (1, 1))
-    )
+    src_layout = TileLayout(shard=([128, 32 * 32 * 4], [(1, "P"), (1, "F")]))
     dst_shape = [128, 4]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 4], [(1, "P"), (1, "F")]))
 
     # fmt: off
     @T.prim_func(tirp=True)

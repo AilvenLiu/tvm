@@ -65,8 +65,8 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     buffer_conditions = [
         dst.buffer.layout and true_value.buffer.layout,
         dst.buffer.scope() == "trn.sbuf" and true_value.buffer.scope() == "trn.sbuf",
-        isinstance(true_value.buffer.layout, T.TrainiumLayout),
-        isinstance(dst.buffer.layout, T.TrainiumLayout),
+        true_value.buffer.layout.is_trainium(),
+        dst.buffer.layout.is_trainium(),
     ]
 
     if not all(buffer_conditions):
@@ -99,11 +99,11 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     p_var = T.var("int32", name="p")
     b_var = T.var("int32", name="b")
     f_var = T.var("int32", name="f")
-    p_size = dst.buffer.layout.partition_size
+    p_size = dst.buffer.layout.size("P")
     inst_gen.bind_inst_iter(dst, f_var, inst_repr.size, inst_repr.stride, True)
     inst_gen.bind_inst_iter(dst, p_var, p_size, 1, False)
     b_extent = inst_gen.fill_in_block_dim(dst, b_var)
-    
+
     # Get buffer references and guard function
     dst_buffer = dst.buffer
     true_value_buffer = true_value.buffer

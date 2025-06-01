@@ -104,7 +104,7 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     f_var = T.var("int32", "F")
     reduction_b_var = T.var("int32", "rB")
     spatial_b_var = T.var("int32", "sB")
-    p_size = binary_output.buffer.layout.partition_size
+    p_size = binary_output.buffer.layout.size("P")
     inst_gen.bind_inst_iter(binary_output, p_var, p_size, 1, False)
     inst_gen.bind_inst_iter(binary_output, f_var, inst_repr.size, inst_repr.stride, True)
     reduction_b_extent = inst_gen.fill_in_block_dim(binary_output, reduction_b_var, reduce_axes)
@@ -219,7 +219,7 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     f_var = T.var("int32", "F")
     reduction_b_var = T.var("int32", "rB")
     spatial_b_var = T.var("int32", "sB")
-    p_size = unary_output.buffer.layout.partition_size
+    p_size = unary_output.buffer.layout.size("P")
     inst_gen.bind_inst_iter(unary_output, p_var, p_size, 1, False)
     inst_gen.bind_inst_iter(unary_output, f_var, inst_repr.size, inst_repr.stride, True)
     reduction_b_extent = inst_gen.fill_in_block_dim(unary_output, reduction_b_var, reduce_axes)
@@ -333,7 +333,7 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     p_var = T.var("int32", name="P")
     b_var = T.var("int32", name="B")
     f_var = T.var("int32", name="F")
-    p_size = output.buffer.layout.partition_size
+    p_size = output.buffer.layout.size("P")
     inst_size_limit = op.schedule_config.get("max_inst_size", 512)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
     inst_gen.bind_inst_iter(output, p_var, p_size, 1, False)

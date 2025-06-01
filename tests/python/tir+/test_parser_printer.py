@@ -20,7 +20,6 @@ import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.ir import assert_structural_equal
-from tvm.tir.async_structs import CopyPipeline
 
 
 def from_source(code):
@@ -108,26 +107,23 @@ def test_roundtrip_exec_scope():
 
 def test_roundtrip_layout():
     def get_layout1():
-        return T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, T.S(1), 2),
-            strides=(6, -1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        return T.TileLayout(
+            shard=([8, 8, 8, 4, 2], [6, (4, "laneid"), 2, (1, "laneid"), 1]),
+            subscope="thread",
+            scope="warp",
         )
 
     def get_layout2():
-        return T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, 4, 2),
-            strides=(64, -1, 8, 2, 1),
-            device=(8, 4),
-            exclusive=[(1, 0)],
-            from_to=("thread", "warp"),
+        return T.TileLayout(
+            shard=([8, 8, 8, 4, 2], [64, (4, "laneid"), 8, 2, 1]),
+            exclude=(([4], [(1, "laneid")]), [0]),
+            subscope="thread",
+            scope="warp",
         )
 
     def get_layout3():
-        return T.TileLayout.from_tuple(
-            data=(8, 16, 8, 16),
-            strides=(1024, 16, 128, 1),
+        return T.TileLayout(
+            shard=([8, 16, 8, 16], [1024, 16, 128, 1]),
         )
 
     def get_layout4():
@@ -136,7 +132,7 @@ def test_roundtrip_layout():
     def get_layout5():
         return T.ComposeLayout(
             T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
-            T.TileLayout.from_tuple(data=(64, 64, 4), strides=(64, 1, 64 * 64)),
+            T.TileLayout(shard=([64, 64, 4], [64, 1, 64 * 64])),
         )
 
     # fmt: off
@@ -167,6 +163,9 @@ def test_roundtrip_layout():
     assert_structural_equal(test, from_source(code))
 
 
+L_LANE = T.TileLayout(shard=([32], [(1, "laneid")]), subscope="thread", scope="warp")
+
+
 def test_roundtrip_buffer_view_get1():
     # fmt: off
     @T.prim_func(tirp=True)
@@ -174,10 +173,8 @@ def test_roundtrip_buffer_view_get1():
         with T.kernel():
             with T.cta():
                 A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
-                A_layout = T.TileLayout.from_tuple((1, 2), (2, 1))
-                A_warp_layout = T.TileLayout.shard(
-                    (8, 8), (8, 4), "S0S1", inner=A_layout, from_to=("thread", "warp")
-                )
+                A_layout = T.TileLayout(shard=([1, 2], [2, 1]))
+                A_warp_layout = A_layout.tile(L_LANE, (8, 4), (1, 2))
                 A_warp = T.view(A, layout=A_warp_layout, shape=(8, 8))
 
                 with T.thread():
@@ -204,10 +201,8 @@ def test_roundtrip_buffer_view_get2():
 
             with T.cta():
                 A = T.alloc_buffer([2,], dtype="float16", scope="local", logical_scope="thread")
-                A_layout = T.TileLayout.from_tuple((1, 2), (2, 1))
-                B_layout = T.TileLayout.shard(
-                    (8, 8), (8, 4), "S0S1", inner=A_layout, from_to=("thread", "warp")
-                )
+                A_layout = T.TileLayout(shard=([1, 2], [2, 1]))
+                B_layout = A_layout.tile(L_LANE, (8, 4), (1, 2))
                 B = T.view(A, layout=B_layout, shape=(8, 8))
                 D = T.get(B, shape=(2,))
 
@@ -613,7 +608,7 @@ def test_roundtrip_implicit_buffer_region():
     # fmt: off
     @T.prim_func(tirp=True)
     def test(A_ptr: T.handle):
-        A = T.match_buffer(A_ptr, (10, 10, 10), "float32", layout=T.TileLayout.from_tuple((10, 10, 10)))
+        A = T.match_buffer(A_ptr, (10, 10, 10), "float32", layout=T.TileLayout((10, 10, 10)))
         with T.kernel():
             Tp.memset(A[0], T.float32(0.0))
 

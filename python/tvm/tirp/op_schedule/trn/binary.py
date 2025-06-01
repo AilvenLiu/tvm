@@ -48,6 +48,7 @@ class InstType(Enum):
     TENSOR_TENSOR = 0
     TENSOR_SCALAR = 1
 
+
 def try_find_inst_nary(
     _dst: BufferRegion,
     _srcs: List[Union[BufferRegion, FloatImm]],
@@ -79,8 +80,8 @@ def try_find_inst_nary(
     valid_buffers = all(
         [
             dst.layout and all(src.layout for src in srcs if src is not None),
-            isinstance(dst.layout, T.TrainiumLayout),
-            all(isinstance(src.layout, T.TrainiumLayout) for src in srcs if src is not None),
+            dst.layout.is_trainium(),
+            all(src.layout.is_trainium() for src in srcs if src is not None),
             dst.scope() == "trn.sbuf",
             all(src.scope() in ["trn.sbuf", "trn.psum"] for src in srcs if src is not None),
         ]
@@ -193,8 +194,12 @@ def try_find_inst_nary(
             continue
 
         allow_tt = allow_first_op_tensortensor or i != 0
-        inst_repr_non_bcast = inst_gen.fit_inst_tile_to_region(inst_repr, src, allowed_f_dim_srcs[i])
-        inst_repr_bcast = inst_gen.fit_inst_tile_to_region(inst_repr, src, allowed_f_dim_srcs[i], broadcast=True)
+        inst_repr_non_bcast = inst_gen.fit_inst_tile_to_region(
+            inst_repr, src, allowed_f_dim_srcs[i]
+        )
+        inst_repr_bcast = inst_gen.fit_inst_tile_to_region(
+            inst_repr, src, allowed_f_dim_srcs[i], broadcast=True
+        )
         if i == 0:
             inst_repr = inst_repr_non_bcast
             continue
@@ -202,10 +207,18 @@ def try_find_inst_nary(
         if not allow_tt:
             plan = "tensorscalar"
         else:
-            
-            if inst_repr_bcast.stride == 1 and inst_repr_non_bcast.stride > 1 and inst_repr_bcast.size > 1:
+
+            if (
+                inst_repr_bcast.stride == 1
+                and inst_repr_non_bcast.stride > 1
+                and inst_repr_bcast.size > 1
+            ):
                 plan = "tensorscalar"
-            elif inst_repr_bcast.stride > 1 and inst_repr_non_bcast.stride == 1 and inst_repr_non_bcast.size > 1:
+            elif (
+                inst_repr_bcast.stride > 1
+                and inst_repr_non_bcast.stride == 1
+                and inst_repr_non_bcast.size > 1
+            ):
                 plan = "tensortensor"
             elif inst_repr_bcast.size > inst_repr_non_bcast.size:
                 plan = "tensorscalar"
@@ -220,6 +233,7 @@ def try_find_inst_nary(
         inst_types.append(inst_type)
 
     return inst_repr, inst_types, reverse
+
 
 def binary_trn(
     op: OpCall,
@@ -251,7 +265,7 @@ def binary_trn(
     p_var = T.var("int32", name="P")
     b_var = T.var("int32", name="B")
     f_var = T.var("int32", name="F")
-    p_size = dst.layout.partition_size
+    p_size = dst.layout.size("P")
     inst_size_limit = op.schedule_config.get("max_inst_size", 512)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
     inst_gen.bind_inst_iter(_dst, p_var, p_size, 1, False)
@@ -274,18 +288,12 @@ def binary_trn(
                 for p_loop in T.serial(0, p_size, annotations={nki_dim: "P"}):
                     for f_loop in T.serial(0, inst_repr.size, annotations={nki_dim: "F"}):
                         inst_gen.set_bind_map_all({p_var: p_loop, f_var: f_loop, b_var: b_loop})
-                        
+
                         if inst_gen.make_guard(_dst):
-                            dst_indices = T.meta_var(
-                                inst_gen.generate_indices(_dst)
-                            )
-                            src1_indices = T.meta_var(
-                                inst_gen.generate_indices(_src1)
-                            )
+                            dst_indices = T.meta_var(inst_gen.generate_indices(_dst))
+                            src1_indices = T.meta_var(inst_gen.generate_indices(_src1))
                             if CONST is None:
-                                src2_indices = T.meta_var(
-                                    inst_gen.generate_indices(_src2)
-                                )
+                                src2_indices = T.meta_var(inst_gen.generate_indices(_src2))
                                 T.evaluate(
                                     func(
                                         dst[*dst_indices],

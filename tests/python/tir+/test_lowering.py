@@ -36,6 +36,9 @@ def compare(before, after, transform):
         tvm.ir.assert_structural_equal(transform()(before), after, map_free_vars=False)
 
 
+L_LANE = T.TileLayout(shard=([32], [(1, "laneid")]), subscope="thread", scope="warp")
+
+
 def test_lower_view_get():
     # fmt: off
     @T.prim_func(private=True, tirp=True)
@@ -46,24 +49,19 @@ def test_lower_view_get():
             lane_id = T.thread_id([32], parent="warp")
 
             with T.thread():
-                A = T.alloc_buffer([2], dtype="float16", scope="local",
-                                   layout=T.TileLayout.from_tuple((2,), (1,)))
-                B_layout = T.TileLayout.shard((64,), (32,), "S0", inner=A.layout, from_to=("thread", "warp"))
-                """
-                load in_buf into A
-                """
+                A = T.alloc_buffer([2], dtype="float16", scope="local", layout=T.TileLayout(shard=([2], [1])))
+                B_layout = A.layout.tile(L_LANE, (32,), (2,))
+                # load in_buf into A
                 with T.warp():
                     # warp view of this load
-                    B = T.view(A, layout=B_layout, shape=(64, )) # TODO(@bohan): consider making view API directly accepts shard parameters
+                    B = T.view(A, layout=B_layout, shape=(64, ))
                     # B[i] = in_buf[i]
                     with T.thread():
                         # done by each thread
                         A_local = T.get(B, shape=(2,))
                         for i in T.vectorized(2):
                             A_local[i] = T.float32(in_buf[lane_id * 2 + i])
-                """
-                write A into out
-                """
+                # write A into out
                 with T.warp():
                     # warp view of this write
                     B = T.view(A, layout=B_layout, shape=(64, ))
@@ -104,14 +102,13 @@ def test_lower_view_get():
             lane_id = T.thread_id([32], parent="warp")
 
             with T.thread():
-                atom = T.TileLayout.from_tuple((1, 2), (2, 1))
-                tile = T.TileLayout.from_tuple((2, 2), (2, 1))
-                warp_atom = T.TileLayout.shard(
-                    (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
-                )
-                A = T.alloc_buffer([4, 2], dtype="float32", scope="local",
-                                   layout=atom.tile(tile, (2, 2), (1, 2)))
+                atom = T.TileLayout(shard=([1, 2], [2, 1]))
+                tile = T.TileLayout(shard=([2, 2], [2, 1]))
+                warp_atom = atom.tile(L_LANE, (8, 4), (1, 2))
+                
+                A = T.alloc_buffer([4, 2], dtype="float32", scope="local", layout=atom.tile(tile, (2, 2), (1, 2)))
                 B_layout = warp_atom.tile(tile, (2, 2), (8, 8))
+                
                 # load in_buf into A
                 with T.warp():
                     # warp view of this load
@@ -168,20 +165,16 @@ def test_lower_view_get():
 
             with T.thread():
                 # shard from thread to warp
-                atom = T.TileLayout.from_tuple((1, 2), (2, 1))
-                warp_atom = T.TileLayout.shard(
-                    (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
-                )
+                atom = T.TileLayout((1, 2))
+                warp_atom = atom.tile(L_LANE, (8, 4), (1, 2))
                 # tile
-                tile = T.TileLayout.from_tuple((2, 128 // 8), (1, 2)) # column-major
+                tile = T.TileLayout(shard=([2, 128 // 8], [1, 2])) # column-major
                 warp_layout = warp_atom.tile(tile, (2, 128 // 8), (8, 8))
                 # shard from warp to cta
-                layout = T.TileLayout.shard(
-                    (128, 128), (8, 1), "S0S1", inner=warp_layout, from_to=("warp", "cta")
-                )
+                L_warp = T.TileLayout(shard=([8], [(1, "warpid")]), subscope="warp", scope="cta")
+                layout = warp_layout.tile(L_warp, (8, 1), (16, 128))
                 # alloc
-                acc = T.alloc_buffer([64,], dtype="float32", scope="local",
-                                     layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
+                acc = T.alloc_buffer([64,], dtype="float32", scope="local", layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
 
                 # load in_buf into acc
                 with T.cta():
@@ -222,14 +215,14 @@ def test_lower_view_get():
                             for j in T.unroll(2):
                                 for vec in T.vectorized(2):
                                     in_buf_1 = T.Buffer((16384,), data=in_buf.data, logical_scope="kernel")
-                                    acc[(i * 4 + j * 2 + vec) % 32 // 2 * 4 + i // 8 * 2 + vec] = in_buf_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec]
+                                    acc[i % 8 * 8 + j * 4 + i // 8 * 2 + vec] = in_buf_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec]
                 with T.cta():
                     with T.thread():
                         for i in range(16):
                             for j in T.unroll(2):
                                 for vec in T.vectorized(2):
                                     out_1 = T.Buffer((16384,), data=out.data, logical_scope="kernel")
-                                    out_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec] = acc[(i * 4 + j * 2 + vec) % 32 // 2 * 4 + i // 8 * 2 + vec]
+                                    out_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec] = acc[i % 8 * 8 + j * 4 + i // 8 * 2 + vec]
     # # fmt: on
 
     compare(before3_wgmma_layout, after3_wgmma_layout, LowerTIRp)
@@ -243,12 +236,8 @@ def test_lower_view_get():
             lane_id = T.thread_id([32], parent="warp")
 
             with T.thread():
-                A = T.alloc_buffer([2], dtype="float16", scope="local",
-                                   layout=T.TileLayout.from_tuple((2,), (1,)))
-                B_layout = T.TileLayout.shard((64,), (32,), "S0", inner=A.layout, from_to=("thread", "warp"))
-                """
-                load in_buf into A
-                """
+                A = T.alloc_buffer([2], dtype="float16", scope="local", layout=T.TileLayout(shard=([2], [1])))
+                B_layout = A.layout.tile(L_LANE, (32,), (2,))
                 with T.warp():
                     # warp view of this load
                     B = T.view(A, layout=B_layout, shape=(64, )) # TODO(@bohan): consider making view API directly accepts shard parameters
@@ -490,8 +479,7 @@ def test_lower_layout():
             tid = T.thread_id([128], parent="cta")
 
             with T.cta():
-                A_smem = T.alloc_buffer([128, 32], dtype="float16", scope="shared",
-                                        layout=T.SwizzleLayout(3, 3, 3))
+                A_smem = T.alloc_buffer([128, 32], dtype="float16", scope="shared", layout=T.SwizzleLayout(3, 3, 3))
 
                 with T.thread():
                     thread_col = T.meta_var(4)

@@ -42,15 +42,28 @@ TVM_REGISTER_GLOBAL("tir.SwizzleLayout")
       return SwizzleLayout(per_element, swizzle_len, atom_len, swizzle_inner);
     });
 
+bool SwizzleLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const { return true; }
+
 bool SwizzleLayoutNode::VerifyWellFormed() const {
   return per_element >= 0 && swizzle_len >= 0 && atom_len >= swizzle_len;
 }
 
-PrimExpr SwizzleLayoutNode::GetSize() const { return 1 << (per_element + swizzle_len + atom_len); }
+PrimExpr SwizzleLayoutNode::GetSize(Optional<String> axis_name) const {
+  CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for swizzle layout";
+  return 1 << (per_element + swizzle_len + atom_len);
+}
 
-PrimExpr SwizzleLayoutNode::GetCosize() const { return GetSize(); }
+PrimExpr SwizzleLayoutNode::GetCosize(Optional<String> axis_name) const {
+  CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for swizzle layout";
+  return GetSize();
+}
 
-Array<PrimExpr> SwizzleLayoutNode::Apply(const PrimExpr& coord) const {
+Map<String, PrimExpr> SwizzleLayoutNode::Apply(Array<PrimExpr> coord) const {
+  LOG(FATAL) << "SwizzleLayoutNode::Apply(Array<PrimExpr>) is not implemented";
+  return {};
+}
+
+Map<String, PrimExpr> SwizzleLayoutNode::Apply(PrimExpr coord) const {
   PrimExpr input = coord;
   auto f = [&](const PrimExpr& x) -> PrimExpr {
     if (swizzle_inner) {
@@ -62,8 +75,50 @@ Array<PrimExpr> SwizzleLayoutNode::Apply(const PrimExpr& coord) const {
   auto base = 1 << per_element;
   arith::Analyzer analyzer;
   // It takes more arithmetic operations to compute the result, but it is more friendly to the
-  // vectorization
-  return {analyzer.Simplify((f(floordiv(input, base)) << per_element) + floormod(input, base))};
+  // vectorization. We use "m" as the default axis name here.
+  return {
+      {"m", analyzer.Simplify((f(floordiv(input, base)) << per_element) + floormod(input, base))}};
+}
+
+TLayout SwizzleLayoutNode::Normalize() const { return GetRef<SwizzleLayout>(this); }
+
+// Creates a TileLayout mapping a logical shape to itself (identity).
+TileLayout IdentityTileLayout(Array<PrimExpr> shape) {
+  PrimExpr extent = std::accumulate(shape.begin() + 1, shape.end(), shape[0],
+                                    [](PrimExpr a, PrimExpr b) { return a * b; });
+  return TileLayout({Iter(extent, 1, Axis::Get("m"))}, {}, {}, {}, {});
+}
+
+TLayout SwizzleLayoutNode::Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
+                                const Array<PrimExpr>& inner_shape) const {
+  // Compose(Swizzle, Identity) -> then tile with `outer`.
+  auto comp = ComposeLayout(GetRef<SwizzleLayout>(this), IdentityTileLayout(inner_shape));
+  return comp->Tile(outer, outer_shape, inner_shape);
+}
+
+Optional<TileLayout> SwizzleLayoutNode::IsTileInner(const TLayout& tile_layout,
+                                                    const Array<PrimExpr>& tiled_shape,
+                                                    const Array<PrimExpr>& inner_shape) const {
+  // We expect tile_layout to be Compose(SwizzleLayout(this), _).
+  if (auto comp = tile_layout.as<ComposeLayout>()) {
+    if (StructuralEqual()(comp.value()->layout_A, GetRef<SwizzleLayout>(this))) {
+      auto identity = IdentityTileLayout(inner_shape);
+      return identity->IsTileInner(comp.value()->layout_B, tiled_shape, inner_shape);
+    }
+  } else if (auto swizzle = tile_layout.as<SwizzleLayout>()) {
+    if (StructuralEqual()(swizzle.value(), GetRef<SwizzleLayout>(this))) {
+      auto inner_identity = IdentityTileLayout(inner_shape);
+      auto tile_identity = IdentityTileLayout(tiled_shape);
+      return inner_identity->IsTileInner(tile_identity, tiled_shape, inner_shape);
+    }
+  }
+  return std::nullopt;
+}
+
+Optional<TLayout> SwizzleLayoutNode::IsTileOuter(const TLayout& tile_layout,
+                                                 const Array<PrimExpr>& tiled_shape,
+                                                 const Array<PrimExpr>& outer_shape) const {
+  return std::nullopt;
 }
 
 }  // namespace tir

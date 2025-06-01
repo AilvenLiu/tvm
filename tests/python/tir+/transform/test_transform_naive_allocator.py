@@ -17,7 +17,7 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TrainiumLayout, TileLayout
+from tvm.tir.layout import TileLayout
 import numpy as np
 import tvm.testing
 from tvm.script import ir as I
@@ -29,13 +29,11 @@ from tvm.tirp.transform import NaiveAllocator
 
 def test_one_alloc():
     src_shape = [128, 512]
-    src_layout = T.TileLayout.from_tuple((128, 512), (512, 1))
+    src_layout = TileLayout(([128, 512], [512, 1]))
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    dst_layout = TileLayout(([128, 512], [(1, "P"), (1, "F")]))
     # fmt: off
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirp=True) 
     def copy(A_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, src_shape, "float32", layout=src_layout)
         with T.kernel():

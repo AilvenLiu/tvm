@@ -17,7 +17,7 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TrainiumLayout, TileLayout
+from tvm.tir.layout import TileLayout
 import numpy as np
 import tvm.testing
 from tvm.script import ir as I
@@ -30,13 +30,9 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 def test_select():
     src_shape = [128, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    src_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -68,14 +64,9 @@ def test_select():
 
 def test_select_in_loop():
     src_shape = [32, 128, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 512), (512, 1, 1)),
-    )
+    src_layout = TileLayout(shard=([32, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -108,10 +99,7 @@ def test_select_in_loop():
 
 def test_select_expr_affine():
     src_shape = [512, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
-    )
+    src_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
     dst_shape = src_shape
     dst_layout = src_layout
     # fmt: off
@@ -143,10 +131,7 @@ def test_select_expr_affine():
 
 def test_select_with_guard():
     src_shape = [512, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
-    )
+    src_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
     dst_shape = src_shape
     dst_layout = src_layout
     # fmt: off

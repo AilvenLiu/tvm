@@ -17,7 +17,7 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TrainiumLayout, TileLayout
+from tvm.tir.layout import TileLayout
 import numpy as np
 import tvm.testing
 from tvm.script import ir as I
@@ -31,13 +31,9 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 def test_copy_transpose():
     src_shape = [512, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
-    )
+    src_layout = TileLayout(([128, 2048], [(1, "P", 1), (1, "F")]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((2048, 128), (1, 1))
-    )
+    dst_layout = TileLayout(([2048, 128], [(1, "F"), (1, "P")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -53,8 +49,10 @@ def test_copy_transpose():
         with T.kernel():
             identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
             acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
-            A_sbuf = T.alloc_buffer((512, 512), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 2048), strides=(1, 1))))
-            B_sbuf = T.alloc_buffer((512, 512), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 0), combined_1d_layout=T.TileLayout.from_tuple(data=(2048, 128), strides=(1, 1))))
+            A_sbuf = T.alloc_buffer((512, 512), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 2048], [(1, "P", 1), (1, "F")])))
+            B_sbuf = T.alloc_buffer((512, 512), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([2048, 128], [(1, "F"), (1, "P")])))
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
@@ -70,11 +68,9 @@ def test_copy_transpose():
 
 def test_normal_copy():
     src_shape = [128, 512]
-    src_layout = T.TileLayout.from_tuple((128, 512), (512, 1))
+    src_layout = TileLayout(([128, 512], [512, 1]))
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    dst_layout = TileLayout(([128, 512], [(1, "P"), (1, "F")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
@@ -91,10 +87,7 @@ def test_normal_copy():
 
 def test_unary_with_bias_scale():
     src_shape = [512, 1024]
-    src_layout = TrainiumLayout(
-        dimension_types="PF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4096), (1, 1)),
-    )
+    src_layout = TileLayout(([128, 4096], [(1, "P"), (1, "F")]))
     dst_shape = src_shape
     dst_layout = src_layout
     bias = T.float32(1.0)
@@ -112,8 +105,10 @@ def test_unary_with_bias_scale():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
             const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            A_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 4096), strides=(1, 1))))
-            C_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 4096), strides=(1, 1))))
+            A_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 4096], [(1, "P"), (1, "F")])))
+            C_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 4096], [(1, "P"), (1, "F")])))
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
@@ -128,13 +123,9 @@ def test_unary_with_bias_scale():
 
 def test_reduction_two_stage():
     src_shape = [128, 32, 4, 32]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 32 * 32 * 4), (1, 1))
-    )
+    src_layout = TileLayout(([128, 32 * 32 * 4], [(1, "P"), (1, "F")]))
     dst_shape = [128, 4]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1))
-    )
+    dst_layout = TileLayout(([128, 4], [(1, "P"), (1, "F")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -149,8 +140,10 @@ def test_reduction_two_stage():
         T.func_attr({"global_symbol": "reduction"})
         with T.kernel():
             partial_reduce = T.alloc_buffer((128, 32), scope="trn.sbuf", logical_scope="kernel")
-            A_sbuf = T.alloc_buffer((128, 32, 4, 32), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 4096), strides=(1, 1))))
-            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 4), strides=(1, 1))))
+            A_sbuf = T.alloc_buffer((128, 32, 4, 32), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 32 * 32 * 4], [(1, "P"), (1, "F")])))
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 4], [(1, "P"), (1, "F")])))
             Tp.sum(B_sbuf[0:128, 0:4], A_sbuf[0:128, 0:32, 0:4, 0:32], [1, 3], False, workspace={"partial_reduce": partial_reduce})
 
     # fmt: on
@@ -161,19 +154,10 @@ def test_reduction_two_stage():
 
 
 def test_gemm():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 8, 128), (1024, 1, 128, 1)),
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="FPFF",
-        combined_1d_layout=T.TileLayout.from_tuple((8, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    A_layout = TileLayout(([4, 128, 8, 128], [(1024, "F"), (1, "F"), (1, "F"), (1, "P")]))
+    B_layout = TileLayout(([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")]))
 
-    C_layout = T.TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 2, 128), (256, 1, 128, 1)),
-    )
+    C_layout = TileLayout(([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -194,9 +178,12 @@ def test_gemm():
         T.func_attr({"global_symbol": "gemm"})
         with T.kernel():
             acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
-            A_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 1, 1, 0), combined_1d_layout=T.TileLayout.from_tuple(data=(4, 128, 8, 128), strides=(1024, 1, 128, 1))))
-            B_sbuf = T.alloc_buffer((1024, 256), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 0, 1, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(8, 128, 2, 128), strides=(256, 1, 128, 1))))
-            C_sbuf = T.alloc_buffer((512, 256), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 1, 1, 0), combined_1d_layout=T.TileLayout.from_tuple(data=(4, 128, 2, 128), strides=(256, 1, 128, 1))))
+            A_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([4, 128, 8, 128], [(1024, "F"), (1, "F"), (1, "F"), (1, "P")])))
+            B_sbuf = T.alloc_buffer((1024, 256), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([8, 128, 2, 128], [(256, "F"), (1, "P"), (128, "F"), (1, "F")])))
+            C_sbuf = T.alloc_buffer((512, 256), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([4, 128, 2, 128], [(256, "F"), (1, "F"), (128, "F"), (1, "P")])))
             for i, k in T.grid(2, 2):
                 Tp.gemm(C_sbuf[256 * i:256 * i + 256, 0:256], A_sbuf[256 * i:256 * i + 256, 512 * k:512 * k + 512], B_sbuf[512 * k:512 * k + 512, 0:256], C_sbuf[256 * i:256 * i + 256, 0:256], False, False, T.float32(1.0), T.float32(0.0), workspace={"acc_psum": acc_psum})
     # fmt: on
@@ -208,17 +195,11 @@ def test_gemm():
 
 def test_binary_reduce_two_stage():
     src1_shape = [512, 1024, 4]
-    src1_layout = TrainiumLayout(
-        dimension_types="PFF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4096, 4), (1, 1, 4096)),
-    )
+    src1_layout = TileLayout(([128, 4096, 4], [(1, "P"), (1, "F"), (4096, "F")]))
     dst1_shape = src1_shape
     dst1_layout = src1_layout
     reduce_dst_shape = [512]
-    reduce_dst_layout = TrainiumLayout(
-        dimension_types="PF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1)),
-    )
+    reduce_dst_layout = TileLayout(([128, 4], [(1, "P"), (1, "F")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def tensor_scalar_reduce() -> None:
@@ -233,9 +214,12 @@ def test_binary_reduce_two_stage():
         T.func_attr({"global_symbol": "tensor_scalar_reduce"})
         with T.kernel():
             partial_reduce = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
-            A_sbuf = T.alloc_buffer((512, 1024, 4), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 4096, 4), strides=(1, 1, 4096))))
-            B_sbuf = T.alloc_buffer((512, 1024, 4), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 4096, 4), strides=(1, 1, 4096))))
-            C_sbuf = T.alloc_buffer((512,), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 4), strides=(1, 1))))
+            A_sbuf = T.alloc_buffer((512, 1024, 4), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 4096, 4], [(1, "P"), (1, "F"), (4096, "F")])))
+            B_sbuf = T.alloc_buffer((512, 1024, 4), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 4096, 4], [(1, "P"), (1, "F"), (4096, "F")])))
+            C_sbuf = T.alloc_buffer((512,), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 4], [(1, "P"), (1, "F")])))
             Tp.binary_reduce(B_sbuf[0:512, 0:1024, 0:4], C_sbuf[0:512], A_sbuf[0:512, 0:1024, 0:4], T.float32(1.0), "add", "sum", [1, 2], workspace={"partial_reduce": partial_reduce})
     # fmt: on
     with target:
@@ -246,13 +230,11 @@ def test_binary_reduce_two_stage():
 
 def test_activation_reduce_two_stage():
     A_shape = (32, 512, 128)
-    A_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 1024, 128), (1, 1)))
+    A_layout = TileLayout(([16 * 1024, 128], [(1, "F"), (1, "P")]))
     B_shape = (16, 512, 128)
-    B_layout = TrainiumLayout(
-        "FFFP", T.TileLayout.from_tuple((2, 4, 1024, 128), (1024, 2048, 1, 1))
-    )
+    B_layout = TileLayout(([2, 4, 1024, 128], [(1024, "F"), (2048, "F"), (1, "F"), (1, "P")]))
     C_shape = (1, 128)
-    C_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((1, 128), (1, 1)))
+    C_layout = TileLayout(([1, 128], [(1, "F"), (1, "P")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def activation_reduce():
@@ -269,9 +251,12 @@ def test_activation_reduce_two_stage():
         with T.kernel():
             partial_reduce = T.alloc_buffer((128, 8), scope="trn.sbuf", logical_scope="kernel")
             const_bias = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
-            A = T.alloc_buffer((32, 512, 128), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 0), combined_1d_layout=T.TileLayout.from_tuple(data=(16384, 128), strides=(1, 1))))
-            B = T.alloc_buffer((16, 512, 128), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 1, 1, 0), combined_1d_layout=T.TileLayout.from_tuple(data=(2, 4, 1024, 128), strides=(1024, 2048, 1, 1))))
-            C = T.alloc_buffer((1, 128), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 0), combined_1d_layout=T.TileLayout.from_tuple(data=(1, 128), strides=(1, 1))))
+            A = T.alloc_buffer((32, 512, 128), scope="trn.sbuf", logical_scope="kernel", 
+                               layout=T.TileLayout(([16 * 1024, 128], [(1, "F"), (1, "P")])))
+            B = T.alloc_buffer((16, 512, 128), scope="trn.sbuf", logical_scope="kernel", 
+                               layout=T.TileLayout(([2, 4, 1024, 128], [(1024, "F"), (2048, "F"), (1, "F"), (1, "P")])))
+            C = T.alloc_buffer((1, 128), scope="trn.sbuf", logical_scope="kernel", 
+                               layout=T.TileLayout(([1, 128], [(1, "F"), (1, "P")])))
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(1024, annotations={"nki_dim": "F"}):
@@ -287,13 +272,11 @@ def test_activation_reduce_two_stage():
 
 def test_partial_workspace_specify():
     A_shape = (32, 512, 128)
-    A_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((16 * 1024, 128), (1, 1)))
+    A_layout = TileLayout(([16 * 1024, 128], [(1, "F"), (1, "P")]))
     B_shape = (16, 512, 128)
-    B_layout = TrainiumLayout(
-        "FFFP", T.TileLayout.from_tuple((2, 4, 1024, 128), (1024, 2048, 1, 1))
-    )
+    B_layout = TileLayout(([2, 4, 1024, 128], [(1024, "F"), (2048, "F"), (1, "F"), (1, "P")]))
     C_shape = (1, 128)
-    C_layout = TrainiumLayout("FP", T.TileLayout.from_tuple((1, 128), (1, 1)))
+    C_layout = TileLayout(([1, 128], [(1, "F"), (1, "P")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def activation_reduce():
@@ -311,9 +294,12 @@ def test_partial_workspace_specify():
         with T.kernel():
             const_bias = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
             partial_reduce = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
-            A = T.alloc_buffer((32, 512, 128), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 0), combined_1d_layout=T.TileLayout.from_tuple(data=(16384, 128), strides=(1, 1))))
-            B = T.alloc_buffer((16, 512, 128), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 1, 1, 0), combined_1d_layout=T.TileLayout.from_tuple(data=(2, 4, 1024, 128), strides=(1024, 2048, 1, 1))))
-            C = T.alloc_buffer((1, 128), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(1, 0), combined_1d_layout=T.TileLayout.from_tuple(data=(1, 128), strides=(1, 1))))
+            A = T.alloc_buffer((32, 512, 128), scope="trn.sbuf", logical_scope="kernel", 
+                               layout=T.TileLayout(([16 * 1024, 128], [(1, "F"), (1, "P")])))
+            B = T.alloc_buffer((16, 512, 128), scope="trn.sbuf", logical_scope="kernel", 
+                               layout=T.TileLayout(([2, 4, 1024, 128], [(1024, "F"), (2048, "F"), (1, "F"), (1, "P")])))
+            C = T.alloc_buffer((1, 128), scope="trn.sbuf", logical_scope="kernel", 
+                               layout=T.TileLayout(([1, 128], [(1, "F"), (1, "P")])))
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(1024, annotations={"nki_dim": "F"}):
@@ -329,10 +315,7 @@ def test_partial_workspace_specify():
 
 def test_workspace_reuse():
     src_shape = [512, 1024]
-    src_layout = TrainiumLayout(
-        dimension_types="PF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4096), (1, 1)),
-    )
+    src_layout = TileLayout(([128, 4096], [(1, "P"), (1, "F")]))
     dst_shape = src_shape
     dst_layout = src_layout
     scale = T.float32(2.0)
@@ -350,8 +333,10 @@ def test_workspace_reuse():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
             const_bias = T.alloc_buffer((128, 1024), scope="trn.sbuf", logical_scope="kernel")
-            A_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 4096), strides=(1, 1))))
-            C_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", layout=T.TrainiumLayout(dimension_types=(0, 1), combined_1d_layout=T.TileLayout.from_tuple(data=(128, 4096), strides=(1, 1))))
+            A_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 4096], [(1, "P"), (1, "F")])))
+            C_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", logical_scope="kernel", 
+                                    layout=T.TileLayout(([128, 4096], [(1, "P"), (1, "F")])))
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(1024, annotations={"nki_dim": "F"}):
@@ -366,15 +351,12 @@ def test_workspace_reuse():
         mod = PrivateBufferAlloc()(mod)
         assert_structural_equal(mod["main"], expected)
 
+
 def test_no_rewrite_with_existing_workspace():
     src_shape = [128, 32, 4, 32]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 32 * 32 * 4), (1, 1))
-    )
+    src_layout = TileLayout(([128, 32 * 32 * 4], [(1, "P"), (1, "F")]))
     dst_shape = [128, 4]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1))
-    )
+    dst_layout = TileLayout(([128, 4], [(1, "P"), (1, "F")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -390,17 +372,12 @@ def test_no_rewrite_with_existing_workspace():
         mod = PrivateBufferAlloc()(mod)
         assert_structural_equal(mod["main"], reduction)
 
-def test_no_rewrite_with_psum_output():
-    A_layout = T.TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
-    )
-    B_layout = T.TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
-    )
 
-    C_layout = T.TrainiumPSUMLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 128), (1, 1))
-    )
+def test_no_rewrite_with_psum_output():
+    A_layout = TileLayout(([128, 128], [(1, "F"), (1, "P")]))
+    B_layout = TileLayout(([128, 128], [(1, "P"), (1, "F")]))
+
+    C_layout = TileLayout(([128, 128], [(1, "P"), (1, "F")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def gemm() -> None:
@@ -414,6 +391,7 @@ def test_no_rewrite_with_psum_output():
         mod = tvm.IRModule({"main": gemm})
         mod = PrivateBufferAlloc()(mod)
         assert_structural_equal(mod["main"], gemm)
+
 
 if __name__ == "__main__":
     tvm.testing.main()

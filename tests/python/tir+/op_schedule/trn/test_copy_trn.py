@@ -17,7 +17,7 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TrainiumLayout, TileLayout
+from tvm.tir.layout import TileLayout
 import numpy as np
 import tvm.testing
 from tvm.script import ir as I
@@ -30,11 +30,9 @@ target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
 def test_simple_copy():
     src_shape = [128, 512]
-    src_layout = T.TileLayout.from_tuple((128, 512), (512, 1))
+    src_layout = T.TileLayout(([128, 512], [512, 1]))
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
 
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
@@ -50,7 +48,7 @@ def test_simple_copy():
             A_ptr,
             (128, 512),
             logical_scope="kernel",
-            layout=T.TileLayout.from_tuple(data=(128, 512), strides=(512, 1)),
+            layout=T.TileLayout(([128, 512], [512, 1])),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
@@ -69,13 +67,10 @@ def test_simple_copy():
 
 def test_simple_copy_2():
     src_shape = [128, 512]
-    src_layout = T.TileLayout.from_tuple((128, 4, 128), (512, 128, 1))
+    src_layout = TileLayout(([128, 4, 128], [512, 128, 1]))
 
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="FFP",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4, 128), (4, 1, 1)),
-    )
+    dst_layout = TileLayout(shard=([128, 4, 128], [(4, "F"), (1, "F"), (1, "P")]))
 
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
@@ -91,7 +86,7 @@ def test_simple_copy_2():
             A_ptr,
             (128, 512),
             logical_scope="kernel",
-            layout=T.TileLayout.from_tuple(data=(128, 4, 128), strides=(512, 128, 1)),
+            layout=T.TileLayout(([128, 4, 128], [512, 128, 1])),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
@@ -110,12 +105,9 @@ def test_simple_copy_2():
 
 def test_copy_in_a_loop():
     src_shape = [512, 512]
-    src_layout = T.TileLayout.from_tuple((4, 128, 512), (512 * 128, 512, 1))
+    src_layout = T.TileLayout(([4, 128, 512], [512 * 128, 512, 1]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
-    )
+    dst_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
 
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
@@ -132,7 +124,7 @@ def test_copy_in_a_loop():
             A_ptr,
             (512, 512),
             logical_scope="kernel",
-            layout=T.TileLayout.from_tuple(data=(4, 128, 512), strides=(65536, 512, 1)),
+            layout=T.TileLayout(([4, 128, 512], [65536, 512, 1])),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
@@ -153,11 +145,9 @@ def test_copy_in_a_loop():
 
 def test_copy_in_a_loop_2():
     src_shape = [512, 512]
-    src_layout = T.TileLayout.from_tuple((128, 2048), (2048, 1))
+    src_layout = T.TileLayout(([128, 2048], [2048, 1]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 2048], [(1, "P"), (1, "F")]))
 
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
@@ -176,7 +166,7 @@ def test_copy_in_a_loop_2():
             A_ptr,
             (512, 512),
             logical_scope="kernel",
-            layout=T.TileLayout.from_tuple(data=(128, 2048), strides=(2048, 1)),
+            layout=T.TileLayout(([128, 2048], [2048, 1])),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
@@ -197,13 +187,9 @@ def test_copy_in_a_loop_2():
 
 def test_copy_transpose():
     src_shape = [512, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
-    )
+    src_layout = TileLayout(shard=([128, 2048], [(1, "P"), (1, "F")]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((2048, 128), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([2048, 128], [(1, "F"), (1, "P")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -248,14 +234,9 @@ def test_copy_transpose():
 
 def test_copy_transpose_2():
     src_shape = [65536]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    src_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
     dst_shape = [4, 65536]
-    dst_layout = TrainiumLayout(
-        dimension_types="FFPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 128, 4), (4, 16, 1, 1)),
-    )
+    dst_layout = TileLayout(shard=([4, 128, 128, 4], [(4, "F"), (16, "F"), (1, "P"), (1, "F")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def copy() -> None:
@@ -300,14 +281,12 @@ def test_copy_transpose_2():
 
 def test_copy_different_f():
     src_shape = [512, 64]
-    src_layout = TrainiumLayout(
-        dimension_types="FPFFF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4, 4, 4), (64, 1, 16, 4, 1)),
+    src_layout = TileLayout(
+        shard=([4, 128, 4, 4, 4], [(64, "F"), (1, "P"), (16, "F"), (4, "F"), (1, "F")])
     )
     dst_shape = [512, 64]
-    dst_layout = TrainiumLayout(
-        dimension_types="FPFFF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4, 4, 4), (64, 1, 4, 16, 1)),
+    dst_layout = TileLayout(
+        shard=([4, 128, 4, 4, 4], [(64, "F"), (1, "P"), (4, "F"), (16, "F"), (1, "F")])
     )
 
     @T.prim_func(tirp=True)
@@ -343,15 +322,11 @@ def test_copy_different_f():
 
 def test_copy_different_shape():
     src_shape = [512, 64]
-    src_layout = TrainiumLayout(
-        dimension_types="FPFFF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4, 4, 4), (64, 1, 16, 4, 1)),
+    src_layout = TileLayout(
+        shard=([4, 128, 4, 4, 4], [(64, "F"), (1, "P"), (16, "F"), (4, "F"), (1, "F")])
     )
     dst_shape = [4, 128, 4]
-    dst_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4), (4, 1, 1)),
-    )
+    dst_layout = TileLayout(shard=([4, 128, 4], [(4, "F"), (1, "P"), (1, "F")]))
 
     @T.prim_func(tirp=True)
     def copy() -> None:
@@ -384,11 +359,9 @@ def test_copy_different_shape():
 
 def test_copy_irregular_shape():
     src_shape = [128, 10000]
-    src_layout = T.TileLayout.from_tuple((128, 10000), (10000, 1))
+    src_layout = TileLayout(shard=([128, 10000], [10000, 1]))
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
 
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
@@ -405,7 +378,7 @@ def test_copy_irregular_shape():
             A_ptr,
             (128, 10000),
             logical_scope="kernel",
-            layout=T.TileLayout.from_tuple(data=(128, 10000), strides=(10000, 1)),
+            layout=T.TileLayout(([128, 10000], [10000, 1])),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
@@ -424,11 +397,9 @@ def test_copy_irregular_shape():
 
 def test_copy_different_shape_dim():
     src_shape = [32, 128, 512]
-    src_layout = T.TileLayout.from_tuple((32, 128, 512), (128 * 512, 128, 1))
+    src_layout = TileLayout(shard=([32, 128, 512], [128 * 512, 128, 1]))
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
     # fmt: off
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
@@ -441,7 +412,7 @@ def test_copy_different_shape_dim():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (32, 128, 512), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(32, 128, 512), strides=(65536, 128, 1)))
+        A = T.match_buffer(A_ptr, (32, 128, 512), logical_scope="kernel", layout=T.TileLayout(([32, 128, 512], [65536, 128, 1])))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
             for i, b_loop in T.grid(32, 1):
@@ -459,12 +430,9 @@ def test_copy_different_shape_dim():
 
 def test_copy_with_offset():
     src_shape = [256, 512]
-    src_layout = T.TileLayout.from_tuple((256, 512), (512, 1))
+    src_layout = TileLayout(shard=([256, 512], [512, 1]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
-    )
+    dst_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
 
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
@@ -481,7 +449,7 @@ def test_copy_with_offset():
             A_ptr,
             (256, 512),
             logical_scope="kernel",
-            layout=T.TileLayout.from_tuple(data=(256, 512), strides=(512, 1)),
+            layout=T.TileLayout(([256, 512], [512, 1])),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
@@ -503,12 +471,9 @@ def test_copy_with_offset():
 
 def test_large_dma_copy():
     src_shape = [512, 4096]
-    src_layout = T.TileLayout.from_tuple((4, 128, 4096), (4096 * 128, 4096, 1))
+    src_layout = T.TileLayout(([4, 128, 4096], [4096 * 128, 4096, 1]))
     dst_shape = [512, 4096]
-    dst_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4096), (4096, 1, 1)),
-    )
+    dst_layout = TileLayout(shard=([4, 128, 4096], [(4096, "F"), (1, "P"), (1, "F")]))
 
     @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
@@ -525,7 +490,7 @@ def test_large_dma_copy():
             A_ptr,
             (512, 4096),
             logical_scope="kernel",
-            layout=T.TileLayout.from_tuple(data=(4, 128, 4096), strides=(524288, 4096, 1)),
+            layout=T.TileLayout(([4, 128, 4096], [524288, 4096, 1])),
         )
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
@@ -547,10 +512,7 @@ def test_large_dma_copy():
 
 def test_copy_with_inst_size_limit():
     src_shape = [512, 4096]
-    src_layout = dst_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 4096), (4096, 1, 1)),
-    )
+    src_layout = dst_layout = TileLayout(shard=([4, 128, 4096], [(4096, "F"), (1, "P"), (1, "F")]))
     dst_shape = src_shape
     dst_layout = src_layout
 
@@ -585,10 +547,10 @@ def test_copy_with_inst_size_limit():
 
 def test_copy_with_complex_index():
     A_shape = [4096, 4096]
-    A_layout = T.TileLayout.from_tuple((4096, 4096), (1, 4096))
+    A_layout = T.TileLayout(([4096, 4096], [1, 4096]))
     A_sbuf_shape = (2, 2048, 1024)
-    A_sbuf_layout = T.TrainiumLayout(
-        "FFFP", T.TileLayout.from_tuple((2, 2048, 8, 128), (16384, 1, 2048, 1))
+    A_sbuf_layout = TileLayout(
+        shard=([2, 2048, 8, 128], [(16384, "F"), (1, "F"), (2048, "F"), (1, "P")])
     )
 
     # fmt: off
@@ -602,7 +564,7 @@ def test_copy_with_complex_index():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (4096, 4096), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(4096, 4096), strides=(1, 4096)))
+        A = T.match_buffer(A_ptr, (4096, 4096), logical_scope="kernel", layout=T.TileLayout(([4096, 4096], [1, 4096])))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 32768), scope="trn.sbuf", logical_scope="kernel")
             for b_loop in T.serial(0, 8):
@@ -620,16 +582,9 @@ def test_copy_with_complex_index():
 
 def test_copy_with_complex_index_2():
     A_sbuf_shape = [4096, 4096]
-    A_sbuf_layout = T.TrainiumLayout("FFP", T.TileLayout.from_tuple((4096, 32, 128), (1, 4096, 1)))
+    A_sbuf_layout = T.TileLayout(shard=([4096, 32, 128], [(1, "F"), (4096, "F"), (1, "P")]))
     A_shape = (2, 2048, 1024)
-    A_layout = T.TileLayout.from_tuple(
-        (2, 2048, 1024),
-        (
-            2048 * 1024,
-            1,
-            2048,
-        ),
-    )
+    A_layout = T.TileLayout(([2, 2048, 1024], [2048 * 1024, 1, 2048]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -642,7 +597,7 @@ def test_copy_with_complex_index_2():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (2, 2048, 1024), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(2, 2048, 1024), strides=(2097152, 1, 2048)))
+        A = T.match_buffer(A_ptr, (2, 2048, 1024), logical_scope="kernel", layout=T.TileLayout(([2, 2048, 1024], [2097152, 1, 2048])))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 131072), scope="trn.sbuf", logical_scope="kernel")
             for b_loop in T.serial(0, 8):
@@ -661,13 +616,9 @@ def test_copy_with_complex_index_2():
 
 def test_copy_transpose_with_workspace():
     src_shape = [512, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
-    )
+    src_layout = TileLayout(shard=([128, 2048], [(1, "P"), (1, "F")]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((2048, 128), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([2048, 128], [(1, "F"), (1, "P")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -715,12 +666,9 @@ def test_copy_transpose_with_workspace():
 
 def test_copy_with_guard():
     src_shape = [512, 512]
-    src_layout = T.TileLayout.from_tuple((4, 128, 512), (512 * 128, 512, 1))
+    src_layout = T.TileLayout(([4, 128, 512], [512 * 128, 512, 1]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
-    )
+    dst_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -735,7 +683,7 @@ def test_copy_with_guard():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(4, 128, 512), strides=(65536, 512, 1)))
+        A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=T.TileLayout(([4, 128, 512], [65536, 512, 1])))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             for j, i, b_loop in T.grid(4, 4, 1):
@@ -755,12 +703,9 @@ def test_copy_with_guard():
 
 def test_copy_with_guard_2():
     src_shape = [512, 512]
-    src_layout = T.TileLayout.from_tuple((4, 128, 512), (512 * 128, 512, 1))
+    src_layout = T.TileLayout(([4, 128, 512], [512 * 128, 512, 1]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
-    )
+    dst_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -775,7 +720,7 @@ def test_copy_with_guard_2():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=T.TileLayout.from_tuple(data=(4, 128, 512), strides=(65536, 512, 1)))
+        A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=T.TileLayout(([4, 128, 512], [65536, 512, 1])))
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
             for j, i, b_loop in T.grid(4, 4, 3):
@@ -795,14 +740,9 @@ def test_copy_with_guard_2():
 
 def test_copy_transpose_with_guard():
     src_shape = [512, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 512), (512, 1, 1)),
-    )
+    src_layout = TileLayout(shard=([4, 128, 512], [(512, "F"), (1, "P"), (1, "F")]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((2048, 128), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([2048, 128], [(1, "F"), (1, "P")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -911,7 +851,7 @@ def test_copy_transpose_with_extended_f():
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
                         T.nki.tensor_copy(B_sbuf[p_loop, b_loop * 512 + f_loop], acc_psum[b_loop, p_loop, f_loop])        
-    
+
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": copy})
@@ -919,6 +859,7 @@ def test_copy_transpose_with_extended_f():
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod = tvm.tir.transform.Simplify()(mod)
         assert_structural_equal(mod["main"], expected)
+
 
 if __name__ == "__main__":
     tvm.testing.main()

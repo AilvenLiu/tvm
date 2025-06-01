@@ -89,7 +89,7 @@ def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape):
     if isinstance(swizzle_mode, int):
         swizzle_mode = SwizzleMode(swizzle_mode)
     if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
-        return TileLayout.from_tuple(shape).normalize()
+        return TileLayout(shape).normalize()
     atom_shape = tma_atom_shape(dtype, swizzle_mode, shape)
     layout = tma_atom_layout(dtype, swizzle_mode)
     tile_to_shape = copy.copy(atom_shape)
@@ -204,24 +204,24 @@ def copy_tma_impl(
             # Swizzle mode selected
             swizzle_mode = mode
             outer_shape = [s // a for s, a in zip(s_buf.shape, atom_shape)]
-            outer, seps = outer.normalize().group_by_logical_shape(outer_shape)
+            outer, seps = outer.normalize().group_by_shape(outer_shape)
 
             # -------------- iterator derivation (mostly unchanged) ----------
             def derive_iters(outer, seps):
-                iters_ = list(enumerate(outer.data_iter_array))
+                iters_ = list(enumerate(outer.shard))
                 iter_ranges_ = [0] * len(iters_)
                 for i in range(len(seps) - 1):
                     st_i, ext_i = s_st[i], s_ext[i]
                     for j in reversed(range(seps[i], seps[i + 1])):
-                        if st_i % outer.data_iter_array[j].extent == 0:
-                            assert ext_i % outer.data_iter_array[j].extent == 0
-                            iter_ranges_[j] = outer.data_iter_array[j].extent
-                            st_i //= outer.data_iter_array[j].extent
-                            ext_i //= outer.data_iter_array[j].extent
+                        if st_i % outer.shard[j].extent == 0:
+                            assert ext_i % outer.shard[j].extent == 0
+                            iter_ranges_[j] = outer.shard[j].extent
+                            st_i //= outer.shard[j].extent
+                            ext_i //= outer.shard[j].extent
                         else:
                             # Region falls within a partial tile
-                            assert st_i < outer.data_iter_array[j].extent
-                            assert st_i + ext_i <= outer.data_iter_array[j].extent
+                            assert st_i < outer.shard[j].extent
+                            assert st_i + ext_i <= outer.shard[j].extent
                             iter_ranges_[j] = ext_i
                             break
                 iters_.sort(key=lambda x: x[1].stride, reverse=True)
@@ -230,9 +230,9 @@ def copy_tma_impl(
             iters, iter_ranges = derive_iters(outer, seps)
 
             # -------- derive box_dim (how many atoms per cp.async) ----------
-            if outer.data_iter_array[seps[-2] - 1].stride == 1:
+            if outer.shard[seps[-2] - 1].stride == 1:
                 box_dim = copy.copy(atom_shape)
-                box_dim[-2] *= outer.data_iter_array[seps[-2] - 1].extent
+                box_dim[-2] *= outer.shard[seps[-2] - 1].extent
                 iter_ranges.pop(iters[-1][0])
                 iters.pop()
             else:
@@ -274,16 +274,16 @@ def copy_tma_impl(
     def make_shared_coord(st, lvs):
         if isinstance(lvs, tvm.tir.Var):
             lvs = [lvs]
-        lv_shuffled = [0] * len(outer.data_iter_array)
+        lv_shuffled = [0] * len(outer.shard)
         for (idx, data_iter), lv in zip(iters, lvs):
             lv_shuffled[idx] = lv
         coord = copy.copy(st)
         for i in range(len(s_buf.shape)):
-            grouped_shape = [outer.data_iter_array[j].extent for j in range(seps[i], seps[i + 1])]
-            grouped_outer = TileLayout.from_tuple(grouped_shape)
+            grouped_shape = [outer.shard[j].extent for j in range(seps[i], seps[i + 1])]
+            grouped_outer = TileLayout(grouped_shape)
             coord[i] += grouped_outer.apply(
                 *lv_shuffled[seps[i] : seps[i + 1]], shape=grouped_shape
-            )[0]
+            )["m"]
             coord[i] *= atom_shape[i]
         return coord
 
@@ -344,9 +344,7 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     element_strides = [1] * len(g_buf.shape)
     dtype_bytes = tvm.DataType(g_buf.dtype).bits // 8
-    g_strides = [
-        g_buf.layout.data_iter_array[i].stride * dtype_bytes for i in range(len(g_buf.shape))
-    ]
+    g_strides = [g_buf.layout.shard[i].stride * dtype_bytes for i in range(len(g_buf.shape))]
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def create_tensor_map():
@@ -415,7 +413,7 @@ def copy_pipeline_cta_impl(
                 if res is not None:
                     return res
             raise ValueError(
-                f"No valid implementation found for copy pipeline with strategy={pipeline.strategy}"
+                f"No valid implementation found for copy pipeline with strategy={impl}"
             )
 
         if op_type == PipelineOp.INIT:
@@ -426,9 +424,7 @@ def copy_pipeline_cta_impl(
 
             return func
         # other ops are not supported
-        raise ValueError(
-            f"Copy pipeline {op_type} is not supported for strategy={pipeline.strategy}"
-        )
+        raise ValueError(f"Copy pipeline {op_type} is not supported for strategy={impl}")
 
     if impl == CopyPipeline.Impl.TMA_LOAD:
         # TODO(@bohan): support private memory allocation
@@ -472,7 +468,7 @@ def copy_pipeline_cta_impl(
                 if res is not None:
                     return res
             raise ValueError(
-                f"No valid implementation found for copy pipeline with strategy={pipeline.strategy}"
+                f"No valid implementation found for copy pipeline with strategy={impl}"
             )
         if op_type == PipelineOp.INIT:
             # initialize the mbarrier, make sure the initialization is visible to all threads
@@ -488,9 +484,7 @@ def copy_pipeline_cta_impl(
 
             return func
         # other ops are not supported
-        raise ValueError(
-            f"Copy pipeline {op_type} is not supported for strategy={pipeline.strategy}"
-        )
+        raise ValueError(f"Copy pipeline {op_type} is not supported for strategy={impl}")
 
     if impl == CopyPipeline.Impl.TMA_STORE:
         if op_type == PipelineOp.PRODUCER_COMMIT:
@@ -515,7 +509,7 @@ def copy_pipeline_cta_impl(
                 if res is not None:
                     return res
             raise ValueError(
-                f"No valid implementation found for copy pipeline with strategy={pipeline.strategy}"
+                f"No valid implementation found for copy pipeline with strategy={impl}"
             )
 
         if op_type == PipelineOp.INIT:
@@ -526,9 +520,7 @@ def copy_pipeline_cta_impl(
 
             return func
         # other ops are not supported
-        raise ValueError(
-            f"Copy pipeline {op_type} is not supported for strategy={pipeline.strategy}"
-        )
+        raise ValueError(f"Copy pipeline {op_type} is not supported for strategy={impl}")
 
 
 @register_schedule("pipeline_init", "cuda")

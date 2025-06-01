@@ -46,7 +46,7 @@ def alloc_const_bias_trn(
         return {}
     if not isinstance(bias, (FloatImm)):
         return {}
-    par_size = op.dsts[0].buffer.layout.partition_size
+    par_size = op.dsts[0].buffer.layout.size("P")
     max_inst_size = op.schedule_config.get("max_inst_size", 512)
     if ("const_bias", bias.value) in buffer_dict:
         bias_buffer, bias_init_stmt = buffer_dict[("const_bias", bias.value)]
@@ -95,7 +95,7 @@ def alloc_identity_trn(
 ) -> Dict[str, Any]:
     if "identity" in op.workspace:
         return {}
-    par_size = op.srcs[0].buffer.layout.partition_size
+    par_size = op.srcs[0].buffer.layout.size("P")
     if "identity" in buffer_dict:
         identity_buffer, identity_init_stmt = buffer_dict["identity"]
         old_shape = identity_buffer.shape
@@ -123,9 +123,9 @@ def alloc_identity_trn(
 def alloc_acc_psum_trn(
     op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
 ) -> Dict[str, Any]:
-    if "acc_psum" in op.workspace or isinstance(op.dsts[0].buffer.layout, T.TrainiumPSUMLayout):
+    if "acc_psum" in op.workspace or op.dsts[0].buffer.scope() == "trn.psum":
         return {}
-    par_size = op.dsts[0].buffer.layout.partition_size
+    par_size = op.dsts[0].buffer.layout.size("P")
     acc_psum = T.buffer(
         (8, par_size, 512),
         "float32",

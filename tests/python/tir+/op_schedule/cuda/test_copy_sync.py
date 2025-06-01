@@ -43,9 +43,9 @@ ml_dtypes_dict = {
             (8, 8),  # s_shape
             ((0, 8), (0, 8)),  # g_region
             8,  # thread_cnt
-            TileLayout.from_tuple((16, 16)),  # layoutA
-            TileLayout.from_tuple((16, 16)),  # layoutB
-            TileLayout.from_tuple((8, 8)),  # layoutS
+            TileLayout([16, 16]),  # layoutA
+            TileLayout([16, 16]),  # layoutB
+            TileLayout([8, 8]),  # layoutS
             tvm.cuda(0),
         ),
         # A[0:128, 0:32] -> A_smem[0:128, 0:32] -> B[0:128, 0:32]
@@ -54,9 +54,9 @@ ml_dtypes_dict = {
             (128, 32),  # s_shape
             ((0, 128), (0, 32)),  # g_region
             32,  # thread_cnt
-            TileLayout.from_tuple((128, 32)),  # layoutA
-            TileLayout.from_tuple((128, 32)),  # layoutB
-            TileLayout.from_tuple((128, 32)),  # layoutS
+            TileLayout([128, 32]),  # layoutA
+            TileLayout([128, 32]),  # layoutB
+            TileLayout([128, 32]),  # layoutS
             tvm.cuda(0),
         ),
         # A[32:64, 32:64] -> A_smem[0:32, 0:32] -> B[32:64, 32:64]
@@ -65,9 +65,9 @@ ml_dtypes_dict = {
             (32, 32),  # s_shape
             ((32, 64), (32, 64)),  # g_region
             32,  # thread_cnt
-            TileLayout.from_tuple((64, 64)),  # layoutA
-            TileLayout.from_tuple((64, 64)),  # layoutB
-            TileLayout.from_tuple((32, 32)),  # layoutS
+            TileLayout([64, 64]),  # layoutA
+            TileLayout([64, 64]),  # layoutB
+            TileLayout([32, 32]),  # layoutS
             tvm.cuda(0),
         ),
         # A[0:1, 0:32, 0:32] -> A_smem[0:32, 0:32] -> B[0:1, 0:32, 0:32]
@@ -76,9 +76,9 @@ ml_dtypes_dict = {
             (32, 32),  # s_shape
             ((0, 1), (0, 32), (0, 32)),  # g_region
             32,  # thread_cnt
-            TileLayout.from_tuple((4, 32, 32)),  # layoutA
-            TileLayout.from_tuple((4, 32, 32)),  # layoutB
-            TileLayout.from_tuple((32, 32)),  # layoutS
+            TileLayout([4, 32, 32]),  # layoutA
+            TileLayout([4, 32, 32]),  # layoutB
+            TileLayout([32, 32]),  # layoutS
             tvm.cuda(0),
         ),
         ############################################################################### default
@@ -88,9 +88,9 @@ ml_dtypes_dict = {
             (8, 8),  # s_shape
             ((0, 8), (0, 8)),  # g_region
             32,  # thread_cnt
-            TileLayout.from_tuple((16, 16)),  # layoutA
-            TileLayout.from_tuple((16, 16)),  # layoutB
-            TileLayout.from_tuple(data=(8, 8), strides=(1, 8)),  # layoutS
+            TileLayout([16, 16]),  # layoutA
+            TileLayout([16, 16]),  # layoutB
+            TileLayout([8, 64]),  # layoutS
             tvm.cuda(0),
         ),
         # A[32:96, 256:512] -> A_smem[0:32, 0:256] -> B[32:96, 256:512]
@@ -99,9 +99,9 @@ ml_dtypes_dict = {
             (32, 256),  # s_shape
             ((16, 48), (256, 512)),  # g_region
             32,  # thread_cnt
-            TileLayout.from_tuple((96, 512)),  # layoutA
-            TileLayout.from_tuple((96, 512)),  # layoutB
-            ComposeLayout(SwizzleLayout(3, 3, 3), TileLayout.from_tuple((8, 64)))
+            TileLayout([96, 512]),  # layoutA
+            TileLayout([96, 512]),  # layoutB
+            ComposeLayout(SwizzleLayout(3, 3, 3), TileLayout([8, 64]))
             .tile_to((16, 128), (8, 64))
             .tile_to((32, 256), (16, 128)),  # layoutS
             tvm.cuda(0),

@@ -85,8 +85,8 @@ def test_reduction_op_shared(input, op_type, dtype):
     copy_slice_b = list(slice(None) for i in range(len(g_shape_b)))
     reduce_slice_a = list(slice(st_a[i], st_a[i] + extent_a[i]) for i in range(len(g_shape_a)))
     reduce_slice_b = list(slice(st_b[i], st_b[i] + extent_b[i]) for i in range(len(g_shape_b)))
-    g_layout_a = s_layout_a = TileLayout.from_tuple(g_shape_a)
-    g_layout_b = s_layout_b = TileLayout.from_tuple(g_shape_b)
+    g_layout_a = s_layout_a = TileLayout(g_shape_a)
+    g_layout_b = s_layout_b = TileLayout(g_shape_b)
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -171,7 +171,7 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
     # get shape info
     NUM_COL = 128
     g_shape_a, g_shape_b = (16 * N_WARPS, NUM_COL), (16 * N_WARPS, 4)
-    g_layout_a, g_layout_b = TileLayout.from_tuple(g_shape_a), TileLayout.from_tuple(g_shape_b)
+    g_layout_a, g_layout_b = TileLayout(g_shape_a), TileLayout(g_shape_b)
     acc_shape, red_shape = (16, NUM_COL), (16, 4)
 
     # fmt: off
@@ -188,11 +188,14 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
 
             with T.thread():
                 # acc layout
-                atom = T.TileLayout.from_tuple((1, 2), (2, 1))
-                warp_atom = T.TileLayout.shard(
-                    (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
+                atom = T.TileLayout(shard=([1, 2], [2, 1]))
+                warp_layout = T.TileLayout(
+                    shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
+                    subscope="thread",
+                    scope="warp",
                 )
-                tile = T.TileLayout.from_tuple((2, NUM_COL // 8), (1, 2))
+                warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
+                tile = T.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
                 acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
                 acc = T.alloc_buffer(
                     [2, NUM_COL // 4],
@@ -203,11 +206,9 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                 )
 
                 # red layout
-                red_atom = T.TileLayout.from_tuple((1, 1), (1, 1))
-                red_warp_atom = T.TileLayout.shard(
-                    (8, 4), (8, 4), "S0S1", inner=red_atom, from_to=("thread", "warp")
-                )
-                red_tile = T.TileLayout.from_tuple((2, 1), (1, 1))
+                red_atom = T.TileLayout(shard=([1, 1], [1, 1]))
+                red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
+                red_tile = T.TileLayout(shard=([2, 1], [1, 1]))
                 red_layout = red_warp_atom.tile(red_tile, (2, 1), (8, 4))
                 red = T.alloc_buffer(
                     [

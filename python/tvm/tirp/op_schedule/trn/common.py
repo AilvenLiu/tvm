@@ -17,10 +17,12 @@
 
 """Common utilities for operator scheduling."""
 
-from collections import namedtuple, defaultdict
+from collections import namedtuple
 from typing import Tuple, Optional, Dict, Callable, List
 from functools import wraps, reduce
 import itertools
+
+import tvm
 from dataclasses import dataclass
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
@@ -28,14 +30,11 @@ from tvm.ir import Range
 from tvm.tir import BufferRegion, Buffer, PrimFunc, Var, PrimExpr
 from tvm.tir.stmt import OpCall
 from tvm.tir.expr_functor import ExprMutator
-from tvm._ffi import get_global_func
 from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tir.layout import Iter
 from math import gcd
 from functools import reduce
 from operator import mul
-
-f_normalize_trn_layout_with_shape = get_global_func("tir.NormalizeTrainiumLayoutWithShape")
-f_normalize_tile_layout_with_shape = get_global_func("tir.NormalizeTileLayoutWithShape")
 
 # Used to generate the correct [:, None] for mask/predicate
 nki_dim = "nki_dim"
@@ -46,7 +45,7 @@ RangeInfo = namedtuple(
 )
 
 
-def normalize_layout_with_shape(layout, shape):
+def normalize_and_group(layout, shape):
     """Normalize a layout with a given shape.
 
     Parameters
@@ -66,38 +65,8 @@ def normalize_layout_with_shape(layout, shape):
     ValueError :
         If layout is not a valid layout type
     """
-    if isinstance(layout, T.TrainiumLayout):
-        ret = f_normalize_trn_layout_with_shape(layout, shape)
-        return ret[0], ret[1]
-    elif isinstance(layout, T.TileLayout):
-        ret = f_normalize_tile_layout_with_shape(layout, shape)
-        return ret[0], ret[1]
-    else:
-        raise ValueError("Invalid layout")
-
-
-def get_layout_data_iters(layout):
-    """Get the data iterators from a layout.
-
-    Parameters
-    ----------
-    layout : Union[T.TrainiumLayout, T.TileLayout]
-        The layout to get data iterators from
-
-    Returns
-    -------
-    List :
-        Data iterators
-
-    Raises
-    ------
-    ValueError :
-        If layout is not a valid layout type
-    """
-    if isinstance(layout, T.TrainiumLayout):
-        return layout.combined_1d_layout.data_iter_array
-    elif isinstance(layout, T.TileLayout):
-        return layout.data_iter_array
+    if isinstance(layout, T.TileLayout):
+        return layout.normalize().group_by_shape(shape)
     else:
         raise ValueError("Invalid layout")
 
@@ -496,54 +465,44 @@ class InstructionGenerator:
 
     def _get_sub_layout(self, buffer_region: BufferRegion):
         layout = buffer_region.buffer.layout
-        layout, seps = normalize_layout_with_shape(layout, buffer_region.buffer.shape)
-        tile_layout = layout.combined_1d_layout if isinstance(layout, T.TrainiumLayout) else layout
-        data_iters = tile_layout.data_iter_array
+        layout, seps = normalize_and_group(layout, buffer_region.buffer.shape)
         tiled_range_infos_per_dim = []
-        new_data_iters = []
-        new_dim_types = []
+        new_shard = []
         new_seps = [0]
         for i in range(len(seps) - 1):
             r = buffer_region.region[i]
             st = r.min
             ext = r.extent
-            reversed_data_iters = []
-            reversed_dim_types = []
+            reversed_shard = []
             for j in reversed(range(seps[i], seps[i + 1])):
-                dim_type = layout.dimension_types[j] if isinstance(layout, T.TrainiumLayout) else -1
                 if self.analyzer.can_prove_equal(ext, 1):
                     break
-                if dim_type == T.TrainiumLayout.Partition and (
-                    not self.analyzer.can_prove(st % data_iters[j].extent == 0)
-                    or not self.analyzer.can_prove(ext % data_iters[j].extent == 0)
+                if layout.shard[j].axis.name == "P" and (
+                    not self.analyzer.can_prove(st % layout.shard[j].extent == 0)
+                    or not self.analyzer.can_prove(ext % layout.shard[j].extent == 0)
                 ):
                     assert False, "Invalid layout"
                 if self.analyzer.can_prove(
-                    ext % data_iters[j].extent == 0
-                ) and self.analyzer.can_prove(st % data_iters[j].extent == 0):
-                    st = st // data_iters[j].extent
-                    ext = ext // data_iters[j].extent
+                    ext % layout.shard[j].extent == 0
+                ) and self.analyzer.can_prove(st % layout.shard[j].extent == 0):
+                    st = st // layout.shard[j].extent
+                    ext = ext // layout.shard[j].extent
                     tiled_range_infos_per_dim.append(
-                        RangeInfo(0, data_iters[j].extent, j, i, dim_type)
+                        RangeInfo(0, layout.shard[j].extent, j, i, layout.shard[j].axis)
                     )
-                    reversed_data_iters.append(data_iters[j])
-                    reversed_dim_types.append(dim_type)
+                    reversed_shard.append(layout.shard[j])
                     continue
-                if self.analyzer.can_prove(st + ext <= data_iters[j].extent):
-                    tiled_range_infos_per_dim.append(RangeInfo(st, ext, j, i, dim_type))
-                    reversed_data_iters.append(T.DataIterAttr(ext, data_iters[j].stride))
-                    reversed_dim_types.append(dim_type)
+                if self.analyzer.can_prove(st + ext <= layout.shard[j].extent):
+                    tiled_range_infos_per_dim.append(RangeInfo(st, ext, j, i, layout.shard[j].axis))
+                    reversed_shard.append(Iter(ext, layout.shard[j].stride, layout.shard[j].axis))
                     break
                 assert False, f"Cannot analyze physical tensor region for: {buffer_region}"
-            new_data_iters += reversed(reversed_data_iters)
-            new_dim_types += reversed(reversed_dim_types)
-            new_seps.append(len(reversed_data_iters) + new_seps[-1])
-        # FIXME: device_iter_array and from_scope/to_scope are not set
-        new_tile_layout = T.TileLayout(new_data_iters)
-        if isinstance(layout, T.TrainiumLayout):
-            return T.TrainiumLayout(new_dim_types, new_tile_layout), new_seps
-        else:
-            return new_tile_layout, new_seps
+            new_shard += reversed(reversed_shard)
+            new_seps.append(len(reversed_shard) + new_seps[-1])
+        new_tile_layout = tvm.tir._ffi_api.TileLayout(  # pylint: disable=no-member
+            new_shard, [], [], None, None
+        )
+        return new_tile_layout, new_seps
 
     def _init_bind_iters(self):
         self.bind_iters = {}
@@ -568,9 +527,8 @@ class InstructionGenerator:
             ]
 
     def _get_flattened_shape_view_from_layout_seps(self, layout, seps):
-        data_iters = get_layout_data_iters(layout)
         return [
-            [data_iters[j].extent for j in range(seps[i], seps[i + 1])]
+            [layout.shard[j].extent for j in range(seps[i], seps[i + 1])]
             for i in range(len(seps) - 1)
         ]
 
@@ -653,9 +611,7 @@ class InstructionGenerator:
             for i in range(len(buffer_region.region))
         ]
         flattened_shape_view_1 = list(itertools.chain(*new_split_shape_view_1))
-        layout, tiled_seps = normalize_layout_with_shape(
-            split_layout_view_1, flattened_shape_view_1
-        )
+        layout, tiled_seps = normalize_and_group(split_layout_view_1, flattened_shape_view_1)
         actual_seps = [0]
         ptr = 0
         for i in range(len(buffer_region.region)):
@@ -740,7 +696,7 @@ class InstructionGenerator:
         #        then we analyze the relationship between data iter of sub-layout
         dims = dims or list(range(len(buffer_region.buffer.shape)))
         layout = self.split_layout_views[buffer_region]
-        data_iters = get_layout_data_iters(layout)
+        shards = layout.shard
         self._normalize_bind_iters()
         bind_iters = self.bind_iters[buffer_region]
         seps = self.seps[buffer_region]
@@ -750,18 +706,14 @@ class InstructionGenerator:
         acc_block_ext = 1
         for i in reversed(dims):
             for j in reversed(range(seps[i], seps[i + 1])):
-                data_iter = data_iters[j]
-                is_partition = (
-                    layout.dimension_types[j] == T.TrainiumLayout.Partition
-                    if isinstance(layout, T.TrainiumLayout)
-                    else False
-                )
+                it = shards[j]
+                is_partition = it.axis.name == "P" if layout.is_trainium() else False
                 logical_iter_dims = bind_iters[i][j - seps[i]]
                 for d in range(-1, len(logical_iter_dims)):
                     next_logical_stride = (
                         logical_iter_dims[d + 1].logical_stride
                         if d + 1 < len(logical_iter_dims)
-                        else data_iter.extent
+                        else it.extent
                     )
                     cur = (
                         logical_iter_dims[d].logical_stride * logical_iter_dims[d].extent
@@ -789,17 +741,17 @@ class InstructionGenerator:
     def _check_bind_iter_coverage(self, buffer_region: BufferRegion):
         self._normalize_bind_iters()
         seps = self.seps[buffer_region]
-        data_iters = get_layout_data_iters(self.split_layout_views[buffer_region])
+        iters = self.split_layout_views[buffer_region].shard
         bind_iters = self.bind_iters[buffer_region]
         for i in range(len(buffer_region.region)):
             for j in range(seps[i], seps[i + 1]):
-                data_iter = data_iters[j]
+                it = iters[j]
                 logical_iter_dims = bind_iters[i][j - seps[i]]
                 for d in range(len(logical_iter_dims)):
                     next_logical_stride = (
                         logical_iter_dims[d + 1].logical_stride
                         if d + 1 < len(logical_iter_dims)
-                        else data_iter.extent
+                        else it.extent
                     )
                     assert (
                         next_logical_stride
@@ -821,7 +773,7 @@ class InstructionGenerator:
     def generate_axes(self, buffer_region: BufferRegion) -> List[PrimExpr]:
         self._check_bind_iter_coverage(buffer_region)
         layout = self.split_layout_views[buffer_region]
-        data_iters = get_layout_data_iters(layout)
+        iters = layout.shard
         bind_iters = self.bind_iters[buffer_region]
         seps = self.seps[buffer_region]
         axes = []
@@ -838,7 +790,7 @@ class InstructionGenerator:
                         * VarReplacer.replace_vars(d.bind_expr, self.bind_maps[buffer_region])
                         * acc_logical_stride
                     )
-                acc_logical_stride *= data_iters[j].extent
+                acc_logical_stride *= iters[j].extent
             axes.append(index)
         return axes
 
@@ -855,64 +807,48 @@ class InstructionGenerator:
         is_free_dim: bool = True,
     ) -> LogicalIterList:
         layout = self.split_layout_views[buffer_region]
-        assert isinstance(
-            layout, T.TrainiumLayout
-        ), " Cannot propagate instruction information from HBM tensor"
-        data_iters = get_layout_data_iters(layout)
+        assert layout.is_trainium(), " Cannot propagate instruction information from HBM tensor"
+        iters = layout.shard
         seps = self.seps[buffer_region]
         ret = [[[] for _ in range(seps[i], seps[i + 1])] for i in range(len(buffer_region.region))]
         for i in range(len(buffer_region.region)):
             for j in range(seps[i], seps[i + 1]):
-                if (layout.dimension_types[j] == T.TrainiumLayout.Free) ^ is_free_dim:
+                if (iters[j].axis.name in ["F", "Bank"]) ^ is_free_dim:
                     continue
-                data_iter = data_iters[j]
-                if (
-                    data_iter.stride * data_iter.extent <= stride
-                    or data_iter.stride >= size * stride
-                ):
+                it = iters[j]
+                if it.stride * it.extent <= stride or it.stride >= size * stride:
                     continue
-                if (
-                    data_iter.stride * data_iter.extent < size * stride
-                    and stride <= data_iter.stride
-                ):
+                if it.stride * it.extent < size * stride and stride <= it.stride:
                     assert (size * stride) % (
-                        data_iter.stride * data_iter.extent
-                    ) == 0 and data_iter.stride % stride == 0
+                        it.stride * it.extent
+                    ) == 0 and it.stride % stride == 0
                     ret[i][j - seps[i]].append(
                         LogicalIterDim(
                             1,
-                            data_iter.extent,
-                            bind
-                            % (data_iter.stride * data_iter.extent // stride)
-                            // (data_iter.stride // stride),
+                            it.extent,
+                            bind % (it.stride * it.extent // stride) // (it.stride // stride),
                         )
                     )
-                elif (
-                    data_iter.stride * data_iter.extent < size * stride
-                    and stride > data_iter.stride
-                ):
+                elif it.stride * it.extent < size * stride and stride > it.stride:
                     assert (size * stride) % (
-                        data_iter.stride * data_iter.extent
-                    ) == 0 and stride % data_iter.stride == 0
+                        it.stride * it.extent
+                    ) == 0 and stride % it.stride == 0
                     ret[i][j - seps[i]].append(
                         LogicalIterDim(
-                            stride // data_iter.stride,
-                            data_iter.stride * data_iter.extent // stride,
-                            bind % (data_iter.stride * data_iter.extent // stride),
+                            stride // it.stride,
+                            it.stride * it.extent // stride,
+                            bind % (it.stride * it.extent // stride),
                         )
                     )
-                elif (
-                    data_iter.stride * data_iter.extent >= size * stride
-                    and stride <= data_iter.stride
-                ):
-                    assert (data_iter.stride * data_iter.extent) % (
+                elif it.stride * it.extent >= size * stride and stride <= it.stride:
+                    assert (it.stride * it.extent) % (
                         size * stride
-                    ) == 0 and data_iter.stride % stride == 0
+                    ) == 0 and it.stride % stride == 0
                     ret[i][j - seps[i]].append(
                         LogicalIterDim(
                             1,
-                            size * stride // data_iter.stride,
-                            bind // (data_iter.stride // stride),
+                            size * stride // it.stride,
+                            bind // (it.stride // stride),
                         )
                     )
         return ret
@@ -966,15 +902,14 @@ class InstructionGenerator:
     ):
         allowed_f_dim = allowed_f_dim or tuple(range(len(buffer_region.region)))
         layout = self.split_layout_views[buffer_region]
-        data_iters = get_layout_data_iters(layout)
         seps = self.seps[buffer_region]
         allowed_data_iter_idx = itertools.chain.from_iterable(
             range(seps[dim], seps[dim + 1]) for dim in allowed_f_dim
         )
         filtered_data_iters = [
-            (i, data_iters[i])
+            (i, layout.shard[i])
             for i in allowed_data_iter_idx
-            if layout.dimension_types[i] == T.TrainiumLayout.Free
+            if layout.shard[i].axis.name in ["F", "Bank"]
         ]
         inst_size, inst_stride, idx_list = self._find_max_linear_inst(
             filtered_data_iters, min_stride
@@ -991,9 +926,7 @@ class InstructionGenerator:
         allowed_to_f_dim = allowed_to_f_dim or tuple(range(len(to_region.region)))
         from_region = inst_repr.buffer_region
         from_layout = self.split_layout_views[from_region]
-        from_data_iters = get_layout_data_iters(from_layout)
         to_layout = self.split_layout_views[to_region]
-        to_data_iters = get_layout_data_iters(to_layout)
         from_seps = self.seps[from_region]
         to_seps = self.seps[to_region]
         dim_map = self.dim_mapper.get_dim_map(from_region, to_region)
@@ -1009,32 +942,30 @@ class InstructionGenerator:
                 for i in range(len(from_region.region))
                 for j in range(from_seps[i + 1] - from_seps[i])
             }
-            indexed_selected_data_iters = [
-                (i, from_data_iters[i])
+            indexed_selected_shard = [
+                (i, from_layout.shard[i])
                 for i in inst_repr.selected_data_iter_ids
                 if data_iter_idx_to_dim[i] not in dim_map
             ]
-            inst_size, inst_stride, idx_list = self._find_max_linear_inst(
-                indexed_selected_data_iters
-            )
+            inst_size, inst_stride, idx_list = self._find_max_linear_inst(indexed_selected_shard)
             return InstructionRepr(from_region, inst_size, inst_stride, idx_list)
-        indexed_selected_data_iters = [
-            (i, from_data_iters[i]) for i in inst_repr.selected_data_iter_ids
+        indexed_selected_shard = [
+            (i, from_layout.shard[i]) for i in inst_repr.selected_data_iter_ids
         ]
-        indexed_selected_data_iters = sorted(indexed_selected_data_iters, key=lambda x: x[1].stride)
+        indexed_selected_shard = sorted(indexed_selected_shard, key=lambda x: x[1].stride)
         inst_size = 1
         inst_stride_from = None
         inst_stride_to = None
         idx_list = []
-        for i, data_iter in indexed_selected_data_iters:
+        for i, data_iter in indexed_selected_shard:
             if i not in data_iter_map:
                 if inst_stride_from is None:
                     continue
                 break
-            mapped_data_iter = to_data_iters[data_iter_map[i]]
+            mapped_data_iter = to_layout.shard[data_iter_map[i]]
             if inst_stride_from is None:
                 inst_stride_from = data_iter.stride
-                if not isinstance(to_layout, T.TrainiumLayout) and mapped_data_iter.stride != 1:
+                if not to_layout.is_trainium() and mapped_data_iter.stride != 1:
                     # dma copy must be contiguous on hbm
                     break
                 inst_stride_to = mapped_data_iter.stride
@@ -1050,24 +981,22 @@ class InstructionGenerator:
         dim_map = self.dim_mapper.get_dim_map(buffer_region_1, buffer_region_2)
         layout_1 = self.split_layout_views[buffer_region_1]
         layout_2 = self.split_layout_views[buffer_region_2]
-        if not isinstance(layout_1, T.TrainiumLayout) or not isinstance(layout_2, T.TrainiumLayout):
+        if not layout_1.is_trainium() or not layout_2.is_trainium():
             return True
-        data_iters_1 = get_layout_data_iters(layout_1)
-        data_iters_2 = get_layout_data_iters(layout_2)
         seps_1 = self.seps[buffer_region_1]
         seps_2 = self.seps[buffer_region_2]
         for i, j in dim_map.items():
             for k in range(seps_1[i + 1] - seps_1[i]):
                 if (
-                    layout_1.dimension_types[seps_1[i] + k]
-                    != layout_2.dimension_types[seps_2[j] + k]
+                    layout_1.shard[seps_1[i] + k].axis.name
+                    != layout_2.shard[seps_2[j] + k].axis.name
                 ):
                     return False
-                if layout_1.dimension_types[seps_1[i] + k] == T.TrainiumLayout.Free:
+                if layout_1.shard[seps_1[i] + k].axis.name in ["F", "Bank"]:
                     continue
-                if data_iters_1[seps_1[i] + k].stride != data_iters_2[seps_2[j] + k].stride:
+                if layout_1.shard[seps_1[i] + k].stride != layout_2.shard[seps_2[j] + k].stride:
                     return False
-                if data_iters_1[seps_1[i] + k].extent != data_iters_2[seps_2[j] + k].extent:
+                if layout_1.shard[seps_1[i] + k].extent != layout_2.shard[seps_2[j] + k].extent:
                     return False
         return True
 
@@ -1076,62 +1005,57 @@ class InstructionGenerator:
     ):
         dim_map = self.dim_mapper.get_dim_map(buffer_region_1, buffer_region_2)
         layout_1 = self.split_layout_views[buffer_region_1]
-
         layout_2 = self.split_layout_views[buffer_region_2]
-        data_iters_1 = get_layout_data_iters(layout_1)
-        data_iters_2 = get_layout_data_iters(layout_2)
+        iters_1 = layout_1.shard
+        iters_2 = layout_2.shard
         seps_1 = self.seps[buffer_region_1]
         seps_2 = self.seps[buffer_region_2]
-        indexed_data_iters_1 = []
-        indexed_data_iters_2 = []
+        indexed_iters_1 = []
+        indexed_iters_2 = []
+        print(iters_1, seps_1)
+        print(iters_2, seps_2)
+        print(dim_map)
         for i, j in dim_map.items():
             for k in range(seps_1[i + 1] - seps_1[i]):
-                if (
-                    layout_1.dimension_types[seps_1[i] + k]
-                    == layout_2.dimension_types[seps_2[j] + k]
-                ):
-                    if layout_1.dimension_types[seps_1[i] + k] == T.TrainiumLayout.Free:
+                if iters_1[seps_1[i] + k].axis.name == iters_2[seps_2[j] + k].axis.name:
+                    if iters_1[seps_1[i] + k].axis.name in ["F", "Bank"]:
                         continue
                     raise ValueError(f"Transpose only part of P dimension is not supported")
-                if layout_1.dimension_types[seps_1[i] + k] == T.TrainiumLayout.Partition:
-                    indexed_data_iters_2.append((seps_2[j] + k, data_iters_2[seps_2[j] + k]))
+                if iters_1[seps_1[i] + k].axis.name == "P":
+                    indexed_iters_2.append((seps_2[j] + k, iters_2[seps_2[j] + k]))
                 else:
-                    indexed_data_iters_1.append((seps_1[i] + k, data_iters_1[seps_1[i] + k]))
-        inst_repr_1 = InstructionRepr(
-            buffer_region_1, *self._find_max_linear_inst(indexed_data_iters_1)
-        )
-        inst_repr_2 = InstructionRepr(
-            buffer_region_2, *self._find_max_linear_inst(indexed_data_iters_2)
-        )
-        assert (
-            inst_repr_1.size == layout_2.partition_size
+                    indexed_iters_1.append((seps_1[i] + k, iters_1[seps_1[i] + k]))
+        inst_repr_1 = InstructionRepr(buffer_region_1, *self._find_max_linear_inst(indexed_iters_1))
+        inst_repr_2 = InstructionRepr(buffer_region_2, *self._find_max_linear_inst(indexed_iters_2))
+        assert inst_repr_1.size == layout_2.size(
+            "P"
         ), f"The instruction size of {buffer_region_1.buffer.name} does not match the partition size of {buffer_region_2.buffer.name}"
-        assert (
-            inst_repr_2.size == layout_1.partition_size
+        assert inst_repr_2.size == layout_1.size(
+            "P"
         ), f"The instruction size of {buffer_region_2.buffer.name} does not match the partition size of {buffer_region_1.buffer.name}"
         return inst_repr_1, inst_repr_2
 
     def restrict_inst_to_one_dim(self, inst_repr: InstructionRepr):
         region = inst_repr.buffer_region
         layout = self.split_layout_views[region]
-        data_iters = get_layout_data_iters(layout)
+        iters = layout.shard
         seps = self.seps[region]
-        indexed_selected_data_iters = [(i, data_iters[i]) for i in inst_repr.selected_data_iter_ids]
-        indexed_selected_data_iters = sorted(indexed_selected_data_iters, key=lambda x: x[1].stride)
-        data_iter_idx_to_dim = {
+        indexed_selected_iters = [(i, iters[i]) for i in inst_repr.selected_data_iter_ids]
+        indexed_selected_iters = sorted(indexed_selected_iters, key=lambda x: x[1].stride)
+        iter_idx_to_dim = {
             seps[j]: i for i in range(len(region.buffer.shape)) for j in range(seps[i], seps[i + 1])
         }
         last_dim = None
         inst_size = 1
         selected_data_iter_ids = []
-        for i, data_iter in indexed_selected_data_iters:
+        for i, it in indexed_selected_iters:
             if last_dim is None:
-                inst_size *= data_iter.extent
-                last_dim = data_iter_idx_to_dim[i]
+                inst_size *= it.extent
+                last_dim = iter_idx_to_dim[i]
                 selected_data_iter_ids.append(i)
                 continue
-            if data_iter_idx_to_dim[i] != last_dim:
+            if iter_idx_to_dim[i] != last_dim:
                 break
-            inst_size *= data_iter.extent
+            inst_size *= it.extent
             selected_data_iter_ids.append(i)
         return InstructionRepr(region, inst_size, inst_repr.stride, selected_data_iter_ids)

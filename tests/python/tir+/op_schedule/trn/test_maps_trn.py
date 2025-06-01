@@ -17,7 +17,7 @@
 import pytest
 
 import tvm
-from tvm.tir.layout import TrainiumLayout, TileLayout
+from tvm.tir.layout import TileLayout
 import numpy as np
 import tvm.testing
 from tvm.script import ir as I
@@ -43,13 +43,9 @@ Tp_func_map = {
 @pytest.mark.parametrize("op_type", ["reciprocal", "memset"])
 def test_simple_unary(op_type):
     src_shape = [128, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    src_layout = T.TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    dst_layout = T.TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
     tp_func = Tp_func_map[op_type]
 
     # fmt: off
@@ -89,13 +85,9 @@ def test_simple_unary(op_type):
 @pytest.mark.parametrize("op_type", ["reciprocal", "memset"])
 def test_unary_in_a_loop(op_type):
     src_shape = [1024, 512]
-    src_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 4096), (1, 1))
-    )
+    src_layout = T.TileLayout(shard=([128, 4096], [(1, "P"), (1, "F")]))
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
-    )
+    dst_layout = T.TileLayout(shard=([128, 2048], [(1, "P"), (1, "F")]))
 
     Tp_func = Tp_func_map[op_type]
     # fmt: off
@@ -147,17 +139,11 @@ def test_unary_in_a_loop(op_type):
 def test_simple_binary(op_type, operands_type):
     const = T.float32(3.0)
     src1_shape = [128, 512] if operands_type != "region_broadcast_lhs" else [128, 1]
-    src1_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple(src1_shape, (1, 1))
-    )
+    src1_layout = TileLayout(shard=(src1_shape, [(1, "P"), (1, "F")]))
     src2_shape = [128, 512] if operands_type != "region_broadcast_rhs" else [128, 1]
-    src2_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple(src2_shape, (1, 1))
-    )
+    src2_layout = TileLayout(shard=(src2_shape, [(1, "P"), (1, "F")]))
     dst_shape = [128, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 512), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 512], [(1, "P"), (1, "F")]))
     Tp_func = Tp_func_map[op_type]
 
     # fmt: off
@@ -216,21 +202,13 @@ def test_simple_binary(op_type, operands_type):
 def test_binary_complex(op_type, operands_type):
     src1_shape = [1024, 512] if operands_type != "region_broadcast_lhs" else [1024, 4]
     src1_layout_data_iter = (128, 4096) if operands_type != "region_broadcast_lhs" else (128, 32)
-    src1_layout = TrainiumLayout(
-        dimension_types="PF",
-        combined_1d_layout=T.TileLayout.from_tuple(src1_layout_data_iter, (1, 1)),
-    )
+    src1_layout = TileLayout(shard=(src1_layout_data_iter, [(1, "P"), (1, "F")]))
     src2_shape = [512, 512] if operands_type != "region_broadcast_rhs" else [128, 512]
     src2_layout_data_iter = (128, 2048) if operands_type != "region_broadcast_rhs" else (128, 512)
-    src2_layout = TrainiumLayout(
-        dimension_types="PF",
-        combined_1d_layout=T.TileLayout.from_tuple(src2_layout_data_iter, (1, 1)),
-    )
+    src2_layout = TileLayout(shard=(src2_layout_data_iter, [(1, "P"), (1, "F")]))
 
     dst_shape = [512, 512]
-    dst_layout = TrainiumLayout(
-        dimension_types="PF", combined_1d_layout=T.TileLayout.from_tuple((128, 2048), (1, 1))
-    )
+    dst_layout = TileLayout(shard=([128, 2048], [(1, "P"), (1, "F")]))
     const = T.float32(3.0)
     Tp_func = Tp_func_map[op_type]
 
@@ -299,14 +277,11 @@ def test_binary_complex(op_type, operands_type):
 
 def test_binary_broadcast1():
     src1_shape = [32, 128, 512]
-    src1_layout = TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 4, 128), (1, 32, 32 * 128, 1)),
+    src1_layout = TileLayout(
+        shard=([32, 128, 4, 128], [(1, "F"), (32, "F"), (32 * 128, "F"), (1, "P")])
     )
     src2_shape = [128, 512]
-    src2_layout = TrainiumLayout(
-        dimension_types="FP", combined_1d_layout=T.TileLayout.from_tuple((512, 128), (1, 1))
-    )
+    src2_layout = TileLayout(shard=([512, 128], [(1, "F"), (1, "P")]))
     dst_shape = src1_shape
     dst_layout = src1_layout
 
@@ -341,15 +316,11 @@ def test_binary_broadcast1():
 
 def test_binary_broadcast2():
     src1_shape = [32, 128, 512]
-    src1_layout = TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 4, 128), (128, 1, 32 * 128, 1)),
+    src1_layout = TileLayout(
+        shard=([32, 128, 4, 128], [(128, "F"), (1, "F"), (32 * 128, "F"), (1, "P")])
     )
     src2_shape = [128, 512]
-    src2_layout = TrainiumLayout(
-        dimension_types="FFP",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4, 128), (1, 128, 1)),
-    )
+    src2_layout = TileLayout(shard=([128, 4, 128], [(1, "F"), (128, "F"), (1, "P")]))
     dst_shape = src1_shape
     dst_layout = src1_layout
 
@@ -383,10 +354,7 @@ def test_binary_broadcast2():
 
 
 def test_unary_complex1():
-    dst_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 256), (256, 1, 1)),
-    )
+    dst_layout = TileLayout(shard=([32, 128, 256], [(256, "F"), (1, "P"), (1, "F")]))
     dst_shape = [4096, 256]
     # fmt: off
     @T.prim_func(tirp=True)
@@ -414,14 +382,10 @@ def test_unary_complex1():
 
 def test_binary_broadcast3():
     src1_shape = [128, 512]
-    src1_layout = TrainiumLayout(
-        dimension_types="FFP",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4, 128), (1, 128, 1)),
-    )
+    src1_layout = TileLayout(shard=([128, 4, 128], [(1, "F"), (128, "F"), (1, "P")]))
     src2_shape = [32, 128, 512]
-    src2_layout = TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 4, 128), (128, 1, 32 * 128, 1)),
+    src2_layout = TileLayout(
+        shard=([32, 128, 4, 128], [(128, "F"), (1, "F"), (32 * 128, "F"), (1, "P")])
     )
     dst_shape = src1_shape
     dst_layout = src1_layout
@@ -458,17 +422,11 @@ def test_binary_broadcast3():
 @pytest.mark.parametrize("op_type", ["sqrt", "exp"])
 def test_unary_with_bias_scale(op_type):
     src_shape = [512, 1024]
-    src_layout = TrainiumLayout(
-        dimension_types="PF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4096), (1, 1)),
-    )
+    src_layout = TileLayout(shard=([128, 4096], [(1, "P"), (1, "F")]))
     dst_shape = src_shape
     dst_layout = src_layout
     bias_shape = [512, 1]
-    bias_layout = TrainiumLayout(
-        dimension_types="PF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4), (1, 1)),
-    )
+    bias_layout = TileLayout(shard=([128, 4], [(1, "P"), (1, "F")]))
     scale = T.float32(2.0)
     tp_func = Tp_func_map[op_type]
     # fmt: off
@@ -502,10 +460,7 @@ def test_unary_with_bias_scale(op_type):
 @pytest.mark.parametrize("op_type", ["sqrt", "exp"])
 def test_unary_with_bias_scale_2(op_type):
     src_shape = [512, 1024]
-    src_layout = TrainiumLayout(
-        dimension_types="PF",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4096), (1, 1)),
-    )
+    src_layout = TileLayout(shard=([128, 4096], [(1, "P"), (1, "F")]))
     dst_shape = src_shape
     dst_layout = src_layout
     bias = T.float32(1.0)
@@ -546,15 +501,11 @@ def test_unary_with_bias_scale_2(op_type):
 
 def test_binary_with_guard():
     src1_shape = [32, 128, 512]
-    src1_layout = TrainiumLayout(
-        dimension_types="FFFP",
-        combined_1d_layout=T.TileLayout.from_tuple((32, 128, 4, 128), (128, 1, 32 * 128, 1)),
+    src1_layout = TileLayout(
+        shard=([32, 128, 4, 128], [(128, "F"), (1, "F"), (32 * 128, "F"), (1, "P")])
     )
     src2_shape = [128, 512]
-    src2_layout = TrainiumLayout(
-        dimension_types="FFP",
-        combined_1d_layout=T.TileLayout.from_tuple((128, 4, 128), (1, 128, 1)),
-    )
+    src2_layout = TileLayout(shard=([128, 4, 128], [(1, "F"), (128, "F"), (1, "P")]))
     dst_shape = src1_shape
     dst_layout = src1_layout
 
@@ -592,17 +543,11 @@ def test_binary_with_guard():
 
 def test_unary_with_guard():
     src_shape = [512, 1024]
-    src_layout = TrainiumLayout(
-        dimension_types="FPF",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128, 1024), (1024, 1, 1)),
-    )
+    src_layout = TileLayout(shard=([4, 128, 1024], [(1024, "F"), (1, "P"), (1, "F")]))
     dst_shape = src_shape
     dst_layout = src_layout
     bias_shape = [512, 1]
-    bias_layout = TrainiumLayout(
-        dimension_types="FP",
-        combined_1d_layout=T.TileLayout.from_tuple((4, 128), (1, 1)),
-    )
+    bias_layout = TileLayout(shard=([4, 128], [(1, "F"), (1, "P")]))
     scale = T.float32(2.0)
 
     # fmt: off

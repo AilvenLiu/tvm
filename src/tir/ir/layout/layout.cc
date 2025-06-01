@@ -21,118 +21,67 @@
 namespace tvm {
 namespace tir {
 
-bool IsTrivialLayout(const TLayout& layout) {
-  auto tile_layout = layout.as<TileLayoutNode>();
-  if (tile_layout == nullptr) {
-    return false;
-  }
-  if (!tile_layout->device_iter_array.empty()) {
-    return false;
-  }
-  ICHECK(!tile_layout->data_iter_array.empty())
-      << "InternalError: The data iter array should be defined";
-  arith::Analyzer ana;
-  PrimExpr expected_stride = 1;
-  int data_iter_size = tile_layout->data_iter_array.size();
-  for (int i = data_iter_size - 1; i >= 0; --i) {
-    if (!ana.CanProveEqual(tile_layout->data_iter_array[i]->stride, expected_stride)) {
-      return false;
-    }
-    expected_stride = expected_stride * tile_layout->data_iter_array[i]->extent;
-  }
-  return true;
-}
-
-TVM_REGISTER_GLOBAL("tir.IsTrivialLayout").set_body_typed(IsTrivialLayout);
-
 /**************** TLayout ****************/
-bool TLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const {
-  return true;
-}
-
-Array<PrimExpr> TLayoutNode::Apply(const Array<PrimExpr>& coord,
-                                   const Array<PrimExpr>& shape) const {
+Map<String, PrimExpr> TLayoutNode::Apply(const Array<PrimExpr>& coord,
+                                         const Array<PrimExpr>& shape) const {
   ICHECK_EQ(coord.size(), shape.size())
       << "ValueError: The size of coord and shape should be equal";
-  PrimExpr flattened_coord = 0;
-  for (size_t i = 0; i < coord.size(); i++) {
-    flattened_coord = flattened_coord * shape[i] + coord[i];
-  }
-  return Apply(flattened_coord);
+  return Apply(FlattenCoord(coord, shape));
 }
 
-TVM_REGISTER_GLOBAL("tir.TLayoutGetSize").set_body_typed([](TLayout layout) {
-  return layout->GetSize();
+TVM_REGISTER_GLOBAL("tir.TLayoutCompatibleWithShape")
+    .set_body_typed([](TLayout layout, Array<PrimExpr> shape) {
+      return layout->CompatibleWithShape(shape);
+    });
+
+TVM_REGISTER_GLOBAL("tir.TLayoutVerifyWellFormed").set_body_typed([](TLayout layout) {
+  return layout->VerifyWellFormed();
 });
 
-TVM_REGISTER_GLOBAL("tir.TLayoutGetCosize").set_body_typed([](TLayout layout) {
-  return layout->GetCosize();
-});
+TVM_REGISTER_GLOBAL("tir.TLayoutGetSize")
+    .set_body_typed([](TLayout layout, Optional<String> axis_name) {
+      return layout->GetSize(axis_name);
+    });
 
-TVM_REGISTER_GLOBAL("tir.TLayoutApply")
+TVM_REGISTER_GLOBAL("tir.TLayoutGetCosize")
+    .set_body_typed([](TLayout layout, Optional<String> axis_name) {
+      return layout->GetCosize(axis_name);
+    });
+
+TVM_REGISTER_GLOBAL("tir.TLayoutApplyWithShape")
     .set_body_typed([](TLayout layout, Array<PrimExpr> coord, Array<PrimExpr> shape) {
       return layout->Apply(coord, shape);
     });
 
-/**************** DataIterAttr ****************/
-DataIterAttr::DataIterAttr(PrimExpr extent, PrimExpr stride) {
-  auto n = make_object<DataIterAttrNode>();
-  n->extent = extent;
-  n->stride = stride;
-  data_ = std::move(n);
-}
-
-TVM_REGISTER_NODE_TYPE(DataIterAttrNode);
-
-TVM_REGISTER_GLOBAL("tir.DataIterAttr").set_body_typed([](PrimExpr extent, PrimExpr stride) {
-  return DataIterAttr(extent, stride);
+TVM_REGISTER_GLOBAL("tir.TLayoutApply").set_body_typed([](TLayout layout, Array<PrimExpr> coord) {
+  return layout->Apply(coord);
 });
 
-/**************** DeviceIterAttr ****************/
-DeviceIterAttr::DeviceIterAttr(PrimExpr extent, ScopeIdType type, Optional<PrimExpr> bound,
-                               Optional<PrimExpr> owner) {
-  auto n = make_object<DeviceIterAttrNode>();
-  n->extent = extent;
-  n->type = type;
-  n->bound = bound;
-  n->owner = owner;
-  data_ = std::move(n);
-}
+TVM_REGISTER_GLOBAL("tir.TLayoutApplyLinear").set_body_typed([](TLayout layout, PrimExpr coord) {
+  return layout->Apply(coord);
+});
 
-TVM_REGISTER_NODE_TYPE(DeviceIterAttrNode);
+TVM_REGISTER_GLOBAL("tir.TLayoutNormalize").set_body_typed([](TLayout layout) {
+  return layout->Normalize();
+});
 
-TVM_REGISTER_GLOBAL("tir.DeviceIterAttr")
-    .set_body_typed([](PrimExpr extent, int type, Optional<PrimExpr> bound,
-                       Optional<PrimExpr> owner) {
-      return DeviceIterAttr(extent, static_cast<ScopeIdType>(type), bound, owner);
+TVM_REGISTER_GLOBAL("tir.TLayoutTile")
+    .set_body_typed([](TLayout layout, TileLayout outer, Array<PrimExpr> outer_shape,
+                       Array<PrimExpr> inner_shape) {
+      return layout->Tile(outer, outer_shape, inner_shape);
     });
 
-DeviceIterAttr DeviceIterAttr::Replicate(PrimExpr extent) {
-  return DeviceIterAttr(extent, kReplicate, std::nullopt, std::nullopt);
-}
+TVM_REGISTER_GLOBAL("tir.TLayoutIsTileInner")
+    .set_body_typed([](TLayout layout, TLayout tile_layout, Array<PrimExpr> tiled_shape,
+                       Array<PrimExpr> inner_shape) {
+      return layout->IsTileInner(tile_layout, tiled_shape, inner_shape);
+    });
 
-DeviceIterAttr DeviceIterAttr::Split(PrimExpr extent, PrimExpr bound) {
-  return DeviceIterAttr(extent, kSplit, bound);
-}
-
-DeviceIterAttr DeviceIterAttr::Exclusive(PrimExpr extent, PrimExpr owner) {
-  return DeviceIterAttr(extent, kExclusive, std::nullopt, owner);
-}
-
-bool DeviceIterAttr::IsReplicate() const { return this->get()->type == kReplicate; }
-
-bool DeviceIterAttr::IsSplit() const { return this->get()->type == kSplit; }
-
-bool DeviceIterAttr::IsExclusive() const { return this->get()->type == kExclusive; }
-
-size_t DeviceIterAttr::GetIntBound() const {
-  ICHECK(this->get()->bound.defined()) << "ValueError: The bound is not defined";
-  auto bound = this->get()->bound.value();
-  const auto* n = bound.as<IntImmNode>();
-  ICHECK(n != nullptr) << "ValueError: The bound is not an integer";
-  ICHECK(n->value >= 0) << "ValueError: The bound must be non-negative";
-  return n->value;
-}
+TVM_REGISTER_GLOBAL("tir.TLayoutIsTileOuter")
+    .set_body_typed([](TLayout layout, TLayout tile_layout, Array<PrimExpr> tiled_shape,
+                       Array<PrimExpr> outer_shape) {
+      return layout->IsTileOuter(tile_layout, tiled_shape, outer_shape);
+    });
 
 }  // namespace tir
 }  // namespace tvm

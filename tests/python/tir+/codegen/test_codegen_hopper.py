@@ -385,7 +385,7 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
         per_element=int(math.log2(128 // dtype.bits)), swizzle_len=swizzle, atom_len=3
     )
     B_np = B.numpy()
-    B_swizzle = [B_np[int(layout.apply(i)[0])] for i in range(total_elems)]
+    B_swizzle = [B_np[int(layout.apply(i)["m"])] for i in range(total_elems)]
     B_swizzle = np.array(B_swizzle).astype(str(dtype))
     assert np.allclose(A.numpy(), B_swizzle)
 

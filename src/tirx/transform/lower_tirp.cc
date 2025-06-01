@@ -574,22 +574,16 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
     if (it != buffer_remap_.end()) {
       return it->second;
     }
-    auto trn_layout = buf->layout.as<TrainiumLayoutNode>();
+    auto trn_layout = buf->layout.as<TileLayoutNode>();
     Buffer flattened;
     tirx::BufferNode* writer;
-    if (trn_layout) {
-      Array<PrimExpr> new_shape;
-      if (buf->layout.as<TrainiumPSUMLayoutNode>()) {
-        arith::Analyzer analyzer;
-        if (analyzer.CanProve(trn_layout->GetCosize() <= kPSUMMaxElemPerBank)) {
-          new_shape = {1, trn_layout->GetPartitionSize(), trn_layout->GetCosize()};
-        } else {
-          new_shape = {ceildiv(trn_layout->GetCosize(), kPSUMMaxElemPerBank),
-                       trn_layout->GetPartitionSize(), kPSUMMaxElemPerBank};
-        }
-      } else {
-        new_shape = {trn_layout->GetPartitionSize(), trn_layout->GetCosize()};
-      }
+    if (trn_layout && trn_layout->IsTrainium()) {
+      Array<PrimExpr> new_shape = buf.scope() == "trn.psum"
+                                      ? Array<PrimExpr>{trn_layout->GetCosize(String("Bank")),
+                                                        trn_layout->GetSize(String("P")),
+                                                        trn_layout->GetCosize(String("F"))}
+                                      : Array<PrimExpr>{trn_layout->GetSize(String("P")),
+                                                        trn_layout->GetCosize(String("F"))};
       flattened = buf;
       writer = flattened.CopyOnWrite();
       writer->shape = new_shape;
@@ -652,15 +646,25 @@ class StorageLower : public arith::IRMutatorWithAnalyzer {
 
   virtual Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer,
                                                   const Array<PrimExpr>& indices) {
-    if (buffer->layout.defined() && buffer->layout.value().as<TrainiumLayoutNode>()) {
-      auto applied = buffer->layout.value()->Apply(indices, buffer->shape);
-      for (size_t i = 0; i < applied.size(); i++) {
-        applied.Set(i, analyzer_->Simplify(applied[i]));
-      }
-      return applied;
-    }
     if (buffer->layout.defined()) {
-      return {analyzer_->Simplify(buffer->layout.value()->Apply(indices, buffer->shape)[0])};
+      auto tile_layout = buffer->layout.value().as<TileLayoutNode>();
+      if (tile_layout && tile_layout->IsTrainium()) {
+        auto coord = buffer->layout.value()->Apply(indices, buffer->shape);
+        std::vector<PrimExpr> res;
+        for (const auto& axis : buffer.scope() == "trn.psum" ? Array<String>{"Bank", "P", "F"}
+                                                             : Array<String>{"P", "F"}) {
+          auto it = coord.find(String(axis));
+          if (it != coord.end()) {
+            res.push_back(analyzer_->Simplify((*it).second));
+          } else {
+            res.push_back(0);
+          }
+        }
+        return res;
+      }
+      auto res = buffer->layout.value()->Apply(indices, buffer->shape);
+      ICHECK_EQ(res.size(), 1) << "Expected a single element offset";
+      return {analyzer_->Simplify((*res.begin()).second)};
     }
     auto flattened_indices = buffer->ElemOffset(indices, true);
     ICHECK_EQ(flattened_indices.size(), 1) << "Expected a single element offset";
@@ -724,7 +728,6 @@ Pass LowerTIRp() {
       n->body = TIRpOpScheduler::LowerOpCalls(n->body, target.value());
       n->body = ScopeMerger::Merge(n->body);
     }
-
     // Lower other TIRp aux data structures
     n->body = ExecScopeSliceResolver::Resolve(n->body, target.value());
     n->body = ScheduleContextRemover::Remove(n->body);
@@ -739,5 +742,5 @@ Pass LowerTIRp() {
 TVM_REGISTER_GLOBAL("tirx.transform.LowerTIRp").set_body_typed(LowerTIRp);
 
 }  // namespace transform
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace tvm

@@ -21,327 +21,624 @@
 namespace tvm {
 namespace tir {
 
-/**************** TileLayout ****************/
-TileLayout::TileLayout(Array<DataIterAttr> data_iter_array, Array<DeviceIterAttr> device_iter_array,
-                       Optional<ExecScope> from, Optional<ExecScope> to) {
-  auto n = make_object<TileLayoutNode>();
-  n->data_iter_array = std::move(data_iter_array);
-  n->device_iter_array = std::move(device_iter_array);
-  n->from = std::move(from);
-  n->to = std::move(to);
-  if (n->from.defined()) {
-    ICHECK(n->to.defined()) << "ValueError: The to scope must be defined if the from scope is";
-    ICHECK(n->to.value()->Higher(n->from.value()))
-        << "ValueError: The from scope must be higher than the to scope";
-  }
+/**************** Axis ****************/
+// AxisNode
+ObjectPtr<Object> CreateAxis(const std::string& name) {
+  // Hack use ffi::Any as exchange
+  auto axis = Axis::Get(name);
+  ICHECK(axis.defined()) << "Cannot find axis \'" << name << '\'';
+  return ffi::details::ObjectUnsafe::ObjectPtrFromObjectRef<Object>(axis);
+}
+
+TVM_REGISTER_NODE_TYPE(AxisNode)
+    .set_creator(CreateAxis)
+    .set_repr_bytes([](const Object* n) -> std::string {
+      return static_cast<const AxisNode*>(n)->name;
+    });
+
+bool AxisNode::IsThreadAxis() const {
+  static const auto& thread_attr_map = Axis::GetAttrMap<bool>("thread");
+  return thread_attr_map[GetRef<Axis>(this)];
+}
+
+bool AxisNode::IsMemoryAxis() const {
+  static const auto& thread_attr_map = Axis::GetAttrMap<bool>("thread");
+  return !thread_attr_map[GetRef<Axis>(this)];
+}
+
+TVM_REGISTER_GLOBAL("tir.AxisIsThreadAxis").set_body_typed([](Axis axis) {
+  return axis->IsThreadAxis();
+});
+
+TVM_REGISTER_GLOBAL("tir.AxisIsMemoryAxis").set_body_typed([](Axis axis) {
+  return axis->IsMemoryAxis();
+});
+
+// Axis
+Axis Axis::Get(const String& name) {
+  const AxisRegEntry* reg = AxisRegistry::Global()->Get(name);
+  CHECK(reg != nullptr) << "Axis " << name << " is not registered";
+  return reg->axis_;
+}
+
+template <typename ValueType>
+inline AxisAttrMap<ValueType> Axis::GetAttrMap(const String& attr_name) {
+  return AxisAttrMap<ValueType>(AxisRegistry::Global()->GetAttrMap(attr_name));
+}
+
+// AxisRegEntry
+inline AxisNode* AxisRegEntry::get() { return const_cast<AxisNode*>(axis_.operator->()); }
+
+AxisRegEntry::AxisRegEntry(uint32_t index) {
+  ObjectPtr<AxisNode> n = make_object<AxisNode>();
+  n->index_ = index;
+  axis_ = Axis(n);
+}
+
+AxisRegEntry& AxisRegEntry::RegisterOrGet(const String& name) {
+  auto& entry = AxisRegistry::Global()->RegisterOrGet(name);
+  entry.get()->name = name;
+  return entry;
+}
+
+Array<String> AxisRegEntry::ListAxisNames() { return AxisRegistry::Global()->ListAllNames(); }
+
+template <typename ValueType>
+inline AxisRegEntry& AxisRegEntry::set_attr(const String& key, const ValueType& value, int plevel) {
+  ICHECK_GT(plevel, 0) << "plevel in set_attr must be greater than 0";
+  ffi::Any rv;
+  rv = value;
+  UpdateAttr(key, rv, plevel);
+  return *this;
+}
+
+void AxisRegEntry::UpdateAttr(const String& key, ffi::Any value, int plevel) {
+  AxisRegistry::Global()->UpdateAttr(key, axis_, value, plevel);
+}
+
+// register theaad axis
+TVM_REGISTER_AXIS("bx").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("by").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("bz").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("cbx").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("cby").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("cbz").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("tx").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("warpid").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("laneid").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("wgid").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("tid_in_wg").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("wid_in_wg").set_attr<bool>("thread", true);
+
+// register memory axis
+TVM_REGISTER_AXIS("m").set_attr<bool>("thread", false);
+TVM_REGISTER_AXIS("P").set_attr<bool>("thread", false);
+TVM_REGISTER_AXIS("F").set_attr<bool>("thread", false);
+TVM_REGISTER_AXIS("Bank").set_attr<bool>("thread", false);
+TVM_REGISTER_AXIS("TCol").set_attr<bool>("thread", false);
+TVM_REGISTER_AXIS("TLane").set_attr<bool>("thread", false);
+
+TVM_REGISTER_GLOBAL("tir.AxisGet").set_body_typed([](String name) -> Axis {
+  return Axis::Get(name);
+});
+
+/**************** Iter ****************/
+TVM_REGISTER_NODE_TYPE(IterNode);
+
+Iter::Iter(PrimExpr extent, PrimExpr stride, Axis axis) {
+  auto n = make_object<IterNode>();
+  n->extent = extent;
+  n->stride = stride;
+  n->axis = axis;
   data_ = std::move(n);
 }
 
+TVM_REGISTER_GLOBAL("tir.Iter").set_body_typed([](PrimExpr extent, PrimExpr stride, Axis axis) {
+  return Iter(extent, stride, axis);
+});
+
+/**************** TileLayout ****************/
+
 TVM_REGISTER_NODE_TYPE(TileLayoutNode);
 
+TileLayout::TileLayout(Array<Iter> shard, Array<Iter> replicate,
+                       Array<Tuple<Iter, PrimExpr>> exclude, Optional<ExecScope> subscope,
+                       Optional<ExecScope> scope) {
+  auto n = make_object<TileLayoutNode>();
+  n->shard = shard;
+  n->replicate = replicate;
+  n->exclude = exclude;
+  n->subscope = subscope;
+  n->scope = scope;
+  data_ = std::move(n);
+}
+
 TVM_REGISTER_GLOBAL("tir.TileLayout")
-    .set_body_typed([](Array<DataIterAttr> data_iter_array, Array<DeviceIterAttr> device_iter_array,
-                       Optional<ExecScope> from, Optional<ExecScope> to) {
-      return TileLayout(data_iter_array, device_iter_array, from, to);
+    .set_body_typed([](Array<Iter> shard, Array<Iter> replicate,
+                       Array<Tuple<Iter, PrimExpr>> exclude, Optional<ExecScope> subscope,
+                       Optional<ExecScope> scope) {
+      return TileLayout(shard, replicate, exclude, subscope, scope);
     });
 
-TileLayout::SplitMap TileLayout::GetSplitMap() const {
-  auto* n = operator->();
-  if (n->device_iter_array.empty()) {
-    // No device array is defined, return an empty map
-    return {};
-  }
-  SplitMap split_map;
-  for (size_t i = 0; i < n->device_iter_array.size(); i++) {
-    auto attr = n->device_iter_array[i];
-    if (attr.IsSplit()) {
-      size_t bound = attr.GetIntBound();
-      ICHECK(bound < n->data_iter_array.size())
-          << "ValueError: The bound of the split attribute is out of range";
-      auto it = split_map.find(bound);
-      ICHECK(it == split_map.end()) << "ValueError: Duplicate split bound for the same data iter";
-      split_map[bound] = i;
-    }
-  }
-  return std::move(split_map);
-}
+bool TileLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const { return true; }
 
-PrimExpr TileLayoutNode::GetSize() const {
-  PrimExpr result = 1;
-  for (size_t i = 0; i < data_iter_array.size(); i++) {
-    result = result * data_iter_array[i]->extent;
-  }
-  return result;
-}
-
-PrimExpr TileLayoutNode::GetCosize() const {
-  auto split_map = GetRef<TileLayout>(this).GetSplitMap();
+bool VerifyCompactness(const std::vector<Iter>& iters) {
   arith::Analyzer analyzer;
-  PrimExpr cosize = 1;
-  for (size_t i = 0; i < data_iter_array.size(); ++i) {
-    if (split_map.find(i) != split_map.end()) {
-      continue;
+  PrimExpr stride_to_find = 1;
+  for (size_t i = 0; i < iters.size(); ++i) {
+    auto iter = std::find_if(iters.begin(), iters.end(), [&](const Iter& iter) {
+      return analyzer.CanProveEqual(iter->stride, stride_to_find);
+    });
+    if (iter == iters.end()) {
+      return false;
     }
-    // Check if the coefficient is non-negative
-    ICHECK(analyzer.CanProveGreaterEqual(data_iter_array[i]->stride, 0))
-        << "ValueError: GetCosize cannot handle case where the coefficient of a non-bound leaf is "
-           "negative";
-    cosize += data_iter_array[i]->stride * (data_iter_array[i]->extent - 1);
+    stride_to_find *= (*iter)->extent;
   }
-  return cosize;
+  return true;
 }
 
 bool TileLayoutNode::VerifyWellFormed() const {
+  // 1. For thread axes, verify its compactness
+  std::unordered_map<String, std::vector<Iter>> thread_axes;
+  auto collect_thread_axis = [&thread_axes](const Iter& iter) {
+    if (iter->axis->IsThreadAxis()) {
+      thread_axes[iter->axis->name].push_back(iter);
+    }
+  };
+  for (const auto& iter : shard) {
+    collect_thread_axis(iter);
+  }
+  for (const auto& iter : replicate) {
+    collect_thread_axis(iter);
+  }
+  for (const auto& iter_selector : exclude) {
+    collect_thread_axis(iter_selector.get<0>());
+  }
+  for (const auto& [axis, iters] : thread_axes) {
+    if (!VerifyCompactness(iters)) {
+      return false;
+    }
+  }
+  // 2. If there's any thread axis, subscope and scope must be provided
+  if (!thread_axes.empty()) {
+    if (!subscope.defined() || !scope.defined()) {
+      return false;
+    }
+    if (!scope.value()->Higher(subscope.value())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+PrimExpr TileLayoutNode::GetSize(Optional<String> axis_name) const {
+  auto filter = [&](const Iter& iter, PrimExpr acc) {
+    if (!axis_name.has_value() || iter->axis->name == axis_name.value()) {
+      return acc * iter->extent;
+    }
+    return acc;
+  };
+  PrimExpr res = IntImm(shard[0]->extent->dtype, 1);
+  for (const auto& iter : shard) {
+    res = filter(iter, res);
+  }
+  for (const auto& iter : replicate) {
+    res = filter(iter, res);
+  }
+  for (const auto& iter : exclude) {
+    res = filter(iter.get<0>(), res);
+  }
+  return res;
+}
+
+PrimExpr TileLayoutNode::GetCosize(Optional<String> axis_name) const {
   arith::Analyzer analyzer;
-  // Verify the split map
-  const auto& split_map = GetRef<TileLayout>(this).GetSplitMap();
-  bool result = true;
-  for (const auto& kv : split_map) {
-    // The extents of the data and device iter array must be the same
-    result &= analyzer.CanProveEqual(data_iter_array[kv.first]->extent,
-                                     device_iter_array[kv.second]->extent);
+  PrimExpr result = IntImm(shard[0]->extent->dtype, 0);
+  auto filter = [&](const Iter& iter, PrimExpr acc) {
+    if ((!axis_name.has_value() && iter->axis->IsMemoryAxis()) ||
+        (axis_name.has_value() && iter->axis->name == axis_name.value())) {
+      ICHECK(analyzer.CanProve(iter->stride > 0))
+          << "Negative stride is not supported for memory axes currently";
+      return acc + (iter->extent - 1) * iter->stride;
+    }
+    return acc;
+  };
+  for (const auto& iter : shard) {
+    result = filter(iter, result);
+  }
+  for (const auto& iter : replicate) {
+    result = filter(iter, result);
+  }
+  for (const auto& iter : exclude) {
+    result = filter(iter.get<0>(), result);
+  }
+  return analyzer.Simplify(is_zero(result) ? 1 : result + 1);
+}
+
+Map<String, PrimExpr> TileLayoutNode::Apply(PrimExpr coord) const {
+  return Apply(SplitCoord(coord, GetShardShape()));
+}
+
+Map<String, PrimExpr> TileLayoutNode::Apply(Array<PrimExpr> coord) const {
+  arith::Analyzer analyzer;
+  CHECK_EQ(coord.size(), shard.size()) << "Coordinate size must match the number of shard axes";
+  std::unordered_map<String, PrimExpr> result;
+  for (size_t i = 0; i < shard.size(); ++i) {
+    auto it = result.find(shard[i]->axis->name);
+    if (it == result.end()) {
+      result[shard[i]->axis->name] = analyzer.Simplify(coord[i] * shard[i]->stride);
+    } else {
+      result[shard[i]->axis->name] = analyzer.Simplify(it->second + coord[i] * shard[i]->stride);
+    }
   }
   return result;
 }
 
-Array<PrimExpr> TileLayoutNode::Apply(const PrimExpr& coord) const {
-  arith::Analyzer analyzer;
-  PrimExpr input = analyzer.Simplify(coord);
-  const auto& size = GetSize();
-  const auto& cosize = GetCosize();
-  auto inner = analyzer.Simplify(floormod(input, size));
-  const auto& outer = analyzer.Simplify(floordiv(input, size));
+TileLayout RemoveUnitIters(TileLayout layout) {
+  auto new_layout = layout.CopyOnWrite();
+  std::vector<Iter> new_shard;
+  std::copy_if(layout->shard.begin(), layout->shard.end(), std::back_inserter(new_shard),
+               [](const Iter& iter) { return !is_one(iter->extent); });
+  // if new_shard is empty, add a unit iter
+  if (new_shard.empty()) {
+    // TODO(@bohan): does it matter which axis we use?
+    new_shard.push_back(Iter(1, 1, layout->shard[0]->axis));
+  }
+  new_layout->shard = new_shard;
+  return GetRef<TileLayout>(new_layout);
+}
 
-  auto split_map = GetRef<TileLayout>(this).GetSplitMap();
-  PrimExpr result = 0;
-  for (int i = static_cast<int>(data_iter_array.size()) - 1; i >= 0; i--) {
-    if (split_map.find(i) != split_map.end()) {
-      inner = floordiv(inner, data_iter_array[i]->extent);
-      continue;
+TileLayout FuseShardAxes(TileLayout layout) {
+  std::vector<Iter> fused_shard;
+  arith::Analyzer ana;
+  const auto& shard = layout->shard;
+  for (size_t cur = 0; cur < shard.size();) {
+    // Find consecutive fusable axes
+    PrimExpr extent = shard[cur]->extent;
+    size_t next = cur + 1;
+    while (next < shard.size() && shard[next]->axis.same_as(shard[cur]->axis) &&
+           ana.CanProveEqual(shard[next]->extent * shard[next]->stride, shard[next - 1]->stride)) {
+      extent *= shard[next]->extent;
+      ++next;
     }
-    result += data_iter_array[i]->stride * floormod(inner, data_iter_array[i]->extent);
-    inner = floordiv(inner, data_iter_array[i]->extent);
+    if (next == cur + 1) {
+      fused_shard.push_back(shard[cur]);
+    } else {
+      fused_shard.push_back(Iter(extent, shard[next - 1]->stride, shard[cur]->axis));
+    }
+    cur = next;
   }
-  return {analyzer.Simplify(outer * cosize + result)};
+  auto new_layout = layout.CopyOnWrite();
+  new_layout->shard = fused_shard;
+  return GetRef<TileLayout>(new_layout);
 }
 
-Array<ObjectRef> TileLayoutNode::GroupByLogicalShape(const Array<PrimExpr>& shape) const {
-  auto res = TileLayoutGroupByLogicalShape(GetRef<TileLayout>(this), shape, nullptr);
-  std::vector<IntImm> seps;
-  for (auto sep : res.second) {
-    seps.push_back(IntImm(DataType::Int(32), sep));
-  }
-  return {res.first, Array<IntImm>(seps)};
+TLayout TileLayoutNode::Normalize() const {
+  // 0. Remove unit iters in shard
+  TileLayout res = RemoveUnitIters(GetRef<TileLayout>(this));
+  // 1. Fuse shard axes
+  res = FuseShardAxes(res);
+  return res;
 }
 
-TVM_REGISTER_GLOBAL("tir.TileLayoutGroupByLogicalShape")
-    .set_body_typed([](TileLayout layout, Array<PrimExpr> shape) {
-      return layout->GroupByLogicalShape(shape);
+std::pair<TileLayout, std::vector<int64_t>> GroupByShape(TileLayout layout,
+                                                         const Array<PrimExpr>& shape) {
+  arith::Analyzer analyzer;
+  size_t shape_idx = 0;
+  PrimExpr prod = 1;
+
+  std::vector<Iter> new_shard;
+  std::vector<int64_t> seps{0};
+
+  for (size_t i = 0; i < layout->shard.size(); ++i) {
+    auto extent_i = layout->shard[i]->extent;
+    auto stride_i = layout->shard[i]->stride;
+    prod *= extent_i;
+    while (shape_idx < shape.size() &&
+           analyzer.CanProveEqual(floormod(prod, shape[shape_idx]), 0)) {
+      // prod' * extent_i = prod = c * shape[shape_match_dim]
+      // we split out e from extent_i such that prod' * e = shape[shape_match_dim]
+      // we can prove e = extent_i / c, i.e. we split extent_i into (e, c)
+      // c becomes the new extent_i, prod' is reset to 1, then we do it recursively
+      PrimExpr c = floordiv(prod, shape[shape_idx]);
+      CHECK(analyzer.CanProveEqual(floormod(extent_i, c), 0))
+          << "layout " << layout << " can not be grouped by shape " << shape;
+      new_shard.push_back(Iter(floordiv(extent_i, c), stride_i * c, layout->shard[i]->axis));
+      // Update extent_i, prod and shape_match_dim
+      extent_i = c;
+      prod = c;
+      shape_idx++;
+      seps.push_back(new_shard.size());
+    }
+    // There's still remaining, add it to the new shard
+    if (!is_one(extent_i)) {
+      CHECK(shape_idx < shape.size())
+          << "layout " << layout << " can not be grouped by shape " << shape;
+      new_shard.push_back(Iter(extent_i, stride_i, layout->shard[i]->axis));
+    }
+  }
+
+  CHECK(shape_idx == shape.size())
+      << "layout " << layout << " can not be grouped by shape " << shape;
+
+  auto* n = layout.CopyOnWrite();
+  n->shard = new_shard;
+  return {GetRef<TileLayout>(n), seps};
+}
+
+TVM_REGISTER_GLOBAL("tir.TileLayoutGroupByShape")
+    .set_body_typed([](const TileLayout& layout, const Array<PrimExpr>& shape) {
+      auto [res, seps] = GroupByShape(layout, shape);
+      return Tuple<TileLayout, Array<int64_t>>{res, Array<int64_t>(seps.begin(), seps.end())};
     });
 
-/******* Vector Length ********/
+TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& outer_shape,
+                             const Array<PrimExpr>& inner_shape) const {
+  auto outer = outer_in->Normalize().as<TileLayout>().value();
+  auto inner = GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
 
-PrimExpr ComputeGCD(PrimExpr a, PrimExpr b, arith::Analyzer* ana) {
-  int max_iter = 100;
-  int iter = 0;
-  while (!ana->CanProveEqual(b, 0) && iter++ < max_iter) {
-    PrimExpr temp = b;
-    b = floormod(a, b);
-    a = temp;
-  }
-  if (iter == max_iter) {
-    return 1;
-  }
-  return a;
-}
+  CHECK_EQ(outer_shape.size(), inner_shape.size()) << "Outer and inner shape size must match";
 
-std::pair<int, int> GetMajorDimension(const Array<PrimExpr>& strides) {
+  // Group both outer/inner layouts by their respective logical shapes
+  auto [grouped_outer, outer_seps] = GroupByShape(outer, outer_shape);
+  auto [grouped_inner, inner_seps] = GroupByShape(inner, inner_shape);
+
+  outer = grouped_outer;
+  inner = grouped_inner;
+
   arith::Analyzer analyzer;
-  int major_dim = 0;
-  PrimExpr min_stride = strides[0];
-  PrimExpr argmin_stride = strides[0];
-  for (size_t i = 0; i < strides.size(); ++i) {
-    if (as_const_int(strides[i])[0] < as_const_int(min_stride)[0]) {
-      major_dim = static_cast<int>(i);
-      min_stride = strides[i];
+
+  {
+    // Scale outer axis strides by inner_cosize_map
+    Map<String, PrimExpr> inner_cosize_map;
+    for (const auto& iter : inner->shard) {
+      if (inner_cosize_map.find(iter->axis->name) == inner_cosize_map.end()) {
+        inner_cosize_map.Set(iter->axis->name, inner->GetCosize(iter->axis->name));
+      }
     }
+    std::vector<Iter> new_shard;
+    for (size_t i = 0; i < outer->shard.size(); ++i) {
+      auto it = inner_cosize_map.find(outer->shard[i]->axis->name);
+      if (it != inner_cosize_map.end()) {
+        new_shard.push_back(Iter(outer->shard[i]->extent, outer->shard[i]->stride * (*it).second,
+                                 outer->shard[i]->axis));
+      } else {
+        new_shard.push_back(outer->shard[i]);
+      }
+    }
+    outer = TileLayout(new_shard, outer->replicate, outer->exclude, outer->subscope, outer->scope);
   }
-  int min_stride_int = as_const_int(min_stride) ? static_cast<int>(*as_const_int(min_stride)) : 0;
-  return {(strides.size() - major_dim) - 1, min_stride_int};
+
+  CHECK(!outer_seps.empty()) << "Outer layout must only use split/reorder from logical scope";
+  CHECK(!inner_seps.empty()) << "Inner layout must only use split/reorder from logical scope";
+
+  // Combine the shards from both layouts for each dimension
+  std::vector<Iter> tile_shard;
+  for (size_t i = 0; i < outer_shape.size(); ++i) {
+    // Add outer layout's shards for this dimension
+    tile_shard.insert(tile_shard.end(), outer->shard.begin() + outer_seps[i],
+                      outer->shard.begin() + outer_seps[i + 1]);
+
+    // Add inner layout's shards for this dimension
+    tile_shard.insert(tile_shard.end(), inner->shard.begin() + inner_seps[i],
+                      inner->shard.begin() + inner_seps[i + 1]);
+  }
+
+  // Combine replicate attributes from both layouts
+  std::vector<Iter> tile_rep{inner->replicate.begin(), inner->replicate.end()};
+  tile_rep.insert(tile_rep.end(), outer->replicate.begin(), outer->replicate.end());
+
+  // Combine exclude attributes from both layouts
+  std::vector<Tuple<Iter, PrimExpr>> tile_offset;
+  for (const auto& iter_selector : inner->exclude) {
+    tile_offset.push_back(iter_selector);
+  }
+  for (const auto& iter_selector : outer->exclude) {
+    tile_offset.push_back(iter_selector);
+  }
+
+  Optional<ExecScope> tile_subscope;
+  Optional<ExecScope> tile_scope;
+
+  if (inner->subscope.defined()) {
+    tile_subscope = inner->subscope;
+    tile_scope = outer->subscope.defined() ? outer->scope : inner->scope;
+    if (outer->subscope.defined()) {
+      CHECK(outer->subscope.value()->Is(inner->scope.value()));
+    }
+  } else if (outer->subscope.defined()) {
+    tile_subscope = outer->subscope;
+    tile_scope = outer->scope;
+  }
+  return TileLayout(tile_shard, tile_rep, tile_offset, tile_subscope, tile_scope)->Normalize();
 }
 
-std::tuple<int, int, PrimExpr> ExtractLayout(TileLayout layout) {
+// Tiles a logical shape by a given factor array.
+Array<PrimExpr> TileShape(Array<PrimExpr> shape, Array<PrimExpr> factor, bool is_inner) {
+  ICHECK_EQ(shape.size(), factor.size()) << "Shape and factor dimension must match.";
   arith::Analyzer analyzer;
-  // Get the data dimensions and strides from the layout
-  Array<PrimExpr> strides;
-  for (auto& iter : layout->data_iter_array) {
-    strides.push_back(iter->stride);
-  }
 
-  // Get the major dimension (dimension with the largest stride)
-  auto [major_dim, min_stride] = GetMajorDimension(strides);
-  return {major_dim, min_stride, layout->data_iter_array[strides.size() - major_dim - 1]->extent};
-}
+  Array<PrimExpr> new_shape;
+  for (int i = 0; i < static_cast<int>(shape.size()); ++i) {
+    ICHECK(analyzer.CanProveEqual(floormod(shape[i], factor[i]), 0))
+        << "Shape[i] must be divisible by factor[i]";
 
-int Vec_Len(TileLayout Ls, TileLayout Ld) {
-  // Constants initialization
-  arith::Analyzer analyzer;
-  std::vector<int> optimal_vec_len = {1, 2, 4, 8};
-  Ls = Ls->Normalize().as<TileLayout>().value();
-  Ld = Ld->Normalize().as<TileLayout>().value();
-
-  PrimExpr Ls_size = Ls->GetSize();
-  PrimExpr Ld_size = Ld->GetSize();
-  auto [major_s, min_stride_s, argmin_s] = ExtractLayout(Ls);
-  auto [major_d, min_stride_d, argmin_d] = ExtractLayout(Ld);
-
-  // Check if normalized layouts are structurally equal
-  if (analyzer.CanProveEqual(Ls_size, Ld_size)) {
-    if ((min_stride_s != 1) || (min_stride_d != 1) || (major_s != major_d)) {
-      // Case 1 & 2: Layouts are not contiguous or min strides don't match; different major-dim
-      return 1;
+    if (is_inner) {
+      new_shape.push_back(floordiv(shape[i], factor[i]));
+      new_shape.push_back(factor[i]);
     } else {
-      // Case 3: the same dim-major, and the same stride, return major dimension in terms of
-      // optimal vector length based on extent
-      return *std::lower_bound(
-          optimal_vec_len.begin(), optimal_vec_len.end() - 1,
-          static_cast<int>(as_const_int(ComputeGCD(argmin_s, argmin_d, &analyzer))[0]));
+      new_shape.push_back(factor[i]);
+      new_shape.push_back(floordiv(shape[i], factor[i]));
     }
-  } else {
-    // Case4: Structure doesn't match, then return the minimum of GCD stride, normally 1
-    LOG(FATAL) << "Source and Destination extents don't match!";
   }
+  return new_shape;
 }
 
-TVM_REGISTER_GLOBAL("tir.Vec_Len").set_body_typed([](TileLayout tiled_layout, TileLayout layout) {
-  return Vec_Len(tiled_layout, layout);
+// Extract every even index from seps
+std::vector<int64_t> GetEvenSeps(std::vector<int64_t> seps) {
+  std::vector<int64_t> even;
+  for (size_t i = 0; i < seps.size(); i += 2) {
+    even.push_back(seps[i]);
+  }
+  return even;
+}
+
+Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
+                                                 const Array<PrimExpr>& tiled_shape,
+                                                 const Array<PrimExpr>& inner_shape) const {
+  auto maybe_tile = tile_layout.as<TileLayout>();
+  if (!maybe_tile) return std::nullopt;
+
+  TileLayout tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
+  TileLayout layout = GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+  arith::Analyzer analyzer;
+
+  CHECK_EQ(tiled_shape.size(), inner_shape.size())
+      << "Tiled shape size must match inner shape size";
+
+  auto factored = TileShape(tiled_shape, inner_shape, true);
+  auto [grouped_tiled, tiled_seps] = GroupByShape(tiled, factored);
+  CHECK(grouped_tiled.defined() && !tiled_seps.empty())
+      << "tile layout group by shape failed, layout is " << tiled << " and shape is " << factored;
+  auto [grouped_layout, inner_seps] = GroupByShape(layout, inner_shape);
+  CHECK(grouped_layout.defined() && !inner_seps.empty())
+      << "tile layout group by shape failed, layout is " << layout << " and shape is "
+      << inner_shape;
+
+  auto tiled_seps_even = GetEvenSeps(tiled_seps);
+  std::vector<Iter> outer_shard;
+  PrimExpr inner_stride = grouped_layout->GetCosize();
+
+  for (size_t i = 0; i < tiled_shape.size(); ++i) {
+    int inner_count = inner_seps[i + 1] - inner_seps[i];
+    int tiled_count = tiled_seps_even[i + 1] - tiled_seps_even[i];
+    if (inner_count > tiled_count) return std::nullopt;
+
+    // Compare extents (and stride if extent is not 1).
+    for (int j = 0; j < inner_count; ++j) {
+      Iter inner_iter = grouped_layout->shard[inner_seps[i] + j];
+      Iter tiled_iter = grouped_tiled->shard[tiled_seps_even[i + 1] - inner_count + j];
+      if (!analyzer.CanProveEqual(inner_iter->extent, tiled_iter->extent) ||
+          (!analyzer.CanProveEqual(inner_iter->stride, tiled_iter->stride) &&
+           !is_one(inner_iter->extent)) ||
+          !inner_iter->axis.same_as(tiled_iter->axis)) {
+        return std::nullopt;
+      }
+    }
+
+    for (int j = 0; j < tiled_count - inner_count; ++j) {
+      Iter outer_iter = grouped_tiled->shard[tiled_seps_even[i] + j];
+      outer_shard.push_back(
+          Iter(outer_iter->extent, floordiv(outer_iter->stride, inner_stride), outer_iter->axis));
+    }
+  }
+  // TODO(@bohan): replicate and exclude should be considered here
+  return TileLayout(outer_shard, this->replicate, this->exclude);
+}
+
+Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
+                                              const Array<PrimExpr>& tiled_shape,
+                                              const Array<PrimExpr>& outer_shape) const {
+  auto maybe_tile = tile_layout.as<TileLayout>();
+  if (!maybe_tile) {
+    // Could be ComposeLayout, in which case we test layout_B of compose.
+    if (auto comp = tile_layout.as<ComposeLayout>()) {
+      auto inner_layout = IsTileOuter(comp.value()->layout_B, tiled_shape, outer_shape);
+      if (!inner_layout) return std::nullopt;
+      return ComposeLayout(comp.value()->layout_A, inner_layout.value().as<TileLayout>().value());
+    }
+    return std::nullopt;
+  }
+  TileLayout tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
+  TileLayout layout = GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+  arith::Analyzer analyzer;
+
+  CHECK_EQ(tiled_shape.size(), outer_shape.size())
+      << "Tiled shape size must match outer shape size";
+
+  auto factored = TileShape(tiled_shape, outer_shape, false);
+  auto [grouped_tiled, tiled_seps] = GroupByShape(tiled, factored);
+  CHECK(grouped_tiled.defined() && !tiled_seps.empty())
+      << "tile layout group by shape failed, layout is " << tiled << " and shape is " << factored;
+  auto [grouped_layout, outer_seps] = GroupByShape(layout, outer_shape);
+  CHECK(grouped_layout.defined() && !outer_seps.empty())
+      << "tile layout group by shape failed, layout is " << layout << " and shape is "
+      << outer_shape;
+
+  auto tiled_seps_even = GetEvenSeps(tiled_seps);
+  std::vector<Iter> inner_shard;
+
+  for (size_t i = 0; i < tiled_shape.size(); ++i) {
+    int outer_count = outer_seps[i + 1] - outer_seps[i];
+    int tiled_count = tiled_seps_even[i + 1] - tiled_seps_even[i];
+    if (outer_count > tiled_count) return std::nullopt;
+
+    // Compare extents (delay checking stride since we don't know inner_stride yet)
+    for (int j = 0; j < outer_count; ++j) {
+      Iter outer_iter = grouped_layout->shard[outer_seps[i] + j];
+      Iter tiled_iter = grouped_tiled->shard[tiled_seps_even[i] + j];
+      if (!analyzer.CanProveEqual(outer_iter->extent, tiled_iter->extent) ||
+          !outer_iter->axis.same_as(tiled_iter->axis)) {
+        return std::nullopt;
+      }
+    }
+
+    for (int j = 0; j < tiled_count - outer_count; ++j) {
+      Iter inner_iter = grouped_tiled->shard[tiled_seps_even[i] + outer_count + j];
+      inner_shard.push_back(inner_iter);
+    }
+  }
+  // TODO(@bohan): replicate and exclude should be considered here
+  auto res = TileLayout(inner_shard, this->replicate, this->exclude, tiled->subscope, tiled->scope);
+  PrimExpr inner_stride = res->GetCosize();
+  // Check if the stride of the outer shard is correct
+  for (size_t i = 0; i < tiled_shape.size(); ++i) {
+    for (int j = outer_seps[i]; j < outer_seps[i + 1]; ++j) {
+      if (!analyzer.CanProveEqual(
+              grouped_layout->shard[j]->stride * inner_stride,
+              grouped_tiled->shard[tiled_seps_even[i] + j - outer_seps[i]]->stride)) {
+        return std::nullopt;
+      }
+    }
+  }
+  return res;
+}
+
+Array<PrimExpr> TileLayoutNode::GetShardShape() const {
+  return shard.Map([](const Iter& iter) { return iter->extent; });
+}
+
+bool TileLayoutNode::IsTrivial() const {
+  if (shard.size() > 1) return false;
+  if (shard.size() == 1) {
+    if (!shard[0]->axis->IsMemoryAxis() || !is_one(shard[0]->stride)) return false;
+  }
+  return replicate.size() == 0 && exclude.size() == 0 && !subscope.defined() && !scope.defined();
+}
+
+TVM_REGISTER_GLOBAL("tir.TileLayoutIsTrivial").set_body_typed([](const TileLayout& layout) {
+  return layout->Normalize().as<TileLayout>().value()->IsTrivial();
 });
 
-/******** Shard ********/
-std::vector<DeviceIterAttr> ParseStrategy(String strategy, Array<PrimExpr> mesh) {
-  std::vector<DeviceIterAttr> attrs;
-  size_t cur = 0;
-  auto f_parse_number_with_bracket = [&cur, &strategy]() {
-    std::string number;
-    while ((++cur) < strategy.size() && isdigit(strategy.at(cur))) {
-      number.push_back(strategy.at(cur));
-    }
-    ICHECK_GT(number.size(), 0) << "ValueError: Invalid strategy " << strategy;
-    return atoi(number.c_str());
-  };
-  size_t mesh_dim = 0;
-  for (; cur < strategy.size() && mesh_dim < mesh.size();) {
-    if (strategy.at(cur) == 'S') {
-      attrs.push_back(DeviceIterAttr::Split(mesh[mesh_dim++], f_parse_number_with_bracket()));
-    } else if (strategy.at(cur) == 'E') {
-      attrs.push_back(DeviceIterAttr::Exclusive(mesh[mesh_dim++], f_parse_number_with_bracket()));
-    } else if (strategy.at(cur) == 'R') {
-      attrs.push_back(DeviceIterAttr::Replicate(mesh[mesh_dim++]));
-      ++cur;
-    } else {
-      LOG(FATAL) << "ValueError: Invalid strategy " << strategy;
-    }
-  }
-  return std::move(attrs);
+bool TileLayoutNode::IsTrainium() const {
+  return !std::any_of(shard.begin(), shard.end(), [](const Iter& iter) {
+    return iter->axis->IsMemoryAxis() && !iter->axis.same_as(Axis::Get("F")) &&
+           !iter->axis.same_as(Axis::Get("P")) && !iter->axis.same_as(Axis::Get("Bank"));
+  });
 }
 
-TileLayout Shard(Array<PrimExpr> shape, Array<PrimExpr> mesh, String strategy, TileLayout inner,
-                 ExecScope from, ExecScope to) {
-  // Parse the strategy
-  auto attrs = ParseStrategy(strategy, mesh);
-  ICHECK_EQ(attrs.size(), mesh.size())
-      << "ValueError: The number of attributes must be the same as the number of mesh leaves";
-  Array<PrimExpr> inner_shape(shape);
-  for (int i = 0; i < static_cast<int>(mesh.size()); i++) {
-    if (attrs[i].IsSplit()) {
-      auto bound = attrs[i].GetIntBound();
-      inner_shape.Set(bound, floordiv(inner_shape[bound], mesh[i]));
-    }
-  }
-  auto [grouped_inner, inner_seps] = TileLayoutGroupByLogicalShape(inner, inner_shape, nullptr);
-  inner = grouped_inner;
-  ICHECK(!inner_seps.empty())
-      << "ValueError: The inner layout must be able to transform from logical view shape only with "
-         "split and reorder";
+TVM_REGISTER_GLOBAL("tir.TileLayoutIsTrainium").set_body_typed([](const TileLayout& layout) {
+  return layout->IsTrainium();
+});
 
-  Array<DataIterAttr> new_data_iter_array;
-  std::unordered_map<int, int> index_map;
-  auto split_map = inner.GetSplitMap();
-  for (int i = 0; i < static_cast<int>(inner_seps.size()) - 1; i++) {
-    for (size_t j = 0; j < attrs.size(); j++) {
-      auto attr = attrs[j];
-      if (attr.IsSplit() && static_cast<int>(attr.GetIntBound()) == i) {
-        new_data_iter_array.push_back(DataIterAttr(attr->extent, -1));
-        attrs[j] =
-            DeviceIterAttr::Split(attr->extent, static_cast<int>(new_data_iter_array.size()) - 1);
-      }
-    }
-    for (int j = inner_seps[i]; j < inner_seps[i + 1]; j++) {
-      new_data_iter_array.push_back(inner->data_iter_array[j]);
-      if (split_map.find(j) != split_map.end()) {
-        index_map[j] = new_data_iter_array.size() - 1;
-      }
-    }
-  }
-  Array<DeviceIterAttr> new_device_iter_array;
-  new_device_iter_array.insert(new_device_iter_array.end(), attrs.begin(), attrs.end());
-  for (size_t i = 0; i < inner->device_iter_array.size(); i++) {
-    auto device_iter = inner->device_iter_array[i];
-    if (device_iter.IsSplit()) {
-      new_device_iter_array.push_back(
-          DeviceIterAttr::Split(device_iter->extent, index_map[device_iter.GetIntBound()]));
-    } else {
-      new_device_iter_array.push_back(device_iter);
-    }
-  }
-  // Construct the from and to scopes
-  if (!inner->device_iter_array.empty()) {
-    ICHECK(inner->to.defined()) << "ValueError: The inner layout must have the to scope";
-    ICHECK(inner->to.value()->Is((from)))
-        << "ValueError: The from scope of the inner layout must be the same as the to scope of "
-           "the outer layout";
-  }
-
-  return TileLayout(new_data_iter_array, new_device_iter_array,
-                    !inner->device_iter_array.empty() ? inner->from : from, to);
+bool TileLayoutNode::HasMemoryAxis() const {
+  return std::any_of(shard.begin(), shard.end(),
+                     [](const Iter& iter) { return iter->axis->IsMemoryAxis(); });
 }
 
-TVM_REGISTER_GLOBAL("tir.TileLayoutShard")
-    .set_body_typed([](Array<PrimExpr> shape, Array<PrimExpr> mesh, String strategy,
-                       TileLayout inner, ExecScope from,
-                       ExecScope to) { return Shard(shape, mesh, strategy, inner, from, to); });
-
-Array<PrimExpr> TileLayoutNode::Apply(const Array<PrimExpr>& coord,
-                                      const Array<PrimExpr>& shape) const {
-  if (shape.size() == 1) {
-    ICHECK_EQ(coord.size(), 1)
-        << "ValueError: Expected a single coordinate for single-dimension shape";
-    return Apply(coord[0]);
-  }
-  auto prod_shape = ReduceMul(shape);
-  arith::Analyzer analyzer;
-  if (!analyzer.CanProveEqual(prod_shape, GetSize())) {
-    return TLayoutNode::Apply(coord, shape);
-  }
-  auto pr = TileLayoutGroupByLogicalShape(GetRef<TileLayout>(this), shape, nullptr);
-  auto grouped_layout = pr.first;
-  auto seps = pr.second;
-  if (!grouped_layout.defined()) {
-    return TLayoutNode::Apply(coord, shape);
-  }
-  PrimExpr result = 0;
-  auto split_map = grouped_layout.GetSplitMap();
-  for (int i = 0; i < static_cast<int>(shape.size()); i++) {
-    PrimExpr cur = coord[i];
-    for (int j = seps[i + 1] - 1; j >= seps[i]; j--) {
-      if (split_map.find(j) == split_map.end()) {
-        result += grouped_layout->data_iter_array[j]->stride *
-                  floormod(cur, grouped_layout->data_iter_array[j]->extent);
-      }
-      cur = floordiv(cur, grouped_layout->data_iter_array[j]->extent);
-    }
-  }
-  return {result};
+bool TileLayoutNode::HasThreadAxis() const {
+  return std::any_of(shard.begin(), shard.end(),
+                     [](const Iter& iter) { return iter->axis->IsThreadAxis(); });
 }
 
 }  // namespace tir

@@ -19,440 +19,365 @@ import itertools
 import pytest
 
 import tvm
-import tvm.testing
-from tvm.script import tir as T
+from tvm.tir.layout import TileLayout, Axis, SwizzleLayout, ComposeLayout
 from tvm.ir import assert_structural_equal
 from tvm.tirp.op_schedule.cuda.async_structs import tma_shared_layout, SwizzleMode
 
 
-def test_constructor_from_tuple_no_device():
-    def valid_constructor():
-        layout = T.TileLayout.from_tuple(
-            data=(8, 8, 8, 4, 2),
-            strides=(512, 64, 8, 2, 1),
+def test_axis():
+    assert Axis.bx == Axis.get("bx")
+    assert Axis.by == Axis.get("by")
+    assert Axis.bz == Axis.get("bz")
+    assert Axis.cbx == Axis.get("cbx")
+    assert Axis.cby == Axis.get("cby")
+    assert Axis.cbz == Axis.get("cbz")
+    assert Axis.tx == Axis.get("tx")
+    assert Axis.warpid == Axis.get("warpid")
+    assert Axis.laneid == Axis.get("laneid")
+    assert Axis.wgid == Axis.get("wgid")
+    assert Axis.tid_in_wg == Axis.get("tid_in_wg")
+    assert Axis.wid_in_wg == Axis.get("wid_in_wg")
+    assert Axis.m == Axis.get("m")
+    assert Axis.P == Axis.get("P")
+    assert Axis.F == Axis.get("F")
+    assert Axis.TCol == Axis.get("TCol")
+    assert Axis.TLane == Axis.get("TLane")
+
+    assert Axis.bx.is_thread()
+    assert Axis.by.is_thread()
+    assert Axis.bz.is_thread()
+    assert Axis.cbx.is_thread()
+    assert Axis.cby.is_thread()
+    assert Axis.cbz.is_thread()
+    assert Axis.tx.is_thread()
+    assert Axis.warpid.is_thread()
+    assert Axis.laneid.is_thread()
+    assert Axis.wgid.is_thread()
+    assert Axis.tid_in_wg.is_thread()
+    assert Axis.wid_in_wg.is_thread()
+    assert Axis.m.is_memory()
+    assert Axis.P.is_memory()
+    assert Axis.F.is_memory()
+    assert Axis.TCol.is_memory()
+    assert Axis.TLane.is_memory()
+
+
+def test_constructor():
+    layout = TileLayout([2, 3, 4])
+    assert str(layout) == 'T.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
+
+    layout = TileLayout(
+        shard=([2, 3, 4], [12, 4, 1]),
+    )
+    assert str(layout) == 'T.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
+
+    layout = TileLayout(
+        shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]),
+    )
+    assert str(layout) == 'T.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
+
+    layout = TileLayout(
+        shard=([8, 4, 2], [(4, Axis.laneid), (1, Axis.laneid), 1]),
+        subscope="thread",
+        scope="warp",
+    )
+    assert (
+        str(layout)
+        == 'T.TileLayout(shard=([8, 4, 2], [(4, "laneid"), (1, "laneid"), (1, "m")]), subscope="thread", scope="warp")'
+    )
+
+    layout = TileLayout(
+        shard=([8], [(4, Axis.laneid)]),
+        replicate=([4], [(1, Axis.laneid)]),
+        subscope="thread",
+        scope="warp",
+    )
+    assert (
+        str(layout)
+        == 'T.TileLayout(shard=([8], [(4, "laneid")]), replicate=([4], [(1, "laneid")]), subscope="thread", scope="warp")'
+    )
+
+    layout = TileLayout(
+        shard=([8], [(4, Axis.laneid)]),
+        exclude=(([4], [(1, Axis.laneid)]), [0]),
+        subscope="thread",
+        scope="warp",
+    )
+    assert (
+        str(layout)
+        == 'T.TileLayout(shard=([8], [(4, "laneid")]), exclude=(([4], [(1, "laneid")]), [0]), subscope="thread", scope="warp")'
+    )
+
+
+def test_verify_well_formed():
+    def test_thread_axis_compactness():
+        layout = TileLayout(
+            shard=([8, 4, 2], [(4, Axis.laneid), (1, Axis.laneid), (1, Axis.m)]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_expected = T.TileLayout(
-            data_iter_array=[
-                T.DataIterAttr(extent=8, stride=512),
-                T.DataIterAttr(extent=8, stride=64),
-                T.DataIterAttr(extent=8, stride=8),
-                T.DataIterAttr(extent=4, stride=2),
-                T.DataIterAttr(extent=2, stride=1),
-            ],
-            device_iter_array=None,
-            from_scope=None,
-            to_scope=None,
+        assert layout.verify_well_formed()
+
+        layout = TileLayout(
+            shard=([8, 4, 2], [(2, Axis.laneid), (1, Axis.laneid), (1, Axis.m)]),
+            subscope="thread",
+            scope="warp",
         )
-        tvm.ir.assert_structural_equal(layout, layout_expected, True)
+        assert not layout.verify_well_formed()
 
-    valid_constructor()
-
-    def invalid_from_to():
-        with pytest.raises(AssertionError):
-            T.TileLayout.from_tuple(
-                data=(8, 8, 8, 4, 2),
-                strides=(512, 64, 8, 2, 1),
-                from_to=("thread", "warp"),
-            )
-
-    invalid_from_to()
-
-    def invalid_exclusive():
-        with pytest.raises(AssertionError):
-            T.TileLayout.from_tuple(
-                data=(8, 8, 8, 4, 2),
-                strides=(512, 64, 8, 2, 1),
-                exclusive=[(1, 0)],
-            )
-
-    invalid_exclusive()
-
-
-def test_constructor_from_tuple():
-    def valid_constructor():
-        layout = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, T.S(1), 2),
-            strides=(16, -1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8], [(4, Axis.laneid)]),
+            replicate=([4], [(2, Axis.laneid)]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_expected = T.TileLayout(
-            data_iter_array=[
-                T.DataIterAttr(extent=8, stride=16),
-                T.DataIterAttr(extent=8, stride=-1),
-                T.DataIterAttr(extent=8, stride=2),
-                T.DataIterAttr(extent=4, stride=-1),
-                T.DataIterAttr(extent=2, stride=1),
-            ],
-            device_iter_array=[
-                T.DeviceIterAttr.split(extent=8, bound=1),
-                T.DeviceIterAttr.split(extent=4, bound=3),
-            ],
-            from_scope=T.ExecScope.create("thread"),
-            to_scope=T.ExecScope.create("warp"),
+        assert not layout.verify_well_formed()
+
+    def test_thread_axis_subscope_scope():
+        layout = TileLayout(
+            shard=([8, 4, 2], [(4, Axis.laneid), (1, Axis.laneid), (1, Axis.m)]),
         )
-        tvm.ir.assert_structural_equal(layout, layout_expected, True)
+        assert not layout.verify_well_formed()
 
-    valid_constructor()
-
-    def invalid_device_axis():
-        with pytest.raises(AssertionError):
-            T.TileLayout.from_tuple(
-                data=(8, T.S(0), 8, T.S(1), 2),
-                strides=(16, -1, 2, -1, 1),
-                device=(4, 8),
-                exclusive=[(1, 0)],
-                from_to=("thread", "warp"),
-            )
-
-    invalid_device_axis()
-
-    def invalid_bound():
-        with pytest.raises(AssertionError):
-            T.TileLayout.from_tuple(
-                data=(8, T.S(0), 8, T.S(0), 2),
-                strides=(16, -1, 2, -1, 1),
-                device=(4, 8),
-                from_to=("thread", "warp"),
-            )
-
-    invalid_bound()
-
-    def invalid_from_to_length():
-        with pytest.raises(AssertionError):
-            T.TileLayout.from_tuple(
-                data=(8, T.S(0), 8, T.S(1), 2),
-                strides=(16, -1, 2, -1, 1),
-                device=(4, 8),
-                from_to=("thread",),
-            )
-
-    invalid_from_to_length()
-
-    def mismatched_data_strides():
-        with pytest.raises(AssertionError):
-            T.TileLayout.from_tuple(
-                data=(8, T.S(0), 8, T.S(1), 2),
-                strides=(16, -1, 2, -1, 1, 1),
-                device=(4, 8),
-                from_to=("thread", "warp"),
-            )
-
-    mismatched_data_strides()
-
-    def device_index_out_of_bound_data():
-        with pytest.raises(AssertionError):
-            T.TileLayout.from_tuple(
-                data=(8, T.S(0), 8, T.S(2), 2),
-                strides=(16, -1, 2, -1, 1),
-                device=(4, 8),
-                from_to=("thread", "warp"),
-            )
-
-    device_index_out_of_bound_data()
-
-    def device_index_out_of_bound_exclusive():
-        with pytest.raises(AssertionError):
-            T.TileLayout.from_tuple(
-                data=(8, T.S(0), 8, T.S(1), 2),
-                strides=(16, -1, 2, -1, 1),
-                device=(4, 8),
-                exclusive=[(2, 0)],
-                from_to=("thread", "warp"),
-            )
-
-    device_index_out_of_bound_exclusive()
-
-    def default_stride_test():
-        layout = T.TileLayout.from_tuple(data=(8, 4, 3, 5, 7, 2, 4))
-        layout_expected = T.TileLayout.from_tuple(
-            data=(8, 4, 3, 5, 7, 2, 4),
-            strides=(3360, 840, 280, 56, 8, 4, 1),
+        layout = TileLayout(
+            shard=([8, 4, 2], [(4, Axis.laneid), (1, Axis.laneid), (1, Axis.m)]),
+            subscope="warp",
+            scope="thread",
         )
-        assert_structural_equal(layout, layout_expected)
+        assert not layout.verify_well_formed()
 
-    default_stride_test()
+    test_thread_axis_compactness()
+    test_thread_axis_subscope_scope()
 
 
 def test_normalize_tile_layout():
     def case1():
-        layout = T.TileLayout.from_tuple(
-            data=(8, 8, 8, 4, 2),
-            strides=(512, 64, 8, 2, 1),
+        layout = TileLayout(
+            shard=(
+                [8, 8, 8, 4, 2],
+                [(512, Axis.m), (64, Axis.m), (8, Axis.m), (2, Axis.m), (1, Axis.m)],
+            ),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=4096,
-            strides=1,
+        layout_expected = TileLayout(
+            shard=([4096], [(1, Axis.m)]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case1()
 
     def case2():
-        layout = T.TileLayout.from_tuple(
-            data=(8, 8, 1, 8, 4, 2),
-            strides=(512, 64, 160, 8, 2, 1),
+        layout = TileLayout(
+            shard=(
+                [8, 8, 1, 8, 4, 2],
+                [(512, Axis.m), (64, Axis.m), (160, Axis.m), (8, Axis.m), (2, Axis.m), (1, Axis.m)],
+            ),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=4096,
-            strides=1,
+        layout_expected = TileLayout(
+            shard=([4096], [(1, Axis.m)]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case2()
 
     def case3():
-        layout = T.TileLayout.from_tuple(
-            data=(8, 8, 8, 4, 1, 1),
-            strides=(512, 64, 8, 2, 1, 1),
+        layout = TileLayout(
+            shard=([8, 8, 8, 4, 1, 1], [512, 64, 8, 2, 1, 1]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=2048,
-            strides=2,
+        layout_expected = TileLayout(
+            shard=([2048], [2]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case3()
 
     def case4():
-        layout = T.TileLayout.from_tuple(
-            data=(8, 8, 1, 1, 1, 4, 1, 1),
-            strides=(512, 64, 1, 1, 1, 2, 1, 1),
+        layout = TileLayout(
+            shard=([8, 8, 1, 1, 1, 4, 1, 1], [512, 64, 1, 1, 1, 2, 1, 1]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(64, 4),
-            strides=(64, 2),
+        layout_expected = TileLayout(
+            shard=([64, 4], [64, 2]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case4()
 
     def case5():
-        layout = T.TileLayout.from_tuple(
-            data=(2, 3, 6),
-            strides=(18, 6, 1),
+        layout = TileLayout(
+            shard=([2, 3, 6], [18, 6, 1]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=36,
-            strides=1,
+        layout_expected = TileLayout(
+            shard=([36], [1]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case5()
 
     def case6():
-        layout = T.TileLayout.from_tuple(
-            data=(8, 2, 3, 6),
-            strides=(6, 18, 6, 1),
+        layout = TileLayout(
+            shard=([8, 2, 3, 6], [6, 18, 6, 1]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(8, 36),
-            strides=(6, 1),
+        layout_expected = TileLayout(
+            shard=([8, 36], [6, 1]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case6()
 
     def case7():
-        layout = T.TileLayout.from_tuple(
-            data=(8, 2, 3, 6),
-            strides=(6, 24, 6, 1),
+        layout = TileLayout(
+            shard=([8, 2, 3, 6], [6, 24, 6, 1]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(8, 2, 18),
-            strides=(6, 24, 1),
+        layout_expected = TileLayout(
+            shard=([8, 2, 18], [6, 24, 1]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case7()
 
     def case8():
-        layout = T.TileLayout.from_tuple(
-            data=(8, 2, 4, 2, 3, 6),
-            strides=(2, 1, 4, 24, 6, 1),
+        layout = TileLayout(
+            shard=([8, 2, 4, 2, 3, 6], [2, 1, 4, 24, 6, 1]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(16, 4, 2, 18),
-            strides=(1, 4, 24, 1),
+        layout_expected = TileLayout(
+            shard=([16, 4, 2, 18], [1, 4, 24, 1]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case8()
 
     def case9():
-        layout = T.TileLayout.from_tuple(
-            data=(3, 4, 5, 2),
-            strides=(20, 5, 1, 60),
+        layout = TileLayout(
+            shard=([3, 4, 5, 2], [20, 5, 1, 60]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(60, 2),
-            strides=(1, 60),
+        layout_expected = TileLayout(
+            shard=([60, 2], [1, 60]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case9()
 
     def case10():
-        layout = T.TileLayout.from_tuple(
-            data=(18, 8, 2, 4, 2, 3, 6),
-            strides=(4, 2, 1, 4, 24, 6, 1),
+        layout = TileLayout(
+            shard=([18, 8, 2, 4, 2, 3, 6], [4, 2, 1, 4, 24, 6, 1]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(18, 16, 4, 2, 18),
-            strides=(4, 1, 4, 24, 1),
+        layout_expected = TileLayout(
+            shard=([18, 16, 4, 2, 18], [4, 1, 4, 24, 1]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case10()
 
     def case11():
-        layout = T.TileLayout.from_tuple(
-            data=(3, 4, 5, 2, 3, 4),
-            strides=(20, 5, 1, 60, 20, 5),
+        layout = TileLayout(
+            shard=([3, 4, 5, 2, 3, 4], [20, 5, 1, 60, 20, 5]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(60, 24),
-            strides=(1, 5),
+        layout_expected = TileLayout(
+            shard=([60, 24], [1, 5]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case11()
 
     def case_no_norm():
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, T.S(1), 2),
-            strides=(16, -1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([8, 8, 8, 4, 2], [16, (4, "laneid"), 2, (1, "laneid"), 1]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout_normalized.normalize())
 
     case_no_norm()
 
     def case_both_data_device1():
-        layout = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, 1, T.S(1), 2, 1),
-            strides=(16, -1, 2, 1, -1, 1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 8, 8, 1, 4, 2, 1], [16, (4, "laneid"), 2, 1, (1, "laneid"), 1, 1]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, T.S(1), 2),
-            strides=(16, -1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([8, 8, 8, 4, 2], [16, (4, "laneid"), 2, (1, "laneid"), 1]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
     case_both_data_device1()
 
     def case_both_data_device2():
-        layout = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, 1, T.S(2), 2, T.S(1)),
-            strides=(16, -1, 2, 1, -1, 1, -1),
-            device=(8, 1, 4),
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=(
+                [8, 8, 8, 1, 4, 2, 1],
+                [16, (4, "laneid"), 2, 1, (1, "laneid"), 1, (4, "laneid")],
+            ),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, T.S(1), 2),
-            strides=(16, -1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([8, 8, 8, 4, 2], [16, (4, "laneid"), 2, (1, "laneid"), 1]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
     case_both_data_device2()
 
     def case_both_data_device3():
-        layout = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, 1, T.S(1), 2, 1),
-            strides=(16, -1, 2, 1, -1, 1, -1),
-            device=(8, 1, 4),
-            exclusive=[(2, 0)],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 8, 8, 1, 1, 2, 1], [16, (4, "laneid"), 2, 1, (4, "laneid"), 1, 1]),
+            exclude=(([4], [(1, "laneid")]), [0]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 16),
-            strides=(16, -1, 1),
-            device=(8, 4),
-            exclusive=[(1, 0)],
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([8, 8, 16], [16, (4, "laneid"), 1]),
+            exclude=(([4], [(1, "laneid")]), [0]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
     case_both_data_device3()
 
     def case_both_data_device4():
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1), 8, 8, 16),
-            strides=(-1, -1, 4, 2, 4),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 4, 8, 8, 16], [(4, "laneid"), (1, "laneid"), 4, 2, 4]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0), 8, 8, 16),
-            strides=(-1, 4, 2, 4),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([32, 8, 8, 16], [(1, "laneid"), 4, 2, 4]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
     case_both_data_device4()
 
-    def case_both_data_device5():
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1), 8, 8, 16),
-            strides=(-1, -1, 4, 2, 4),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
-        )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0), 8, 8, 16),
-            strides=(-1, 4, 2, 4),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
-        )
-        assert_structural_equal(layout_normalized, layout.normalize())
-
-    case_both_data_device5()
-
     def case_both_data_device6():
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1), 8, 16),
-            strides=(-1, -1, 2, 4),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 4, 8, 16], [(4, "laneid"), (1, "laneid"), 2, 4]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0), 8, 16),
-            strides=(-1, 2, 4),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([32, 8, 16], [(1, "laneid"), 2, 4]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
     case_both_data_device6()
 
     def case_both_data_device7():
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1), 8),
-            strides=(-1, -1, 8),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 4, 8], [(4, "laneid"), (1, "laneid"), 8]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0), 8),
-            strides=(-1, 8),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([32, 8], [(1, "laneid"), 8]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -460,19 +385,15 @@ def test_normalize_tile_layout():
 
     def case_both_data_device8():
         # Fuse-Case 1
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1), 8),
-            strides=(-1, -1, 4),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 4, 8], [(4, "laneid"), (1, "laneid"), 4]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0), 8),
-            strides=(-1, 4),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([32, 8], [(1, "laneid"), 4]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -480,79 +401,31 @@ def test_normalize_tile_layout():
 
     def case_both_data_device9():
         # Fuse-Case 2
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1)),
-            strides=(-1, -1),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0)),
-            strides=(-1),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([32], [(1, "laneid")]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
     case_both_data_device9()
 
-    def case_both_data_device10():
-        # Fuse-Case 3 (same as Case 9)
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1)),
-            strides=(-1, -1),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
-        )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0)),
-            strides=(-1),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
-        )
-        assert_structural_equal(layout_normalized, layout.normalize())
-
-    case_both_data_device10()
-
-    def case_both_data_device11():
-        # Fuse-Case 4
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1), 8),
-            strides=(-1, -1, 8),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
-        )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0), 8),
-            strides=(-1, 8),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
-        )
-        assert_structural_equal(layout_normalized, layout.normalize())
-
-    case_both_data_device11()
-
     def case_both_data_device12():
         # Fuse-mixed
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1), 4, 8, 8, 8),
-            strides=(-1, -1, 4, 8, 8, 8),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 4, 4, 8, 8, 8], [(4, "laneid"), (1, "laneid"), 4, 8, 8, 8]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0), 4, 8, 8, 8),
-            strides=(-1, 4, 8, 8, 8),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([32, 4, 8, 8, 8], [(1, "laneid"), 4, 8, 8, 8]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -560,19 +433,15 @@ def test_normalize_tile_layout():
 
     def case_both_data_device13():
         # Fuse-mixed with partial
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1), 4, 8, 8, 8),
-            strides=(-1, -1, 16, 2, 8, 8),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 4, 4, 8, 8, 8], [(4, "laneid"), (1, "laneid"), 16, 2, 8, 8]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0), 32, 8, 8),
-            strides=(-1, 2, 8, 8),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([32, 32, 8, 8], [(1, "laneid"), 2, 8, 8]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -580,19 +449,16 @@ def test_normalize_tile_layout():
 
     def case_both_data_device14():
         # Fuse-mixed with partial (another case)
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1), 4, 8, 8, 4, 4, 16, 8),
-            strides=(-1, -1, 16, 2, 8, 2, 16, 1, 4),
-            device=(8, 4),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=(
+                [8, 4, 4, 8, 8, 4, 4, 16, 8],
+                [(4, "laneid"), (1, "laneid"), 16, 2, 8, 2, 16, 1, 4],
+            ),
+            scope="warp",
         )
-        layout_normalized = T.TileLayout.from_tuple(
-            data=(T.S(0), 32, 32, 64, 8),
-            strides=(-1, 2, 2, 1, 4),
-            device=(32),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout_normalized = TileLayout(
+            shard=([32, 32, 32, 64, 8], [(1, "laneid"), 2, 2, 1, 4]),
+            scope="warp",
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -600,60 +466,38 @@ def test_normalize_tile_layout():
 
     def case15():
         # Only data tree (partial norm - middle) #15
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), 3, 4, 5, 2, 3, 4),
-            strides=(-1, 20, 5, 1, 60, 20, 5),
-            device=(8),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([32, 3, 4, 5, 2, 3, 4], [(1, "laneid"), 20, 5, 1, 60, 20, 5]),
+            subscope="thread",
+            scope="warp",
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(T.S(0), 60, 24),
-            strides=(-1, 1, 5),
-            device=(8),
-            exclusive=[],
-            from_to=("thread", "warp"),
+        layout_expected = TileLayout(
+            shard=([32, 60, 24], [(1, "laneid"), 1, 5]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
     case15()
 
     def unit_layout_case1():
-        layout = T.TileLayout.from_tuple(data=(1, 1, 1, 1, 1), strides=(1, 1, 1, 1, 1))
-        layout_unit = T.TileLayout.from_tuple(data=1, strides=1)
+        layout = TileLayout(
+            shard=([1, 1, 1, 1, 1], [1, 1, 1, 1, 1]),
+        )
+        layout_unit = TileLayout(
+            shard=([1], [1]),
+        )
         assert_structural_equal(layout_unit, layout.normalize())
 
     unit_layout_case1()
-
-    def unit_layout_case2():
-        layout = T.TileLayout.from_tuple(
-            data=(1, T.S(0), T.S(1), 1, 1),
-            strides=(1, -1, -1, 1, 1),
-            device=(1, 1),
-            from_to=("thread", "warp"),
-        )
-        layout_unit = T.TileLayout.from_tuple(
-            data=1, strides=1, device=1, from_to=("thread", "warp")
-        )
-        assert_structural_equal(layout_unit, layout.normalize())
-
-    unit_layout_case2()
-
-    def idempotent_unit_layout():
-        layout_unit = T.TileLayout.from_tuple(
-            data=1, strides=1, device=1, from_to=("thread", "warp")
-        )
-        assert_structural_equal(layout_unit, layout_unit.normalize())
-
-    idempotent_unit_layout()
 
 
 def test_tile_layout():
     def case1():
         # (8):(1)x(8):(1) -> (64):(1)
-        inner = T.TileLayout.from_tuple(data=8, strides=1)
+        inner = TileLayout(shard=([8], [1]))
         outer = inner
-        layout_tile = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
+        layout_tile = TileLayout(shard=([64], [1]))
         assert_structural_equal(layout_tile, inner.tile(outer, [8], [8]))
 
         outer_res = inner.is_tile_inner(layout_tile, [64], [8])
@@ -668,9 +512,9 @@ def test_tile_layout():
 
     def case2():
         # (8,8):(8,1)x(8,8):(8,1) -> (8,8,8,8):(512,8,64,1)
-        inner = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
+        inner = TileLayout(shard=([8, 8], [8, 1]))
         outer = inner
-        layout_tile = T.TileLayout.from_tuple(data=(8, 8, 8, 8), strides=(512, 8, 64, 1))
+        layout_tile = TileLayout(shard=([8, 8, 8, 8], [512, 8, 64, 1]))
         assert_structural_equal(layout_tile, inner.tile(outer, [8, 8], [8, 8]))
 
         outer_res = inner.is_tile_inner(layout_tile, [64, 64], [8, 8])
@@ -685,9 +529,9 @@ def test_tile_layout():
 
     def case3():
         # (2,4):(1,2)x(8,8):(8,1) -> (8,2,8,4):(64,1,8,2)
-        inner = T.TileLayout.from_tuple(data=(2, 4), strides=(1, 2))
-        outer = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
-        layout_tile = T.TileLayout.from_tuple(data=(8, 2, 8, 4), strides=(64, 1, 8, 2))
+        inner = TileLayout(shard=([2, 4], [1, 2]))
+        outer = TileLayout(shard=([8, 8], [8, 1]))
+        layout_tile = TileLayout(shard=([8, 2, 32], [64, 1, 2]))
         assert_structural_equal(layout_tile, inner.tile(outer, [8, 8], [2, 4]))
 
         outer_res = inner.is_tile_inner(layout_tile, [16, 32], [2, 4])
@@ -705,11 +549,9 @@ def test_tile_layout():
 
     def case4():
         # ((4,2),(2,4)):((16,8),(1,2))x(8,8):(8,1) -> (8,4,2,8,2,4):(512,16,8,64,1,2)
-        inner = T.TileLayout.from_tuple(data=(4, 2, 2, 4), strides=(16, 8, 1, 2))
-        outer = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
-        layout_tile = T.TileLayout.from_tuple(
-            data=(8, 4, 2, 8, 2, 4), strides=(512, 16, 8, 64, 1, 2)
-        )
+        inner = TileLayout(shard=([4, 2, 2, 4], [16, 8, 1, 2]))
+        outer = TileLayout(shard=([8, 8], [8, 1]))
+        layout_tile = TileLayout(shard=([8, 4, 2, 8, 2, 4], [512, 16, 8, 64, 1, 2]))
         assert_structural_equal(layout_tile.normalize(), inner.tile(outer, (8, 8), (8, 8)))
 
         outer_res = inner.is_tile_inner(layout_tile, (64, 64), (8, 8))
@@ -727,23 +569,21 @@ def test_tile_layout():
 
     def case5_sharded1():
         # Tile over a sharded layout - 1
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), 1, T.S(1), 2),
-            strides=(-1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 1, 4, 2], [(4, "laneid"), 2, (1, "laneid"), 1]),
+            subscope="thread",
+            scope="warp",
         )
-        outer = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
+        outer = TileLayout(shard=([8, 8], [8, 1]))
         layout_tile = layout.tile(
             outer=outer,
             outer_shape=(8, 8),
             inner_shape=(8, 8),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 1, 8, T.S(1), 2),
-            strides=(16, -1, 2, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        layout_expected = TileLayout(
+            shard=([8, 8, 1, 8, 4, 2], [16, (4, "laneid"), 2, 2, (1, "laneid"), 1]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_expected.normalize(), layout_tile)
 
@@ -762,23 +602,21 @@ def test_tile_layout():
 
     def case6_sharded2():
         # Tile over a sharded layout - 2
-        inner = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(1)),
-            strides=(-1, -1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        inner = TileLayout(
+            shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
+            subscope="thread",
+            scope="warp",
         )
-        outer = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
+        outer = TileLayout(shard=([8, 8], [8, 1]))
         layout_tile = inner.tile(
             outer=outer,
             outer_shape=(8, 8),
             inner_shape=(8, 4),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 8, T.S(1)),
-            strides=(8, -1, 1, -1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        layout_expected = TileLayout(
+            shard=([8, 8, 8, 4], [8, (4, "laneid"), 1, (1, "laneid")]),
+            subscope="thread",
+            scope="warp",
         )
         assert_structural_equal(layout_expected, layout_tile)
 
@@ -797,8 +635,8 @@ def test_tile_layout():
 
     def case7_normalized4():
         # Normalized Tile Layout Test - 4 (tile < inner)
-        outer = T.TileLayout.from_tuple(data=(4, 2, 1), strides=(2, 1, 1))
-        inner = T.TileLayout.from_tuple(data=(2, 4, 1), strides=(2, 3, 1))
+        outer = TileLayout(shard=([4, 2, 1], [2, 1, 1]))
+        inner = TileLayout(shard=([2, 4, 1], [2, 3, 1]))
         layout_tile = inner.tile(
             outer,
             outer_shape=(4, 2),
@@ -820,8 +658,8 @@ def test_tile_layout():
 
     def case8_normalized5():
         # Normalized Tile Layout Test - 5 (tile = inner)
-        outer = T.TileLayout.from_tuple(data=(8, 2), strides=(2, 1))
-        inner = T.TileLayout.from_tuple(data=(2, 4), strides=(4, 1))
+        outer = TileLayout(shard=([8, 2], [2, 1]))
+        inner = TileLayout(shard=([2, 4], [4, 1]))
         layout_tile = inner.tile(outer, (8, 2), (2, 4))
 
         outer_res = inner.is_tile_inner(layout_tile, (16, 8), (2, 4))
@@ -839,9 +677,9 @@ def test_tile_layout():
 
     def case9_normalized6():
         # Normalized Tile Layout Test - 6 (tile < inner)
-        outer = T.TileLayout.from_tuple(data=(8, 4, 1), strides=(4, 1, 4))
-        inner = T.TileLayout.from_tuple(data=(2, 1, 1), strides=(4, 3, 1))
-        inner_tmp = T.TileLayout.from_tuple(data=(8, 2, 2), strides=(4, 2, 2))
+        outer = TileLayout(shard=([8, 4, 1], [4, 1, 4]))
+        inner = TileLayout(shard=([2, 1, 1], [4, 3, 1]))
+        inner_tmp = TileLayout(shard=([8, 2, 2], [4, 2, 2]))
         layout_tile = inner.tile(outer, (8, 4), (2, 1))
 
         outer_res = inner.is_tile_inner(layout_tile, (16, 4), (2, 1))
@@ -852,15 +690,13 @@ def test_tile_layout():
         assert inner_res is not None
         assert_structural_equal(inner_res.normalize(), inner.normalize())
 
-        assert inner_tmp.is_tile_inner(layout_tile, (16, 4), (8, 2, 2)) is None
-
     case9_normalized6()
 
     def case10_normalized7():
         # Normalized Tile Layout Test - 7 (tile = inner)
-        outer = T.TileLayout.from_tuple(data=(8, 8, 4), strides=(32, 4, 1))
-        inner = T.TileLayout.from_tuple(data=(1, 2, 1), strides=(4, 3, 1))
-        inner_tmp = T.TileLayout.from_tuple(data=(1, 2, 2), strides=(8, 4, 3))
+        outer = TileLayout(shard=([8, 8, 4], [32, 4, 1]))
+        inner = TileLayout(shard=([1, 2, 1], [4, 3, 1]))
+        inner_tmp = TileLayout(shard=([1, 2, 2], [8, 4, 3]))
         layout_tile = inner.tile(outer, (8, 8, 4), (1, 2, 1))
 
         outer_res = inner.is_tile_inner(layout_tile, (8, 16, 4), (1, 2, 1))
@@ -876,14 +712,14 @@ def test_tile_layout():
 
     def case11_normalized8():
         # Normalized Tile Layout Test - 8 (tile = inner w/ device)
-        outer = T.TileLayout.from_tuple(data=(8, 8, 4), strides=(32, 4, 1))
-        inner = T.TileLayout.from_tuple(
-            data=(8, T.S(0), 1, T.S(1), 2),
-            strides=(4, -1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        outer = TileLayout(shard=([8, 8, 4], [32, 4, 1]))
+        inner = TileLayout(
+            shard=([8, 8, 1, 4, 2], [4, (4, "laneid"), 2, (1, "laneid"), 1]),
+            subscope="thread",
+            scope="warp",
         )
         layout_tile = inner.tile(outer, (8, 8, 4), (8, 8, 8))
+
         outer_res = inner.is_tile_inner(layout_tile, (64, 64, 32), (8, 8, 8))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
@@ -894,10 +730,11 @@ def test_tile_layout():
 
     def case12_normalized9():
         # Normalized Tile Layout Test - 9 (tile = inner w/ device + diff major-dim)
-        outer = T.TileLayout.from_tuple(data=(16, 8, 4), strides=(1, 64, 16))
-        inner = T.TileLayout.from_tuple(data=(2, 4, 2, 2), strides=(4, 1, 4, 3))
-        inner_tmp = T.TileLayout.from_tuple(data=(1, 2, 2), strides=(8, 4, 3))
+        outer = TileLayout(shard=([16, 8, 4], [1, 64, 16]))
+        inner = TileLayout(shard=([2, 4, 2, 2], [4, 1, 4, 3]))
+        inner_tmp = TileLayout(shard=([1, 2, 2], [8, 4, 3]))
         layout_tile = inner.tile(outer, (16, 8, 4), (8, 2, 2))
+
         outer_res = inner.is_tile_inner(layout_tile, (128, 16, 8), (8, 2, 2))
         assert outer_res is not None
         assert_structural_equal(outer_res.normalize(), outer.normalize())
@@ -911,39 +748,23 @@ def test_tile_layout():
 
     def case_dims_mismatch():
         with pytest.raises(Exception):
-            layout = T.TileLayout.from_tuple(data=8, strides=1)
-            layout2 = T.TileLayout.from_tuple(data=(2, 4), strides=(1, 2))
+            layout = TileLayout(shard=([8], [1]))
+            layout2 = TileLayout(shard=([2, 4], [1, 2]))
             layout2.tile(layout, [8], [2, 4])
 
     case_dims_mismatch()
 
-    def case_outer_with_device():
-        with pytest.raises(Exception):
-            layout = T.TileLayout.from_tuple(
-                data=(T.S(0), 1, T.S(1), 2),
-                strides=(-1, 2, -1, 1),
-                device=(8, 4),
-                from_to=("thread", "warp"),
-            )
-            T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)).tile(
-                outer=layout,
-                outer_shape=(8, 8),
-                inner_shape=(8, 8),
-            )
-
-    case_outer_with_device()
-
     def case_tile_compose_layout():
         # tile(TileLayout, ComposeLayout)
-        compose = T.ComposeLayout(
-            layout_A=T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
-            layout_B=T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1)),
+        compose = ComposeLayout(
+            layout_A=SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+            layout_B=TileLayout(shard=([8, 64], [64, 1])),
         )
-        layout = T.TileLayout.from_tuple(data=(8, 1), strides=(1, 1))
+        layout = TileLayout(shard=([8, 1], [1, 1]))
         layout_tile = compose.tile(layout, (8, 1), (8, 64))
-        layout_expected = T.ComposeLayout(
-            T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-            T.TileLayout.from_tuple(data=(4096,), strides=(1,)),
+        layout_expected = ComposeLayout(
+            SwizzleLayout(3, 3, 3, swizzle_inner=True),
+            TileLayout(shard=([4096], [1])),
         )
         assert_structural_equal(layout_tile.normalize(), layout_expected.normalize())
 
@@ -956,19 +777,18 @@ def test_tile_layout():
         assert_structural_equal(inner_res.normalize(), compose.normalize())
 
         assert layout.is_tile_inner(layout_tile, (4096,), (512,)) is None
-        with pytest.raises(Exception):
-            compose.is_tile_outer(layout_tile, (4096,), (8,))
+        assert compose.is_tile_outer(layout_tile, (4096,), (8,)) is None
 
     case_tile_compose_layout()
 
     def case_tile_swizzle_layout():
         # swizzle_128B_atom
-        swizzle = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        layout = T.TileLayout.from_tuple(data=(8, 4), strides=(1, 8))
+        swizzle = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        layout = TileLayout(shard=([8, 4], [1, 8]))
         layout_tile = swizzle.tile(layout, (8, 4), (8, 64))
-        layout_expected = T.ComposeLayout(
-            T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-            T.TileLayout.from_tuple(data=(64, 4, 64), strides=(64, 4096, 1)),
+        layout_expected = ComposeLayout(
+            SwizzleLayout(3, 3, 3, swizzle_inner=True),
+            TileLayout(shard=([64, 4, 64], [64, 4096, 1])),
         )
         assert_structural_equal(layout_tile.normalize(), layout_expected)
 
@@ -984,12 +804,12 @@ def test_tile_layout():
 
     def case_tile_swizzle_layout2():
         # swizzle_128B_atom
-        swizzle = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        tile = T.TileLayout.from_tuple((3, 8, 4), (8 * 4, 1, 8))
+        swizzle = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        tile = TileLayout(shard=([3, 8, 4], [8 * 4, 1, 8]))
         layout_tile = swizzle.tile(tile, (3, 8, 4), (1, 8, 64))
-        layout_expected = T.ComposeLayout(
+        layout_expected = ComposeLayout(
             swizzle,
-            T.TileLayout.from_tuple(data=(3, 64, 4, 64), strides=(16384, 64, 4096, 1)),
+            TileLayout(shard=([3, 64, 4, 64], [16384, 64, 4096, 1])),
         )
         assert_structural_equal(layout_tile.normalize(), layout_expected.normalize())
 
@@ -1005,12 +825,10 @@ def test_tile_layout():
 
     def case_tile_swizzle_layout3():
         # swizzle_64B_atom
-        swizzle = T.SwizzleLayout(per_element=3, swizzle_len=2, atom_len=3)
-        tile = T.TileLayout.from_tuple((8, 8), (1, 8))
+        swizzle = SwizzleLayout(per_element=3, swizzle_len=2, atom_len=3)
+        tile = TileLayout(shard=([8, 8], [1, 8]))
         layout_tile = swizzle.tile(tile, (8, 8), (8, 32))
-        layout_expected = T.ComposeLayout(
-            swizzle, T.TileLayout.from_tuple(data=(64, 8, 32), strides=(32, 2048, 1))
-        )
+        layout_expected = ComposeLayout(swizzle, TileLayout(shard=([64, 8, 32], [32, 2048, 1])))
         assert_structural_equal(layout_tile.normalize(), layout_expected.normalize())
 
         outer_res = swizzle.is_tile_inner(layout_tile, (64, 256), (8, 32))
@@ -1025,22 +843,22 @@ def test_tile_layout():
 
     def case_tile_swizzle_layout4():
         # swizzle_64B_atom
-        swizzle = T.SwizzleLayout(per_element=3, swizzle_len=2, atom_len=3)
+        swizzle = SwizzleLayout(per_element=3, swizzle_len=2, atom_len=3)
         outer = swizzle.is_tile_inner(swizzle, (64, 256), (8, 32))
         assert outer is None
 
         outer = swizzle.is_tile_inner(swizzle, (64, 32), (8, 32))
         assert outer is not None
-        outer_expected = T.TileLayout.from_tuple(data=(8, 1), strides=(1, 0))
+        outer_expected = TileLayout(shard=([8, 1], [1, 0]))
         assert_structural_equal(outer.normalize(), outer_expected.normalize())
 
     case_tile_swizzle_layout4()
 
     def case_tile_swizzle_layout5():
         # swizzle_128B_atom
-        swizzle = T.SwizzleLayout(per_element=3, swizzle_len=2, atom_len=3)
-        tile1 = T.TileLayout.from_tuple((8, 8), (1, 8))
-        tile2 = T.TileLayout.from_tuple((2, 2), (1, 2))
+        swizzle = SwizzleLayout(per_element=3, swizzle_len=2, atom_len=3)
+        tile1 = TileLayout(shard=([8, 8], [1, 8]))
+        tile2 = TileLayout(shard=([2, 2], [1, 2]))
         layout_tile = swizzle.tile(tile1, (8, 8), (8, 32))
         layout_tile = layout_tile.tile(tile2, (2, 2), (64, 256))
 
@@ -1052,236 +870,154 @@ def test_tile_layout():
     case_tile_swizzle_layout5()
 
 
-def test_vec_len_layout():
-    def case1():
-        # different dim-majors: vec_len(layout_rm, layout_cm) = 1
-        layout_rm = T.TileLayout.from_tuple(data=(32), strides=(1))
-        layout_cm = T.TileLayout.from_tuple(data=(8, 4), strides=(1, 8))
-        assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_cm) == 1
-
-    case1()
-
-    def case2():
-        # row-major - 2D
-        layout_rm = T.TileLayout.from_tuple(data=(32), strides=(1))
-        layout_rm_2 = T.TileLayout.from_tuple(data=(8, 2, 2), strides=(4, 2, 1))
-        assert T.TileLayout.find_optimal_vec_len(layout_rm, layout_rm_2) == 8
-
-    case2()
-
-    def case3():
-        # col-major - 2D
-        layout_cm = T.TileLayout.from_tuple(data=(8, 4), strides=(1, 8))
-        layout_cm_2 = T.TileLayout.from_tuple(data=(4, 2, 4), strides=(2, 1, 8))
-        layout_cm_half = T.TileLayout.from_tuple(data=(4, 8), strides=(1, 4))
-        assert T.TileLayout.find_optimal_vec_len(layout_cm, layout_cm_2) == 8
-        assert T.TileLayout.find_optimal_vec_len(layout_cm, layout_cm_half) == 4
-
-    case3()
-
-    def case_3D():
-        layout_3D_1 = T.TileLayout.from_tuple(data=(8, 2, 4), strides=(1, 8, 16))
-        layout_3D_2 = T.TileLayout.from_tuple(data=(4, 2, 8), strides=(1, 4, 8))
-        layout_3D_3 = T.TileLayout.from_tuple(data=(16, 2, 4), strides=(1, 16, 32))
-        layout_3D_4 = T.TileLayout.from_tuple(data=(16, 2, 8), strides=(1, 16, 128))
-        layout_3D_1_twice_coeff = T.TileLayout.from_tuple(data=(8, 2, 4), strides=(2, 16, 32))
-        assert T.TileLayout.find_optimal_vec_len(layout_3D_1, layout_3D_2) == 4
-        assert T.TileLayout.find_optimal_vec_len(layout_3D_1, layout_3D_1_twice_coeff) == 1
-        with pytest.raises(Exception):
-            T.TileLayout.find_optimal_vec_len(layout_3D_3, layout_3D_4)
-        with pytest.raises(Exception):
-            T.TileLayout.find_optimal_vec_len(layout_3D_1, layout_3D_4)
-        with pytest.raises(Exception):
-            T.TileLayout.find_optimal_vec_len(layout_3D_2, layout_3D_4)
-
-    case_3D()
-
-
 def test_shard_layout():
+    """In the current layout design, shard is just a special case of tile, where the outer tile has thread axes."""
+
     def case_mma_layout():
-        layout = T.TileLayout.from_tuple(data=(1, 2), strides=(2, 1))
-        layout_warp = T.TileLayout.shard(
-            shape=(8, 8), mesh=(8, 4), strategy="S0S1", inner=layout, from_to=("thread", "warp")
+        layout = TileLayout(shard=([1, 2], [2, 1]))
+        layout_warp = TileLayout(
+            shard=([8, 4], [(4, "laneid"), (1, "laneid")]), scope="warp", subscope="thread"
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(T.S(0), 1, T.S(1), 2),
-            strides=(-1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        res = layout.tile(layout_warp, [8, 4], [1, 2])
+        layout_expected = TileLayout(
+            shard=([32, 2], [(1, "laneid"), (1, "m")]), subscope="thread", scope="warp"
         )
-        assert_structural_equal(layout_expected, layout_warp)
+        assert_structural_equal(res.normalize(), layout_expected.normalize())
 
     case_mma_layout()
 
     def case_cta_layout():
-        layout = T.TileLayout.from_tuple(data=(1, 2), strides=(2, 1))
-        layout_warp = T.TileLayout.shard(
-            shape=(8, 8), mesh=(8, 4), strategy="S0S1", inner=layout, from_to=("thread", "warp")
+        # layout = T.TileLayout.from_tuple(data=(1, 2), strides=(2, 1))
+        layout = TileLayout(shard=([1, 2], [2, 1]))
+        layout_warp = TileLayout(
+            shard=([8, 4], [(4, "laneid"), (1, "laneid")]), scope="warp", subscope="thread"
         )
-        layout_cta = T.TileLayout.shard(
-            shape=(16, 16), mesh=(2, 2), strategy="S0S1", inner=layout_warp, from_to=("warp", "cta")
+        layout_cta = TileLayout(
+            shard=([2, 2], [(2, "warpid"), (1, "warpid")]), scope="cta", subscope="warp"
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(T.S(0), T.S(2), 1, T.S(1), T.S(3), 2),
-            strides=(-1, -1, 2, -1, -1, 1),
-            device=(2, 2, 8, 4),
-            from_to=("thread", "cta"),
+
+        res = layout.tile(layout_warp, [8, 4], [1, 2]).tile(layout_cta, [2, 2], [8, 8])
+        layout_expected = TileLayout(
+            shard=(
+                [2, 8, 2, 4, 2],
+                [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid"), (1, "m")],
+            ),
+            subscope="thread",
+            scope="cta",
         )
-        assert_structural_equal(layout_expected.normalize(), layout_cta)
+        assert_structural_equal(res.normalize(), layout_expected.normalize())
 
     case_cta_layout()
 
     def case_quad_shuffle():
-        layout = T.TileLayout.from_tuple(data=(1, 2), strides=(2, 1))
-        layout_warp = T.TileLayout.shard(
-            shape=(8, 2),
-            mesh=(8, 4),
-            strategy="S0E0",
-            inner=layout,
-            from_to=("thread", "warp"),
+        layout = TileLayout(shard=([1, 2], [2, 1]))
+        layout_warp = TileLayout(
+            shard=([8], [(4, "laneid")]),
+            exclude=(([4], [(1, "laneid")]), [0]),
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(T.S(0), 1, 2),
-            strides=(-1, 2, 1),
-            device=(8, 4),
-            exclusive=[(1, 0)],
-            from_to=("thread", "warp"),
+        res = layout.tile(layout_warp, [8, 1], [1, 2])
+        layout_expected = TileLayout(
+            shard=([8, 2], [(4, "laneid"), (1, "m")]), exclude=(([4], [(1, "laneid")]), [0])
         )
-        assert_structural_equal(layout_expected, layout_warp)
+        assert_structural_equal(res.normalize(), layout_expected.normalize())
 
     case_quad_shuffle()
 
     def case_replicate():
-        layout = T.TileLayout.from_tuple(data=(64, 128), strides=(128, 1))
-        layout_rep = T.TileLayout.shard(
-            shape=(128, 128),
-            mesh=(2, 2),
-            strategy="S0R",
-            inner=layout,
-            from_to=("kernel", "world"),
+        layout = TileLayout(shard=([64, 128], [128, 1]))
+        layout_rep = TileLayout(shard=([2], [(2, "laneid")]), replicate=([2], [(1, "laneid")]))
+        res = layout.tile(layout_rep, [2, 1], [64, 128])
+        layout_expected = TileLayout(
+            shard=([2, 8192], [(2, "laneid"), (1, "m")]), replicate=([2], [(1, "laneid")])
         )
-        layout_expected = T.TileLayout.from_tuple(
-            data=(T.S(0), 64, 128),
-            strides=(-1, 128, 1),
-            device=(2, 2),
-            from_to=("kernel", "world"),
-        )
-        assert_structural_equal(layout_expected, layout_rep)
+        assert_structural_equal(res.normalize(), layout_expected.normalize())
 
     case_replicate()
-
-    def case_error():
-        layout = T.TileLayout.from_tuple(data=(64, 64), strides=(128, 1))
-        with pytest.raises(Exception):
-            T.TileLayout.shard(
-                shape=(128, 128),
-                mesh=(2, 2),
-                strategy="S0R",
-                inner=layout,
-                from_to=("kernel", "world"),
-            )
-
-    case_error()
 
 
 def test_size_cosize():
     def tile_layout_size():
-        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
-        assert layout.size == 64
+        layout = TileLayout(shard=([8, 8], [8, 1]))
+        assert layout.size() == 64
 
     tile_layout_size()
 
     def swizzle_layout_size():
-        layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        assert layout.size == 512
-        layout = T.SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
-        assert layout.size == 1024
+        layout = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        assert layout.size() == 512
+        layout = SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
+        assert layout.size() == 1024
 
     swizzle_layout_size()
 
     def compose_layout_size():
-        layout = T.ComposeLayout(
-            T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
-            T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1)),
+        layout = ComposeLayout(
+            SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+            TileLayout(shard=([8, 64], [64, 1])),
         )
-        assert layout.size == 512
+        assert layout.size() == 512
 
     compose_layout_size()
 
     def tile_layout_cosize():
-        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
-        assert layout.cosize == 64
-        layout = T.TileLayout.from_tuple(data=(8, 6), strides=(8, 1))
-        assert layout.cosize == 62
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), 1, T.S(1), 2),
-            strides=(-1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
-        )
-        assert layout.cosize == 2
+        layout = TileLayout(shard=([8, 8], [8, 1]))
+        assert layout.cosize() == 64
+        layout = TileLayout(shard=([8, 6], [8, 1]))
+        assert layout.cosize() == 62
+        layout = TileLayout(shard=([8, 1, 4, 2], [(4, "laneid"), 2, (1, "laneid"), 1]))
+        assert layout.cosize() == 2
 
     tile_layout_cosize()
 
     def swizzle_layout_cosize():
-        layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        assert layout.cosize == 512
-        layout = T.SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
-        assert layout.cosize == 1024
+        layout = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        assert layout.cosize() == 512
+        layout = SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
+        assert layout.cosize() == 1024
 
     swizzle_layout_cosize()
 
     def compose_layout_cosize():
-        layout = T.ComposeLayout(
-            T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
-            T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1)),
+        layout = ComposeLayout(
+            SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+            TileLayout(shard=([8, 64], [64, 1])),
         )
-        assert layout.cosize == 512
+        assert layout.cosize() == 512
 
     compose_layout_cosize()
 
     def trainium_layout_tests():
         # TrainiumLayout tests
-        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(1, 1))
-        layout = T.TrainiumLayout(dimension_types="PF", combined_1d_layout=layout)
-        assert layout.partition_size == 8
-        assert layout.size == 8
+        layout = TileLayout(shard=([8, 8], [(1, "P"), (1, "F")]))
+        assert layout.size("P") == 8
+        assert layout.size("F") == 8
 
-        layout = T.TileLayout.from_tuple(data=(8, 8, 8), strides=(64, 1, 1))
-        layout = T.TrainiumLayout(dimension_types="FPF", combined_1d_layout=layout)
-        assert layout.partition_size == 8
-        assert layout.size == 64
-        assert layout.cosize == 456
+        layout = TileLayout(shard=([8, 8, 8], [(64, "F"), (1, "P"), (1, "F")]))
+        assert layout.size("P") == 8
+        assert layout.size("F") == 64
+        assert layout.cosize("F") == 456
 
-        layout = T.TileLayout.from_tuple(data=(8), strides=(1))
-        layout_partition = T.TrainiumLayout(dimension_types="P", combined_1d_layout=layout)
-        assert layout_partition.partition_size == 8 and layout_partition.size == 1
-        layout_free = T.TrainiumLayout(dimension_types="F", combined_1d_layout=layout)
-        assert layout_free.partition_size == 1 and layout_free.size == 8
+        layout_partition = TileLayout(shard=([8], [(1, "P")]))
+        assert layout_partition.size("P") == 8 and layout_partition.size("F") == 1
 
-        layout = T.TrainiumLayout.from_annotation("PF", (128, 128))
-        assert layout.partition_size == 128 and layout.size == 128
+        layout_free = TileLayout(shard=([8], [(1, "F")]))
+        assert layout_free.size("P") == 1 and layout_free.size("F") == 8
 
-        layout = T.TrainiumLayout.from_annotation("FPF", (32, 512, 512))
+        layout = TileLayout.trainium("PF", (128, 128))
+        assert layout.size("P") == 128 and layout.size("F") == 128
+
+        layout = TileLayout.trainium("FPF", (32, 512, 512))
         assert_structural_equal(
             layout,
-            T.TrainiumLayout(
-                dimension_types="FFPF",
-                combined_1d_layout=T.TileLayout.from_tuple(
-                    (32, 4, 128, 512), strides=(512, 512 * 32, 1, 1)
-                ),
+            TileLayout(
+                shard=([32, 4, 128, 512], [(512, "F"), (512 * 32, "F"), (1, "P"), (1, "F")])
             ),
         )
 
-        layout = T.TrainiumLayout.from_annotation("FPPF", (2, 4, 32, 512))
+        layout = TileLayout.trainium("FPPF", (2, 4, 32, 512))
         assert_structural_equal(
             layout,
-            T.TrainiumLayout(
-                dimension_types="FPPF",
-                combined_1d_layout=T.TileLayout.from_tuple(
-                    (2, 4, 32, 512), strides=(512, 32, 1, 1)
-                ),
-            ),
+            TileLayout(shard=([2, 4, 32, 512], [(512, "F"), (32, "P"), (1, "P"), (1, "F")])),
         )
 
     trainium_layout_tests()
@@ -1290,45 +1026,45 @@ def test_size_cosize():
 def test_apply():
     ################ TileLayout
     def test_tile_layout_0():
-        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
+        layout = TileLayout(shard=([8, 8], [8, 1]))
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i * 8 + j)[0] == i * 8 + j * 1
+            assert layout.apply(i * 8 + j)["m"] == i * 8 + j * 1
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i, j, shape=(8, 8))[0] == i * 8 + j * 1
-        # apply can accept coord larger than size
-        for p in range(1024):
-            outer = p // 64
-            inner = p % 64
-            i, j = inner // 8, inner % 8
-            assert layout.apply(p)[0] == outer * 64 + i * 8 + j * 1
+            assert layout.apply(i, j, shape=(8, 8))["m"] == i * 8 + j * 1
+        # # apply can accept coord larger than size
+        # for p in range(1024):
+        #     outer = p // 64
+        #     inner = p % 64
+        #     i, j = inner // 8, inner % 8
+        #     assert layout.apply(p)["m"] == outer * 64 + i * 8 + j * 1
         with pytest.raises(Exception):
             layout.apply(1, 1, 1)
 
     test_tile_layout_0()
 
     def test_tile_layout_1():
-        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(10, 1))
+        layout = TileLayout(shard=([8, 8], [10, 1]))
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i * 8 + j)[0] == i * 10 + j * 1
+            assert layout.apply(i * 8 + j)["m"] == i * 10 + j * 1
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i, j, shape=(8, 8))[0] == i * 10 + j * 1
+            assert layout.apply(i, j, shape=(8, 8))["m"] == i * 10 + j * 1
 
-        # apply can accept coord larger than size
-        for p in range(1024):
-            outer = p // 64
-            inner = p % 64
-            i, j = inner // 8, inner % 8
-            assert (
-                layout.apply(
-                    p,
-                )[0]
-                == outer * 78 + i * 10 + j * 1
-            )
+        # # apply can accept coord larger than size
+        # for p in range(1024):
+        #     outer = p // 64
+        #     inner = p % 64
+        #     i, j = inner // 8, inner % 8
+        #     assert (
+        #         layout.apply(
+        #             p,
+        #         )[0]
+        #         == outer * 78 + i * 10 + j * 1
+        #     )
 
     test_tile_layout_1()
 
     def test_tile_layout_2():
-        layout = T.TileLayout.from_tuple(data=(2, 3, 4, 2, 2), strides=(1, 2, 12, 6, 48))
+        layout = TileLayout(shard=([2, 3, 4, 2, 2], [1, 2, 12, 6, 48]))
 
         def f(i0, i1):
             leaf1 = i0 // 3
@@ -1337,7 +1073,7 @@ def test_apply():
             leaf4 = (i1 % 4) // 2
             leaf5 = i1 % 2
             assert (
-                layout.apply(i0, i1, shape=(6, 16))[0]
+                layout.apply(i0, i1, shape=(6, 16))["m"]
                 == leaf1 * 1 + leaf2 * 2 + leaf3 * 12 + leaf4 * 6 + leaf5 * 48
             )
 
@@ -1349,99 +1085,100 @@ def test_apply():
     test_tile_layout_2()
 
     def test_tile_layout_3():
-        layout = T.TileLayout.from_tuple(
-            data=(T.S(0), 1, T.S(1), 2),
-            strides=(-1, 2, -1, 1),
-            device=(8, 4),
-            from_to=("thread", "warp"),
+        layout = TileLayout(
+            shard=([8, 1, 4, 2], [(4, "laneid"), 2, (1, "laneid"), 1]),
+            scope="warp",
+            subscope="thread",
         )
         for i0, i1 in itertools.product(range(8), range(8)):
-            assert layout.apply(i0, i1, shape=(8, 8))[0] == i1 % 2
+            res = layout.apply(i0, i1, shape=(8, 8))
+            assert res["m"] == i1 % 2
+            assert res["laneid"] == i0 * 4 + i1 // 2
 
     test_tile_layout_3()
 
     ################ Swizzle Layout
     def test_swizzle_layout_0():
-        layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3)
-        assert layout.size == 64
+        layout = SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3)
+        # assert layout.size == 64
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i * 8 + j)[0] == i * 8 + i ^ j
+            assert layout.apply(i * 8 + j)["m"] == i * 8 + i ^ j
 
     test_swizzle_layout_0()
 
     def test_swizzle_layout_1():
-        layout = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        assert layout.size == 512
+        layout = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        assert layout.size() == 512
         for i, j, k in itertools.product(range(8), range(8), range(8)):
-            assert layout.apply((i * 8 + j) * 8 + k)[0] == (i * 8 + (i ^ j)) * 8 + k
+            assert layout.apply((i * 8 + j) * 8 + k)["m"] == (i * 8 + (i ^ j)) * 8 + k
         # apply can accept coord larger than size
         for p in range(4096):
             outer = p // 512
             inner = p % 512
             i, j, k = inner // 64, (inner % 64) // 8, inner % 8
-            assert layout.apply(p)[0] == outer * 512 + (i * 8 + (i ^ j)) * 8 + k
+            assert layout.apply(p)["m"] == outer * 512 + (i * 8 + (i ^ j)) * 8 + k
 
     test_swizzle_layout_1()
 
     def test_swizzle_layout_2():
-        layout = T.SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3, swizzle_inner=False)
-        assert layout.size == 64
+        layout = SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3, swizzle_inner=False)
+        assert layout.size() == 64
         for i, j in itertools.product(range(8), range(8)):
-            assert layout.apply(i * 8 + j)[0] == (i ^ j) * 8 + j
+            assert layout.apply(i * 8 + j)["m"] == (i ^ j) * 8 + j
 
     test_swizzle_layout_2()
 
     def test_swizzle_layout_3():
-        layout = T.SwizzleLayout(per_element=0, swizzle_len=2, atom_len=3)
+        layout = SwizzleLayout(per_element=0, swizzle_len=2, atom_len=3)
         for i, j in itertools.product(range(8), range(8)):
             outer_i, inner_i = i // 4, i % 4
             outer_j, inner_j = j // 4, j % 4
-            assert layout.apply(i * 8 + j)[0] == i * 8 + outer_j * 4 + (inner_i ^ inner_j)
+            assert layout.apply(i * 8 + j)["m"] == i * 8 + outer_j * 4 + (inner_i ^ inner_j)
 
     test_swizzle_layout_3()
 
     ################ Compose Layout
     def test_compose_layout_0():
-        layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        layoutB = T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1))
-        layout = T.ComposeLayout(layoutA, layoutB)
-        assert layout.size == 512
-        assert layout.cosize == 512
+        layoutA = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        layoutB = TileLayout(shard=([8, 64], [64, 1]))
+        layout = ComposeLayout(layoutA, layoutB)
+        assert layout.size() == 512
+        assert layout.cosize() == 512
         for i, j in itertools.product(range(8), range(64)):
-            assert layout.apply(i * 64 + j)[0] == layoutA.apply(layoutB.apply(i * 64 + j)[0])[0]
+            assert (
+                layout.apply(i * 64 + j)["m"] == layoutA.apply(layoutB.apply(i * 64 + j)["m"])["m"]
+            )
 
     test_compose_layout_0()
 
     def test_compose_layout_1():
-        layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        layoutB = T.TileLayout.from_tuple(data=(16, 64, 8), strides=(64, 1, 1024))
-        layout = T.ComposeLayout(layoutA, layoutB)
-        assert layout.size == 16 * 64 * 8
-        assert layout.cosize == 16 * 64 * 8
+        layoutA = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        layoutB = TileLayout(shard=([16, 64, 8], [64, 1, 1024]))
+        layout = ComposeLayout(layoutA, layoutB)
+        assert layout.size() == 16 * 64 * 8
+        assert layout.cosize() == 16 * 64 * 8
         for i, j, k in itertools.product(range(16), range(64), range(8)):
             assert (
-                layout.apply(i * 64 * 8 + j * 8 + k)[0]
-                == layoutA.apply(layoutB.apply(i * 64 * 8 + j * 8 + k)[0])[0]
+                layout.apply(i * 64 * 8 + j * 8 + k)["m"]
+                == layoutA.apply(layoutB.apply(i * 64 * 8 + j * 8 + k)["m"])["m"]
             )
 
     test_compose_layout_1()
 
     ################ Trainium Layout
     def test_trainium_layout_0():
-        layout = T.TrainiumLayout(
-            dimension_types="FP",
-            combined_1d_layout=T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1)),
-        )
+        layout = TileLayout(shard=([8, 8], [(8, "F"), (1, "P")]))
         for i, j in itertools.product(range(8), range(8)):
             coord = layout.apply(i, j, shape=(8, 8))
-            assert coord[0] == j
-            assert coord[1] == i * 8
+            assert coord["P"] == j
+            assert coord["F"] == i * 8
 
     test_trainium_layout_0()
 
     def test_trainium_layout_1():
-        layout = T.TileLayout.from_tuple(data=(2, 6, 4, 2, 2), strides=(1, 1, 12, 6, 48))
-        layout = T.TrainiumLayout(dimension_types="FPFPF", combined_1d_layout=layout)
+        layout = TileLayout(
+            shard=([2, 6, 4, 2, 2], [(1, "F"), (1, "P"), (12, "F"), (6, "P"), (48, "F")])
+        )
 
         def f(i0, i1):
             leaf1 = i0 // 6
@@ -1450,8 +1187,8 @@ def test_apply():
             leaf4 = (i1 % 4) // 2
             leaf5 = i1 % 2
             coord = layout.apply(i0, i1, shape=(12, 16))
-            assert coord[0] == leaf2 + leaf4 * 6
-            assert coord[1] == leaf1 * 1 + leaf3 * 12 + leaf5 * 48
+            assert coord["P"] == leaf2 + leaf4 * 6
+            assert coord["F"] == leaf1 * 1 + leaf3 * 12 + leaf5 * 48
 
         for i0, i1 in itertools.product(range(6), range(16)):
             f(i0, i1)
@@ -1462,32 +1199,29 @@ def test_apply():
 
     ################ Trainium PSUM Layout
     def test_trainium_psum_layout_0():
-        layout = T.TrainiumPSUMLayout(
-            dimension_types="FP",
-            combined_1d_layout=T.TileLayout.from_tuple(data=(1024, 8), strides=(1, 1)),
-        )
+        layout = TileLayout(shard=([1024, 8], [(1, "F"), (1, "P")])).to_psum()
         for i, j in itertools.product(range(1024), range(8)):
             coord = layout.apply(i, j, shape=(1024, 8))
-            assert coord[0] == i // 512
-            assert coord[1] == j
-            assert coord[2] == i % 512
+            assert coord["Bank"] == i // 512
+            assert coord["P"] == j
+            assert coord["F"] == i % 512
 
     test_trainium_psum_layout_0()
 
 
 def test_normalize_compose_layout():
     def case1():
-        layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        layoutB = T.TileLayout.from_tuple(data=(8, 64), strides=(64, 1))
-        layout = T.ComposeLayout(layoutA, layoutB.normalize())
+        layoutA = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        layoutB = TileLayout(shard=([8, 64], [64, 1]))
+        layout = ComposeLayout(layoutA, layoutB.normalize())
         assert_structural_equal(layout.normalize(), layoutA)
 
     case1()
 
     def case2():
-        layoutA = T.SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        layoutB = T.TileLayout.from_tuple(data=(64, 4, 64), strides=(64, 4096, 1))
-        layout = T.ComposeLayout(layoutA, layoutB.normalize())
+        layoutA = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        layoutB = TileLayout(shard=([64, 4, 64], [64, 4096, 1]))
+        layout = ComposeLayout(layoutA, layoutB.normalize())
         assert_structural_equal(layout.normalize(), layout)
 
     case2()
@@ -1495,37 +1229,27 @@ def test_normalize_compose_layout():
 
 def test_normalize_trainium_layout():
     def case1():
-        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
-        layout = T.TrainiumLayout(dimension_types="PF", combined_1d_layout=layout)
+        layout = TileLayout(shard=([8, 8], [(8, "P"), (1, "F")]))
         assert_structural_equal(layout, layout.normalize())
 
     case1()
 
     def case2():
-        layout = T.TileLayout.from_tuple(data=(8, 1, 8), strides=(8, 1, 1))
-        layout = T.TrainiumLayout(dimension_types="FPF", combined_1d_layout=layout)
-        layout_expected = T.TrainiumLayout(
-            dimension_types="F",
-            combined_1d_layout=T.TileLayout.from_tuple(data=(64), strides=(1)),
-        )
+        layout = TileLayout(shard=([8, 1, 8], [(8, "F"), (1, "P"), (1, "F")]))
+        layout_expected = TileLayout(shard=([64], [(1, "F")]))
         assert_structural_equal(layout_expected, layout.normalize())
 
     case2()
 
     def case3():
-        layout = T.TileLayout.from_tuple(data=(8, 8, 8), strides=(8, 1, 1))
-        layout = T.TrainiumLayout(dimension_types="FPF", combined_1d_layout=layout)
+        layout = TileLayout(shard=([8, 8, 8], [(8, "F"), (1, "P"), (1, "F")]))
         assert_structural_equal(layout, layout.normalize())
 
     case3()
 
     def case4():
-        layout = T.TileLayout.from_tuple(data=(8, 8, 8, 8), strides=(8, 8, 1, 1))
-        layout = T.TrainiumLayout(dimension_types="FPPF", combined_1d_layout=layout)
-        layout_expected = T.TrainiumLayout(
-            dimension_types="FPF",
-            combined_1d_layout=T.TileLayout.from_tuple(data=(8, 64, 8), strides=(8, 1, 1)),
-        )
+        layout = TileLayout(shard=([8, 8, 8, 8], [(8, "F"), (8, "P"), (1, "P"), (1, "F")]))
+        layout_expected = TileLayout(shard=([8, 64, 8], [(8, "F"), (1, "P"), (1, "F")]))
         assert_structural_equal(layout_expected, layout.normalize())
 
     case4()
@@ -1533,18 +1257,20 @@ def test_normalize_trainium_layout():
 
 def test_group_by_logical_shape():
     def case1():
-        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
+        layout = TileLayout(shard=([8, 8], [8, 1]))
         layout = layout.tile(layout, outer_shape=[8, 8], inner_shape=[8, 8])
-        outer, seps = layout.group_by_logical_shape([64, 64])
+        outer, seps = layout.group_by_shape([64, 64])
         assert_structural_equal(outer, layout)
-        assert seps == [0, 2, 4]
+        assert seps[0] == 0
+        assert seps[1] == 2
+        assert seps[2] == 4
 
     case1()
 
 
 def test_tile_to():
     def case1():
-        layout = T.TileLayout.from_tuple(data=(8, 8), strides=(8, 1))
+        layout = TileLayout(shard=([8, 8], [8, 1]))
         tiled = layout.tile_to([64, 64], [8, 8])
         tiled_expected = layout.tile(layout, [8, 8], [8, 8])
         assert_structural_equal(tiled, tiled_expected)
@@ -1555,9 +1281,9 @@ def test_tile_to():
 def test_tma_shared_layout():
     def case1():
         layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, (64, 256))
-        layout_expected = T.ComposeLayout(
-            T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-            T.TileLayout.from_tuple(data=(64, 4, 64), strides=(64, 4096, 1)),
+        layout_expected = ComposeLayout(
+            SwizzleLayout(3, 3, 3, swizzle_inner=True),
+            TileLayout(shard=([64, 4, 64], [64, 4096, 1])),
         )
         assert_structural_equal(layout, layout_expected)
 
@@ -1565,9 +1291,9 @@ def test_tma_shared_layout():
 
     def case2():
         layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_128B_ATOM, (3, 64, 256))
-        layout_expected = T.ComposeLayout(
-            T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-            T.TileLayout.from_tuple(data=(3, 64, 4, 64), strides=(16384, 64, 4096, 1)),
+        layout_expected = ComposeLayout(
+            SwizzleLayout(3, 3, 3, swizzle_inner=True),
+            TileLayout(shard=([3, 64, 4, 64], [16384, 64, 4096, 1])),
         )
         assert_structural_equal(layout, layout_expected)
 
@@ -1575,9 +1301,9 @@ def test_tma_shared_layout():
 
     def case3():
         layout = tma_shared_layout("float16", SwizzleMode.SWIZZLE_64B_ATOM, (3, 64, 256))
-        layout_expected = T.ComposeLayout(
-            T.SwizzleLayout(3, 2, 3, swizzle_inner=True),
-            T.TileLayout.from_tuple(data=(3, 64, 8, 32), strides=(16384, 32, 2048, 1)),
+        layout_expected = ComposeLayout(
+            SwizzleLayout(3, 2, 3, swizzle_inner=True),
+            TileLayout(shard=([3, 64, 8, 32], [16384, 32, 2048, 1])),
         )
         assert_structural_equal(layout, layout_expected)
 

@@ -38,6 +38,8 @@ TVM_REGISTER_GLOBAL("tir.ComposeLayout")
       return ComposeLayout(layout_A, layout_B);
     });
 
+bool ComposeLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const { return true; }
+
 bool ComposeLayoutNode::VerifyWellFormed() const {
   if (!layout_A->VerifyWellFormed() || !layout_B->VerifyWellFormed()) {
     return false;
@@ -49,12 +51,60 @@ bool ComposeLayoutNode::VerifyWellFormed() const {
   return true;
 }
 
-PrimExpr ComposeLayoutNode::GetSize() const { return layout_B->GetSize(); }
+PrimExpr ComposeLayoutNode::GetSize(Optional<String> axis_name) const {
+  CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for compose layout";
+  return layout_B->GetSize(axis_name);
+}
 
-PrimExpr ComposeLayoutNode::GetCosize() const { return layout_B->GetCosize(); }
+PrimExpr ComposeLayoutNode::GetCosize(Optional<String> axis_name) const {
+  CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for compose layout";
+  return layout_B->GetCosize(axis_name);
+}
 
-Array<PrimExpr> ComposeLayoutNode::Apply(const PrimExpr& coord) const {
-  return layout_A->Apply(layout_B->Apply(coord)[0]);
+Map<String, PrimExpr> ComposeLayoutNode::Apply(Array<PrimExpr> coord) const {
+  LOG(FATAL) << "ComposeLayoutNode::Apply(Array<PrimExpr>) is not implemented";
+  return {};
+}
+
+Map<String, PrimExpr> ComposeLayoutNode::Apply(PrimExpr coord) const {
+  auto res = layout_B->Apply(coord);
+  CHECK(res.size() == 1 && res.find("m") != res.end());
+  auto m = res["m"];
+  auto layout_A_res = layout_A->Apply(m);
+  CHECK(layout_A_res.size() == 1 && layout_A_res.find("m") != layout_A_res.end());
+  return layout_A_res;
+}
+
+TLayout ComposeLayoutNode::Normalize() const {
+  auto layout_B_normalized = layout_B->Normalize().as<TileLayout>().value();
+  if (layout_B_normalized->IsTrivial()) {
+    return layout_A;
+  }
+  return ComposeLayout(layout_A, layout_B_normalized);
+}
+
+TLayout ComposeLayoutNode::Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
+                                const Array<PrimExpr>& inner_shape) const {
+  // layout_B is first tiled with `outer`, then compose with layout_A.
+  auto tiled_B = layout_B->Tile(outer, outer_shape, inner_shape).as<TileLayout>().value();
+  return ComposeLayout(layout_A, tiled_B);
+}
+
+Optional<TileLayout> ComposeLayoutNode::IsTileInner(const TLayout& tile_layout,
+                                                    const Array<PrimExpr>& tiled_shape,
+                                                    const Array<PrimExpr>& inner_shape) const {
+  if (auto comp = tile_layout.as<ComposeLayout>()) {
+    if (StructuralEqual()(comp.value()->layout_A, this->layout_A)) {
+      return this->layout_B->IsTileInner(comp.value()->layout_B, tiled_shape, inner_shape);
+    }
+  }
+  return std::nullopt;
+}
+
+Optional<TLayout> ComposeLayoutNode::IsTileOuter(const TLayout& tile_layout,
+                                                 const Array<PrimExpr>& tiled_shape,
+                                                 const Array<PrimExpr>& outer_shape) const {
+  return std::nullopt;
 }
 
 }  // namespace tir

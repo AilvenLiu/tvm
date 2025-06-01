@@ -54,7 +54,7 @@ from tvm.script import tirp as Tp
 def test_unary_op_shared(input, op_type, dtype):
     g_shape, st_a, st_res, ext_a, ext_res, thread_cnt, dev = input
     s_shape = g_shape
-    g_layout = s_layout = TileLayout.from_tuple(g_shape)
+    g_layout = s_layout = TileLayout(g_shape)
 
     copy_slice = list(slice(None) for _ in range(len(g_shape)))
     map_slice_a = list(slice(st_a[i], st_a[i] + ext_a[i]) for i in range(len(g_shape)))
@@ -154,7 +154,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
 
     g_shape, st_a, st_b, st_res, ext_a, ext_b, ext_res, thread_cnt, dev = input
     s_shape = g_shape
-    g_layout = s_layout = TileLayout.from_tuple(g_shape)
+    g_layout = s_layout = TileLayout(g_shape)
 
     copy_slice = list(slice(None) for i in range(len(g_shape)))
     map_slice_a = list(slice(st_a[i], st_a[i] + ext_a[i]) for i in range(len(g_shape)))
@@ -310,7 +310,7 @@ def test_unary_op_local(input, op_type, dtype):
     # get shape info
     NUM_COL = 128
     g_shape_a = g_shape_b = (16 * N_WARPS, NUM_COL)
-    g_layout_a = g_layout_b = TileLayout.from_tuple(g_shape_a)
+    g_layout_a = g_layout_b = TileLayout(g_shape_a)
     acc_shape = red_shape = (16, NUM_COL)
 
     @T.prim_func(tirp=True)
@@ -326,11 +326,14 @@ def test_unary_op_local(input, op_type, dtype):
 
             with T.thread():
                 # acc layout
-                atom = T.TileLayout.from_tuple((1, 2), (2, 1))
-                warp_atom = T.TileLayout.shard(
-                    (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
+                atom = T.TileLayout(shard=([1, 2], [2, 1]))
+                warp_layout = T.TileLayout(
+                    shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
+                    subscope="thread",
+                    scope="warp",
                 )
-                tile = T.TileLayout.from_tuple((2, NUM_COL // 8), (1, 2))
+                warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
+                tile = T.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
                 acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
                 acc = T.alloc_buffer(
                     [2, NUM_COL // 4],
@@ -436,7 +439,7 @@ def test_binary_op_local(input, op_type, dtype):
     # get shape info
     NUM_COL = 128
     g_shape_a, g_shape_b = (16 * N_WARPS, NUM_COL), (16 * N_WARPS, 4)
-    g_layout_a, g_layout_b = TileLayout.from_tuple(g_shape_a), TileLayout.from_tuple(g_shape_b)
+    g_layout_a, g_layout_b = TileLayout(g_shape_a), TileLayout(g_shape_b)
     A_shape, B_shape = (16, NUM_COL), (16, 4)
     const = T.float16(3.0) if dtype == "float16" else T.float32(3.0)
 
@@ -453,11 +456,17 @@ def test_binary_op_local(input, op_type, dtype):
 
             with T.thread():
                 # A layout
-                atom = T.TileLayout.from_tuple((1, 2), (2, 1))
-                warp_atom = T.TileLayout.shard(
-                    (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
+                atom = T.TileLayout(shard=([1, 2], [2, 1]))
+                warp_layout = T.TileLayout(
+                    shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
+                    subscope="thread",
+                    scope="warp",
                 )
-                tile = T.TileLayout.from_tuple((2, NUM_COL // 8), (1, 2))
+                warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
+                # warp_atom = T.TileLayout.shard(
+                #     (8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp")
+                # )
+                tile = T.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
                 A_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
                 A_buffer = T.alloc_buffer(
                     [2, NUM_COL // 4],
@@ -468,11 +477,9 @@ def test_binary_op_local(input, op_type, dtype):
                 )
 
                 # B layout
-                B_atom = T.TileLayout.from_tuple((1, 1), (1, 1))
-                B_warp_atom = T.TileLayout.shard(
-                    (8, 4), (8, 4), "S0S1", inner=B_atom, from_to=("thread", "warp")
-                )
-                B_tile = T.TileLayout.from_tuple((2, 1), (1, 1))
+                B_atom = T.TileLayout(shard=([1, 1], [1, 1]))
+                B_warp_atom = B_atom.tile(warp_layout, (8, 4), (1, 1))
+                B_tile = T.TileLayout(shard=([2, 1], [1, 1]))
                 B_layout = B_warp_atom.tile(B_tile, (2, 1), (8, 4))
                 B_buffer = T.alloc_buffer(
                     [

@@ -54,13 +54,15 @@ def generate_intermediate_buffer(
     Returns:
         Tuple[Optional[buffer], int]: The intermediate buffer and reduction factor size.
     """
-    intermediate_shape = [dst_buffer_region.buffer.layout.partition_size, rfactor_size]
+    intermediate_shape = [dst_buffer_region.buffer.layout.size("P"), rfactor_size]
 
     if "partial_reduce" in workspace:
         intermediate_buffer = workspace["partial_reduce"]
         check_workspace_buffer(intermediate_buffer, intermediate_shape, "trn.sbuf")
     else:
-        assert sctx.alloc_only, "Partial reduce buffer must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
+        assert (
+            sctx.alloc_only
+        ), "Partial reduce buffer must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."
         intermediate_buffer = T.buffer(
             intermediate_shape,
             dtype=dst_buffer_region.buffer.dtype,
@@ -109,9 +111,9 @@ def reduction_trn(
             src.layout and dst.layout,
             src.scope() == "trn.sbuf" or src.scope() == "trn.psum",
             dst.scope() == "trn.sbuf",
-            isinstance(src.layout, T.TrainiumLayout),
-            isinstance(dst.layout, T.TrainiumLayout),
-            src.layout.partition_size == dst.layout.partition_size,
+            src.layout.is_trainium(),
+            dst.layout.is_trainium(),
+            src.layout.size("P") == dst.layout.size("P"),
         ]
     ), "Invalid layout"
 
@@ -124,7 +126,7 @@ def reduction_trn(
     assert analyzer.can_prove(inst_repr.size > 1), "Instruction size must be greater than 1"
 
     # Get partition size and extents
-    p_size = src.layout.partition_size
+    p_size = src.layout.size("P")
     f_var = T.var("int32", "F")
     p_var = T.var("int32", "P")
     spatial_b_var = T.var("int32", "sB")

@@ -17,38 +17,25 @@
  * under the License.
  */
 
-#ifndef TVM_TIR_IR_LAYOUT_UTILS_H_
-#define TVM_TIR_IR_LAYOUT_UTILS_H_
-
-#include <tvm/arith/analyzer.h>
-#include <tvm/tir/expr.h>
-#include <tvm/tir/layout.h>
-#include <tvm/tir/op.h>
-
-#include <numeric>
-
-#include "../../../node/attr_registry.h"
+#include "utils.h"
 
 namespace tvm {
 namespace tir {
 
-/*!
- * \brief Split the coordinate into multiple parts
- * \param coord The coordinate to split
- * \param shape The shape of the tensor
- * \return The split coordinates
- */
-Array<PrimExpr> SplitCoord(PrimExpr coord, const Array<PrimExpr>& shape);
+Array<PrimExpr> SplitCoord(PrimExpr coord, const Array<PrimExpr>& shape) {
+  Array<PrimExpr> result;
+  for (size_t i = shape.size(); i-- > 0;) {
+    result.push_back(floormod(coord, shape[i]));
+    coord = floordiv(coord, shape[i]);
+  }
+  return Array<PrimExpr>(result.rbegin(), result.rend());
+}
 
-/*!
- * \brief Flatten the split coordinates
- * \param coord The split coordinates
- * \param shape The shape of the tensor
- * \return The flattened coordinate
- */
-PrimExpr FlattenCoord(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape);
+PrimExpr FlattenCoord(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) {
+  return std::accumulate(
+      coord.begin(), coord.end(), PrimExpr(0),
+      [&shape, i = 0](PrimExpr acc, const PrimExpr& c) mutable { return acc * shape[i++] + c; });
+}
 
 }  // namespace tir
 }  // namespace tvm
-
-#endif  // TVM_TIR_IR_LAYOUT_UTILS_H_

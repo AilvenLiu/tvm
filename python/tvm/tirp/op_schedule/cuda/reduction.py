@@ -239,12 +239,15 @@ def reduction_cuda_warp_logical_view_impl(
     if src.layout.is_swizzle() or dst.layout.is_swizzle():
         return None
 
-    atom = T.TileLayout.from_tuple((1, 2), (2, 1))
-    warp_atom = T.TileLayout.shard((8, 8), (8, 4), "S0S1", inner=atom, from_to=("thread", "warp"))
-    red_atom = T.TileLayout.from_tuple(1, 1)
-    red_warp_atom = T.TileLayout.shard(
-        (32,), (32,), "S0", inner=red_atom, from_to=("thread", "warp")
+    atom = T.TileLayout(shard=([1, 2], [2, 1]))
+    warp_layout = T.TileLayout(
+        shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
+        subscope="thread",
+        scope="warp",
     )
+    warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
+    red_atom = T.TileLayout(shard=([1, 1], [1, 1]))
+    red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
 
     shuffle = T.bool(schedule_config.get("thread_reduce", False))
 
@@ -295,7 +298,7 @@ def reduction_cuda_warp_logical_view_impl(
         return None
 
     num_rows = 2
-    src_local_shape = (num_rows, src_tile_outer.size)
+    src_local_shape = (num_rows, src_tile_outer.size())
     dst_local_shape = (num_rows,)
 
     # fmt: off

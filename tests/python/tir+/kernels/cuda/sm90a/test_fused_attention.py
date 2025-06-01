@@ -475,8 +475,8 @@ def test_fp16_fused_attn():
     @T.prim_func(tirp=True)
     def manual(Q_ptr: T.handle, K_ptr: T.handle, V_ptr: T.handle, b_indices_ptr: T.handle, h_indices_ptr: T.handle,
                q_indices_ptr: T.handle, tiles_indptr_ptr: T.handle, O_ptr: T.handle, profiler_buffer_ptr: T.handle) -> None:
-        qo_layout = T.meta_var(T.TileLayout.from_tuple(QO_SHAPE))
-        kv_layout = T.meta_var(T.TileLayout.from_tuple(KV_SHAPE))
+        qo_layout = T.meta_var(T.TileLayout(QO_SHAPE))
+        kv_layout = T.meta_var(T.TileLayout(KV_SHAPE))
         Q = T.match_buffer(Q_ptr, QO_SHAPE, "float16", scope="global", layout=qo_layout)
         K = T.match_buffer(K_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
         V = T.match_buffer(V_ptr, KV_SHAPE, "float16", scope="global", layout=kv_layout)
@@ -757,19 +757,19 @@ def test_fp16_fused_attn():
     np.set_printoptions(threshold=np.inf)
     np.set_printoptions(linewidth=np.inf)
 
-    def fa3():
-        from flash_attn_interface import flash_attn_func
-        import torch
+    # def fa3():
+    #     from flash_attn_interface import flash_attn_func
+    #     import torch
 
-        q_torch = torch.from_numpy(q).cuda()
-        k_torch = torch.from_numpy(k).cuda()
-        v_torch = torch.from_numpy(v).cuda()
+    #     q_torch = torch.from_numpy(q).cuda()
+    #     k_torch = torch.from_numpy(k).cuda()
+    #     v_torch = torch.from_numpy(v).cuda()
 
-        func = lambda: flash_attn_func(q_torch, k_torch, v_torch, causal=CAUSAL)[0]
-        ms = bench(func, warmup=0, repeat=10, proton_name="fa3")
-        print(f"FA3 flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
-        o_torch = func()
-        return o_torch.cpu().numpy()
+    #     func = lambda: flash_attn_func(q_torch, k_torch, v_torch, causal=CAUSAL)[0]
+    #     ms = bench(func, warmup=0, repeat=10, proton_name="fa3")
+    #     print(f"FA3 flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
+    #     o_torch = func()
+    #     return o_torch.cpu().numpy()
 
     def tir():
         q_tvm = tvm.nd.array(q, DEV)
@@ -892,12 +892,12 @@ def test_fp16_fused_attn():
         return o_torch.reshape(BATCH_SIZE, QO_LEN, NHEADS, HEAD_DIM).cpu().numpy()
 
     with ProtonContext("fused_attn"):
-        O_fa3 = fa3()
+        # O_fa3 = fa3()
         O_tir = tir()
         O_flashinfer = flashinfer()
 
-    np.testing.assert_allclose(O_fa3, O_tir, rtol=1e-3, atol=1e-3)
-    np.testing.assert_allclose(O_fa3, O_flashinfer, rtol=1e-3, atol=1e-3)
+    # np.testing.assert_allclose(O_fa3, O_tir, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(O_tir, O_flashinfer, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":

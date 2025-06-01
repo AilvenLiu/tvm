@@ -599,5 +599,39 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       });
 }
 
+void tvm_cublaslt_fp8_gemm(NDArray x, NDArray weight, NDArray workspace, NDArray alpha,
+                           NDArray out) {
+  // Workspace is used for storing device-side gemm arguments and cutlass internal workspace.
+  // Recommened size is 4MB.
+  auto func = tvm::ffi::Function::GetGlobalRequired("runtime.get_cuda_stream");
+  ICHECK(func != nullptr);
+  CHECK_GE(x->ndim, 2);
+  CHECK_EQ(weight->ndim, 2);
+  CHECK_EQ(workspace->ndim, 1);
+  CHECK_GE(out->ndim, 2);
+  CHECK_EQ(alpha->dtype.code, kDLFloat);
+  CHECK_EQ(alpha->dtype.bits, 32);
+  CHECK_EQ(alpha->ndim, 1);
+  CHECK_EQ(alpha->shape[0], 1);
+  int64_t m = 1;
+  for (int i = 0; i < x->ndim - 1; ++i) {
+    m *= x->shape[i];
+  }
+  int64_t n = weight->shape[0];
+  CHECK_EQ(x->shape[x->ndim - 1], weight->shape[1]) << "Only col-major weight is supported now.";
+  int64_t k = x->shape[x->ndim - 1];
+  const float* beta = nullptr;
+  cudaStream_t stream = static_cast<cudaStream_t>(func().cast<void*>());
+  tvm::contrib::CuBlasLtThreadEntry* cublas_entry =
+      tvm::contrib::CuBlasLtThreadEntry::ThreadLocal();
+  tvm::contrib::CallCublasLt(cublas_entry->handle, stream, cublas_entry->matmul_pref_desc,
+                             x.operator->(), weight.operator->(), nullptr, alpha.operator->(),
+                             nullptr, out.operator->(), /*transa=*/false, /*transb=*/true,
+                             cublas_entry->workspace_ptr, cublas_entry->workspace_size,
+                             CUBLASLT_EPILOGUE_DEFAULT, std::nullopt);
+}
+
+TVM_REGISTER_GLOBAL("cublaslt.fp8_gemm").set_body_typed(tvm_cublaslt_fp8_gemm);
+
 }  // namespace contrib
 }  // namespace tvm

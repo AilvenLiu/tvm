@@ -27,7 +27,7 @@ from tvm.ir import assert_structural_equal
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from tvm.tir.stmt import OpCall
 from .common import (
-    normalize_layout_with_shape,
+    normalize_and_group,
     InstructionGenerator,
     init_analyzer,
     check_workspace_buffer,
@@ -58,9 +58,7 @@ def get_pf_dim_from_buffer_region(
     ]
     assert len(non_unit_dims) == 2, "Only 2D matrix is supported for gemm"
 
-    layout, seps = normalize_layout_with_shape(
-        buffer_region.buffer.layout, buffer_region.buffer.shape
-    )
+    layout, seps = normalize_and_group(buffer_region.buffer.layout, buffer_region.buffer.shape)
     # Determine partition and free dimensions based on operator kind
     if operator_kind == OperatorKind.A:
         p_dim, f_dim = non_unit_dims[1], non_unit_dims[0]
@@ -72,7 +70,7 @@ def get_pf_dim_from_buffer_region(
         ), "Transposed C is implemented by swapping lhs and rhs. No need to specify by user."
         # For C, determine dimensions based on layout
         has_partition = any(
-            layout.dimension_types[i] == T.TrainiumLayout.Partition
+            layout.shard[i].axis.name == "P"
             for i in range(seps[non_unit_dims[0]], seps[non_unit_dims[0] + 1])
         )
         p_dim, f_dim = (
@@ -87,20 +85,19 @@ def get_pf_dim_from_buffer_region(
 
     # Validate partition dimension
     p_exts = [
-        layout.combined_1d_layout.data_iter_array[i].extent
+        layout.shard[i].extent
         for i in range(seps[p_dim], seps[p_dim + 1])
-        if layout.dimension_types[i] == T.TrainiumLayout.Partition
+        if layout.shard[i].axis.name == "P"
     ]
 
-    assert functools.reduce(operator.mul, p_exts, 1) == layout.partition_size, (
+    assert functools.reduce(operator.mul, p_exts, 1) == layout.size("P"), (
         f"Accumulation dimension and output non-streaming dimension must contain whole P dimension. "
         f"However, the {p_dim} dimension of {buffer_region} does not."
     )
 
     # Validate free dimension
     assert all(
-        layout.dimension_types[i] == T.TrainiumLayout.Free
-        or layout.combined_1d_layout.data_iter_array[i].extent == 1
+        layout.shard[i].axis.name in ["F", "Bank"] or layout.shard[i].extent == 1
         for i in range(seps[f_dim], seps[f_dim + 1])
     ), f"Spatial dimension must not contain P. However, the {f_dim} dimension of {buffer_region} does."
 
@@ -149,15 +146,15 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
             A.dtype == B.dtype,
             A.scope() == "trn.sbuf" and B.scope() == "trn.sbuf",
             C.scope() == "trn.psum" or C.scope() == "trn.sbuf",
-            isinstance(A.layout, T.TrainiumLayout),
-            isinstance(B.layout, T.TrainiumLayout),
-            isinstance(C.layout, T.TrainiumLayout),
-            A.layout.partition_size == B.layout.partition_size,
+            A.layout.is_trainium(),
+            B.layout.is_trainium(),
+            C.layout.is_trainium(),
+            A.layout.size("P") == B.layout.size("P"),
         ]
     ), "Invalid buffer layout and scope"
 
-    p_size = A.layout.partition_size
-    assert p_size == B.layout.partition_size, "Partition size mismatch"
+    p_size = A.layout.size("P")
+    assert p_size == B.layout.size("P"), "Partition size mismatch"
 
     # Get partition and free dimensions
     lhs_p_dim, lhs_f_dim = get_pf_dim_from_buffer_region(
@@ -201,12 +198,12 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     reduction_b = T.var("int32", "reduction_b")
     lhs_b = T.var("int32", "lhs_b")
     rhs_b = T.var("int32", "rhs_b")
-    lhs_f_size = C.layout.partition_size
+    lhs_f_size = C.layout.size("P")
     inst_gen.bind_inst_iter(
         B_buffer_region, rhs_f, inst_repr.size, inst_repr.stride, is_free_dim=True
     )
     inst_gen.bind_inst_iter(C_buffer_region, lhs_f, lhs_f_size, 1, is_free_dim=False)
-    inst_gen.bind_inst_iter(A_buffer_region, p, A.layout.partition_size, 1, is_free_dim=False)
+    inst_gen.bind_inst_iter(A_buffer_region, p, A.layout.size("P"), 1, is_free_dim=False)
     reduction_b_extent = inst_gen.fill_in_block_dim(A_buffer_region, reduction_b, [lhs_p_dim])
     lhs_b_extent = inst_gen.fill_in_block_dim(A_buffer_region, lhs_b, [lhs_f_dim])
     rhs_b_extent = inst_gen.fill_in_block_dim(B_buffer_region, rhs_b, [rhs_f_dim])
