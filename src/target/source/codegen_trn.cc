@@ -620,6 +620,6 @@ void CodeGenTrainium::VisitExpr_(const OrNode* op, std::ostream& os) {
   os << PrintExpr(op->a) << " | " << PrintExpr(op->b);
 }
 
-TVM_REGISTER_GLOBAL("target.build.trn").set_body_typed(BuildTrainium);
+TVM_FFI_REGISTER_GLOBAL("target.build.trn").set_body_typed(BuildTrainium);
 }  // namespace codegen
 }  // namespace tvm

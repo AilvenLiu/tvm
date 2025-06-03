@@ -109,16 +109,12 @@ def test_roundtrip_layout():
     def get_layout1():
         return T.TileLayout(
             shard=([8, 8, 8, 4, 2], [6, (4, "laneid"), 2, (1, "laneid"), 1]),
-            subscope="thread",
-            scope="warp",
         )
 
     def get_layout2():
         return T.TileLayout(
             shard=([8, 8, 8, 4, 2], [64, (4, "laneid"), 8, 2, 1]),
             exclude=(([4], [(1, "laneid")]), [0]),
-            subscope="thread",
-            scope="warp",
         )
 
     def get_layout3():
@@ -163,7 +159,7 @@ def test_roundtrip_layout():
     assert_structural_equal(test, from_source(code))
 
 
-L_LANE = T.TileLayout(shard=([32], [(1, "laneid")]), subscope="thread", scope="warp")
+L_LANE = T.TileLayout(shard=([32], [(1, "laneid")]))
 
 
 def test_roundtrip_buffer_view_get1():

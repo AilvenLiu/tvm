@@ -680,7 +680,7 @@ class SBlockRealize(Stmt):
         )  # type: ignore
 
 
-@tvm._ffi.register_object("tir.Break")
+@tvm.ffi.register_object("tir.Break")
 class Break(Stmt):
     """Break node.
 
@@ -692,7 +692,7 @@ class Break(Stmt):
         self.__init_handle_by_constructor__(_ffi_api.Break, span)  # type: ignore
 
 
-@tvm._ffi.register_object("tir.Continue")
+@tvm.ffi.register_object("tir.Continue")
 class Continue(Stmt):
     """Continue node.
 
@@ -753,7 +753,7 @@ def normalize_const_arg(arg) -> PrimExpr:
     return arg
 
 
-@tvm._ffi.register_object("tir.OpCall")
+@tvm.ffi.register_object("tir.OpCall")
 class OpCall(Stmt):
     """OpCall node.
 

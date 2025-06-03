@@ -631,7 +631,7 @@ void tvm_cublaslt_fp8_gemm(NDArray x, NDArray weight, NDArray workspace, NDArray
                              CUBLASLT_EPILOGUE_DEFAULT, std::nullopt);
 }
 
-TVM_REGISTER_GLOBAL("cublaslt.fp8_gemm").set_body_typed(tvm_cublaslt_fp8_gemm);
+TVM_FFI_REGISTER_GLOBAL("cublaslt.fp8_gemm").set_body_typed(tvm_cublaslt_fp8_gemm);
 
 }  // namespace contrib
 }  // namespace tvm

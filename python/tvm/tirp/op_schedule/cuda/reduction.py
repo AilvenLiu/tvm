@@ -240,11 +240,7 @@ def reduction_cuda_warp_logical_view_impl(
         return None
 
     atom = T.TileLayout(shard=([1, 2], [2, 1]))
-    warp_layout = T.TileLayout(
-        shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
-        subscope="thread",
-        scope="warp",
-    )
+    warp_layout = T.TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
     red_atom = T.TileLayout(shard=([1, 1], [1, 1]))
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))

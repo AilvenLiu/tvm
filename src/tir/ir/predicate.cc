@@ -48,11 +48,11 @@ Predicate::Predicate(Array<Var> vars, PrimExpr pred) {
 
 TVM_REGISTER_NODE_TYPE(PredicateNode);
 
-TVM_REGISTER_GLOBAL("tir.Predicate").set_body_typed([](Array<Var> vars, PrimExpr pred) {
+TVM_FFI_REGISTER_GLOBAL("tir.Predicate").set_body_typed([](Array<Var> vars, PrimExpr pred) {
   return Predicate(vars, pred);
 });
 
-TVM_REGISTER_GLOBAL("tir.PredicateApply")
+TVM_FFI_REGISTER_GLOBAL("tir.PredicateApply")
     .set_body_typed([](Predicate pred, Array<PrimExpr> indices) { return pred->Apply(indices); });
 
 }  // namespace tir

@@ -23,7 +23,6 @@
  *
  *  builtin intrinsic operators specific to Trainium target.
  */
-#include <tvm/runtime/registry.h>
 #include <tvm/tir/builtin.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/op_attr_types.h>

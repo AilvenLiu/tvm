@@ -392,14 +392,7 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
     values.push_back(TupleDoc({TupleDoc({ListDoc(exclude_e_docs), ListDoc(exclude_sa_docs)}),
                                ListDoc(exclude_selector_docs)}));
   }
-  if (layout->subscope.defined()) {
-    keys.push_back("subscope");
-    values.push_back(d->AsDoc<ExprDoc>(layout->subscope.value()->name, p->Attr("subscope")));
-  }
-  if (layout->scope.defined()) {
-    keys.push_back("scope");
-    values.push_back(d->AsDoc<ExprDoc>(layout->scope.value()->name, p->Attr("scope")));
-  }
+
   return TIR(d, "TileLayout")->Call({}, keys, values);
 }
 

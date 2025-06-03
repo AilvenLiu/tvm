@@ -17,7 +17,7 @@
 """TIRp operator schedule registry."""
 from typing import Dict, Optional, Callable, Tuple
 
-from tvm._ffi import register_func
+from tvm.ffi import register_func
 from tvm.ir import Op
 from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall

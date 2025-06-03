@@ -500,7 +500,7 @@ class InstructionGenerator:
             new_shard += reversed(reversed_shard)
             new_seps.append(len(reversed_shard) + new_seps[-1])
         new_tile_layout = tvm.tir._ffi_api.TileLayout(  # pylint: disable=no-member
-            new_shard, [], [], None, None
+            new_shard, [], []
         )
         return new_tile_layout, new_seps
 

@@ -33,7 +33,7 @@ ComposeLayout::ComposeLayout(SwizzleLayout layout_A, TileLayout layout_B) {
 
 TVM_REGISTER_NODE_TYPE(ComposeLayoutNode);
 
-TVM_REGISTER_GLOBAL("tir.ComposeLayout")
+TVM_FFI_REGISTER_GLOBAL("tir.ComposeLayout")
     .set_body_typed([](SwizzleLayout layout_A, TileLayout layout_B) {
       return ComposeLayout(layout_A, layout_B);
     });

@@ -87,7 +87,7 @@ ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
   data_ = std::move(n);
 }
 
-TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
+TVM_FFI_REGISTER_GLOBAL("tirp.ScheduleContext")
     .set_body_typed([](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params,
                        Map<Var, Range> var_range_map, bool alloc_only,
                        Map<String, ObjectRef> callbacks) {
@@ -95,9 +95,9 @@ TVM_REGISTER_GLOBAL("tirp.ScheduleContext")
                              callbacks);
     });
 
-TVM_REGISTER_GLOBAL("tirp.ScheduleContextAddAllocBuffer")
+TVM_FFI_REGISTER_GLOBAL("tirp.ScheduleContextAddAllocBuffer")
     .set_body_method(&ScheduleContextNode::AddAllocBuffer);
-TVM_REGISTER_GLOBAL("tirp.ScheduleContextAddInitStmt")
+TVM_FFI_REGISTER_GLOBAL("tirp.ScheduleContextAddInitStmt")
     .set_body_method(&ScheduleContextNode::AddInitStmt);
 
 /********************* Schedule Ops **********************/

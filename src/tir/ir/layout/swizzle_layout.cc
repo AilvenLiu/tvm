@@ -37,7 +37,7 @@ SwizzleLayout::SwizzleLayout(int per_element, int swizzle_len, int atom_len, boo
 
 TVM_REGISTER_NODE_TYPE(SwizzleLayoutNode);
 
-TVM_REGISTER_GLOBAL("tir.SwizzleLayout")
+TVM_FFI_REGISTER_GLOBAL("tir.SwizzleLayout")
     .set_body_typed([](int per_element, int swizzle_len, int atom_len, bool swizzle_inner) {
       return SwizzleLayout(per_element, swizzle_len, atom_len, swizzle_inner);
     });
@@ -86,7 +86,7 @@ TLayout SwizzleLayoutNode::Normalize() const { return GetRef<SwizzleLayout>(this
 TileLayout IdentityTileLayout(Array<PrimExpr> shape) {
   PrimExpr extent = std::accumulate(shape.begin() + 1, shape.end(), shape[0],
                                     [](PrimExpr a, PrimExpr b) { return a * b; });
-  return TileLayout({Iter(extent, 1, Axis::Get("m"))}, {}, {}, {}, {});
+  return TileLayout({Iter(extent, 1, Axis::Get("m"))}, {}, {});
 }
 
 TLayout SwizzleLayoutNode::Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,

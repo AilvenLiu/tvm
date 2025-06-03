@@ -61,9 +61,9 @@ bool ExecScopeNode::Higher(const ExecScope& other) const { return Higher(other->
 
 TVM_REGISTER_NODE_TYPE(ExecScopeNode);
 
-TVM_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](String name) { return ExecScope(name); });
+TVM_FFI_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](String name) { return ExecScope(name); });
 
-TVM_REGISTER_GLOBAL("tirx.ExecScopeCreate").set_body_typed([](String name) {
+TVM_FFI_REGISTER_GLOBAL("tirx.ExecScopeCreate").set_body_typed([](String name) {
   return ExecScope::Create(name);
 });
 
@@ -77,7 +77,7 @@ WorldScope::WorldScope(ScopeIdDef def) {
 
 TVM_REGISTER_NODE_TYPE(WorldScopeNode);
 
-TVM_REGISTER_GLOBAL("tirx.WorldScope").set_body_typed([](ScopeIdDef def) {
+TVM_FFI_REGISTER_GLOBAL("tirx.WorldScope").set_body_typed([](ScopeIdDef def) {
   return WorldScope(def);
 });
 
@@ -91,7 +91,7 @@ KernelScope::KernelScope(Array<ScopeIdDef> def) {
 
 TVM_REGISTER_NODE_TYPE(KernelScopeNode);
 
-TVM_REGISTER_GLOBAL("tirx.KernelScope").set_body_typed([](Array<ScopeIdDef> def) {
+TVM_FFI_REGISTER_GLOBAL("tirx.KernelScope").set_body_typed([](Array<ScopeIdDef> def) {
   return KernelScope(def);
 });
 
@@ -125,7 +125,7 @@ bool ExecScopeSliceNode::Is(const ExecScope& other) const {
 
 TVM_REGISTER_NODE_TYPE(ExecScopeSliceNode);
 
-TVM_REGISTER_GLOBAL("tirx.ExecScopeSlice")
+TVM_FFI_REGISTER_GLOBAL("tirx.ExecScopeSlice")
     .set_body_typed([](Variant<Array<Range>, PrimExpr> slice, Optional<Array<PrimExpr>> extents,
                        String parent,
                        String cur) { return ExecScopeSlice(slice, extents, parent, cur); });
@@ -141,7 +141,7 @@ ScopePair::ScopePair(String parent, String cur) {
 
 TVM_REGISTER_NODE_TYPE(ScopePairNode);
 
-TVM_REGISTER_GLOBAL("tirx.ScopePair").set_body_typed([](String parent, String cur) {
+TVM_FFI_REGISTER_GLOBAL("tirx.ScopePair").set_body_typed([](String parent, String cur) {
   return ScopePair(parent, cur);
 });
 
@@ -167,7 +167,7 @@ PrimExpr ScopeIdDef::fused_extent() const {
 
 TVM_REGISTER_NODE_TYPE(ScopeIdDefNode);
 
-TVM_REGISTER_GLOBAL("tirx.ScopeIdDef")
+TVM_FFI_REGISTER_GLOBAL("tirx.ScopeIdDef")
     .set_body_typed([](Array<Var> vars, Array<PrimExpr> extents, ScopePair scope) {
       return ScopeIdDef(vars, extents, scope);
     });
@@ -343,5 +343,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm

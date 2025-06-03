@@ -123,6 +123,12 @@ class AxisNode : public Object {
   /*! \brief Check if the axis is a memory axis. */
   bool IsMemoryAxis() const;
 
+  /*! \brief Get the scope of the (thread) axis. */
+  Optional<ExecScope> GetScope() const;
+
+  /*! \brief Get the subscope of the (thread) axis. */
+  Optional<ExecScope> GetSubscope() const;
+
   static constexpr const char* _type_key = "tirx.Axis";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
@@ -175,6 +181,12 @@ class AxisRegEntry {
   /*! \brief Set the attribute for the axis. */
   template <typename ValueType>
   inline AxisRegEntry& set_attr(const String& attr_name, const ValueType& value, int plevel = 10);
+
+  /*! \brief Set the scope of the axis. */
+  inline AxisRegEntry& set_scope(const String& scope_name, int plevel = 10);
+
+  /*! \brief Set the subscope of the axis. */
+  inline AxisRegEntry& set_subscope(const String& subscope_name, int plevel = 10);
 
  private:
   // return internal pointer to op.
@@ -253,29 +265,22 @@ class TileLayoutNode : public TLayoutNode {
   Array<Iter> shard;
   Array<Iter> replicate;
   Array<Tuple<Iter, PrimExpr>> exclude;
-  Optional<ExecScope> subscope;
-  Optional<ExecScope> scope;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("shard", &shard);
     v->Visit("replicate", &replicate);
     v->Visit("exclude", &exclude);
-    v->Visit("subscope", &subscope);
-    v->Visit("scope", &scope);
   }
 
   bool SEqualReduce(const TileLayoutNode* other, SEqualReducer equal) const {
     return equal(shard, other->shard) && equal(replicate, other->replicate) &&
-           equal(exclude, other->exclude) && equal(subscope, other->subscope) &&
-           equal(scope, other->scope);
+           equal(exclude, other->exclude);
   }
 
   void SHashReduce(SHashReducer hash_reducer) const {
     hash_reducer(shard);
     hash_reducer(replicate);
     hash_reducer(exclude);
-    hash_reducer(subscope);
-    hash_reducer(scope);
   }
 
   /*! \brief Check if the layout is compatible with the shape */
@@ -324,6 +329,9 @@ class TileLayoutNode : public TLayoutNode {
   /*! \brief Has Thread Axis */
   bool HasThreadAxis() const;
 
+  /*! \brief Get the scope pair of the layout */
+  Optional<Tuple<ExecScope, ExecScope>> GetScope() const;
+
   static constexpr const char* _type_key = "tirx.TileLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
@@ -333,9 +341,7 @@ class TileLayoutNode : public TLayoutNode {
 class TileLayout : public TLayout {
  public:
   TVM_DLL explicit TileLayout(Array<Iter> shard, Array<Iter> replicate,
-                              Array<Tuple<Iter, PrimExpr>> exclude,
-                              Optional<ExecScope> subscope = std::nullopt,
-                              Optional<ExecScope> scope = std::nullopt);
+                              Array<Tuple<Iter, PrimExpr>> exclude);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);
@@ -487,7 +493,7 @@ class ComposeLayout : public TLayout {
 constexpr int kPSUMMaxElemPerBank = 512;
 constexpr int kPSUMBankNum = 8;
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

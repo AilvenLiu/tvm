@@ -46,12 +46,28 @@ bool AxisNode::IsMemoryAxis() const {
   return !thread_attr_map[GetRef<Axis>(this)];
 }
 
-TVM_REGISTER_GLOBAL("tir.AxisIsThreadAxis").set_body_typed([](Axis axis) {
+Optional<ExecScope> AxisNode::GetScope() const {
+  static const auto& scope_attr_map = Axis::GetAttrMap<Optional<ExecScope>>("scope");
+  return scope_attr_map.get(GetRef<Axis>(this), std::nullopt);
+}
+
+Optional<ExecScope> AxisNode::GetSubscope() const {
+  static const auto& subscope_attr_map = Axis::GetAttrMap<Optional<ExecScope>>("subscope");
+  return subscope_attr_map.get(GetRef<Axis>(this), std::nullopt);
+}
+
+TVM_FFI_REGISTER_GLOBAL("tir.AxisIsThreadAxis").set_body_typed([](Axis axis) {
   return axis->IsThreadAxis();
 });
 
-TVM_REGISTER_GLOBAL("tir.AxisIsMemoryAxis").set_body_typed([](Axis axis) {
+TVM_FFI_REGISTER_GLOBAL("tir.AxisIsMemoryAxis").set_body_typed([](Axis axis) {
   return axis->IsMemoryAxis();
+});
+
+TVM_FFI_REGISTER_GLOBAL("tir.AxisGetScope").set_body_typed([](Axis axis) { return axis->GetScope(); });
+
+TVM_FFI_REGISTER_GLOBAL("tir.AxisGetSubscope").set_body_typed([](Axis axis) {
+  return axis->GetSubscope();
 });
 
 // Axis
@@ -92,23 +108,40 @@ inline AxisRegEntry& AxisRegEntry::set_attr(const String& key, const ValueType& 
   return *this;
 }
 
+AxisRegEntry& AxisRegEntry::set_scope(const String& scope_name, int plevel) {
+  set_attr<Optional<ExecScope>>("scope", ExecScope::Create(scope_name), plevel);
+  return *this;
+}
+
+AxisRegEntry& AxisRegEntry::set_subscope(const String& subscope_name, int plevel) {
+  set_attr<Optional<ExecScope>>("subscope", ExecScope::Create(subscope_name), plevel);
+  return *this;
+}
+
 void AxisRegEntry::UpdateAttr(const String& key, ffi::Any value, int plevel) {
   AxisRegistry::Global()->UpdateAttr(key, axis_, value, plevel);
 }
 
 // register theaad axis
-TVM_REGISTER_AXIS("bx").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("by").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("bz").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("cbx").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("cby").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("cbz").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("tx").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("warpid").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("laneid").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("wgid").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("tid_in_wg").set_attr<bool>("thread", true);
-TVM_REGISTER_AXIS("wid_in_wg").set_attr<bool>("thread", true);
+TVM_REGISTER_AXIS("pid").set_attr<bool>("thread", true).set_scope("world").set_subscope("kernel");
+TVM_REGISTER_AXIS("bx").set_attr<bool>("thread", true).set_scope("kernel").set_subscope("cta");
+TVM_REGISTER_AXIS("by").set_attr<bool>("thread", true).set_scope("kernel").set_subscope("cta");
+TVM_REGISTER_AXIS("bz").set_attr<bool>("thread", true).set_scope("kernel").set_subscope("cta");
+TVM_REGISTER_AXIS("cbx").set_attr<bool>("thread", true).set_scope("cluster").set_subscope("cta");
+TVM_REGISTER_AXIS("cby").set_attr<bool>("thread", true).set_scope("cluster").set_subscope("cta");
+TVM_REGISTER_AXIS("cbz").set_attr<bool>("thread", true).set_scope("cluster").set_subscope("cta");
+TVM_REGISTER_AXIS("tx").set_attr<bool>("thread", true).set_scope("cta").set_subscope("thread");
+TVM_REGISTER_AXIS("warpid").set_attr<bool>("thread", true).set_scope("cta").set_subscope("warp");
+TVM_REGISTER_AXIS("laneid").set_attr<bool>("thread", true).set_scope("warp").set_subscope("thread");
+TVM_REGISTER_AXIS("wgid").set_attr<bool>("thread", true).set_scope("cta").set_subscope("warpgroup");
+TVM_REGISTER_AXIS("tid_in_wg")
+    .set_attr<bool>("thread", true)
+    .set_scope("warpgroup")
+    .set_subscope("thread");
+TVM_REGISTER_AXIS("wid_in_wg")
+    .set_attr<bool>("thread", true)
+    .set_scope("warpgroup")
+    .set_subscope("warp");
 
 // register memory axis
 TVM_REGISTER_AXIS("m").set_attr<bool>("thread", false);
@@ -118,7 +151,7 @@ TVM_REGISTER_AXIS("Bank").set_attr<bool>("thread", false);
 TVM_REGISTER_AXIS("TCol").set_attr<bool>("thread", false);
 TVM_REGISTER_AXIS("TLane").set_attr<bool>("thread", false);
 
-TVM_REGISTER_GLOBAL("tir.AxisGet").set_body_typed([](String name) -> Axis {
+TVM_FFI_REGISTER_GLOBAL("tir.AxisGet").set_body_typed([](String name) -> Axis {
   return Axis::Get(name);
 });
 
@@ -133,7 +166,7 @@ Iter::Iter(PrimExpr extent, PrimExpr stride, Axis axis) {
   data_ = std::move(n);
 }
 
-TVM_REGISTER_GLOBAL("tir.Iter").set_body_typed([](PrimExpr extent, PrimExpr stride, Axis axis) {
+TVM_FFI_REGISTER_GLOBAL("tir.Iter").set_body_typed([](PrimExpr extent, PrimExpr stride, Axis axis) {
   return Iter(extent, stride, axis);
 });
 
@@ -142,22 +175,18 @@ TVM_REGISTER_GLOBAL("tir.Iter").set_body_typed([](PrimExpr extent, PrimExpr stri
 TVM_REGISTER_NODE_TYPE(TileLayoutNode);
 
 TileLayout::TileLayout(Array<Iter> shard, Array<Iter> replicate,
-                       Array<Tuple<Iter, PrimExpr>> exclude, Optional<ExecScope> subscope,
-                       Optional<ExecScope> scope) {
+                       Array<Tuple<Iter, PrimExpr>> exclude) {
   auto n = make_object<TileLayoutNode>();
   n->shard = shard;
   n->replicate = replicate;
   n->exclude = exclude;
-  n->subscope = subscope;
-  n->scope = scope;
   data_ = std::move(n);
 }
 
-TVM_REGISTER_GLOBAL("tir.TileLayout")
+TVM_FFI_REGISTER_GLOBAL("tir.TileLayout")
     .set_body_typed([](Array<Iter> shard, Array<Iter> replicate,
-                       Array<Tuple<Iter, PrimExpr>> exclude, Optional<ExecScope> subscope,
-                       Optional<ExecScope> scope) {
-      return TileLayout(shard, replicate, exclude, subscope, scope);
+                       Array<Tuple<Iter, PrimExpr>> exclude) {
+      return TileLayout(shard, replicate, exclude);
     });
 
 bool TileLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const { return true; }
@@ -199,14 +228,9 @@ bool TileLayoutNode::VerifyWellFormed() const {
       return false;
     }
   }
-  // 2. If there's any thread axis, subscope and scope must be provided
-  if (!thread_axes.empty()) {
-    if (!subscope.defined() || !scope.defined()) {
-      return false;
-    }
-    if (!scope.value()->Higher(subscope.value())) {
-      return false;
-    }
+  // 2. Check if the scope is connected
+  if (!GetScope().defined() && HasThreadAxis()) {
+    return false;
   }
   return true;
 }
@@ -366,7 +390,7 @@ std::pair<TileLayout, std::vector<int64_t>> GroupByShape(TileLayout layout,
   return {GetRef<TileLayout>(n), seps};
 }
 
-TVM_REGISTER_GLOBAL("tir.TileLayoutGroupByShape")
+TVM_FFI_REGISTER_GLOBAL("tir.TileLayoutGroupByShape")
     .set_body_typed([](const TileLayout& layout, const Array<PrimExpr>& shape) {
       auto [res, seps] = GroupByShape(layout, shape);
       return Tuple<TileLayout, Array<int64_t>>{res, Array<int64_t>(seps.begin(), seps.end())};
@@ -406,7 +430,7 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
         new_shard.push_back(outer->shard[i]);
       }
     }
-    outer = TileLayout(new_shard, outer->replicate, outer->exclude, outer->subscope, outer->scope);
+    outer = TileLayout(new_shard, outer->replicate, outer->exclude);
   }
 
   CHECK(!outer_seps.empty()) << "Outer layout must only use split/reorder from logical scope";
@@ -437,20 +461,7 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
     tile_offset.push_back(iter_selector);
   }
 
-  Optional<ExecScope> tile_subscope;
-  Optional<ExecScope> tile_scope;
-
-  if (inner->subscope.defined()) {
-    tile_subscope = inner->subscope;
-    tile_scope = outer->subscope.defined() ? outer->scope : inner->scope;
-    if (outer->subscope.defined()) {
-      CHECK(outer->subscope.value()->Is(inner->scope.value()));
-    }
-  } else if (outer->subscope.defined()) {
-    tile_subscope = outer->subscope;
-    tile_scope = outer->scope;
-  }
-  return TileLayout(tile_shard, tile_rep, tile_offset, tile_subscope, tile_scope)->Normalize();
+  return TileLayout(tile_shard, tile_rep, tile_offset)->Normalize();
 }
 
 // Tiles a logical shape by a given factor array.
@@ -589,7 +600,7 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
     }
   }
   // TODO(@bohan): replicate and exclude should be considered here
-  auto res = TileLayout(inner_shard, this->replicate, this->exclude, tiled->subscope, tiled->scope);
+  auto res = TileLayout(inner_shard, this->replicate, this->exclude);
   PrimExpr inner_stride = res->GetCosize();
   // Check if the stride of the outer shard is correct
   for (size_t i = 0; i < tiled_shape.size(); ++i) {
@@ -613,10 +624,10 @@ bool TileLayoutNode::IsTrivial() const {
   if (shard.size() == 1) {
     if (!shard[0]->axis->IsMemoryAxis() || !is_one(shard[0]->stride)) return false;
   }
-  return replicate.size() == 0 && exclude.size() == 0 && !subscope.defined() && !scope.defined();
+  return replicate.size() == 0 && exclude.size() == 0;
 }
 
-TVM_REGISTER_GLOBAL("tir.TileLayoutIsTrivial").set_body_typed([](const TileLayout& layout) {
+TVM_FFI_REGISTER_GLOBAL("tir.TileLayoutIsTrivial").set_body_typed([](const TileLayout& layout) {
   return layout->Normalize().as<TileLayout>().value()->IsTrivial();
 });
 
@@ -627,7 +638,7 @@ bool TileLayoutNode::IsTrainium() const {
   });
 }
 
-TVM_REGISTER_GLOBAL("tir.TileLayoutIsTrainium").set_body_typed([](const TileLayout& layout) {
+TVM_FFI_REGISTER_GLOBAL("tir.TileLayoutIsTrainium").set_body_typed([](const TileLayout& layout) {
   return layout->IsTrainium();
 });
 
@@ -640,6 +651,55 @@ bool TileLayoutNode::HasThreadAxis() const {
   return std::any_of(shard.begin(), shard.end(),
                      [](const Iter& iter) { return iter->axis->IsThreadAxis(); });
 }
+
+Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
+  if (!HasThreadAxis()) return std::nullopt;
+
+  std::unordered_map<String, String> scope_map;
+  Optional<String> inner_most;
+
+  auto check_axis = [&](const Iter& iter) {
+    if (!iter->axis->IsThreadAxis()) return;
+
+    auto subscope_opt = iter->axis->GetSubscope();
+    auto scope_opt = iter->axis->GetScope();
+    CHECK(subscope_opt.defined() && scope_opt.defined())
+        << "Thread axis " << iter->axis->name << " has no subscope or scope";
+
+    String subscope = subscope_opt.value()->name;
+    String scope = scope_opt.value()->name;
+
+    if (!inner_most.defined() ||
+        ExecScope::Create(inner_most.value())->Higher(ExecScope::Create(subscope)))
+      inner_most = subscope;
+
+    auto it = scope_map.find(subscope);
+    if (it == scope_map.end())
+      scope_map[subscope] = scope;
+    else
+      CHECK_EQ(it->second, scope) << "Ill-formed tile layout: conflicting scopes for " << subscope;
+  };
+
+  for (const auto& iter : shard) check_axis(iter);
+  for (const auto& iter : replicate) check_axis(iter);
+  for (const auto& iter : exclude) check_axis(iter.get<0>());
+
+  String outer_most = inner_most.value();
+  size_t count = 0;
+  for (auto it = scope_map.find(outer_most); it != scope_map.end();
+       it = scope_map.find(outer_most)) {
+    count++;
+    outer_most = it->second;
+  }
+
+  CHECK_EQ(count, scope_map.size()) << "Ill-formed tile layout: disconnected scope chain";
+  return Tuple<ExecScope, ExecScope>{ExecScope(inner_most.value()), ExecScope(outer_most)};
+}
+
+TVM_FFI_REGISTER_GLOBAL("tir.TileLayoutGetScope")
+    .set_body_typed([](const TileLayout& layout) -> Optional<Tuple<ExecScope, ExecScope>> {
+      return layout->GetScope();
+    });
 
 }  // namespace tir
 }  // namespace tvm

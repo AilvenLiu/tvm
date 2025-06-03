@@ -353,11 +353,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
 
     # WGMMA layout check
     atom = T.TileLayout(shard=([1, 2], [2, 1]))
-    warp_layout = T.TileLayout(
-        shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
-        subscope="thread",
-        scope="warp",
-    )
+    warp_layout = T.TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
 
     def check_wgmma(buf):

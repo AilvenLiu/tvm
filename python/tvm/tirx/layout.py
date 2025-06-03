@@ -23,14 +23,14 @@ import re
 import operator
 
 import tvm
-import tvm._ffi
+import tvm.ffi
 from tvm.runtime import Object, ShapeTuple
 from tvm.tirx.expr import PrimExpr
 from . import _ffi_api
 from .exec_scope import ExecScope
 
 
-@tvm._ffi.register_object("tir.TLayout")
+@tvm.ffi.register_object("tir.TLayout")
 class TLayout(Object):
     def __init__(self):
         self.__init_handle_by_constructor__(_ffi_api.TLayout)  # pylint: disable=no-member
@@ -217,7 +217,7 @@ class TLayout(Object):
         return _ffi_api.TileLayoutIsTrainium(self)  # pylint: disable=no-member
 
 
-@tvm._ffi.register_object("tir.Axis")
+@tvm.ffi.register_object("tir.Axis")
 class Axis(Object):
     """Layout axis wrapper."""
 
@@ -226,6 +226,7 @@ class Axis(Object):
     # ------------------------------------------------------------------
     if TYPE_CHECKING:
         # Thread axes
+        pid: ClassVar["Axis"]
         bx: ClassVar["Axis"]
         by: ClassVar["Axis"]
         bz: ClassVar["Axis"]
@@ -252,6 +253,8 @@ class Axis(Object):
 
     # ---- implementation helpers ----
     _NAMES = [
+        # Thread axes
+        "pid",
         "bx",
         "by",
         "bz",
@@ -264,6 +267,7 @@ class Axis(Object):
         "wgid",
         "tid_in_wg",
         "wid_in_wg",
+        # Memory axes
         "m",
         "P",
         "F",
@@ -291,6 +295,14 @@ class Axis(Object):
         """Check if the axis is a memory axis."""
         return _ffi_api.AxisIsMemoryAxis(self)  # pylint: disable=no-member
 
+    def get_scope(self) -> Optional[ExecScope]:
+        """Get the scope of the axis."""
+        return _ffi_api.AxisGetScope(self)  # pylint: disable=no-member
+
+    def get_subscope(self) -> Optional[ExecScope]:
+        """Get the subscope of the axis."""
+        return _ffi_api.AxisGetSubscope(self)  # pylint: disable=no-member
+
 
 # ------------------------------------------------------------------
 # 2)  Runtime: actually attach the attributes
@@ -302,7 +314,7 @@ for _n in Axis._NAMES:  # pylint: disable=protected-access
     Axis.reg_dict[_n] = _axis_obj
 
 
-@tvm._ffi.register_object("tir.Iter")
+@tvm.ffi.register_object("tir.Iter")
 class Iter(Object):
     """A memory layout that tiles data across devices."""
 
@@ -318,15 +330,13 @@ class Iter(Object):
         )
 
 
-@tvm._ffi.register_object("tir.TileLayout")
+@tvm.ffi.register_object("tir.TileLayout")
 class TileLayout(TLayout):
     """A memory layout that tiles data across devices."""
 
     shard: List[Iter]
     replicate: List[Iter]
     exclude: List[Tuple[Iter, PrimExpr]]
-    subscope: Optional[ExecScope]
-    scope: Optional[ExecScope]
 
     IterList: TypeAlias = Tuple[
         List[PrimExpr], List[Union[Tuple[PrimExpr, Union[str, Axis]], PrimExpr]]
@@ -337,8 +347,6 @@ class TileLayout(TLayout):
         shard: IterList = None,
         replicate: IterList = None,
         exclude: Tuple[IterList, List[PrimExpr]] = None,
-        subscope: Optional[Union[str, ExecScope]] = None,
-        scope: Optional[Union[str, ExecScope]] = None,
     ):
         # Handle None values
         if shard is None:
@@ -372,19 +380,11 @@ class TileLayout(TLayout):
         exclude = ([process_iter(e, s) for e, s in zip(exclude[0][0], exclude[0][1])], exclude[1])
         exclude = list(zip(exclude[0], exclude[1]))
 
-        # Convert to ExecScope objects
-        if isinstance(subscope, str):
-            subscope = ExecScope.create(subscope)
-        if isinstance(scope, str):
-            scope = ExecScope.create(scope)
-
         self.__init_handle_by_constructor__(
             _ffi_api.TileLayout,  # pylint: disable=no-member
             shard,
             replicate,
             exclude,
-            subscope,
-            scope,
         )
 
     def is_trivial(self) -> bool:
@@ -405,6 +405,10 @@ class TileLayout(TLayout):
             The grouped layout and the separators
         """
         return _ffi_api.TileLayoutGroupByShape(self, shape)  # pylint: disable=no-member
+
+    def get_scope(self) -> Optional[Tuple[ExecScope, ExecScope]]:
+        """Get the scope pair of the layout."""
+        return _ffi_api.TileLayoutGetScope(self)  # pylint: disable=no-member
 
     @classmethod
     def trainium(
@@ -461,7 +465,7 @@ class TileLayout(TLayout):
             result = result[1:]
             result = result[:p_idx] + [higher_P] + result[p_idx:]
 
-        res = _ffi_api.TileLayout(result, [], [], None, None)  # pylint: disable=no-member
+        res = _ffi_api.TileLayout(result, [], [])  # pylint: disable=no-member
         if is_psum:
             res = res.to_psum()
         return res
@@ -491,10 +495,10 @@ class TileLayout(TLayout):
                     assert False, f"layout {self} can not be converted to psum layout"
             else:
                 shard.append(i)
-        return _ffi_api.TileLayout(shard, [], [], None, None)  # pylint: disable=no-member
+        return _ffi_api.TileLayout(shard, [], [])  # pylint: disable=no-member
 
 
-@tvm._ffi.register_object("tir.SwizzleLayout")
+@tvm.ffi.register_object("tir.SwizzleLayout")
 class SwizzleLayout(TLayout):
     """A memory layout that swizzles elements to improve memory access patterns."""
 
@@ -515,7 +519,7 @@ class SwizzleLayout(TLayout):
         )
 
 
-@tvm._ffi.register_object("tir.ComposeLayout")
+@tvm.ffi.register_object("tir.ComposeLayout")
 class ComposeLayout(TLayout):
     """A memory layout that composes 2 layouts."""
 

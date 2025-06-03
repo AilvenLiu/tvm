@@ -45,18 +45,18 @@ OpCall::OpCall(tvm::Op op, Array<ffi::Any> args, Map<String, Buffer> workspace,
   data_ = std::move(n);
 }
 
-TVM_REGISTER_GLOBAL("tirx.OpCall")
+TVM_FFI_REGISTER_GLOBAL("tirx.OpCall")
     .set_body_typed([](tvm::Op op, Array<ffi::Any> args, Map<String, Buffer> workspace,
                        Map<String, ffi::Any> schedule_config) {
       return OpCall(op, args, workspace, schedule_config);
     });
 
-TVM_REGISTER_GLOBAL("tirx.OpCallCopyHandle").set_body_typed([](const OpCall& op) {
+TVM_FFI_REGISTER_GLOBAL("tirx.OpCallCopyHandle").set_body_typed([](const OpCall& op) {
   return OpCall(op);
 });
 
 TVM_REGISTER_NODE_TYPE(OpCallNode);
 
-}  // namespace tirxxxxxp
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxxp
+}  // namespace tirxxxxxx
 }  // namespace tvm

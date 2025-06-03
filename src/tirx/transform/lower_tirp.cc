@@ -22,7 +22,6 @@
  * \file lower_tirp.cc
  */
 #include <tvm/arith/analyzer.h>
-#include <tvm/runtime/registry.h>
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/op.h>
 #include <tvm/tirx/stmt_functor.h>
@@ -739,8 +738,8 @@ Pass LowerTIRp() {
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRp", {});
 }
 
-TVM_REGISTER_GLOBAL("tirx.transform.LowerTIRp").set_body_typed(LowerTIRp);
+TVM_FFI_REGISTER_GLOBAL("tirx.transform.LowerTIRp").set_body_typed(LowerTIRp);
 
 }  // namespace transform
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace tvm

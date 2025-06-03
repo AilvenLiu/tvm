@@ -19,7 +19,7 @@ from typing import List, Optional
 from enum import IntEnum
 
 import tvm
-import tvm._ffi
+import tvm.ffi
 
 from . import _ffi_api
 from .type import Type
@@ -59,7 +59,7 @@ class TensorMapOOBFillKind(IntEnum):
     kNan = 1
 
 
-@tvm._ffi.register_object("TensorMapType")
+@tvm.ffi.register_object("TensorMapType")
 class TensorMapType(Type):
     """TensorMap type in the IR.
 

@@ -246,7 +246,7 @@ Break::Break(Span span) {
   data_ = std::move(node);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.Break", [](Span span) { return Break(span); });
 });
@@ -258,7 +258,7 @@ Continue::Continue(Span span) {
   data_ = std::move(node);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.Continue", [](Span span) { return Continue(span); });
 });
@@ -575,7 +575,7 @@ BufferView::BufferView(Buffer src_buffer, TLayout layout, Buffer dst_buffer) {
   data_ = std::move(node);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.BufferView", [](Buffer src_buffer, TLayout layout, Buffer dst_buffer) {
     return BufferView(src_buffer, layout, dst_buffer);
@@ -590,7 +590,7 @@ BufferGet::BufferGet(Buffer src_buffer, Buffer dst_buffer) {
   data_ = std::move(node);
 }
 
-TVM_REGISTER_GLOBAL("tir.BufferGet").set_body_typed([](Buffer src_buffer, Buffer dst_buffer) {
+TVM_FFI_REGISTER_GLOBAL("tir.BufferGet").set_body_typed([](Buffer src_buffer, Buffer dst_buffer) {
   return BufferGet(src_buffer, dst_buffer);
 });
 
@@ -603,8 +603,6 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
                ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
                Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views,
                ffi::Array<BufferGet> buffer_gets, ffi::Array<Pipeline> pipelines) {
-  annotations =
-      Downcast<ffi::Map<ffi::String, ffi::ObjectRef>>(NormalizeAttributeObject(annotations));
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = std::move(iter_vars);
   node->reads = std::move(reads);

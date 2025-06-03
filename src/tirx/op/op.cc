@@ -1297,7 +1297,7 @@ PrimExpr PrintOpPacked(Var data, DataType dtype, Array<PrimExpr> shape) {
   return tir::Call(dtype, tir::builtin::print_buffer(), args);
 }
 
-TVM_REGISTER_GLOBAL("tir.print_buffer").set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
+TVM_FFI_REGISTER_GLOBAL("tir.print_buffer").set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
   Array<PrimExpr> shape;
   for (int i = 3; i < args.size(); ++i) {
     shape.push_back(args[i].cast<PrimExpr>());

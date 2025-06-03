@@ -19,7 +19,7 @@
 """Definition of execution scope."""
 from typing import List
 
-from tvm._ffi import register_object, get_global_func
+from tvm.ffi import register_object, get_global_func
 from tvm.runtime import Object
 from tvm.ir import Range
 
