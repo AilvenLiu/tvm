@@ -25,6 +25,7 @@ from tvm.tirp.op_schedule.cuda.async_structs import tma_shared_layout, SwizzleMo
 
 
 def test_axis():
+    assert Axis.pid == Axis.get("pid")
     assert Axis.bx == Axis.get("bx")
     assert Axis.by == Axis.get("by")
     assert Axis.bz == Axis.get("bz")
@@ -43,6 +44,7 @@ def test_axis():
     assert Axis.TCol == Axis.get("TCol")
     assert Axis.TLane == Axis.get("TLane")
 
+    assert Axis.pid.is_thread()
     assert Axis.bx.is_thread()
     assert Axis.by.is_thread()
     assert Axis.bz.is_thread()
@@ -61,6 +63,8 @@ def test_axis():
     assert Axis.TCol.is_memory()
     assert Axis.TLane.is_memory()
 
+    assert Axis.pid.get_scope().name == "world"
+    assert Axis.pid.get_subscope().name == "kernel"
     assert Axis.bx.get_scope().name == "kernel"
     assert Axis.bx.get_subscope().name == "cta"
 
@@ -493,6 +497,96 @@ def test_normalize_tile_layout():
 
     unit_layout_case1()
 
+    def case_fuse_axis():
+        with tvm.target.Target("cuda"):
+            layout = TileLayout(
+                shard=([2, 8, 2, 4], [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid")]),
+            )
+            layout_expected = TileLayout(
+                shard=(
+                    [2, 8, 2, 4],
+                    [(64, "tx"), (4, "tx"), (32, "tx"), (1, "tx")],
+                ),
+            )
+            assert layout.verify_well_formed()
+            assert layout_expected.verify_well_formed()
+            assert_structural_equal(layout_expected, layout.normalize())
+
+            layout = TileLayout(
+                shard=([2, 2, 8, 4], [(2, "warpid"), (1, "warpid"), (4, "laneid"), (1, "laneid")]),
+            )
+            layout_expected = TileLayout(shard=([128], [(1, "tx")]))
+            assert layout.verify_well_formed()
+            assert layout_expected.verify_well_formed()
+            assert_structural_equal(layout_expected, layout.normalize())
+
+            layout = TileLayout(
+                shard=(
+                    [2, 2, 8, 2, 2, 4],
+                    [
+                        (2, "wgid"),
+                        (2, "wid_in_wg"),
+                        (4, "laneid"),
+                        (1, "wgid"),
+                        (1, "wid_in_wg"),
+                        (1, "laneid"),
+                    ],
+                ),
+            )
+            layout_expected = TileLayout(
+                shard=(
+                    [2, 2, 8, 2, 2, 4],
+                    [(256, "tx"), (64, "tx"), (4, "tx"), (128, "tx"), (32, "tx"), (1, "tx")],
+                ),
+            )
+            assert layout.verify_well_formed()
+            assert layout_expected.verify_well_formed()
+            assert_structural_equal(layout_expected, layout.normalize())
+
+            layout = TileLayout(
+                shard=(
+                    [2, 8, 2, 4],
+                    [(2, "wid_in_wg"), (4, "laneid"), (1, "wid_in_wg"), (1, "laneid")],
+                ),
+            )
+            layout_expected = TileLayout(
+                shard=(
+                    [2, 8, 2, 4],
+                    [(64, "tid_in_wg"), (4, "tid_in_wg"), (32, "tid_in_wg"), (1, "tid_in_wg")],
+                ),
+            )
+            assert layout.verify_well_formed()
+            assert layout_expected.verify_well_formed()
+            assert_structural_equal(layout_expected, layout.normalize())
+
+            layout = TileLayout(
+                shard=(
+                    [2, 2, 4, 32],
+                    [(2, "wgid"), (1, "wgid"), (32, "tid_in_wg"), (1, "tid_in_wg")],
+                ),
+            )
+            layout_expected = TileLayout(shard=([512], [(1, "tx")]))
+            assert layout.verify_well_formed()
+            assert layout_expected.verify_well_formed()
+            assert_structural_equal(layout_expected, layout.normalize())
+
+    case_fuse_axis()
+
+    def case_sort_replicate_exclude_iters():
+        layout1 = TileLayout(
+            shard=([1], [1]),
+            replicate=([8, 4], [(4, "laneid"), (1, "laneid")]),
+            exclude=(([2, 2], [(2, "warpid"), (1, "warpid")]), [1, 0]),
+        )
+        layout2 = TileLayout(
+            shard=([1], [1]),
+            replicate=([4, 8], [(1, "laneid"), (4, "laneid")]),
+            exclude=(([2, 2], [(1, "warpid"), (2, "warpid")]), [0, 1]),
+        )
+        assert_structural_equal(layout1.normalize(), layout2.normalize())
+
+    case_sort_replicate_exclude_iters()
+
 
 def test_tile_layout():
     def case1():
@@ -724,7 +818,6 @@ def test_tile_layout():
         # Normalized Tile Layout Test - 9 (tile = inner w/ device + diff major-dim)
         outer = TileLayout(shard=([16, 8, 4], [1, 64, 16]))
         inner = TileLayout(shard=([2, 4, 2, 2], [4, 1, 4, 3]))
-        inner_tmp = TileLayout(shard=([1, 2, 2], [8, 4, 3]))
         layout_tile = inner.tile(outer, (16, 8, 4), (8, 2, 2))
 
         outer_res = inner.is_tile_inner(layout_tile, (128, 16, 8), (8, 2, 2))
@@ -734,7 +827,6 @@ def test_tile_layout():
         assert not outer.normalize().is_tile_inner(
             layout_tile.normalize(), (128, 16, 8), (16, 8, 4)
         )
-        assert inner_tmp.is_tile_inner(layout_tile.normalize(), (128, 16, 8), (1, 2, 2))
 
     case12_normalized9()
 
@@ -872,15 +964,23 @@ def test_shard_layout():
         layout_expected = TileLayout(shard=([32, 2], [(1, "laneid"), (1, "m")]))
         assert_structural_equal(res.normalize(), layout_expected.normalize())
 
+        outer = layout.is_tile_inner(res, [8, 8], [1, 2])
+        assert outer is not None
+        assert_structural_equal(outer.normalize(), layout_warp.normalize())
+
+        inner = layout_warp.is_tile_outer(res, [8, 8], [8, 4])
+        assert inner is not None
+        assert_structural_equal(inner.normalize(), layout.normalize())
+
     case_mma_layout()
 
     def case_cta_layout():
-        # layout = T.TileLayout.from_tuple(data=(1, 2), strides=(2, 1))
         layout = TileLayout(shard=([1, 2], [2, 1]))
         layout_warp = TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
         layout_cta = TileLayout(shard=([2, 2], [(2, "warpid"), (1, "warpid")]))
 
-        res = layout.tile(layout_warp, [8, 4], [1, 2]).tile(layout_cta, [2, 2], [8, 8])
+        res_warp = layout.tile(layout_warp, [8, 4], [1, 2])
+        res = res_warp.tile(layout_cta, [2, 2], [8, 8])
         layout_expected = TileLayout(
             shard=(
                 [2, 8, 2, 4, 2],
@@ -889,7 +989,61 @@ def test_shard_layout():
         )
         assert_structural_equal(res.normalize(), layout_expected.normalize())
 
+        outer = layout.is_tile_inner(res, [16, 16], [1, 2])
+        outer_expected = TileLayout(
+            shard=(
+                [2, 8, 2, 4],
+                [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid")],
+            ),
+        )
+        assert outer is not None
+        assert_structural_equal(outer, outer_expected)
+
+        inner = layout_cta.is_tile_outer(res, [16, 16], [2, 2])
+        assert inner is not None
+        assert_structural_equal(inner.normalize(), res_warp.normalize())
+
     case_cta_layout()
+
+    def case_cta_layout2():
+        with tvm.target.Target("cuda"):
+            tiled = TileLayout(
+                shard=(
+                    [2, 8, 2, 4, 2],
+                    [(64, "tx"), (4, "tx"), (32, "tx"), (1, "tx"), (1, "m")],
+                ),
+            )
+            # local is inner of cta
+            layout = TileLayout(shard=([2], [1]))
+            outer = layout.is_tile_inner(tiled, [16, 16], [1, 2])
+            assert outer is not None
+            outer_expected = TileLayout(
+                shard=([2, 8, 2, 4], [(64, "tx"), (4, "tx"), (32, "tx"), (1, "tx")])
+            )
+            assert_structural_equal(outer.normalize(), outer_expected.normalize())
+
+            layout = TileLayout(
+                shard=([2, 8, 2, 4], [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid")])
+            )
+            inner = layout.is_tile_outer(tiled, [16, 16], [16, 8])
+            inner_expected = TileLayout(shard=([2], [1]))
+            assert inner is not None
+            assert_structural_equal(inner.normalize(), inner_expected.normalize())
+
+            # warp view is inner of cta
+            layout = TileLayout(shard=([8, 1, 4, 2], [(4, "laneid"), 2, (1, "laneid"), 1]))
+            outer = layout.is_tile_inner(tiled, [16, 16], [8, 8])
+            assert outer is not None
+            outer_expected = TileLayout(shard=([2, 2], [(2, "warpid"), (1, "warpid")]))
+            assert_structural_equal(outer.normalize(), outer_expected.normalize())
+
+            layout = TileLayout(shard=([2, 2], [(2, "warpid"), (1, "warpid")]))
+            inner = layout.is_tile_outer(tiled, [16, 16], [2, 2])
+            inner_expected = TileLayout(shard=([32, 2], [(1, "laneid"), 1]))
+            assert inner is not None
+            assert_structural_equal(inner.normalize(), inner_expected.normalize())
+
+    case_cta_layout2()
 
     def case_quad_shuffle():
         layout = TileLayout(shard=([1, 2], [2, 1]))
@@ -903,16 +1057,32 @@ def test_shard_layout():
         )
         assert_structural_equal(res.normalize(), layout_expected.normalize())
 
+        outer = layout.is_tile_inner(res, [8, 2], [1, 2])
+        assert outer is not None
+        assert_structural_equal(outer.normalize(), layout_warp.normalize())
+
+        inner = layout_warp.is_tile_outer(res, [8, 2], [8, 1])
+        assert inner is not None
+        assert_structural_equal(inner.normalize(), layout.normalize())
+
     case_quad_shuffle()
 
     def case_replicate():
         layout = TileLayout(shard=([64, 128], [128, 1]))
-        layout_rep = TileLayout(shard=([2], [(2, "laneid")]), replicate=([2], [(1, "laneid")]))
+        layout_rep = TileLayout(shard=([2], [(2, "pid")]), replicate=([2], [(1, "pid")]))
         res = layout.tile(layout_rep, [2, 1], [64, 128])
         layout_expected = TileLayout(
-            shard=([2, 8192], [(2, "laneid"), (1, "m")]), replicate=([2], [(1, "laneid")])
+            shard=([2, 8192], [(2, "pid"), (1, "m")]), replicate=([2], [(1, "pid")])
         )
         assert_structural_equal(res.normalize(), layout_expected.normalize())
+
+        outer = layout.is_tile_inner(res, [128, 128], [64, 128])
+        assert outer is not None
+        assert_structural_equal(outer.normalize(), layout_rep.normalize())
+
+        inner = layout_rep.is_tile_outer(res, [128, 128], [2, 1])
+        assert inner is not None
+        assert_structural_equal(inner.normalize(), layout.normalize())
 
     case_replicate()
 

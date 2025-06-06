@@ -56,6 +56,16 @@ Optional<ExecScope> AxisNode::GetSubscope() const {
   return subscope_attr_map.get(GetRef<Axis>(this), std::nullopt);
 }
 
+Optional<FAxisFuser> AxisNode::GetFuser() const {
+  static const auto& fuser_attr_map = Axis::GetAttrMap<Optional<FAxisFuser>>("fuser");
+  return fuser_attr_map.get(GetRef<Axis>(this), std::nullopt);
+}
+
+Optional<FAxisSplitter> AxisNode::GetSplitter() const {
+  static const auto& splitter_attr_map = Axis::GetAttrMap<Optional<FAxisSplitter>>("splitter");
+  return splitter_attr_map.get(GetRef<Axis>(this), std::nullopt);
+}
+
 TVM_FFI_REGISTER_GLOBAL("tir.AxisIsThreadAxis").set_body_typed([](Axis axis) {
   return axis->IsThreadAxis();
 });
@@ -64,7 +74,9 @@ TVM_FFI_REGISTER_GLOBAL("tir.AxisIsMemoryAxis").set_body_typed([](Axis axis) {
   return axis->IsMemoryAxis();
 });
 
-TVM_FFI_REGISTER_GLOBAL("tir.AxisGetScope").set_body_typed([](Axis axis) { return axis->GetScope(); });
+TVM_FFI_REGISTER_GLOBAL("tir.AxisGetScope").set_body_typed([](Axis axis) {
+  return axis->GetScope();
+});
 
 TVM_FFI_REGISTER_GLOBAL("tir.AxisGetSubscope").set_body_typed([](Axis axis) {
   return axis->GetSubscope();
@@ -118,11 +130,38 @@ AxisRegEntry& AxisRegEntry::set_subscope(const String& subscope_name, int plevel
   return *this;
 }
 
+AxisRegEntry& AxisRegEntry::set_fuser(const FAxisFuser& fuser) {
+  set_attr<Optional<FAxisFuser>>("fuser", fuser);
+  return *this;
+}
+
+AxisRegEntry& AxisRegEntry::set_splitter(const FAxisSplitter& splitter) {
+  set_attr<Optional<FAxisSplitter>>("splitter", splitter);
+  return *this;
+}
+
 void AxisRegEntry::UpdateAttr(const String& key, ffi::Any value, int plevel) {
   AxisRegistry::Global()->UpdateAttr(key, axis_, value, plevel);
 }
 
 // register theaad axis
+Array<Iter> SplitterGen(const Iter& iter, const Axis& axis_outer, const Axis& axis_inner,
+                        const PrimExpr& e_inner) {
+  arith::Analyzer analyzer;
+  if (analyzer.CanProve(iter->extent * iter->stride < e_inner)) {
+    return {Iter(iter->extent, iter->stride, axis_inner)};
+  } else if (analyzer.CanProveEqual(floormod(e_inner, iter->stride), 0) &&
+             analyzer.CanProveEqual(floormod(iter->extent * iter->stride, e_inner), 0)) {
+    const auto& d = analyzer.Simplify(floordiv(e_inner, iter->stride));
+    const auto& c = analyzer.Simplify(floordiv(iter->extent, d));
+    return {Iter(c, IntImm(e_inner.dtype(), 1), axis_outer), Iter(d, iter->stride, axis_inner)};
+  } else if (analyzer.CanProveEqual(floormod(iter->stride, e_inner), 0)) {
+    const auto& d = analyzer.Simplify(floordiv(iter->stride, e_inner));
+    return {Iter(iter->extent, d, axis_outer)};
+  }
+  return {};
+}
+
 TVM_REGISTER_AXIS("pid").set_attr<bool>("thread", true).set_scope("world").set_subscope("kernel");
 TVM_REGISTER_AXIS("bx").set_attr<bool>("thread", true).set_scope("kernel").set_subscope("cta");
 TVM_REGISTER_AXIS("by").set_attr<bool>("thread", true).set_scope("kernel").set_subscope("cta");
@@ -130,18 +169,154 @@ TVM_REGISTER_AXIS("bz").set_attr<bool>("thread", true).set_scope("kernel").set_s
 TVM_REGISTER_AXIS("cbx").set_attr<bool>("thread", true).set_scope("cluster").set_subscope("cta");
 TVM_REGISTER_AXIS("cby").set_attr<bool>("thread", true).set_scope("cluster").set_subscope("cta");
 TVM_REGISTER_AXIS("cbz").set_attr<bool>("thread", true).set_scope("cluster").set_subscope("cta");
-TVM_REGISTER_AXIS("tx").set_attr<bool>("thread", true).set_scope("cta").set_subscope("thread");
-TVM_REGISTER_AXIS("warpid").set_attr<bool>("thread", true).set_scope("cta").set_subscope("warp");
-TVM_REGISTER_AXIS("laneid").set_attr<bool>("thread", true).set_scope("warp").set_subscope("thread");
-TVM_REGISTER_AXIS("wgid").set_attr<bool>("thread", true).set_scope("cta").set_subscope("warpgroup");
+TVM_REGISTER_AXIS("tx")
+    .set_attr<bool>("thread", true)
+    .set_scope("cta")
+    .set_subscope("thread")
+    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+      if (target->kind->default_device_type == kDLCUDA) {
+        return std::nullopt;
+      }
+      return std::nullopt;
+    })
+    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+      arith::Analyzer analyzer;
+      if (target->kind->default_device_type == kDLCUDA) {
+        if (scope == "warp") {
+          // tx -> warpid, laneid
+          return SplitterGen(iter, Axis::Get("warpid"), Axis::Get("laneid"), 32);
+        } else if (scope == "warpgroup") {
+          // tx -> wgid, tid_in_wg
+          return SplitterGen(iter, Axis::Get("wgid"), Axis::Get("tid_in_wg"), 128);
+        }
+        LOG(FATAL) << "Cannot split cta->thread axis into cta->" << scope << "->thread";
+      }
+      return {};
+    });
+TVM_REGISTER_AXIS("warpid")
+    .set_attr<bool>("thread", true)
+    .set_scope("cta")
+    .set_subscope("warp")
+    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+      if (target->kind->default_device_type == kDLCUDA) {
+        // cta->warp ===> cta->thread (tx)
+        if (subscope == "thread" && scope == "cta") {
+          return Iter(iter->extent, 32 * iter->stride, Axis::Get("tx"));
+        }
+        return std::nullopt;
+      }
+      return std::nullopt;
+    })
+    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+      arith::Analyzer analyzer;
+      if (target->kind->default_device_type == kDLCUDA) {
+        if (scope == "warp") {
+          // warpid -> wgid, wid_in_wg
+          return SplitterGen(iter, Axis::Get("wgid"), Axis::Get("wid_in_wg"), 4);
+        }
+        LOG(FATAL) << "Cannot split cta->warp axis into cta->" << scope << "->warp";
+      }
+      return {};
+    });
+TVM_REGISTER_AXIS("laneid")
+    .set_attr<bool>("thread", true)
+    .set_scope("warp")
+    .set_subscope("thread")
+    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+      if (target->kind->default_device_type == kDLCUDA) {
+        if (subscope == "thread" && scope == "warpgroup") {
+          // warp->thread ===> warpgroup->thread (tid_in_wg)
+          return Iter(iter->extent, iter->stride, Axis::Get("tid_in_wg"));
+        } else if (subscope == "thread" && scope == "cta") {
+          // warp->thread ===> cta->thread (tx)
+          return Iter(iter->extent, iter->stride, Axis::Get("tx"));
+        }
+        return std::nullopt;
+      }
+      return std::nullopt;
+    })
+    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+      arith::Analyzer analyzer;
+      if (target->kind->default_device_type == kDLCUDA) {
+        LOG(FATAL) << "laneid can not be split any more";
+      }
+      return {};
+    });
+TVM_REGISTER_AXIS("wgid")
+    .set_attr<bool>("thread", true)
+    .set_scope("cta")
+    .set_subscope("warpgroup")
+    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+      if (target->kind->default_device_type == kDLCUDA) {
+        if (subscope == "thread" && scope == "cta") {
+          // cta->warpgroup ===> cta->thread (tx)
+          return Iter(iter->extent, iter->stride * 128, Axis::Get("tx"));
+        } else if (subscope == "warp" && scope == "cta") {
+          // cta->warpgroup ===> cta->warp (warpid)
+          return Iter(iter->extent, iter->stride * 4, Axis::Get("wgid"));
+        }
+      }
+      return std::nullopt;
+    })
+    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+      arith::Analyzer analyzer;
+      if (target->kind->default_device_type == kDLCUDA) {
+        LOG(FATAL) << "wgid can not be split any more";
+      }
+      return {};
+    });
 TVM_REGISTER_AXIS("tid_in_wg")
     .set_attr<bool>("thread", true)
     .set_scope("warpgroup")
-    .set_subscope("thread");
+    .set_subscope("thread")
+    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+      if (target->kind->default_device_type == kDLCUDA) {
+        if (subscope == "thread" && scope == "cta") {
+          // warpgroup->thread ===> cta->thread (tx)
+          return Iter(iter->extent, iter->stride, Axis::Get("tx"));
+        }
+        return std::nullopt;
+      }
+      return std::nullopt;
+    })
+    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+      arith::Analyzer analyzer;
+      if (target->kind->default_device_type == kDLCUDA) {
+        if (scope == "warp") {
+          // tid_in_wg -> wid_in_wg, laneid
+          return SplitterGen(iter, Axis::Get("wid_in_wg"), Axis::Get("laneid"), 32);
+        }
+        LOG(FATAL) << "Cannot split warpgroup->thread axis into warpgroup->" << scope << "->thread";
+      }
+      return {};
+    });
 TVM_REGISTER_AXIS("wid_in_wg")
     .set_attr<bool>("thread", true)
     .set_scope("warpgroup")
-    .set_subscope("warp");
+    .set_subscope("warp")
+    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+      if (target->kind->default_device_type == kDLCUDA) {
+        if (subscope == "thread" && scope == "warpgroup") {
+          // warpgroup->warp ===> warpgroup->thread (tid_in_wg)
+          return Iter(iter->extent, iter->stride * 32, Axis::Get("tid_in_wg"));
+        } else if (subscope == "thread" && scope == "cta") {
+          // warpgroup->warp ===> cta->thread (tx)
+          return Iter(iter->extent, iter->stride * 32, Axis::Get("tx"));
+        } else if (subscope == "warp" && scope == "cta") {
+          // warpgroup->warp ===> cta->warp (warpid)
+          return Iter(iter->extent, iter->stride, Axis::Get("warpid"));
+        }
+        return std::nullopt;
+      }
+      return std::nullopt;
+    })
+    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+      arith::Analyzer analyzer;
+      if (target->kind->default_device_type == kDLCUDA) {
+        LOG(FATAL) << "wid_in_wg can not be split any more";
+      }
+      return {};
+    });
 
 // register memory axis
 TVM_REGISTER_AXIS("m").set_attr<bool>("thread", false);
@@ -312,7 +487,7 @@ TileLayout RemoveUnitIters(TileLayout layout) {
   return GetRef<TileLayout>(new_layout);
 }
 
-TileLayout FuseShardAxes(TileLayout layout) {
+TileLayout FuseShardIters(TileLayout layout) {
   std::vector<Iter> fused_shard;
   arith::Analyzer ana;
   const auto& shard = layout->shard;
@@ -337,11 +512,68 @@ TileLayout FuseShardAxes(TileLayout layout) {
   return GetRef<TileLayout>(new_layout);
 }
 
+TileLayout TryFuseAxes(TileLayout layout) {
+  // Step 1: Get the target and scope information
+  auto scope_pair_opt = layout->GetScope();
+  Target target = Target::Current();
+  if (!scope_pair_opt.has_value() || !target.defined()) {
+    return layout;
+  }
+  auto subscope = scope_pair_opt.value().get<0>()->name;
+  auto scope = scope_pair_opt.value().get<1>()->name;
+
+  // Step 2: Create vectors for the new layout components
+  std::vector<Iter> new_shard;
+  std::vector<Iter> new_replicate;
+  std::vector<Tuple<Iter, PrimExpr>> new_exclude;
+
+  // Step 3: Define the axis fusion function
+  auto try_fuse_axis = [&](const Iter& iter) -> Iter {
+    const auto& fuser = iter->axis->GetFuser();
+    return fuser.has_value() ? fuser.value()(target, subscope, scope, iter).value_or(iter) : iter;
+  };
+
+  // Step 4: Process shard iterators
+  for (size_t i = 0; i < layout->shard.size(); ++i) {
+    new_shard.push_back(try_fuse_axis(layout->shard[i]));
+  }
+  // Step 5: Process replicate iterators
+  for (size_t i = 0; i < layout->replicate.size(); ++i) {
+    new_replicate.push_back(try_fuse_axis(layout->replicate[i]));
+  }
+  // Step 6: Process exclude iterators
+  for (size_t i = 0; i < layout->exclude.size(); ++i) {
+    new_exclude.push_back(Tuple<Iter, PrimExpr>(try_fuse_axis(layout->exclude[i].get<0>()),
+                                                layout->exclude[i].get<1>()));
+  }
+  // Step 7: Create and return the new layout
+  auto result = TileLayout(new_shard, new_replicate, new_exclude);
+  return result;
+}
+
+TileLayout SortReplicateExcludeIters(TileLayout layout) {
+  auto n = layout.CopyOnWrite();
+  std::vector<Iter> replicate(n->replicate.begin(), n->replicate.end());
+  std::vector<Tuple<Iter, PrimExpr>> exclude(n->exclude.begin(), n->exclude.end());
+  auto hash_compare = [](const auto& a, const auto& b) {
+    return StructuralHash()(a) < StructuralHash()(b);
+  };
+  std::sort(replicate.begin(), replicate.end(), hash_compare);
+  std::sort(exclude.begin(), exclude.end(), hash_compare);
+  n->replicate = std::move(replicate);
+  n->exclude = std::move(exclude);
+  return GetRef<TileLayout>(n);
+}
+
 TLayout TileLayoutNode::Normalize() const {
   // 0. Remove unit iters in shard
   TileLayout res = RemoveUnitIters(GetRef<TileLayout>(this));
-  // 1. Fuse shard axes
-  res = FuseShardAxes(res);
+  // 1. Try fuse axes
+  res = TryFuseAxes(res);
+  // 2. Fuse shard iters
+  res = FuseShardIters(res);
+  // 3. Sort replicate & exclude iters
+  res = SortReplicateExcludeIters(res);
   return res;
 }
 
@@ -485,6 +717,14 @@ Array<PrimExpr> TileShape(Array<PrimExpr> shape, Array<PrimExpr> factor, bool is
   return new_shape;
 }
 
+Array<PrimExpr> ShapeDiv(Array<PrimExpr> shape, Array<PrimExpr> factor) {
+  Array<PrimExpr> new_shape;
+  for (int i = 0; i < static_cast<int>(shape.size()); ++i) {
+    new_shape.push_back(floordiv(shape[i], factor[i]));
+  }
+  return new_shape;
+}
+
 // Extract every even index from seps
 std::vector<int64_t> GetEvenSeps(std::vector<int64_t> seps) {
   std::vector<int64_t> even;
@@ -492,6 +732,48 @@ std::vector<int64_t> GetEvenSeps(std::vector<int64_t> seps) {
     even.push_back(seps[i]);
   }
   return even;
+}
+
+TileLayout SplitAxes(TileLayout layout, const String& split_scope) {
+  Target target = Target::Current();
+  if (!target.defined()) {
+    return layout;
+  }
+  auto split_iter = [&](const Iter& iter) -> Array<Iter> {
+    const auto& splitter = iter->axis->GetSplitter();
+    if (splitter.has_value()) {
+      return splitter.value()(target, split_scope, iter);
+    }
+    return {iter};
+  };
+
+  std::vector<Iter> shard, replicate;
+  std::vector<Tuple<Iter, PrimExpr>> exclude;
+
+  for (const auto& iter : layout->shard) {
+    auto split_iters = split_iter(iter);
+    shard.insert(shard.end(), split_iters.begin(), split_iters.end());
+  }
+
+  for (const auto& iter : layout->replicate) {
+    auto split_iters = split_iter(iter);
+    replicate.insert(replicate.end(), split_iters.begin(), split_iters.end());
+  }
+
+  for (const auto& iter_selector : layout->exclude) {
+    auto split_iters = split_iter(iter_selector.get<0>());
+    if (split_iters.size() == 1) {
+      exclude.emplace_back(split_iters[0], iter_selector.get<1>());
+    } else {
+      auto coord =
+          SplitCoord(iter_selector.get<1>(), {split_iters[0]->extent, split_iters[1]->extent});
+      ICHECK(coord.size() == 2) << "Split coord size must be 2";
+      exclude.emplace_back(split_iters[0], coord[0]);
+      exclude.emplace_back(split_iters[1], coord[1]);
+    }
+  }
+
+  return TileLayout(shard, replicate, exclude);
 }
 
 Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
@@ -502,7 +784,37 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
 
   TileLayout tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
   TileLayout layout = GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+
+  auto tiled_scope = tiled->GetScope();
+  auto inner_scope = layout->GetScope();
+  if (tiled_scope.has_value() && inner_scope.has_value()) {
+    if (!tiled_scope.value().get<0>()->Is(inner_scope.value().get<0>()) ||
+        inner_scope.value().get<1>()->Higher(tiled_scope.value().get<1>())) {
+      return std::nullopt;
+    }
+    if (tiled_scope.value().get<1>()->Higher(inner_scope.value().get<1>())) {
+      tiled = SplitAxes(tiled, inner_scope.value().get<1>()->name);
+    }
+  }
+
   arith::Analyzer analyzer;
+  // Get the cosize map of the inner layout of each axis
+  Map<String, PrimExpr> inner_cosize_map;
+  for (const auto& iter : layout->shard) {
+    if (inner_cosize_map.find(iter->axis->name) == inner_cosize_map.end()) {
+      inner_cosize_map.Set(iter->axis->name, layout->GetCosize(iter->axis->name));
+    }
+  }
+  auto rescale_iter = [&](const Iter& iter) -> Optional<Iter> {
+    auto it = inner_cosize_map.find(iter->axis->name);
+    if (it != inner_cosize_map.end() && !is_one(iter->extent)) {
+      if (!analyzer.CanProveEqual(floormod(iter->stride, (*it).second), 0)) {
+        return std::nullopt;
+      }
+      return Iter(iter->extent, floordiv(iter->stride, (*it).second), iter->axis);
+    }
+    return iter;
+  };
 
   CHECK_EQ(tiled_shape.size(), inner_shape.size())
       << "Tiled shape size must match inner shape size";
@@ -517,34 +829,59 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
       << inner_shape;
 
   auto tiled_seps_even = GetEvenSeps(tiled_seps);
-  std::vector<Iter> outer_shard;
-  PrimExpr inner_stride = grouped_layout->GetCosize();
 
+  // Gather outer shards
+  std::vector<Iter> outer_shard;
   for (size_t i = 0; i < tiled_shape.size(); ++i) {
     int inner_count = inner_seps[i + 1] - inner_seps[i];
     int tiled_count = tiled_seps_even[i + 1] - tiled_seps_even[i];
     if (inner_count > tiled_count) return std::nullopt;
 
-    // Compare extents (and stride if extent is not 1).
+    // Compare extents (and stride/axis if extent is not 1).
     for (int j = 0; j < inner_count; ++j) {
       Iter inner_iter = grouped_layout->shard[inner_seps[i] + j];
       Iter tiled_iter = grouped_tiled->shard[tiled_seps_even[i + 1] - inner_count + j];
       if (!analyzer.CanProveEqual(inner_iter->extent, tiled_iter->extent) ||
-          (!analyzer.CanProveEqual(inner_iter->stride, tiled_iter->stride) &&
-           !is_one(inner_iter->extent)) ||
-          !inner_iter->axis.same_as(tiled_iter->axis)) {
+          (!is_one(inner_iter->extent) &&
+           !(analyzer.CanProveEqual(inner_iter->stride, tiled_iter->stride) &&
+             inner_iter->axis.same_as(tiled_iter->axis)))) {
+        // failure cases:
+        // 1. extent doesn't match
+        // 2. extent is not 1, and stride or axis doesn't match
         return std::nullopt;
       }
     }
-
     for (int j = 0; j < tiled_count - inner_count; ++j) {
-      Iter outer_iter = grouped_tiled->shard[tiled_seps_even[i] + j];
-      outer_shard.push_back(
-          Iter(outer_iter->extent, floordiv(outer_iter->stride, inner_stride), outer_iter->axis));
+      auto outer_iter = rescale_iter(grouped_tiled->shard[tiled_seps_even[i] + j]);
+      if (!outer_iter.has_value()) return std::nullopt;
+      outer_shard.push_back(outer_iter.value());
     }
   }
-  // TODO(@bohan): replicate and exclude should be considered here
-  return TileLayout(outer_shard, this->replicate, this->exclude);
+
+  // Gather outer replicate
+  std::vector<Iter> outer_replicate;
+  for (const auto& tiled_iter : tiled->replicate) {
+    if (std::none_of(
+            layout->replicate.begin(), layout->replicate.end(),
+            [&](const Iter& inner_iter) { return StructuralEqual()(tiled_iter, inner_iter); })) {
+      auto outer_iter = rescale_iter(tiled_iter);
+      if (!outer_iter.has_value()) return std::nullopt;
+      outer_replicate.push_back(outer_iter.value());
+    }
+  }
+  // Gather outer exclude
+  std::vector<Tuple<Iter, PrimExpr>> outer_exclude;
+  for (const auto& iter_selector : tiled->exclude) {
+    if (std::none_of(layout->exclude.begin(), layout->exclude.end(),
+                     [&](const Tuple<Iter, PrimExpr>& inner_iter_selector) {
+                       return StructuralEqual()(iter_selector, inner_iter_selector);
+                     })) {
+      auto outer_iter = rescale_iter(iter_selector.get<0>());
+      if (!outer_iter.has_value()) return std::nullopt;
+      outer_exclude.push_back(Tuple<Iter, PrimExpr>(outer_iter.value(), iter_selector.get<1>()));
+    }
+  }
+  return TileLayout(outer_shard, outer_replicate, outer_exclude);
 }
 
 Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
@@ -562,6 +899,19 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
   }
   TileLayout tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
   TileLayout layout = GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+
+  auto tiled_scope = tiled->GetScope();
+  auto outer_scope = layout->GetScope();
+  if (tiled_scope.has_value() && outer_scope.has_value()) {
+    if (!tiled_scope.value().get<1>()->Is(outer_scope.value().get<1>()) ||
+        tiled_scope.value().get<0>()->Higher(outer_scope.value().get<0>())) {
+      return std::nullopt;
+    }
+    if (outer_scope.value().get<0>()->Higher(tiled_scope.value().get<0>())) {
+      tiled = SplitAxes(tiled, outer_scope.value().get<0>()->name);
+    }
+  }
+
   arith::Analyzer analyzer;
 
   CHECK_EQ(tiled_shape.size(), outer_shape.size())
@@ -577,19 +927,22 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
       << outer_shape;
 
   auto tiled_seps_even = GetEvenSeps(tiled_seps);
-  std::vector<Iter> inner_shard;
 
+  // Gather inner shards
+  std::vector<Iter> inner_shard;
   for (size_t i = 0; i < tiled_shape.size(); ++i) {
     int outer_count = outer_seps[i + 1] - outer_seps[i];
     int tiled_count = tiled_seps_even[i + 1] - tiled_seps_even[i];
     if (outer_count > tiled_count) return std::nullopt;
 
-    // Compare extents (delay checking stride since we don't know inner_stride yet)
+    // Failure cases:
+    // 1. extent doesn't match
+    // 2. extent is not 1, and axis doesn't match (we don't know inner cosize yet)
     for (int j = 0; j < outer_count; ++j) {
       Iter outer_iter = grouped_layout->shard[outer_seps[i] + j];
       Iter tiled_iter = grouped_tiled->shard[tiled_seps_even[i] + j];
       if (!analyzer.CanProveEqual(outer_iter->extent, tiled_iter->extent) ||
-          !outer_iter->axis.same_as(tiled_iter->axis)) {
+          (!is_one(outer_iter->extent) && !outer_iter->axis.same_as(tiled_iter->axis))) {
         return std::nullopt;
       }
     }
@@ -599,20 +952,34 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
       inner_shard.push_back(inner_iter);
     }
   }
-  // TODO(@bohan): replicate and exclude should be considered here
-  auto res = TileLayout(inner_shard, this->replicate, this->exclude);
-  PrimExpr inner_stride = res->GetCosize();
-  // Check if the stride of the outer shard is correct
-  for (size_t i = 0; i < tiled_shape.size(); ++i) {
-    for (int j = outer_seps[i]; j < outer_seps[i + 1]; ++j) {
-      if (!analyzer.CanProveEqual(
-              grouped_layout->shard[j]->stride * inner_stride,
-              grouped_tiled->shard[tiled_seps_even[i] + j - outer_seps[i]]->stride)) {
-        return std::nullopt;
-      }
+
+  // Gather inner replicate
+  std::vector<Iter> inner_replicate;
+  for (const auto& tiled_iter : tiled->replicate) {
+    if (std::none_of(
+            layout->replicate.begin(), layout->replicate.end(),
+            [&](const Iter& inner_iter) { return StructuralEqual()(tiled_iter, inner_iter); })) {
+      inner_replicate.push_back(tiled_iter);
     }
   }
-  return res;
+
+  // Gather inner exclude
+  std::vector<Tuple<Iter, PrimExpr>> inner_exclude;
+  for (const auto& iter_selector : tiled->exclude) {
+    if (std::none_of(layout->exclude.begin(), layout->exclude.end(),
+                     [&](const Tuple<Iter, PrimExpr>& inner_iter_selector) {
+                       return StructuralEqual()(iter_selector, inner_iter_selector);
+                     })) {
+      inner_exclude.push_back(iter_selector);
+    }
+  }
+
+  auto inner_layout = TileLayout(inner_shard, inner_replicate, inner_exclude);
+  auto try_tile = inner_layout->Tile(layout, outer_shape, ShapeDiv(tiled_shape, outer_shape));
+  if (StructuralEqual()(try_tile->Normalize(), tiled->Normalize())) {
+    return inner_layout;
+  }
+  return std::nullopt;
 }
 
 Array<PrimExpr> TileLayoutNode::GetShardShape() const {
@@ -693,7 +1060,8 @@ Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
   }
 
   CHECK_EQ(count, scope_map.size()) << "Ill-formed tile layout: disconnected scope chain";
-  return Tuple<ExecScope, ExecScope>{ExecScope(inner_most.value()), ExecScope(outer_most)};
+  return Tuple<ExecScope, ExecScope>{ExecScope::Create(inner_most.value()),
+                                     ExecScope::Create(outer_most)};
 }
 
 TVM_FFI_REGISTER_GLOBAL("tir.TileLayoutGetScope")

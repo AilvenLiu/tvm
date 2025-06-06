@@ -359,7 +359,6 @@ class TileLayout(TLayout):
         if isinstance(shard, (tuple, list)) and not isinstance(shard[0], (tuple, list)):
             # shard can be just a tuple of extents, infer the default strides
             shard = (shard, TLayout._get_default_strides(shard, 1))
-
         # Convert to Iter objects
         assert len(shard[0]) == len(shard[1]), "shard's extent and stride must have the same length"
         assert len(replicate[0]) == len(

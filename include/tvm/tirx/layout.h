@@ -23,7 +23,9 @@
 #ifndef TVM_TIRX_LAYOUT_H_
 #define TVM_TIRX_LAYOUT_H_
 
+#include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/tuple.h>
+#include <tvm/ffi/function.h>
 #include <tvm/ir/module.h>
 #include <tvm/node/attr_registry_map.h>
 #include <tvm/runtime/object.h>
@@ -42,6 +44,8 @@ class AxisAttrMap;
 
 class TLayout;
 class TileLayout;
+class Iter;
+using ffi::Array;
 using ffi::Tuple;
 
 // Base class for layout
@@ -104,6 +108,12 @@ class TLayout : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_METHODS(TLayout, ObjectRef, TLayoutNode);
 };
 
+// target, subscope, scope, iter -> fused_iter
+using FAxisFuser = ffi::TypedFunction<Optional<Iter>(Target, String, String, Iter)>;
+// target, scope, iter -> (outer_iter, inner_iter)
+// Note(@bohao): use Array<Iter, void> to avoid incomplete type error (SFINAE)
+using FAxisSplitter = ffi::TypedFunction<Array<Iter, void>(Target, String, Iter)>;
+
 // Axis
 class AxisNode : public Object {
  public:
@@ -128,6 +138,12 @@ class AxisNode : public Object {
 
   /*! \brief Get the subscope of the (thread) axis. */
   Optional<ExecScope> GetSubscope() const;
+
+  /*! \brief Get the fuser of the (thread) axis. */
+  Optional<FAxisFuser> GetFuser() const;
+
+  /*! \brief Get the splitter of the (thread) axis. */
+  Optional<FAxisSplitter> GetSplitter() const;
 
   static constexpr const char* _type_key = "tirx.Axis";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -187,6 +203,12 @@ class AxisRegEntry {
 
   /*! \brief Set the subscope of the axis. */
   inline AxisRegEntry& set_subscope(const String& subscope_name, int plevel = 10);
+
+  /*! \brief Set the fuser of the axis. */
+  inline AxisRegEntry& set_fuser(const FAxisFuser& fuser);
+
+  /*! \brief Set the splitter of the axis. */
+  inline AxisRegEntry& set_splitter(const FAxisSplitter& splitter);
 
  private:
   // return internal pointer to op.
@@ -493,7 +515,7 @@ class ComposeLayout : public TLayout {
 constexpr int kPSUMMaxElemPerBank = 512;
 constexpr int kPSUMBankNum = 8;
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_
