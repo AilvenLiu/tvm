@@ -1,6 +1,6 @@
 # Layout Systems in Tensor Compilers
 
-## Ours
+## Axe (Ours)
 
 ### Axes
 
@@ -121,7 +121,7 @@ If $L$ doesn't touch axis $a$, then $\text{Vals}_{f_L, a} = \emptyset$, and the 
 The codomain size of $f_L$ is over all axes $a \in A$ can be written as a element in $\mathbb{Z}A$ as 
 
 $$
-\text{size} (\text{Vals}_{f_L}) = \sum_{a \in A} \text{Vals}_{f_L, a}@a
+\text{cosize} (f_L) = \sum_{a \in A} \text{size}(\text{Vals}_{f_L, a})@a
 $$
 
 
@@ -177,7 +177,7 @@ $$
 \overline{S_x} || \overline{S_y} = [0, S_x[0]) \times [0, S_y[0]) \times [0, S_x[1]) \times [0, S_y[1]) \times \dots \times [0, S_x[r]) \times [0, S_y[r])
 $$
 
-Coorepondingly, a coordinate $x || y$ in $\overline{S_x} || \overline{S_y}$ is a tuple of $2r$ integers $(x_0, y_0, x_1, y_1, \dots, x_r, y_r)$ where $x \in \overline{S_x}$ and $y \in \overline{S_y}$.
+Coorepondingly, a coordinate $x || y \in \overline{S_x} || \overline{S_y}$ is a tuple of $2r$ integers $(x_0, y_0, x_1, y_1, \dots, x_r, y_r)$ where $x \in \overline{S_x}$ and $y \in \overline{S_y}$.
 
 
 **Definition**
@@ -185,7 +185,7 @@ Coorepondingly, a coordinate $x || y$ in $\overline{S_x} || \overline{S_y}$ is a
 Given Layout $A$, $B$ and shape $S_A$ and $S_B$ such that rank($S_A$) = rank($S_B$) = $r$, we define the tile layout of $A||S_A$ and $B||S_B$ as a layout $T$ that satisfies the following conditions:
 
 - $E_T = E_A \times E_B$, and hence $E_T = E_{A||S_A} \times E_{B||S_B}$
-- For any $x \in \overline{S_A}, y \in \overline{S_B}$, $f_T(x || y) = f_{A||S_A}(x) \odot \text{size}(\text{Vals}_{f_{B||S_B}}) + f_{B||S_B}(y)$
+- For any $x \in \overline{S_A}, y \in \overline{S_B}$, $f_T(x || y) = f_{A||S_A}(x) \odot \text{cosize}(f_{B||S_B}) + f_{B||S_B}(y)$
 
 We write $T$ as $(A||S_A) \otimes (B||S_B)$.
 
