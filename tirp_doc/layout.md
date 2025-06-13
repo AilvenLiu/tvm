@@ -1,5 +1,33 @@
 # Layout Systems in Tensor Compilers
 
+## Introduction
+
+### 1.1. The Evolving Landscape of Tensor Layouts in Deep Learning Compilers
+The representation and manipulation of multi-dimensional arrays, or tensors, are central to deep learning (DL) computations. The way tensor data is organized in **memory** and shared between **threads (execution units)**—its data layout—profoundly influences the performance of DL models on diverse hardware architectures, including CPUs, GPUs, and specialized accelerators. Effective data layout modeling within compilers is paramount, as it provides the necessary information to answer critical questions about how a tensor is stored, such as its memory footprint, alignment requirements, and the scheme for addressing its elements as well as what operations can be performed on it, such as hardware native SIMD instructions. This capability underpins the generation of efficient memory access patterns and enables deeper reasoning about data structures, for instance, in the context of vector processing.
+
+The trajectory of compiler development for DL reflects a clear progression towards increasingly sophisticated layout management. Initially, layout considerations might have been limited to simple choices like row-major or column-major ordering. However, the advent of massively parallel architectures like GPUs, with their specific memory access characteristics (e.g., coalesced global memory access, banked shared memory，mma/tma register inputs), necessitated more nuanced approaches. CuTe presents a nested tuple based layout system
+with algebraic operations. Triton presents a linear layout system formalized by lienar algebra over $\mathbb{F}_{2}$. They both aim to capture the latest hardware features and provide a unified way to represent and manipulate tensor data.
+
+### 1.2. Challenges
+
+Managing tensor layouts in DL compilers poses challenges, primarily revolving around achieving optimal performance, ensuring portability across diverse hardware, and maintaining programmability for developers.
+
+**Expressiveness for Optimal Performance**: The pursuit of optimal performance is fundamentally linked to the expressiveness of the underlying layout system. If a system lacks the capability to describe the most efficient data arrangement for a specific hardware architecture and computational pattern, then peak performance remains unattainable. For example, Nvidia GPU requires layouts with different distributed strategies across a warp group/warp to invoke Tensor Core on Ampere, Hopper and Blackwell architectures.
+
+**Portability**: Achieving performance portability across diverse hardware is a major hurdle because a tensor's layout is effectively a mapping from its logical elements to the specific thread hierarchies and memory architectures (or vice versa) of the target device—resources that diverge significantly. For instance, modern GPUs feature increasingly complex, multi-level thread hierarchies (grids, clusters, blocks, warp groups, warps) and memory systems optimized for 2D access patterns (banked shared memory) or even natively 2D Tensor Memory. AWS Trainium processors present a native 3D memory organization with 'Partition', 'Free', and 'Bank' dimensions.
+
+**Programmability**: Directly managing complex, hardware-specific layouts imposes a significant burden on programmers. Developers are forced to reason about low-level hardware details, such as warp scheduling, memory bank structures, and cache hierarchies, diverting focus from the algorithmic aspects of their work. This complexity not only slows down development but also increases the likelihood of errors. Abstractions that simplify layout management are therefore crucial.
+
+### 1.3 Axe: Our Solution
+
+We introduce Axe, aiming to provide a unified approach to to address the aforementioned challenges in tensor layout management. Specifically, we incoporate the following insights from our experience of developing kernels:
+
+- Distributed ML communuity has long been using GSPMD-style sharding to partition tensors across multiple devices, which many intra-kernel layouts (such as Tensor Core) can effectively adopt. Moreover, besides classical sharded (we use **D** to denote while papers like [Alpa](https://www.usenix.org/system/files/osdi22-zheng-lianmin.pdf) use **S**) and replicated (**R**) strategies we observe another sharding pattern where some parition is exclusively owned by a single device over some device dimension, which we use **O** to denote. Such paterns can be achieved by reducing over some device dimension, or having a logically unique tensor but physically allocated across devices due to SPMD restrictions.
+  
+- Thread hierarchy and special memory dimensions present similar properties, which layouts aim to map logical coordinates to. It can map to purely memory axes, or a combination of memory and thread axes, or even purely thread axes (and we can view it as a way of representing the cooperative thread group).
+  
+- There are two ways of modeling layouts: 1) mapping logical coordinates to thread/memory axes, and 2) mapping thread/memory axes to logical coordinates. Considering the replicated strategy(**R**), 1) might map to a set of values, but 2) is defined to be only a single value and naturally surjective. That's why CuTe and Triton use 2). But considering when **O** is used, some memory/thread axes should map to none, as well as the tradition of distributed ML community, Axe uses 1) but covers the functionality of 2) as well.
+
 ## Axe (Ours)
 
 ### Axes
