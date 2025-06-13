@@ -491,7 +491,7 @@ LaunchThreadFrame LaunchThread(String thread_tag, PrimExpr extent);
  * \param schedule_config The schedule config of the compose op.
  * \return The result ComposeOpFrame.
  */
-ComposeOpFrame ComposeOp(Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config);
+ComposeOpFrame ComposeOp(Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config);
 
 /*!
  * \brief Bind a var to thread env.

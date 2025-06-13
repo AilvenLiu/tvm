@@ -185,8 +185,6 @@ def _compile_cuda_nvcc(
     ]
 
     major, _ = parse_compute_version(get_target_compute_version(Target.current(allow_none=True)))
-    if major >= 10:
-        cmd += ["--ptxas-options=--g-tensor-memory-access-check"]
 
     if options:
         if isinstance(options, str):

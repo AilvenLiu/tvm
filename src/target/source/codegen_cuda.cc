@@ -1811,7 +1811,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_global_to_cluster())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
-    CHECK_EQ(op->args.size(), 5 + dim);
+    CHECK_EQ(op->args.size(), 6 + dim);
     std::string dst = this->PrintExpr(op->args[1]);
     std::string bar = this->PrintExpr(op->args[2]);
     std::string tensormap = this->PrintExpr(op->args[3]);
@@ -1820,8 +1820,9 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       coords.push_back(this->PrintExpr(op->args[4 + i]));
     }
     int cta_mask = Downcast<IntImm>(op->args[4 + dim])->value;
+    int cta_group = Downcast<IntImm>(op->args[5 + dim])->value;
     print(PrintCpAsyncBulkTensorGlobalToClusterAssembly(this, dim, dst, bar, tensormap, cta_mask,
-                                                        coords));
+                                                        cta_group, coords));
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_shared_to_global())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
@@ -2420,6 +2421,10 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->stream << PrintLdGlobalAcquireAssembly(this, this->PrintExpr(op->args[0]),
                                                  this->PrintExpr(op->args[1]), op->args[0]->dtype);
     this->stream << ";\n";
+  } else if (op->op.same_as(builtin::ptx_map_shared_rank())) {
+    ICHECK_EQ(op->args.size(), 2U);
+    os << PrintMapSharedRankAssembly(this, this->PrintExpr(op->args[0]),
+                                                 this->PrintExpr(op->args[1]));
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {

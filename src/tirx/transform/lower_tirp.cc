@@ -723,9 +723,15 @@ Pass LowerTIRp() {
     // n->body = PipelineOpScheduler::DecideStrategy(n->body, target.value());
 
     // TIRp OpCall Scheduling
+    int max_try = 100;
     while (!NoOpCallVerifier::Verify(n->body, false)) {
       n->body = TIRpOpScheduler::LowerOpCalls(n->body, target.value());
       n->body = ScopeMerger::Merge(n->body);
+      if (max_try == 0) {
+        LOG(FATAL) << "Failed to lower the TIRp program after " << 100 << " tries";
+        break;
+      }
+      max_try--;
     }
     // Lower other TIRp aux data structures
     n->body = ExecScopeSliceResolver::Resolve(n->body, target.value());

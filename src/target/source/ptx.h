@@ -229,11 +229,12 @@ std::string PrintNamedBarrierSyncAssembly(const std::string& name_bar_id,
  * \param bar: The pointer to the barrier in shared memory.
  * \param tensormap: The pointer to the CUtensorMap object.
  * \param cta_mask: The mask for the CTA.
+ * \param cta_group: The cta_group for the copy.
  * \param coords: The coordinates of the tensor.
  */
 std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(
     CodeGenCUDA* cg, int dim, const std::string& dst, const std::string& bar,
-    const std::string& tensormap, int cta_mask, std::vector<std::string> coords);
+    const std::string& tensormap, int cta_mask, int cta_group, std::vector<std::string> coords);
 
 /*!
  * \brief Print ptx cp.async.bulk.tensor.dim.global.shared::cta.tile。bulk_group
@@ -633,6 +634,14 @@ std::string PrintGetTimestampAssembly(CodeGenCUDA* cg);
  */
 std::string PrintLdGlobalAcquireAssembly(codegen::CodeGenCUDA* cg, const std::string& res,
                                          const std::string& addr, DataType dtype);
+
+/*!
+ * \brief Print ptx_map_shared_rank
+ * \param addr: The address of the remote shared memory.
+ * \param rank: The rank of the remote shared memory.
+ */
+std::string PrintMapSharedRankAssembly(codegen::CodeGenCUDA* cg, 
+                                         const std::string& addr, const std::string& rank);
 }  // namespace codegen
 }  // namespace tvm
 #endif  // TVM_TARGET_SOURCE_PTX_H_

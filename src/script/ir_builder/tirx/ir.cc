@@ -482,11 +482,13 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
 
 CopyPipeline AllocCopyPipeline(ExecScope thread_scope, size_t depth, bool separate_pc,
                                String name_hint, Map<String, Buffer> workspace,
-                               Map<String, ObjectRef> schedule_config) {
+                               Map<String, ffi::Any> schedule_config) {
   CopyPipeline pipeline = tvm::tirx::CopyPipeline(thread_scope, depth, separate_pc, name_hint,
                                                  workspace, schedule_config);
   IRBuilder builder = IRBuilder::Current();
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
+    frame.value()->pipelines.push_back(pipeline);
+  } else if (Optional<BlockFrame> frame = builder->FindFrame<BlockFrame>()) {
     frame.value()->pipelines.push_back(pipeline);
   } else {
     TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_copy_pipeline' is "
@@ -765,7 +767,7 @@ ElseFrame Else() {
   return ElseFrame(n);
 }
 
-ComposeOpFrame ComposeOp(Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config) {
+ComposeOpFrame ComposeOp(Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
   ObjectPtr<ComposeOpFrameNode> n = make_object<ComposeOpFrameNode>();
   n->workspace = workspace;
   n->schedule_config = schedule_config;
@@ -1158,7 +1160,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

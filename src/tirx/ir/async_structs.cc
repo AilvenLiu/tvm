@@ -32,7 +32,7 @@ namespace tirx {
 TVM_REGISTER_NODE_TYPE(PipelineNode);
 
 Pipeline::Pipeline(ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                   Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config) {
+                   Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
   auto n = make_object<PipelineNode>();
   n->thread_scope = std::move(thread_scope);
   n->name_hint = std::move(name_hint);
@@ -45,7 +45,7 @@ Pipeline::Pipeline(ExecScope thread_scope, size_t depth, bool separate_pc, Strin
 
 TVM_FFI_REGISTER_GLOBAL("tirx.Pipeline")
     .set_body_typed([](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                       Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config) {
+                       Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
       return Pipeline(thread_scope, depth, separate_pc, name_hint, workspace, schedule_config);
     });
 
@@ -53,7 +53,7 @@ TVM_FFI_REGISTER_GLOBAL("tirx.Pipeline")
 TVM_REGISTER_NODE_TYPE(CopyPipelineNode);
 
 CopyPipeline::CopyPipeline(ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                           Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config) {
+                           Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
   auto n = make_object<CopyPipelineNode>();
   n->thread_scope = std::move(thread_scope);
   n->name_hint = std::move(name_hint);
@@ -66,7 +66,7 @@ CopyPipeline::CopyPipeline(ExecScope thread_scope, size_t depth, bool separate_p
 
 TVM_FFI_REGISTER_GLOBAL("tirx.CopyPipeline")
     .set_body_typed([](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                       Map<String, Buffer> workspace, Map<String, ObjectRef> schedule_config) {
+                       Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
       return CopyPipeline(thread_scope, depth, separate_pc, name_hint, workspace, schedule_config);
     });
 

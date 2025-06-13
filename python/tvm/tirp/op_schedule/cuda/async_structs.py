@@ -224,7 +224,6 @@ def copy_tma_impl(
                             assert st_i + ext_i <= outer.shard[j].extent
                             iter_ranges_[j] = ext_i
                             break
-                iters_.sort(key=lambda x: x[1].stride, reverse=True)
                 return iters_, iter_ranges_
 
             iters, iter_ranges = derive_iters(outer, seps)
@@ -233,8 +232,8 @@ def copy_tma_impl(
             if outer.shard[seps[-2] - 1].stride == 1:
                 box_dim = copy.copy(atom_shape)
                 box_dim[-2] *= outer.shard[seps[-2] - 1].extent
-                iter_ranges.pop(iters[-1][0])
-                iters.pop()
+                iters.pop(seps[-2] - 1)
+                iter_ranges.pop(seps[-2] - 1)
             else:
                 box_dim = atom_shape
 
@@ -250,12 +249,15 @@ def copy_tma_impl(
             raise ValueError(
                 "No valid swizzle mode found for TMA copy. Shared layout is " f"{s_buf.layout}"
             )
-
     # ---------------------------------------------------------------------
     # Launch configuration & common symbols
     # ---------------------------------------------------------------------
     tx = sctx.launch_params["threadIdx.x"]
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
+    if sctx.target.arch == "sm_100a":
+        cta_group = pipeline.schedule_config.get("cta_group", 1)
+    else:
+        cta_group = -1
 
     tensor_map = T.Var(g_buf.data.name + "_tensormap", dtype=T.handle("tensormap").type_annotation)
 
@@ -296,8 +298,6 @@ def copy_tma_impl(
         rank = len(g_buf.shape)
         # TODO(@bohan): reconsider this under warp specialized scenario. Q: should we place the fence here?
         # make sure smem write is visible to tma proxy
-        T.ptx.fence.proxy("shared")
-        T.tvm_storage_sync("shared")
         for tid_x in T.thread_binding(tx, "threadIdx.x"):
             with T.thread()[tid_x == 0]:
                 if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
@@ -309,6 +309,7 @@ def copy_tma_impl(
                             if direction == "g2s" else 0,  # dummy when not needed
                             tensor_map,
                             *reversed(g_st),
+                            cta_group=cta_group,
                         )
                     else:
                         T.ptx.cp_async.bulk.tensor.s2g(
@@ -328,6 +329,7 @@ def copy_tma_impl(
                                 pipeline.workspace.get("mbarrier", None).access_ptr("rw", offset=0),  # type: ignore
                                 tensor_map,
                                 *reversed(g_coord),
+                                cta_group=cta_group,
                             )
                         else:
                             s_coord = T.meta_var(make_shared_coord(s_st, lvs))
@@ -437,6 +439,11 @@ def copy_pipeline_cta_impl(
         # TODO(@bohan): consider cluster multicasting cases
         # TODO(@bohan): support other launch parameters
         tx = sctx.launch_params["threadIdx.x"]
+        cbx = sctx.launch_params.get("clusterCtaIdx.x", 1)
+        if sctx.target.arch == "sm_100a":
+            cta_group = pipeline.schedule_config.get("cta_group", 1)
+        else:
+            cta_group = -1
         assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
         # TMA-based copy pipeline
@@ -448,15 +455,19 @@ def copy_pipeline_cta_impl(
             def func():  # pylint: disable=function-redefined
                 # TODO(@bohan): fetch env variables from the launch parameters
                 for tid in T.thread_binding(tx, "threadIdx.x"):
-                    with T.thread()[tid == 0]:
-                        T.ptx.mbarrier.arrive.expect_tx(mbarrier.access_ptr("rw"), tma_bytes)
+                    for cta_id in T.thread_binding(cbx, "clusterCtaIdx.x"):
+                        with T.thread()[tid == 0]:
+                            if cta_group == 1 or cta_id % 2 == 0:
+                                T.ptx.mbarrier.arrive.expect_tx(mbarrier.access_ptr("rw"), tma_bytes)
 
             return func
         if op_type == PipelineOp.CONSUMER_WAIT:
             # wait mbarrier to flip the phase
             @T.prim_func(check_well_formed=False, tirp=True)
             def func():  # pylint: disable=function-redefined
-                T.ptx.mbarrier.try_wait(mbarrier.access_ptr("rw"), phase[0])
+                for cta_id in T.thread_binding(cbx, "clusterCtaIdx.x"):
+                    if cta_group == 1 or cta_id % 2 == 0:
+                        T.ptx.mbarrier.try_wait(mbarrier.access_ptr("rw"), phase[0])
                 T.tvm_storage_sync("shared")
                 phase[0] = phase[0] ^ 1
 
@@ -476,9 +487,11 @@ def copy_pipeline_cta_impl(
             @T.prim_func(check_well_formed=False, tirp=True)
             def func():  # pylint: disable=function-redefined
                 for tid in T.thread_binding(tx, "threadIdx.x"):
-                    with T.thread()[tid == 0]:
-                        T.ptx.mbarrier.init(mbarrier.access_ptr("rw"), 1)
-                        T.ptx.fence.proxy("shared")
+                    for cta_id in T.thread_binding(cbx, "clusterCtaIdx.x"):
+                        with T.thread()[tid == 0]:
+                            if cta_group == 1 or cta_id % 2 == 0:
+                                T.ptx.mbarrier.init(mbarrier.access_ptr("rw"), 1)
+                                T.ptx.fence.proxy("shared")
                     phase[0] = 0
                 T.tvm_storage_sync("shared")
 
@@ -569,7 +582,6 @@ def pipeline_copy(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     pipeline, dst_buffer_region, src_buffer_region = op.args
     if not validate_copy_op(dst_buffer_region, src_buffer_region, sctx):
         return None
-
     if isinstance(pipeline, CopyPipeline):
         return copy_pipeline_cta_impl(PipelineOp.COPY, sctx, *op.args)
     return None

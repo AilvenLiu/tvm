@@ -1897,7 +1897,7 @@ def ptx_bar_sync(name_bar_id, thread_count):
     return call_intrin("", "tir.ptx_bar_sync", name_bar_id, thread_count)
 
 
-def ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *coords, cta_mask=0):
+def ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *coords, cta_mask=0, cta_group=1):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.shared::cluster.global.tile.mbarrier::complete_tx::bytes
 
     Parameters
@@ -1919,7 +1919,12 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *co
 
     cta_mask : int
         The mask of the cta for multicast.
-
+        
+    cta_group : int 
+        Must be either 1 or 2.
+        If set to 1, mbarrier must be in the shared memory of the same CTA as the shared memory destination
+        If set to 2, mbarrier can be in shared memory of either the same CTA as the shared memory destination
+                     or the shared memory of the peer CTA.
     Returns
     -------
     call : PrimExpr
@@ -1934,6 +1939,7 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *co
         tensormap,
         *coords,
         cta_mask,
+        cta_group,
     )
 
 
@@ -5936,3 +5942,21 @@ def ptx_ld_global_acquire(res, addr):
         The call expression.
     """
     return call_intrin("", "tir.ptx_ld_global_acquire", res, addr)
+
+def ptx_map_shared_rank(ptr, rank):
+    """TVM intrinsic to call ptx map_shared_rank instruction
+
+    Parameters
+    ----------
+    ptr: PrimExpr
+        The pointer to the local shared memory.
+        
+    rank: int
+        The rank of the distributed shared memory.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("uint32", "tir.ptx_map_shared_rank", ptr, rank)

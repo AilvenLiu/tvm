@@ -177,6 +177,16 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
                 else None
             ),
         ),
+        (
+            (8192, 8192),
+            ((0, 128), (0, 64)),
+            (128, 64),
+            ((0, 128), (0, 64)),
+            128,
+            TileLayout((8192, 8192)),
+            TileLayout((8192, 8192)),
+            lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (128, 64)) if dtype == "float16" else None,
+        )
     ],
 )
 def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len):

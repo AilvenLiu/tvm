@@ -2209,6 +2209,7 @@ class PTXNamespace:
         self.elect_sync: Callable[..., Any] = _op_wrapper(_tir_op.ptx_elect_sync)
         self.fetch_register: Callable[..., Any] = _op_wrapper(_tir_op.ptx_fetch_register)
         self.ld_global_acquire = _op_wrapper(_tir_op.ptx_ld_global_acquire)
+        self.map_shared_rank = _op_wrapper(_tir_op.ptx_map_shared_rank)
         self.mma = MmaNamespace()
         self.cp_async = CpAsyncNamespace()
         self.wgmma = WgmmaNamespace()

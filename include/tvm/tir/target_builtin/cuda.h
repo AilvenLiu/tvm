@@ -337,7 +337,7 @@ TVM_DLL const Op& ptx_bar_sync();
  * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#table-alignment-multi-dim-tma
  *
  * ptx_cp_async_bulk_tensor_global_to_cluster(int dim, PrimExpr dst_ptr, PrimExpr bar_ptr, Var
- * tensormap_ptr, int cta_mask, int...coords)
+ * tensormap_ptr, int...coords, int cta_mask, int cta_group)
  */
 TVM_DLL const Op& ptx_cp_async_bulk_tensor_global_to_cluster();
 
@@ -636,6 +636,13 @@ TVM_DLL const Op& ptx_tcgen05_cp();
  * ptx_tcgen05_shift()
  */
 TVM_DLL const Op& ptx_tcgen05_shift();
+
+/*!
+ * \brief tvm instrinsics to call map_shared_rank
+ *
+ * ptx_map_shared_rank(PrimExpr ptr, int rank)
+ */
+TVM_DLL const Op& ptx_map_shared_rank();
 
 }  // namespace builtin
 }  // namespace tir

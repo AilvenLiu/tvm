@@ -111,6 +111,12 @@ class Pipeline(Object):
         return make_op_call("pipeline_consumer_release", [self])
 
 
+def _to_region(buffer: Union[BufferRegion, Buffer]):
+    if isinstance(buffer, Buffer):
+        return buffer[[slice(None, None, None) for _ in range(len(buffer.shape))]]
+    assert isinstance(buffer, BufferRegion)
+    return buffer
+
 @register_object("tirx.CopyPipeline")
 class CopyPipeline(Pipeline):
     """A pipeline for copying data asynchronously."""
@@ -129,4 +135,6 @@ class CopyPipeline(Pipeline):
 
     def copy(self, dst: Union[BufferRegion, Buffer], src: Union[BufferRegion, Buffer]):
         """Copy data asynchronously from the source to the destination."""
+        dst = _to_region(dst)
+        src = _to_region(src)
         return make_op_call("pipeline_copy", [self, dst, src])
