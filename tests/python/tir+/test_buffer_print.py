@@ -34,54 +34,113 @@ def verify_tir_code(code):
     assert from_source(code).script() == code
 
 
-def verify_cuda_code(func, dim_num, dtype, *dims):
+def verify_cuda_code_array(func, dim_num, dtype, *dims):
     generated_code = func.mod.imported_modules[0].get_source()
 
-    # Extract the section between "// print_buffer starts" and "// print_buffer ends"
     match = re.search(r"// print_buffer starts(.*?)// print_buffer ends", generated_code, re.DOTALL)
     if not match:
         raise AssertionError("print_buffer section not found in generated code")
 
     print_buffer_section = match.group(1).strip()
-
-    # Check the number of nested for-loops = dim_num
     loop_pattern = re.compile(r"for \(int i(\d+) = 0; i\1 < (\d+); \+\+i\1\)")
     loops = loop_pattern.findall(print_buffer_section)
     if len(loops) != dim_num:
         raise AssertionError(f"Expected {dim_num} nested loops, but found {len(loops)}")
 
-    # Verify the loop limits = *dims in order
     loop_limits = [int(limit) for _, limit in loops]
     if loop_limits != list(dims):
         raise AssertionError(f"Expected loop limits {dims}, but found {loop_limits}")
 
-    # Verify the printf statement and dtype
     dtype_to_printf = {"float32": "%f", "float16": "%f", "int32": "%d", "uint32": "%u"}
-    expected_printf = dtype_to_printf.get(dtype)
-    if not expected_printf:
+    expected_printf_specifier = dtype_to_printf.get(dtype)
+    if not expected_printf_specifier:
         raise AssertionError(f"Unsupported dtype {dtype}")
+    variable_access_pattern = r"\w+\[.*\]"
+
     if dtype == "float16":
+        # Look for `printf("%f", static_cast<float>(C[...]))`
         printf_pattern = re.compile(
-            r'printf\("'
-            + re.escape(expected_printf)
-            + r'"\s*,\s*static_cast<float>\(\w+\[idx\]\)\s*\)'
+            r'printf\s*\(\s*"' + re.escape(expected_printf_specifier) + r'"\s*,\s*static_cast<float>\(' + variable_access_pattern + r'\)\s*\)'
         )
     else:
+        # Look for `printf("%f", C[...])`
         printf_pattern = re.compile(
-            r'printf\("' + re.escape(expected_printf) + r'"\s*,\s*\w+\[idx\]\s*\)'
+            r'printf\s*\(\s*"' + re.escape(expected_printf_specifier) + r'"\s*,\s*' + variable_access_pattern + r'\s*\)'
         )
 
     if not printf_pattern.search(print_buffer_section):
         raise AssertionError(
-            f'Expected printf statement with format "{expected_printf}", but not found'
+            f'Expected element printf statement with format "{expected_printf_specifier}" and a buffer access, but not found'
         )
 
+def verify_cuda_code_scalar(func, dtype, expected_value_or_varname):
+    generated_code = func.mod.imported_modules[0].get_source()
+
+    all_print_blocks = re.findall(r"// print_buffer starts(.*?)// print_buffer ends", generated_code, re.DOTALL)
+    if not all_print_blocks:
+        raise AssertionError("No print_buffer sections found in generated code")
+
+    dtype_to_printf = {"float32": "%f", "float16": "%f", "int32": "%d", "uint32": "%u"}
+    expected_printf = dtype_to_printf.get(dtype)
+    if not expected_printf:
+        raise AssertionError(f"Unsupported dtype for scalar verification: {dtype}")
+        
+    value_pattern = ""
+    if isinstance(expected_value_or_varname, (int, float)):
+        if "float" in dtype:
+            value_pattern = re.escape(str(float(expected_value_or_varname))) + "f?"
+        else:
+            value_pattern = re.escape(str(int(expected_value_or_varname)))
+    elif isinstance(expected_value_or_varname, str):
+        value_pattern = re.escape(expected_value_or_varname)
+    else:
+        raise TypeError(
+            "expected_value_or_varname must be a number (for literals) or a string (for variables)"
+        )
+
+    if dtype == "float16":
+        printf_pattern = re.compile(
+            r'printf\s*\(\s*".*?' + re.escape(expected_printf) + r'.*?",\s*static_cast<float>\(\s*' + value_pattern + r'\s*\)\s*\)'
+        )
+    else:
+        printf_pattern = re.compile(
+            r'printf\s*\(\s*".*?' + re.escape(expected_printf) + r'.*?",\s*' + value_pattern + r'\s*\)'
+        )
+
+    for block in all_print_blocks:
+        if printf_pattern.search(block):
+            return
+
+    raise AssertionError(
+        f'Could not find a scalar printf with format "{expected_printf}" and value/variable '
+        f'"{expected_value_or_varname}" in any print_buffer block.'
+    )
+
+def verify_cuda_code_string(func, expected_var_name):
+    generated_code = func.mod.imported_modules[0].get_source()
+
+    all_print_blocks = re.findall(r"// print_buffer starts(.*?)// print_buffer ends", generated_code, re.DOTALL)
+    if not all_print_blocks:
+        raise AssertionError("No print_buffer sections found in generated code")
+    
+    string_printf_pattern = re.compile(
+        r'printf\s*\(\s*".*?%s.*?",\s*\(char\*\)' + re.escape(expected_var_name) + r'\s*\)'
+    )
+
+    for block in all_print_blocks:
+        if string_printf_pattern.search(block):
+            return
+            
+    raise AssertionError(
+        f'Could not find a string printf with variable "{expected_var_name}" '
+        f'in the format `printf("...%s...", (char*){expected_var_name})` in any print_buffer block.'
+    )
 
 def test_print():
     DEV = tvm.cuda()
     target = tvm.target.Target.from_device(DEV)
 
-    def vector_add_1D(dtype, dtype_str):
+    def test_vector_add_1D(dtype, dtype_str):
         M = 6
         M_BLK = 6
         dim_num = 1
@@ -99,7 +158,7 @@ def test_print():
                 with T.block("C"):
                     vi = T.axis.spatial(M, i)
                     C[vi] = A[vi] + B[vi]
-                T.print_buffer(C.data, dtype_str, dim_num, M)
+                T.print_buffer(C.data, dtype_str, False, False, dim_num, (M,))
 
         sch = tvm.tir.Schedule(add_func)
         blk = sch.get_block("C")
@@ -115,9 +174,9 @@ def test_print():
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
-        verify_cuda_code(func, dim_num, dtype_str, M)
+        verify_cuda_code_array(func, dim_num, dtype_str, M)
 
-    def vector_add_2D(dtype, dtype_str):
+    def test_vector_add_2D(dtype, dtype_str):
         M, N = 6, 6
         M_BLK, N_BLK = 6, 6
         dim_num = 2
@@ -136,7 +195,7 @@ def test_print():
                     vi = T.axis.spatial(M, i)
                     vj = T.axis.spatial(N, j)
                     C[vi, vj] = A[vi, vj] + B[vi, vj]
-                T.print_buffer(C.data, C.dtype, dim_num, M, N)
+                T.print_buffer(C.data, C.dtype, False, False, dim_num, (M, N))
 
         sch = tvm.tir.Schedule(add_func)
         blk = sch.get_block("C")
@@ -155,9 +214,9 @@ def test_print():
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
-        verify_cuda_code(func, dim_num, dtype_str, M, N)
+        verify_cuda_code_array(func, dim_num, dtype_str, M, N)
 
-    def vector_add_3D(dtype, dtype_str):
+    def test_vector_add_3D(dtype, dtype_str):
         M, N, K = 6, 6, 6
         M_BLK, N_BLK, K_BLK = 6, 6, 6
         dim_num = 3
@@ -178,7 +237,7 @@ def test_print():
                     vj = T.axis.spatial(N, j)
                     vk = T.axis.spatial(K, k)
                     C[vi, vj, vk] = A[vi, vj, vk] + B[vi, vj, vk]
-                T.print_buffer(C.data, C.dtype, dim_num, M, N, K)
+                T.print_buffer(C.data, C.dtype, False, False, dim_num, (M, N, K))
 
         sch = tvm.tir.Schedule(add_func)
         blk = sch.get_block("C")
@@ -200,12 +259,89 @@ def test_print():
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
-        verify_cuda_code(func, dim_num, dtype_str, M, N, K)
+        verify_cuda_code_array(func, dim_num, dtype_str, M, N, K)
 
-    vector_add_1D(np.float32, "float32")
-    vector_add_2D(np.int32, "int32")
-    vector_add_2D(np.float16, "float16")
-    vector_add_3D(np.uint32, "uint32")
+    def test_const_scalar(dtype, dtype_str):
+        M = 6
+        M_BLK = 6
+        dim_num = 1
+        A_np, B_np = generate_random_data((M,), dtype), generate_random_data((M,), dtype)
+        C_np = A_np + B_np
+        A_tvm, B_tvm = create_tvm_arrays([A_np, B_np], DEV)
+
+        @T.prim_func
+        def add_func(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
+            A = T.match_buffer(A_ptr, (M,), dtype_str)
+            B = T.match_buffer(B_ptr, (M,), dtype_str)
+            C = T.match_buffer(C_ptr, (M,), dtype_str)
+            Ten = T.IntImm(dtype_str, 10)
+
+            for i in T.grid(M):
+                with T.block("C"):
+                    vi = T.axis.spatial(M, i)
+                    C[vi] = A[vi] + B[vi]
+                T.print_buffer(Ten, "int32", False, True, dim_num, ())
+
+        sch = tvm.tir.Schedule(add_func)
+        blk = sch.get_block("C")
+        i = sch.get_loops(blk)[0]
+
+        i0, i1 = sch.split(i, factors=[None, M_BLK])
+
+        sch.bind(i0, "blockIdx.x")
+        sch.bind(i1, "threadIdx.x")
+
+        C_np_tmp = np.zeros((M,), dtype=dtype)
+        C_tvm = tvm.nd.array(C_np_tmp, device=DEV)
+        func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
+        verify_result(C_tvm, C_np)
+        verify_tir_code(add_func.script())
+        verify_cuda_code_scalar(func, dtype_str, 10)        
+
+    def test_string(dtype, dtype_str, test_string):
+        M = 6
+        M_BLK = 6
+        dim_num = 1
+        A_np, B_np = generate_random_data((M,), dtype), generate_random_data((M,), dtype)
+        C_np = A_np + B_np
+        A_tvm, B_tvm = create_tvm_arrays([A_np, B_np], DEV)
+
+        @T.prim_func
+        def add_func(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle) -> None:
+            A = T.match_buffer(A_ptr, (M,), dtype_str)
+            B = T.match_buffer(B_ptr, (M,), dtype_str)
+            C = T.match_buffer(C_ptr, (M,), dtype_str)
+            string_var = T.StringImm(test_string)
+
+            for i in T.grid(M):
+                with T.block("C"):
+                    vi = T.axis.spatial(M, i)
+                    C[vi] = A[vi] + B[vi]
+                T.print_buffer(string_var, "int8", True, False, dim_num, ())
+
+        sch = tvm.tir.Schedule(add_func)
+        blk = sch.get_block("C")
+        i = sch.get_loops(blk)[0]
+
+        i0, i1 = sch.split(i, factors=[None, M_BLK])
+
+        sch.bind(i0, "blockIdx.x")
+        sch.bind(i1, "threadIdx.x")
+
+        C_np_tmp = np.zeros((M,), dtype=dtype)
+        C_tvm = tvm.nd.array(C_np_tmp, device=DEV)
+        func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
+        verify_result(C_tvm, C_np)
+        verify_tir_code(add_func.script())
+        verify_cuda_code_string(func, "string_var")
+        
+
+    test_vector_add_1D(np.float32, "float32")
+    test_vector_add_2D(np.int32, "int32")
+    test_vector_add_2D(np.float16, "float16")
+    test_vector_add_3D(np.uint32, "uint32")
+    test_string(np.float32, "float32", "hello tir+!")
+    test_const_scalar(np.int32, "int32")
 
 
 if __name__ == "__main__":

@@ -1286,23 +1286,74 @@ PrimExpr fast_erf_float_expr(PrimExpr arg, int bits) {
   return p / q;
 }
 
-PrimExpr PrintOpPacked(Var data, DataType dtype, Array<PrimExpr> shape) {
+// Helper function to safely extract boolean from PackedArgs
+bool ExtractBool(const ffi::PackedArgs& args, int index) {
+  try {
+    return args[index].cast<bool>();
+  } catch (...) {
+    // Handle IntImm case (from TIR parsing)
+    PrimExpr expr = args[index].cast<PrimExpr>();
+    if (auto int_imm = expr.as<IntImmNode>()) {
+      return int_imm->value != 0;
+    }
+    LOG(FATAL) << "Cannot extract bool from argument at index " << index;
+    return false;
+  }
+}
+
+// Helper function to safely extract int from PackedArgs
+int ExtractInt(const ffi::PackedArgs& args, int index) {
+  try {
+    return args[index].cast<int>();
+  } catch (...) {
+    // Handle IntImm case (from TIR parsing)
+    PrimExpr expr = args[index].cast<PrimExpr>();
+    if (auto int_imm = expr.as<IntImmNode>()) {
+      return static_cast<int>(int_imm->value);
+    }
+    LOG(FATAL) << "Cannot extract int from argument at index " << index;
+    return 0;
+  }
+}
+
+PrimExpr PrintOpPacked(Var data, DataType dtype, bool is_string, bool is_scalar, int dim_num,
+                       Array<PrimExpr> shape) {
   Array<PrimExpr> args;
   args.push_back(data);
   args.push_back(tir::StringImm(runtime::DLDataTypeToString(dtype)));
-  args.push_back(make_const(DataType::UInt(32), shape.size()));
+  args.push_back(make_const(DataType::Bool(), is_string));
+  args.push_back(make_const(DataType::Bool(), is_scalar));
+  args.push_back(make_const(DataType::UInt(32), dim_num));
   for (const auto& dim : shape) {
     args.push_back(dim);
   }
   return tir::Call(dtype, tir::builtin::print_buffer(), args);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.print_buffer").set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
-  Array<PrimExpr> shape;
-  for (int i = 3; i < args.size(); ++i) {
-    shape.push_back(args[i].cast<PrimExpr>());
-  }
-  *ret = PrintOpPacked(args[0].cast<Var>(), args[1].cast<DataType>(), shape);
-});
+TVM_FFI_REGISTER_GLOBAL("tir.print_buffer")
+    .set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
+      // Expected arguments:
+      // args[0]: buffer_var (Var)
+      // args[1]: dtype (DataType)
+      // args[2]: is_string (bool or IntImm)
+      // args[3]: is_scalar (bool or IntImm)
+      // args[4]: dim_num (int or IntImm)
+      // args[5...]: shape dimensions (PrimExpr)
+
+      ICHECK_GE(args.size(), 5) << "print_buffer expects at least 5 arguments";
+
+      Var buffer_var = args[0].cast<Var>();
+      DataType dtype = args[1].cast<DataType>();
+      bool is_string = ExtractBool(args, 2);
+      bool is_scalar = ExtractBool(args, 3);
+      int dim_num = ExtractInt(args, 4);
+
+      Array<PrimExpr> shape;
+      for (int i = 5; i < args.size(); ++i) {
+        shape.push_back(args[i].cast<PrimExpr>());
+      }
+
+      *ret = PrintOpPacked(buffer_var, dtype, is_string, is_scalar, dim_num, shape);
+    });
 
 }  // namespace tvm

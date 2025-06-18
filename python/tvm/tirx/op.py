@@ -5252,33 +5252,42 @@ def ignore_loop_partition(predicate) -> PrimExpr:
     return call_intrin("bool", "tirx.ignore_loop_partition", predicate)
 
 
-def print_buffer(buffer_var, dtype, shape_size, *dims):
-    """Print out buffer memory during runtime on cuda.
-
+def print_buffer(buffer_var, dtype, is_string, is_scalar, dim_num, *shape):
+    """Print out buffer memory (tensor, string, or scalar) during runtime on cuda.
     This print function allows printing out buffer in tvm during runtime without
     dumping all the cuda code.
-
     Parameters
     ----------
     buffer_var : Var
         The data pointer of the buffer that needs to be printed out.
-
     dtype : DataType
         The data type of the buffer.
-
-    shape_size : Int
+    is_string: Bool
+        Whether the buffer is a string (dtype is Int8 by default in the backend).
+    is_scalar: Bool
+        Whether the buffer is a scalar.
+    dim_num : Int
         The number of dimensions of the buffer
-
-    *dims : Array
+    *shape : Tuple
         The dimensions of the buffer in order.
-
     Returns
     -------
     call : PrimExpr
         The call expression.
     """
-    return _ffi_api.print_buffer(buffer_var, dtype, shape_size, *dims)
+    final_shape_args = []
+    if len(shape) == 1 and isinstance(shape[0], (tuple, list, tvm.ir.Array)):
+        # Case 1: Called as print_buffer(..., dim, (s1, s2, ...))
+        # The user provided a tuple/list as the single shape argument.
+        final_shape_args = list(shape[0])
+    else:
+        # Case 2: Called as print_buffer(..., dim, s1, s2, ...)
+        # This is how TVMScript parser will call it.
+        final_shape_args = list(shape)
 
+    return _ffi_api.print_buffer(
+        buffer_var, dtype, is_string, is_scalar, dim_num, *final_shape_args
+    )
 
 def timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
     """TVM intrinsic for initializing the CUDA profiler, and store profiling result in a buffer.

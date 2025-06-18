@@ -821,7 +821,6 @@ TVM_DLL const Op& timer_end_cuda();
  */
 TVM_DLL const Op& cuda_atomic_add();
 
-
 /*!
  * \brief tvm intrinsic for cuda thread fence instruction
  */

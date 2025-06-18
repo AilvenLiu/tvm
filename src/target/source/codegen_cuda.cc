@@ -1016,7 +1016,7 @@ std::string CodeGenCUDA::CastFromTo(std::string value, DataType from, DataType t
 void CodeGenCUDA::AddUtilFunction(const std::string& func_name, const std::string& code) {
   auto it = this->util_funcs_.find(func_name);
   if (it != this->util_funcs_.end()) {
-    CHECK_EQ(it->second, code) << "Function " << func_name << " already exists with different code";
+    TVM_FFI_CHECK_EQ(it->second, code) << "Function " << func_name << " already exists with different code";
     return;
   }
   this->util_funcs_.insert({func_name, code});
@@ -1586,15 +1586,57 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
     EndScope(ssa_scope);
   } else if (op->op.same_as(builtin::print_buffer())) {
-    TVM_FFI_ICHECK_GE(op->args.size(), 3U) << "Print operation expects at least three arguments";
+    TVM_FFI_ICHECK_GE(op->args.size(), 5U) << "Print operation expects at least 5 arguments";
+
     const PrimExpr& arg = op->args[0];
     const auto* var_node = arg.as<VarNode>();
     DataType dtype = op->dtype;
-    int num_dims = op->args[2].as<IntImmNode>()->value;
+    bool is_string = op->args[2].as<IntImmNode>()->value;
+    bool is_scalar = op->args[3].as<IntImmNode>()->value;
+    int num_dims = op->args[4].as<IntImmNode>()->value;
+
+    TVM_FFI_ICHECK(!(is_string && is_scalar)) << "Cannot have both is_string and is_scalar true";
+    if (is_string) {
+      // String printing logic
+      std::string print_arg = var_node ? GetVarID(var_node) : PrintExpr(arg);
+      std::string buffer_name = GetVarID(var_node);
+      os << "// print_buffer starts (string)\n"
+         << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
+         << "  printf(\"" << buffer_name << ": %s\\n\\n\", (char*)" << print_arg << ");\n"
+         << "}\n"
+         << "// print_buffer ends\n";
+      return;
+    }
+
+    if (is_scalar) {
+      // Scalar printing logic
+      std::string format_specifier;
+      bool is_float16 = dtype.is_float() && dtype.bits() == 16;
+      if (dtype.is_float())
+        format_specifier = "%f";
+      else if (dtype.is_int())
+        format_specifier = "%d";
+      else if (dtype.is_uint())
+        format_specifier = "%u";
+      else
+        TVM_FFI_THROW(InternalError) << "Unsupported data type for scalar print: " << dtype;
+
+      std::string print_arg = var_node ? ("*" + GetVarID(var_node)) : PrintExpr(arg);
+      os << "// print_buffer starts (scalar)\n"
+         << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
+         << "  printf(\"Scalar (dtype: " << dtype << "): " << format_specifier << "\\n\\n\", "
+         << (is_float16 ? "static_cast<float>(" : "") << print_arg << (is_float16 ? ")" : "")
+         << ");\n"
+         << "}\n"
+         << "// print_buffer ends\n";
+      return;
+    }
+
     Array<PrimExpr> shape;
-    for (size_t i = 3; i < op->args.size(); ++i) {
+    for (size_t i = 5; i < op->args.size(); ++i) {
       shape.push_back(op->args[i]);
     }
+
     std::string format_specifier;
     bool is_float16 = false;
     if (dtype.is_float()) {
@@ -1611,87 +1653,79 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     } else {
       TVM_FFI_THROW(InternalError) << "Unsupported data type for print: " << dtype;
     }
-    if (var_node) {
-      std::string buffer_name = GetVarID(var_node);
-      std::vector<std::string> indices;
-      for (int i = 0; i < num_dims; ++i) {
-        indices.push_back("i" + std::to_string(i));
-      }
-      auto nested_loops = [&](auto&& self, int dim) -> std::string {
-        if (dim >= num_dims) return "";
-        std::string loop_var = "i" + std::to_string(dim);
-        std::string body = self(self, dim + 1);
-        std::ostringstream oss;
-        oss << "for (int " << loop_var << " = 0; " << loop_var << " < "
-            << shape[dim].as<IntImmNode>()->value << "; ++" << loop_var << ") {\n";
 
-        if (dim == num_dims - 1) {
-          std::string index_calculation = indices[0];
-          for (size_t i = 1; i < indices.size(); ++i) {
-            index_calculation = indices[i] + " + " +
-                                std::to_string(shape[i].as<IntImmNode>()->value) + " * (" +
-                                index_calculation + ")";
-          }
-          oss << "  int idx = " << index_calculation << ";\n";
-          if (is_float16) {
-            oss << "  if (" << loop_var << " == " << shape[dim].as<IntImmNode>()->value
-                << " - 1) {\n"
-                << "  printf(\"" << format_specifier << "\", static_cast<float>(" << buffer_name
-                << "[idx]));\n"
-                << "} else {\n"
-                << "  printf(\"" << format_specifier << "  \", static_cast<float>(" << buffer_name
-                << "[idx]));\n"
-                << "  }\n";
-          } else {
-            oss << "  if (" << loop_var << " == " << shape[dim].as<IntImmNode>()->value
-                << " - 1) {\n"
-                << "  printf(\"" << format_specifier << "\", " << buffer_name << "[idx]);\n"
-                << "} else {\n"
-                << "  printf(\"" << format_specifier << "  \", " << buffer_name << "[idx]);\n"
-                << "  }\n";
+    TVM_FFI_ICHECK(var_node) << "Formatted print is only supported for buffer variables.";
+    std::string buffer_name = GetVarID(var_node);
+
+    os << "// print_buffer starts (buffer)\n"
+       << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n";
+
+    os << "  printf(\"(" << buffer_name << ", shape=(";
+    for (int i = 0; i < num_dims; ++i) {
+      os << PrintExpr(shape[i]) << (i < num_dims - 1 ? "," : "");
+    }
+    os << "), dtype=" << dtype << "):\\n\");\n";
+
+    std::vector<std::string> loop_vars;
+    for (int i = 0; i < num_dims; ++i) {
+      loop_vars.push_back("i" + std::to_string(i));
+    }
+
+    std::function<void(int)> GenerateLoops;
+    GenerateLoops = [&](int dim) {
+      if (dim == num_dims) {
+        std::string idx_calculation;
+        if (num_dims > 0) {
+          idx_calculation = loop_vars[0];
+          for (int i = 1; i < num_dims; ++i) {
+            idx_calculation =
+                "(" + idx_calculation + " * " + PrintExpr(shape[i]) + " + " + loop_vars[i] + ")";
           }
         } else {
-          oss << "  printf(\"[\");\n"
-              << body << "  if (" << loop_var << " == " << shape[dim].as<IntImmNode>()->value
-              << " - 1) {\n"
-              << "    printf(\"]\");\n"
-              << "} else {\n"
-              << "    printf(\"]\\n\");\n"
-              << "  }\n";
+          idx_calculation = "0";
         }
-        oss << "}\n";
-        return oss.str();
-      };
-      os << "// print_buffer starts\n"
-         << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
-         << "  printf(\"\\nBuffer " << buffer_name << "\\nDatatype: " << dtype << "\\n"
-         << "Shape: [";
-      for (int i = 0; i < num_dims; ++i) {
-        os << "%d" << (i < num_dims - 1 ? ", " : "");
+
+        os << std::string(num_dims * 2 + 4, ' ') << "printf(\"" << format_specifier << "\", ";
+        if (is_float16) {
+          os << "static_cast<float>(" << buffer_name << "[" << idx_calculation << "]));\n";
+        } else {
+          os << buffer_name << "[" << idx_calculation << "]);\n";
+        }
+        return;
       }
-      os << "]\\n\", ";
-      for (int i = 0; i < num_dims; ++i) {
-        os << shape[i].as<IntImmNode>()->value << (i < num_dims - 1 ? ", " : "");
+
+      std::string indent(dim * 2 + 2, ' ');
+      os << indent << "for (int " << loop_vars[dim] << " = 0; " << loop_vars[dim] << " < "
+         << PrintExpr(shape[dim]) << "; ++" << loop_vars[dim] << ") {\n";
+
+      if (dim < num_dims - 1) {
+        os << indent << "  printf(\"[\");\n";
       }
-      os << ");\n"
-         << "  printf(\"Buffer " << buffer_name << " Contents:\\n[\");\n";
-      std::string loops = nested_loops(nested_loops, 0);
-      os << loops << "  printf(\"]\\n\");\n"
-         << "}\n"
-         << "// print_buffer ends\n";
-    } else {
-      std::string print_arg = PrintExpr(arg);
-      if (is_float16) {
-        os << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
-           << "  printf(\"" << format_specifier << "\\n\", static_cast<float>(" << print_arg
-           << "));\n"
-           << "}\n";
+      GenerateLoops(dim + 1);
+
+      if (dim < num_dims - 1) {
+        os << indent << "  printf(\"]\");\n";
+      }
+
+      os << indent << "  if (" << loop_vars[dim] << " < " << PrintExpr(shape[dim]) << " - 1) {\n";
+      if (dim == num_dims - 1) {
+        os << indent << "    printf(\" \");\n";
       } else {
-        os << "if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {\n"
-           << "  printf(\"" << format_specifier << "\\n\", " << print_arg << ");\n"
-           << "}\n";
+        os << indent << "    printf(\"\\n" << std::string(dim + 2, ' ') << "\");\n";
       }
+      os << indent << "  }\n";
+
+      os << indent << "}\n";
+    };
+
+    os << "  printf(\"[\");\n";
+    if (num_dims > 0) {
+      GenerateLoops(0);
     }
+    os << "  printf(\"]\\n\");\n";
+
+    os << "}\n"
+       << "// print_buffer ends\n";
   } else if (op->op.same_as(builtin::cuda_barrier_create())) {
     enable_cuda_barrier_ = true;
     // retrieve arguments
@@ -1777,7 +1811,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(PrintMbarrierInitAssembly(this, mbarrier, num_threads));
   } else if (op->op.same_as(builtin::ptx_mbarrier_arrive())) {
     need_cast_smem_ptr_to_int_ = true;
-    CHECK(op->args.size() == 1 || op->args.size() == 3)
+    TVM_FFI_CHECK(op->args.size() == 1 || op->args.size() == 3)
         << "ptx_mbarrier_arrive() expects 1 or 3 args";
     std::string mbarrier = this->PrintExpr(op->args[0]);
     bool remote = op->args.size() == 3;
@@ -1786,7 +1820,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(PrintMbarrierArriveAssembly(this, mbarrier, remote, cta_id, pred));
   } else if (op->op.same_as(builtin::ptx_mbarrier_arrive_expect_tx())) {
     need_cast_smem_ptr_to_int_ = true;
-    CHECK(op->args.size() == 2 || op->args.size() == 4)
+    TVM_FFI_CHECK(op->args.size() == 2 || op->args.size() == 4)
         << "ptx_mbarrier_arrive_expect_tx() expects 2 "
            "or 4 args";
     std::string mbarrier = this->PrintExpr(op->args[0]);
@@ -1811,7 +1845,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_global_to_cluster())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
-    CHECK_EQ(op->args.size(), 6 + dim);
+    TVM_FFI_CHECK_EQ(op->args.size(), 6 + dim);
     std::string dst = this->PrintExpr(op->args[1]);
     std::string bar = this->PrintExpr(op->args[2]);
     std::string tensormap = this->PrintExpr(op->args[3]);
@@ -1826,7 +1860,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_shared_to_global())) {
     need_cast_smem_ptr_to_int_ = true;
     int dim = Downcast<IntImm>(op->args[0])->value;
-    CHECK_EQ(op->args.size(), 3 + dim);
+    TVM_FFI_CHECK_EQ(op->args.size(), 3 + dim);
     std::string src = this->PrintExpr(op->args[1]);
     std::string tensormap = this->PrintExpr(op->args[2]);
     std::vector<std::string> coords;
@@ -1858,7 +1892,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string reg = Downcast<StringImm>(op->args[1])->value;
     os << PrintPtxFetchRegisterAssembly(this, bits, reg);
   } else if (op->op.same_as(builtin::ptx_wgmma_encode_matrix_descriptor())) {
-    CHECK_EQ(5, op->args.size())
+    TVM_FFI_CHECK_EQ(5, op->args.size())
         << "The number of arguments for ptx_wgmma_encode_matrix_descriptor is incorrect";
     need_gmma_descriptor_ = true;
     need_cast_smem_ptr_to_int_ = true;
@@ -1872,7 +1906,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string fence = this->PrintExpr(op->args[0]);
     print(PrintWGMMAFenceOpearandAssembly(this, fence, op->args[0]->dtype));
   } else if (op->op.same_as(builtin::ptx_wgmma_mma_async_ss())) {
-    CHECK_LE(12, op->args.size())
+    TVM_FFI_CHECK_LE(12, op->args.size())
         << "The number of arguments for ptx_wgmma_mma_async_ss is incorrect";
     int M = Downcast<IntImm>(op->args[0])->value;
     int N = Downcast<IntImm>(op->args[1])->value;
@@ -1887,8 +1921,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string descA = this->PrintExpr(op->args[10]);
     std::string descB = this->PrintExpr(op->args[11]);
     size_t expected_accm_cnt = M * N / 128;
-    CHECK(out_dtype == "float32") << "Now codegen only support float32 output";
-    CHECK_EQ(12 + expected_accm_cnt, op->args.size())
+    TVM_FFI_CHECK(out_dtype == "float32") << "Now codegen only support float32 output";
+    TVM_FFI_CHECK_EQ(12 + expected_accm_cnt, op->args.size())
         << "The number of arguments for ptx_wgmma_mma_async_ss is incorrect";
     std::vector<std::string> accum;
     for (size_t i = 0; i < expected_accm_cnt; ++i) {
@@ -1902,7 +1936,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int K = Downcast<IntImm>(op->args[2])->value;
     std::string in_dtype = Downcast<StringImm>(op->args[3])->value;
     std::string out_dtype = Downcast<StringImm>(op->args[4])->value;
-    CHECK(out_dtype == "float32") << "Now codegen only support float32 output";
+    TVM_FFI_CHECK(out_dtype == "float32") << "Now codegen only support float32 output";
     bool transA = Downcast<Bool>(op->args[5])->value;
     bool transB = Downcast<Bool>(op->args[6])->value;
     float scaleA = Downcast<FloatImm>(op->args[7])->value;
@@ -1913,7 +1947,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     runtime::DataType in_dtype_tvm = runtime::DataType(runtime::StringToDLDataType(in_dtype));
     size_t expected_A_cnt = M * K / 128 / (32 / in_dtype_tvm.bits());
     size_t expected_accm_cnt = M * N / 128;
-    CHECK_EQ(11 + expected_A_cnt + expected_accm_cnt, op->args.size())
+    TVM_FFI_CHECK_EQ(11 + expected_A_cnt + expected_accm_cnt, op->args.size())
         << "ptx_wgmma_mma_async_rs with shape " << M << "x" << N << "x" << K << " and input dtype "
         << in_dtype << " expects " << 11 + expected_A_cnt + expected_accm_cnt << " arguments, got "
         << op->args.size();
@@ -1938,7 +1972,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int num = Downcast<IntImm>(op->args[0])->value;
     bool trans = Downcast<Bool>(op->args[1])->value;
     std::string ptr = this->PrintExpr(op->args[2]);
-    ICHECK_EQ(op->args.size(), 3 + num * 2) << "The number of arguments for ptx_stmatrix "
+    TVM_FFI_ICHECK_EQ(op->args.size(), 3 + num * 2) << "The number of arguments for ptx_stmatrix "
                                                "is incorrect, expected "
                                             << 3 + num * 2 << ", got " << op->args.size();
     std::vector<std::string> regs;
@@ -1951,39 +1985,39 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int nregs = Downcast<IntImm>(op->args[1])->value;
     print(PrintSetMaxNRegAssembly(inc, nregs));
   } else if (op->op.same_as(builtin::ptx_tcgen05_alloc())) {
-    CHECK(op->args.size() == 3) << "ptx_tcgen05_alloc() expects 3 args";
+    TVM_FFI_CHECK(op->args.size() == 3) << "ptx_tcgen05_alloc() expects 3 args";
     std::string dst_shared_ptr = this->PrintExpr(op->args[0]);
     int n_cols = Downcast<IntImm>(op->args[1])->value;
-    CHECK(32 <= n_cols && n_cols <= 512 && n_cols % 32 == 0 && (n_cols & (n_cols - 1)) == 0)
+    TVM_FFI_CHECK(32 <= n_cols && n_cols <= 512 && n_cols % 32 == 0 && (n_cols & (n_cols - 1)) == 0)
         << "The number of columns to allocate in Tensor Memory is invalid, expect a value within "
            "range [32, 512] and be a multiple of 32 and a power of 2, got "
         << n_cols;
     std::string n_cols_str = this->PrintExpr(op->args[1]);
     int n_cta_group = Downcast<IntImm>(op->args[2])->value;
-    CHECK(n_cta_group == 1 || n_cta_group == 2)
+    TVM_FFI_CHECK(n_cta_group == 1 || n_cta_group == 2)
         << "The number of cta_group involved in allocating Tensor Memory is incorrect, expected 1 "
            "or 2, got "
         << n_cta_group;
     print(PrintTcgen05AllocAssembly(this, dst_shared_ptr, n_cols_str, n_cta_group));
   } else if (op->op.same_as(builtin::ptx_tcgen05_dealloc())) {
-    CHECK(op->args.size() == 3) << "ptx_tcgen05_dealloc() expects 3 args";
+    TVM_FFI_CHECK(op->args.size() == 3) << "ptx_tcgen05_dealloc() expects 3 args";
     std::string taddr = this->PrintExpr(op->args[0]);
     int n_cols = Downcast<IntImm>(op->args[1])->value;
-    CHECK(32 <= n_cols && n_cols <= 512 && n_cols % 32 == 0 && (n_cols & (n_cols - 1)) == 0)
+    TVM_FFI_CHECK(32 <= n_cols && n_cols <= 512 && n_cols % 32 == 0 && (n_cols & (n_cols - 1)) == 0)
         << "The number of columns to deallocate in Tensor Memory is invalid, expect a value within"
            "range [32, 512] and be a multiple of 32 and a power of 2, got "
         << n_cols;
     std::string n_cols_str = this->PrintExpr(op->args[1]);
     int n_cta_group = Downcast<IntImm>(op->args[2])->value;
-    CHECK(n_cta_group == 1 || n_cta_group == 2)
+    TVM_FFI_CHECK(n_cta_group == 1 || n_cta_group == 2)
         << "The number of cta_group involved in deallocating Tensor Memory is incorrect, expected 1"
            "or 2, got "
         << n_cta_group;
     print(PrintTcgen05DeallocAssembly(this, taddr, n_cols_str, n_cta_group));
   } else if (op->op.same_as(builtin::ptx_tcgen05_relinquish_alloc_permit())) {
-    CHECK(op->args.size() == 1) << "ptx_tcgen05_relinquish_alloc_permit() expects 1 arg";
+    TVM_FFI_CHECK(op->args.size() == 1) << "ptx_tcgen05_relinquish_alloc_permit() expects 1 arg";
     int n_cta_group = Downcast<IntImm>(op->args[0])->value;
-    CHECK(n_cta_group == 1 || n_cta_group == 2)
+    TVM_FFI_CHECK(n_cta_group == 1 || n_cta_group == 2)
         << "The number of cta_group involved in relinquishing permit to allocate Tensor Memory is "
            "incorrect, expected 1 or 2, got "
         << n_cta_group;
@@ -1994,13 +2028,13 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(PrintTcgen05FenceAfterThreadSyncAssembly(this));
   } else if (op->op.same_as(builtin::ptx_tcgen05_ld())) {
     need_tmem_offset_ = true;
-    CHECK_LT(6, op->args.size()) << "The number of arguments for ptx_tcgen05_ld is incorrect";
+    TVM_FFI_CHECK_LT(6, op->args.size()) << "The number of arguments for ptx_tcgen05_ld is incorrect";
     std::string src_addr = this->PrintExpr(op->args[0]);
     std::string row_offset = this->PrintExpr(op->args[1]);
     std::string col_offset = this->PrintExpr(op->args[2]);
     std::string shape = Downcast<StringImm>(op->args[3])->value;
     int num = Downcast<IntImm>(op->args[4])->value;
-    CHECK(1 <= num && num <= 128 && (num & (num - 1)) == 0)
+    TVM_FFI_CHECK(1 <= num && num <= 128 && (num & (num - 1)) == 0)
         << "The repeat factor of ptx_tcgen05_ld is invalid, expect a value within range [1, 128] "
            "and be a power of 2, got "
         << num;
@@ -2009,22 +2043,22 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     if (shape == "16x32bx2" || shape == "16x64b" || shape == "32x32b") {
       expected_n_regs = num;
     } else if (shape == "16x128b") {
-      CHECK_LE(num, 64) << "The repeat factor of ptx_tcgen05_ld for shape 16x128b is invalid, "
+      TVM_FFI_CHECK_LE(num, 64) << "The repeat factor of ptx_tcgen05_ld for shape 16x128b is invalid, "
                            "expect a value within range [1, 64], got "
                         << num;
       expected_n_regs = 2 * num;
     } else if (shape == "16x256b") {
-      CHECK_LE(num, 32) << "The repeat factor of ptx_tcgen05_ld for shape 16x256b is invalid, "
+      TVM_FFI_CHECK_LE(num, 32) << "The repeat factor of ptx_tcgen05_ld for shape 16x256b is invalid, "
                            "expect a value within range [1, 32], got "
                         << num;
       expected_n_regs = 4 * num;
     } else {
-      LOG(FATAL)
+      TVM_FFI_THROW(InternalError)
           << "The input shape of ptx_tcgen05_ld is invalid, expect one of [16x32bx2, 16x64b, "
              "32x32b, 16x128b, 16x256b], got "
           << shape;
     }
-    CHECK_EQ(6 + expected_n_regs, op->args.size())
+    TVM_FFI_CHECK_EQ(6 + expected_n_regs, op->args.size())
         << "The number of arguments for ptx_tcgen05_ld is incorrect, expected "
         << 6 + expected_n_regs << ", got " << op->args.size();
     std::vector<std::string> regs;
@@ -2034,13 +2068,13 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(PrintTcgen05LoadAssembly(this, src_addr, row_offset, col_offset, regs, shape, num, pack));
   } else if (op->op.same_as(builtin::ptx_tcgen05_st())) {
     need_tmem_offset_ = true;
-    CHECK_LT(6, op->args.size()) << "The number of arguments for ptx_tcgen05_st is incorrect";
+    TVM_FFI_CHECK_LT(6, op->args.size()) << "The number of arguments for ptx_tcgen05_st is incorrect";
     std::string dst_addr = this->PrintExpr(op->args[0]);
     std::string row_offset = this->PrintExpr(op->args[1]);
     std::string col_offset = this->PrintExpr(op->args[2]);
     std::string shape = Downcast<StringImm>(op->args[3])->value;
     int num = Downcast<IntImm>(op->args[4])->value;
-    CHECK(1 <= num && num <= 128 && (num & (num - 1)) == 0)
+    TVM_FFI_CHECK(1 <= num && num <= 128 && (num & (num - 1)) == 0)
         << "The repeat factor of ptx_tcgen05_st is invalid, expect a value within range [1, 128] "
            "and be a power of 2, got "
         << num;
@@ -2049,22 +2083,22 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     if (shape == "16x32bx2" || shape == "16x64b" || shape == "32x32b") {
       expected_n_regs = num;
     } else if (shape == "16x128b") {
-      CHECK_LE(num, 64) << "The repeat factor of ptx_tcgen05_st for shape 16x128b is invalid, "
+      TVM_FFI_CHECK_LE(num, 64) << "The repeat factor of ptx_tcgen05_st for shape 16x128b is invalid, "
                            "expect a value within range [1, 64], got "
                         << num;
       expected_n_regs = 2 * num;
     } else if (shape == "16x256b") {
-      CHECK_LE(num, 32) << "The repeat factor of ptx_tcgen05_st for shape 16x256b is invalid, "
+      TVM_FFI_CHECK_LE(num, 32) << "The repeat factor of ptx_tcgen05_st for shape 16x256b is invalid, "
                            "expect a value within range [1, 32], got "
                         << num;
       expected_n_regs = 4 * num;
     } else {
-      LOG(FATAL)
+      TVM_FFI_THROW(InternalError)
           << "The input shape of ptx_tcgen05_st is invalid, expect one of [16x32bx2, 16x64b, "
              "32x32b, 16x128b, 16x256b], got "
           << shape;
     }
-    CHECK_EQ(6 + expected_n_regs, op->args.size())
+    TVM_FFI_CHECK_EQ(6 + expected_n_regs, op->args.size())
         << "The number of arguments for ptx_tcgen05_st is incorrect, expected "
         << 6 + expected_n_regs << ", got " << op->args.size();
     std::vector<std::string> regs;
@@ -2078,7 +2112,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::ptx_tcgen05_wait_st())) {
     print(PrintTcgen05WaitStSyncAssembly(this));
   } else if (op->op.same_as(builtin::ptx_tcgen05_encode_matrix_descriptor())) {
-    CHECK_EQ(5, op->args.size())
+    TVM_FFI_CHECK_EQ(5, op->args.size())
         << "The number of arguments for ptx_tcgen05_encode_matrix_descriptor is incorrect";
     need_smem_descriptor_ = true;
     need_cast_smem_ptr_to_int_ = true;
@@ -2089,7 +2123,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     int swizzle = Downcast<IntImm>(op->args[4])->value;
     print(PrintEncodeTcgen05MatrixDescriptor(this, desc, addr, ldo, sdo, swizzle));
   } else if (op->op.same_as(builtin::ptx_tcgen05_encode_instr_descriptor())) {
-    CHECK_EQ(14, op->args.size())
+    TVM_FFI_CHECK_EQ(14, op->args.size())
         << "The number of arguments for ptx_tcgen05_encode_instr_descriptor is incorrect";
     need_instr_descriptor_ = true;
     std::string desc = this->PrintExpr(op->args[0]);
@@ -2102,7 +2136,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     bool trans_a = Downcast<Bool>(op->args[7])->value;
     bool trans_b = Downcast<Bool>(op->args[8])->value;
     int cta_group = Downcast<IntImm>(op->args[9])->value;
-    CHECK(cta_group == 1 || cta_group == 2)
+    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
         << "The number of cta_group involved in ptx_tcgen05_mma is incorrect, expected 1 or 2, got "
         << cta_group;
     bool neg_a = Downcast<Bool>(op->args[10])->value;
@@ -2112,7 +2146,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(PrintEncodeTcgen05InstrDescriptor(this, desc, d_dtype, a_dtype, b_dtype, M, N, K, trans_a,
                                             trans_b, cta_group, neg_a, neg_b, sat_d, is_sparse));
   } else if (op->op.same_as(builtin::ptx_tcgen05_encode_instr_descriptor_block_scaled())) {
-    CHECK_EQ(17, op->args.size())
+    TVM_FFI_CHECK_EQ(17, op->args.size())
         << "The number of arguments for ptx_tcgen05_encode_instr_descriptor_block_scaled is "
            "incorrect";
     need_instr_descriptor_block_scaled_ = true;
@@ -2130,7 +2164,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     bool trans_a = Downcast<Bool>(op->args[11])->value;
     bool trans_b = Downcast<Bool>(op->args[12])->value;
     int cta_group = Downcast<IntImm>(op->args[13])->value;
-    CHECK(cta_group == 1 || cta_group == 2)
+    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
         << "The number of cta_group involved in ptx_tcgen05_mma_block_scale is incorrect, expected "
            "1 or 2, got "
         << cta_group;
@@ -2141,7 +2175,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
         this, desc, d_dtype, a_dtype, b_dtype, sfa_dtype, sfb_dtype, sfa_tmem_addr, sfb_tmem_addr,
         M, N, K, trans_a, trans_b, cta_group, neg_a, neg_b, is_sparse));
   } else if (op->op.same_as(builtin::ptx_tcgen05_mma())) {
-    CHECK_LT(11, op->args.size()) << "The number of arguments for ptx_tcgen05_mma is incorrect";
+    TVM_FFI_CHECK_LT(11, op->args.size()) << "The number of arguments for ptx_tcgen05_mma is incorrect";
     std::string d_dtype = Downcast<StringImm>(op->args[0])->value;
     std::string a_dtype = Downcast<StringImm>(op->args[1])->value;
     std::string b_dtype = Downcast<StringImm>(op->args[2])->value;
@@ -2151,17 +2185,17 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string i_desc = this->PrintExpr(op->args[6]);
     bool use_a_tmem = Downcast<Bool>(op->args[7])->value;
     int cta_group = Downcast<IntImm>(op->args[8])->value;
-    CHECK(cta_group == 1 || cta_group == 2)
+    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
         << "The number of cta_group involved in ptx_tcgen05_mma is incorrect, expected 1 or 2, got "
         << cta_group;
     bool enable_input_d = Downcast<Bool>(op->args[9])->value;
     int scale_input_d = Downcast<IntImm>(op->args[10])->value;
-    CHECK(0 <= scale_input_d && scale_input_d <= 15)
+    TVM_FFI_CHECK(0 <= scale_input_d && scale_input_d <= 15)
         << "The value of scale_input_d for ptx_tcgen05_mma is incorrect, expected a value within "
            "range [0, 15], got "
         << scale_input_d;
     size_t expected_vec_size = (cta_group == 1) ? 4 : 8;
-    CHECK_EQ(expected_vec_size + 11, op->args.size())
+    TVM_FFI_CHECK_EQ(expected_vec_size + 11, op->args.size())
         << "The number of arguments for ptx_tcgen05_mma is incorrect, expected "
         << expected_vec_size + 11 << ", got " << op->args.size();
     std::vector<std::string> disable_output_lane;
@@ -2172,7 +2206,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
                                   i_desc, use_a_tmem, cta_group, disable_output_lane,
                                   enable_input_d, scale_input_d, false));
   } else if (op->op.same_as(builtin::ptx_tcgen05_mma_block_scale())) {
-    CHECK_EQ(op->args.size(), 14)
+    TVM_FFI_CHECK_EQ(op->args.size(), 14)
         << "The number of arguments for ptx_tcgen05_mma_block_scale is incorrect";
     std::string d_dtype = Downcast<StringImm>(op->args[0])->value;
     std::string a_dtype = Downcast<StringImm>(op->args[1])->value;
@@ -2187,7 +2221,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string i_desc = this->PrintExpr(op->args[10]);
     bool use_a_tmem = Downcast<Bool>(op->args[11])->value;
     int cta_group = Downcast<IntImm>(op->args[12])->value;
-    CHECK(cta_group == 1 || cta_group == 2)
+    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
         << "The number of cta_group involved in ptx_tcgen05_mma_block_scale is incorrect, expected "
            "1 or 2, got "
         << cta_group;
@@ -2196,7 +2230,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
         this, d_dtype, a_dtype, b_dtype, sfa_dtype, sfb_dtype, d_tmem_addr, a_operand, b_desc,
         sfa_tmem_addr, sfb_tmem_addr, i_desc, use_a_tmem, cta_group, enable_input_d, false));
   } else if (op->op.same_as(builtin::ptx_tcgen05_mma_sp())) {
-    CHECK_LT(12, op->args.size()) << "The number of arguments for ptx_tcgen05_mma_sp is incorrect";
+    TVM_FFI_CHECK_LT(12, op->args.size()) << "The number of arguments for ptx_tcgen05_mma_sp is incorrect";
     std::string d_dtype = Downcast<StringImm>(op->args[0])->value;
     std::string a_dtype = Downcast<StringImm>(op->args[1])->value;
     std::string b_dtype = Downcast<StringImm>(op->args[2])->value;
@@ -2207,18 +2241,18 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string i_desc = this->PrintExpr(op->args[7]);
     bool use_a_tmem = Downcast<Bool>(op->args[8])->value;
     int cta_group = Downcast<IntImm>(op->args[9])->value;
-    CHECK(cta_group == 1 || cta_group == 2)
+    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
         << "The number of cta_group involved in ptx_tcgen05_mma_sp is incorrect, expected 1 or 2, "
            "got "
         << cta_group;
     bool enable_input_d = Downcast<Bool>(op->args[10])->value;
     int scale_input_d = Downcast<IntImm>(op->args[11])->value;
-    CHECK(0 <= scale_input_d && scale_input_d <= 15)
+    TVM_FFI_CHECK(0 <= scale_input_d && scale_input_d <= 15)
         << "The value of scale_input_d for ptx_tcgen05_mma_sp is incorrect, expected a value "
            "within range [0, 15], got "
         << scale_input_d;
     size_t expected_vec_size = (cta_group == 1) ? 4 : 8;
-    CHECK_EQ(expected_vec_size + 12, op->args.size())
+    TVM_FFI_CHECK_EQ(expected_vec_size + 12, op->args.size())
         << "The number of arguments for ptx_tcgen05_mma_sp is incorrect, expected "
         << expected_vec_size + 12 << ", got " << op->args.size();
     std::vector<std::string> disable_output_lane;
@@ -2229,7 +2263,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
                                   i_desc, use_a_tmem, cta_group, disable_output_lane,
                                   enable_input_d, scale_input_d, true, sp_tmem_addr));
   } else if (op->op.same_as(builtin::ptx_tcgen05_mma_sp_block_scale())) {
-    CHECK_EQ(op->args.size(), 15)
+    TVM_FFI_CHECK_EQ(op->args.size(), 15)
         << "The number of arguments for ptx_tcgen05_mma_sp_block_scale is incorrect";
     std::string d_dtype = Downcast<StringImm>(op->args[0])->value;
     std::string a_dtype = Downcast<StringImm>(op->args[1])->value;
@@ -2245,7 +2279,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string i_desc = this->PrintExpr(op->args[11]);
     bool use_a_tmem = Downcast<Bool>(op->args[12])->value;
     int cta_group = Downcast<IntImm>(op->args[13])->value;
-    CHECK(cta_group == 1 || cta_group == 2)
+    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
         << "The number of cta_group involved in ptx_tcgen05_mma_sp_block_scale is incorrect, "
            "expected 1 or 2, got "
         << cta_group;
@@ -2255,10 +2289,10 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
                                             sfb_tmem_addr, i_desc, use_a_tmem, cta_group,
                                             enable_input_d, true, sp_tmem_addr));
   } else if (op->op.same_as(builtin::ptx_tcgen05_commit())) {
-    CHECK_EQ(op->args.size(), 3) << "The number of arguments for ptx_tcgen05_commit is incorrect";
+    TVM_FFI_CHECK_EQ(op->args.size(), 3) << "The number of arguments for ptx_tcgen05_commit is incorrect";
     std::string bar = this->PrintExpr(op->args[0]);
     int cta_group = Downcast<IntImm>(op->args[1])->value;
-    CHECK(cta_group == 1 || cta_group == 2)
+    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
         << "The number of cta_group involved in ptx_tcgen05_commit is incorrect, expected 1 or 2, "
            "got "
         << cta_group;
@@ -2266,7 +2300,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(PrintTcgen05CommitAssembly(this, bar, cta_group, cta_mask));
   } else if (op->op.same_as(builtin::ptx_tcgen05_cp())) {
     need_tmem_offset_ = true;
-    CHECK_EQ(op->args.size(), 9) << "The number of arguments for ptx_tcgen05_cp is incorrect";
+    TVM_FFI_CHECK_EQ(op->args.size(), 9) << "The number of arguments for ptx_tcgen05_cp is incorrect";
     std::string dst_addr = this->PrintExpr(op->args[0]);
     std::string row_offset = this->PrintExpr(op->args[1]);
     std::string col_offset = this->PrintExpr(op->args[2]);
@@ -2275,7 +2309,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string dst_dtype = Downcast<StringImm>(op->args[5])->value;
     std::string src_dtype = Downcast<StringImm>(op->args[6])->value;
     int cta_group = Downcast<IntImm>(op->args[7])->value;
-    CHECK(cta_group == 1 || cta_group == 2)
+    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
         << "The number of cta_group involved in ptx_tcgen05_cp is incorrect, expected 1 or 2, "
            "got "
         << cta_group;
@@ -2283,10 +2317,10 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(PrintTcgen05CopyAssembly(this, dst_addr, row_offset, col_offset, src_desc, shape,
                                    dst_dtype, src_dtype, cta_group, multicast));
   } else if (op->op.same_as(builtin::ptx_tcgen05_shift())) {
-    CHECK_EQ(op->args.size(), 2) << "The number of arguments for ptx_tcgen05_shift is incorrect";
+    TVM_FFI_CHECK_EQ(op->args.size(), 2) << "The number of arguments for ptx_tcgen05_shift is incorrect";
     std::string taddr = this->PrintExpr(op->args[0]);
     int cta_group = Downcast<IntImm>(op->args[1])->value;
-    CHECK(cta_group == 1 || cta_group == 2)
+    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
         << "The number of cta_group involved in ptx_tcgen05_shift is incorrect, expected 1 or 2, "
            "got "
         << cta_group;
@@ -2295,7 +2329,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     // arg 0: profiler buffer
     // arg 1: base tag
     // arg 2: offset
-    ICHECK_EQ(op->args.size(), 3U);
+    TVM_FFI_ICHECK_EQ(op->args.size(), 3U);
     std::string NBLOCKS = "(uint32_t)(gridDim.x * gridDim.y * gridDim.z)";
     std::string BLOCK_IDX =
         "(uint32_t)((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x)";
@@ -2331,7 +2365,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     // arg 2: base tag
     // arg 3: offset
     // arg 4: stride
-    ICHECK_EQ(op->args.size(), 5U);
+    TVM_FFI_ICHECK_EQ(op->args.size(), 5U);
     this->PrintIndent();
     this->stream << "// timer start\n";
     this->PrintIndent();
@@ -2366,7 +2400,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     // arg 2: base tag
     // arg 3: offset
     // arg 4: stride
-    ICHECK_EQ(op->args.size(), 5U);
+    TVM_FFI_ICHECK_EQ(op->args.size(), 5U);
     this->PrintIndent();
     this->stream << "// timer end\n";
     this->PrintIndent();
@@ -2396,7 +2430,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintIndent();
     this->stream << "}\n";
   } else if (op->op.same_as(builtin::cuda_atomic_add())) {
-    ICHECK_EQ(op->args.size(), 2U);
+    TVM_FFI_ICHECK_EQ(op->args.size(), 2U);
     this->PrintIndent();
     this->stream << "atomicAdd(";
     this->stream << this->PrintExpr(op->args[0]);
@@ -2416,13 +2450,13 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->stream << this->PrintExpr(op->args[0]);
     this->stream << ");\n";
   } else if (op->op.same_as(builtin::ptx_ld_global_acquire())) {
-    ICHECK_EQ(op->args.size(), 2U);
+    TVM_FFI_ICHECK_EQ(op->args.size(), 2U);
     this->PrintIndent();
     this->stream << PrintLdGlobalAcquireAssembly(this, this->PrintExpr(op->args[0]),
                                                  this->PrintExpr(op->args[1]), op->args[0]->dtype);
     this->stream << ";\n";
   } else if (op->op.same_as(builtin::ptx_map_shared_rank())) {
-    ICHECK_EQ(op->args.size(), 2U);
+    TVM_FFI_ICHECK_EQ(op->args.size(), 2U);
     os << PrintMapSharedRankAssembly(this, this->PrintExpr(op->args[0]),
                                                  this->PrintExpr(op->args[1]));
   } else if (op->op.same_as(builtin::thread_return())) {
