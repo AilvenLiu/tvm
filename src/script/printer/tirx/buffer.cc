@@ -346,6 +346,11 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::Axis>("", [](tirx::Axis axis, ObjectPath p, IRDocsifier d) -> Doc {
+      return LiteralDoc::Str(axis->name, p->Attr("name"));
+    });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Iter>("", [](tirx::Iter iter, ObjectPath p, IRDocsifier d) -> Doc {
       return TIR(d, "Iter")->Call({d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")),
                                    d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
@@ -379,18 +384,13 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
     values.push_back(TupleDoc({ListDoc(replicate_e_docs), ListDoc(replicate_sa_docs)}));
   }
   if (layout->exclude.size() > 0) {
-    Array<ExprDoc> exclude_e_docs, exclude_sa_docs, exclude_selector_docs;
-    for (const auto& iter_selector : layout->exclude) {
-      const auto& iter = iter_selector.get<0>();
-      const auto& selector = iter_selector.get<1>();
-      exclude_e_docs.push_back(d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")));
-      exclude_sa_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
-                                          d->AsDoc<ExprDoc>(iter->axis->name, p->Attr("axis"))}));
-      exclude_selector_docs.push_back(d->AsDoc<ExprDoc>(selector, p->Attr("selector")));
+    Array<ExprDoc> exclude_docs;
+    for (const auto& [axis, offset] : layout->exclude) {
+      exclude_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(axis->name, p->Attr("axis")),
+                                       d->AsDoc<ExprDoc>(offset, p->Attr("offset"))}));
     }
     keys.push_back("exclude");
-    values.push_back(TupleDoc({TupleDoc({ListDoc(exclude_e_docs), ListDoc(exclude_sa_docs)}),
-                               ListDoc(exclude_selector_docs)}));
+    values.push_back(ListDoc(exclude_docs));
   }
 
   return TIR(d, "TileLayout")->Call({}, keys, values);

@@ -336,7 +336,7 @@ class TileLayout(TLayout):
 
     shard: List[Iter]
     replicate: List[Iter]
-    exclude: List[Tuple[Iter, PrimExpr]]
+    exclude: List[Tuple[Axis, PrimExpr]]
 
     IterList: TypeAlias = Tuple[
         List[PrimExpr], List[Union[Tuple[PrimExpr, Union[str, Axis]], PrimExpr]]
@@ -346,7 +346,7 @@ class TileLayout(TLayout):
         self,
         shard: IterList = None,
         replicate: IterList = None,
-        exclude: Tuple[IterList, List[PrimExpr]] = None,
+        exclude: List[Tuple[Union[Axis, str], PrimExpr]] = None,
     ):
         # Handle None values
         if shard is None:
@@ -354,7 +354,7 @@ class TileLayout(TLayout):
         if replicate is None:
             replicate = ([], [])
         if exclude is None:
-            exclude = (([], []), [])
+            exclude = dict()
 
         if isinstance(shard, (tuple, list)) and not isinstance(shard[0], (tuple, list)):
             # shard can be just a tuple of extents, infer the default strides
@@ -364,20 +364,15 @@ class TileLayout(TLayout):
         assert len(replicate[0]) == len(
             replicate[1]
         ), "replicate's extent and stride must have the same length"
-        assert len(exclude[0][0]) == len(
-            exclude[0][1]
-        ), "exclude's extent and stride must have the same length"
-        assert len(exclude[1]) == len(
-            exclude[0][0]
-        ), "exclude's iter and selector must have the same length"
 
         def process_iter(e, s):
             return Iter(e, s[0], s[1]) if isinstance(s, tuple) else Iter(e, s, "m")
 
         shard = [process_iter(e, s) for e, s in zip(shard[0], shard[1])]
         replicate = [process_iter(e, s) for e, s in zip(replicate[0], replicate[1])]
-        exclude = ([process_iter(e, s) for e, s in zip(exclude[0][0], exclude[0][1])], exclude[1])
-        exclude = list(zip(exclude[0], exclude[1]))
+        exclude = {
+            Axis.get(axis) if isinstance(axis, str) else axis: offset for axis, offset in exclude
+        }
 
         self.__init_handle_by_constructor__(
             _ffi_api.TileLayout,  # pylint: disable=no-member
@@ -464,7 +459,7 @@ class TileLayout(TLayout):
             result = result[1:]
             result = result[:p_idx] + [higher_P] + result[p_idx:]
 
-        res = _ffi_api.TileLayout(result, [], [])  # pylint: disable=no-member
+        res = _ffi_api.TileLayout(result, [], dict())  # pylint: disable=no-member
         if is_psum:
             res = res.to_psum()
         return res
@@ -494,7 +489,7 @@ class TileLayout(TLayout):
                     assert False, f"layout {self} can not be converted to psum layout"
             else:
                 shard.append(i)
-        return _ffi_api.TileLayout(shard, [], [])  # pylint: disable=no-member
+        return _ffi_api.TileLayout(shard, [], dict())  # pylint: disable=no-member
 
 
 @tvm.ffi.register_object("tir.SwizzleLayout")

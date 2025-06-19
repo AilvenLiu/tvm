@@ -286,7 +286,7 @@ class TileLayoutNode : public TLayoutNode {
  public:
   Array<Iter> shard;
   Array<Iter> replicate;
-  Array<Tuple<Iter, PrimExpr>> exclude;
+  Map<Axis, PrimExpr> exclude;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("shard", &shard);
@@ -363,7 +363,7 @@ class TileLayoutNode : public TLayoutNode {
 class TileLayout : public TLayout {
  public:
   TVM_DLL explicit TileLayout(Array<Iter> shard, Array<Iter> replicate,
-                              Array<Tuple<Iter, PrimExpr>> exclude);
+                              Map<Axis, PrimExpr> exclude);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);

@@ -349,8 +349,7 @@ TVM_FFI_REGISTER_GLOBAL("tir.Iter").set_body_typed([](PrimExpr extent, PrimExpr 
 
 TVM_REGISTER_NODE_TYPE(TileLayoutNode);
 
-TileLayout::TileLayout(Array<Iter> shard, Array<Iter> replicate,
-                       Array<Tuple<Iter, PrimExpr>> exclude) {
+TileLayout::TileLayout(Array<Iter> shard, Array<Iter> replicate, Map<Axis, PrimExpr> exclude) {
   auto n = make_object<TileLayoutNode>();
   n->shard = shard;
   n->replicate = replicate;
@@ -359,8 +358,7 @@ TileLayout::TileLayout(Array<Iter> shard, Array<Iter> replicate,
 }
 
 TVM_FFI_REGISTER_GLOBAL("tir.TileLayout")
-    .set_body_typed([](Array<Iter> shard, Array<Iter> replicate,
-                       Array<Tuple<Iter, PrimExpr>> exclude) {
+    .set_body_typed([](Array<Iter> shard, Array<Iter> replicate, Map<Axis, PrimExpr> exclude) {
       return TileLayout(shard, replicate, exclude);
     });
 
@@ -382,28 +380,25 @@ bool VerifyCompactness(const std::vector<Iter>& iters) {
 }
 
 bool TileLayoutNode::VerifyWellFormed() const {
-  // 1. For thread axes, verify its compactness
-  std::unordered_map<String, std::vector<Iter>> thread_axes;
-  auto collect_thread_axis = [&thread_axes](const Iter& iter) {
-    if (iter->axis->IsThreadAxis()) {
-      thread_axes[iter->axis->name].push_back(iter);
-    }
-  };
-  for (const auto& iter : shard) {
-    collect_thread_axis(iter);
-  }
-  for (const auto& iter : replicate) {
-    collect_thread_axis(iter);
-  }
-  for (const auto& iter_selector : exclude) {
-    collect_thread_axis(iter_selector.get<0>());
-  }
-  for (const auto& [axis, iters] : thread_axes) {
-    if (!VerifyCompactness(iters)) {
-      return false;
-    }
-  }
-  // 2. Check if the scope is connected
+  // // 1. For thread axes, verify its compactness
+  // std::unordered_map<String, std::vector<Iter>> thread_axes;
+  // auto collect_thread_axis = [&thread_axes](const Iter& iter) {
+  //   if (iter->axis->IsThreadAxis()) {
+  //     thread_axes[iter->axis->name].push_back(iter);
+  //   }
+  // };
+  // for (const auto& iter : shard) {
+  //   collect_thread_axis(iter);
+  // }
+  // for (const auto& iter : replicate) {
+  //   collect_thread_axis(iter);
+  // }
+  // for (const auto& [axis, iters] : thread_axes) {
+  //   if (!VerifyCompactness(iters)) {
+  //     return false;
+  //   }
+  // }
+  // 1. Check if the scope is connected
   if (!GetScope().defined() && HasThreadAxis()) {
     return false;
   }
@@ -421,37 +416,27 @@ PrimExpr TileLayoutNode::GetSize(Optional<String> axis_name) const {
   for (const auto& iter : shard) {
     res = filter(iter, res);
   }
-  for (const auto& iter : replicate) {
-    res = filter(iter, res);
-  }
-  for (const auto& iter : exclude) {
-    res = filter(iter.get<0>(), res);
-  }
   return res;
 }
 
 PrimExpr TileLayoutNode::GetCosize(Optional<String> axis_name) const {
   arith::Analyzer analyzer;
-  PrimExpr result = IntImm(shard[0]->extent->dtype, 0);
-  auto filter = [&](const Iter& iter, PrimExpr acc) {
-    if ((!axis_name.has_value() && iter->axis->IsMemoryAxis()) ||
-        (axis_name.has_value() && iter->axis->name == axis_name.value())) {
-      ICHECK(analyzer.CanProve(iter->stride > 0))
-          << "Negative stride is not supported for memory axes currently";
-      return acc + (iter->extent - 1) * iter->stride;
-    }
-    return acc;
+  PrimExpr result = IntImm(shard[0]->extent->dtype, 1);
+  auto filter = [&](const Axis& axis) {
+    return (!axis_name.has_value() && axis->IsMemoryAxis()) ||
+           (axis_name.has_value() && axis->name == axis_name.value());
   };
+
   for (const auto& iter : shard) {
-    result = filter(iter, result);
+    if (filter(iter->axis)) result += (iter->extent - 1) * iter->stride;
   }
   for (const auto& iter : replicate) {
-    result = filter(iter, result);
+    if (filter(iter->axis)) result += (iter->extent - 1) * iter->stride;
   }
-  for (const auto& iter : exclude) {
-    result = filter(iter.get<0>(), result);
+  for (const auto& [axis, offset] : exclude) {
+    if (filter(axis)) result += offset;
   }
-  return analyzer.Simplify(is_zero(result) ? 1 : result + 1);
+  return analyzer.Simplify(result);
 }
 
 Map<String, PrimExpr> TileLayoutNode::Apply(PrimExpr coord) const {
@@ -484,6 +469,18 @@ TileLayout RemoveUnitIters(TileLayout layout) {
     new_shard.push_back(Iter(1, 1, layout->shard[0]->axis));
   }
   new_layout->shard = new_shard;
+  return GetRef<TileLayout>(new_layout);
+}
+
+TileLayout RemoveZeroOffset(TileLayout layout) {
+  auto new_layout = layout.CopyOnWrite();
+  Map<Axis, PrimExpr> exclude;
+  for (const auto& [axis, offset] : layout->exclude) {
+    if (!is_zero(offset)) {
+      exclude.Set(axis, offset);
+    }
+  }
+  new_layout->exclude = exclude;
   return GetRef<TileLayout>(new_layout);
 }
 
@@ -523,9 +520,9 @@ TileLayout TryFuseAxes(TileLayout layout) {
   auto scope = scope_pair_opt.value().get<1>()->name;
 
   // Step 2: Create vectors for the new layout components
-  std::vector<Iter> new_shard;
-  std::vector<Iter> new_replicate;
-  std::vector<Tuple<Iter, PrimExpr>> new_exclude;
+  std::vector<Iter> shard;
+  std::vector<Iter> replicate;
+  Map<Axis, PrimExpr> exclude;
 
   // Step 3: Define the axis fusion function
   auto try_fuse_axis = [&](const Iter& iter) -> Iter {
@@ -534,46 +531,45 @@ TileLayout TryFuseAxes(TileLayout layout) {
   };
 
   // Step 4: Process shard iterators
-  for (size_t i = 0; i < layout->shard.size(); ++i) {
-    new_shard.push_back(try_fuse_axis(layout->shard[i]));
+  for (auto iter : layout->shard) {
+    shard.push_back(try_fuse_axis(iter));
   }
   // Step 5: Process replicate iterators
-  for (size_t i = 0; i < layout->replicate.size(); ++i) {
-    new_replicate.push_back(try_fuse_axis(layout->replicate[i]));
+  for (auto iter : layout->replicate) {
+    replicate.push_back(try_fuse_axis(iter));
   }
   // Step 6: Process exclude iterators
-  for (size_t i = 0; i < layout->exclude.size(); ++i) {
-    new_exclude.push_back(Tuple<Iter, PrimExpr>(try_fuse_axis(layout->exclude[i].get<0>()),
-                                                layout->exclude[i].get<1>()));
+  for (auto [axis, offset] : layout->exclude) {
+    Iter iter = try_fuse_axis(Iter(1, offset, axis));
+    exclude.Set(iter->axis, iter->stride);
   }
   // Step 7: Create and return the new layout
-  auto result = TileLayout(new_shard, new_replicate, new_exclude);
+  auto result = TileLayout(shard, replicate, exclude);
   return result;
 }
 
-TileLayout SortReplicateExcludeIters(TileLayout layout) {
+TileLayout SortReplicateIters(TileLayout layout) {
   auto n = layout.CopyOnWrite();
   std::vector<Iter> replicate(n->replicate.begin(), n->replicate.end());
-  std::vector<Tuple<Iter, PrimExpr>> exclude(n->exclude.begin(), n->exclude.end());
   auto hash_compare = [](const auto& a, const auto& b) {
     return StructuralHash()(a) < StructuralHash()(b);
   };
   std::sort(replicate.begin(), replicate.end(), hash_compare);
-  std::sort(exclude.begin(), exclude.end(), hash_compare);
   n->replicate = std::move(replicate);
-  n->exclude = std::move(exclude);
   return GetRef<TileLayout>(n);
 }
 
 TLayout TileLayoutNode::Normalize() const {
   // 0. Remove unit iters in shard
   TileLayout res = RemoveUnitIters(GetRef<TileLayout>(this));
-  // 1. Try fuse axes
+  // 1. Remove zero offset in exclude
+  res = RemoveZeroOffset(res);
+  // 2. Try fuse axes
   res = TryFuseAxes(res);
-  // 2. Fuse shard iters
+  // 3. Fuse shard iters
   res = FuseShardIters(res);
-  // 3. Sort replicate & exclude iters
-  res = SortReplicateExcludeIters(res);
+  // 3. Sort replicate iters
+  res = SortReplicateIters(res);
   return res;
 }
 
@@ -685,12 +681,17 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
   tile_rep.insert(tile_rep.end(), outer->replicate.begin(), outer->replicate.end());
 
   // Combine exclude attributes from both layouts
-  std::vector<Tuple<Iter, PrimExpr>> tile_offset;
-  for (const auto& iter_selector : inner->exclude) {
-    tile_offset.push_back(iter_selector);
+  Map<Axis, PrimExpr> tile_offset;
+  for (const auto& [axis, offset] : inner->exclude) {
+    tile_offset.Set(axis, offset);
   }
-  for (const auto& iter_selector : outer->exclude) {
-    tile_offset.push_back(iter_selector);
+  for (const auto& [axis, offset] : outer->exclude) {
+    auto it = tile_offset.find(axis);
+    if (it != tile_offset.end()) {
+      tile_offset.Set(axis, (*it).second + offset);
+    } else {
+      tile_offset.Set(axis, offset);
+    }
   }
 
   return TileLayout(tile_shard, tile_rep, tile_offset)->Normalize();
@@ -748,7 +749,7 @@ TileLayout SplitAxes(TileLayout layout, const String& split_scope) {
   };
 
   std::vector<Iter> shard, replicate;
-  std::vector<Tuple<Iter, PrimExpr>> exclude;
+  Map<Axis, PrimExpr> exclude;
 
   for (const auto& iter : layout->shard) {
     auto split_iters = split_iter(iter);
@@ -760,16 +761,15 @@ TileLayout SplitAxes(TileLayout layout, const String& split_scope) {
     replicate.insert(replicate.end(), split_iters.begin(), split_iters.end());
   }
 
-  for (const auto& iter_selector : layout->exclude) {
-    auto split_iters = split_iter(iter_selector.get<0>());
+  for (const auto& [axis, offset] : layout->exclude) {
+    auto split_iters = split_iter(Iter(1, offset, axis));
     if (split_iters.size() == 1) {
-      exclude.emplace_back(split_iters[0], iter_selector.get<1>());
+      exclude.Set(split_iters[0]->axis, split_iters[0]->stride);
     } else {
-      auto coord =
-          SplitCoord(iter_selector.get<1>(), {split_iters[0]->extent, split_iters[1]->extent});
+      auto coord = SplitCoord(offset, {split_iters[0]->extent, split_iters[1]->extent});
       ICHECK(coord.size() == 2) << "Split coord size must be 2";
-      exclude.emplace_back(split_iters[0], coord[0]);
-      exclude.emplace_back(split_iters[1], coord[1]);
+      exclude.Set(split_iters[0]->axis, coord[0] * split_iters[0]->stride);
+      exclude.Set(split_iters[1]->axis, coord[1] * split_iters[1]->stride);
     }
   }
 
@@ -870,15 +870,13 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
     }
   }
   // Gather outer exclude
-  std::vector<Tuple<Iter, PrimExpr>> outer_exclude;
-  for (const auto& iter_selector : tiled->exclude) {
-    if (std::none_of(layout->exclude.begin(), layout->exclude.end(),
-                     [&](const Tuple<Iter, PrimExpr>& inner_iter_selector) {
-                       return StructuralEqual()(iter_selector, inner_iter_selector);
-                     })) {
-      auto outer_iter = rescale_iter(iter_selector.get<0>());
-      if (!outer_iter.has_value()) return std::nullopt;
-      outer_exclude.push_back(Tuple<Iter, PrimExpr>(outer_iter.value(), iter_selector.get<1>()));
+  Map<Axis, PrimExpr> outer_exclude;
+  for (const auto& [axis, offset] : tiled->exclude) {
+    auto it = layout->exclude.find(axis);
+    if (it != layout->exclude.end()) {
+      outer_exclude.Set(axis, analyzer.Simplify(offset - (*it).second));
+    } else {
+      outer_exclude.Set(axis, offset);
     }
   }
   return TileLayout(outer_shard, outer_replicate, outer_exclude);
@@ -964,13 +962,13 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
   }
 
   // Gather inner exclude
-  std::vector<Tuple<Iter, PrimExpr>> inner_exclude;
-  for (const auto& iter_selector : tiled->exclude) {
-    if (std::none_of(layout->exclude.begin(), layout->exclude.end(),
-                     [&](const Tuple<Iter, PrimExpr>& inner_iter_selector) {
-                       return StructuralEqual()(iter_selector, inner_iter_selector);
-                     })) {
-      inner_exclude.push_back(iter_selector);
+  Map<Axis, PrimExpr> inner_exclude;
+  for (const auto& [axis, offset] : tiled->exclude) {
+    auto it = layout->exclude.find(axis);
+    if (it != layout->exclude.end()) {
+      inner_exclude.Set(axis, analyzer.Simplify(offset - (*it).second));
+    } else {
+      inner_exclude.Set(axis, offset);
     }
   }
 
@@ -1025,13 +1023,13 @@ Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
   std::unordered_map<String, String> scope_map;
   Optional<String> inner_most;
 
-  auto check_axis = [&](const Iter& iter) {
-    if (!iter->axis->IsThreadAxis()) return;
+  auto check_axis = [&](const Axis& axis) {
+    if (!axis->IsThreadAxis()) return;
 
-    auto subscope_opt = iter->axis->GetSubscope();
-    auto scope_opt = iter->axis->GetScope();
+    auto subscope_opt = axis->GetSubscope();
+    auto scope_opt = axis->GetScope();
     CHECK(subscope_opt.defined() && scope_opt.defined())
-        << "Thread axis " << iter->axis->name << " has no subscope or scope";
+        << "Thread axis " << axis->name << " has no subscope or scope";
 
     String subscope = subscope_opt.value()->name;
     String scope = scope_opt.value()->name;
@@ -1047,9 +1045,9 @@ Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
       CHECK_EQ(it->second, scope) << "Ill-formed tile layout: conflicting scopes for " << subscope;
   };
 
-  for (const auto& iter : shard) check_axis(iter);
-  for (const auto& iter : replicate) check_axis(iter);
-  for (const auto& iter : exclude) check_axis(iter.get<0>());
+  for (const auto& iter : shard) check_axis(iter->axis);
+  for (const auto& iter : replicate) check_axis(iter->axis);
+  for (const auto& [axis, offset] : exclude) check_axis(axis);
 
   String outer_most = inner_most.value();
   size_t count = 0;

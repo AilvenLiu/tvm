@@ -112,10 +112,7 @@ def test_roundtrip_layout():
         )
 
     def get_layout2():
-        return T.TileLayout(
-            shard=([8, 8, 8, 4, 2], [64, (4, "laneid"), 8, 2, 1]),
-            exclude=(([4], [(1, "laneid")]), [0]),
-        )
+        return T.TileLayout(shard=([8, 8, 8, 4, 2], [64, (4, "laneid"), 8, 2, 1]))
 
     def get_layout3():
         return T.TileLayout(

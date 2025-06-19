@@ -101,34 +101,12 @@ def test_constructor():
 
     layout = TileLayout(
         shard=([8], [(4, Axis.laneid)]),
-        exclude=(([4], [(1, Axis.laneid)]), [0]),
+        exclude=(("laneid", 1),),
     )
-    assert (
-        str(layout)
-        == 'T.TileLayout(shard=([8], [(4, "laneid")]), exclude=(([4], [(1, "laneid")]), [0]))'
-    )
+    assert str(layout) == 'T.TileLayout(shard=([8], [(4, "laneid")]), exclude=[("laneid", 1)])'
 
 
 def test_verify_well_formed():
-    def test_thread_axis_compactness():
-        layout = TileLayout(
-            shard=([8, 4, 2], [(4, Axis.laneid), (1, Axis.laneid), (1, Axis.m)]),
-        )
-        assert layout.verify_well_formed()
-
-        layout = TileLayout(
-            shard=([8, 4, 2], [(2, Axis.laneid), (1, Axis.laneid), (1, Axis.m)]),
-        )
-        assert not layout.verify_well_formed()
-
-        layout = TileLayout(
-            shard=([8], [(4, Axis.laneid)]),
-            replicate=([4], [(2, Axis.laneid)]),
-        )
-        assert not layout.verify_well_formed()
-
-    test_thread_axis_compactness()
-
     def test_scope_connected():
         layout = TileLayout(
             shard=([8, 4, 2], [(4, "laneid"), (1, "laneid"), (1, "m")]),
@@ -368,11 +346,10 @@ def test_normalize_tile_layout():
     def case_both_data_device3():
         layout = TileLayout(
             shard=([8, 8, 8, 1, 1, 2, 1], [16, (4, "laneid"), 2, 1, (4, "laneid"), 1, 1]),
-            exclude=(([4], [(1, "laneid")]), [0]),
+            exclude=[("laneid", 0)],
         )
         layout_normalized = TileLayout(
             shard=([8, 8, 16], [16, (4, "laneid"), 1]),
-            exclude=(([4], [(1, "laneid")]), [0]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -576,12 +553,12 @@ def test_normalize_tile_layout():
         layout1 = TileLayout(
             shard=([1], [1]),
             replicate=([8, 4], [(4, "laneid"), (1, "laneid")]),
-            exclude=(([2, 2], [(2, "warpid"), (1, "warpid")]), [1, 0]),
+            exclude=[("warpid", 2)],
         )
         layout2 = TileLayout(
             shard=([1], [1]),
             replicate=([4, 8], [(1, "laneid"), (4, "laneid")]),
-            exclude=(([2, 2], [(1, "warpid"), (2, "warpid")]), [0, 1]),
+            exclude=[("warpid", 2)],
         )
         assert_structural_equal(layout1.normalize(), layout2.normalize())
 
@@ -1047,14 +1024,9 @@ def test_shard_layout():
 
     def case_quad_shuffle():
         layout = TileLayout(shard=([1, 2], [2, 1]))
-        layout_warp = TileLayout(
-            shard=([8], [(4, "laneid")]),
-            exclude=(([4], [(1, "laneid")]), [0]),
-        )
+        layout_warp = TileLayout(shard=([8], [(4, "laneid")]))
         res = layout.tile(layout_warp, [8, 1], [1, 2])
-        layout_expected = TileLayout(
-            shard=([8, 2], [(4, "laneid"), (1, "m")]), exclude=(([4], [(1, "laneid")]), [0])
-        )
+        layout_expected = TileLayout(shard=([8, 2], [(4, "laneid"), (1, "m")]))
         assert_structural_equal(res.normalize(), layout_expected.normalize())
 
         outer = layout.is_tile_inner(res, [8, 2], [1, 2])

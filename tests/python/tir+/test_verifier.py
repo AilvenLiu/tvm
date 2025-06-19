@@ -370,7 +370,7 @@ def test_host():
                             T.ptx.mbarrier.arrive.expect_tx(bar.data, 16*16*4)
                         T.ptx.mbarrier.try_wait(bar.data, phase[0])
                         phase[0] = phase[0] ^ 1
-                        T.print_buffer(A_smem.data, "float32", 2, 16*16)
+                        T.print_buffer(A_smem.data, "float32", False, False, 2, 16*16)
     # fmt: on
     verify(test1)
 
