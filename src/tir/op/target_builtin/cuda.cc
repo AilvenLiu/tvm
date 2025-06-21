@@ -268,6 +268,9 @@ TIR_DEFINE_BUILTIN_FUNC(ptx_tcgen05_shift)
 TIR_DEFINE_BUILTIN_FUNC(ptx_map_shared_rank)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(cuda_func_call)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

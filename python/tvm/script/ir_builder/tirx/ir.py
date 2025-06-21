@@ -2408,6 +2408,7 @@ class CUDANamespace:
         self.thread_fence = _op_wrapper(_tir_op.cuda_thread_fence)
         self.syncthreads_and = _op_wrapper(_tir_op.cuda_syncthreads_and)
         self.nano_sleep = _op_wrapper(_tir_op.cuda_nano_sleep)
+        self.func_call = _op_wrapper(_tir_op.cuda_func_call)
 
 
 class CUDABarrierNamespace:

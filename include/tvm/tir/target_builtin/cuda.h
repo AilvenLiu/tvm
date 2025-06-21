@@ -644,6 +644,13 @@ TVM_DLL const Op& ptx_tcgen05_shift();
  */
 TVM_DLL const Op& ptx_map_shared_rank();
 
+/*!
+ * \brief tvm instrinsics to call a CUDA function. Source code is provided as a string.
+ *
+ * cuda_func_call(String func_name, PrimExpr... args, String source_code)
+ */
+TVM_DLL const Op& cuda_func_call();
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

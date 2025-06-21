@@ -1897,7 +1897,9 @@ def ptx_bar_sync(name_bar_id, thread_count):
     return call_intrin("", "tir.ptx_bar_sync", name_bar_id, thread_count)
 
 
-def ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *coords, cta_mask=0, cta_group=1):
+def ptx_cp_async_bulk_tensor_global_to_cluster(
+    dim, dst_ptr, bar, tensormap, *coords, cta_mask=0, cta_group=1
+):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.shared::cluster.global.tile.mbarrier::complete_tx::bytes
 
     Parameters
@@ -1919,8 +1921,8 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *co
 
     cta_mask : int
         The mask of the cta for multicast.
-        
-    cta_group : int 
+
+    cta_group : int
         Must be either 1 or 2.
         If set to 1, mbarrier must be in the shared memory of the same CTA as the shared memory destination
         If set to 2, mbarrier can be in shared memory of either the same CTA as the shared memory destination
@@ -5289,6 +5291,7 @@ def print_buffer(buffer_var, dtype, is_string, is_scalar, dim_num, *shape):
         buffer_var, dtype, is_string, is_scalar, dim_num, *final_shape_args
     )
 
+
 def timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
     """TVM intrinsic for initializing the CUDA profiler, and store profiling result in a buffer.
 
@@ -5952,6 +5955,7 @@ def ptx_ld_global_acquire(res, addr):
     """
     return call_intrin("", "tir.ptx_ld_global_acquire", res, addr)
 
+
 def ptx_map_shared_rank(ptr, rank):
     """TVM intrinsic to call ptx map_shared_rank instruction
 
@@ -5959,7 +5963,7 @@ def ptx_map_shared_rank(ptr, rank):
     ----------
     ptr: PrimExpr
         The pointer to the local shared memory.
-        
+
     rank: int
         The rank of the distributed shared memory.
 
@@ -5969,3 +5973,23 @@ def ptx_map_shared_rank(ptr, rank):
         The call expression.
     """
     return call_intrin("uint32", "tir.ptx_map_shared_rank", ptr, rank)
+
+
+def cuda_func_call(func_name, *args, source_code, return_type="void"):
+    """TVM intrinsic to call a CUDA function. Source code is provided as a string.
+
+    Parameters
+    ----------
+    func_name: str
+        The name of the CUDA function.
+
+    args: PrimExpr
+        The arguments to the CUDA function.
+
+    source_code: str
+        The source code of the CUDA function.
+
+    return_type: str
+        The return type of the CUDA function.
+    """
+    return call_intrin(return_type, "tir.cuda_func_call", func_name, *args, source_code)
