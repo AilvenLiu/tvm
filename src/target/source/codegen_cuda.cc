@@ -2455,12 +2455,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->stream << PrintLdGlobalAcquireAssembly(this, this->PrintExpr(op->args[0]),
                                                  this->PrintExpr(op->args[1]), op->args[0]->dtype);
     this->stream << ";\n";
-  } else if (op->op.same_as(builtin::ptx_map_shared_rank())) {
-    TVM_FFI_ICHECK_EQ(op->args.size(), 2U);
-    os << PrintMapSharedRankAssembly(this, this->PrintExpr(op->args[0]),
-                                     this->PrintExpr(op->args[1]));
   } else if (op->op.same_as(builtin::cuda_func_call())) {
-    ICHECK_GE(op->args.size(), 2U);
+    TVM_FFI_ICHECK_GE(op->args.size(), 2U);
     size_t num_args = op->args.size() - 2;
     std::vector<std::string> args;
     for (size_t i = 1; i < num_args + 1; i++) {

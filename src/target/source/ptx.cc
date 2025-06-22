@@ -2694,7 +2694,8 @@ __forceinline__ __device__ void {func_name}(void* bar, int cta_mask_) {
 }
 )";
 
-  std::string caller_code = "{func_name}<{cta_group}>(reinterpret_cast<void*>({bar}), {cta_mask});\n";
+  std::string caller_code =
+      "{func_name}<{cta_group}>(reinterpret_cast<void*>({bar}), {cta_mask});\n";
   std::string func_name = "ptx_tcgen05_commit{multicast_func}";
   {
     // func name
@@ -2872,25 +2873,6 @@ __forceinline__ __device__ {dtype} {func_name}({dtype}* addr) {
   func_code = replacer.rewrite(func_code);
   cg->AddUtilFunction(func_name, func_code);
   return res + " = " + func_name + "(" + addr + ")";
-}
-
-std::string PrintMapSharedRankAssembly(codegen::CodeGenCUDA* cg,
-                                         const std::string& addr, const std::string& rank){
-  std::string func_code = R"(
-__forceinline__ __device__ uint32_t {func_name}(uint32_t addr, uint32_t rank) {
-  uint32_t result;
-  asm volatile("mapa.shared::cluster.u32  %0, %1, %2;\n"
-              : "=r"(result)
-              : "r"(addr), "r"(rank));
-  return result;
-}
-)";
-  std::string func_name = "ptx_map_shared_rank";
-  Replacer replacer;
-  replacer.register_rule("{func_name}", func_name);
-  func_code = replacer.rewrite(func_code);
-  cg->AddUtilFunction(func_name, func_code);
-  return func_name + "(reinterpret_cast<uint32_t>(" + addr + "), " + rank + ")";
 }
 
 }  // namespace codegen

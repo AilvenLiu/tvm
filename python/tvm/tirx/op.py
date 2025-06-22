@@ -20,6 +20,7 @@ import warnings
 from typing import Any, Optional, Union
 
 import tvm_ffi
+
 import tvm
 from tvm import tirx
 from tvm.ir import Array, Op, PrimExpr
@@ -825,6 +826,2096 @@ def tvm_throw_last_error():
         The return expression
     """
     return call_intrin("handle", "tirx.tvm_throw_last_error")
+
+
+def make_filled_simdgroup_matrix(
+    d: Var,
+    index: PrimExpr,
+    value: PrimExpr,
+    col: int = 8,
+    row: int = 8,
+):
+    """Create a filled SIMDGroup matrix
+
+    Parameters
+    ----------
+    d : var
+        The simdgroup var
+
+    index : PrimExpr
+        The index of the matrix.
+
+    value : PrimExpr
+        The value to fill.
+
+    col : int
+        The number of columns.
+
+    row : int
+        The number of rows.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("handle", "tir.make_filled_simdgroup_matrix", d, index, value, col, row)
+
+
+def simdgroup_load(
+    d: Var,
+    index: PrimExpr,
+    ptr: PrimExpr,
+    stride: PrimExpr,
+    col: int = 8,
+    row: int = 8,
+    transpose_matrix: bool = False,
+):
+    """Load data from device memory or threadgroup memory to simdgroup
+
+    Parameters
+    ----------
+    d : var
+        The simdgroup var
+
+    index : PrimExpr
+        The index of the matrix.
+
+    ptr : PrimExpr
+        The pointer.
+
+    stride : PrimExpr
+        The stride.
+
+    col : int
+        The number of columns.
+
+    row : int
+        The number of rows.
+
+    transpose_matrix : bool
+        Whether to transpose the matrix.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "handle",
+        "tir.simdgroup_load",
+        d,
+        index,
+        ptr,
+        stride,
+        col,
+        row,
+        transpose_matrix,
+    )
+
+
+def simdgroup_store(
+    d: PrimExpr,
+    index: PrimExpr,
+    ptr: PrimExpr,
+    stride: PrimExpr,
+    col: int = 8,
+    row: int = 8,
+    transpose_matrix: bool = False,
+):
+    """Store data from simdgroup to device memory or threadgroup memory
+
+    Parameters
+    ----------
+    d : PrimExpr
+        The SIMDGroup.
+
+    index : PrimExpr
+        The index of the matrix.
+
+    ptr : PrimExpr
+        The pointer.
+
+    stride : PrimExpr
+        The stride.
+
+    col : int
+        The number of columns.
+
+    row : int
+        The number of rows.
+
+
+    transpose_matrix : bool
+        Whether to transpose the matrix.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "handle",
+        "tir.simdgroup_store",
+        d,
+        index,
+        ptr,
+        stride,
+        col,
+        row,
+        transpose_matrix,
+    )
+
+
+def simdgroup_multiply_accumulate(
+    d: Var,
+    index_d: PrimExpr,
+    a: Var,
+    index_a: PrimExpr,
+    b: Var,
+    index_b: PrimExpr,
+    c: Var,
+    index_c: PrimExpr,
+):
+    """Multiply and accumulate two matrices in simdgroup
+    i.e. d = a * b + c
+
+    Parameters
+    ----------
+    d : Var
+        The destination matrix.
+
+    index_d : PrimExpr
+        The index of the destination matrix.
+
+    a : Var
+        The first matrix.
+
+    index_a : PrimExpr
+        The index of the first matrix.
+
+    b : Var
+        The second matrix.
+
+    index_b : PrimExpr
+        The index of the second matrix.
+
+    c : Var
+        The third matrix.
+
+    index_c : PrimExpr
+        The index of the third matrix.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "handle",
+        "tir.simdgroup_multiply_accumulate",
+        d,
+        index_d,
+        a,
+        index_a,
+        b,
+        index_b,
+        c,
+        index_c,
+    )
+
+
+def vectorlow(dtype, vec):
+    """Get the low level half of the vector
+
+    Parameters
+    ----------
+    dtype : str
+       The data type of the result.
+
+    vec : list
+       The input vector.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(dtype, "tir.vectorlow", vec)
+
+
+def vectorhigh(dtype, vec):
+    """Get the high level half of the vector
+
+    Parameters
+    ----------
+    dtype : str
+       The data type of the result.
+
+    vec : list
+       The input vector.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(dtype, "tir.vectorhigh", vec)
+
+
+def vectorcombine(dtype, vec1, vec2):
+    """Concat two vectors
+
+    Parameters
+    ----------
+    vec1 : list
+       The input vector.
+
+    vec2 : list
+       The input vector.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(dtype, "tir.vectorcombine", vec1, vec2)
+
+
+def dp4a(vec1, vec2, acc=0):
+    """Dot product of two int8x4 vectors and add an optional accumulator
+
+    Parameters
+    ----------
+    vec1 : int8x4
+       The input vector.
+
+    vec2 : int8x4
+       The input vector.
+
+    acc : int32
+       The accumulator.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("int32", "tir.dp4a", vec1, vec2, acc)
+
+
+def ret(val, span=None):
+    """Create a tir return expression
+
+    Parameters
+    ----------
+    val : Expr
+        The returned tir expression, whose data type is int, float or void pointer.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    ret : PrimExpr
+        The return expression
+    """
+
+    return _ffi_api.ret(val, span)
+
+
+def any(*args, span=None):
+    """Create a new experssion of the union of all conditions in the arguments
+
+    Parameters
+    ----------
+    args : list
+        List of symbolic boolean expressions
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    expr: Expr
+        Expression
+    """
+    if not args:
+        raise ValueError("Any must take at least 1 argument")
+    if len(args) == 1:
+        return args[0]
+    val = _ffi_api._OpOr(args[0], args[1], span)  # type: ignore
+    for i in range(2, len(args)):
+        val = _ffi_api._OpOr(val, args[i], span)  # type: ignore
+    return val
+
+
+def all(*args, span=None):
+    """Create a new expression of the intersection of all conditions in the
+      arguments
+
+    Parameters
+    ----------
+    args : list
+        List of symbolic boolean expressions
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    expr: Expr
+        Expression
+    """
+    if not args:
+        raise ValueError("Any must take at least 1 argument")
+    if len(args) == 1:
+        return args[0]
+    val = _ffi_api._OpAnd(args[0], args[1], span)  # type: ignore
+    for i in range(2, len(args)):
+        val = _ffi_api._OpAnd(val, args[i], span)  # type: ignore
+    return val
+
+
+@tvm.ffi.register_func("tvm.default_trace_action")
+def _tvm_default_trace_action(*args):
+    print(list(args))
+
+
+def trace(args, trace_action="tvm.default_trace_action"):
+    """Trace tensor data at the runtime.
+
+    The trace function allows to trace specific tensor at the
+    runtime. The tracing value should come as last argument.
+    The trace action should be specified, by default
+    tvm.default_trace_action is used.
+
+    Parameters
+    ----------
+    args : list of Expr or Buffers.
+        Positional arguments.
+
+    trace_action : str.
+        The name of the trace action.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+
+    See Also
+    --------
+    tvm.tir.call_packed : Creates packed function.
+    """
+    if not isinstance(args, list):
+        raise Exception("tvm.tir.trace consumes the args as list type")
+    call_args = [_pack_buffer(x) if isinstance(x, Buffer) else x for x in args]
+    call_args.insert(0, trace_action)
+    return tvm.tir.Call(args[-1].dtype, Op.get("tir.tvm_call_trace_packed"), call_args)
+
+
+def min_value(dtype, span=None):
+    """minimum value of dtype
+
+    Parameters
+    ----------
+    dtype : str
+        The data type.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    value : tvm.Expr
+        The minimum value of dtype.
+    """
+    return _ffi_api.min_value(dtype, span)  # type: ignore
+
+
+def max_value(dtype: str, span: Optional[Span] = None) -> Any:
+    """maximum value of dtype
+
+    Parameters
+    ----------
+    dtype : str
+        The data type.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    value : tvm.Expr
+        The maximum value of dtype.
+    """
+    return _ffi_api.max_value(dtype, span)  # type: ignore
+
+
+def infinity(dtype: str, span: Optional[Span] = None) -> Any:
+    """infinity value of dtype
+
+    Parameters
+    ----------
+    dtype : str
+        The data type.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    value : tvm.Expr
+        The infinity value of dtype.
+    """
+    return _ffi_api.infinity(dtype, span)  # type: ignore
+
+
+def reinterpret(dtype, value, span: Optional[Span] = None) -> Any:
+    """infinity value of dtype
+
+    Parameters
+    ----------
+    dtype : str
+        The data type.
+
+    value : PrimExpr
+        The input value.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    value : tvm.Expr
+        The reinterpret cast value of dtype.
+    """
+    return _ffi_api.reinterpret(dtype, value, span)  # type: ignore
+
+
+def exp(x):
+    """Take exponential of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.exp", x)
+
+
+def exp2(x):
+    """Calculate 2**x
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.exp2", x)
+
+
+def exp10(x):
+    """Calculate 10**x
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.exp10", x)
+
+
+def erf(x):
+    """Take gauss error function of the input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.erf", x)
+
+
+def tanh(x):
+    """Take hyperbolic tanh of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.tanh", x)
+
+
+def sigmoid(x):
+    """Quick function to get sigmoid
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.sigmoid", x)
+
+
+def log(x):
+    """Take log of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.log", x)
+
+
+def log2(x):
+    """Take log2 of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.log2", x)
+
+
+def log10(x):
+    """Take log10 of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.log10", x)
+
+
+def log1p(x):
+    """Take log(x + 1) with respect to input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.log1p", x)
+
+
+def tan(x):
+    """Take tan of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.tan", x)
+
+
+def cos(x):
+    """Take cos of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.cos", x)
+
+
+def cosh(x):
+    """Take cosh of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.cosh", x)
+
+
+def acos(x):
+    """Take acos of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.acos", x)
+
+
+def acosh(x):
+    """Take acos of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.acosh", x)
+
+
+def sin(x):
+    """Take sin of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.sin", x)
+
+
+def sinh(x):
+    """Take sinh of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.sinh", x)
+
+
+def asin(x):
+    """Take asin of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.asin", x)
+
+
+def asinh(x):
+    """Take asinh of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.asinh", x)
+
+
+def atan(x):
+    """Take atan of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.atan", x)
+
+
+def atanh(x):
+    """Take atanh of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.atanh", x)
+
+
+def atan2(x1, x2):
+    """Take arctan2(x1, x2).
+
+    Parameters
+    ----------
+    x1 : PrimExpr
+        Input argument.
+
+    x2 : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x1 = tir.convert(x1)
+    x2 = tir.convert(x2)
+    return call_intrin(x1.dtype, "tir.atan2", x1, x2)
+
+
+def sqrt(x):
+    """Take square root of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.sqrt", x)
+
+
+def rsqrt(x):
+    """Take reciprocal of square root of input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.rsqrt", x)
+
+
+def clz(x):
+    """Count leading zero bits of an integer x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input 32 or 64 bit integer.
+        The result is undefined if the input is 0.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return call_intrin("int32", "tir.clz", x)
+
+
+def floor(x: PrimExprWithOp, span=None):
+    """Take floor of float input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return _ffi_api.floor(x, span)  # type: ignore
+
+
+def ceil(x, span=None):
+    """Take ceil of float input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return _ffi_api.ceil(x, span)  # type: ignore
+
+
+def trunc(x, span=None):
+    """Get truncated value of the input.
+
+    The truncated value of the scalar x is the
+    nearest integer i which is closer to zero than x is.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return _ffi_api.trunc(x, span)  # type: ignore
+
+
+def abs(x, span=None):
+    """Get absolute value of the input element-wise.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return _ffi_api.abs(x, span)  # type: ignore
+
+
+def bitwise_and(x, y, span=None):
+    """Take bitwise and of two values
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Left operand
+
+    y : PrimExpr
+        Right operand
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result.
+    """
+    return _ffi_api.bitwise_and(x, y, span)
+
+
+def bitwise_not(x, span=None):
+    """Take bitwise not of input value
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input operand
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result.
+    """
+    return _ffi_api.bitwise_not(x, span)
+
+
+def bitwise_or(x, y, span=None):
+    """Take bitwise or of two values
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Left operand
+
+    y : PrimExpr
+        Right operand
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result.
+    """
+    return _ffi_api.bitwise_or(x, y, span)
+
+
+def bitwise_xor(x, y, span=None):
+    """Take bitwise xor of two values
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Left operand
+
+    y : PrimExpr
+        Right operand
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result.
+    """
+    return _ffi_api.bitwise_xor(x, y, span)
+
+
+def round(x, span=None):
+    """Round elements of the array to the nearest integer.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return _ffi_api.round(x, span)  # type: ignore
+
+
+def nearbyint(x, span=None):
+    """Round elements of the array to the nearest integer.
+    This intrinsic uses llvm.nearbyint instead of llvm.round
+    which is faster but will results different from te.round.
+    Notably nearbyint rounds according to the rounding mode,
+    whereas te.round (llvm.round) ignores that.
+    For differences between the two see:
+    https://en.cppreference.com/w/cpp/numeric/math/round
+    https://en.cppreference.com/w/cpp/numeric/math/nearbyint
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return _ffi_api.nearbyint(x, span)  # type: ignore
+
+
+def nextafter(x1, x2):
+    """Return the next floating-point value after x1 towards x2.
+
+    Parameters
+    ----------
+    x1 : PrimExpr
+        Input argument.
+
+    x2 : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x1 = tir.convert(x1)
+    x2 = tir.convert(x2)
+    return call_intrin(x1.dtype, "tir.nextafter", x1, x2)  # type: ignore
+
+
+def hypot(x1, x2):
+    """Equivalent to sqrt(x1**2 + x2**2), element-wise.
+
+    Parameters
+    ----------
+    x1 : PrimExpr
+        Input argument.
+
+    x2 : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x1 = tir.convert(x1)
+    x2 = tir.convert(x2)
+    return call_intrin(x1.dtype, "tir.hypot", x1, x2)  # type: ignore
+
+
+def copysign(x1, x2):
+    """Change the sign of x1 to that of x2, element-wise.
+
+    Parameters
+    ----------
+    x1 : PrimExpr
+        Input argument.
+
+    x2 : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x1 = tir.convert(x1)
+    x2 = tir.convert(x2)
+    return call_intrin(x1.dtype, "tir.copysign", x1, x2)  # type: ignore
+
+
+def ldexp(x1, x2):
+    """Returns x1 * (2 ** x2).
+
+    Parameters
+    ----------
+    x1 : PrimExpr
+        Input argument.
+
+    x2 : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x1 = tir.convert(x1)
+    x2 = tir.convert(x2)
+    return call_intrin(x1.dtype, "tir.ldexp", x1, x2)  # type: ignore
+
+
+def likely(cond, span=None):
+    """Mark condition as likely.
+
+    Parameters
+    ----------
+
+    cond : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The marked expression.
+    """
+    return _ffi_api.likely(cond, span)  # type: ignore
+
+
+def isnan(x, span=None):
+    """Check if input value is Nan.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return _ffi_api.isnan(x, span)  # type: ignore
+
+
+def isnullptr(x, span=None):
+    """Check if input value is nullptr.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return call_intrin("bool", "tir.isnullptr", x, span=span)  # type: ignore
+
+
+def isfinite(x, span=None):
+    """Check if input value is finite.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return _ffi_api.isfinite(x, span)  # type: ignore
+
+
+def isinf(x, span=None):
+    """Check if input value is infinite.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return _ffi_api.isinf(x, span)  # type: ignore
+
+
+def power(x, y, span=None):
+    """x power y
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    y : PrimExpr
+        The exponent
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    z : PrimExpr
+        The result.
+    """
+    return _ffi_api._OpPow(x, y, span)  # type: ignore
+
+
+def pow(x, y, span=None):
+    """x power y
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    y : PrimExpr
+        The exponent
+
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    z : PrimExpr
+        The result.
+    """
+    return _ffi_api._OpPow(x, y, span)  # type: ignore
+
+
+def popcount(x):
+    """Count the number of set bits in input x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    return call_intrin(x.dtype, "tir.popcount", x)
+
+
+def q_multiply_shift(x, y, q, s):
+    """Execute a multiplication between two Q-numbers x and y
+    followed by a right shift s. The mathematical expression is:
+
+       out = round(x*y*2^-s)
+
+    More about Q-numbers here: https://en.wikipedia.org/wiki/Q_(number_format)
+    The rounding rule is to the nearest value, rounding half up
+    (i.e., round(x.1) = x and round (x.5) = x+1)
+
+    Parameters
+    ----------
+    x : PrimExpr
+        First Q-number
+    y : PrimExpr
+        Second Q-number
+    q : PrimExpr
+        Number of fractional bits in x and y. Needs to be > 0
+    s : PrimExpr
+        Integer shift
+
+    Returns
+    -------
+    y : PrimExpr
+        The result.
+    """
+    return call_intrin("int32", "tir.q_multiply_shift", x, y, q, s)
+
+
+def q_multiply_shift_per_axis(
+    x: PrimExpr,
+    y: PrimExpr,
+    ls: PrimExpr,
+    rs: PrimExpr,
+    q: IntImm,
+    is_lshift_required: IntImm,
+    is_rshift_required: IntImm,
+):
+    """Execute a multiplication between two Q-numbers x and y
+
+    Parameters
+    ----------
+    x : PrimExpr
+        First Q-number.
+    y : PrimExpr
+        Second Q-number.
+    ls : PrimExpr
+         Integer left shift.
+    rs : PrimExpr
+         Integer right shift.
+    q : IntImm
+        Number of fractional bits in x and y. Needs to be > 0.
+    is_lshift_required : IntImm
+                         Whether we need to do left shift or not.
+    is_rshift_required : IntImm
+                         Whether we need to do right shift or not.
+
+    Returns
+    -------
+    z : PrimExpr
+        The result.
+    """
+    return call_intrin(
+        "int32",
+        "tir.q_multiply_shift_per_axis",
+        x,
+        y,
+        ls,
+        rs,
+        q,
+        is_lshift_required,
+        is_rshift_required,
+    )
+
+
+def shift_left(x, y, span=None):
+    """Return the result of x left shifted by y bits.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    y : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    z : PrimExpr
+        The result.
+    """
+    return _ffi_api.left_shift(x, y, span)
+
+
+def shift_right(x, y, span=None):
+    """Return the result of x right shifted by y bits.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+
+    y : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    z : PrimExpr
+        The result.
+    """
+    return _ffi_api.right_shift(x, y, span)
+
+
+def fmod(x, y):
+    """Return the remainder of x divided by y with the same sign as x.
+
+    Parameters
+    ----------
+    x : PrimExpr
+        Input argument.
+    y : PrimExpr
+        Input argument.
+
+    Returns
+    -------
+    z : PrimExpr
+        The result.
+    """
+    x = tir.convert(x)
+    y = tir.convert(y)
+    return call_intrin(x.dtype, "tir.fmod", x, y)
+
+
+def if_then_else(cond, t, f, span=None):
+    """Conditional selection expression.
+
+    Parameters
+    ----------
+    cond : PrimExpr
+        The condition
+
+    t : PrimExpr
+        The result expression if cond is true.
+
+    f : PrimExpr
+        The result expression if cond is false.
+
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    result : Node
+        The result of conditional expression.
+
+    Note
+    ----
+    Unlike Select, if_then_else will not execute
+    the branch that does not satisfy the condition.
+    You can use it to guard against out of bound access.
+    Unlike Select, if_then_else cannot be vectorized
+    if some lanes in the vector have different conditions.
+    """
+    return _ffi_api._OpIfThenElse(cond, t, f, span)  # type: ignore
+
+
+def div(a, b, span=None):
+    """Compute a / b as in C/C++ semantics.
+
+    Parameters
+    ----------
+    a : PrimExpr
+        The left hand operand, known to be non-negative.
+
+    b : PrimExpr
+        The right hand operand, known to be non-negative.
+
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result expression.
+    Note
+    ----
+    When operands are integers, returns truncdiv(a, b, span).
+    """
+    return _ffi_api._OpDiv(a, b, span)  # type: ignore
+
+
+def indexdiv(a, b, span=None):
+    """Compute floor(a / b) where a and b are non-negative.
+
+    Parameters
+    ----------
+    a : PrimExpr
+        The left hand operand, known to be non-negative.
+
+    b : PrimExpr
+        The right hand operand, known to be non-negative.
+
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result expression.
+
+    Note
+    ----
+    Use this function to split non-negative indices.
+    This function may take advantage of operands'
+    non-negativeness.
+    """
+    return _ffi_api._OpIndexDiv(a, b, span)  # type: ignore
+
+
+def indexmod(a, b, span=None):
+    """Compute the remainder of indexdiv. a and b are non-negative.
+
+    Parameters
+    ----------
+    a : PrimExpr
+        The left hand operand, known to be non-negative.
+
+    b : PrimExpr
+        The right hand operand, known to be non-negative.
+
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result expression.
+
+    Note
+    ----
+    Use this function to split non-negative indices.
+    This function may take advantage of operands'
+    non-negativeness.
+    """
+    return _ffi_api._OpIndexMod(a, b, span)  # type: ignore
+
+
+def truncdiv(a, b, span=None):
+    """Compute the truncdiv of two expressions.
+
+    Parameters
+    ----------
+    a : PrimExpr
+        The left hand operand
+
+    b : PrimExpr
+        The right hand operand
+
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result expression.
+
+    Note
+    ----
+    This is the default integer division behavior in C.
+    """
+    return _ffi_api._OpTruncDiv(a, b, span)  # type: ignore
+
+
+def truncmod(a, b, span=None):
+    """Compute the truncmod of two expressions.
+
+    Parameters
+    ----------
+    a : PrimExpr
+        The left hand operand
+
+    b : PrimExpr
+        The right hand operand
+
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result expression.
+
+    Note
+    ----
+    This is the default integer division behavior in C.
+    """
+    return _ffi_api._OpTruncMod(a, b, span)  # type: ignore
+
+
+def floordiv(a, b, span=None):
+    """Compute the floordiv of two expressions.
+
+    Parameters
+    ----------
+    a : PrimExpr
+        The left hand operand
+
+    b : PrimExpr
+        The right hand operand
+
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result expression.
+    """
+    return _ffi_api._OpFloorDiv(a, b, span)  # type: ignore
+
+
+def logaddexp(a, b, span=None):
+    """Compute the logaddexp of two expressions.
+
+    Parameters
+    ----------
+    a : PrimExpr
+        The left hand operand
+
+    b : PrimExpr
+        The right hand operand
+
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result expression.
+    """
+    return _ffi_api._OpLogAddExp(a, b, span)  # type: ignore
+
+
+def floormod(a, b, span=None):
+    """Compute the floormod of two expressions.
+
+    Parameters
+    ----------
+    a : PrimExpr
+        The left hand operand
+
+    b : PrimExpr
+        The right hand operand
+
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    res : PrimExpr
+        The result expression.
+    """
+    return _ffi_api._OpFloorMod(a, b, span)  # type: ignore
+
+
+def ceildiv(lhs, rhs, span=None):
+    """Generic ceildiv operator.
+
+    Parameters
+    ----------
+    lhs : object
+        The left operand.
+    rhs : object
+        The right operand.
+    span : Optional[Span]
+        The location of this operator in the source.
+
+    Returns
+    -------
+    op : tvm.Expr
+        The result Expr of ceildiv operaton.
+    """
+    return _ffi_api._OpCeilDiv(lhs, rhs, span)  # type: ignore
+
+
+def comm_reducer(fcombine, fidentity, name="reduce"):
+    """Create a commutative reducer for reduction.
+
+    Parameters
+    ----------
+    fcombine : function(Expr -> Expr -> Expr)
+        A binary function which takes two Expr as input to return a Expr.
+
+    fidentity : function(str -> Expr)
+        A function which takes a type string as input to return a const Expr.
+
+    Returns
+    -------
+    reducer : function
+        A function which creates a reduce expression over axis.
+        There are two ways to use it:
+
+        1. accept (expr, axis, where) to produce an Reduce Expr on
+           specified axis;
+        2. simply use it with multiple Exprs.
+
+    Example
+    -------
+    .. code-block:: python
+
+        n = te.var("n")
+        m = te.var("m")
+        mysum = te.comm_reducer(lambda x, y: x+y,
+            lambda t: tvm.tir.const(0, dtype=t), name="mysum")
+        A = te.placeholder((n, m), name="A")
+        k = te.reduce_axis((0, m), name="k")
+        B = te.compute((n,), lambda i: mysum(A[i, k], axis=k), name="B")
+    """
+
+    def _reduce_directly(*args):
+        num = len(args)
+        # process `where` is None
+        if num == 3 and args[2] is None:
+            num = 2
+        res = args[0]
+        for i in range(num - 1):
+            res = fcombine(res, args[i + 1])
+        return res
+
+    def _make_reduce(expr, axis, where=None, init=None):
+        code = fcombine.__code__
+        assert fcombine.__code__.co_argcount == 2
+        expr = tir.convert(expr)
+        if init is not None:
+            init = tir.convert(init)
+        if isinstance(expr, Array):
+            size = len(expr)
+            lhs = []
+            rhs = []
+            dtypes = []
+            for i in range(size):
+                dtype = expr[i].dtype
+                dtypes.append(dtype)
+                lname = code.co_varnames[0] + "_" + str(i)
+                lhs.append(Var(lname, dtype))
+                rname = code.co_varnames[1] + "_" + str(i)
+                rhs.append(Var(rname, dtype))
+            if init is None:
+                init = []
+            result = fcombine(lhs, rhs)
+            id_elem = fidentity(*dtypes)
+        else:
+            assert isinstance(expr, tvm.ir.PrimExpr)
+            size = 1
+            dtype = expr.dtype
+            lvar = Var(code.co_varnames[0], dtype)
+            rvar = Var(code.co_varnames[1], dtype)
+            result = [fcombine(lvar, rvar)]
+            id_elem = [fidentity(dtype)]
+            lhs = [lvar]
+            rhs = [rvar]
+            expr = [expr]
+            if init is not None:
+                init = [init]
+        combiner = CommReducer(lhs, rhs, result, id_elem)
+        if not isinstance(axis, (list, tuple, tvm.ir.Array)):
+            axis = [axis]
+        if where is None:
+            where = tir.convert(True)
+        if init is None:
+            outputs = tuple(tvm.tir.Reduce(combiner, expr, axis, where, i, []) for i in range(size))
+        else:
+            outputs = tuple(
+                tvm.tir.Reduce(combiner, expr, axis, where, i, init) for i in range(size)
+            )
+        return outputs[0] if size == 1 else outputs
+
+    # pylint: disable=keyword-arg-before-vararg
+    def reducer(expr, axis, where=None, init=None, *args):
+        if isinstance(axis, (tvm.tir.IterVar, list, tuple)):
+            assert not args
+            return _make_reduce(expr, axis, where, init)
+
+        if where is None:
+            assert not args
+            assert init is None
+            return _reduce_directly(expr, axis)
+        elif init is None:
+            assert not args
+            return _reduce_directly(expr, axis, where)
+        else:
+            return _reduce_directly(expr, axis, where, init, *args)
+
+    doc_str = """Create a {0} expression over axis.
+
+              Parameters
+              ----------
+              expr : PrimExpr
+                  The source expression.
+              axis : IterVar
+                  The reduction IterVar axis
+              where : optional, Expr
+                  Filtering predicate of the reduction.
+              Returns
+              -------
+              value : PrimExpr
+                  The result value.
+
+              Example
+              -------
+              .. code-block:: python
+
+                m = te.var("m")
+                n = te.var("n")
+                A = te.placeholder((m, n), name="A")
+                k = te.reduce_axis((0, n), name="k")
+
+                # there are two way to use this {0} reducer:
+                # mode 1, accept (expr, axis, where) to produce an Reduce Expr
+                # tvm.{0} represents tvm.te.{0} or tvm.tir.{0}.
+                B = te.compute((m,), lambda i: tvm.{0}(A[i, k], axis=k), name="B")
+
+                # mode 2, simply use it with multiple Exprs:
+                {0}_res = tvm.{0}(m, n)
+              """
+    reducer.__doc__ = doc_str.format(name)
+    return reducer
+
+
+def TVMBackendAllocWorkspace(device_type, device_id, nbytes, dtype_code_hint, dtype_bits_hint):
+    """Backend function to allocate temporal workspace
+
+    Parameters
+    ----------
+    device_type : int
+        The device type which the space will be allocated.
+
+    device_id : int
+        The device id which the space will be allocated.
+
+    nbytes : int
+        The size of the space requested.
+
+    dtype_code_hint : int
+        The type code of the array elements. Only used in certain backends such as OpenGL.
+
+    dtype_bits_hint : int
+        The type bits of the array elements. Only used in certain backends such as OpenGL.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "handle",
+        "tir.TVMBackendAllocWorkspace",
+        device_type,
+        device_id,
+        nbytes,
+        dtype_code_hint,
+        dtype_bits_hint,
+    )
+
+
+def TVMBackendFreeWorkspace(device_type, device_id, ptr):
+    """Backend function to free temporal workspace.
+
+    Parameters
+    ----------
+    device_type : int
+        The device type which the space will be allocated.
+
+    device_id : int
+        The device id which the space will be allocated.
+
+    ptr : Var
+        The result allocated space pointer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("int32", "tir.TVMBackendFreeWorkspace", device_type, device_id, ptr)
+
+
+def anylist_getitem(list_handle, index):
+    """Returns an item from any list.
+    list_handle: Var
+        The handle to anylist
+    index : int
+        The index
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("handle", "tir.anylist_getitem", list_handle, index)
+
+
+def anylist_resetitem(list_handle, index):
+    """Reset an item from any list.
+    list_handle: Var
+        The handle to anylist
+    index : int
+        The index
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("int", "tir.anylist_resetitem", list_handle, index)
+
+
+def anylist_setitem_call_packed(list_handle, index, func_name, *args):
+    """Set anylist item by result of packed call.
+    list_handle: Var
+        The handle to anylist
+    index : int
+        The index
+    func_name: str
+        The name of the function to be called.
+    args:
+        Extra arguments
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "int", "tir.anylist_setitem_call_packed", list_handle, index, func_name, *args
+    )
+
+
+def anylist_setitem_call_cpacked(list_handle, index, func_name, *args):
+    """Set anylist item by result of packed call.
+    list_handle: Var
+        The handle to anylist
+    index : int
+        The index
+    func_name: str
+        The name of the function to be called.
+    args:
+        Extra arguments
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "int", "tir.anylist_setitem_call_cpacked", list_handle, index, func_name, *args
+    )
+
+
+def vscale():
+    """Get the target's vscale value. It will be lowered to llvm.vscale intrinsic
+    (https://llvm.org/docs/LangRef.html#llvm-vscale-intrinsic)
+    Returns
+    -------
+    call : PrimExpr
+        Call to the vscale intrinsic
+    """
+    return call_intrin("int32", "tir.vscale")
+
+
+def get_active_lane_mask(dtype, base, limit):
+    """
+    Calculate a predicate mask given an upper bound (limit) and a current value (base).
+
+    It will be lowered to the llvm.get.active.lane.mask intrinsic.
+    (https://llvm.org/docs/LangRef.html#llvm-get-active-lane-mask-intrinsics)
+
+    Parameters
+    ----------
+    dtype : str
+        The data type of the result.
+
+    base : PrimExpr
+        An expression reprsenting the base.
+
+    limit : PrimExpr
+        An expression representing the limit.
+    """
+    return call_intrin(dtype, "tir.get_active_lane_mask", base, limit)
+
+
+def get_vscale_expr(dtype: Union[str, tvm.ffi.dtype], min_size: int = 128) -> PrimExpr:
+    """
+    Create a datatype dependent scalable expression.
+
+    Parameters
+    ----------
+    dtype : Union[str, tvm.DataType]
+        Element data type.
+    min_size : int
+        The minimum size of the scalable vector in bits.
+    """
+    if isinstance(dtype, str):
+        dtype = tvm.ffi.dtype(dtype)
+    return min_size // dtype.bits * vscale()
+
+
+def ignore_loop_partition(predicate) -> PrimExpr:
+    """
+    Annotate a predicate not be considered as target condition of loop partition.
+
+    Parameters
+    ----------
+    predicate : PrimExpr
+        The annotated predicate expression.
+    """
+    return call_intrin("bool", "tir.ignore_loop_partition", predicate)
+
+
+# pylint: disable=unnecessary-lambda
+sum = comm_reducer(lambda x, y: x + y, lambda t: const(0, dtype=t), name="sum")
+min = comm_reducer(lambda x, y: _ffi_api._OpMin(x, y, None), max_value, name="min")  # type: ignore
+max = comm_reducer(lambda x, y: _ffi_api._OpMax(x, y, None), min_value, name="max")  # type: ignore
+
+
+########################################################
+# CUDA native builtins
+########################################################
+
+
+def cuda_func_call(func_name, *args, source_code, return_type="void"):
+    """TVM intrinsic to call a CUDA function. Source code is provided as a string.
+
+    Parameters
+    ----------
+    func_name: str
+        The name of the CUDA function.
+
+    args: PrimExpr
+        The arguments to the CUDA function.
+
+    source_code: str
+        The source code of the CUDA function.
+
+    return_type: str
+        The return type of the CUDA function.
+    """
+    return call_intrin(return_type, "tir.cuda_func_call", func_name, *args, source_code)
 
 
 def tvm_load_matrix_sync(fragment, m, n, k, index, buffer_ptr, stride, layout):
@@ -5402,10 +7493,121 @@ def timer_end_cuda(
     )
 
 
-# pylint: disable=unnecessary-lambda
-sum = comm_reducer(lambda x, y: x + y, lambda t: const(0, dtype=t), name="sum")
-min = comm_reducer(lambda x, y: _ffi_api._OpMin(x, y, None), max_value, name="min")  # type: ignore
-max = comm_reducer(lambda x, y: _ffi_api._OpMax(x, y, None), min_value, name="max")  # type: ignore
+def cuda_atomic_add(res_addr, value):
+    """TVM intrinsic to call cuda atomic add instruction
+
+    Parameters
+    ----------
+    res_addr : PrimExpr
+        The result address.
+
+    value: PrimExpr
+        The value to add.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_atomic_add", res_addr, value)
+
+
+def cuda_thread_fence():
+    """TVM intrinsic to call cuda thread fence instruction
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_thread_fence")
+
+
+def cuda_syncthreads_and(cond):
+    """TVM intrinsic to call cuda syncthreads_and instruction
+
+    Parameters
+    ----------
+    cond: PrimExpr
+        The condition.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("int64", "tir.cuda_syncthreads_and", cond)
+
+
+def cuda_nano_sleep(time):
+    """TVM intrinsic to call cuda nano sleep instruction
+
+    Parameters
+    ----------
+    time: PrimExpr
+        The time to sleep.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_nano_sleep", time)
+
+
+def ptx_ld_global_acquire(res, addr):
+    """TVM intrinsic to call ptx ld.global.acquire instruction
+
+    Parameters
+    ----------
+    res : PrimExpr
+        The result of the load.
+
+    addr : PrimExpr
+        The memory address to load.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.ptx_ld_global_acquire", res, addr)
+
+
+def ptx_map_shared_rank(ptr, rank):
+    """TVM intrinsic to call ptx map_shared_rank instruction
+
+    Parameters
+    ----------
+    ptr: PrimExpr
+        The genericpointer to the local shared memory, handle type
+
+    rank: int
+        The rank of the distributed shared memory.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    func_name = "tvm_builtin_ptx_map_shared_rank"
+    source_code = R"""
+__forceinline__ __device__ uint64_t {func_name}(void* addr, uint32_t rank) {{
+    uint64_t result;
+    asm volatile("mapa.u64  %0, %1, %2;\n"
+                : "=l"(result)
+                : "l"(reinterpret_cast<uint64_t>(addr)), "r"(rank));
+    return result;
+}}
+"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, ptr, rank, source_code=source_code, return_type="uint64")
+
+
+########################################################
+# NKI builtins
+########################################################
 
 
 def nki_load(res, data):
@@ -5873,123 +8075,3 @@ def nki_affine_select(result, pred, true_value, false_value):
         The call expression.
     """
     return call_intrin("", "tir.nki_affine_select", result, pred, true_value, false_value)
-
-
-def cuda_atomic_add(res_addr, value):
-    """TVM intrinsic to call cuda atomic add instruction
-
-    Parameters
-    ----------
-    res_addr : PrimExpr
-        The result address.
-
-    value: PrimExpr
-        The value to add.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.cuda_atomic_add", res_addr, value)
-
-
-def cuda_thread_fence():
-    """TVM intrinsic to call cuda thread fence instruction
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.cuda_thread_fence")
-
-
-def cuda_syncthreads_and(cond):
-    """TVM intrinsic to call cuda syncthreads_and instruction
-
-    Parameters
-    ----------
-    cond: PrimExpr
-        The condition.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("int64", "tir.cuda_syncthreads_and", cond)
-
-
-def cuda_nano_sleep(time):
-    """TVM intrinsic to call cuda nano sleep instruction
-
-    Parameters
-    ----------
-    time: PrimExpr
-        The time to sleep.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.cuda_nano_sleep", time)
-
-
-def ptx_ld_global_acquire(res, addr):
-    """TVM intrinsic to call ptx ld.global.acquire instruction
-
-    Parameters
-    ----------
-    res : PrimExpr
-        The result of the load.
-
-    addr : PrimExpr
-        The memory address to load.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.ptx_ld_global_acquire", res, addr)
-
-
-def ptx_map_shared_rank(ptr, rank):
-    """TVM intrinsic to call ptx map_shared_rank instruction
-
-    Parameters
-    ----------
-    ptr: PrimExpr
-        The pointer to the local shared memory.
-
-    rank: int
-        The rank of the distributed shared memory.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("uint32", "tir.ptx_map_shared_rank", ptr, rank)
-
-
-def cuda_func_call(func_name, *args, source_code, return_type="void"):
-    """TVM intrinsic to call a CUDA function. Source code is provided as a string.
-
-    Parameters
-    ----------
-    func_name: str
-        The name of the CUDA function.
-
-    args: PrimExpr
-        The arguments to the CUDA function.
-
-    source_code: str
-        The source code of the CUDA function.
-
-    return_type: str
-        The return type of the CUDA function.
-    """
-    return call_intrin(return_type, "tir.cuda_func_call", func_name, *args, source_code)

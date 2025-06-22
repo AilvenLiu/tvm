@@ -245,23 +245,21 @@ def test_tcgen05_mma_ss_tma():
     A_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
         T.TileLayout(
-            shard=((PIPE_DEPTH, NUM_CONSUMER, BLK_M, 1, 64),
-                   (BLK_M * 64 * NUM_CONSUMER, BLK_M * 64, 64, BLK_M * 64, 1))
+            shard=(
+                (PIPE_DEPTH, NUM_CONSUMER, BLK_M, 1, 64),
+                (BLK_M * 64 * NUM_CONSUMER, BLK_M * 64, 64, BLK_M * 64, 1),
+            )
         ),
     )
     B_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
         T.TileLayout(
-            shard=((PIPE_DEPTH, BLK_N // 2, 1, 64),
-                   (BLK_N // 2 * 64, 64, BLK_N // 2 * 64, 1))
+            shard=((PIPE_DEPTH, BLK_N // 2, 1, 64), (BLK_N // 2 * 64, 64, BLK_N // 2 * 64, 1))
         ),
     )
     D_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        T.TileLayout(
-            shard=((NUM_CONSUMER, BLK_M, EPI_TILE),
-                   (BLK_M * EPI_TILE, EPI_TILE, 1))
-        ),
+        T.TileLayout(shard=((NUM_CONSUMER, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))),
     )
     ldo, sdo = 1, 64
 
@@ -299,12 +297,17 @@ def test_tcgen05_mma_ss_tma():
                 mma2ld_pipe.init(c2p_thread_count=128 * 2)
                 tma2mma_pipe.init(c2p_thread_count=NUM_CONSUMER)
                 # this is to represent that both ctas in a cta group use the same mbarrier in TMA load
-                tma_finished_ptr = T.alloc_buffer((1,), "uint64", scope="local")
-                if cbx == 0:
-                    tma_finished_ptr[0] = T.reinterpret("uint64", tma2mma_pipe.mbar_p2c.access_ptr("rw", offset=tma2mma_pipe.mbar_p2c.offset_of_p([0, 0])))
-                else:
-                    tma_finished_ptr[0] = T.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.access_ptr("rw", offset=tma2mma_pipe.mbar_p2c.offset_of_p([0, 0])), 0)
-                ptr: T.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret("handle", tma_finished_ptr[0])
+                # tma_finished_ptr = T.alloc_buffer((1,), "uint64", scope="local")
+                # if cbx == 0:
+                #     tma_finished_ptr[0] = T.reinterpret("uint64", tma2mma_pipe.mbar_p2c.access_ptr("rw", offset=tma2mma_pipe.mbar_p2c.offset_of_p([0, 0])))
+                # else:
+                ptr: T.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret(
+                    "handle",
+                    T.ptx.map_shared_rank(
+                        tma2mma_pipe.mbar_p2c.access_ptr("rw", offset=tma2mma_pipe.mbar_p2c.offset_of_p([0, 0])),
+                        0,
+                    ),
+                )
                 tma_finished = T.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
                 tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
                 tile_scheduler.init(bx//2)
@@ -437,6 +440,7 @@ def test_tcgen05_mma_ss_tma():
     target = tvm.target.Target("cuda")
     with target:
         src, mod = _get_source(test_mma_ss_tma_2sm_persistent)
+        print(src)
         A_torch = torch.randn((M, K), dtype=torch.float16)
         B_torch = torch.randn((N, K), dtype=torch.float16)
         C_torch = torch.zeros((M, N), dtype=torch.float16)

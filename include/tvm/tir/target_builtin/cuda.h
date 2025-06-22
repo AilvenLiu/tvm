@@ -638,13 +638,6 @@ TVM_DLL const Op& ptx_tcgen05_cp();
 TVM_DLL const Op& ptx_tcgen05_shift();
 
 /*!
- * \brief tvm instrinsics to call map_shared_rank
- *
- * ptx_map_shared_rank(PrimExpr ptr, int rank)
- */
-TVM_DLL const Op& ptx_map_shared_rank();
-
-/*!
  * \brief tvm instrinsics to call a CUDA function. Source code is provided as a string.
  *
  * cuda_func_call(String func_name, PrimExpr... args, String source_code)

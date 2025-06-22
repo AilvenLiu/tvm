@@ -946,6 +946,24 @@ def test_wgmma_rs_nt():
     tvm.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-3)
 
 
+@tvm.testing.requires_cuda_compute_version(9)
+def test_ptx_map_shared_rank():
+    @T.prim_func(tirp=True)
+    def func(A: T.Buffer((1))):
+        with T.kernel():
+            cbx = T.cta_id([2], parent="cluster")
+            bx = T.cta_id([2], parent="kernel")
+            tx = T.thread_id([128], parent="cta")
+            with T.cta():
+                A_smem = T.alloc_buffer([1], "uint32", scope="shared")
+                with T.thread()[cbx == 0 and tx == 0]:
+                    T.ptx.map_shared_rank(A_smem.data, cbx)
+
+    mod = tvm.IRModule({"main": func})
+    script = mod.script()
+    assert 'T.cuda_func_call("tvm_builtin_ptx_map_shared_rank"' in script
+
+
 def test_warp_shuffle_xor_sync():
     # fmt: off
     @T.prim_func(tirp=True)
