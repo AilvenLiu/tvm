@@ -1154,6 +1154,41 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
   };
 
+  auto print_cuda_func_call = [&](const CallNode* op, std::ostream& os) {
+    TVM_FFI_ICHECK_GE(op->args.size(), 2U);
+    size_t num_args = op->args.size() - 2;
+    std::vector<std::string> args;
+    for (size_t i = 1; i < num_args + 1; i++) {
+      args.push_back(this->PrintExpr(op->args[i]));
+    }
+    std::string source_code = op->args[num_args + 1].as<StringImmNode>()->value;
+    std::string func_name = op->args[0].as<StringImmNode>()->value;
+    os << func_name << "(";
+    for (size_t i = 0; i < num_args; i++) {
+      const auto& arg = args[i];
+      os << arg;
+      if (i < num_args - 1) {
+        os << ", ";
+      }
+    }
+    os << ")";
+    AddUtilFunction(func_name, source_code);
+  };
+
+  if (auto opt_call_opt = op->op.as<Op>()) {
+    Op call_op = opt_call_opt.value();
+    auto codegen_getter = tvm::ffi::Function::GetGlobal("tir.hw_ops.cuda.get_codegen");
+    TVM_FFI_ICHECK(codegen_getter.has_value()) << "tir.hw_ops.cuda.get_codegen is not registered";
+    // either codegen is registered or not
+    auto codegen = codegen_getter.value()(call_op->name).cast<Optional<tvm::ffi::Function>>();
+    if (codegen.has_value()) {
+      // codegen is registered, it should return a Call to cuda_func_call
+      auto func_call = codegen.value()(op->args);
+      print_cuda_func_call(func_call.cast<Call>().get(), os);
+      return;
+    }
+  }
+
   if (op->op.same_as(builtin::tvm_fill_fragment())) {
     need_mma_h_ = true;
     TVM_FFI_ICHECK_EQ(op->args.size(), 6U);
@@ -2456,24 +2491,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
                                                  this->PrintExpr(op->args[1]), op->args[0]->dtype);
     this->stream << ";\n";
   } else if (op->op.same_as(builtin::cuda_func_call())) {
-    TVM_FFI_ICHECK_GE(op->args.size(), 2U);
-    size_t num_args = op->args.size() - 2;
-    std::vector<std::string> args;
-    for (size_t i = 1; i < num_args + 1; i++) {
-      args.push_back(this->PrintExpr(op->args[i]));
-    }
-    std::string source_code = op->args[num_args + 1].as<StringImmNode>()->value;
-    std::string func_name = op->args[0].as<StringImmNode>()->value;
-    os << func_name << "(";
-    for (size_t i = 0; i < num_args; i++) {
-      const auto& arg = args[i];
-      os << arg;
-      if (i < num_args - 1) {
-        os << ", ";
-      }
-    }
-    os << ")";
-    AddUtilFunction(func_name, source_code);
+    print_cuda_func_call(op, os);
   } else if (op->op.same_as(builtin::thread_return())) {
     os << "return";
   } else {

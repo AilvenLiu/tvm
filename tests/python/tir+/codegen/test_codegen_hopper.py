@@ -24,12 +24,12 @@ from tvm.script import tir as T
 import tvm.testing
 
 
-def _get_source(func: tvm.tir.PrimFunc) -> str:
+def _get_source(func: tvm.tir.PrimFunc) -> tuple[str, tvm.IRModule]:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
     src = mod.mod.imported_modules[0].get_source()
-    return src
+    return src, mod
 
 
 @pytest.mark.parametrize("inc", [False, True])
@@ -45,7 +45,7 @@ def test_ptx_setmaxnreg(inc):
                 T.ptx.setmaxnreg(inc, 32)
     # fmt: on
 
-    src = _get_source(func)
+    src, mod = _get_source(func)
     assert "setmaxnreg" in src
     if inc:
         assert "inc" in src
@@ -127,7 +127,7 @@ def test_bar_arrive():
                 T.ptx.bar.arrive(0, 128)
     # fmt: on
 
-    src = _get_source(func)
+    src, mod = _get_source(func)
     assert 'bar.arrive %0, %1;" : : "r"(0), "r"(128)' in src
 
 
@@ -143,7 +143,7 @@ def test_bar_sync():
                 T.ptx.bar.sync(0, 128)
     # fmt: on
 
-    src = _get_source(func)
+    src, mod = _get_source(func)
     assert 'bar.sync %0, %1;" : : "r"(0), "r"(128)' in src
 
 
@@ -159,7 +159,7 @@ def test_fence_mbarrier_init_release_clsuter():
                 T.ptx.fence.mbarrier_init()
     # fmt: on
 
-    src = _get_source(func)
+    src, mod = _get_source(func)
     assert "fence.mbarrier_init.release.cluster" in src
 
 
@@ -176,7 +176,7 @@ def test_ptx_elect_sync():
                     A[tx] = tx
     # fmt: on
 
-    src = _get_source(func)
+    src, mod = _get_source(func)
     assert "elect.sync %rx|%px, %2;" in src
 
 
@@ -194,7 +194,7 @@ def test_barrier_cluster():
                 T.ptx.barrier.cluster.wait()
     # fmt: on
 
-    src = _get_source(func)
+    src, mod = _get_source(func)
     assert "barrier.cluster.arrive.relaxed.aligned" in src
     assert "barrier.cluster.wait.aligned" in src
 
@@ -213,7 +213,7 @@ def test_fence_proxy_async():
 
     # fmt: on
 
-    src = _get_source(func)
+    src, mod = _get_source(func)
     assert "fence.proxy.async.global" in src
     assert "fence.proxy.async.shared::cta" in src
 
@@ -959,45 +959,9 @@ def test_ptx_map_shared_rank():
                 with T.thread()[cbx == 0 and tx == 0]:
                     T.ptx.map_shared_rank(A_smem.data, cbx)
 
-    mod = tvm.IRModule({"main": func})
-    script = mod.script()
-    assert 'T.cuda_func_call("tvm_builtin_ptx_map_shared_rank"' in script
-
-
-def test_warp_shuffle_xor_sync():
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def func(A_ptr: T.handle):
-        A = T.match_buffer(A_ptr, (32,), dtype="float32", align=16)
-
-        with T.kernel():
-            bx = T.cta_id([1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-
-            with T.thread():
-                A_local = T.alloc_buffer([1], "float32", scope="local")
-                i = T.alloc_buffer([1], "int32", scope="local")
-
-                A_local[0] = T.float32(31 - lane_id)
-                i[0] = 16
-                while i[0] >= 1:
-                    A_local[0] += T.tvm_warp_shuffle_xor(0xFFFFFFFF, A_local[0], i[0], 32, 32)
-                    i[0] = i[0] // 2
-
-                A[lane_id] = A_local[0]
-    # fmt: on
-
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
-    mod = tvm.IRModule({"main": func})
-    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    A_np = np.zeros(32, dtype="float32")
-    A = tvm.nd.array(A_np, device=DEV)
-    mod(A)
-    assert "__shfl_xor_sync" in mod.mod.imported_modules[0].get_source()
-    A_ref = np.ones(32, dtype="float32") * 496
-    np.testing.assert_allclose(A.numpy(), A_ref)
+    src, mod = _get_source(func)
+    print(src)
+    assert "tvm_builtin_ptx_map_shared_rank(A_smem" in src
 
 
 if __name__ == "__main__":

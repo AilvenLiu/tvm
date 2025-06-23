@@ -7580,7 +7580,7 @@ def ptx_map_shared_rank(ptr, rank):
     Parameters
     ----------
     ptr: PrimExpr
-        The genericpointer to the local shared memory, handle type
+        The generic pointer to the local shared memory, handle type
 
     rank: int
         The rank of the distributed shared memory.
@@ -7591,18 +7591,7 @@ def ptx_map_shared_rank(ptr, rank):
         The call expression.
     """
 
-    func_name = "tvm_builtin_ptx_map_shared_rank"
-    source_code = R"""
-__forceinline__ __device__ uint64_t {func_name}(void* addr, uint32_t rank) {{
-    uint64_t result;
-    asm volatile("mapa.u64  %0, %1, %2;\n"
-                : "=l"(result)
-                : "l"(reinterpret_cast<uint64_t>(addr)), "r"(rank));
-    return result;
-}}
-"""
-    source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, ptr, rank, source_code=source_code, return_type="uint64")
+    return call_intrin("uint64", "tir.ptx_map_shared_rank", ptr, rank)
 
 
 ########################################################

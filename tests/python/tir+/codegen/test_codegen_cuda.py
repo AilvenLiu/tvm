@@ -15,11 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 import numpy as np
-import pytest
 
 import tvm
 from tvm.script import tir as T
-from tvm.script import tirp as Tp
 import tvm.testing
 
 
@@ -92,5 +90,41 @@ __device__ void print(int32_t a) {
     test_print()
 
 
+def test_warp_shuffle_xor_sync():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def func(A_ptr: T.handle):
+        A = T.match_buffer(A_ptr, (32,), dtype="float32", align=16)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            warp_id = T.warp_id([1], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+
+            with T.thread():
+                A_local = T.alloc_buffer([1], "float32", scope="local")
+                i = T.alloc_buffer([1], "int32", scope="local")
+
+                A_local[0] = T.float32(31 - lane_id)
+                i[0] = 16
+                while i[0] >= 1:
+                    A_local[0] += T.tvm_warp_shuffle_xor(0xFFFFFFFF, A_local[0], i[0], 32, 32)
+                    i[0] = i[0] // 2
+
+                A[lane_id] = A_local[0]
+    # fmt: on
+
+    DEV = tvm.cuda(0)
+    target = tvm.target.Target("cuda")
+    mod = tvm.IRModule({"main": func})
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+    A_np = np.zeros(32, dtype="float32")
+    A = tvm.nd.array(A_np, device=DEV)
+    mod(A)
+    assert "__shfl_xor_sync" in mod.mod.imported_modules[0].get_source()
+    A_ref = np.ones(32, dtype="float32") * 496
+    np.testing.assert_allclose(A.numpy(), A_ref)
+
+
 if __name__ == "__main__":
-    test_cuda_func_call()
+    tvm.testing.main()
