@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# pylint: disable=missing-function-docstring
 import numpy as np
 
 import tvm
@@ -30,6 +31,53 @@ def _get_source(func: tvm.tir.PrimFunc) -> str:
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
     src = mod.mod.imported_modules[0].get_source()
     return src, mod
+
+
+def test_cuda_atomic_add():
+    @T.prim_func(tirp=True)
+    def main(A: T.Buffer((1,), "int32"), B: T.Buffer((1,), "float32")):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([32], parent="cta")
+            with T.thread()[tx == 0]:
+                T.cuda.atomic_add(A.data, T.int32(1))
+                T.cuda.atomic_add(B.data, T.float32(1.0))
+
+    src, mod = _get_source(main)
+    assert "tvm_builtin_cuda_atomic_add" in src
+    A_np = np.zeros(1, dtype="int32")
+    B_np = np.zeros(1, dtype="float32")
+    A_tvm = tvm.nd.array(A_np, device=DEV)
+    B_tvm = tvm.nd.array(B_np, device=DEV)
+    mod["main"](A_tvm, B_tvm)
+    np.testing.assert_allclose(A_tvm.numpy(), 1)
+    np.testing.assert_allclose(B_tvm.numpy(), 1.0)
+
+
+def test_cuda_thread_fence():
+    @T.prim_func(tirp=True)
+    def main(A: T.Buffer((16, 16), "int32")):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([32], parent="cta")
+            with T.thread()[tx == 0]:
+                T.cuda.thread_fence()
+
+    src, mod = _get_source(main)
+    assert "tvm_builtin_cuda_thread_fence" in src
+
+
+def test_cuda_nano_sleep():
+    @T.prim_func(tirp=True)
+    def main(A: T.Buffer((16, 16), "int32")):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([32], parent="cta")
+            with T.thread()[tx == 0]:
+                T.cuda.nano_sleep(1)
+
+    src, mod = _get_source(main)
+    assert "tvm_builtin_cuda_nano_sleep" in src
 
 
 def test_cuda_func_call():

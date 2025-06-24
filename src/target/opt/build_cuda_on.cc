@@ -46,7 +46,7 @@ namespace codegen {
 
 ffi::Module BuildCUDA(IRModule mod, Target target) {
   bool output_ssa = false;
-  CodeGenCUDA cg;
+  CodeGenCUDA cg(target);
   cg.Init(output_ssa);
 
   ffi::Map<GlobalVar, PrimFunc> functions;

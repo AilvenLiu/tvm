@@ -29,6 +29,8 @@
 #include <utility>
 #include <vector>
 
+#include "../../support/utils.h"
+
 namespace tvm {
 namespace codegen {
 
@@ -1201,7 +1203,25 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
     }
     replacer.register_rule("{coord_list}", coord_list);
     replacer.register_rule("{dim}", std::to_string(dim));
-    if (cta_group == -1) {
+    auto is_sm100_or_higher = [&]() {
+      if (Optional<String> opt_sm = cg->target->GetAttr<String>("arch")) {
+        std::string sm = opt_sm.value();
+        if (support::StartsWith(sm, "sm_")) {
+          sm = sm.substr(3);
+          try {
+            // only sm_80 or higher supports async memcopy
+            if (std::stoi(sm) >= 100) {
+              return true;
+            }
+          } catch (const std::invalid_argument& e) {
+            LOG(WARNING) << "ValueError: Unable to parse `target.arch`: " << sm
+                         << ". Details: " << e.what();
+          }
+        }
+      }
+      return false;
+    };
+    if (cta_group == -1 || !is_sm100_or_higher()) {
       replacer.register_rule("{cta_group}", "");
     } else {
       replacer.register_rule("{cta_group}", ".cta_group::" + std::to_string(cta_group));

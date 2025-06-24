@@ -599,8 +599,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       });
 }
 
-void tvm_cublaslt_fp8_gemm(NDArray x, NDArray weight, NDArray workspace, NDArray alpha,
-                           NDArray out) {
+void tvm_cublaslt_fp8_gemm(ffi::PackedArgs args, ffi::Any* ret) {
+  auto x = args[0].cast<DLTensor*>();
+  auto weight = args[1].cast<DLTensor*>();
+  auto workspace = args[2].cast<DLTensor*>();
+  auto alpha = args[3].cast<DLTensor*>();
+  auto out = args[4].cast<DLTensor*>();
+
   // Workspace is used for storing device-side gemm arguments and cutlass internal workspace.
   // Recommened size is 4MB.
   auto func = tvm::ffi::Function::GetGlobalRequired("runtime.get_cuda_stream");
@@ -624,14 +629,13 @@ void tvm_cublaslt_fp8_gemm(NDArray x, NDArray weight, NDArray workspace, NDArray
   cudaStream_t stream = static_cast<cudaStream_t>(func().cast<void*>());
   tvm::contrib::CuBlasLtThreadEntry* cublas_entry =
       tvm::contrib::CuBlasLtThreadEntry::ThreadLocal();
-  tvm::contrib::CallCublasLt(cublas_entry->handle, stream, cublas_entry->matmul_pref_desc,
-                             x.operator->(), weight.operator->(), nullptr, alpha.operator->(),
-                             nullptr, out.operator->(), /*transa=*/false, /*transb=*/true,
-                             cublas_entry->workspace_ptr, cublas_entry->workspace_size,
-                             CUBLASLT_EPILOGUE_DEFAULT, std::nullopt);
+  tvm::contrib::CallCublasLt(cublas_entry->handle, stream, cublas_entry->matmul_pref_desc, x,
+                             weight, nullptr, alpha, nullptr, out, /*transa=*/false,
+                             /*transb=*/true, cublas_entry->workspace_ptr,
+                             cublas_entry->workspace_size, CUBLASLT_EPILOGUE_DEFAULT, std::nullopt);
 }
 
-TVM_FFI_REGISTER_GLOBAL("cublaslt.fp8_gemm").set_body_typed(tvm_cublaslt_fp8_gemm);
+TVM_FFI_REGISTER_GLOBAL("cublaslt.fp8_gemm").set_body_packed(tvm_cublaslt_fp8_gemm);
 
 }  // namespace contrib
 }  // namespace tvm

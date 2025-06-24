@@ -38,7 +38,7 @@ namespace codegen {
 
 class CodeGenCUDA final : public CodeGenC {
  public:
-  CodeGenCUDA();
+  CodeGenCUDA(Target target);
   void Init(bool output_ssa);
   std::string Finish();
   bool need_include_path() {
@@ -73,6 +73,9 @@ class CodeGenCUDA final : public CodeGenC {
   void VisitStmt_(const EvaluateNode* op) final;
   void VisitStmt_(const AllocBufferNode* op) final;
   void VisitStmt_(const AttrStmtNode* op) final;
+
+  // Target
+  Target target;
 
  protected:
   void PrintCallExtern(Type ret_type, ffi::String global_symbol, const ffi::Array<PrimExpr>& args,
