@@ -42,8 +42,11 @@ class CodeGenCUDA final : public CodeGenC {
   void Init(bool output_ssa);
   std::string Finish();
   bool need_include_path() {
-    return (enable_fp16_ || enable_bf16_ || enable_int8_ || enable_fp8_ || enable_fp6_ ||
-            enable_fp4_ || need_math_constants_h_ || need_mma_h_);
+    std::vector<std::string> tag_list{"fp16", "bf16", "int8",           "fp8",
+                                      "fp6",  "fp4",  "math_constants", "mma"};
+    return std::any_of(tag_list.begin(), tag_list.end(), [this](const std::string& tag) {
+      return codegen_tags_.find(tag) != codegen_tags_.end();
+    });
   }
   // override behavior
   void PrintFunctionSignature(const ffi::String& function_name, const PrimFunc& func,
@@ -95,40 +98,10 @@ class CodeGenCUDA final : public CodeGenC {
   std::string vid_global_barrier_state_;
   // Global barrier expected node.
   std::string vid_global_barrier_expect_;
-  // whether enable cuda::barrier
-  bool enable_cuda_barrier_{false};
-  // whether enable cooperative_group
-  bool enable_cooperative_groups_{false};
-  // whether enable fp16
-  bool enable_fp16_{false};
-  // whether enable bf16
-  bool enable_bf16_{false};
-  // whether enable fp8
-  bool enable_fp8_{false};
-  // whether enable fp6
-  bool enable_fp6_{false};
-  // whether enable fp4
-  bool enable_fp4_{false};
-  // whether enable int8
-  bool enable_int8_{false};
-  // whether enable warp shuffle intrinsics
-  bool enable_warp_shuffle_{false};
-  // whether need math_constants.h
-  bool need_math_constants_h_{false};
-  // whether need mma.h
-  bool need_mma_h_{false};
-  // whether need cast_smem_ptr_to_int helper function
-  bool need_cast_smem_ptr_to_int_{false};
-  // whether need to compute TMEM address by offset
-  bool need_tmem_offset_{false};
-  // whether need matrix descriptor for wgmma instructions
-  bool need_gmma_descriptor_{false};
-  // whether need matrix descriptor for tcgen05 instructions
-  bool need_smem_descriptor_{false};
-  // whether need instruction descriptor for tcgen05 MMA
-  bool need_instr_descriptor_{false};
-  // whether need instruction descriptor for tcgen05 MMA with block scaling
-  bool need_instr_descriptor_block_scaled_{false};
+
+  // Codegen tags
+  std::unordered_set<std::string> codegen_tags_;
+
   // Op attribute map
   OpAttrMap<bool> op_need_warp_shuffle_ = Op::GetAttrMap<bool>("cuda.need_warp_shuffle");
 

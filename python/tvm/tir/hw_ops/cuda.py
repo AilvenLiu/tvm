@@ -18,9 +18,745 @@
 """HW level ops for CUDA, along with its codegen ruls"""
 # pylint: disable=missing-function-docstring
 import functools
+import enum
 
 import tvm.ffi
 from tvm.tir.op import cuda_func_call
+
+
+#########################
+# HEADER GENERATOR FOR CUDA CODEGEN
+# The header generator is used to generate the header for the CUDA code.
+# It's controlled by the predefine tags.
+# The tags are used to identify the utility functions/classes necessary for the codegen.
+#########################
+
+TAGS = {
+    "cuda",
+    "cuda/barrier",
+    "cooperative_groups",
+    "fp16",
+    "bf16",
+    "fp8",
+    "fp6",
+    "fp4",
+    "int8",
+    "math_constants",
+    "mma",
+    "warp_shuffle",
+    "cast_smem_ptr_to_int",
+    "get_tmem_addr",
+    "gmma_descriptor",
+    "smem_descriptor",
+    "instr_descriptor",
+    "instr_descriptor_block_scaled",
+    "get_time_stamp",
+}
+
+
+@tvm.register_func("tir.hw_ops.cuda.header_generator")
+def header_generator(tags):
+    """Generate the header for the CUDA code."""
+    for tag in tags:
+        if tag not in TAGS:
+            raise ValueError(f"Invalid tag: {tag}")
+
+    header = ""
+
+    if "cuda/barrier" in tags or "cooperative_groups" in tags:
+        header += (
+            R"""
+#include <cuda/barrier>
+#include <cooperative_groups.h>
+"""
+            + "\n"
+        )
+
+    header += """
+#include <cuda.h>
+"""
+
+    if "fp16" in tags:
+        header += R"""
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
+#include <cuda_fp16.h>
+__device__ half max(half a, half b)
+{
+  return __hgt(__half(a), __half(b)) ? a : b;
+}
+__device__ half min(half a, half b)
+{
+  return __hlt(__half(a), __half(b)) ? a : b;
+}
+#endif // __CUDA_ARCH__ >= 530
+
+// Pack two half values.
+static inline __device__ __host__ unsigned
+__pack_half2(const half x, const half y) {
+  unsigned v0 = *((unsigned short *)&x);
+  unsigned v1 = *((unsigned short *)&y);
+  return (v1 << 16) | v0;
+}
+
+#define CUDA_UNSUPPORTED_HALF_MATH_BINARY(HALF_MATH_NAME, FP32_MATH_NAME) \
+static inline __device__ __host__ half HALF_MATH_NAME(half x, half y) {   \
+  float tmp_x = __half2float(x);                                          \
+  float tmp_y = __half2float(y);                                          \
+  float result = FP32_MATH_NAME(tmp_x, tmp_y);                            \
+  return __float2half(result);                                            \
+}
+
+#define CUDA_UNSUPPORTED_HALF_MATH_UNARY(HALF_MATH_NAME, FP32_MATH_NAME) \
+static inline __device__ __host__ half HALF_MATH_NAME(half x) {          \
+  float tmp_x = __half2float(x);                                         \
+  float result = FP32_MATH_NAME(tmp_x);                                  \
+  return __float2half(result);                                           \
+}
+
+// Some fp16 math functions are not supported in cuda_fp16.h,
+// so we define them here to make sure the generated CUDA code
+// is valid.
+#if defined(__CUDA_ARCH__)
+#if (__CUDA_ARCH__ >= 530)
+CUDA_UNSUPPORTED_HALF_MATH_BINARY(hpow, powf)
+#if ((__CUDACC_VER_MAJOR__ < 12) || ((__CUDACC_VER_MAJOR__ == 12) && (__CUDACC_VER_MINOR__ < 8)))
+CUDA_UNSUPPORTED_HALF_MATH_UNARY(htanh, tanhf)
+#endif
+CUDA_UNSUPPORTED_HALF_MATH_UNARY(htan, tanf)
+CUDA_UNSUPPORTED_HALF_MATH_UNARY(hatan, atanf)
+CUDA_UNSUPPORTED_HALF_MATH_UNARY(herf, erf)
+#else
+CUDA_UNSUPPORTED_HALF_MATH_UNARY(hexp, exp)
+#endif
+#endif
+
+#undef CUDA_UNSUPPORTED_HALF_MATH_BINARY
+#undef CUDA_UNSUPPORTED_HALF_MATH_UNARY
+"""
+
+    if "bf16" in tags:
+        header += R"""
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+#include <cuda_bf16.h>
+__device__ nv_bfloat16 max(nv_bfloat16 a, nv_bfloat16 b)
+{
+  return __hgt(a, b) ? a : b;
+}
+__device__ nv_bfloat16 min(nv_bfloat16 a, nv_bfloat16 b)
+{
+  return __hlt(a, b) ? a : b;
+}
+#endif // __CUDA_ARCH__ >= 800
+// Pack two bfloat16 values.
+static inline __device__ __host__ unsigned
+__pack_nv_bfloat162(const nv_bfloat16 x, const nv_bfloat16 y) {
+  unsigned v0 = *((unsigned short *)&x);
+  unsigned v1 = *((unsigned short *)&y);
+  return (v1 << 16) | v0;
+}
+
+// Some bfp16 math functions are not supported in cuda_bfp16.h,
+// so we define them here to make sure the generated CUDA code
+// is valid.
+#define CUDA_UNSUPPORTED_HALF_MATH_BINARY(HALF_MATH_NAME, FP32_MATH_NAME) \
+static inline __device__ __host__ nv_bfloat16 HALF_MATH_NAME(nv_bfloat16 x, nv_bfloat16 y) {   \
+  float tmp_x = __bfloat162float(x);                                      \
+  float tmp_y = __bfloat162float(y);                                      \
+  float result = FP32_MATH_NAME(tmp_x, tmp_y);                            \
+  return __float2bfloat16(result);                                        \
+}
+
+#define CUDA_UNSUPPORTED_HALF_MATH_UNARY(HALF_MATH_NAME, FP32_MATH_NAME) \
+static inline __device__ __host__ nv_bfloat16 HALF_MATH_NAME(nv_bfloat16 x) {          \
+  float tmp_x = __bfloat162float(x);                                     \
+  float result = FP32_MATH_NAME(tmp_x);                                  \
+  return __float2bfloat16(result);                                       \
+}
+
+CUDA_UNSUPPORTED_HALF_MATH_BINARY(hpow, powf)
+#if ((__CUDACC_VER_MAJOR__ < 12) || ((__CUDACC_VER_MAJOR__ == 12) && (__CUDACC_VER_MINOR__ < 8)))
+CUDA_UNSUPPORTED_HALF_MATH_UNARY(htanh, tanhf)
+#endif
+CUDA_UNSUPPORTED_HALF_MATH_UNARY(htan, tanf)
+CUDA_UNSUPPORTED_HALF_MATH_UNARY(hatan, atanf)
+CUDA_UNSUPPORTED_HALF_MATH_UNARY(herf, erf)
+
+#undef CUDA_UNSUPPORTED_HALF_MATH_BINARY
+#undef CUDA_UNSUPPORTED_HALF_MATH_UNARY
+"""
+
+    if "fp8" in tags:
+        header += R"""
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 890)
+#include <cuda_fp8.h>
+using fp8_e4_t = __nv_fp8_e4m3;
+using fp8_e4x2_t = __nv_fp8x2_e4m3;
+using fp8_e4x4_t = __nv_fp8x4_e4m3;
+struct fp8_e4x8_t {
+ fp8_e4_t data[8]; 
+};
+struct fp8_e4x16_t {
+ fp8_e4_t data[16]; 
+};
+using fp8_e5_t = __nv_fp8_e5m2;
+using fp8_e5x2_t = __nv_fp8x2_e5m2;
+using fp8_e5x4_t = __nv_fp8x4_e5m2;
+struct fp8_e5x8_t {
+ fp8_e5_t data[8]; 
+};
+struct fp8_e5x16_t {
+ fp8_e5_t data[16]; 
+};
+using fp8_e8_t = __nv_fp8_e8m0;
+using fp8_e8x2_t = __nv_fp8x2_e8m0;
+using fp8_e8x4_t = __nv_fp8x4_e8m0;
+struct fp8_e8x8_t {
+ fp8_e8_t data[8]; 
+};
+struct fp8_e8x16_t {
+ fp8_e8_t data[16]; 
+};
+#endif // __CUDA_ARCH__ >= 890
+"""
+
+    if "fp6" in tags:
+        header += R"""
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 1000)
+#include <cuda_fp6.h>
+using fp6_e2_t = __nv_fp6_e2m3;
+using fp6_e2x2_t = __nv_fp6x2_e2m3;
+using fp6_e2x4_t = __nv_fp6x4_e2m3;
+struct fp6_e2x8_t {
+ fp6_e2_t data[8]; 
+};
+struct fp6_e2x16_t {
+ fp6_e2_t data[16]; 
+};
+using fp6_e3_t = __nv_fp6_e3m2;
+using fp6_e3x2_t = __nv_fp6x2_e3m2;
+using fp6_e3x4_t = __nv_fp6x4_e3m2;
+struct fp6_e3x8_t {
+ fp6_e3_t data[8]; 
+};
+struct fp6_e3x16_t {
+ fp6_e3_t data[16]; 
+};
+#endif // __CUDA_ARCH__ >= 1000
+"""
+
+    if "fp4" in tags:
+        header += R"""
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+#include <cuda_fp4.h>
+using fp4_e2_t = __nv_fp4_e2m1;
+using fp4_e2x2_t = __nv_fp4x2_e2m1;
+using fp4_e2x4_t = __nv_fp4x4_e2m1;
+struct fp4_e2x8_t {
+ fp4_e2_t data[8]; 
+};
+struct fp4_e2x16_t {
+ fp4_e2_t data[16]; 
+};
+#endif // __CUDA_ARCH__ >= 800
+"""
+
+    #########################################################
+    # Vector type extensions
+    #########################################################
+    if "fp16" in tags or "bf16" in tags:
+        header += R"""
+#include <type_traits>
+template <typename T, typename TVec2>
+struct __align__(8) half4_bfloat164 {
+  T x, y, z, w;
+  __host__ __device__ half4_bfloat164() : x(T(0)), y(T(0)), z(T(0)), w(T(0)) {}
+  __host__ __device__ half4_bfloat164(T x, T y, T z, T w) : x(x), y(y), z(z), w(w) {}
+"""
+        if "fp8" in tags:
+            header += R"""
+  __host__ __device__ explicit half4_bfloat164(const __nv_fp8x4_e4m3& fp8x4) {
+    if constexpr (std::is_same_v<T, __half>) {
+      __nv_fp8x2_e4m3 lo_part, hi_part;
+      lo_part.__x = static_cast<__nv_fp8x2_storage_t>(fp8x4.__x & 0xFFFF);
+      hi_part.__x = static_cast<__nv_fp8x2_storage_t>((fp8x4.__x >> 16) & 0xFFFF);
+      TVec2 lo_half2 = static_cast<TVec2>(lo_part);
+      TVec2 hi_half2 = static_cast<TVec2>(hi_part);
+      x = reinterpret_cast<T*>(&lo_half2)[0];
+      y = reinterpret_cast<T*>(&lo_half2)[1];
+      z = reinterpret_cast<T*>(&hi_half2)[0];
+      w = reinterpret_cast<T*>(&hi_half2)[1];
+    } else {
+      __nv_fp8_storage_t elem0_raw = static_cast<__nv_fp8_storage_t>(fp8x4.__x & 0xFF);
+      __nv_fp8_storage_t elem1_raw = static_cast<__nv_fp8_storage_t>((fp8x4.__x >> 8) & 0xFF);
+      __nv_fp8_storage_t elem2_raw = static_cast<__nv_fp8_storage_t>((fp8x4.__x >> 16) & 0xFF);
+      __nv_fp8_storage_t elem3_raw = static_cast<__nv_fp8_storage_t>((fp8x4.__x >> 24) & 0xFF);
+      __nv_fp8_e4m3 elem0, elem1, elem2, elem3;
+      elem0.__x = elem0_raw;
+      elem1.__x = elem1_raw;
+      elem2.__x = elem2_raw;
+      elem3.__x = elem3_raw;
+      x = T(elem0);
+      y = T(elem1);
+      z = T(elem2);
+      w = T(elem3);
+    }
+  }
+  __host__ __device__ explicit operator __nv_fp8x4_e4m3() const {
+    __nv_fp8x4_e4m3 result;
+    TVec2 lo_half2 = *reinterpret_cast<const TVec2*>(&x);
+    TVec2 hi_half2 = *reinterpret_cast<const TVec2*>(&z);
+    __nv_fp8x2_e4m3 lo_part(lo_half2), hi_part(hi_half2);
+    result.__x =
+        (static_cast<__uint32_t>(lo_part.__x) | (static_cast<__uint32_t>(hi_part.__x) << 16));
+    return result;
+  }
+  __host__ __device__ explicit half4_bfloat164(const __nv_fp8x4_e5m2& fp8x4) {
+      __nv_fp8x2_e5m2 lo_part, hi_part;
+      lo_part.__x = static_cast<__nv_fp8x2_storage_t>(fp8x4.__x & 0xFFFF);
+      hi_part.__x = static_cast<__nv_fp8x2_storage_t>((fp8x4.__x >> 16) & 0xFFFF);
+      TVec2 lo_half2 = static_cast<TVec2>(lo_part);
+      TVec2 hi_half2 = static_cast<TVec2>(hi_part);
+      x = reinterpret_cast<T*>(&lo_half2)[0];
+      y = reinterpret_cast<T*>(&lo_half2)[1];
+      z = reinterpret_cast<T*>(&hi_half2)[0];
+      w = reinterpret_cast<T*>(&hi_half2)[1];
+  }
+  __host__ __device__ explicit operator __nv_fp8x4_e5m2() const {
+    __nv_fp8x4_e5m2 result;
+    TVec2 lo_half2 = *reinterpret_cast<const TVec2*>(&x);
+    TVec2 hi_half2 = *reinterpret_cast<const TVec2*>(&z);
+    __nv_fp8x2_e5m2 lo_part(lo_half2), hi_part(hi_half2);
+    result.__x =
+        (static_cast<__uint32_t>(lo_part.__x) | (static_cast<__uint32_t>(hi_part.__x) << 16));
+    return result;
+  }
+  __host__ __device__ explicit half4_bfloat164(const __nv_fp8x4_e8m0& fp8x4) {
+      __nv_fp8x2_e8m0 lo_part, hi_part;
+      lo_part.__x = static_cast<__nv_fp8x2_storage_t>(fp8x4.__x & 0xFFFF);
+      hi_part.__x = static_cast<__nv_fp8x2_storage_t>((fp8x4.__x >> 16) & 0xFFFF);
+      TVec2 lo_half2 = static_cast<TVec2>(lo_part);
+      TVec2 hi_half2 = static_cast<TVec2>(hi_part);
+      x = reinterpret_cast<T*>(&lo_half2)[0];
+      y = reinterpret_cast<T*>(&lo_half2)[1];
+      z = reinterpret_cast<T*>(&hi_half2)[0];
+      w = reinterpret_cast<T*>(&hi_half2)[1];
+  }
+  __host__ __device__ explicit operator __nv_fp8x4_e8m0() const {
+    __nv_fp8x4_e8m0 result;
+    TVec2 lo_half2 = *reinterpret_cast<const TVec2*>(&x);
+    TVec2 hi_half2 = *reinterpret_cast<const TVec2*>(&z);
+    __nv_fp8x2_e8m0 lo_part(lo_half2), hi_part(hi_half2);
+    result.__x =
+        (static_cast<__uint32_t>(lo_part.__x) | (static_cast<__uint32_t>(hi_part.__x) << 16));
+    return result;
+  }
+"""
+        if "fp4" in tags:
+            header += R"""
+  __host__ __device__ explicit half4_bfloat164(const __nv_fp4x4_e2m1& fp4x4) {
+    if constexpr (std::is_same_v<T, __half>) {
+      __nv_fp4x2_storage_t lo_part = static_cast<__nv_fp4x2_storage_t>(fp4x4.__x & 0xFF);
+      __nv_fp4x2_storage_t hi_part = static_cast<__nv_fp4x2_storage_t>((fp4x4.__x >> 8) & 0xFF);
+      TVec2 lo_half2 = __half2(__nv_cvt_fp4x2_to_halfraw2(lo_part, __NV_E2M1));
+      TVec2 hi_half2 = __half2(__nv_cvt_fp4x2_to_halfraw2(hi_part, __NV_E2M1));
+      x = reinterpret_cast<T*>(&lo_half2)[0];
+      y = reinterpret_cast<T*>(&lo_half2)[1];
+      z = reinterpret_cast<T*>(&hi_half2)[0];
+      w = reinterpret_cast<T*>(&hi_half2)[1];
+    } else {
+      __nv_fp4_e2m1 elem0, elem1, elem2, elem3;
+      elem0.__x = static_cast<__nv_fp4_storage_t>(fp4x4.__x & 0xF);
+      elem1.__x = static_cast<__nv_fp4_storage_t>((fp4x4.__x >> 4) & 0xF);
+      elem2.__x = static_cast<__nv_fp4_storage_t>((fp4x4.__x >> 8) & 0xF);
+      elem3.__x = static_cast<__nv_fp4_storage_t>((fp4x4.__x >> 12) & 0xF);
+      x = T(elem0);
+      y = T(elem1);
+      z = T(elem2);
+      w = T(elem3);
+    }
+  }
+  __host__ __device__ explicit operator __nv_fp4x4_e2m1() const {
+    TVec2 lo_half2 = *reinterpret_cast<const TVec2*>(&x);
+    TVec2 hi_half2 = *reinterpret_cast<const TVec2*>(&z);
+    return __nv_fp4x4_e2m1(lo_half2, hi_half2);
+  }
+"""
+        header += R"""
+};
+"""
+    if "fp16" in tags:
+        header += R"""
+using half4 = half4_bfloat164<__half, __half2>;
+__host__ __device__ half4 make_half4(__half x, __half y, __half z, __half w) {
+    return half4(x, y, z, w);
+}
+"""
+    if "bf16" in tags:
+        header += R"""
+using nv_bfloat164 = half4_bfloat164<nv_bfloat16, nv_bfloat162>;
+__host__ __device__ nv_bfloat164 make_nv_bfloat164(nv_bfloat16 x, nv_bfloat16 y, nv_bfloat16 z, nv_bfloat16 w) {
+    return nv_bfloat164(x, y, z, w);
+}
+__host__ __device__ nv_bfloat162 make_nv_bfloat162(nv_bfloat16 x, nv_bfloat16 y) {
+    return nv_bfloat162(x, y);
+}
+"""
+        if "fp8" in tags:
+            header += R"""
+__host__ __device__ nv_bfloat162 cast_to_nv_bfloat162(const __nv_fp8x2_e4m3& fp8x2) {
+    __nv_fp8_e4m3 elem0, elem1;
+    elem0.__x = static_cast<__nv_fp8_storage_t>(fp8x2.__x & 0xFF);
+    elem1.__x = static_cast<__nv_fp8_storage_t>((fp8x2.__x >> 8) & 0xFF);
+    nv_bfloat16 x = nv_bfloat16(elem0);
+    nv_bfloat16 y = nv_bfloat16(elem1);
+    return nv_bfloat162(x, y);
+}
+__host__ __device__ nv_bfloat162 cast_to_nv_bfloat162(const __nv_fp8x2_e5m2& fp8x2) {
+    __nv_fp8_e5m2 elem0, elem1;
+    elem0.__x = static_cast<__nv_fp8_storage_t>(fp8x2.__x & 0xFF);
+    elem1.__x = static_cast<__nv_fp8_storage_t>((fp8x2.__x >> 8) & 0xFF);
+    nv_bfloat16 x = nv_bfloat16(elem0);
+    nv_bfloat16 y = nv_bfloat16(elem1);
+    return nv_bfloat162(x, y);
+}
+__host__ __device__ nv_bfloat162 cast_to_nv_bfloat162(const __nv_fp8x2_e8m0& fp8x2) {
+    __nv_fp8_e8m0 elem0, elem1;
+    elem0.__x = static_cast<__nv_fp8_storage_t>(fp8x2.__x & 0xFF);
+    elem1.__x = static_cast<__nv_fp8_storage_t>((fp8x2.__x >> 8) & 0xFF);
+    nv_bfloat16 x = nv_bfloat16(elem0);
+    nv_bfloat16 y = nv_bfloat16(elem1);
+    return nv_bfloat162(x, y);
+}
+    """
+    if "fp8" in tags:
+        header += R"""
+__device__ __nv_fp8x2_e5m2 make___nv_fp8x2_e5m2(__nv_fp8_e5m2 x, __nv_fp8_e5m2 y) {
+    __nv_fp8x2_e5m2 result;
+    result.__x = (x.__x) | (y.__x << 8);
+    return result;
+}
+__device__ __nv_fp8x4_e5m2 make___nv_fp8x4_e5m2(__nv_fp8_e5m2 a, __nv_fp8_e5m2 b, __nv_fp8_e5m2 c, __nv_fp8_e5m2 d) {
+    __nv_fp8x4_e5m2 result;
+    result.__x = (a.__x) | (b.__x << 8) | (c.__x << 16) | (d.__x << 24);
+    return result;
+}
+__device__ __nv_fp8x2_e4m3 make___nv_fp8x2_e4m3(__nv_fp8_e4m3 x, __nv_fp8_e4m3 y) {
+    __nv_fp8x2_e4m3 result;
+    result.__x = (x.__x) | (y.__x << 8);
+    return result;
+}
+__device__ __nv_fp8x4_e4m3 make___nv_fp8x4_e4m3(__nv_fp8_e4m3 a, __nv_fp8_e4m3 b, __nv_fp8_e4m3 c, __nv_fp8_e4m3 d) {
+    __nv_fp8x4_e4m3 result;
+    result.__x = (a.__x) | (b.__x << 8) | (c.__x << 16) | (d.__x << 24);
+    return result;
+}
+__device__ __nv_fp8x2_e8m0 make___nv_fp8x2_e8m0(__nv_fp8_e8m0 x, __nv_fp8_e8m0 y) {
+    __nv_fp8x2_e8m0 result;
+    result.__x = (x.__x) | (y.__x << 8);
+    return result;
+}
+__device__ __nv_fp8x4_e8m0 make___nv_fp8x4_e8m0(__nv_fp8_e8m0 a, __nv_fp8_e8m0 b, __nv_fp8_e8m0 c, __nv_fp8_e8m0 d) {
+    __nv_fp8x4_e8m0 result;
+    result.__x = (a.__x) | (b.__x << 8) | (c.__x << 16) | (d.__x << 24);
+    return result;
+}
+"""
+    if "fp4" in tags:
+        header += R"""
+__host__ __device__ nv_bfloat162 cast_to_nv_bfloat162(const __nv_fp4x2_e2m1& fp4x2) {
+    __nv_fp4_e2m1 elem0, elem1;
+    elem0.__x = static_cast<__nv_fp4_storage_t>(fp4x2.__x & 0xFF);
+    elem1.__x = static_cast<__nv_fp4_storage_t>((fp4x2.__x >> 8) & 0xFF);
+    nv_bfloat16 x = nv_bfloat16(elem0);
+    nv_bfloat16 y = nv_bfloat16(elem1);
+    return nv_bfloat162(x, y);
+}
+"""
+
+    if "int8" in tags:
+        header += R"""
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 610)
+#include <sm_61_intrinsics.h>
+
+#if defined(__CUDACC_RTC__)
+#define __SM_61_INTRINSICS_DECL__ __device__
+#else /* !__CUDACC_RTC__ */
+#define __SM_61_INTRINSICS_DECL__ static __device__ __inline__
+#endif /* __CUDACC_RTC__ */
+
+#ifndef __CUDA_ARCH__
+#define __DEF_IF_HOST { }
+#else  /* !__CUDA_ARCH__ */
+#define __DEF_IF_HOST ;
+#endif /* __CUDA_ARCH__ */
+
+__SM_61_INTRINSICS_DECL__ int __dp4a(unsigned int srcA, int srcB, int c) __DEF_IF_HOST
+__SM_61_INTRINSICS_DECL__ int __dp4a(int srcA, unsigned int srcB, int c) __DEF_IF_HOST
+
+#undef __DEF_IF_HOST
+
+#if !defined(__CUDACC_RTC__) && defined(__CUDA_ARCH__)
+__SM_61_INTRINSICS_DECL__ int __dp4a(unsigned int srcA, int srcB, int c) {
+    int ret;
+    asm volatile ("dp4a.u32.s32 %0, %1, %2, %3;" : "=r"(ret) : "r"(srcA), "r"(srcB), "r"(c));
+    return ret;
+}
+
+__SM_61_INTRINSICS_DECL__ int __dp4a(int srcA, unsigned int srcB, int c) {
+    int ret;
+    asm volatile ("dp4a.s32.u32 %0, %1, %2, %3;" : "=r"(ret) : "r"(srcA), "r"(srcB), "r"(c));
+    return ret;
+}
+#endif /* !__CUDACC_RTC__ && defined(__CUDA_ARCH__) */
+
+#undef __SM_61_INTRINSICS_DECL__
+
+#endif // __CUDA_ARCH__ >= 610
+"""
+    if "math_constants" in tags:
+        header += R"""
+#include <math_constants.h>
+"""
+    if "mma" in tags:
+        header += R"""
+#include <mma.h>
+"""
+
+    if "warp_shuffle" in tags:
+        header += R"""
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)
+#define __shfl_sync(mask, var, lane, width) \
+        __shfl((var), (lane), (width))
+
+#define __shfl_down_sync(mask, var, offset, width) \
+        __shfl_down((var), (offset), (width))
+
+#define __shfl_up_sync(mask, var, offset, width) \
+        __shfl_up((var), (offset), (width))
+#endif
+"""
+
+    if "cast_smem_ptr_to_int" in tags:
+        header += R"""
+__forceinline__ __device__ unsigned int cast_smem_ptr_to_int(const void* const smem_ptr) {
+  unsigned int smem_int;
+  asm volatile ("{ .reg .u64 smem_int; cvta.to.shared.u64 smem_int, %1; cvt.u32.u64 %0, smem_int; }"
+    : "=r"(smem_int) : "l"(smem_ptr));
+  return smem_int;
+}
+"""
+    header += R"""
+#include <cuda.h>
+#if (((__CUDACC_VER_MAJOR__ == 11) && (__CUDACC_VER_MINOR__ >= 4)) || \
+     (__CUDACC_VER_MAJOR__ > 11))
+#define TVM_ENABLE_L2_PREFETCH 1
+#else
+#define TVM_ENABLE_L2_PREFETCH 0
+#endif
+
+#ifdef __CUDACC_RTC__
+  using int64_t = long long;
+  using uint64_t = unsigned long long;
+#else
+  #include <cstdint>
+#endif
+  using uint = unsigned int;
+  using uchar = unsigned char;
+  using ushort = unsigned short;
+"""
+
+    if "get_tmem_addr" in tags:
+        header += R"""
+__forceinline__ __device__ uint32_t get_tmem_addr(uint32_t idx, int row_offset, int col_offset) {
+  int col_idx = idx & 0xFFFF;
+  int row_idx = (idx >> 16) & 0xFFFF;
+  col_idx += col_offset;
+  row_idx += row_offset;
+  col_idx = col_idx & 0xFFFF;
+  row_idx = row_idx & 0xFFFF;
+
+  uint32_t new_idx = (row_idx << 16) | col_idx;
+  return new_idx;
+}
+"""
+
+    if "get_time_stamp" in tags:
+        header += R"""
+__forceinline__ __device__ uint32_t tvm_builtin_get_timestamp() {
+  volatile uint32_t ret;
+  asm volatile("mov.u32 %0, %globaltimer_lo;" : "=r"(ret));
+  return ret;
+}
+"""
+
+    if "gmma_descriptor" in tags:
+        header += R"""
+#ifndef HOST_DEVICE
+#define HOST_DEVICE __forceinline__ __host__ __device__
+#endif
+union GmmaDescriptor
+{
+  HOST_DEVICE constexpr
+  GmmaDescriptor() noexcept : desc_(0) {}
+  HOST_DEVICE constexpr
+  GmmaDescriptor(uint64_t desc) noexcept : desc_(desc) {}
+  HOST_DEVICE constexpr
+  GmmaDescriptor(GmmaDescriptor const& t) noexcept : desc_(t.desc_) {}
+  HOST_DEVICE constexpr
+  GmmaDescriptor(GmmaDescriptor && t) noexcept : desc_(t.desc_) {}
+
+  HOST_DEVICE constexpr
+  GmmaDescriptor& operator=(GmmaDescriptor const& t) noexcept {
+    desc_ = t.desc_;
+    return *this;
+  }
+
+  HOST_DEVICE constexpr
+  GmmaDescriptor& operator=(GmmaDescriptor && t) noexcept {
+    desc_ = t.desc_;
+    return *this;
+  }
+
+  uint64_t desc_;
+  uint32_t reg32_[2];
+  uint16_t reg16_[4];
+
+  // Bitfield implementation avoids the need for shifts in assignment
+  struct {
+    // start_address, bit [0,14), 4LSB not included
+    uint16_t start_address_ : 14, : 2;        // 14 bits [0,14), 2 bits unused
+    // leading dimension byte offset, bit [16,30), 4LSB not included
+    // For N: This is the stride from the first col to the second col of the 8x2 brick in INTERLEAVED
+    //   Unused for all SWIZZLE_* layouts (and assumed to be 1)
+    // For T: This is the stride from the first 8 rows to the next 8 rows.
+    uint16_t leading_byte_offset_ : 14, : 2;  // 14 bits [0,14), 2 bits unused
+    // stride dimension byte offset, bit [32,46), 4LSB not included
+    // For N: This is the stride from the first 8 rows to the next 8 rows.
+    // For T: This is the stride fro mthe first 8 cols to the next 8 cols.
+    uint16_t stride_byte_offset_ : 14, : 2;   // 14 bits [0,14), 2 bits unused
+    // base_offset, bit [49,52)
+    // Valid only for SWIZZLE_128B and SWIZZLE_64B
+    uint8_t : 1, base_offset_ : 3, : 4;       // 1 bit unused, 3 bits [1,4), 4 bits unused
+    // layout type, bit [62,64)
+    // SWIZZLE_NONE = 0, SWIZZLE_32B = 3, SWIZZLE_64B = 2, SWIZZLE_128B = 1
+    uint8_t : 6, layout_type_ : 2;            // 6 bits unused, 2 bits [6,8)
+  } bitfield;
+
+  // Decay to a uint64_t
+  HOST_DEVICE constexpr
+  operator uint64_t() const noexcept { return desc_; }
+};
+"""
+
+    if "smem_descriptor" in tags:
+        header += R"""
+#ifndef HOST_DEVICE
+#define HOST_DEVICE __forceinline__ __host__ __device__
+#endif
+union SmemDescriptor
+{
+  uint64_t desc_ = 0;
+  // Bitfield implementation avoids the need for shifts in assignment
+  struct {
+    // start_address, bit [0,14), 4LSB not included
+    uint16_t start_address_ : 14, : 2;                     // 14 bits [0,14), 2 bits unused
+    // leading dimension byte offset, bit [16,30), 4LSB not included
+    uint16_t leading_byte_offset_ : 14, : 2;               // 14 bits [0,14), 2 bits unused
+    // stride dimension byte offset, bit [32,46), 4LSB not included
+    uint16_t stride_byte_offset_ : 14, version_ : 2;       // 14 bits [0,14), 2 bits [14,16)
+    // base_offset, bit [49,52). leading_byte_offset_mode, bit [52,53).
+    uint8_t : 1, base_offset_ : 3, lbo_mode_ : 1, : 3;     // 1 bit unused, 3 bits [1,4), 1 bit [4,5), 3 bits unused
+    // layout type, bit [61,64), SWIZZLE_NONE matrix descriptor = 0, SWIZZLE_128B matrix descriptor = 2, SWIZZLE_64B descriptor = 4, SWIZZLE_32B descriptor = 6, SWIZZLE_128B_BASE32B = 1, N/A = 3, N/A = 5, N/A = 7
+    uint8_t : 5, layout_type_ : 3;                         // 6 bits unused, 3 bits [5,8)
+  };
+  // Seperate the field, as we may only update one part of desc
+  struct {
+    uint32_t lo;
+    uint32_t hi;
+  };
+
+  // Decay to a uint64_t
+  HOST_DEVICE constexpr
+  operator uint64_t() const noexcept { return desc_; }
+};
+"""
+
+    if "instr_descriptor" in tags:
+        header += R"""
+#ifndef HOST_DEVICE
+#define HOST_DEVICE __forceinline__ __host__ __device__
+#endif
+union InstrDescriptor
+{
+  uint32_t desc_;
+
+  struct {
+    // Bitfield implementation avoids the need for shifts in assignment
+    uint16_t sparse_id2_    : 2,  // bit [ 0, 2) : Sparse meta data id2
+             sparse_flag_   : 1,  // bit [ 2, 3) : 0 = dense. 1 = sparse. 1 value valid only for F32F16/S8/MXF8F6F4
+             saturate_      : 1,  // bit [ 3, 4) : 0 = no saturate. 1 = saturate. 1 value valid only for S8
+             c_format_      : 2,  // bit [ 4, 6) : 0 = F16. 1 = F32, 2 = S32
+                            : 1,  //
+             a_format_      : 3,  // bit [ 7,10) : MXF8F6F4Format:0 = E4M3, 1 = E5M2, 3 = E2M3, 4 = E3M2, 5 = E2M1. F32F16Format: 0 = F16, 1 = BF16, 2 = TF32. S8: 0 unsigned 8 bit, 1 signed 8 bit. Boolean MMA: 0 Boolean
+             b_format_      : 3,  // bit [10,13) : MXF8F6F4Format:0 = E4M3, 1 = E5M2, 3 = E2M3, 4 = E3M2, 5 = E2M1. F32F16Format: 0 = F16, 1 = BF16, 2 = TF32. S8: 0 unsigned 8 bit, 1 signed 8 bit. Boolean MMA: 0 Boolean
+             a_negate_      : 1,  // bit [13,14) : 0 = no negate. 1 = negate. 1 value valid only for F32F16Format and MXF8F6F4Format
+             b_negate_      : 1,  // bit [14,15) : 0 = no negate. 1 = negate. 1 value valid only for F32F16Format and MXF8F6F4Format
+             a_major_       : 1;  // bit [15,16) : 0 = K-major. 1 = MN-major. Major value of 1 is only valid for E4M3, E5M2, INT8 (signed and unsigned), F16, BF16 and TF32 source formats
+    uint16_t b_major_       : 1,  // bit [16,17) : 0 = K-major. 1 = MN-major. Major value of 1 is only valid for E4M3, E5M2, INT8 (signed and unsigned), F16, BF16 and TF32 source formats
+             n_dim_         : 6,  // bit [17,23) : 3 LSBs not included. Valid values range from 1 (N=8) to 32 (N=256).  All values are not valid for all instruction formats
+                            : 1,  //
+             m_dim_         : 5,  // bit [24,29) : 4 LSBs not included. Valid values are: 4 (M=64), 8 (M=128), 16 (M=256)
+                            : 1,  //
+             max_shift_     : 2;  // bit [30,32) : Maximum shift for WS instruction. Encoded as follows: 0 = no shift, 1 = maximum shift of 8, 2 = maximum shift of 16, 3 = maximum shift of 32.
+  };
+
+  // Decay to a uint32_t
+  HOST_DEVICE constexpr explicit
+  operator uint32_t() const noexcept { return desc_; }
+};
+"""
+
+    if "instr_descriptor_scaled" in tags:
+        header += R"""
+#ifndef HOST_DEVICE
+#define HOST_DEVICE __forceinline__ __host__ __device__
+#endif
+union InstrDescriptorBlockScaled
+{
+  uint32_t desc_;
+
+  struct {
+    // Bitfield implementation avoids the need for shifts in assignment
+    uint16_t sparse_id2_    : 2,  // bit [ 0, 2) : Sparse meta data id2
+             sparse_flag_   : 1,  // bit [ 2, 3) : 0 = dense. 1 = sparse. 1 value valid only for F32F16/S8/MXF8F6F4
+                            : 1,  //
+             b_sf_id_       : 2,  // bit [ 4, 6) : Matrix B Scale Factor ID
+                            : 1,  //
+             a_format_      : 3,  // bit [ 7, 9) : MXF8F6F4Format:0 = E4M3, 1 = E5M2, 3 = E2M3, 4 = E3M2, 5 = E2M1. F32F16Format: 0 = F16, 1 = BF16, 2 = TF32. S8: 0 unsigned 8 bit, 1 signed 8 bit. BMMA: 0 Boolean
+             b_format_      : 3,  // bit [10,12) : MXF8F6F4Format:0 = E4M3, 1 = E5M2, 3 = E2M3, 4 = E3M2, 5 = E2M1. F32F16Format: 0 = F16, 1 = BF16, 2 = TF32. S8: 0 unsigned 8 bit, 1 signed 8 bit. BMMA: 0 Boolean
+             a_negate_      : 1,  // bit [13,14) : 0 = no negate. 1 = negate. 1 value valid only for F32F16Format and MXF8F6F4Format
+             b_negate_      : 1,  // bit [14,15) : 0 = no negate. 1 = negate. 1 value valid only for F32F16Format and MXF8F6F4Format
+             a_major_       : 1;  // bit [15,16) : 0 = K-major. 1 = MN-major. Major value of 1 is only valid for E4M3, E5M2, INT8 (signed and unsigned), F16, BF16 and TF32 source formats
+    uint16_t b_major_       : 1,  // bit [16,17) : 0 = K-major. 1 = MN-major. Major value of 1 is only valid for E4M3, E5M2, INT8 (signed and unsigned), F16, BF16 and TF32 source formats
+             n_dim_         : 6,  // bit [17,23) : 3 LSBs not included. Valid values range from 1 (N=8) to 32 (N=256).  All values are not valid for all instruction formats
+             scale_format_  : 1,  // bit [23,24) : 0=E4M3, 1=E8M0
+             m_dim_         : 5,  // bit [24,29) : 4 LSBs not included. Valid values are: 4 (M=64), 8 (M=128), 16 (M=256)
+             a_sf_id_       : 2,  // bit [29,31) : Matrix A Scale Factor ID
+                            : 1;  //
+  };
+
+  // Decay to a uint32_t
+  HOST_DEVICE constexpr
+  operator uint32_t() const noexcept { return desc_; }
+};
+"""
+
+    return header
+
+
+#########################
+# CODEGEN REGISTRY FOR CUDA HW OPS
+#########################
 
 
 CODEGEN_REGISTRY = {}
@@ -34,14 +770,19 @@ def get_codegen(op):
 
 def register_codegen(op, backend="cuda"):
     """register a codegen function for a given op
-    The codegen function should return a cuda_func_call statement
+    The codegen function should return a cuda_func_call statement,
+    and a list of tags that the codegen function needs.
     """
 
     def decorator(func):
 
         @functools.wraps(func)
         def wrapper(arg_list):
-            return func(*arg_list)  # pylint: disable=not-callable
+            res = func(*arg_list)  # pylint: disable=not-callable
+            if isinstance(res, tuple):
+                return res[0], res[1]
+            else:
+                return res, list()
 
         CODEGEN_REGISTRY["tir." + op] = wrapper
         return wrapper
@@ -49,8 +790,1394 @@ def register_codegen(op, backend="cuda"):
     return decorator
 
 
+@register_codegen("ptx_tcgen05_alloc")
+def codegen_ptx_tcgen05_alloc(dst_shared_ptr, n_cols, n_cta_group):
+    n_cols = int(n_cols)
+    n_cta_group = int(n_cta_group)
+    is_power_of_two = (n_cols > 0) and ((n_cols & (n_cols - 1)) == 0)
+    if not (32 <= n_cols <= 512 and n_cols % 32 == 0 and is_power_of_two):
+        raise ValueError(  # pylint: disable=raise-missing-from
+            "The number of columns to allocate in Tensor Memory is invalid, "
+            f"expect a value within range [32, 512] and be a multiple of 32 "
+            f"and a power of 2, got {n_cols}"
+        )
+
+    if n_cta_group not in [1, 2]:
+        raise ValueError(
+            "The number of cta_group involved in allocating Tensor Memory is incorrect, "
+            f"expected 1 or 2, got {n_cta_group}"
+        )
+
+    func_name = f"tvm_builtin_ptx_tcgen05_alloc_cta_group_{n_cta_group}"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(void* dst, int nCols) {{
+  unsigned int smem_addr = __cvta_generic_to_shared(dst);
+    __asm__ __volatile__(
+      "tcgen05.alloc.cta_group::{n_cta_group}.sync.aligned.shared::cta.b32 [%0], %1;"
+      :: "r"(smem_addr), "r"(nCols)
+      : "memory"
+    );
+}}
+"""
+    source_code = source_code.format(func_name=func_name, n_cta_group=n_cta_group)
+    return cuda_func_call(func_name, dst_shared_ptr, n_cols, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_dealloc")
+def codegen_ptx_tcgen05_dealloc(taddr, n_cols, n_cta_group):
+    n_cols = int(n_cols)
+    n_cta_group = int(n_cta_group)
+    is_power_of_two = (n_cols > 0) and ((n_cols & (n_cols - 1)) == 0)
+    if not (32 <= n_cols <= 512 and n_cols % 32 == 0 and is_power_of_two):
+        raise ValueError(
+            "The number of columns to deallocate in Tensor Memory is invalid, expect a value within"
+            f"range [32, 512] and be a multiple of 32 and a power of 2, got {n_cols}"
+        )
+
+    if n_cta_group not in [1, 2]:
+        raise ValueError(
+            "The number of cta_group involved in deallocating Tensor Memory is incorrect, expected 1"
+            f"or 2, got {n_cta_group}"
+        )
+
+    func_name = f"tvm_builtin_ptx_tcgen05_dealloc_cta_group_{n_cta_group}"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint32_t taddr, int nCols) {{
+    __asm__ __volatile__(
+      "tcgen05.dealloc.cta_group::{n_cta_group}.sync.aligned.b32 %0, %1;"
+      :: "r"(taddr), "r"(nCols)
+      : "memory"
+    );
+}}
+"""
+    source_code = source_code.format(func_name=func_name, n_cta_group=n_cta_group)
+    return cuda_func_call(func_name, taddr, n_cols, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_relinquish_alloc_permit")
+def codegen_ptx_tcgen05_relinquish_alloc_permit(n_cta_group):
+    n_cta_group = int(n_cta_group)
+    if n_cta_group not in [1, 2]:
+        raise ValueError(
+            "The number of cta_group involved in relinquishing alloc permit is incorrect, expected 1"
+            f"or 2, got {n_cta_group}"
+        )
+
+    func_name = f"tvm_builtin_ptx_tcgen05_relinquish_alloc_permit_cta_group_{n_cta_group}"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+    __asm__ __volatile__(
+        "tcgen05.relinquish_alloc_permit.cta_group::{n_cta_group}.sync.aligned;"
+        ::: "memory"
+    );
+}}
+"""
+    source_code = source_code.format(func_name=func_name, n_cta_group=n_cta_group)
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_fence_before_thread_sync")
+def codegen_ptx_tcgen05_fence_before_thread_sync():
+    func_name = "tvm_builtin_ptx_tcgen05_fence_before_thread_sync"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+  asm volatile("tcgen05.fence::before_thread_sync;\n" ::: "memory");
+}}
+"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_fence_after_thread_sync")
+def codegen_ptx_tcgen05_fence_after_thread_sync():
+    func_name = "tvm_builtin_ptx_tcgen05_fence_after_thread_sync"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+  asm volatile("tcgen05.fence::after_thread_sync;\n" ::: "memory");
+}}
+"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_ld")
+def codegen_ptx_tcgen05_ld(src_addr, row_offset, col_offset, shape, num, pack, *regs):
+    shape = str(shape)[1:-1]
+    num = int(num)
+    pack = bool(pack)
+    is_power_of_two = (num > 0) and ((num & (num - 1)) == 0)
+    if not (1 <= num <= 128 and is_power_of_two):
+        raise ValueError(
+            "The repeat factor of ptx_tcgen05_ld is invalid, expect a value within range [1, 128] "
+            f"and be a power of 2, got {num}"
+        )
+
+    if shape in ["16x32bx2", "16x64b", "32x32b"]:
+        expected_n_regs = num
+    elif shape == "16x128b":
+        if num > 64:
+            raise ValueError(
+                "The repeat factor of ptx_tcgen05_ld for shape 16x128b is invalid, "
+                f"expect a value within range [1, 64], got {num}"
+            )
+        expected_n_regs = 2 * num
+    elif shape == "16x256b":
+        if num > 32:
+            raise ValueError(
+                "The repeat factor of ptx_tcgen05_ld for shape 16x256b is invalid, "
+                f"expect a value within range [1, 32], got {num}"
+            )
+        expected_n_regs = 4 * num
+    else:
+        raise ValueError(
+            "The input shape of ptx_tcgen05_ld is invalid, expect one of [16x32bx2, 16x64b, "
+            f"32x32b, 16x128b, 16x256b], got {shape}"
+        )
+
+    if len(regs) != expected_n_regs:
+        raise ValueError(
+            "The number of arguments for ptx_tcgen05_ld is incorrect, expected "
+            f"{6 + expected_n_regs} total args (meaning {expected_n_regs} register args), "
+            f"but got {len(regs)} register args."
+        )
+
+    reg_args = ", ".join([f"void* reg{i}" for i in range(len(regs))])
+    regs_placeholder = ", ".join([f"%{i}" for i in range(len(regs))])
+    src_placeholder = str(len(regs))
+
+    imm_arg = ""
+    if shape == "16x32bx2":
+        imm = 2 * num if pack else num
+        imm_arg = f", {imm}"
+
+    reg_operands = ", ".join([f'"=r"(*(uint32_t*)reg{i})' for i in range(len(regs))])
+    pack_str = ".pack::16b" if pack else ""
+
+    func_name = "tvm_builtin_ptx_tcgen05_ld_" + shape + "_x" + str(num) + ("_pack" if pack else "")
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint32_t src_addr, uint32_t row_offset, uint32_t col_offset, {reg_args}) {{
+    asm volatile(
+        "tcgen05.ld.sync.aligned.{shape}.x{num}{pack_str}.b32 "
+        "{{{regs_placeholder}}}, "
+        "[%{src_placeholder}]{imm_arg};\n"
+        :  {reg_operands}
+        :  "r"(get_tmem_addr(src_addr, row_offset, col_offset))
+    );
+}}"""
+    source_code = source_code.format(
+        func_name=func_name,
+        reg_args=reg_args,
+        shape=shape,
+        num=num,
+        pack_str=pack_str,
+        regs_placeholder=regs_placeholder,
+        src_placeholder=src_placeholder,
+        imm_arg=imm_arg,
+        reg_operands=reg_operands,
+        src_addr=src_addr,
+        row_offset=row_offset,
+        col_offset=col_offset,
+    )
+    regs = [tvm.tir.address_of(reg) for reg in regs]
+
+    return cuda_func_call(
+        func_name,
+        src_addr,
+        row_offset,
+        col_offset,
+        *regs,
+        source_code=source_code,
+    ), ["get_tmem_addr"]
+
+
+@register_codegen("ptx_tcgen05_st")
+def codegen_ptx_tcgen05_st(dst_addr, row_offset, col_offset, shape, num, unpack, *regs):
+    shape = str(shape)[1:-1]
+    num = int(num)
+    unpack = bool(unpack)
+    is_power_of_two = (num > 0) and ((num & (num - 1)) == 0)
+    if not (1 <= num <= 128 and is_power_of_two):
+        raise ValueError(
+            "The repeat factor of ptx_tcgen05_st is invalid, expect a value within range [1, 128] "
+            f"and be a power of 2, got {num}"
+        )
+
+    if shape in ["16x32bx2", "16x64b", "32x32b"]:
+        expected_n_regs = num
+    elif shape == "16x128b":
+        if num > 64:
+            raise ValueError(
+                "The repeat factor of ptx_tcgen05_st for shape 16x128b is invalid, "
+                f"expect a value within range [1, 64], got {num}"
+            )
+        expected_n_regs = 2 * num
+    elif shape == "16x256b":
+        if num > 32:
+            raise ValueError(
+                "The repeat factor of ptx_tcgen05_st for shape 16x256b is invalid, "
+                f"expect a value within range [1, 32], got {num}"
+            )
+        expected_n_regs = 4 * num
+    else:
+        raise ValueError(
+            "The input shape of ptx_tcgen05_st is invalid, expect one of [16x32bx2, 16x64b, "
+            f"32x32b, 16x128b, 16x256b], got {shape}"
+        )
+
+    if len(regs) != expected_n_regs:
+        raise ValueError(
+            "The number of arguments for ptx_tcgen05_st is incorrect, expected "
+            f"{6 + expected_n_regs} total args (meaning {expected_n_regs} register args), "
+            f"but got {len(regs)} register args."
+        )
+
+    reg_args = ", ".join([f"void* reg{i}" for i in range(len(regs))])
+    regs_placeholder = ", ".join([f"%{i + 1}" for i in range(len(regs))])
+
+    imm_arg = ""
+    if shape == "16x32bx2":
+        imm = 2 * num if unpack else num
+        imm_arg = f", {imm}"
+
+    reg_operands = ", ".join([f'"r"(*(uint32_t*)reg{i})' for i in range(len(regs))])
+    unpack_str = ".unpack::16b" if unpack else ""
+
+    func_name = (
+        "tvm_builtin_ptx_tcgen05_st_" + shape + "_x" + str(num) + ("_unpack" if unpack else "")
+    )
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint32_t dst_addr, uint32_t row_offset, uint32_t col_offset, {reg_args}) {{
+    asm volatile(
+        "tcgen05.st.sync.aligned.{shape}.x{num}{unpack_str}.b32 "
+        "[%0]{imm_arg}, "
+        "{{{regs_placeholder}}};\n"
+        :
+        :  "r"(get_tmem_addr(dst_addr, row_offset, col_offset)), {reg_operands}
+    );
+}}"""
+    source_code = source_code.format(
+        func_name=func_name,
+        reg_args=reg_args,
+        shape=shape,
+        num=num,
+        unpack_str=unpack_str,
+        regs_placeholder=regs_placeholder,
+        imm_arg=imm_arg,
+        reg_operands=reg_operands,
+        dst_addr=dst_addr,
+        row_offset=row_offset,
+        col_offset=col_offset,
+    )
+    regs = [tvm.tir.address_of(reg) for reg in regs]
+    return cuda_func_call(
+        func_name,
+        dst_addr,
+        row_offset,
+        col_offset,
+        *regs,
+        source_code=source_code,
+    ), ["get_tmem_addr"]
+
+
+@register_codegen("ptx_tcgen05_wait_ld")
+def codegen_ptx_tcgen05_wait_ld():
+    func_name = "tvm_builtin_ptx_tcgen05_wait_ld"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+    asm volatile("tcgen05.wait::ld.sync.aligned;\n" ::: "memory");
+}}
+"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_wait_st")
+def codegen_ptx_tcgen05_wait_st():
+    func_name = "tvm_builtin_ptx_tcgen05_wait_st"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+    asm volatile("tcgen05.wait::st.sync.aligned;\n" ::: "memory");
+}}
+"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_encode_matrix_descriptor")
+def codegen_ptx_tcgen05_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
+    valid_swizzle_modes = [0, 1, 2, 3, 4]
+    swizzle = int(swizzle)
+    if swizzle not in valid_swizzle_modes:
+        raise ValueError(
+            f"Invalid swizzle mode. Expected a value in {valid_swizzle_modes}, but got {swizzle}"
+        )
+
+    func_name = "tvm_builtin_ptx_tcgen05_encode_matrix_descriptor"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo, int sdo, int swizzle) {{
+  SmemDescriptor _desc;
+
+  _desc.version_ = 1;
+  _desc.lbo_mode_ = 0;
+
+  switch (swizzle) {{
+    case 0: _desc.layout_type_ = uint8_t(0); break; // No swizzle
+    case 1: _desc.layout_type_ = uint8_t(6); break; // 32B swizzle
+    case 2: _desc.layout_type_ = uint8_t(4); break; // 64B swizzle
+    case 3: _desc.layout_type_ = uint8_t(2); break; // 128B swizzle
+    case 4: _desc.layout_type_ = uint8_t(1); break; // 128B_base32B swizzle
+  }}
+
+  uint32_t start_address = __cvta_generic_to_shared(addr);
+  _desc.start_address_ = static_cast<uint16_t>(start_address >> 4);
+
+  constexpr uint8_t base_offset = 0;
+  _desc.base_offset_ = base_offset;
+
+  _desc.stride_byte_offset_  = static_cast<uint32_t>(sdo);
+  _desc.leading_byte_offset_ = static_cast<uint32_t>(ldo);
+
+  *desc = (uint64_t)_desc;
+}}"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, desc, addr, ldo, sdo, swizzle, source_code=source_code), [
+        "smem_descriptor"
+    ]
+
+
+from_string_func = tvm.ffi.get_global_func("tir.hw_ops.cuda.DTypeFromString")
+
+
+class PTXDataType(enum.Enum):
+    """
+    A Python equivalent of the provided C++ DataType enum class.
+
+    Inherits from IntEnum so that members behave both as enum members
+    and as integers, mirroring the C++ behavior.
+
+    see also src/target/source/ptx.cc
+    """
+
+    INT4 = 0
+    UINT4 = 1
+    INT8 = 2
+    UINT8 = 3
+    INT16 = 4
+    UINT16 = 5
+    INT32 = 6
+    UINT32 = 7
+    INT64 = 8
+    UINT64 = 9
+    FLOAT4_E2M1FN = 10
+    FLOAT6_E2M3FN = 11
+    FLOAT6_E3M2FN = 12
+    FLOAT8_E4M3FN = 13
+    FLOAT8_E4M3FNUZ = 14
+    FLOAT8_E5M2 = 15
+    FLOAT8_E8M0FNU = 16
+    FLOAT16 = 17
+    BFLOAT16 = 18
+    FLOAT16X2 = 19
+    FLOAT32 = 20
+    TENSOR_FLOAT32 = 21
+    FLOAT64 = 22
+    BIT1 = 23
+    BIT8 = 24
+    BIT16 = 25
+    BIT32 = 26
+    BIT64 = 27
+
+    @classmethod
+    def from_string(cls, s_type: str) -> "PTXDataType":
+        return PTXDataType(from_string_func(s_type))
+
+
+def _get_tcgen05_mma_kind(
+    d_dtype: str, a_dtype: str, b_dtype: str, sfa_dtype: str = "", sfb_dtype: str = ""
+) -> str:
+    kind = ""
+
+    dtype = PTXDataType.from_string(d_dtype)
+    atype = PTXDataType.from_string(a_dtype)
+    btype = PTXDataType.from_string(b_dtype)
+    kind = ""
+
+    if (
+        atype == PTXDataType.FLOAT16
+        and btype == PTXDataType.FLOAT16
+        and dtype == PTXDataType.FLOAT16
+    ):
+        kind = "f16"
+    elif (
+        (atype in {PTXDataType.BFLOAT16, PTXDataType.FLOAT16})
+        and (btype in {PTXDataType.BFLOAT16, PTXDataType.FLOAT16})
+        and dtype == PTXDataType.FLOAT32
+    ):
+        kind = "f16"
+    elif (
+        atype == PTXDataType.TENSOR_FLOAT32
+        and btype == PTXDataType.TENSOR_FLOAT32
+        and dtype == PTXDataType.FLOAT32
+    ):
+        kind = "tf32"
+    elif (
+        atype == PTXDataType.FLOAT4_E2M1FN
+        and btype == PTXDataType.FLOAT4_E2M1FN
+        and sfa_dtype
+        and sfb_dtype
+        and dtype == PTXDataType.FLOAT32
+    ):
+        sfa_dtype_enum = PTXDataType.from_string(sfa_dtype)
+        sfb_dtype_enum = PTXDataType.from_string(sfb_dtype)
+        if (
+            sfa_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
+            and sfb_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
+        ):
+            kind = "mxf4"
+        elif (sfa_dtype_enum in {PTXDataType.FLOAT8_E4M3FN, PTXDataType.FLOAT8_E4M3FNUZ}) and (
+            sfb_dtype_enum in {PTXDataType.FLOAT8_E4M3FN, PTXDataType.FLOAT8_E4M3FNUZ}
+        ):
+            kind = "mxf4nvf4"
+    elif (
+        atype
+        in {
+            PTXDataType.FLOAT8_E4M3FN,
+            PTXDataType.FLOAT8_E4M3FNUZ,
+            PTXDataType.FLOAT8_E5M2,
+            PTXDataType.FLOAT6_E2M3FN,
+            PTXDataType.FLOAT6_E3M2FN,
+            PTXDataType.FLOAT4_E2M1FN,
+        }
+    ) and (
+        btype
+        in {
+            PTXDataType.FLOAT8_E4M3FN,
+            PTXDataType.FLOAT8_E4M3FNUZ,
+            PTXDataType.FLOAT8_E5M2,
+            PTXDataType.FLOAT6_E2M3FN,
+            PTXDataType.FLOAT6_E3M2FN,
+            PTXDataType.FLOAT4_E2M1FN,
+        }
+    ):
+        if not sfa_dtype and not sfb_dtype:
+            if dtype in {PTXDataType.FLOAT32, PTXDataType.FLOAT16}:
+                kind = "f8f6f4"
+        elif sfa_dtype and sfb_dtype:
+            sfa_dtype_enum = PTXDataType.from_string(sfa_dtype)
+            sfb_dtype_enum = PTXDataType.from_string(sfb_dtype)
+            if (
+                sfa_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
+                and sfb_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
+                and dtype_enum == PTXDataType.FLOAT32
+            ):
+                kind = "mxf8f6f4"
+    elif (
+        (atype in {PTXDataType.INT8, PTXDataType.UINT8})
+        and (btype in {PTXDataType.INT8, PTXDataType.UINT8})
+        and dtype == PTXDataType.INT32
+    ):
+        kind = "i8"
+
+    if not kind:
+        raise ValueError(
+            f"Invalid multiplicand data types for Tcgen05 MMA, check failed for d: {d_dtype}, "
+            f"a: {a_dtype}, b: {b_dtype}, scale_a: {sfa_dtype}, scale_b: {sfb_dtype}"
+        )
+    return kind
+
+
+def _check_tcgen05_mma_matrix_shape(
+    kind: str, cta_group: int, m: int, n: int, k: int, is_sparse: bool
+) -> bool:
+    err = (
+        f"Invalid matrix shape for Tcgen05 MMA, check failed for kind: {kind}, "
+        f"is_sparse: {is_sparse}, cta_group: {cta_group}, M: {m}, N: {n}, K: {k}"
+    )
+
+    if kind in ["f16", "tf32", "f8f6f4"]:
+        if cta_group == 1:
+            if m == 64:
+                if not (8 <= n <= 256 and n % 8 == 0):
+                    raise ValueError(err)
+            elif m == 128:
+                if not (16 <= n <= 256 and n % 16 == 0):
+                    raise ValueError(err)
+            else:
+                raise ValueError(err)
+        elif cta_group == 2:
+            if not (m in [128, 256]):
+                raise ValueError(err)
+            if not (32 <= n <= 256 and n % 32 == 0):
+                raise ValueError(err)
+    elif kind == "i8":
+        if cta_group == 1:
+            if not (m in [64, 128]):
+                raise ValueError(err)
+            is_n_valid = (n == 8) or (n == 24) or (16 <= n <= 256 and n % 16 == 0)
+            if not is_n_valid:
+                raise ValueError(err)
+        elif cta_group == 2:
+            if not (m in [128, 256]):
+                raise ValueError(err)
+            if not (32 <= n <= 256 and n % 32 == 0):
+                raise ValueError(err)
+    elif kind in ["mxf8f6f4", "mxf4", "mxf4nvf4"]:
+        if cta_group == 1:
+            if not (m == 128):
+                raise ValueError(err)
+            if not (8 <= n <= 256 and n % 8 == 0):
+                raise ValueError(err)
+        elif cta_group == 2:
+            if is_sparse:
+                if not (m == 256):
+                    raise ValueError(err)
+            else:  # dense
+                if not (m in [128, 256]):
+                    raise ValueError(err)
+            if not (16 <= n <= 256 and n % 16 == 0):
+                raise ValueError(err)
+    else:
+        raise ValueError(err)
+
+    if kind == "f16":
+        if not (k == (32 if is_sparse else 16)):
+            raise ValueError(err)
+    elif kind == "tf32":
+        if not (k == (16 if is_sparse else 8)):
+            raise ValueError(err)
+    elif kind in ["f8f6f4", "i8", "mxf8f6f4"]:
+        if not (k == (64 if is_sparse else 32)):
+            raise ValueError(err)
+    elif kind in ["mxf4", "mxf4nvf4"]:
+        if not (k == (128 if is_sparse else 64)):
+            raise ValueError(err)
+    else:
+        raise ValueError(err)
+
+    return True
+
+
+@register_codegen("ptx_tcgen05_encode_instr_descriptor")
+def codegen_ptx_tcgen05_encode_instr_descriptor(
+    desc,
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    M,
+    N,
+    K,
+    trans_a,
+    trans_b,
+    n_cta_group,
+    neg_a,
+    neg_b,
+    sat_d,
+    is_sparse,
+):
+    a_dtype = str(a_dtype)[1:-1]
+    b_dtype = str(b_dtype)[1:-1]
+    d_dtype = str(d_dtype)[1:-1]
+    M = int(M)
+    N = int(N)
+    K = int(K)
+    n_cta_group = int(n_cta_group)
+    trans_a = bool(trans_a)
+    trans_b = bool(trans_b)
+    neg_a = bool(neg_a)
+    neg_b = bool(neg_b)
+    sat_d = bool(sat_d)
+    is_sparse = bool(is_sparse)
+
+    if n_cta_group not in [1, 2]:
+        raise ValueError(
+            f"The number of cta_group involved is incorrect, expected 1 or 2, got {n_cta_group}"
+        )
+
+    kind = _get_tcgen05_mma_kind(d_dtype, a_dtype, b_dtype)
+    if kind not in ["f16", "tf32", "f8f6f4", "i8"]:
+        raise ValueError(
+            f"Check failed for Data Type Kind. d_dtype: {d_dtype}, a_dtype: {a_dtype}, b_dtype: {b_dtype}"
+        )
+
+    if not _check_tcgen05_mma_matrix_shape(kind, n_cta_group, M, N, K, is_sparse):
+        raise ValueError(f"Invalid matrix shape ({M}, {N}, {K}) for kind '{kind}'")
+
+    format_map = {
+        PTXDataType.FLOAT16: 0,
+        PTXDataType.BFLOAT16: 1,
+        PTXDataType.TENSOR_FLOAT32: 2,
+        PTXDataType.FLOAT8_E4M3FN: 0,
+        PTXDataType.FLOAT8_E4M3FNUZ: 0,
+        PTXDataType.FLOAT8_E5M2: 1,
+        PTXDataType.FLOAT6_E2M3FN: 3,
+        PTXDataType.FLOAT6_E3M2FN: 4,
+        PTXDataType.FLOAT4_E2M1FN: 5,
+        PTXDataType.UINT8: 0,
+        PTXDataType.INT8: 1,
+        PTXDataType.FLOAT32: 1,
+        PTXDataType.INT32: 2,
+    }
+    dtype = PTXDataType.from_string(d_dtype)
+    atype = PTXDataType.from_string(a_dtype)
+    btype = PTXDataType.from_string(b_dtype)
+
+    d_format = format_map[dtype]
+    a_format = format_map[atype]
+    b_format = format_map[btype]
+
+    valid_dtypes_for_trans = {
+        PTXDataType.FLOAT8_E4M3FN,
+        PTXDataType.FLOAT8_E4M3FNUZ,
+        PTXDataType.FLOAT8_E5M2,
+        PTXDataType.INT8,
+        PTXDataType.UINT8,
+        PTXDataType.FLOAT16,
+        PTXDataType.BFLOAT16,
+        PTXDataType.TENSOR_FLOAT32,
+    }
+    if trans_a and atype not in valid_dtypes_for_trans:
+        raise ValueError(f"Invalid a_dtype for transpose: {a_dtype}")
+    if trans_b and btype not in valid_dtypes_for_trans:
+        raise ValueError(f"Invalid b_dtype for transpose: {b_dtype}")
+    if (neg_a or neg_b) and kind not in ["f16", "tf32", "f8f6f4"]:
+        raise ValueError(f"Invalid kind for negate: {kind}")
+    if sat_d and kind != "i8":
+        raise ValueError(f"Invalid kind for saturate: {kind}")
+
+    func_name = "ptx_tcgen05_encode_instr_descriptor"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int d_format,
+                                            int a_format, int b_format, bool trans_a, bool trans_b,
+                                            bool neg_a, bool neg_b, bool sat_d, bool is_sparse) {{
+  InstrDescriptor _desc;
+
+  _desc.a_format_ = uint8_t(a_format);
+  _desc.b_format_ = uint8_t(b_format);
+  _desc.c_format_ = uint8_t(d_format);
+
+  _desc.m_dim_ = (M >> 4);
+  _desc.n_dim_ = (N >> 3);
+
+  _desc.a_major_ = static_cast<uint8_t>(trans_a);
+  _desc.b_major_ = static_cast<uint8_t>(trans_b);
+
+  _desc.a_negate_ = static_cast<uint8_t>(neg_a);
+  _desc.b_negate_ = static_cast<uint8_t>(neg_b);
+  _desc.saturate_ = static_cast<uint8_t>(sat_d);
+
+  _desc.sparse_flag_ = is_sparse;
+  _desc.sparse_id2_  = 0;                          // should modify in sparse case
+
+  _desc.max_shift_ = uint8_t(0);                   // WS not used
+
+  *desc = (uint32_t)_desc;
+}}"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(
+        func_name,
+        desc,
+        M,
+        N,
+        d_format,
+        a_format,
+        b_format,
+        trans_a,
+        trans_b,
+        neg_a,
+        neg_b,
+        sat_d,
+        is_sparse,
+        source_code=source_code,
+    ), ["instr_descriptor"]
+
+
+@register_codegen("ptx_tcgen05_encode_instr_descriptor_block_scaled")
+def codegen_ptx_tcgen05_encode_instr_descriptor_block_scaled(
+    desc,
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    sfa_dtype,
+    sfb_dtype,
+    sfa_tmem_addr,
+    sfb_tmem_addr,
+    M,
+    N,
+    K,
+    trans_a,
+    trans_b,
+    n_cta_group,
+    neg_a,
+    neg_b,
+    is_sparse,
+):
+    a_dtype = str(a_dtype)[1:-1]
+    b_dtype = str(b_dtype)[1:-1]
+    d_dtype = str(d_dtype)[1:-1]
+    sfa_dtype = str(sfa_dtype)[1:-1]
+    sfb_dtype = str(sfb_dtype)[1:-1]
+    M = int(M)
+    N = int(N)
+    K = int(K)
+    n_cta_group = int(n_cta_group)
+    trans_a = bool(trans_a)
+    trans_b = bool(trans_b)
+    neg_a = bool(neg_a)
+    neg_b = bool(neg_b)
+    is_sparse = bool(is_sparse)
+
+    if n_cta_group not in [1, 2]:
+        raise ValueError(
+            f"The number of cta_group involved is incorrect, expected 1 or 2, got {n_cta_group}"
+        )
+
+    kind = _get_tcgen05_mma_kind(d_dtype, a_dtype, b_dtype, sfa_dtype, sfb_dtype)
+    valid_kinds = {"mxf8f6f4", "mxf4", "mxf4nvf4"}
+    if kind not in valid_kinds:
+        raise ValueError(
+            f"Check failed for Data Type Kind. Expected one of {valid_kinds}, but got '{kind}' "
+            f"for d:{d_dtype}, a:{a_dtype}, b:{b_dtype}, sfa:{sfa_dtype}, sfb:{sfb_dtype}"
+        )
+
+    _check_tcgen05_mma_matrix_shape(kind, n_cta_group, M, N, K, is_sparse)
+
+    # Phase 2: Map data types to integer format codes
+    format_map = {
+        PTXDataType.FLOAT8_E4M3FN: 0,
+        PTXDataType.FLOAT8_E4M3FNUZ: 0,
+        PTXDataType.FLOAT8_E5M2: 1,
+        PTXDataType.FLOAT6_E2M3FN: 3,
+        PTXDataType.FLOAT6_E3M2FN: 4,
+        PTXDataType.FLOAT4_E2M1FN: 5,
+    }
+    format_map_sf = {
+        PTXDataType.FLOAT8_E4M3FN: 0,
+        PTXDataType.FLOAT8_E4M3FNUZ: 0,
+        PTXDataType.FLOAT8_E8M0FNU: 1,
+    }
+
+    atype_enum = PTXDataType.from_string(a_dtype)
+    btype_enum = PTXDataType.from_string(b_dtype)
+    stype_enum = PTXDataType.from_string(sfa_dtype)
+
+    if kind == "mxf8f6f4":
+        a_format = format_map[atype_enum]
+        b_format = format_map[btype_enum]
+    else:  # mxf4 and mxf4nvf4
+        a_format = 1  # Corresponds to E5M2 in the map, a specific hardware encoding choice
+        b_format = 1
+
+    s_format = format_map_sf[stype_enum]
+
+    # Phase 3: Detailed conditional validation for transpose
+    valid_dtypes_for_trans = {
+        PTXDataType.FLOAT8_E4M3FN,
+        PTXDataType.FLOAT8_E4M3FNUZ,
+        PTXDataType.FLOAT8_E5M2,
+    }
+    if trans_a and atype_enum not in valid_dtypes_for_trans:
+        raise ValueError(f"Invalid a_dtype for transpose: {a_dtype}")
+    if trans_b and btype_enum not in valid_dtypes_for_trans:
+        raise ValueError(f"Invalid b_dtype for transpose: {b_dtype}")
+
+    func_name = "ptx_tcgen05_encode_instr_descriptor_block_scaled"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int a_format,
+                                            int b_format, int s_format, bool trans_a, bool trans_b,
+                                            bool neg_a, bool neg_b, bool is_sparse,
+                                            uint32_t sfa_tmem_addr, uint32_t sfb_tmem_addr) {{
+  InstrDescriptorBlockScaled _desc;
+
+  _desc.a_format_ = uint8_t(a_format);
+  _desc.b_format_ = uint8_t(b_format);
+  _desc.scale_format_ = uint8_t(s_format);
+
+  _desc.a_sf_id_ = (sfa_tmem_addr & 0xC0000000) >> 30;
+  _desc.b_sf_id_ = (sfb_tmem_addr & 0xC0000000) >> 30;
+
+  _desc.m_dim_ = (M >> 4);
+  _desc.n_dim_ = (N >> 3);
+
+  _desc.a_major_ = static_cast<uint8_t>(trans_a);
+  _desc.b_major_ = static_cast<uint8_t>(trans_b);
+
+  _desc.a_negate_ = static_cast<uint8_t>(neg_a);
+  _desc.b_negate_ = static_cast<uint8_t>(neg_b);
+
+  _desc.sparse_flag_ = is_sparse;
+  _desc.sparse_id2_  = 0;                          // should modify in sparse case
+
+  *desc = (uint32_t)_desc;
+}}
+"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(
+        func_name,
+        desc,
+        M,
+        N,
+        a_format,
+        b_format,
+        s_format,
+        trans_a,
+        trans_b,
+        neg_a,
+        neg_b,
+        is_sparse,
+        sfa_tmem_addr,
+        sfb_tmem_addr,
+        source_code=source_code,
+    ), ["instr_descriptor_block_scaled"]
+
+
+def _tcgen05_mma_common(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d,
+    scale_input_d,
+    *disable_output_lane,
+    sparse=False,
+    sp_tmem_addr=None,
+):
+    d_dtype = str(d_dtype)[1:-1]
+    a_dtype = str(a_dtype)[1:-1]
+    b_dtype = str(b_dtype)[1:-1]
+    use_a_tmem = bool(use_a_tmem)
+    cta_group = int(cta_group)
+    enable_input_d = bool(enable_input_d)
+    scale_input_d = int(scale_input_d)
+
+    if cta_group not in [1, 2]:
+        raise ValueError(f"The number of cta_group is incorrect, expected 1 or 2, got {cta_group}")
+    if not (0 <= scale_input_d <= 15):
+        raise ValueError(
+            f"scale_input_d is incorrect, expected a value within [0, 15], got {scale_input_d}"
+        )
+
+    expected_vec_size = 8 if cta_group == 2 else 4
+    if len(disable_output_lane) != expected_vec_size:
+        raise ValueError(
+            "The number of arguments for ptx_tcgen05_mma is incorrect, expected "
+            f"{11 + expected_vec_size} total args (meaning {expected_vec_size} lane mask args), "
+            f"but got {len(disable_output_lane)}."
+        )
+
+    kind = _get_tcgen05_mma_kind(d_dtype, a_dtype, b_dtype)
+    valid_kinds = {"f16", "tf32", "f8f6f4", "i8"}
+    if kind not in valid_kinds:
+        raise ValueError(
+            f"Check failed for Data Type Kind. Got '{kind}', expected one of {valid_kinds}"
+        )
+
+    if scale_input_d > 0 and kind not in {"f16", "tf32"}:
+        raise ValueError(f"scale_input_d is only valid for kind 'f16' or 'tf32', not '{kind}'")
+
+    if sparse:
+        p_operand_idx = 5
+        sparse_instr_suffix = ".sp"
+        i_sp_operand_str = "[%3], %4,"
+        sp_tmem_addr_str = "uint32_t sp_tmem_addr, "
+        mask_start_idx = 6
+    else:
+        p_operand_idx = 4
+        sparse_instr_suffix = ""
+        i_sp_operand_str = "%3,"
+        sp_tmem_addr_str = ""
+        mask_start_idx = 5
+
+    mask_signature = ", ".join([f"uint32_t mask{i}" for i in range(len(disable_output_lane))])
+
+    a_operand_str = "[%1]" if use_a_tmem else "%1"
+    a_operand_type = "uint32_t" if use_a_tmem else "uint64_t"
+    mask_placeholders = ", ".join(
+        [f"%{mask_start_idx + i}" for i in range(len(disable_output_lane))]
+    )
+
+    scale_placeholder = ""
+    if enable_input_d and scale_input_d > 0:
+        scale_operand_idx = mask_start_idx + len(disable_output_lane)
+        scale_placeholder = f", %{scale_operand_idx}"
+
+    # Build the list of input operands for the asm block
+    input_operands_list = [
+        '"r"(d_tmem_addr)',  # %0
+        f'"{("r" if use_a_tmem else "l")}"(a_operand)',  # %1
+        '"l"(b_desc)',  # %2
+    ]
+    if sparse:
+        input_operands_list.append('"r"(sp_tmem_addr)')  # %3 (sparse only)
+    input_operands_list.extend(
+        [
+            '"r"(i_desc)',  # %3 or %4
+            f'"r"({"1" if enable_input_d else "0"})',  # %4 or %5
+        ]
+    )
+    for i in range(len(disable_output_lane)):
+        input_operands_list.append(f'"r"(mask{i})')
+    if enable_input_d and scale_input_d > 0:
+        input_operands_list.append(f'"n"({scale_input_d})')
+
+    input_operands_list = ", ".join(input_operands_list)
+
+    func_name = (
+        f"ptx_tcgen05_mma_cta_{cta_group}_kind_{kind}"
+        + ("_sp" if sparse else "")
+        + ("TS" if use_a_tmem else "SS")
+        + ("_enable_input_d" if enable_input_d else "")
+        + (f"_{scale_input_d}" if scale_input_d > 0 else "")
+    )
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_type} a_operand, uint64_t b_desc, {sp_tmem_addr_str}uint32_t i_desc, {mask_signature}) {{
+    asm volatile(
+        "{{\n"
+        ".reg .pred p;\n"
+        "setp.ne.b32 p, %{p_operand_idx}, 0;\n"
+        "tcgen05.mma{sparse_instr_suffix}.cta_group::{cta_group}.kind::{kind} [%0], {a_operand_str}, %2, {i_sp_operand_str} "
+        "{{{mask_placeholders}}}, p{scale_placeholder};\n"
+        "}}\n"
+        :
+        :  {input_operands_list}
+    );
+}}
+"""
+    source_code = source_code.format(
+        func_name=func_name,
+        a_operand_type=a_operand_type,
+        sp_tmem_addr_str=sp_tmem_addr_str,
+        mask_signature=mask_signature,
+        p_operand_idx=p_operand_idx,
+        sparse_instr_suffix=sparse_instr_suffix,
+        cta_group=cta_group,
+        kind=kind,
+        a_operand_str=a_operand_str,
+        i_sp_operand_str=i_sp_operand_str,
+        mask_placeholders=mask_placeholders,
+        scale_placeholder=scale_placeholder,
+        input_operands_list=input_operands_list,
+    )
+
+    args = [func_name, d_tmem_addr, a_operand, b_desc]
+    if sparse:
+        args.append(sp_tmem_addr)
+    args.append(i_desc)
+    args.extend(disable_output_lane)
+
+    return cuda_func_call(*args, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_mma")
+def codegen_ptx_tcgen05_mma(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d,
+    scale_input_d,
+    *disable_output_lane,
+):
+    return _tcgen05_mma_common(
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        d_tmem_addr,
+        a_operand,
+        b_desc,
+        i_desc,
+        use_a_tmem,
+        cta_group,
+        enable_input_d,
+        scale_input_d,
+        *disable_output_lane,
+    )
+
+
+@register_codegen("ptx_tcgen05_mma_sp")
+def codegen_ptx_tcgen05_mma_sp(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    sp_tmem_addr,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d,
+    scale_input_d,
+    *disable_output_lane,
+):
+    return _tcgen05_mma_common(
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        d_tmem_addr,
+        a_operand,
+        b_desc,
+        sp_tmem_addr,
+        i_desc,
+        use_a_tmem,
+        cta_group,
+        enable_input_d,
+        scale_input_d,
+        *disable_output_lane,
+        sparse=True,
+        sp_tmem_addr=sp_tmem_addr,
+    )
+
+
+def _get_tcgen05_mma_scale_vec_size(kind: str, scale_dtype: str) -> int:
+    """
+    Determines the scale vector size for a tcgen05 MMA instruction.
+    This is a direct translation of the C++ GetTcgen05MMAScaleVecSize function.
+    """
+    scale_vec_size = 0
+    stype = PTXDataType.from_string(scale_dtype)
+
+    if kind == "mxf8f6f4" and stype == PTXDataType.FLOAT8_E8M0FNU:
+        scale_vec_size = 1
+    elif kind == "mxf4" and stype == PTXDataType.FLOAT8_E8M0FNU:
+        scale_vec_size = 2
+    elif kind == "mxf4nvf4" and stype == PTXDataType.FLOAT8_E8M0FNU:
+        scale_vec_size = 2
+    elif kind == "mxf4nvf4" and stype in {PTXDataType.FLOAT8_E4M3FN, PTXDataType.FLOAT8_E4M3FNUZ}:
+        scale_vec_size = 4
+
+    if scale_vec_size <= 0:
+        raise ValueError(
+            f"Invalid scale vector size for Tcgen05 MMA, check failed for kind::{kind}, "
+            f"scale_dtype: {scale_dtype}"
+        )
+    return scale_vec_size
+
+
+def _tcgen05_mma_block_scaled_common(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    sfa_dtype,
+    sfb_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    sfa_tmem_addr,
+    sfb_tmem_addr,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d,
+    sparse=False,
+    sp_tmem_addr=None,
+):
+    d_dtype = str(d_dtype)[1:-1]
+    a_dtype = str(a_dtype)[1:-1]
+    b_dtype = str(b_dtype)[1:-1]
+    sfa_dtype = str(sfa_dtype)[1:-1]
+    sfb_dtype = str(sfb_dtype)[1:-1]
+    use_a_tmem = bool(use_a_tmem)
+    cta_group = int(cta_group)
+    enable_input_d = bool(enable_input_d)
+
+    if cta_group not in [1, 2]:
+        raise ValueError(f"The number of cta_group is incorrect, expected 1 or 2, got {cta_group}")
+
+    kind = _get_tcgen05_mma_kind(d_dtype, a_dtype, b_dtype, sfa_dtype, sfb_dtype)
+    valid_kinds = {"mxf8f6f4", "mxf4", "mxf4nvf4"}
+    if kind not in valid_kinds:
+        raise ValueError(
+            f"Check failed for Data Type Kind. Expected one of {valid_kinds}, but got '{kind}' "
+            f"for d:{d_dtype}, a:{a_dtype}, b:{b_dtype}, sfa:{sfa_dtype}, sfb:{sfb_dtype}"
+        )
+
+    scale_vec_size = _get_tcgen05_mma_scale_vec_size(kind, sfa_dtype)
+
+    sparse_instr_suffix = ".sp" if sparse else ""
+    sparse_placeholder = "[%7], " if sparse else ""
+    a_constraint = '"r"' if use_a_tmem else '"l"'
+    a_operand_type = "uint32_t" if use_a_tmem else "uint64_t"
+    a_operand_placeholder = "[%1]" if use_a_tmem else "%1"
+    enable_input_d_str = "1" if enable_input_d else "0"
+    sp_tmem_addr_str = "uint32_t sp_tmem_addr, " if sparse else ""
+    sp_tmem_addr_operand = f', "r"({sp_tmem_addr})' if sparse else ""
+
+    func_name = (
+        f"ptx_tcgen05_mma_block_scaled_cta_{cta_group}_kind_{kind}_scale_vec_{scale_vec_size}"
+        + ("_sp" if sparse else "")
+        + ("TS" if use_a_tmem else "SS")
+        + ("_enable_input_d" if enable_input_d else "")
+    )
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_type} a_operand, uint64_t b_desc, {sp_tmem_addr_str}uint32_t i_desc, uint32_t sfa_tmem_addr, uint32_t sfb_tmem_addr) {{
+    asm volatile(
+        "{{    \n"
+        ".reg .pred p;\n"
+        "setp.ne.b32 p, %4, 0;\n"
+        "tcgen05.mma{sparse_instr_suffix}.cta_group::{cta_group}.kind::{kind}.block_scale.scale_vec::{scale_vec_size}X "
+        "[%0], {a_operand_placeholder}, %2, {sparse_placeholder}%3, [%5], [%6], p;\n"
+        "}}\n"
+        :
+        : "r"(d_tmem_addr_expr), {a_constraint}(a_operand_expr), "l"(b_desc), "r"(i_desc), "r"({enable_input_d_str}), "r"(sfa_tmem_addr), "r"(sfb_tmem_addr){sp_tmem_addr_operand}
+    );
+}}"""
+    source_code = source_code.format(
+        func_name=func_name,
+        a_operand_type=a_operand_type,
+        sp_tmem_addr_str=sp_tmem_addr_str,
+        sparse_instr_suffix=sparse_instr_suffix,
+        cta_group=cta_group,
+        kind=kind,
+        scale_vec_size=scale_vec_size,
+        a_operand_placeholder=a_operand_placeholder,
+        sparse_placeholder=sparse_placeholder,
+        a_constraint=a_constraint,
+        enable_input_d_str=enable_input_d_str,
+        sp_tmem_addr_operand=sp_tmem_addr_operand,
+    )
+    args = [func_name, d_tmem_addr, a_operand, b_desc]
+    if sparse:
+        args.append(sp_tmem_addr)
+    args.append(i_desc)
+    args.append(sfa_tmem_addr)
+    args.append(sfb_tmem_addr)
+
+    return cuda_func_call(*args, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_mma_block_scaled")
+def codegen_ptx_tcgen05_mma_block_scaled(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    sfa_dtype,
+    sfb_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    sfa_tmem_addr,
+    sfb_tmem_addr,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d=True,
+):
+    return _tcgen05_mma_block_scaled_common(
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        sfa_dtype,
+        sfb_dtype,
+        d_tmem_addr,
+        a_operand,
+        b_desc,
+        sfa_tmem_addr,
+        sfb_tmem_addr,
+        i_desc,
+        use_a_tmem,
+        cta_group,
+        enable_input_d,
+    )
+
+
+@register_codegen("ptx_tcgen05_mma_sp_block_scale")
+def codegen_ptx_tcgen05_mma_sp_block_scale(
+    d_dtype,
+    a_dtype,
+    b_dtype,
+    sfa_dtype,
+    sfb_dtype,
+    d_tmem_addr,
+    a_operand,
+    b_desc,
+    sfa_tmem_addr,
+    sfb_tmem_addr,
+    sp_tmem_addr,
+    i_desc,
+    use_a_tmem,
+    cta_group,
+    enable_input_d=True,
+):
+    return _tcgen05_mma_block_scaled_common(
+        d_dtype,
+        a_dtype,
+        b_dtype,
+        sfa_dtype,
+        sfb_dtype,
+        d_tmem_addr,
+        a_operand,
+        b_desc,
+        sfa_tmem_addr,
+        sfb_tmem_addr,
+        i_desc,
+        use_a_tmem,
+        cta_group,
+        enable_input_d,
+        sparse=True,
+        sp_tmem_addr=sp_tmem_addr,
+    )
+
+
+@register_codegen("ptx_tcgen05_commit")
+def codegen_ptx_tcgen05_commit(bar, cta_group, cta_mask):
+    cta_group = int(cta_group)
+    cta_mask = int(cta_mask)
+
+    if cta_group not in [1, 2]:
+        raise ValueError(f"The number of cta_group is incorrect, expected 1 or 2, got {cta_group}")
+
+    is_multicast = cta_mask != 0
+
+    if is_multicast:
+        multicast_str = ".multicast::cluster"
+        mask_operand_str = ", %1"
+        cta_mask_arg_str = ', "h"(cta_mask)'
+    else:
+        multicast_str = ""
+        mask_operand_str = ""
+        cta_mask_arg_str = ""
+
+    func_name = "ptx_tcgen05_commit_cta_group_" + str(cta_group)
+    if is_multicast:
+        func_name += "_multicast"
+
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(void* bar, int cta_mask_) {{
+  unsigned int bar_addr = __cvta_generic_to_shared(bar);
+  uint16_t cta_mask = static_cast<uint16_t>(cta_mask_);
+  __asm__ __volatile__(
+    "tcgen05.commit.cta_group::{cta_group}.mbarrier::arrive::one.shared::cluster{multicast_str}.b64 [%0]{mask_operand_str};"
+    :
+    :"r"(bar_addr){cta_mask_arg_str}
+  );
+}}
+"""
+    source_code = source_code.format(
+        func_name=func_name,
+        cta_group=cta_group,
+        multicast_str=multicast_str,
+        mask_operand_str=mask_operand_str,
+        cta_mask_arg_str=cta_mask_arg_str,
+    )
+    return cuda_func_call(func_name, bar, cta_mask, source_code=source_code)
+
+
+@register_codegen("ptx_tcgen05_cp")
+def codegen_ptx_tcgen05_cp(
+    dst_addr,
+    row_offset,
+    col_offset,
+    src_desc,
+    shape,
+    dst_dtype,
+    src_dtype,
+    cta_group=1,
+    multicast="",
+):
+    shape = str(shape)[1:-1]
+    dst_dtype = str(dst_dtype)[1:-1]
+    src_dtype = str(src_dtype)[1:-1]
+    cta_group = int(cta_group)
+    multicast = str(multicast)[1:-1]
+
+    if cta_group not in [1, 2]:
+        raise ValueError(f"The number of cta_group is incorrect, expected 1 or 2, got {cta_group}")
+
+    valid_shapes = {"128x256b", "4x256b", "128x128b", "64x128b", "32x128b"}
+    if shape not in valid_shapes:
+        raise ValueError(f"Invalid shape for tcgen05 copy, check failed for shape: {shape}")
+
+    err_msg = f"Invalid multicast for tcgen05 copy, check failed for shape: {shape}, multicast: {multicast}"
+    if shape == "64x128b":
+        if multicast not in {"warpx2::02_13", "warpx2::01_23"}:
+            raise ValueError(err_msg)
+    elif shape == "32x128b":
+        if multicast != "warpx4":
+            raise ValueError(err_msg)
+    else:
+        if multicast != "":
+            raise ValueError(err_msg)
+
+    # 2. Decompression Format Logic
+    # ===============================
+    dst_src_fmt = ""
+    dtype_enum = PTXDataType.from_string(dst_dtype)
+    stype_enum = PTXDataType.from_string(src_dtype)
+
+    fp8_types = {
+        PTXDataType.FLOAT8_E4M3FN,
+        PTXDataType.FLOAT8_E4M3FNUZ,
+        PTXDataType.FLOAT8_E5M2,
+        PTXDataType.FLOAT8_E8M0FNU,
+    }
+    fp6_types = {PTXDataType.FLOAT6_E2M3FN, PTXDataType.FLOAT6_E3M2FN}
+
+    if dtype_enum in fp8_types:
+        if stype_enum == PTXDataType.FLOAT4_E2M1FN:
+            dst_src_fmt = ".b8x16.b4x16_p64"
+        elif stype_enum in fp6_types:
+            dst_src_fmt = ".b8x16.b6x16_p32"
+
+    multicast_str = f".{multicast}" if multicast else ""
+
+    func_name = f"ptx_tcgen05_cp_cta_group_{cta_group}_shape_{shape}_multicast_{multicast}"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint32_t dst_addr, int row_offset, int col_offset, uint64_t src_desc) {{
+    asm volatile(
+        "tcgen05.cp.cta_group::{cta_group}.{shape}{multicast_str}{dst_src_fmt} [%0], %1;"
+        :
+        : "r"(get_tmem_addr(dst_addr, row_offset, col_offset)), "l"(src_desc)
+    );
+}}"""
+    source_code = source_code.format(
+        func_name=func_name,
+        cta_group=cta_group,
+        shape=shape,
+        multicast_str=multicast_str,
+        dst_src_fmt=dst_src_fmt,
+    )
+    return cuda_func_call(
+        func_name,
+        dst_addr,
+        row_offset,
+        col_offset,
+        src_desc,
+        source_code=source_code,
+    ), ["get_tmem_addr"]
+
+
+@register_codegen("ptx_tcgen05_shift")
+def codegen_ptx_tcgen05_shift(taddr, cta_group):
+    cta_group = int(cta_group)
+
+    if cta_group not in [1, 2]:
+        raise ValueError(f"The number of cta_group is incorrect, expected 1 or 2, got {cta_group}")
+
+    func_name = f"ptx_tcgen05_shift_cta_group_{cta_group}"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(uint32_t taddr) {{
+  __asm__ __volatile__(
+    "tcgen05.shift.cta_group::{cta_group}.down %0;"
+    :: "r"(taddr)
+  );
+}}"""
+    source_code = source_code.format(func_name=func_name, cta_group=cta_group)
+    return cuda_func_call(func_name, taddr, source_code=source_code)
+
+
 @register_codegen("timer_init_cuda")
 def codegen_timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
+
     func_name = "tvm_builtin_timer_init_cuda"
     source_code = R"""
 __forceinline__ __device__ void {func_name}(void* profiler_buffer, void* profiler_tag, void* profiler_write_offset) {{
@@ -79,15 +2206,6 @@ def codegen_timer_start_cuda(
 ):
     func_name = "tvm_builtin_timer_start_cuda"
     source_code = R"""
-#ifndef TVM_BUILTIN_GET_TIMESTAMP_ASSEMBLY
-#define TVM_BUILTIN_GET_TIMESTAMP_ASSEMBLY
-__forceinline__ __device__ uint32_t tvm_builtin_get_timestamp() {
-  volatile uint32_t ret;
-  asm volatile("mov.u32 %0, %globaltimer_lo;" : "=r"(ret));
-  return ret;
-}
-#endif // TVM_BUILTIN_GET_TIMESTAMP_ASSEMBLY
-
 __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffer, void* profiler_tag, void* profiler_write_offset, int profiler_write_stride) {{
     // timer start
     if (threadIdx.x % 128 == 0) {
@@ -106,7 +2224,7 @@ __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffe
         profiler_write_offset,
         profiler_write_stride,
         source_code=source_code,
-    )
+    ), ["get_time_stamp"]
 
 
 @register_codegen("timer_end_cuda")
@@ -115,15 +2233,6 @@ def codegen_timer_end_cuda(
 ):
     func_name = "tvm_builtin_timer_end_cuda"
     source_code = R"""
-#ifndef TVM_BUILTIN_GET_TIMESTAMP_ASSEMBLY
-#define TVM_BUILTIN_GET_TIMESTAMP_ASSEMBLY
-__forceinline__ __device__ uint32_t tvm_builtin_get_timestamp() {
-  volatile uint32_t ret;
-  asm volatile("mov.u32 %0, %globaltimer_lo;" : "=r"(ret));
-  return ret;
-}
-#endif // TVM_BUILTIN_GET_TIMESTAMP_ASSEMBLY
-
 __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffer, void* profiler_tag, void* profiler_write_offset, int profiler_write_stride) {{
     // timer end
     __threadfence_block();
@@ -142,7 +2251,7 @@ __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffe
         profiler_write_offset,
         profiler_write_stride,
         source_code=source_code,
-    )
+    ), ["get_time_stamp"]
 
 
 @register_codegen("cuda_atomic_add")
@@ -211,3 +2320,18 @@ __forceinline__ __device__ uint64_t {func_name}(void* addr, uint32_t rank) {{
 """
     source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, ptr, rank, source_code=source_code, return_type="uint64")
+
+
+@register_codegen("cuda_atomic_cas")
+def codegen_cuda_atomic_cas(ptr, old_val, new_val):
+    func_name = "tvm_builtin_cuda_atomic_cas"
+    source_code = f"""
+template <typename T>
+__forceinline__ __device__ T {func_name}(T* address, T compare, T val) {{
+    return atomicCAS(address, compare, val);
+}}
+"""
+    print(old_val.dtype)
+    return cuda_func_call(
+        func_name, ptr, old_val, new_val, source_code=source_code, return_type=old_val.dtype
+    )

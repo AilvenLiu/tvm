@@ -195,321 +195,15 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
 }
 
 std::string CodeGenCUDA::Finish() {
-  if (enable_cuda_barrier_ || enable_cooperative_groups_) {
-    decl_stream << "#include <cuda/barrier>\n";
-    decl_stream << "#include <cooperative_groups.h>\n";
-  }
+  // Generate header
+  auto header_generator = ffi::Function::GetGlobal("tir.hw_ops.cuda.header_generator");
+  TVM_FFI_ICHECK(header_generator.has_value()) << "tir.hw_ops.cuda.header_generator is not defined";
+  Array<String> tags;
+  for (const auto& tag : codegen_tags_) tags.push_back(String(tag));
+  std::string header = header_generator.value()(tags).cast<String>().operator std::string();
+  decl_stream << header;
 
-  decl_stream << "#include <cuda.h>\n";
-
-  if (enable_fp16_) {
-    decl_stream << "#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)\n";
-    decl_stream << "#include <cuda_fp16.h>\n";
-    decl_stream << "__device__ half max"
-                << "(half a, half b)\n"
-                << "{\n  return __hgt(__half(a), __half(b)) ? a : b;\n}\n";
-    decl_stream << "__device__ half min(half a, half b)\n"
-                << "{\n  return __hlt(__half(a), __half(b)) ? a : b;\n}\n";
-    decl_stream << "#else\n";
-    decl_stream << _cuda_half_t_def;
-    decl_stream << "#endif\n\n";
-
-    decl_stream << _cuda_half_util;
-  }
-
-  if (enable_bf16_) {
-    decl_stream << "#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)\n";
-    decl_stream << "#include <cuda_bf16.h>\n";
-    decl_stream << "__device__ nv_bfloat16 max"
-                << "(nv_bfloat16 a, nv_bfloat16 b)\n"
-                << "{\n  return __hgt(a, b) ? a : b;\n}\n";
-    decl_stream << "__device__ nv_bfloat16 min(nv_bfloat16 a, nv_bfloat16 b)\n"
-                << "{\n  return __hlt(a, b) ? a : b;\n}\n";
-    decl_stream << "#endif\n\n";
-    decl_stream << _cuda_bfloat16_util;
-  }
-
-  if (enable_fp8_) {
-    decl_stream << "#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 890)\n";
-    decl_stream << "#include <cuda_fp8.h>\n";
-    decl_stream << "using fp8_e4_t = __nv_fp8_e4m3;\n";
-    decl_stream << "using fp8_e4x2_t = __nv_fp8x2_e4m3;\n";
-    decl_stream << "using fp8_e4x4_t = __nv_fp8x4_e4m3;\n";
-    decl_stream << "struct fp8_e4x8_t {\n fp8_e4_t data[8]; \n};\n";
-    decl_stream << "struct fp8_e4x16_t {\n fp8_e4_t data[16]; \n};\n";
-    decl_stream << "using fp8_e5_t = __nv_fp8_e5m2;\n";
-    decl_stream << "using fp8_e5x2_t = __nv_fp8x2_e5m2;\n";
-    decl_stream << "using fp8_e5x4_t = __nv_fp8x4_e5m2;\n";
-    decl_stream << "struct fp8_e5x8_t {\n fp8_e5_t data[8]; \n};\n";
-    decl_stream << "struct fp8_e5x16_t {\n fp8_e5_t data[16]; \n};\n";
-    decl_stream << "using fp8_e8_t = __nv_fp8_e8m0;\n";
-    decl_stream << "using fp8_e8x2_t = __nv_fp8x2_e8m0;\n";
-    decl_stream << "using fp8_e8x4_t = __nv_fp8x4_e8m0;\n";
-    decl_stream << "struct fp8_e8x8_t {\n fp8_e8_t data[8]; \n};\n";
-    decl_stream << "struct fp8_e8x16_t {\n fp8_e8_t data[16]; \n};\n";
-    decl_stream << "#endif\n\n";
-  }
-
-  if (enable_fp6_) {
-    decl_stream << "#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 1000)\n";
-    decl_stream << "#include <cuda_fp6.h>\n";
-    decl_stream << "using fp6_e2_t = __nv_fp6_e2m3;\n";
-    decl_stream << "using fp6_e2x2_t = __nv_fp6x2_e2m3;\n";
-    decl_stream << "using fp6_e2x4_t = __nv_fp6x4_e2m3;\n";
-    decl_stream << "struct fp6_e2x8_t {\n fp6_e2_t data[8]; \n};\n";
-    decl_stream << "struct fp6_e2x16_t {\n fp6_e2_t data[16]; \n};\n";
-    decl_stream << "using fp6_e3_t = __nv_fp6_e3m2;\n";
-    decl_stream << "using fp6_e3x2_t = __nv_fp6x2_e3m2;\n";
-    decl_stream << "using fp6_e3x4_t = __nv_fp6x4_e3m2;\n";
-    decl_stream << "struct fp6_e3x8_t {\n fp6_e3_t data[8]; \n};\n";
-    decl_stream << "struct fp6_e3x16_t {\n fp6_e3_t data[16]; \n};\n";
-    decl_stream << "#endif\n\n";
-  }
-
-  if (enable_fp4_) {
-    decl_stream << "#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)\n";
-    decl_stream << "#include <cuda_fp4.h>\n";
-    decl_stream << "using fp4_e2_t = __nv_fp4_e2m1;\n";
-    decl_stream << "using fp4_e2x2_t = __nv_fp4x2_e2m1;\n";
-    decl_stream << "using fp4_e2x4_t = __nv_fp4x4_e2m1;\n";
-    decl_stream << "struct fp4_e2x8_t {\n fp4_e2_t data[8]; \n};\n";
-    decl_stream << "struct fp4_e2x16_t {\n fp4_e2_t data[16]; \n};\n";
-    decl_stream << "#endif\n\n";
-  }
-  declare_vector_type_extensions(decl_stream, enable_fp16_, enable_bf16_, enable_fp8_, enable_fp4_);
-
-  if (enable_warp_shuffle_) {
-    decl_stream << _cuda_warp_intrinsic_util;
-  }
-
-  if (enable_int8_) {
-    decl_stream << "#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 610)\n";
-    decl_stream << "#include <sm_61_intrinsics.h>\n";
-    decl_stream << _cuda_int8_t_def;
-    decl_stream << "#endif\n";
-  }
-
-  if (need_math_constants_h_) {
-    decl_stream << "#include <math_constants.h>\n";
-  }
-
-  if (need_mma_h_) {
-    decl_stream << "#include <mma.h>\n";
-  }
-
-  if (need_cast_smem_ptr_to_int_) {
-    decl_stream << "__forceinline__ __device__ unsigned int\n";
-    decl_stream << "cast_smem_ptr_to_int(const void* const smem_ptr)\n";
-    decl_stream << "{\n";
-    decl_stream << "  unsigned int smem_int;\n";
-    decl_stream << "  asm volatile (\"{ .reg .u64 smem_int; cvta.to.shared.u64 smem_int, %1; "
-                   "cvt.u32.u64 %0, smem_int; }\"\n";
-    decl_stream << "    : \"=r\"(smem_int) : \"l\"(smem_ptr));\n";
-    decl_stream << "  return smem_int;\n";
-    decl_stream << "}\n";
-  }
-
-  decl_stream << "#include <cuda.h>";
-  decl_stream << "\n#if (((__CUDACC_VER_MAJOR__ == 11) && (__CUDACC_VER_MINOR__ >= 4)) || \\\n";
-  decl_stream << "     (__CUDACC_VER_MAJOR__ > 11))\n";
-  decl_stream << "#define TVM_ENABLE_L2_PREFETCH 1\n";
-  decl_stream << "#else\n";
-  decl_stream << "#define TVM_ENABLE_L2_PREFETCH 0\n";
-  decl_stream << "#endif\n";
-
-  // Emit type aliases, guarding int64_t/uint64_t for compatibility
-  decl_stream << "\n#ifdef __CUDACC_RTC__\n";
-  decl_stream << "using int64_t = long long;\n";
-  decl_stream << "using uint64_t = unsigned long long;\n";
-  decl_stream << "#else\n";
-  decl_stream << "#include <cstdint>\n";
-  decl_stream << "#endif\n";
-  decl_stream << "using uint = unsigned int;\n";
-  decl_stream << "using uchar = unsigned char;\n";
-  decl_stream << "using ushort = unsigned short;\n\n";
-
-  if (need_tmem_offset_) {
-    decl_stream << R"(
-__forceinline__ __device__ uint32_t get_tmem_addr(uint32_t idx, int row_offset, int col_offset) {
-  int col_idx = idx & 0xFFFF;
-  int row_idx = (idx >> 16) & 0xFFFF;
-  col_idx += col_offset;
-  row_idx += row_offset;
-  col_idx = col_idx & 0xFFFF;
-  row_idx = row_idx & 0xFFFF;
-
-  uint32_t new_idx = (row_idx << 16) | col_idx;
-  return new_idx;
-}
-)";
-  }
-
-  if (need_gmma_descriptor_) {
-    decl_stream << R"(
-#ifndef HOST_DEVICE
-#define HOST_DEVICE __forceinline__ __host__ __device__
-#endif
-union GmmaDescriptor
-{
-  HOST_DEVICE constexpr
-  GmmaDescriptor() noexcept : desc_(0) {}
-  HOST_DEVICE constexpr
-  GmmaDescriptor(uint64_t desc) noexcept : desc_(desc) {}
-  HOST_DEVICE constexpr
-  GmmaDescriptor(GmmaDescriptor const& t) noexcept : desc_(t.desc_) {}
-  HOST_DEVICE constexpr
-  GmmaDescriptor(GmmaDescriptor && t) noexcept : desc_(t.desc_) {}
-
-  HOST_DEVICE constexpr
-  GmmaDescriptor& operator=(GmmaDescriptor const& t) noexcept {
-    desc_ = t.desc_;
-    return *this;
-  }
-
-  HOST_DEVICE constexpr
-  GmmaDescriptor& operator=(GmmaDescriptor && t) noexcept {
-    desc_ = t.desc_;
-    return *this;
-  }
-
-  uint64_t desc_;
-  uint32_t reg32_[2];
-  uint16_t reg16_[4];
-
-  // Bitfield implementation avoids the need for shifts in assignment
-  struct {
-    // start_address, bit [0,14), 4LSB not included
-    uint16_t start_address_ : 14, : 2;        // 14 bits [0,14), 2 bits unused
-    // leading dimension byte offset, bit [16,30), 4LSB not included
-    // For N: This is the stride from the first col to the second col of the 8x2 brick in INTERLEAVED
-    //   Unused for all SWIZZLE_* layouts (and assumed to be 1)
-    // For T: This is the stride from the first 8 rows to the next 8 rows.
-    uint16_t leading_byte_offset_ : 14, : 2;  // 14 bits [0,14), 2 bits unused
-    // stride dimension byte offset, bit [32,46), 4LSB not included
-    // For N: This is the stride from the first 8 rows to the next 8 rows.
-    // For T: This is the stride fro mthe first 8 cols to the next 8 cols.
-    uint16_t stride_byte_offset_ : 14, : 2;   // 14 bits [0,14), 2 bits unused
-    // base_offset, bit [49,52)
-    // Valid only for SWIZZLE_128B and SWIZZLE_64B
-    uint8_t : 1, base_offset_ : 3, : 4;       // 1 bit unused, 3 bits [1,4), 4 bits unused
-    // layout type, bit [62,64)
-    // SWIZZLE_NONE = 0, SWIZZLE_32B = 3, SWIZZLE_64B = 2, SWIZZLE_128B = 1
-    uint8_t : 6, layout_type_ : 2;            // 6 bits unused, 2 bits [6,8)
-  } bitfield;
-
-  // Decay to a uint64_t
-  HOST_DEVICE constexpr
-  operator uint64_t() const noexcept { return desc_; }
-};
-)";
-  }
-
-  if (need_smem_descriptor_) {
-    decl_stream << R"(
-#ifndef HOST_DEVICE
-#define HOST_DEVICE __forceinline__ __host__ __device__
-#endif
-union SmemDescriptor
-{
-  uint64_t desc_ = 0;
-  // Bitfield implementation avoids the need for shifts in assignment
-  struct {
-    // start_address, bit [0,14), 4LSB not included
-    uint16_t start_address_ : 14, : 2;                     // 14 bits [0,14), 2 bits unused
-    // leading dimension byte offset, bit [16,30), 4LSB not included
-    uint16_t leading_byte_offset_ : 14, : 2;               // 14 bits [0,14), 2 bits unused
-    // stride dimension byte offset, bit [32,46), 4LSB not included
-    uint16_t stride_byte_offset_ : 14, version_ : 2;       // 14 bits [0,14), 2 bits [14,16)
-    // base_offset, bit [49,52). leading_byte_offset_mode, bit [52,53).
-    uint8_t : 1, base_offset_ : 3, lbo_mode_ : 1, : 3;     // 1 bit unused, 3 bits [1,4), 1 bit [4,5), 3 bits unused
-    // layout type, bit [61,64), SWIZZLE_NONE matrix descriptor = 0, SWIZZLE_128B matrix descriptor = 2, SWIZZLE_64B descriptor = 4, SWIZZLE_32B descriptor = 6, SWIZZLE_128B_BASE32B = 1, N/A = 3, N/A = 5, N/A = 7
-    uint8_t : 5, layout_type_ : 3;                         // 6 bits unused, 3 bits [5,8)
-  };
-  // Seperate the field, as we may only update one part of desc
-  struct {
-    uint32_t lo;
-    uint32_t hi;
-  };
-
-  // Decay to a uint64_t
-  HOST_DEVICE constexpr
-  operator uint64_t() const noexcept { return desc_; }
-};
-)";
-  }
-
-  if (need_instr_descriptor_) {
-    decl_stream << R"(
-#ifndef HOST_DEVICE
-#define HOST_DEVICE __forceinline__ __host__ __device__
-#endif
-union InstrDescriptor
-{
-  uint32_t desc_;
-
-  struct {
-    // Bitfield implementation avoids the need for shifts in assignment
-    uint16_t sparse_id2_    : 2,  // bit [ 0, 2) : Sparse meta data id2
-             sparse_flag_   : 1,  // bit [ 2, 3) : 0 = dense. 1 = sparse. 1 value valid only for F32F16/S8/MXF8F6F4
-             saturate_      : 1,  // bit [ 3, 4) : 0 = no saturate. 1 = saturate. 1 value valid only for S8
-             c_format_      : 2,  // bit [ 4, 6) : 0 = F16. 1 = F32, 2 = S32
-                            : 1,  //
-             a_format_      : 3,  // bit [ 7,10) : MXF8F6F4Format:0 = E4M3, 1 = E5M2, 3 = E2M3, 4 = E3M2, 5 = E2M1. F32F16Format: 0 = F16, 1 = BF16, 2 = TF32. S8: 0 unsigned 8 bit, 1 signed 8 bit. Boolean MMA: 0 Boolean
-             b_format_      : 3,  // bit [10,13) : MXF8F6F4Format:0 = E4M3, 1 = E5M2, 3 = E2M3, 4 = E3M2, 5 = E2M1. F32F16Format: 0 = F16, 1 = BF16, 2 = TF32. S8: 0 unsigned 8 bit, 1 signed 8 bit. Boolean MMA: 0 Boolean
-             a_negate_      : 1,  // bit [13,14) : 0 = no negate. 1 = negate. 1 value valid only for F32F16Format and MXF8F6F4Format
-             b_negate_      : 1,  // bit [14,15) : 0 = no negate. 1 = negate. 1 value valid only for F32F16Format and MXF8F6F4Format
-             a_major_       : 1;  // bit [15,16) : 0 = K-major. 1 = MN-major. Major value of 1 is only valid for E4M3, E5M2, INT8 (signed and unsigned), F16, BF16 and TF32 source formats
-    uint16_t b_major_       : 1,  // bit [16,17) : 0 = K-major. 1 = MN-major. Major value of 1 is only valid for E4M3, E5M2, INT8 (signed and unsigned), F16, BF16 and TF32 source formats
-             n_dim_         : 6,  // bit [17,23) : 3 LSBs not included. Valid values range from 1 (N=8) to 32 (N=256).  All values are not valid for all instruction formats
-                            : 1,  //
-             m_dim_         : 5,  // bit [24,29) : 4 LSBs not included. Valid values are: 4 (M=64), 8 (M=128), 16 (M=256)
-                            : 1,  //
-             max_shift_     : 2;  // bit [30,32) : Maximum shift for WS instruction. Encoded as follows: 0 = no shift, 1 = maximum shift of 8, 2 = maximum shift of 16, 3 = maximum shift of 32.
-  };
-
-  // Decay to a uint32_t
-  HOST_DEVICE constexpr explicit
-  operator uint32_t() const noexcept { return desc_; }
-};
-)";
-  }
-
-  if (need_instr_descriptor_block_scaled_) {
-    decl_stream << R"(
-#ifndef HOST_DEVICE
-#define HOST_DEVICE __forceinline__ __host__ __device__
-#endif
-union InstrDescriptorBlockScaled
-{
-  uint32_t desc_;
-
-  struct {
-    // Bitfield implementation avoids the need for shifts in assignment
-    uint16_t sparse_id2_    : 2,  // bit [ 0, 2) : Sparse meta data id2
-             sparse_flag_   : 1,  // bit [ 2, 3) : 0 = dense. 1 = sparse. 1 value valid only for F32F16/S8/MXF8F6F4
-                            : 1,  //
-             b_sf_id_       : 2,  // bit [ 4, 6) : Matrix B Scale Factor ID
-                            : 1,  //
-             a_format_      : 3,  // bit [ 7, 9) : MXF8F6F4Format:0 = E4M3, 1 = E5M2, 3 = E2M3, 4 = E3M2, 5 = E2M1. F32F16Format: 0 = F16, 1 = BF16, 2 = TF32. S8: 0 unsigned 8 bit, 1 signed 8 bit. BMMA: 0 Boolean
-             b_format_      : 3,  // bit [10,12) : MXF8F6F4Format:0 = E4M3, 1 = E5M2, 3 = E2M3, 4 = E3M2, 5 = E2M1. F32F16Format: 0 = F16, 1 = BF16, 2 = TF32. S8: 0 unsigned 8 bit, 1 signed 8 bit. BMMA: 0 Boolean
-             a_negate_      : 1,  // bit [13,14) : 0 = no negate. 1 = negate. 1 value valid only for F32F16Format and MXF8F6F4Format
-             b_negate_      : 1,  // bit [14,15) : 0 = no negate. 1 = negate. 1 value valid only for F32F16Format and MXF8F6F4Format
-             a_major_       : 1;  // bit [15,16) : 0 = K-major. 1 = MN-major. Major value of 1 is only valid for E4M3, E5M2, INT8 (signed and unsigned), F16, BF16 and TF32 source formats
-    uint16_t b_major_       : 1,  // bit [16,17) : 0 = K-major. 1 = MN-major. Major value of 1 is only valid for E4M3, E5M2, INT8 (signed and unsigned), F16, BF16 and TF32 source formats
-             n_dim_         : 6,  // bit [17,23) : 3 LSBs not included. Valid values range from 1 (N=8) to 32 (N=256).  All values are not valid for all instruction formats
-             scale_format_  : 1,  // bit [23,24) : 0=E4M3, 1=E8M0
-             m_dim_         : 5,  // bit [24,29) : 4 LSBs not included. Valid values are: 4 (M=64), 8 (M=128), 16 (M=256)
-             a_sf_id_       : 2,  // bit [29,31) : Matrix A Scale Factor ID
-                            : 1;  //
-  };
-
-  // Decay to a uint32_t
-  HOST_DEVICE constexpr
-  operator uint32_t() const noexcept { return desc_; }
-};
-)";
-  }
-
+  // Generate util functions
   for (const auto& [name, code] : util_funcs_) {
     decl_stream << code;
   }
@@ -529,7 +223,7 @@ void CodeGenCUDA::BindThreadIndex(const IterVar& iv) {
   TVM_FFI_ICHECK(!var_idmap_.count(iv->var.get()));
   const auto& scope = runtime::ThreadScope::Create(iv->thread_tag);
   if (scope.IsClusterCtaIdx()) {
-    enable_cooperative_groups_ = true;
+    codegen_tags_.insert("cooperative_groups");
     std::string reg_name = std::string("cluster_ctaid.") + static_cast<char>('x' + scope.dim_index);
     var_idmap_[iv->var.get()] = PrintPtxFetchRegisterAssembly(this, 32, reg_name);
   } else {
@@ -554,7 +248,7 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
   if (t.is_float()) {
     switch (t.bits()) {
       case 16:
-        enable_fp16_ = true;
+        codegen_tags_.insert("fp16");
         if (t.is_scalar()) {
           os << "half";
         } else if (lanes <= 8) {
@@ -599,7 +293,7 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
       return;
     }
   } else if (t.is_bfloat16()) {
-    enable_bf16_ = true;
+    codegen_tags_.insert("bf16");
     if (t.is_scalar()) {
       os << "nv_bfloat16";
     } else if (lanes <= 8) {
@@ -614,7 +308,7 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
     }
     if (!fail) return;
   } else if (t.is_float8()) {
-    enable_fp8_ = true;
+    codegen_tags_.insert("fp8");
     if (t.lanes() <= 4) {
       os << GetFP8Type(t);
     } else {
@@ -622,7 +316,7 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
     }
     return;
   } else if (t.is_float6()) {
-    enable_fp6_ = true;
+    codegen_tags_.insert("fp6");
     if (t.lanes() <= 4) {
       os << GetFP6Type(t);
     } else {
@@ -630,7 +324,7 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
     }
     return;
   } else if (t.is_float4()) {
-    enable_fp4_ = true;
+    codegen_tags_.insert("fp4");
     if (t.lanes() <= 4) {
       os << GetFP4Type(t);
     } else {
@@ -697,7 +391,7 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
       case 8: {
         if (t.lanes() == 4) {
           // directly 4 8 bit int in integer.
-          enable_int8_ = true;
+          codegen_tags_.insert("int8");
 
           // We use int for int8x4 instead of char4 because using char4 is
           // likely to produce extra instructions to pack four int8 elements
@@ -705,11 +399,11 @@ void CodeGenCUDA::PrintType(DataType t, std::ostream& os) {  // NOLINT(*)
           os << "int";
           return;
         } else if (t.lanes() == 8) {
-          enable_int8_ = true;
+          codegen_tags_.insert("int8");
           os << "int2";
           return;
         } else if (t.lanes() == 16) {
-          enable_int8_ = true;
+          codegen_tags_.insert("int8");
           os << "int4";
           return;
         } else if (!t.is_uint() && t.is_scalar()) {
@@ -1139,7 +833,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     // This is only for backward compatibility with __shfl_{up/down}.
     // A macro will be used to replace *_sync calls to legacy ones.
     if (op_need_warp_shuffle_.get(call_op, false)) {
-      enable_warp_shuffle_ = true;
+      codegen_tags_.insert("warp_shuffle");
     }
   }
 
@@ -1184,13 +878,17 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     if (codegen.has_value()) {
       // codegen is registered, it should return a Call to cuda_func_call
       auto func_call = codegen.value()(op->args);
-      print_cuda_func_call(func_call.cast<Call>().get(), os);
+      auto res = func_call.cast<Tuple<Call, Array<String>>>();
+      print_cuda_func_call(res.get<0>().get(), os);
+      for (const auto& tag : res.get<1>()) {
+        codegen_tags_.insert(tag.operator std::string());
+      }
       return;
     }
   }
 
   if (op->op.same_as(builtin::tvm_fill_fragment())) {
-    need_mma_h_ = true;
+    codegen_tags_.insert("mma");
     TVM_FFI_ICHECK_EQ(op->args.size(), 6U);
     os << "nvcuda::wmma::fill_fragment(";
     this->PrintExpr(op->args[0], os);
@@ -1200,7 +898,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[5], os);
     os << ")";
   } else if (op->op.same_as(builtin::tvm_load_matrix_sync())) {
-    need_mma_h_ = true;
+    codegen_tags_.insert("mma");
     TVM_FFI_ICHECK_EQ(op->args.size(), 8U);
     os << "nvcuda::wmma::load_matrix_sync(";
     this->PrintExpr(op->args[0], os);
@@ -1212,7 +910,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[6], os);
     os << ")";
   } else if (op->op.same_as(builtin::tvm_store_matrix_sync())) {
-    need_mma_h_ = true;
+    codegen_tags_.insert("mma");
     TVM_FFI_ICHECK_EQ(op->args.size(), 8U);
     os << "nvcuda::wmma::store_matrix_sync(";
     this->PrintExpr(op->args[5], os);
@@ -1229,7 +927,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
     os << ")";
   } else if (op->op.same_as(builtin::tvm_mma_sync())) {
-    need_mma_h_ = true;
+    codegen_tags_.insert("mma");
     TVM_FFI_ICHECK_EQ(op->args.size(), 8U);
     os << "nvcuda::wmma::mma_sync(";
     for (int i = 0; i < 4; ++i) {
@@ -1239,7 +937,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       os << "]" << ((i < 3) ? ", " : ")");
     }
   } else if (op->op.same_as(builtin::tvm_bmma_sync())) {
-    need_mma_h_ = true;
+    codegen_tags_.insert("mma");
     TVM_FFI_ICHECK_EQ(op->args.size(), 8U);
     os << "nvcuda::wmma::bmma_sync(";
     for (int i = 0; i < 4; ++i) {
@@ -1348,7 +1046,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       os << "}\n";
     } else {
       std::string smem_elem_offset = this->PrintExpr(op->args[6]);
-      need_cast_smem_ptr_to_int_ = true;
+      codegen_tags_.insert("cast_smem_ptr_to_int");
       this->stream << PrintLoadMatrixAssembly(trans, num, type, local_ptr, local_elem_offset,
                                               smem_ptr, smem_elem_offset);
     }
@@ -1416,7 +1114,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string src = this->PrintExpr(op->args[2]);
     std::string src_offset = this->PrintExpr(op->args[3]);
     std::string size = this->PrintExpr(op->args[4]);
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     // use size of argument list to indicate whether or not to use predicated cp.async
     if (op->args.size() == 5) {
       print(PrintCpAsyncAssembly(dst, dst_offset, src, src_offset, size));
@@ -1425,7 +1123,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
                                            this->PrintExpr(op->args[5])));
     }
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     std::string dst = this->PrintExpr(op->args[0]);
     std::string dst_offset = this->PrintExpr(op->args[1]);
     std::string src = this->PrintExpr(op->args[2]);
@@ -1446,7 +1144,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintIndent();
     this->stream << "__asm__ __volatile__(\"cp.async.wait_group " << n << ";\");\n";
   } else if (op->op.same_as(builtin::ptx_cp_async_mbarrier_arrive())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
     auto it = barrier_count_.find(barrier_arr_id);
@@ -1456,7 +1154,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintCpAsyncBarrierAsm(barrier);
   } else if (op->op.same_as(builtin::init_barrier_thread_count())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
     auto it = barrier_count_.find(barrier_arr_id);
@@ -1467,7 +1165,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string thread_count = this->PrintExpr(op->args[2]);
     this->stream << PrintInitBarrierThreadCountAsm(barrier, thread_count);
   } else if (op->op.same_as(builtin::arrive_barrier())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
     auto it = barrier_count_.find(barrier_arr_id);
@@ -1477,7 +1175,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintArriveBarrierAsm(barrier);
   } else if (op->op.same_as(builtin::arrive_barrier_expect_tx())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
     auto it = barrier_count_.find(barrier_arr_id);
@@ -1488,7 +1186,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string byte_count = this->PrintExpr(op->args[2]);
     this->stream << PrintArriveBarrierExpectTxAsm(barrier, byte_count);
   } else if (op->op.same_as(builtin::wait_barrier())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
     auto it = barrier_count_.find(barrier_arr_id);
@@ -1762,7 +1460,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     os << "}\n"
        << "// print_buffer ends\n";
   } else if (op->op.same_as(builtin::cuda_barrier_create())) {
-    enable_cuda_barrier_ = true;
+    codegen_tags_.insert("cuda_barrier");
     // retrieve arguments
     const String& thread_scope_suf = Downcast<StringImm>(op->args[0])->value;
     int barrier_arr_id = Downcast<IntImm>(op->args[1])->value;
@@ -1789,7 +1487,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintIndent();
     this->stream << barrier_type + "::arrival_token " + token_arr << "[" << barrier_size << "];\n";
   } else if (op->op.same_as(builtin::cuda_barrier_init())) {
-    enable_cuda_barrier_ = true;
+    codegen_tags_.insert("cuda_barrier");
     // retrieve arguments
     int thread_count = Downcast<IntImm>(op->args[0])->value;
     int barrier_id = Downcast<IntImm>(op->args[1])->value;
@@ -1806,7 +1504,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintIndent();
     this->stream << "__syncthreads();\n";
   } else if (op->op.same_as(builtin::cuda_barrier_arrive())) {
-    enable_cuda_barrier_ = true;
+    codegen_tags_.insert("cuda_barrier");
     // retrieve arguments
     int barrier_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_arr_id = Downcast<IntImm>(op->args[1])->value;
@@ -1817,7 +1515,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->stream << token_arr << "[" << barrier_id << "] = " << barrier_arr << "[" << barrier_id
                  << "].arrive();\n";
   } else if (op->op.same_as(builtin::cuda_barrier_wait())) {
-    enable_cuda_barrier_ = true;
+    codegen_tags_.insert("cuda_barrier");
     // retrieve arguments
     int barrier_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_arr_id = Downcast<IntImm>(op->args[1])->value;
@@ -1828,7 +1526,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->stream << barrier_arr << "[" << barrier_id << "].wait(std::move(" << token_arr << "["
                  << barrier_id << "]));\n";
   } else if (op->op.same_as(builtin::cuda_barrier_arrive_and_wait())) {
-    enable_cuda_barrier_ = true;
+    codegen_tags_.insert("cuda_barrier");
     // retrieve arguments
     int barrier_id = Downcast<IntImm>(op->args[0])->value;
     int barrier_arr_id = Downcast<IntImm>(op->args[1])->value;
@@ -1840,12 +1538,12 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string scope = Downcast<StringImm>(op->args[0])->value;
     print(PrintCudaFenceProxyAsyncAssembly(this, scope));
   } else if (op->op.same_as(builtin::ptx_mbarrier_init())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string num_threads = this->PrintExpr(op->args[1]);
     print(PrintMbarrierInitAssembly(this, mbarrier, num_threads));
   } else if (op->op.same_as(builtin::ptx_mbarrier_arrive())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     TVM_FFI_CHECK(op->args.size() == 1 || op->args.size() == 3)
         << "ptx_mbarrier_arrive() expects 1 or 3 args";
     std::string mbarrier = this->PrintExpr(op->args[0]);
@@ -1854,7 +1552,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string pred = remote ? this->PrintExpr(op->args[2]) : "";
     print(PrintMbarrierArriveAssembly(this, mbarrier, remote, cta_id, pred));
   } else if (op->op.same_as(builtin::ptx_mbarrier_arrive_expect_tx())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     TVM_FFI_CHECK(op->args.size() == 2 || op->args.size() == 4)
         << "ptx_mbarrier_arrive_expect_tx() expects 2 "
            "or 4 args";
@@ -1865,7 +1563,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string pred = remote ? this->PrintExpr(op->args[3]) : "";
     print(PrintMbarrierArriveExpectTxAssembly(this, mbarrier, byte_count, remote, cta_id, pred));
   } else if (op->op.same_as(builtin::ptx_mbarrier_try_wait())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string phase = this->PrintExpr(op->args[1]);
     print(PrintMbarrierWaitAssembly(this, mbarrier, phase));
@@ -1878,7 +1576,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string thread_count = this->PrintExpr(op->args[1]);
     print(PrintNamedBarrierSyncAssembly(name_bar_id, thread_count));
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_global_to_cluster())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     int dim = Downcast<IntImm>(op->args[0])->value;
     TVM_FFI_CHECK_EQ(op->args.size(), 6 + dim);
     std::string dst = this->PrintExpr(op->args[1]);
@@ -1893,7 +1591,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     print(PrintCpAsyncBulkTensorGlobalToClusterAssembly(this, dim, dst, bar, tensormap, cta_mask,
                                                         cta_group, coords));
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_shared_to_global())) {
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     int dim = Downcast<IntImm>(op->args[0])->value;
     TVM_FFI_CHECK_EQ(op->args.size(), 3 + dim);
     std::string src = this->PrintExpr(op->args[1]);
@@ -1929,8 +1627,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::ptx_wgmma_encode_matrix_descriptor())) {
     TVM_FFI_CHECK_EQ(5, op->args.size())
         << "The number of arguments for ptx_wgmma_encode_matrix_descriptor is incorrect";
-    need_gmma_descriptor_ = true;
-    need_cast_smem_ptr_to_int_ = true;
+    codegen_tags_.insert("gmma_descriptor");
+    codegen_tags_.insert("cast_smem_ptr_to_int");
     std::string desc = this->PrintExpr(op->args[0]);
     std::string addr = this->PrintExpr(op->args[1]);
     std::string ldo = this->PrintExpr(op->args[2]);
@@ -2019,347 +1717,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     bool inc = Downcast<Bool>(op->args[0])->value;
     int nregs = Downcast<IntImm>(op->args[1])->value;
     print(PrintSetMaxNRegAssembly(inc, nregs));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_alloc())) {
-    TVM_FFI_CHECK(op->args.size() == 3) << "ptx_tcgen05_alloc() expects 3 args";
-    std::string dst_shared_ptr = this->PrintExpr(op->args[0]);
-    int n_cols = Downcast<IntImm>(op->args[1])->value;
-    TVM_FFI_CHECK(32 <= n_cols && n_cols <= 512 && n_cols % 32 == 0 && (n_cols & (n_cols - 1)) == 0)
-        << "The number of columns to allocate in Tensor Memory is invalid, expect a value within "
-           "range [32, 512] and be a multiple of 32 and a power of 2, got "
-        << n_cols;
-    std::string n_cols_str = this->PrintExpr(op->args[1]);
-    int n_cta_group = Downcast<IntImm>(op->args[2])->value;
-    TVM_FFI_CHECK(n_cta_group == 1 || n_cta_group == 2)
-        << "The number of cta_group involved in allocating Tensor Memory is incorrect, expected 1 "
-           "or 2, got "
-        << n_cta_group;
-    print(PrintTcgen05AllocAssembly(this, dst_shared_ptr, n_cols_str, n_cta_group));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_dealloc())) {
-    TVM_FFI_CHECK(op->args.size() == 3) << "ptx_tcgen05_dealloc() expects 3 args";
-    std::string taddr = this->PrintExpr(op->args[0]);
-    int n_cols = Downcast<IntImm>(op->args[1])->value;
-    TVM_FFI_CHECK(32 <= n_cols && n_cols <= 512 && n_cols % 32 == 0 && (n_cols & (n_cols - 1)) == 0)
-        << "The number of columns to deallocate in Tensor Memory is invalid, expect a value within"
-           "range [32, 512] and be a multiple of 32 and a power of 2, got "
-        << n_cols;
-    std::string n_cols_str = this->PrintExpr(op->args[1]);
-    int n_cta_group = Downcast<IntImm>(op->args[2])->value;
-    TVM_FFI_CHECK(n_cta_group == 1 || n_cta_group == 2)
-        << "The number of cta_group involved in deallocating Tensor Memory is incorrect, expected 1"
-           "or 2, got "
-        << n_cta_group;
-    print(PrintTcgen05DeallocAssembly(this, taddr, n_cols_str, n_cta_group));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_relinquish_alloc_permit())) {
-    TVM_FFI_CHECK(op->args.size() == 1) << "ptx_tcgen05_relinquish_alloc_permit() expects 1 arg";
-    int n_cta_group = Downcast<IntImm>(op->args[0])->value;
-    TVM_FFI_CHECK(n_cta_group == 1 || n_cta_group == 2)
-        << "The number of cta_group involved in relinquishing permit to allocate Tensor Memory is "
-           "incorrect, expected 1 or 2, got "
-        << n_cta_group;
-    print(PrintTcgen05RelinquishAllocPermitAssembly(this, n_cta_group));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_fence_before_thread_sync())) {
-    print(PrintTcgen05FenceBeforeThreadSyncAssembly(this));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_fence_after_thread_sync())) {
-    print(PrintTcgen05FenceAfterThreadSyncAssembly(this));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_ld())) {
-    need_tmem_offset_ = true;
-    TVM_FFI_CHECK_LT(6, op->args.size()) << "The number of arguments for ptx_tcgen05_ld is incorrect";
-    std::string src_addr = this->PrintExpr(op->args[0]);
-    std::string row_offset = this->PrintExpr(op->args[1]);
-    std::string col_offset = this->PrintExpr(op->args[2]);
-    std::string shape = Downcast<StringImm>(op->args[3])->value;
-    int num = Downcast<IntImm>(op->args[4])->value;
-    TVM_FFI_CHECK(1 <= num && num <= 128 && (num & (num - 1)) == 0)
-        << "The repeat factor of ptx_tcgen05_ld is invalid, expect a value within range [1, 128] "
-           "and be a power of 2, got "
-        << num;
-    bool pack = Downcast<Bool>(op->args[5])->value;
-    size_t expected_n_regs;
-    if (shape == "16x32bx2" || shape == "16x64b" || shape == "32x32b") {
-      expected_n_regs = num;
-    } else if (shape == "16x128b") {
-      TVM_FFI_CHECK_LE(num, 64) << "The repeat factor of ptx_tcgen05_ld for shape 16x128b is invalid, "
-                           "expect a value within range [1, 64], got "
-                        << num;
-      expected_n_regs = 2 * num;
-    } else if (shape == "16x256b") {
-      TVM_FFI_CHECK_LE(num, 32) << "The repeat factor of ptx_tcgen05_ld for shape 16x256b is invalid, "
-                           "expect a value within range [1, 32], got "
-                        << num;
-      expected_n_regs = 4 * num;
-    } else {
-      TVM_FFI_THROW(InternalError)
-          << "The input shape of ptx_tcgen05_ld is invalid, expect one of [16x32bx2, 16x64b, "
-             "32x32b, 16x128b, 16x256b], got "
-          << shape;
-    }
-    TVM_FFI_CHECK_EQ(6 + expected_n_regs, op->args.size())
-        << "The number of arguments for ptx_tcgen05_ld is incorrect, expected "
-        << 6 + expected_n_regs << ", got " << op->args.size();
-    std::vector<std::string> regs;
-    for (size_t i = 0; i < expected_n_regs; ++i) {
-      regs.push_back(this->PrintExpr(op->args[6 + i]));
-    }
-    print(PrintTcgen05LoadAssembly(this, src_addr, row_offset, col_offset, regs, shape, num, pack));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_st())) {
-    need_tmem_offset_ = true;
-    TVM_FFI_CHECK_LT(6, op->args.size()) << "The number of arguments for ptx_tcgen05_st is incorrect";
-    std::string dst_addr = this->PrintExpr(op->args[0]);
-    std::string row_offset = this->PrintExpr(op->args[1]);
-    std::string col_offset = this->PrintExpr(op->args[2]);
-    std::string shape = Downcast<StringImm>(op->args[3])->value;
-    int num = Downcast<IntImm>(op->args[4])->value;
-    TVM_FFI_CHECK(1 <= num && num <= 128 && (num & (num - 1)) == 0)
-        << "The repeat factor of ptx_tcgen05_st is invalid, expect a value within range [1, 128] "
-           "and be a power of 2, got "
-        << num;
-    bool unpack = Downcast<Bool>(op->args[5])->value;
-    size_t expected_n_regs;
-    if (shape == "16x32bx2" || shape == "16x64b" || shape == "32x32b") {
-      expected_n_regs = num;
-    } else if (shape == "16x128b") {
-      TVM_FFI_CHECK_LE(num, 64) << "The repeat factor of ptx_tcgen05_st for shape 16x128b is invalid, "
-                           "expect a value within range [1, 64], got "
-                        << num;
-      expected_n_regs = 2 * num;
-    } else if (shape == "16x256b") {
-      TVM_FFI_CHECK_LE(num, 32) << "The repeat factor of ptx_tcgen05_st for shape 16x256b is invalid, "
-                           "expect a value within range [1, 32], got "
-                        << num;
-      expected_n_regs = 4 * num;
-    } else {
-      TVM_FFI_THROW(InternalError)
-          << "The input shape of ptx_tcgen05_st is invalid, expect one of [16x32bx2, 16x64b, "
-             "32x32b, 16x128b, 16x256b], got "
-          << shape;
-    }
-    TVM_FFI_CHECK_EQ(6 + expected_n_regs, op->args.size())
-        << "The number of arguments for ptx_tcgen05_st is incorrect, expected "
-        << 6 + expected_n_regs << ", got " << op->args.size();
-    std::vector<std::string> regs;
-    for (size_t i = 0; i < expected_n_regs; ++i) {
-      regs.push_back(this->PrintExpr(op->args[6 + i]));
-    }
-    print(PrintTcgen05StoreAssembly(this, dst_addr, row_offset, col_offset, regs, shape, num,
-                                    unpack));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_wait_ld())) {
-    print(PrintTcgen05WaitLdSyncAssembly(this));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_wait_st())) {
-    print(PrintTcgen05WaitStSyncAssembly(this));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_encode_matrix_descriptor())) {
-    TVM_FFI_CHECK_EQ(5, op->args.size())
-        << "The number of arguments for ptx_tcgen05_encode_matrix_descriptor is incorrect";
-    need_smem_descriptor_ = true;
-    need_cast_smem_ptr_to_int_ = true;
-    std::string desc = this->PrintExpr(op->args[0]);
-    std::string addr = this->PrintExpr(op->args[1]);
-    std::string ldo = this->PrintExpr(op->args[2]);
-    std::string sdo = this->PrintExpr(op->args[3]);
-    int swizzle = Downcast<IntImm>(op->args[4])->value;
-    print(PrintEncodeTcgen05MatrixDescriptor(this, desc, addr, ldo, sdo, swizzle));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_encode_instr_descriptor())) {
-    TVM_FFI_CHECK_EQ(14, op->args.size())
-        << "The number of arguments for ptx_tcgen05_encode_instr_descriptor is incorrect";
-    need_instr_descriptor_ = true;
-    std::string desc = this->PrintExpr(op->args[0]);
-    std::string d_dtype = Downcast<StringImm>(op->args[1])->value;
-    std::string a_dtype = Downcast<StringImm>(op->args[2])->value;
-    std::string b_dtype = Downcast<StringImm>(op->args[3])->value;
-    int M = Downcast<IntImm>(op->args[4])->value;
-    int N = Downcast<IntImm>(op->args[5])->value;
-    int K = Downcast<IntImm>(op->args[6])->value;
-    bool trans_a = Downcast<Bool>(op->args[7])->value;
-    bool trans_b = Downcast<Bool>(op->args[8])->value;
-    int cta_group = Downcast<IntImm>(op->args[9])->value;
-    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
-        << "The number of cta_group involved in ptx_tcgen05_mma is incorrect, expected 1 or 2, got "
-        << cta_group;
-    bool neg_a = Downcast<Bool>(op->args[10])->value;
-    bool neg_b = Downcast<Bool>(op->args[11])->value;
-    bool sat_d = Downcast<Bool>(op->args[12])->value;
-    bool is_sparse = Downcast<Bool>(op->args[13])->value;
-    print(PrintEncodeTcgen05InstrDescriptor(this, desc, d_dtype, a_dtype, b_dtype, M, N, K, trans_a,
-                                            trans_b, cta_group, neg_a, neg_b, sat_d, is_sparse));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_encode_instr_descriptor_block_scaled())) {
-    TVM_FFI_CHECK_EQ(17, op->args.size())
-        << "The number of arguments for ptx_tcgen05_encode_instr_descriptor_block_scaled is "
-           "incorrect";
-    need_instr_descriptor_block_scaled_ = true;
-    std::string desc = this->PrintExpr(op->args[0]);
-    std::string d_dtype = Downcast<StringImm>(op->args[1])->value;
-    std::string a_dtype = Downcast<StringImm>(op->args[2])->value;
-    std::string b_dtype = Downcast<StringImm>(op->args[3])->value;
-    std::string sfa_dtype = Downcast<StringImm>(op->args[4])->value;
-    std::string sfb_dtype = Downcast<StringImm>(op->args[5])->value;
-    std::string sfa_tmem_addr = this->PrintExpr(op->args[6]);
-    std::string sfb_tmem_addr = this->PrintExpr(op->args[7]);
-    int M = Downcast<IntImm>(op->args[8])->value;
-    int N = Downcast<IntImm>(op->args[9])->value;
-    int K = Downcast<IntImm>(op->args[10])->value;
-    bool trans_a = Downcast<Bool>(op->args[11])->value;
-    bool trans_b = Downcast<Bool>(op->args[12])->value;
-    int cta_group = Downcast<IntImm>(op->args[13])->value;
-    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
-        << "The number of cta_group involved in ptx_tcgen05_mma_block_scale is incorrect, expected "
-           "1 or 2, got "
-        << cta_group;
-    bool neg_a = Downcast<Bool>(op->args[14])->value;
-    bool neg_b = Downcast<Bool>(op->args[15])->value;
-    bool is_sparse = Downcast<Bool>(op->args[16])->value;
-    print(PrintEncodeTcgen05InstrDescriptorBlockScaled(
-        this, desc, d_dtype, a_dtype, b_dtype, sfa_dtype, sfb_dtype, sfa_tmem_addr, sfb_tmem_addr,
-        M, N, K, trans_a, trans_b, cta_group, neg_a, neg_b, is_sparse));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_mma())) {
-    TVM_FFI_CHECK_LT(11, op->args.size()) << "The number of arguments for ptx_tcgen05_mma is incorrect";
-    std::string d_dtype = Downcast<StringImm>(op->args[0])->value;
-    std::string a_dtype = Downcast<StringImm>(op->args[1])->value;
-    std::string b_dtype = Downcast<StringImm>(op->args[2])->value;
-    std::string d_tmem_addr = this->PrintExpr(op->args[3]);
-    std::string a_operand = this->PrintExpr(op->args[4]);
-    std::string b_desc = this->PrintExpr(op->args[5]);
-    std::string i_desc = this->PrintExpr(op->args[6]);
-    bool use_a_tmem = Downcast<Bool>(op->args[7])->value;
-    int cta_group = Downcast<IntImm>(op->args[8])->value;
-    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
-        << "The number of cta_group involved in ptx_tcgen05_mma is incorrect, expected 1 or 2, got "
-        << cta_group;
-    bool enable_input_d = Downcast<Bool>(op->args[9])->value;
-    int scale_input_d = Downcast<IntImm>(op->args[10])->value;
-    TVM_FFI_CHECK(0 <= scale_input_d && scale_input_d <= 15)
-        << "The value of scale_input_d for ptx_tcgen05_mma is incorrect, expected a value within "
-           "range [0, 15], got "
-        << scale_input_d;
-    size_t expected_vec_size = (cta_group == 1) ? 4 : 8;
-    TVM_FFI_CHECK_EQ(expected_vec_size + 11, op->args.size())
-        << "The number of arguments for ptx_tcgen05_mma is incorrect, expected "
-        << expected_vec_size + 11 << ", got " << op->args.size();
-    std::vector<std::string> disable_output_lane;
-    for (size_t i = 0; i < expected_vec_size; ++i) {
-      disable_output_lane.push_back(this->PrintExpr(op->args[11 + i]));
-    }
-    print(PrintTcgen05MMAAssembly(this, d_dtype, a_dtype, b_dtype, d_tmem_addr, a_operand, b_desc,
-                                  i_desc, use_a_tmem, cta_group, disable_output_lane,
-                                  enable_input_d, scale_input_d, false));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_mma_block_scale())) {
-    TVM_FFI_CHECK_EQ(op->args.size(), 14)
-        << "The number of arguments for ptx_tcgen05_mma_block_scale is incorrect";
-    std::string d_dtype = Downcast<StringImm>(op->args[0])->value;
-    std::string a_dtype = Downcast<StringImm>(op->args[1])->value;
-    std::string b_dtype = Downcast<StringImm>(op->args[2])->value;
-    std::string sfa_dtype = Downcast<StringImm>(op->args[3])->value;
-    std::string sfb_dtype = Downcast<StringImm>(op->args[4])->value;
-    std::string d_tmem_addr = this->PrintExpr(op->args[5]);
-    std::string a_operand = this->PrintExpr(op->args[6]);
-    std::string b_desc = this->PrintExpr(op->args[7]);
-    std::string sfa_tmem_addr = this->PrintExpr(op->args[8]);
-    std::string sfb_tmem_addr = this->PrintExpr(op->args[9]);
-    std::string i_desc = this->PrintExpr(op->args[10]);
-    bool use_a_tmem = Downcast<Bool>(op->args[11])->value;
-    int cta_group = Downcast<IntImm>(op->args[12])->value;
-    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
-        << "The number of cta_group involved in ptx_tcgen05_mma_block_scale is incorrect, expected "
-           "1 or 2, got "
-        << cta_group;
-    bool enable_input_d = Downcast<Bool>(op->args[13])->value;
-    print(PrintTcgen05MMABlockScaleAssembly(
-        this, d_dtype, a_dtype, b_dtype, sfa_dtype, sfb_dtype, d_tmem_addr, a_operand, b_desc,
-        sfa_tmem_addr, sfb_tmem_addr, i_desc, use_a_tmem, cta_group, enable_input_d, false));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_mma_sp())) {
-    TVM_FFI_CHECK_LT(12, op->args.size()) << "The number of arguments for ptx_tcgen05_mma_sp is incorrect";
-    std::string d_dtype = Downcast<StringImm>(op->args[0])->value;
-    std::string a_dtype = Downcast<StringImm>(op->args[1])->value;
-    std::string b_dtype = Downcast<StringImm>(op->args[2])->value;
-    std::string d_tmem_addr = this->PrintExpr(op->args[3]);
-    std::string a_operand = this->PrintExpr(op->args[4]);
-    std::string b_desc = this->PrintExpr(op->args[5]);
-    std::string sp_tmem_addr = this->PrintExpr(op->args[6]);
-    std::string i_desc = this->PrintExpr(op->args[7]);
-    bool use_a_tmem = Downcast<Bool>(op->args[8])->value;
-    int cta_group = Downcast<IntImm>(op->args[9])->value;
-    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
-        << "The number of cta_group involved in ptx_tcgen05_mma_sp is incorrect, expected 1 or 2, "
-           "got "
-        << cta_group;
-    bool enable_input_d = Downcast<Bool>(op->args[10])->value;
-    int scale_input_d = Downcast<IntImm>(op->args[11])->value;
-    TVM_FFI_CHECK(0 <= scale_input_d && scale_input_d <= 15)
-        << "The value of scale_input_d for ptx_tcgen05_mma_sp is incorrect, expected a value "
-           "within range [0, 15], got "
-        << scale_input_d;
-    size_t expected_vec_size = (cta_group == 1) ? 4 : 8;
-    TVM_FFI_CHECK_EQ(expected_vec_size + 12, op->args.size())
-        << "The number of arguments for ptx_tcgen05_mma_sp is incorrect, expected "
-        << expected_vec_size + 12 << ", got " << op->args.size();
-    std::vector<std::string> disable_output_lane;
-    for (size_t i = 0; i < expected_vec_size; ++i) {
-      disable_output_lane.push_back(this->PrintExpr(op->args[12 + i]));
-    }
-    print(PrintTcgen05MMAAssembly(this, d_dtype, a_dtype, b_dtype, d_tmem_addr, a_operand, b_desc,
-                                  i_desc, use_a_tmem, cta_group, disable_output_lane,
-                                  enable_input_d, scale_input_d, true, sp_tmem_addr));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_mma_sp_block_scale())) {
-    TVM_FFI_CHECK_EQ(op->args.size(), 15)
-        << "The number of arguments for ptx_tcgen05_mma_sp_block_scale is incorrect";
-    std::string d_dtype = Downcast<StringImm>(op->args[0])->value;
-    std::string a_dtype = Downcast<StringImm>(op->args[1])->value;
-    std::string b_dtype = Downcast<StringImm>(op->args[2])->value;
-    std::string sfa_dtype = Downcast<StringImm>(op->args[3])->value;
-    std::string sfb_dtype = Downcast<StringImm>(op->args[4])->value;
-    std::string d_tmem_addr = this->PrintExpr(op->args[5]);
-    std::string a_operand = this->PrintExpr(op->args[6]);
-    std::string b_desc = this->PrintExpr(op->args[7]);
-    std::string sfa_tmem_addr = this->PrintExpr(op->args[8]);
-    std::string sfb_tmem_addr = this->PrintExpr(op->args[9]);
-    std::string sp_tmem_addr = this->PrintExpr(op->args[10]);
-    std::string i_desc = this->PrintExpr(op->args[11]);
-    bool use_a_tmem = Downcast<Bool>(op->args[12])->value;
-    int cta_group = Downcast<IntImm>(op->args[13])->value;
-    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
-        << "The number of cta_group involved in ptx_tcgen05_mma_sp_block_scale is incorrect, "
-           "expected 1 or 2, got "
-        << cta_group;
-    bool enable_input_d = Downcast<Bool>(op->args[14])->value;
-    print(PrintTcgen05MMABlockScaleAssembly(this, d_dtype, a_dtype, b_dtype, sfa_dtype, sfb_dtype,
-                                            d_tmem_addr, a_operand, b_desc, sfa_tmem_addr,
-                                            sfb_tmem_addr, i_desc, use_a_tmem, cta_group,
-                                            enable_input_d, true, sp_tmem_addr));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_commit())) {
-    TVM_FFI_CHECK_EQ(op->args.size(), 3) << "The number of arguments for ptx_tcgen05_commit is incorrect";
-    std::string bar = this->PrintExpr(op->args[0]);
-    int cta_group = Downcast<IntImm>(op->args[1])->value;
-    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
-        << "The number of cta_group involved in ptx_tcgen05_commit is incorrect, expected 1 or 2, "
-           "got "
-        << cta_group;
-    int cta_mask = Downcast<IntImm>(op->args[2])->value;
-    print(PrintTcgen05CommitAssembly(this, bar, cta_group, cta_mask));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_cp())) {
-    need_tmem_offset_ = true;
-    TVM_FFI_CHECK_EQ(op->args.size(), 9) << "The number of arguments for ptx_tcgen05_cp is incorrect";
-    std::string dst_addr = this->PrintExpr(op->args[0]);
-    std::string row_offset = this->PrintExpr(op->args[1]);
-    std::string col_offset = this->PrintExpr(op->args[2]);
-    std::string src_desc = this->PrintExpr(op->args[3]);
-    std::string shape = Downcast<StringImm>(op->args[4])->value;
-    std::string dst_dtype = Downcast<StringImm>(op->args[5])->value;
-    std::string src_dtype = Downcast<StringImm>(op->args[6])->value;
-    int cta_group = Downcast<IntImm>(op->args[7])->value;
-    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
-        << "The number of cta_group involved in ptx_tcgen05_cp is incorrect, expected 1 or 2, "
-           "got "
-        << cta_group;
-    std::string multicast = Downcast<StringImm>(op->args[8])->value;
-    print(PrintTcgen05CopyAssembly(this, dst_addr, row_offset, col_offset, src_desc, shape,
-                                   dst_dtype, src_dtype, cta_group, multicast));
-  } else if (op->op.same_as(builtin::ptx_tcgen05_shift())) {
-    TVM_FFI_CHECK_EQ(op->args.size(), 2) << "The number of arguments for ptx_tcgen05_shift is incorrect";
-    std::string taddr = this->PrintExpr(op->args[0]);
-    int cta_group = Downcast<IntImm>(op->args[1])->value;
-    TVM_FFI_CHECK(cta_group == 1 || cta_group == 2)
-        << "The number of cta_group involved in ptx_tcgen05_shift is incorrect, expected 1 or 2, "
-           "got "
-        << cta_group;
-    print(PrintTcgen05ShiftAssembly(this, taddr, cta_group));
   } else if (op->op.same_as(builtin::ptx_ld_global_acquire())) {
     TVM_FFI_ICHECK_EQ(op->args.size(), 2U);
     this->PrintIndent();
@@ -2687,10 +2044,10 @@ inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenCUDA* p)
           temp << "-";
         }
         temp << "CUDART_INF";
-        p->need_math_constants_h_ = true;
+        p->codegen_tags_.insert("math_constants");
       } else if (std::isnan(op->value)) {
         temp << "CUDART_NAN";
-        p->need_math_constants_h_ = true;
+        p->codegen_tags_.insert("math_constants");
       } else {
         temp << std::fixed << std::setprecision(15) << op->value;
       }
@@ -2705,10 +2062,10 @@ inline void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenCUDA* p)
           temp << "-";
         }
         temp << "CUDART_INF_F";
-        p->need_math_constants_h_ = true;
+        p->codegen_tags_.insert("math_constants");
       } else if (std::isnan(op->value)) {
         temp << "CUDART_NAN_F";
-        p->need_math_constants_h_ = true;
+        p->codegen_tags_.insert("math_constants");
       } else {
         temp << std::hexfloat << op->value << 'f';
         temp << "/*" << std::scientific << op->value << "*/";
@@ -2759,19 +2116,19 @@ void CodeGenCUDA::PrintWmmaScope(const std::string& scope, DataType t, const Var
     }
   }
   if (scope == "wmma.matrix_a") {
-    need_mma_h_ = true;
+    codegen_tags_.insert("mma");
     std::string layout_str = fragment_layouts[variable];
     TVM_FFI_ICHECK_NE(layout_str, "") << "Layout must be defined for matrix_a";
     os << "nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, " << shape_str << ", " << type.str()
        << ", nvcuda::wmma::" << layout_str << ">";
   } else if (scope == "wmma.matrix_b") {
-    need_mma_h_ = true;
+    codegen_tags_.insert("mma");
     std::string layout_str = fragment_layouts[variable];
     TVM_FFI_ICHECK_NE(layout_str, "") << "Layout must be defined for matrix_b";
     os << "nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, " << shape_str << ", " << type.str()
        << ", nvcuda::wmma::" << layout_str << ">";
   } else if (scope == "wmma.accumulator") {
-    need_mma_h_ = true;
+    codegen_tags_.insert("mma");
     os << "nvcuda::wmma::fragment<nvcuda::wmma::accumulator, " << shape_str << ", " << type.str()
        << ">";
   }

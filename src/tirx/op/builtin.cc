@@ -389,7 +389,8 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_syncthreads_and)
 TIR_DEFINE_BUILTIN_FUNC(cuda_nano_sleep)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-
+TIR_DEFINE_BUILTIN_FUNC(cuda_atomic_cas)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 }  // namespace builtin
 }  // namespace tirx

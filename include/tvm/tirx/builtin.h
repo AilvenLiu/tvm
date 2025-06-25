@@ -836,6 +836,11 @@ TVM_DLL const Op& cuda_syncthreads_and();
  */
 TVM_DLL const Op& cuda_nano_sleep();
 
+/*!
+ * \brief tvm intrinsic for cuda atomic compare and swap instruction
+ */
+TVM_DLL const Op& cuda_atomic_cas();
+
 }  // namespace builtin
 }  // namespace tirx
 }  // namespace tvm

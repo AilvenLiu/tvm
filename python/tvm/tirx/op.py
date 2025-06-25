@@ -7509,7 +7509,8 @@ def cuda_atomic_add(res_addr, value):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_atomic_add", res_addr, value)
+    value = tir.convert(value)
+    return call_intrin(value.dtype, "tir.cuda_atomic_add", res_addr, value)
 
 
 def cuda_thread_fence():
@@ -7593,6 +7594,28 @@ def ptx_map_shared_rank(ptr, rank):
 
     return call_intrin("uint64", "tir.ptx_map_shared_rank", ptr, rank)
 
+
+def cuda_atomic_cas(ptr, old_val, new_val):
+    """TVM intrinsic to call cuda atomic cas instruction
+
+    Parameters
+    ----------  
+    ptr: PrimExpr
+        The pointer to the memory location.
+
+    old_val: PrimExpr
+        The old value.
+
+    new_val: PrimExpr
+        The new value.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    old_val = tir.convert(old_val)
+    return call_intrin(old_val.dtype, "tir.cuda_atomic_cas", ptr, old_val, new_val)
 
 ########################################################
 # NKI builtins

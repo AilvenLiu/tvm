@@ -78,7 +78,18 @@ def test_cuda_nano_sleep():
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_nano_sleep" in src
+    
+def test_cuda_atomic_cas():
+    @T.prim_func(tirp=True)
+    def main(A: T.Buffer((16, 16), "int32")):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([32], parent="cta")
+            with T.thread()[tx == 0]:
+                T.cuda.atomic_cas(A.data, T.int32(1), T.int32(2))
 
+    src, mod = _get_source(main)
+    assert "tvm_builtin_cuda_atomic_cas" in src
 
 def test_cuda_func_call():
     def test_add_one():

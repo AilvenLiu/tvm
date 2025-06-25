@@ -182,6 +182,7 @@ def test_partial_reduction():
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
     C_tvm = tvm.nd.array(C_np, device=DEV)
+    C_tvm_fused = tvm.nd.array(C_np, device=DEV)
     sem_tvm = tvm.nd.array(np.zeros((NUM_BLOCK_M,), dtype=np.int32), device=DEV)
     with target:
 
@@ -196,8 +197,8 @@ def test_partial_reduction():
 
         fused_mod = tvm.IRModule({"main": partial_reduction_fused})
         fused_mod = tvm.compile(fused_mod, target=target, tir_pipeline="tirp")
-        fused_mod(A_tvm, B_tvm, C_tvm, sem_tvm)
-        ret_fused = C_tvm.numpy()
+        fused_mod(A_tvm, B_tvm, C_tvm_fused, sem_tvm)
+        ret_fused = C_tvm_fused.numpy()
         tvm.testing.assert_allclose(ret_fused, ret_ref_stage_2, rtol=1e-3, atol=1e-3)
 
 

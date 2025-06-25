@@ -368,6 +368,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
     target = tvm.target.Target("cuda")
     with target:
         src, mod = _get_source(test_mma_ss_no_tma)
+        print(src)
         assert "tcgen05.mma.cta_group::1.kind::f16" in src
         assert "tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64" in src
         assert "tcgen05.ld.sync.aligned.32x32b.x1.b32" in src
