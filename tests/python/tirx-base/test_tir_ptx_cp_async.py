@@ -154,5 +154,3 @@ def test_ptx_cp_async_bulk():
 
 if __name__ == "__main__":
     test_ptx_cp_async()
-    test_ptx_cp_async_barrier()
-    test_ptx_cp_async_bulk()

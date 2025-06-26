@@ -1205,13 +1205,13 @@ def trace(args, trace_action="tvm.default_trace_action"):
 
     See Also
     --------
-    tvm.tir.call_packed : Creates packed function.
+    tvm.tirx.call_packed : Creates packed function.
     """
     if not isinstance(args, list):
-        raise Exception("tvm.tir.trace consumes the args as list type")
+        raise Exception("tvm.tirx.trace consumes the args as list type")
     call_args = [_pack_buffer(x) if isinstance(x, Buffer) else x for x in args]
     call_args.insert(0, trace_action)
-    return tvm.tir.Call(args[-1].dtype, Op.get("tir.tvm_call_trace_packed"), call_args)
+    return tvm.tirx.Call(args[-1].dtype, Op.get("tir.tvm_call_trace_packed"), call_args)
 
 
 def min_value(dtype, span=None):
@@ -2585,7 +2585,7 @@ def comm_reducer(fcombine, fidentity, name="reduce"):
         n = te.var("n")
         m = te.var("m")
         mysum = te.comm_reducer(lambda x, y: x+y,
-            lambda t: tvm.tir.const(0, dtype=t), name="mysum")
+            lambda t: tvm.tirx.const(0, dtype=t), name="mysum")
         A = te.placeholder((n, m), name="A")
         k = te.reduce_axis((0, m), name="k")
         B = te.compute((n,), lambda i: mysum(A[i, k], axis=k), name="B")
@@ -2642,16 +2642,16 @@ def comm_reducer(fcombine, fidentity, name="reduce"):
         if where is None:
             where = tir.convert(True)
         if init is None:
-            outputs = tuple(tvm.tir.Reduce(combiner, expr, axis, where, i, []) for i in range(size))
+            outputs = tuple(tvm.tirx.Reduce(combiner, expr, axis, where, i, []) for i in range(size))
         else:
             outputs = tuple(
-                tvm.tir.Reduce(combiner, expr, axis, where, i, init) for i in range(size)
+                tvm.tirx.Reduce(combiner, expr, axis, where, i, init) for i in range(size)
             )
         return outputs[0] if size == 1 else outputs
 
     # pylint: disable=keyword-arg-before-vararg
     def reducer(expr, axis, where=None, init=None, *args):
-        if isinstance(axis, (tvm.tir.IterVar, list, tuple)):
+        if isinstance(axis, (tvm.tirx.IterVar, list, tuple)):
             assert not args
             return _make_reduce(expr, axis, where, init)
 
@@ -2691,7 +2691,7 @@ def comm_reducer(fcombine, fidentity, name="reduce"):
 
                 # there are two way to use this {0} reducer:
                 # mode 1, accept (expr, axis, where) to produce an Reduce Expr
-                # tvm.{0} represents tvm.te.{0} or tvm.tir.{0}.
+                # tvm.{0} represents tvm.te.{0} or tvm.tirx.{0}.
                 B = te.compute((m,), lambda i: tvm.{0}(A[i, k], axis=k), name="B")
 
                 # mode 2, simply use it with multiple Exprs:
@@ -3618,122 +3618,6 @@ def ptx_cp_async_mbarrier_arrive(barrier_id):
         The call expression.
     """
     return call_intrin("", "tir.ptx_cp_async_mbarrier_arrive", barrier_id)
-
-
-def init_barrier_thread_count(barrier_id, thread_count):
-    """TVM intrinsic for ptx barrier initialization of thread count using mbarrier.init
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-mbarrier-init
-
-    Parameters
-    ----------
-    barrier_id : int
-        The ID of the barrier shared memory pointer.
-
-    thread_count : int
-        Number of threads expected to arrive at the barrier.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    warnings.warn(
-        "init_barrier_thread_count is deprecated and will be removed in the future. "
-        "Please use `ptx_mbarrier_init` instead.",
-        category=DeprecationWarning,
-        stacklevel=2,
-    )
-    return call_intrin("", "tir.init_barrier_thread_count", barrier_id, thread_count)
-
-
-def arrive_barrier(barrier_id):
-    """TVM intrinsic for ptx barrier arrival using mbarrier.arrive
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-mbarrier-arrive
-
-    Parameters
-    ----------
-    barrier_id : int
-        The ID of the barrier shared memory pointer.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    warnings.warn(
-        "arrive_barrier is deprecated and will be removed in a future release. "
-        "Please use `ptx_mbarrier_arrive` instead.",
-        category=DeprecationWarning,
-        stacklevel=2,
-    )
-    return call_intrin("", "tir.arrive_barrier", barrier_id)
-
-
-def arrive_barrier_expect_tx(barrier_id, byte_count):
-    """TVM intrinsic for ptx barrier arrival with expect tx using mbarrier.arrive.expect_tx
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-mbarrier-arrive
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-mbarrier-expect-tx-operation
-
-    Parameters
-    ----------
-    barrier_id : int
-        The ID of the barrier shared memory pointer.
-
-    byte_count : int
-        Increases the tx count of the mbarrier object to track completion of
-        addtional async transactions.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    warnings.warn(
-        "arrive_barrier_expect_tx is deprecated and will be removed in a future release. "
-        "Please use `ptx_mbarrier_arrive_expect_tx` instead.",
-        category=DeprecationWarning,
-        stacklevel=2,
-    )
-    return call_intrin("", "tir.arrive_barrier_expect_tx", barrier_id, byte_count)
-
-
-def wait_barrier(barrier_id):
-    """TVM intrinsic for ptx barrier wait using mbarrier.try_wait
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#parallel-synchronization-and-communication-instructions-mbarrier-test-wait-mbarrier-try-wait
-
-    Parameters
-    ----------
-    barrier_id : int
-        The ID of the barrier shared memory pointer.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    warnings.warn(
-        "wait_barrier is deprecated and will be removed in a future release. "
-        "Please use `ptx_mbarrier_try_wait` instead.",
-        category=DeprecationWarning,
-        stacklevel=2,
-    )
-    return call_intrin("", "tir.wait_barrier", barrier_id)
-
-
-def create_barriers(barrier_count):
-    """TVM intrinsic to create N barriers
-
-    Parameters
-    ----------
-    barrier_count : int
-        The number of barriers to create.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tirx.create_barriers", barrier_count)
 
 
 def ptx_fence_proxy(scope: str):

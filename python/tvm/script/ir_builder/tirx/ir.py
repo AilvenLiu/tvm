@@ -2530,15 +2530,10 @@ tvm_warp_shuffle_up = _tir_op.tvm_warp_shuffle_up
 tvm_warp_shuffle_down = _tir_op.tvm_warp_shuffle_down
 tvm_warp_shuffle_xor = _tir_op.tvm_warp_shuffle_xor
 tvm_warp_activemask = _tir_op.tvm_warp_activemask
-init_barrier_thread_count = _op_wrapper(_tir_op.init_barrier_thread_count)
-arrive_barrier = _op_wrapper(_tir_op.arrive_barrier)
-arrive_barrier_expect_tx = _op_wrapper(_tir_op.arrive_barrier_expect_tx)
-wait_barrier = _op_wrapper(_tir_op.wait_barrier)
 make_filled_simdgroup_matrix = _op_wrapper(_tir_op.make_filled_simdgroup_matrix)
 simdgroup_load = _op_wrapper(_tir_op.simdgroup_load)
 simdgroup_store = _op_wrapper(_tir_op.simdgroup_store)
 simdgroup_multiply_accumulate = _op_wrapper(_tir_op.simdgroup_multiply_accumulate)
-create_barriers = _op_wrapper(_tir_op.create_barriers)
 assume = _op_wrapper(_tir_op.assume)
 undef = _op_wrapper(_tir_op.undef)
 TVMBackendAllocWorkspace = _op_wrapper(_tir_op.TVMBackendAllocWorkspace)
@@ -2851,15 +2846,10 @@ __all__ = float_types + [
     "tvm_warp_shuffle_down",
     "tvm_warp_shuffle_xor",
     "tvm_warp_activemask",
-    "init_barrier_thread_count",
-    "arrive_barrier",
-    "arrive_barrier_expect_tx",
-    "wait_barrier",
     "make_filled_simdgroup_matrix",
     "simdgroup_load",
     "simdgroup_store",
     "simdgroup_multiply_accumulate",
-    "create_barriers",
     "mma_store",
     "mma_fill",
     "vectorlow",

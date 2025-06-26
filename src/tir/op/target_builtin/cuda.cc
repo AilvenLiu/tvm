@@ -90,36 +90,6 @@ TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_wait_group)
 TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_mbarrier_arrive)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(init_barrier_thread_count)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(arrive_barrier)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(arrive_barrier_expect_tx)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(wait_barrier)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(create_barriers)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(cuda_barrier_create)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(cuda_barrier_init)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(cuda_barrier_arrive)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(cuda_barrier_wait)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
-TIR_DEFINE_BUILTIN_FUNC(cuda_barrier_arrive_and_wait)
-    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
-
 TIR_DEFINE_BUILTIN_FUNC(ptx_fence_proxy)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

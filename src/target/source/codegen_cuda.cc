@@ -1154,64 +1154,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintCpAsyncBarrierAsm(barrier);
-  } else if (op->op.same_as(builtin::init_barrier_thread_count())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
-    int barrier_id = Downcast<IntImm>(op->args[1])->value;
-    auto it = barrier_count_.find(barrier_arr_id);
-    TVM_FFI_CHECK(it != barrier_count_.end()) << "Barrier array does not exist";
-    TVM_FFI_CHECK(barrier_id < it->second) << "Barrier id out of bounds";
-    std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
-    std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
-    std::string thread_count = this->PrintExpr(op->args[2]);
-    this->stream << PrintInitBarrierThreadCountAsm(barrier, thread_count);
-  } else if (op->op.same_as(builtin::arrive_barrier())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
-    int barrier_id = Downcast<IntImm>(op->args[1])->value;
-    auto it = barrier_count_.find(barrier_arr_id);
-    TVM_FFI_CHECK(it != barrier_count_.end()) << "Barrier array does not exist";
-    TVM_FFI_CHECK(barrier_id < it->second) << "Barrier id out of bounds";
-    std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
-    std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
-    this->stream << PrintArriveBarrierAsm(barrier);
-  } else if (op->op.same_as(builtin::arrive_barrier_expect_tx())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
-    int barrier_id = Downcast<IntImm>(op->args[1])->value;
-    auto it = barrier_count_.find(barrier_arr_id);
-    TVM_FFI_CHECK(it != barrier_count_.end()) << "Barrier array does not exist";
-    TVM_FFI_CHECK(barrier_id < it->second) << "Barrier id out of bounds";
-    std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
-    std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
-    std::string byte_count = this->PrintExpr(op->args[2]);
-    this->stream << PrintArriveBarrierExpectTxAsm(barrier, byte_count);
-  } else if (op->op.same_as(builtin::wait_barrier())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
-    int barrier_id = Downcast<IntImm>(op->args[1])->value;
-    auto it = barrier_count_.find(barrier_arr_id);
-    TVM_FFI_CHECK(it != barrier_count_.end()) << "Barrier array does not exist";
-    TVM_FFI_CHECK(barrier_id < it->second) << "Barrier id out of bounds";
-    std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
-    std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
-    this->stream << PrintWaitBarrierAsm(barrier);
-  } else if (op->op.same_as(builtin::create_barriers())) {
-    int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
-    int barrier_count = Downcast<IntImm>(op->args[1])->value;
-    TVM_FFI_ICHECK_EQ(barrier_count_.count(barrier_arr_id), 0) << "Barrier array already exists";
-    // pad barrier alignment to avoid runtime alignment errors
-    TVM_FFI_CHECK_EQ(barrier_alignment_bytes_ % sizeof(uint64_t), 0);
-    int barrier_alignment_count = barrier_alignment_bytes_ / sizeof(uint64_t);
-    if (barrier_count % barrier_alignment_count != 0) {
-      barrier_count = ((barrier_count / barrier_alignment_count) + 1) * barrier_alignment_count;
-    }
-    barrier_count_[barrier_arr_id] = barrier_count;
-    std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
-    this->stream << "__shared__ __align__(" << barrier_alignment_bytes_ << ") uint64_t "
-                 << barrier_arr << "[" << barrier_count << "];\n";
-    this->stream << "for (int i = 0; i < " << barrier_count << "; ++i) { " << barrier_arr
-                 << "[i] = 0; }\n";
   } else if (op->op.same_as(builtin::ptx_ldg32())) {
     /*
     asm volatile (
@@ -1460,36 +1402,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
 
     os << "}\n"
        << "// print_buffer ends\n";
-  } else if (op->op.same_as(builtin::ptx_mbarrier_init())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    std::string mbarrier = this->PrintExpr(op->args[0]);
-    std::string num_threads = this->PrintExpr(op->args[1]);
-    print(PrintMbarrierInitAssembly(this, mbarrier, num_threads));
-  } else if (op->op.same_as(builtin::ptx_mbarrier_arrive())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    TVM_FFI_CHECK(op->args.size() == 1 || op->args.size() == 3)
-        << "ptx_mbarrier_arrive() expects 1 or 3 args";
-    std::string mbarrier = this->PrintExpr(op->args[0]);
-    bool remote = op->args.size() == 3;
-    std::string cta_id = remote ? this->PrintExpr(op->args[1]) : "";
-    std::string pred = remote ? this->PrintExpr(op->args[2]) : "";
-    print(PrintMbarrierArriveAssembly(this, mbarrier, remote, cta_id, pred));
-  } else if (op->op.same_as(builtin::ptx_mbarrier_arrive_expect_tx())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    TVM_FFI_CHECK(op->args.size() == 2 || op->args.size() == 4)
-        << "ptx_mbarrier_arrive_expect_tx() expects 2 "
-           "or 4 args";
-    std::string mbarrier = this->PrintExpr(op->args[0]);
-    std::string byte_count = this->PrintExpr(op->args[1]);
-    bool remote = op->args.size() == 4;
-    std::string cta_id = remote ? this->PrintExpr(op->args[2]) : "";
-    std::string pred = remote ? this->PrintExpr(op->args[3]) : "";
-    print(PrintMbarrierArriveExpectTxAssembly(this, mbarrier, byte_count, remote, cta_id, pred));
-  } else if (op->op.same_as(builtin::ptx_mbarrier_try_wait())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    std::string mbarrier = this->PrintExpr(op->args[0]);
-    std::string phase = this->PrintExpr(op->args[1]);
-    print(PrintMbarrierWaitAssembly(this, mbarrier, phase));
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_global_to_cluster())) {
     codegen_tags_.insert("cast_smem_ptr_to_int");
     int dim = Downcast<IntImm>(op->args[0])->value;

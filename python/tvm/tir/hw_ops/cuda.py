@@ -2308,6 +2308,118 @@ __forceinline__ __device__ uint32_t {func_name}(uint32_t mask) {{
     return cuda_func_call(func_name, mask, source_code=source_code)
 
 
+#################### mbarrier
+
+
+@register_codegen("ptx_mbarrier_init")
+def codegen_ptx_mbarrier_init(bar, thread_count):
+    func_name = "tvm_builtin_ptx_mbarrier_init"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(void* barrier, int thread_count) {{
+  unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
+  __asm__ __volatile__(
+    "mbarrier.init.shared.b64 [%0], %1;"
+    :: "r"(barrier_addr_int), "r"(thread_count)
+  );
+}}"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, bar, thread_count, source_code=source_code)
+
+
+@register_codegen("ptx_mbarrier_arrive")
+def codegen_ptx_mbarrier_arrive(bar, cta_id=None, pred=None):
+    remote = cta_id is not None and pred is not None
+    if not remote:
+        func_name = "tvm_builtin_ptx_mbarrier_arrive"
+        source_code = R"""
+__forceinline__ __device__ void {func_name}(void* barrier) {{
+  unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
+  __asm__ __volatile__(
+    "mbarrier.arrive.shared.b64 _, [%0];"
+    :: "r"(barrier_addr_int)
+  );
+}}"""
+        source_code = source_code.format(func_name=func_name)
+        return cuda_func_call(func_name, bar, source_code=source_code)
+    else:
+        func_name = "tvm_builtin_ptx_mbarrier_arrive_remote"
+        source_code = R"""
+__forceinline__ __device__ void {func_name}(void* barrier, int cta_id, int pred) {{
+  unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
+  asm volatile(
+      "{{\n\t"
+      ".reg .pred p;\n\t"
+      ".reg .b32 remAddr32;\n\t"
+      "setp.eq.u32 p, %2, 1;\n\t"
+      "@p mapa.shared::cluster.u32  remAddr32, %0, %1;\n\t"
+      "@p mbarrier.arrive.shared::cluster.b64  _, [remAddr32];\n\t"
+      "}}"
+      :
+      : "r"(barrier_addr_int), "r"(cta_id), "r"(pred));
+}}"""
+        source_code = source_code.format(func_name=func_name)
+        return cuda_func_call(func_name, bar, cta_id, pred, source_code=source_code)
+
+
+@register_codegen("ptx_mbarrier_arrive_expect_tx")
+def codegen_ptx_mbarrier_arrive_expect_tx(bar, byte_count, cta_id=None, pred=None):
+    remote = cta_id is not None and pred is not None
+    if not remote:
+        func_name = "tvm_builtin_ptx_mbarrier_arrive_expect_tx"
+        source_code = R"""
+__forceinline__ __device__ void {func_name}(void* barrier, int byte_count) {{
+  unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
+  __asm__ __volatile__(
+    "mbarrier.arrive.expect_tx.shared.b64 _, [%0], %1;"
+    :: "r"(barrier_addr_int), "r"(byte_count)
+  );
+}}"""
+        source_code = source_code.format(func_name=func_name)
+        return cuda_func_call(func_name, bar, byte_count, source_code=source_code)
+    else:
+        func_name = "tvm_builtin_ptx_mbarrier_arrive_expect_tx_remote"
+        source_code = R"""
+__forceinline__ __device__ void {func_name}(void* barrier, int byte_count, int cta_id, int pred) {{
+  unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
+  asm volatile(
+      "{{\n\t"
+      ".reg .pred p;\n\t"
+      ".reg .b32 remAddr32;\n\t"
+      "setp.eq.u32 p, %2, 1;\n\t"
+      "@p mapa.shared::cluster.u32  remAddr32, %0, %1;\n\t"
+      "@p mbarrier.arrive.expect_tx.shared::cluster.b64  _, [remAddr32], %3;\n\t"
+      "}}"
+      :
+      : "r"(barrier_addr_int), "r"(cta_id), "r"(pred), "r"(byte_count));
+}}"""
+        source_code = source_code.format(func_name=func_name)
+        return cuda_func_call(func_name, bar, byte_count, cta_id, pred, source_code=source_code)
+
+
+@register_codegen("ptx_mbarrier_try_wait")
+def codegen_ptx_mbarrier_try_wait(bar, phase):
+    func_name = "tvm_builtin_ptx_mbarrier_wait"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(void* barrier, int phase) {{
+   unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
+  asm volatile (
+      "{{\n"
+      ".reg .pred                P1;\n"
+      "LAB_WAIT:\n"
+      "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1;\n"
+      "@P1                       bra.uni DONE;\n"
+      "bra.uni                   LAB_WAIT;\n"
+      "DONE:\n"
+      "}}\n"
+      ::
+      "r"(barrier_addr_int),
+      "r"(phase)
+  );
+}}"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, bar, phase, source_code=source_code)
+
+
 ########################################################
 # PTX Miscellaneous
 ########################################################

@@ -161,46 +161,6 @@ std::string PrintArriveBarrierExpectTxAsm(const std::string& barrier,
 std::string PrintWaitBarrierAsm(const std::string& barrier);
 
 /*!
- * \brief Print ptx mbarrier.init.shared.b64
- * \param barrier: The name of the barrier in shared memory.
- * \param thread_count: The number of threads expected to arrive at the barrier.
- */
-std::string PrintMbarrierInitAssembly(CodeGenCUDA* cg, const std::string& barrier,
-                                      const std::string& thread_count);
-
-/*!
- * \brief Print ptx mbarrier.arrive.shared.b64
- * \param barrier: The name of the barrier in shared memory.
- * \param remote: Whether the barrier is remote.
- * \param cta_id: The id of the target CTA.
- * \param pred: The predicate value.
- */
-std::string PrintMbarrierArriveAssembly(codegen::CodeGenCUDA* cg, const std::string& barrier,
-                                        bool remote, const std::string& cta_id,
-                                        const std::string& pred);
-
-/*!
- * \brief Print ptx mbarrier.arrive.expect_tx.shared::cta.b64
- * \param barrier: The name of the barrier in shared memory.
- * \param byte_count: Increases the tx count of the mbarrier object to track completion of
- * addtional async transactions.
- * \param remote: Whether the barrier is remote.
- * \param cta_id: The id of the target CTA.
- * \param pred: The predicate value.
- */
-std::string PrintMbarrierArriveExpectTxAssembly(CodeGenCUDA* cg, const std::string& barrier,
-                                                const std::string& byte_count, bool remote,
-                                                const std::string& cta_id, const std::string& pred);
-
-/*!
- * \brief Print ptx mbarrier.try_wait.parity repeatedly until it returns true
- * \param barrier: The name of the barrier in shared memory.
- * \param phase: The phase bit to wait for.
- */
-std::string PrintMbarrierWaitAssembly(codegen::CodeGenCUDA* cg, const std::string& barrier,
-                                      const std::string& phase);
-
-/*!
  * \brief Print ptx cp.async.bulk.tensor.{dim}.shared::cluster.global.mbarrier::complete_tx::bytes
  * \param dim: The dimension of the tensor.
  * \param dst: The pointer to the destination shared memory.

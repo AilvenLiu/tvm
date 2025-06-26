@@ -73,11 +73,6 @@ from .op import (
     ptx_cp_async_commit_group,
     ptx_cp_async_wait_group,
     ptx_cp_async_mbarrier_arrive,
-    init_barrier_thread_count,
-    arrive_barrier,
-    arrive_barrier_expect_tx,
-    wait_barrier,
-    create_barriers,
 )
 from .op import (
     make_filled_simdgroup_matrix,
