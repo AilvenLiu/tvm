@@ -224,8 +224,9 @@ void CodeGenCUDA::BindThreadIndex(const IterVar& iv) {
   const auto& scope = runtime::ThreadScope::Create(iv->thread_tag);
   if (scope.IsClusterCtaIdx()) {
     codegen_tags_.insert("cooperative_groups");
-    std::string reg_name = std::string("cluster_ctaid.") + static_cast<char>('x' + scope.dim_index);
-    var_idmap_[iv->var.get()] = PrintPtxFetchRegisterAssembly(this, 32, reg_name);
+    std::string reg_name = std::string("cooperative_groups::cluster_group::block_index().") +
+                           static_cast<char>('x' + scope.dim_index);
+    var_idmap_[iv->var.get()] = CastFromTo(reg_name, DataType::UInt(32), iv->var.dtype());
   } else {
     var_idmap_[iv->var.get()] = CastFromTo(iv->thread_tag, DataType::UInt(32), iv->var.dtype());
   }
@@ -1459,9 +1460,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
 
     os << "}\n"
        << "// print_buffer ends\n";
-  } else if (op->op.same_as(builtin::ptx_fence_proxy())) {
-    std::string scope = Downcast<StringImm>(op->args[0])->value;
-    print(PrintCudaFenceProxyAsyncAssembly(this, scope));
   } else if (op->op.same_as(builtin::ptx_mbarrier_init())) {
     codegen_tags_.insert("cast_smem_ptr_to_int");
     std::string mbarrier = this->PrintExpr(op->args[0]);
@@ -1492,14 +1490,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string mbarrier = this->PrintExpr(op->args[0]);
     std::string phase = this->PrintExpr(op->args[1]);
     print(PrintMbarrierWaitAssembly(this, mbarrier, phase));
-  } else if (op->op.same_as(builtin::ptx_bar_arrive())) {
-    std::string name_bar_id = this->PrintExpr(op->args[0]);
-    std::string thread_count = this->PrintExpr(op->args[1]);
-    print(PrintNamedBarrierArriveAssembly(name_bar_id, thread_count));
-  } else if (op->op.same_as(builtin::ptx_bar_sync())) {
-    std::string name_bar_id = this->PrintExpr(op->args[0]);
-    std::string thread_count = this->PrintExpr(op->args[1]);
-    print(PrintNamedBarrierSyncAssembly(name_bar_id, thread_count));
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_global_to_cluster())) {
     codegen_tags_.insert("cast_smem_ptr_to_int");
     int dim = Downcast<IntImm>(op->args[0])->value;
@@ -1532,23 +1522,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string wait_cnt = this->PrintExpr(op->args[0]);
     bool read = Downcast<Bool>(op->args[1])->value;
     print(PrintCpAsyncBulkTensorWaitGroupAssembly(this, wait_cnt, read));
-  } else if (op->op.same_as(builtin::ptx_barrier_cluster_arrive())) {
-    std::string sem = Downcast<StringImm>(op->args[0])->value;
-    bool aligned = Downcast<Bool>(op->args[1])->value;
-    print(PrintBarrierClusterArriveAssembly(sem, aligned));
-  } else if (op->op.same_as(builtin::ptx_barrier_cluster_wait())) {
-    bool acquire = Downcast<Bool>(op->args[0])->value;
-    bool aligned = Downcast<Bool>(op->args[1])->value;
-    print(PrintBarrierClusterWaitAssembly(acquire, aligned));
-  } else if (op->op.same_as(builtin::ptx_elect_sync())) {
-    uint32_t mask = Downcast<IntImm>(op->args[0])->value;
-    os << PrintElectSyncAssembly(this, mask);
-  } else if (op->op.same_as(builtin::ptx_fence_mbarrier_init_release_cluster())) {
-    print(PrintFenceMbarrierInitReleaseClusterAssembly(this));
-  } else if (op->op.same_as(builtin::ptx_fetch_register())) {
-    int bits = Downcast<IntImm>(op->args[0])->value;
-    std::string reg = Downcast<StringImm>(op->args[1])->value;
-    os << PrintPtxFetchRegisterAssembly(this, bits, reg);
   } else if (op->op.same_as(builtin::ptx_wgmma_encode_matrix_descriptor())) {
     TVM_FFI_CHECK_EQ(5, op->args.size())
         << "The number of arguments for ptx_wgmma_encode_matrix_descriptor is incorrect";
@@ -1638,16 +1611,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       regs.push_back(this->PrintExpr(op->args[3 + i]));
     }
     print(PrintStmatrixSyncAlignedAssembly(num, trans, ptr, regs));
-  } else if (op->op.same_as(builtin::ptx_setmaxnreg())) {
-    bool inc = Downcast<Bool>(op->args[0])->value;
-    int nregs = Downcast<IntImm>(op->args[1])->value;
-    print(PrintSetMaxNRegAssembly(inc, nregs));
-  } else if (op->op.same_as(builtin::ptx_ld_global_acquire())) {
-    TVM_FFI_ICHECK_EQ(op->args.size(), 2U);
-    this->PrintIndent();
-    this->stream << PrintLdGlobalAcquireAssembly(this, this->PrintExpr(op->args[0]),
-                                                 this->PrintExpr(op->args[1]), op->args[0]->dtype);
-    this->stream << ";\n";
   } else if (op->op.same_as(builtin::cuda_func_call())) {
     print_cuda_func_call(op, os);
   } else if (op->op.same_as(builtin::thread_return())) {

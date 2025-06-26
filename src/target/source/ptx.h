@@ -161,12 +161,6 @@ std::string PrintArriveBarrierExpectTxAsm(const std::string& barrier,
 std::string PrintWaitBarrierAsm(const std::string& barrier);
 
 /*!
- * \brief Print ptx fence.proxy.async.{global, shared::cta, shared::cluster}
- * \param scope: The scope of the fence.
- */
-std::string PrintCudaFenceProxyAsyncAssembly(CodeGenCUDA* cg, std::string scope);
-
-/*!
  * \brief Print ptx mbarrier.init.shared.b64
  * \param barrier: The name of the barrier in shared memory.
  * \param thread_count: The number of threads expected to arrive at the barrier.
@@ -207,22 +201,6 @@ std::string PrintMbarrierWaitAssembly(codegen::CodeGenCUDA* cg, const std::strin
                                       const std::string& phase);
 
 /*!
- * \brief Print bar.arrive a, b
- * \param name_bar_id: The name of the barrier.
- * \param thread_count The number of threads expected to arrive at the barrier.
- */
-std::string PrintNamedBarrierArriveAssembly(const std::string& name_bar_id,
-                                            const std::string& thread_count);
-
-/*!
- * \brief Print bar.sync a, {b}
- * \param name_bar_id: The name of the barrier.
- * \param thread_count: The number of threads expected to arrive at the barrier.
- */
-std::string PrintNamedBarrierSyncAssembly(const std::string& name_bar_id,
-                                          const std::string& thread_count);
-
-/*!
  * \brief Print ptx cp.async.bulk.tensor.{dim}.shared::cluster.global.mbarrier::complete_tx::bytes
  * \param dim: The dimension of the tensor.
  * \param dst: The pointer to the destination shared memory.
@@ -260,13 +238,6 @@ std::string PrintCpAsyncBulkTensorCommitGroupAssembly(codegen::CodeGenCUDA* cg);
  */
 std::string PrintCpAsyncBulkTensorWaitGroupAssembly(codegen::CodeGenCUDA* cg, const std::string& N,
                                                     bool read);
-
-/*!
- * \brief Print predefined, read-only variables, which are visible as special registers in PTX.
- * \param bits: The number of bits of the register.
- * \param reg: The name of the register.
- */
-std::string PrintPtxFetchRegisterAssembly(CodeGenCUDA* cg, int bits, const std::string& reg);
 
 /*!
  * \brief Print "" : "+r"(reg) :: "memory"
@@ -350,31 +321,6 @@ std::string PrintEncodeWgmmaMatrixDescriptor(codegen::CodeGenCUDA* cg, const std
                                              const std::string& sdo, int swizzle);
 
 /*!
- * \brief Print barrier.cluster.arrive{.sem}{.aligned};
- * \param sem: Either release or relaxed or empty string.
- * \param aligned: Whether all threads in the warp must execute the same instruction.
- */
-std::string PrintBarrierClusterArriveAssembly(const std::string& sem, bool aligned);
-
-/*!
- * \brief Print barrier.cluster.wait{.acquire}{.aligned};
- * \param acquire: The memory synchronization
- * \param aligned: Whether all threads in the warp must execute the same instruction.
- */
-std::string PrintBarrierClusterWaitAssembly(bool acquire, bool aligned);
-
-/*!
- * \brief Print elec.sync _|p membermask
- * \param membermask: The mask for the synchronization.
- */
-std::string PrintElectSyncAssembly(CodeGenCUDA* cg, uint32_t membermask);
-
-/*!
- * \brief Print ptx_fence_mbarrier_init_release_cluster
- */
-std::string PrintFenceMbarrierInitReleaseClusterAssembly(codegen::CodeGenCUDA* cg);
-
-/*!
  * \brief Print stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r;
  * \param num: The number of 8x8 matrices to store.
  * \param trans: true if the matrix is stored in col-major format.
@@ -384,21 +330,6 @@ std::string PrintFenceMbarrierInitReleaseClusterAssembly(codegen::CodeGenCUDA* c
 std::string PrintStmatrixSyncAlignedAssembly(int num, bool trans, const std::string& ptr,
                                              const std::vector<std::string>& vars);
 
-/*!
- * \brief Print setmaxnreg.action.sync.aligned.u32 imm-reg-count
- * \param inc: true if the register count should be incremented.
- * \param reg_count: The number of registers to set.
- */
-std::string PrintSetMaxNRegAssembly(bool inc, int reg_count);
-
-/*!
- * \brief Print ld.global.acquire.gpu.{type} %0, [%1].
- * \param res: The register to store the result.
- * \param addr: The address of the global memory.
- * \param dtype: The data type of the global memory.
- */
-std::string PrintLdGlobalAcquireAssembly(codegen::CodeGenCUDA* cg, const std::string& res,
-                                         const std::string& addr, DataType dtype);
 }  // namespace codegen
 }  // namespace tvm
 #endif  // TVM_TARGET_SOURCE_PTX_H_

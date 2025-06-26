@@ -873,38 +873,6 @@ std::string PrintWaitBarrierAsm(const std::string& barrier) {
   return predicated_asm_code;
 }
 
-std::string PrintCudaFenceProxyAsyncAssembly(CodeGenCUDA* cg, std::string scope) {
-  std::string func_code = R"(
-__forceinline__ __device__ void {func_name}() {
-  __asm__ __volatile__("fence.proxy.async.{scope};");
-}
-)";
-  std::string caller_code = "{func_name}();\n";
-
-  std::string func_name = "ptx_cuda_fence_proxy_async_{scope}";
-  {  // func name
-    Replacer replacer;
-    replacer.register_rule("{scope}", scope);
-    func_name = replacer.rewrite(func_name);
-  }
-  {  // func code
-    Replacer replacer;
-    replacer.register_rule("{func_name}", func_name);
-    if (scope == "shared") {
-      scope = "shared::cta";
-    }
-    replacer.register_rule("{scope}", scope);
-    func_code = replacer.rewrite(func_code);
-  }
-  {  // caller code
-    Replacer replacer;
-    replacer.register_rule("{func_name}", func_name);
-    caller_code = replacer.rewrite(caller_code);
-  }
-  cg->AddUtilFunction(func_name, func_code);
-  return caller_code;
-}
-
 std::string PrintMbarrierInitAssembly(CodeGenCUDA* cg, const std::string& barrier,
                                       const std::string& thread_count) {
   std::string func_code = R"(
@@ -1108,32 +1076,6 @@ __forceinline__ __device__ void {func_name}(void* barrier, int phase) {
   }
   cg->AddUtilFunction(func_name, func_code);
   return caller_code;
-}
-
-std::string PrintNamedBarrierArriveAssembly(const std::string& name_bar_id,
-                                            const std::string& thread_count) {
-  std::string asm_code = R"(/* T.ptx_bar_arrive() */ {
-  asm volatile("bar.arrive %0, %1;" : : "r"({name_bar_id}), "r"({thread_count}));
-}
-)";
-
-  Replacer replacer;
-  replacer.register_rule("{name_bar_id}", name_bar_id);
-  replacer.register_rule("{thread_count}", thread_count);
-  return replacer.rewrite(asm_code);
-}
-
-std::string PrintNamedBarrierSyncAssembly(const std::string& name_bar_id,
-                                          const std::string& thread_count) {
-  std::string asm_code = R"(/* T.ptx_bar_sync() */ {
-  asm volatile("bar.sync %0, %1;" : : "r"({name_bar_id}), "r"({num_threads}));
-}
-)";
-
-  Replacer replacer;
-  replacer.register_rule("{name_bar_id}", name_bar_id);
-  replacer.register_rule("{num_threads}", thread_count);
-  return replacer.rewrite(asm_code);
 }
 
 std::string PrintCpAsyncBulkTensorGlobalToClusterAssembly(
@@ -1353,31 +1295,6 @@ __forceinline__ __device__ void {func_name}() {
   func_code = replacer.rewrite(func_code);
   cg->AddUtilFunction(func_name, func_code);
   return func_name + "<" + N + ", " + std::to_string(read) + ">();\n";
-}
-
-std::string PrintPtxFetchRegisterAssembly(codegen::CodeGenCUDA* cg, int bits,
-                                          const std::string& reg) {
-  std::string func_code = R"(
-__forceinline__ __device__ int{bits}_t {func_name}() {
-  uint{bits}_t x;
-  asm volatile("mov.u{bits} %0, %{reg};\n" : "=r"(x) : );
-  return (int{bits}_t)x;
-}
-)";
-  TVM_FFI_CHECK(bits == 32 || bits == 64) << "Only support 32/64 bits for ptx_fetch_register.";
-
-  std::string reg_rp = reg;
-  std::replace(reg_rp.begin(), reg_rp.end(), '.', '_');
-  std::string func_name = "ptx_" + reg_rp;
-
-  Replacer replacer;
-  replacer.register_rule("{bits}", std::to_string(bits));
-  replacer.register_rule("{func_name}", func_name);
-  replacer.register_rule("{reg}", reg);
-  func_code = replacer.rewrite(func_code);
-
-  cg->AddUtilFunction(func_name, func_code);
-  return func_name + "()";
 }
 
 std::string PrintWGMMAFenceOpearandAssembly(CodeGenCUDA* cg, const std::string& reg,
@@ -1703,75 +1620,6 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo,
   return caller_code;
 }
 
-std::string PrintBarrierClusterArriveAssembly(const std::string& sem, bool aligned) {
-  std::string asm_code = R"(/* T.ptx_barrier_cluster_arrive() */ {
-  asm volatile("barrier.cluster.arrive{sem}{aligned};\n" : :);
-}
-)";
-  Replacer replacer;
-  replacer.register_rule("{sem}", sem.empty() ? "" : "." + sem);
-  replacer.register_rule("{aligned}", aligned ? ".aligned" : "");
-  return replacer.rewrite(asm_code);
-}
-
-std::string PrintBarrierClusterWaitAssembly(bool acquire, bool aligned) {
-  std::string asm_code = R"(/* T.ptx_barrier_cluster_wait() */ {
-  asm volatile("barrier.cluster.wait{acquire}{aligned};\n" : :);
-}
-)";
-  Replacer replacer;
-  replacer.register_rule("{acquire}", acquire ? ".acquire" : "");
-  replacer.register_rule("{aligned}", aligned ? ".aligned" : "");
-  return replacer.rewrite(asm_code);
-}
-
-std::string PrintElectSyncAssembly(CodeGenCUDA* cg, uint32_t mask) {
-  std::string func_code = R"(
-__forceinline__ __device__ uint32_t {func_name}(uint32_t mask) {
-  uint32_t pred = 0;
-  uint32_t laneid = 0;
-  asm volatile(
-      "{\n"
-      ".reg .b32 %rx;\n"
-      ".reg .pred %px;\n"
-      "     elect.sync %rx|%px, %2;\n"
-      "@%px mov.s32 %1, 1;\n"
-      "     mov.s32 %0, %rx;\n"
-      "}\n"
-      : "+r"(laneid), "+r"(pred)
-      : "r"(mask));
-  return pred;
-}  
-)";
-  std::string func_name = "elect_one_sync";
-
-  Replacer replacer;
-  replacer.register_rule("{func_name}", func_name);
-  func_code = replacer.rewrite(func_code);
-
-  cg->AddUtilFunction(func_name, func_code);
-  return func_name + "(" + std::to_string(mask) + ")";
-}
-
-std::string PrintFenceMbarrierInitReleaseClusterAssembly(codegen::CodeGenCUDA* cg) {
-  std::string func_code = R"(
-__forceinline__ __device__ void {func_name}() {
-  asm volatile(
-      "{\n\t"
-      "fence.mbarrier_init.release.cluster; \n"
-      "}" ::);
-}
-)";
-  std::string func_name = "ptx_fence_mbarrier_init_release_cluster";
-
-  Replacer replacer;
-  replacer.register_rule("{func_name}", func_name);
-  func_code = replacer.rewrite(func_code);
-
-  cg->AddUtilFunction(func_name, func_code);
-  return func_name + "();\n";
-}
-
 std::string PrintStmatrixSyncAlignedAssembly(int num, bool trans, const std::string& ptr,
                                              const std::vector<std::string>& vars) {
   std::string asm_code = R"(/* T.store_matrix_sync_aligned() */ {
@@ -1804,57 +1652,6 @@ std::string PrintStmatrixSyncAlignedAssembly(int num, bool trans, const std::str
   }
   replacer.register_rule("{half_pairs}", half_pairs);
   return replacer.rewrite(asm_code);
-}
-
-std::string PrintSetMaxNRegAssembly(bool inc, int reg_count) {
-  std::string asm_code = R"(/* T.set_maxnreg() */ {
-   asm volatile( "setmaxnreg{action}.sync.aligned.u32 %0;\n" : : "n"({reg_count}) );
-}
-)";
-  Replacer replacer;
-  replacer.register_rule("{action}", inc ? ".inc" : ".dec");
-  replacer.register_rule("{reg_count}", std::to_string(reg_count));
-  return replacer.rewrite(asm_code);
-}
-
-std::string PrintLdGlobalAcquireAssembly(codegen::CodeGenCUDA* cg, const std::string& res,
-                                         const std::string& addr, DataType dtype) {
-  std::string func_code = R"(
-__forceinline__ __device__ {dtype} {func_name}({dtype}* addr) {
-  {dtype} res;
-  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
-  asm volatile ("ld.global.acquire.gpu.{type} %0, [%1];\n" : "=r"(res) : "l"(addr));  
-  #else
-  asm volatile ("ld.global.cg.{type} %0, [%1];\n" : "=r"(res) : "l"(addr));  
-  #endif
-  return res;
-}
-)";
-  std::string dtype_str;
-  std::string type;
-  if (dtype == DataType::UInt(32)) {
-    dtype_str = "uint32_t";
-    type = "b32";
-  } else if (dtype == DataType::Int(32)) {
-    dtype_str = "int32_t";
-    type = "b32";
-  } else if (dtype == DataType::UInt(64)) {
-    dtype_str = "uint64_t";
-    type = "b64";
-  } else if (dtype == DataType::Int(64)) {
-    dtype_str = "int64_t";
-    type = "b64";
-  } else {
-    LOG(FATAL) << "Only support uint32/int32/uint64/int64 for ld.global.acquire.";
-  }
-  std::string func_name = "ptx_ld_global_acquire";
-  Replacer replacer;
-  replacer.register_rule("{func_name}", func_name);
-  replacer.register_rule("{dtype}", dtype_str);
-  replacer.register_rule("{type}", type);
-  func_code = replacer.rewrite(func_code);
-  cg->AddUtilFunction(func_name, func_code);
-  return res + " = " + func_name + "(" + addr + ")";
 }
 
 }  // namespace codegen

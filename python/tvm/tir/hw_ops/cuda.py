@@ -790,6 +790,55 @@ def register_codegen(op, backend="cuda"):
     return decorator
 
 
+class PTXDataType(enum.Enum):
+    """
+    A Python equivalent of the provided C++ DataType enum class.
+
+    Inherits from IntEnum so that members behave both as enum members
+    and as integers, mirroring the C++ behavior.
+
+    see also src/target/source/ptx.cc
+    """
+
+    INT4 = 0
+    UINT4 = 1
+    INT8 = 2
+    UINT8 = 3
+    INT16 = 4
+    UINT16 = 5
+    INT32 = 6
+    UINT32 = 7
+    INT64 = 8
+    UINT64 = 9
+    FLOAT4_E2M1FN = 10
+    FLOAT6_E2M3FN = 11
+    FLOAT6_E3M2FN = 12
+    FLOAT8_E4M3FN = 13
+    FLOAT8_E4M3FNUZ = 14
+    FLOAT8_E5M2 = 15
+    FLOAT8_E8M0FNU = 16
+    FLOAT16 = 17
+    BFLOAT16 = 18
+    FLOAT16X2 = 19
+    FLOAT32 = 20
+    TENSOR_FLOAT32 = 21
+    FLOAT64 = 22
+    BIT1 = 23
+    BIT8 = 24
+    BIT16 = 25
+    BIT32 = 26
+    BIT64 = 27
+
+    @classmethod
+    def from_string(cls, s_type: str) -> "PTXDataType":
+        return PTXDataType(from_string_func(s_type))
+
+
+########################################################
+# PTX tcgen05
+########################################################
+
+
 @register_codegen("ptx_tcgen05_alloc")
 def codegen_ptx_tcgen05_alloc(dst_shared_ptr, n_cols, n_cta_group):
     n_cols = int(n_cols)
@@ -1146,50 +1195,6 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo,
 
 
 from_string_func = tvm.ffi.get_global_func("tir.hw_ops.cuda.DTypeFromString")
-
-
-class PTXDataType(enum.Enum):
-    """
-    A Python equivalent of the provided C++ DataType enum class.
-
-    Inherits from IntEnum so that members behave both as enum members
-    and as integers, mirroring the C++ behavior.
-
-    see also src/target/source/ptx.cc
-    """
-
-    INT4 = 0
-    UINT4 = 1
-    INT8 = 2
-    UINT8 = 3
-    INT16 = 4
-    UINT16 = 5
-    INT32 = 6
-    UINT32 = 7
-    INT64 = 8
-    UINT64 = 9
-    FLOAT4_E2M1FN = 10
-    FLOAT6_E2M3FN = 11
-    FLOAT6_E3M2FN = 12
-    FLOAT8_E4M3FN = 13
-    FLOAT8_E4M3FNUZ = 14
-    FLOAT8_E5M2 = 15
-    FLOAT8_E8M0FNU = 16
-    FLOAT16 = 17
-    BFLOAT16 = 18
-    FLOAT16X2 = 19
-    FLOAT32 = 20
-    TENSOR_FLOAT32 = 21
-    FLOAT64 = 22
-    BIT1 = 23
-    BIT8 = 24
-    BIT16 = 25
-    BIT32 = 26
-    BIT64 = 27
-
-    @classmethod
-    def from_string(cls, s_type: str) -> "PTXDataType":
-        return PTXDataType(from_string_func(s_type))
 
 
 def _get_tcgen05_mma_kind(
@@ -2175,6 +2180,223 @@ __forceinline__ __device__ void {func_name}(uint32_t taddr) {{
     return cuda_func_call(func_name, taddr, source_code=source_code)
 
 
+########################################################
+# PTX Parallel Synchronization and Communication Instructions
+########################################################
+
+
+@register_codegen("ptx_bar_arrive")
+def codegen_ptx_bar_arrive(name_bar_id, thread_count):
+    func_name = "tvm_builtin_ptx_bar_arrive"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(int name_bar_id, int thread_count) {{
+    asm volatile("bar.arrive %0, %1;" : : "r"(name_bar_id), "r"(thread_count));
+}}
+"""
+    source_code = source_code.format(func_name=func_name, name_bar_id=name_bar_id)
+    return cuda_func_call(func_name, name_bar_id, thread_count, source_code=source_code)
+
+
+@register_codegen("ptx_bar_sync")
+def codegen_ptx_bar_sync(name_bar_id, thread_count):
+    func_name = "tvm_builtin_ptx_bar_sync"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}(int name_bar_id, int thread_count) {{
+    asm volatile("bar.sync %0, %1;" : : "r"(name_bar_id), "r"(thread_count));
+}}
+"""
+    source_code = source_code.format(func_name=func_name, name_bar_id=name_bar_id)
+    return cuda_func_call(func_name, name_bar_id, thread_count, source_code=source_code)
+
+
+@register_codegen("ptx_fence_proxy")
+def codegen_ptx_fence_proxy(scope):
+    scope = str(scope)[1:-1]
+    func_name = f"tvm_builtin_ptx_fence_proxy_{scope}"
+
+    if scope == "shared":
+        ptx_scope = ".async.shared::cta"
+    elif scope == "global":
+        ptx_scope = ".async.global"
+    else:
+        raise ValueError(f"Invalid scope for ptx_fence_proxy: {scope}")
+
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+  __asm__ __volatile__("fence.proxy{ptx_scope};");
+}}"""
+    source_code = source_code.format(func_name=func_name, ptx_scope=ptx_scope)
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_fence_mbarrier_init_release_cluster")
+def codegen_ptx_fence_mbarrier_init_release_cluster():
+    func_name = "tvm_builtin_ptx_fence_mbarrier_init_release_cluster"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+    asm volatile("fence.mbarrier_init.release.cluster;");
+}}
+"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_barrier_cluster_arrive")
+def codegen_ptx_barrier_cluster_arrive(sem, aligned):
+    sem = str(sem)[1:-1]
+    aligned = bool(aligned)
+
+    sem_name = "" if len(sem) == 0 else f"_{sem}"
+    aligned_name = "_aligned" if aligned else ""
+
+    sem_inst = "" if len(sem) == 0 else f".{sem}"
+    aligned_inst = ".aligned" if aligned else ""
+
+    func_name = f"tvm_builtin_ptx_barrier_cluster_arrive{sem_name}{aligned_name}"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+    asm volatile("barrier.cluster.arrive{sem_inst}{aligned_inst};\n" : :);
+}}
+"""
+    source_code = source_code.format(
+        func_name=func_name, sem_inst=sem_inst, aligned_inst=aligned_inst
+    )
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_barrier_cluster_wait")
+def codegen_ptx_barrier_cluster_wait(acquire, aligned):
+    acquire_name = "_acquire" if bool(acquire) else ""
+    aligned_name = "_aligned" if bool(aligned) else ""
+
+    acquire_inst = ".acquire" if bool(acquire) else ""
+    aligned_inst = ".aligned" if aligned else ""
+
+    func_name = f"tvm_builtin_ptx_barrier_cluster_wait{acquire_name}{aligned_name}"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+    asm volatile("barrier.cluster.wait{acquire_inst}{aligned_inst};\n" : :);
+}}
+"""
+    source_code = source_code.format(
+        func_name=func_name, acquire_inst=acquire_inst, aligned_inst=aligned_inst
+    )
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_elect_sync")
+def codegen_ptx_elect_sync(mask):
+    func_name = "tvm_builtin_ptx_elect_sync"
+    source_code = R"""
+__forceinline__ __device__ uint32_t {func_name}(uint32_t mask) {{
+  uint32_t pred = 0;
+  uint32_t laneid = 0;
+  asm volatile(
+      "{{\n"
+      ".reg .b32 %rx;\n"
+      ".reg .pred %px;\n"
+      "     elect.sync %rx|%px, %2;\n"
+      "@%px mov.s32 %1, 1;\n"
+      "     mov.s32 %0, %rx;\n"
+      "}}\n"
+      : "+r"(laneid), "+r"(pred)
+      : "r"(mask));
+  return pred;
+}}
+"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, mask, source_code=source_code)
+
+
+########################################################
+# PTX Miscellaneous
+########################################################
+
+
+@register_codegen("ptx_setmaxnreg")
+def codegen_ptx_setmaxnreg(inc, nreg):
+    inc = bool(inc)
+    nreg = int(nreg)
+    action = "inc" if inc else "dec"
+    func_name = f"tvm_builtin_ptx_setmaxnreg_{action}_{nreg}    "
+    source_code = R"""
+__forceinline__ __device__ void {func_name}() {{
+    asm volatile( "setmaxnreg.{action}.sync.aligned.u32 %0;\n" : : "n"({nreg}) );
+}}
+"""
+    source_code = source_code.format(func_name=func_name, action=action, nreg=nreg)
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_ld_global_acquire")
+def codegen_ptx_ld_global_acquire(res, addr):
+    dtype = str(res.dtype)
+    if dtype == "uint32":
+        dtype_str, type_str = "uint32_t", "b32"
+    elif dtype == "int32":
+        dtype_str, type_str = "int32_t", "b32"
+    elif dtype == "uint64":
+        dtype_str, type_str = "uint64_t", "b64"
+    elif dtype == "int64":
+        dtype_str, type_str = "int64_t", "b64"
+    else:
+        raise ValueError(f"Unsupported data type for ld.global.acquire: {dtype}")
+
+    func_name = f"tvm_builtin_ptx_ld_global_acquire_{type_str}"
+    source_code = R"""
+__forceinline__ __device__ void {func_name}({dtype_str}& res,{dtype_str}* addr) {{
+  #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+  asm volatile ("ld.global.acquire.gpu.{type_str} %0, [%1];\n" : "=r"(res) : "l"(addr));
+  #else
+  asm volatile ("ld.global.cg.{type_str} %0, [%1];\n" : "=r"(res) : "l"(addr));
+  #endif
+}}"""
+    source_code = source_code.format(func_name=func_name, dtype_str=dtype_str, type_str=type_str)
+    return cuda_func_call(func_name, res, addr, source_code=source_code)
+
+
+@register_codegen("ptx_map_shared_rank")
+def codegen_ptx_map_shared_rank(ptr, rank):
+    func_name = "tvm_builtin_ptx_map_shared_rank"
+    source_code = R"""
+__forceinline__ __device__ uint64_t {func_name}(void* addr, uint32_t rank) {{
+    uint64_t result;
+    asm volatile("mapa.u64  %0, %1, %2;\n"
+                : "=l"(result)
+                : "l"(reinterpret_cast<uint64_t>(addr)), "r"(rank));
+    return result;
+}}
+"""
+    source_code = source_code.format(func_name=func_name)
+    return cuda_func_call(func_name, ptr, rank, source_code=source_code, return_type="uint64")
+
+
+@register_codegen("ptx_fetch_register")
+def codegen_ptx_fetch_register(bits, reg):
+    bits = int(bits)
+    reg = str(reg)[1:-1]
+
+    if bits not in [32, 64]:
+        raise ValueError(f"Only support 32/64 bits for ptx_fetch_register, but got {bits}.")
+
+    func_name_safe_reg = reg.replace(".", "_")
+
+    func_name = f"tvm_builtin_ptx_fetch_register_{func_name_safe_reg}"
+    source_code = R"""
+__forceinline__ __device__ int{bits}_t {func_name}() {{
+  uint{bits}_t x;
+  asm volatile("mov.u{bits} %0, %{reg};\\n" : "=r"(x) : );
+  return (int{bits}_t)x;
+}}"""
+    source_code = source_code.format(func_name=func_name, bits=bits, reg=reg)
+    return cuda_func_call(func_name, source_code=source_code, return_type=f"int{bits}")
+
+
+########################################################
+# Timer
+########################################################
+
+
 @register_codegen("timer_init_cuda")
 def codegen_timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
 
@@ -2254,6 +2476,11 @@ __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffe
     ), ["get_time_stamp"]
 
 
+########################################################
+# CUDA C++ miscellaneous
+########################################################
+
+
 @register_codegen("cuda_atomic_add")
 def codegen_cuda_atomic_add(res_addr, value):
     func_name = "tvm_builtin_cuda_atomic_add"
@@ -2305,21 +2532,6 @@ __forceinline__ __device__ void {func_name}(uint64_t time) {{
     source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, time, source_code=source_code)
 
-
-@register_codegen("ptx_map_shared_rank")
-def codegen_ptx_map_shared_rank(ptr, rank):
-    func_name = "tvm_builtin_ptx_map_shared_rank"
-    source_code = R"""
-__forceinline__ __device__ uint64_t {func_name}(void* addr, uint32_t rank) {{
-    uint64_t result;
-    asm volatile("mapa.u64  %0, %1, %2;\n"
-                : "=l"(result)
-                : "l"(reinterpret_cast<uint64_t>(addr)), "r"(rank));
-    return result;
-}}
-"""
-    source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, ptr, rank, source_code=source_code, return_type="uint64")
 
 
 @register_codegen("cuda_atomic_cas")

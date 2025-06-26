@@ -2403,26 +2403,12 @@ class CUDANamespace:
     """The CUDA intrinsics submodule."""
 
     def __init__(self):
-        self.barrier = CUDABarrierNamespace()
         self.atomic_add = _op_wrapper(_tir_op.cuda_atomic_add)
         self.thread_fence = _op_wrapper(_tir_op.cuda_thread_fence)
         self.syncthreads_and = _op_wrapper(_tir_op.cuda_syncthreads_and)
         self.nano_sleep = _op_wrapper(_tir_op.cuda_nano_sleep)
         self.atomic_cas = _op_wrapper(_tir_op.cuda_atomic_cas)
         self.func_call = _op_wrapper(_tir_op.cuda_func_call)
-
-
-class CUDABarrierNamespace:
-    """The CUDA barrier intrinsics submodule."""
-
-    def __init__(self):
-        self.init = _op_wrapper(_tir_op.cuda_barrier_init)
-        self.arrive = _op_wrapper(_tir_op.cuda_barrier_arrive)
-        self.wait = _op_wrapper(_tir_op.cuda_barrier_wait)
-        self.arrive_and_wait = _op_wrapper(_tir_op.cuda_barrier_arrive_and_wait)
-
-    def __call__(self, *args, **kwds):
-        return _op_wrapper(_tir_op.cuda_barrier_create)(*args, **kwds)
 
 
 class NKINamespace:

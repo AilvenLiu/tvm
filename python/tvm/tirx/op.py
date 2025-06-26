@@ -3736,107 +3736,6 @@ def create_barriers(barrier_count):
     return call_intrin("", "tirx.create_barriers", barrier_count)
 
 
-def cuda_barrier_create(thread_scope, barrier_count, barrier_arr_id):
-    """TVM intrinsic to create N cuda::barrier
-
-    Parameters
-    ----------
-    thread_scope : int
-        The thread scope.
-
-    barrier_count : int
-        The number of barriers to create.
-
-    barrier_arr_id : int
-        The barrier array ID.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.cuda_barrier_create", thread_scope, barrier_count, barrier_arr_id)
-
-
-def cuda_barrier_init(thread_count, barrier_arr_id, barrier_id):
-    """TVM intrinsic to initialize cuda::barrier
-
-    Parameters
-    ----------
-    thread_count : int
-        The number of threads expected to arrive at the barrier.
-
-    barrier_arr_id : int
-        The barrier array ID.
-
-    barrier_id : int
-        The barrier ID.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.cuda_barrier_init", thread_count, barrier_arr_id, barrier_id)
-
-
-def cuda_barrier_arrive(barrier_id, barrier_arr_id):
-    """TVM intrinsic to arrive at cuda::barrier
-
-    Parameters
-    ----------
-    barrier_id : int
-        The barrier ID.
-
-    barrier_arr_id : int
-        The barrier array ID.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.cuda_barrier_arrive", barrier_id, barrier_arr_id)
-
-
-def cuda_barrier_wait(barrier_id, barrier_arr_id):
-    """TVM intrinsic to wait at cuda::barrier
-
-    Parameters
-    ----------
-    barrier_id : int
-        The barrier ID.
-
-    barrier_arr_id : int
-        The barrier array ID.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.cuda_barrier_wait", barrier_id, barrier_arr_id)
-
-
-def cuda_barrier_arrive_and_wait(barrier_id, barrier_arr_id):
-    """TVM intrinsic to arrive and wait at cuda::barrier
-
-    Parameters
-    ----------
-    barrier_id : int
-        The barrier ID.
-
-    barrier_arr_id : int
-        The barrier array ID.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.cuda_barrier_arrive_and_wait", barrier_id, barrier_arr_id)
-
-
 def ptx_fence_proxy(scope: str):
     """TVM intrinsic to call cuda::ptx::fence_proxy_async
 
@@ -7599,7 +7498,7 @@ def cuda_atomic_cas(ptr, old_val, new_val):
     """TVM intrinsic to call cuda atomic cas instruction
 
     Parameters
-    ----------  
+    ----------
     ptr: PrimExpr
         The pointer to the memory location.
 
@@ -7616,6 +7515,7 @@ def cuda_atomic_cas(ptr, old_val, new_val):
     """
     old_val = tir.convert(old_val)
     return call_intrin(old_val.dtype, "tir.cuda_atomic_cas", ptr, old_val, new_val)
+
 
 ########################################################
 # NKI builtins
