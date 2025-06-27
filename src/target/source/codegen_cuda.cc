@@ -1402,38 +1402,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
 
     os << "}\n"
        << "// print_buffer ends\n";
-  } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_global_to_cluster())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    int dim = Downcast<IntImm>(op->args[0])->value;
-    TVM_FFI_CHECK_EQ(op->args.size(), 6 + dim);
-    std::string dst = this->PrintExpr(op->args[1]);
-    std::string bar = this->PrintExpr(op->args[2]);
-    std::string tensormap = this->PrintExpr(op->args[3]);
-    std::vector<std::string> coords;
-    for (int i = 0; i < dim; ++i) {
-      coords.push_back(this->PrintExpr(op->args[4 + i]));
-    }
-    int cta_mask = Downcast<IntImm>(op->args[4 + dim])->value;
-    int cta_group = Downcast<IntImm>(op->args[5 + dim])->value;
-    print(PrintCpAsyncBulkTensorGlobalToClusterAssembly(this, dim, dst, bar, tensormap, cta_mask,
-                                                        cta_group, coords));
-  } else if (op->op.same_as(builtin::ptx_cp_async_bulk_tensor_shared_to_global())) {
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    int dim = Downcast<IntImm>(op->args[0])->value;
-    TVM_FFI_CHECK_EQ(op->args.size(), 3 + dim);
-    std::string src = this->PrintExpr(op->args[1]);
-    std::string tensormap = this->PrintExpr(op->args[2]);
-    std::vector<std::string> coords;
-    for (int i = 0; i < dim; ++i) {
-      coords.push_back(this->PrintExpr(op->args[3 + i]));
-    }
-    print(PrintCpAsyncBulkTensorSharedToGlobalAssembly(this, dim, src, tensormap, coords));
-  } else if (op->op.same_as(builtin::ptx_cp_async_bulk_commit_group())) {
-    print(PrintCpAsyncBulkTensorCommitGroupAssembly(this));
-  } else if (op->op.same_as(builtin::ptx_cp_async_bulk_wait_group())) {
-    std::string wait_cnt = this->PrintExpr(op->args[0]);
-    bool read = Downcast<Bool>(op->args[1])->value;
-    print(PrintCpAsyncBulkTensorWaitGroupAssembly(this, wait_cnt, read));
   } else if (op->op.same_as(builtin::ptx_wgmma_encode_matrix_descriptor())) {
     TVM_FFI_CHECK_EQ(5, op->args.size())
         << "The number of arguments for ptx_wgmma_encode_matrix_descriptor is incorrect";

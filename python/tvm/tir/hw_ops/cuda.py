@@ -858,7 +858,7 @@ def codegen_ptx_tcgen05_alloc(dst_shared_ptr, n_cols, n_cta_group):
         )
 
     func_name = f"tvm_builtin_ptx_tcgen05_alloc_cta_group_{n_cta_group}"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(void* dst, int nCols) {{
   unsigned int smem_addr = __cvta_generic_to_shared(dst);
     __asm__ __volatile__(
@@ -868,7 +868,6 @@ __forceinline__ __device__ void {func_name}(void* dst, int nCols) {{
     );
 }}
 """
-    source_code = source_code.format(func_name=func_name, n_cta_group=n_cta_group)
     return cuda_func_call(func_name, dst_shared_ptr, n_cols, source_code=source_code)
 
 
@@ -890,7 +889,7 @@ def codegen_ptx_tcgen05_dealloc(taddr, n_cols, n_cta_group):
         )
 
     func_name = f"tvm_builtin_ptx_tcgen05_dealloc_cta_group_{n_cta_group}"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t taddr, int nCols) {{
     __asm__ __volatile__(
       "tcgen05.dealloc.cta_group::{n_cta_group}.sync.aligned.b32 %0, %1;"
@@ -899,7 +898,6 @@ __forceinline__ __device__ void {func_name}(uint32_t taddr, int nCols) {{
     );
 }}
 """
-    source_code = source_code.format(func_name=func_name, n_cta_group=n_cta_group)
     return cuda_func_call(func_name, taddr, n_cols, source_code=source_code)
 
 
@@ -913,7 +911,7 @@ def codegen_ptx_tcgen05_relinquish_alloc_permit(n_cta_group):
         )
 
     func_name = f"tvm_builtin_ptx_tcgen05_relinquish_alloc_permit_cta_group_{n_cta_group}"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
     __asm__ __volatile__(
         "tcgen05.relinquish_alloc_permit.cta_group::{n_cta_group}.sync.aligned;"
@@ -921,31 +919,28 @@ __forceinline__ __device__ void {func_name}() {{
     );
 }}
 """
-    source_code = source_code.format(func_name=func_name, n_cta_group=n_cta_group)
     return cuda_func_call(func_name, source_code=source_code)
 
 
 @register_codegen("ptx_tcgen05_fence_before_thread_sync")
 def codegen_ptx_tcgen05_fence_before_thread_sync():
     func_name = "tvm_builtin_ptx_tcgen05_fence_before_thread_sync"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-  asm volatile("tcgen05.fence::before_thread_sync;\n" ::: "memory");
+  asm volatile("tcgen05.fence::before_thread_sync;\\n" ::: "memory");
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, source_code=source_code)
 
 
 @register_codegen("ptx_tcgen05_fence_after_thread_sync")
 def codegen_ptx_tcgen05_fence_after_thread_sync():
     func_name = "tvm_builtin_ptx_tcgen05_fence_after_thread_sync"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-  asm volatile("tcgen05.fence::after_thread_sync;\n" ::: "memory");
+  asm volatile("tcgen05.fence::after_thread_sync;\\n" ::: "memory");
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, source_code=source_code)
 
 
@@ -1003,30 +998,17 @@ def codegen_ptx_tcgen05_ld(src_addr, row_offset, col_offset, shape, num, pack, *
     pack_str = ".pack::16b" if pack else ""
 
     func_name = "tvm_builtin_ptx_tcgen05_ld_" + shape + "_x" + str(num) + ("_pack" if pack else "")
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t src_addr, uint32_t row_offset, uint32_t col_offset, {reg_args}) {{
     asm volatile(
         "tcgen05.ld.sync.aligned.{shape}.x{num}{pack_str}.b32 "
         "{{{regs_placeholder}}}, "
-        "[%{src_placeholder}]{imm_arg};\n"
+        "[%{src_placeholder}]{imm_arg};\\n"
         :  {reg_operands}
         :  "r"(get_tmem_addr(src_addr, row_offset, col_offset))
     );
-}}"""
-    source_code = source_code.format(
-        func_name=func_name,
-        reg_args=reg_args,
-        shape=shape,
-        num=num,
-        pack_str=pack_str,
-        regs_placeholder=regs_placeholder,
-        src_placeholder=src_placeholder,
-        imm_arg=imm_arg,
-        reg_operands=reg_operands,
-        src_addr=src_addr,
-        row_offset=row_offset,
-        col_offset=col_offset,
-    )
+}}
+"""
     regs = [tvm.tir.address_of(reg) for reg in regs]
 
     return cuda_func_call(
@@ -1094,29 +1076,17 @@ def codegen_ptx_tcgen05_st(dst_addr, row_offset, col_offset, shape, num, unpack,
     func_name = (
         "tvm_builtin_ptx_tcgen05_st_" + shape + "_x" + str(num) + ("_unpack" if unpack else "")
     )
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t dst_addr, uint32_t row_offset, uint32_t col_offset, {reg_args}) {{
     asm volatile(
         "tcgen05.st.sync.aligned.{shape}.x{num}{unpack_str}.b32 "
         "[%0]{imm_arg}, "
-        "{{{regs_placeholder}}};\n"
+        "{{{regs_placeholder}}};\\n"
         :
         :  "r"(get_tmem_addr(dst_addr, row_offset, col_offset)), {reg_operands}
     );
-}}"""
-    source_code = source_code.format(
-        func_name=func_name,
-        reg_args=reg_args,
-        shape=shape,
-        num=num,
-        unpack_str=unpack_str,
-        regs_placeholder=regs_placeholder,
-        imm_arg=imm_arg,
-        reg_operands=reg_operands,
-        dst_addr=dst_addr,
-        row_offset=row_offset,
-        col_offset=col_offset,
-    )
+}}
+"""
     regs = [tvm.tir.address_of(reg) for reg in regs]
     return cuda_func_call(
         func_name,
@@ -1131,24 +1101,22 @@ __forceinline__ __device__ void {func_name}(uint32_t dst_addr, uint32_t row_offs
 @register_codegen("ptx_tcgen05_wait_ld")
 def codegen_ptx_tcgen05_wait_ld():
     func_name = "tvm_builtin_ptx_tcgen05_wait_ld"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-    asm volatile("tcgen05.wait::ld.sync.aligned;\n" ::: "memory");
+    asm volatile("tcgen05.wait::ld.sync.aligned;\\n" ::: "memory");
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, source_code=source_code)
 
 
 @register_codegen("ptx_tcgen05_wait_st")
 def codegen_ptx_tcgen05_wait_st():
     func_name = "tvm_builtin_ptx_tcgen05_wait_st"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-    asm volatile("tcgen05.wait::st.sync.aligned;\n" ::: "memory");
+    asm volatile("tcgen05.wait::st.sync.aligned;\\n" ::: "memory");
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, source_code=source_code)
 
 
@@ -1162,7 +1130,7 @@ def codegen_ptx_tcgen05_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
         )
 
     func_name = "tvm_builtin_ptx_tcgen05_encode_matrix_descriptor"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo, int sdo, int swizzle) {{
   SmemDescriptor _desc;
 
@@ -1187,8 +1155,8 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo,
   _desc.leading_byte_offset_ = static_cast<uint32_t>(ldo);
 
   *desc = (uint64_t)_desc;
-}}"""
-    source_code = source_code.format(func_name=func_name)
+}}
+"""
     return cuda_func_call(func_name, desc, addr, ldo, sdo, swizzle, source_code=source_code), [
         "smem_descriptor"
     ]
@@ -1450,7 +1418,7 @@ def codegen_ptx_tcgen05_encode_instr_descriptor(
         raise ValueError(f"Invalid kind for saturate: {kind}")
 
     func_name = "ptx_tcgen05_encode_instr_descriptor"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int d_format,
                                             int a_format, int b_format, bool trans_a, bool trans_b,
                                             bool neg_a, bool neg_b, bool sat_d, bool is_sparse) {{
@@ -1476,8 +1444,8 @@ __forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int d_
   _desc.max_shift_ = uint8_t(0);                   // WS not used
 
   *desc = (uint32_t)_desc;
-}}"""
-    source_code = source_code.format(func_name=func_name)
+}}
+"""
     return cuda_func_call(
         func_name,
         desc,
@@ -1586,7 +1554,7 @@ def codegen_ptx_tcgen05_encode_instr_descriptor_block_scaled(
         raise ValueError(f"Invalid b_dtype for transpose: {b_dtype}")
 
     func_name = "ptx_tcgen05_encode_instr_descriptor_block_scaled"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int a_format,
                                             int b_format, int s_format, bool trans_a, bool trans_b,
                                             bool neg_a, bool neg_b, bool is_sparse,
@@ -1615,7 +1583,6 @@ __forceinline__ __device__ void {func_name}(uint32_t* desc, int M, int N, int a_
   *desc = (uint32_t)_desc;
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(
         func_name,
         desc,
@@ -1738,35 +1705,20 @@ def _tcgen05_mma_common(
         + ("_enable_input_d" if enable_input_d else "")
         + (f"_{scale_input_d}" if scale_input_d > 0 else "")
     )
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_type} a_operand, uint64_t b_desc, {sp_tmem_addr_str}uint32_t i_desc, {mask_signature}) {{
     asm volatile(
-        "{{\n"
-        ".reg .pred p;\n"
-        "setp.ne.b32 p, %{p_operand_idx}, 0;\n"
+        "{{\\n"
+        ".reg .pred p;\\n"
+        "setp.ne.b32 p, %{p_operand_idx}, 0;\\n"
         "tcgen05.mma{sparse_instr_suffix}.cta_group::{cta_group}.kind::{kind} [%0], {a_operand_str}, %2, {i_sp_operand_str} "
-        "{{{mask_placeholders}}}, p{scale_placeholder};\n"
-        "}}\n"
+        "{{{mask_placeholders}}}, p{scale_placeholder};\\n"
+        "}}\\n"
         :
         :  {input_operands_list}
     );
 }}
 """
-    source_code = source_code.format(
-        func_name=func_name,
-        a_operand_type=a_operand_type,
-        sp_tmem_addr_str=sp_tmem_addr_str,
-        mask_signature=mask_signature,
-        p_operand_idx=p_operand_idx,
-        sparse_instr_suffix=sparse_instr_suffix,
-        cta_group=cta_group,
-        kind=kind,
-        a_operand_str=a_operand_str,
-        i_sp_operand_str=i_sp_operand_str,
-        mask_placeholders=mask_placeholders,
-        scale_placeholder=scale_placeholder,
-        input_operands_list=input_operands_list,
-    )
 
     args = [func_name, d_tmem_addr, a_operand, b_desc]
     if sparse:
@@ -1923,33 +1875,20 @@ def _tcgen05_mma_block_scaled_common(
         + ("TS" if use_a_tmem else "SS")
         + ("_enable_input_d" if enable_input_d else "")
     )
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_type} a_operand, uint64_t b_desc, {sp_tmem_addr_str}uint32_t i_desc, uint32_t sfa_tmem_addr, uint32_t sfb_tmem_addr) {{
     asm volatile(
-        "{{    \n"
-        ".reg .pred p;\n"
-        "setp.ne.b32 p, %4, 0;\n"
+        "{{\\n"
+        ".reg .pred p;\\n"
+        "setp.ne.b32 p, %4, 0;\\n"
         "tcgen05.mma{sparse_instr_suffix}.cta_group::{cta_group}.kind::{kind}.block_scale.scale_vec::{scale_vec_size}X "
-        "[%0], {a_operand_placeholder}, %2, {sparse_placeholder}%3, [%5], [%6], p;\n"
-        "}}\n"
+        "[%0], {a_operand_placeholder}, %2, {sparse_placeholder}%3, [%5], [%6], p;\\n"
+        "}}\\n"
         :
         : "r"(d_tmem_addr_expr), {a_constraint}(a_operand_expr), "l"(b_desc), "r"(i_desc), "r"({enable_input_d_str}), "r"(sfa_tmem_addr), "r"(sfb_tmem_addr){sp_tmem_addr_operand}
     );
-}}"""
-    source_code = source_code.format(
-        func_name=func_name,
-        a_operand_type=a_operand_type,
-        sp_tmem_addr_str=sp_tmem_addr_str,
-        sparse_instr_suffix=sparse_instr_suffix,
-        cta_group=cta_group,
-        kind=kind,
-        scale_vec_size=scale_vec_size,
-        a_operand_placeholder=a_operand_placeholder,
-        sparse_placeholder=sparse_placeholder,
-        a_constraint=a_constraint,
-        enable_input_d_str=enable_input_d_str,
-        sp_tmem_addr_operand=sp_tmem_addr_operand,
-    )
+}}
+"""
     args = [func_name, d_tmem_addr, a_operand, b_desc]
     if sparse:
         args.append(sp_tmem_addr)
@@ -2056,7 +1995,7 @@ def codegen_ptx_tcgen05_commit(bar, cta_group, cta_mask):
     if is_multicast:
         func_name += "_multicast"
 
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(void* bar, int cta_mask_) {{
   unsigned int bar_addr = __cvta_generic_to_shared(bar);
   uint16_t cta_mask = static_cast<uint16_t>(cta_mask_);
@@ -2067,13 +2006,6 @@ __forceinline__ __device__ void {func_name}(void* bar, int cta_mask_) {{
   );
 }}
 """
-    source_code = source_code.format(
-        func_name=func_name,
-        cta_group=cta_group,
-        multicast_str=multicast_str,
-        mask_operand_str=mask_operand_str,
-        cta_mask_arg_str=cta_mask_arg_str,
-    )
     return cuda_func_call(func_name, bar, cta_mask, source_code=source_code)
 
 
@@ -2136,21 +2068,15 @@ def codegen_ptx_tcgen05_cp(
     multicast_str = f".{multicast}" if multicast else ""
 
     func_name = f"ptx_tcgen05_cp_cta_group_{cta_group}_shape_{shape}_multicast_{multicast}"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t dst_addr, int row_offset, int col_offset, uint64_t src_desc) {{
     asm volatile(
         "tcgen05.cp.cta_group::{cta_group}.{shape}{multicast_str}{dst_src_fmt} [%0], %1;"
         :
         : "r"(get_tmem_addr(dst_addr, row_offset, col_offset)), "l"(src_desc)
     );
-}}"""
-    source_code = source_code.format(
-        func_name=func_name,
-        cta_group=cta_group,
-        shape=shape,
-        multicast_str=multicast_str,
-        dst_src_fmt=dst_src_fmt,
-    )
+}}
+"""
     return cuda_func_call(
         func_name,
         dst_addr,
@@ -2169,14 +2095,14 @@ def codegen_ptx_tcgen05_shift(taddr, cta_group):
         raise ValueError(f"The number of cta_group is incorrect, expected 1 or 2, got {cta_group}")
 
     func_name = f"ptx_tcgen05_shift_cta_group_{cta_group}"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint32_t taddr) {{
   __asm__ __volatile__(
     "tcgen05.shift.cta_group::{cta_group}.down %0;"
     :: "r"(taddr)
   );
-}}"""
-    source_code = source_code.format(func_name=func_name, cta_group=cta_group)
+}}
+"""
     return cuda_func_call(func_name, taddr, source_code=source_code)
 
 
@@ -2188,24 +2114,22 @@ __forceinline__ __device__ void {func_name}(uint32_t taddr) {{
 @register_codegen("ptx_bar_arrive")
 def codegen_ptx_bar_arrive(name_bar_id, thread_count):
     func_name = "tvm_builtin_ptx_bar_arrive"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(int name_bar_id, int thread_count) {{
     asm volatile("bar.arrive %0, %1;" : : "r"(name_bar_id), "r"(thread_count));
 }}
 """
-    source_code = source_code.format(func_name=func_name, name_bar_id=name_bar_id)
     return cuda_func_call(func_name, name_bar_id, thread_count, source_code=source_code)
 
 
 @register_codegen("ptx_bar_sync")
 def codegen_ptx_bar_sync(name_bar_id, thread_count):
     func_name = "tvm_builtin_ptx_bar_sync"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(int name_bar_id, int thread_count) {{
     asm volatile("bar.sync %0, %1;" : : "r"(name_bar_id), "r"(thread_count));
 }}
 """
-    source_code = source_code.format(func_name=func_name, name_bar_id=name_bar_id)
     return cuda_func_call(func_name, name_bar_id, thread_count, source_code=source_code)
 
 
@@ -2221,23 +2145,22 @@ def codegen_ptx_fence_proxy(scope):
     else:
         raise ValueError(f"Invalid scope for ptx_fence_proxy: {scope}")
 
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
   __asm__ __volatile__("fence.proxy{ptx_scope};");
-}}"""
-    source_code = source_code.format(func_name=func_name, ptx_scope=ptx_scope)
+}}
+"""
     return cuda_func_call(func_name, source_code=source_code)
 
 
 @register_codegen("ptx_fence_mbarrier_init_release_cluster")
 def codegen_ptx_fence_mbarrier_init_release_cluster():
     func_name = "tvm_builtin_ptx_fence_mbarrier_init_release_cluster"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
     asm volatile("fence.mbarrier_init.release.cluster;");
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, source_code=source_code)
 
 
@@ -2253,14 +2176,11 @@ def codegen_ptx_barrier_cluster_arrive(sem, aligned):
     aligned_inst = ".aligned" if aligned else ""
 
     func_name = f"tvm_builtin_ptx_barrier_cluster_arrive{sem_name}{aligned_name}"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-    asm volatile("barrier.cluster.arrive{sem_inst}{aligned_inst};\n" : :);
+    asm volatile("barrier.cluster.arrive{sem_inst}{aligned_inst};\\n" : :);
 }}
 """
-    source_code = source_code.format(
-        func_name=func_name, sem_inst=sem_inst, aligned_inst=aligned_inst
-    )
     return cuda_func_call(func_name, source_code=source_code)
 
 
@@ -2273,38 +2193,34 @@ def codegen_ptx_barrier_cluster_wait(acquire, aligned):
     aligned_inst = ".aligned" if aligned else ""
 
     func_name = f"tvm_builtin_ptx_barrier_cluster_wait{acquire_name}{aligned_name}"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-    asm volatile("barrier.cluster.wait{acquire_inst}{aligned_inst};\n" : :);
+    asm volatile("barrier.cluster.wait{acquire_inst}{aligned_inst};\\n" : :);
 }}
 """
-    source_code = source_code.format(
-        func_name=func_name, acquire_inst=acquire_inst, aligned_inst=aligned_inst
-    )
     return cuda_func_call(func_name, source_code=source_code)
 
 
 @register_codegen("ptx_elect_sync")
 def codegen_ptx_elect_sync(mask):
     func_name = "tvm_builtin_ptx_elect_sync"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ uint32_t {func_name}(uint32_t mask) {{
   uint32_t pred = 0;
   uint32_t laneid = 0;
   asm volatile(
-      "{{\n"
-      ".reg .b32 %rx;\n"
-      ".reg .pred %px;\n"
-      "     elect.sync %rx|%px, %2;\n"
-      "@%px mov.s32 %1, 1;\n"
-      "     mov.s32 %0, %rx;\n"
-      "}}\n"
+      "{{\\n"
+      ".reg .b32 %rx;\\n"
+      ".reg .pred %px;\\n"
+      "     elect.sync %rx|%px, %2;\\n"
+      "@%px mov.s32 %1, 1;\\n"
+      "     mov.s32 %0, %rx;\\n"
+      "}}\\n"
       : "+r"(laneid), "+r"(pred)
       : "r"(mask));
   return pred;
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, mask, source_code=source_code)
 
 
@@ -2314,15 +2230,15 @@ __forceinline__ __device__ uint32_t {func_name}(uint32_t mask) {{
 @register_codegen("ptx_mbarrier_init")
 def codegen_ptx_mbarrier_init(bar, thread_count):
     func_name = "tvm_builtin_ptx_mbarrier_init"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(void* barrier, int thread_count) {{
   unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
   __asm__ __volatile__(
     "mbarrier.init.shared.b64 [%0], %1;"
     :: "r"(barrier_addr_int), "r"(thread_count)
   );
-}}"""
-    source_code = source_code.format(func_name=func_name)
+}}
+"""
     return cuda_func_call(func_name, bar, thread_count, source_code=source_code)
 
 
@@ -2331,33 +2247,33 @@ def codegen_ptx_mbarrier_arrive(bar, cta_id=None, pred=None):
     remote = cta_id is not None and pred is not None
     if not remote:
         func_name = "tvm_builtin_ptx_mbarrier_arrive"
-        source_code = R"""
+        source_code = f"""
 __forceinline__ __device__ void {func_name}(void* barrier) {{
   unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
   __asm__ __volatile__(
     "mbarrier.arrive.shared.b64 _, [%0];"
     :: "r"(barrier_addr_int)
   );
-}}"""
-        source_code = source_code.format(func_name=func_name)
+}}
+"""
         return cuda_func_call(func_name, bar, source_code=source_code)
     else:
         func_name = "tvm_builtin_ptx_mbarrier_arrive_remote"
-        source_code = R"""
+        source_code = f"""
 __forceinline__ __device__ void {func_name}(void* barrier, int cta_id, int pred) {{
   unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
   asm volatile(
-      "{{\n\t"
-      ".reg .pred p;\n\t"
-      ".reg .b32 remAddr32;\n\t"
-      "setp.eq.u32 p, %2, 1;\n\t"
-      "@p mapa.shared::cluster.u32  remAddr32, %0, %1;\n\t"
-      "@p mbarrier.arrive.shared::cluster.b64  _, [remAddr32];\n\t"
-      "}}"
+      "{{\\n"
+      ".reg .pred p;\\n"
+      ".reg .b32 remAddr32;\\n"
+      "setp.eq.u32 p, %2, 1;\\n"
+      "@p mapa.shared::cluster.u32  remAddr32, %0, %1;\\n"
+      "@p mbarrier.arrive.shared::cluster.b64  _, [remAddr32];\\n"
+      "}}\\n"
       :
       : "r"(barrier_addr_int), "r"(cta_id), "r"(pred));
-}}"""
-        source_code = source_code.format(func_name=func_name)
+}}
+"""
         return cuda_func_call(func_name, bar, cta_id, pred, source_code=source_code)
 
 
@@ -2366,58 +2282,199 @@ def codegen_ptx_mbarrier_arrive_expect_tx(bar, byte_count, cta_id=None, pred=Non
     remote = cta_id is not None and pred is not None
     if not remote:
         func_name = "tvm_builtin_ptx_mbarrier_arrive_expect_tx"
-        source_code = R"""
+        source_code = f"""
 __forceinline__ __device__ void {func_name}(void* barrier, int byte_count) {{
   unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
   __asm__ __volatile__(
     "mbarrier.arrive.expect_tx.shared.b64 _, [%0], %1;"
     :: "r"(barrier_addr_int), "r"(byte_count)
   );
-}}"""
-        source_code = source_code.format(func_name=func_name)
+}}
+"""
         return cuda_func_call(func_name, bar, byte_count, source_code=source_code)
     else:
         func_name = "tvm_builtin_ptx_mbarrier_arrive_expect_tx_remote"
-        source_code = R"""
+        source_code = f"""
 __forceinline__ __device__ void {func_name}(void* barrier, int byte_count, int cta_id, int pred) {{
   unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
   asm volatile(
-      "{{\n\t"
-      ".reg .pred p;\n\t"
-      ".reg .b32 remAddr32;\n\t"
-      "setp.eq.u32 p, %2, 1;\n\t"
-      "@p mapa.shared::cluster.u32  remAddr32, %0, %1;\n\t"
-      "@p mbarrier.arrive.expect_tx.shared::cluster.b64  _, [remAddr32], %3;\n\t"
-      "}}"
+      "{{\\n"
+      ".reg .pred p;\\n"
+      ".reg .b32 remAddr32;\\n"
+      "setp.eq.u32 p, %2, 1;\\n"
+      "@p mapa.shared::cluster.u32  remAddr32, %0, %1;\\n"
+      "@p mbarrier.arrive.expect_tx.shared::cluster.b64  _, [remAddr32], %3;\\n"
+      "}}\\n"
       :
       : "r"(barrier_addr_int), "r"(cta_id), "r"(pred), "r"(byte_count));
-}}"""
-        source_code = source_code.format(func_name=func_name)
+}}
+"""
         return cuda_func_call(func_name, bar, byte_count, cta_id, pred, source_code=source_code)
 
 
 @register_codegen("ptx_mbarrier_try_wait")
 def codegen_ptx_mbarrier_try_wait(bar, phase):
     func_name = "tvm_builtin_ptx_mbarrier_wait"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(void* barrier, int phase) {{
    unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
   asm volatile (
-      "{{\n"
-      ".reg .pred                P1;\n"
-      "LAB_WAIT:\n"
-      "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1;\n"
-      "@P1                       bra.uni DONE;\n"
-      "bra.uni                   LAB_WAIT;\n"
-      "DONE:\n"
-      "}}\n"
+      "{{\\n"
+      ".reg .pred                P1;\\n"
+      "LAB_WAIT:\\n"
+      "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1;\\n"
+      "@P1                       bra.uni DONE;\\n"
+      "bra.uni                   LAB_WAIT;\\n"
+      "DONE:\\n"
+      "}}\\n"
       ::
       "r"(barrier_addr_int),
       "r"(phase)
   );
-}}"""
-    source_code = source_code.format(func_name=func_name)
+}}
+"""
     return cuda_func_call(func_name, bar, phase, source_code=source_code)
+
+
+########################################################
+# PTX Data Movement and Conversion Instructions
+########################################################
+
+#################### TMA (cp.async.bulk.tensor)
+
+
+@register_codegen("ptx_cp_async_bulk_tensor_global_to_cluster")
+def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *args):
+    dim = int(dim)
+    coords, cta_mask, cta_group = args[:-2], int(args[-2]), int(args[-1])
+    func_name = f"tvm_builtin_ptx_cp_async_bulk_tensor_global_to_cluster_{dim}d"
+    if len(coords) != dim:
+        raise ValueError(
+            f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."
+        )
+
+    func_name = (
+        f"ptx_cp_async_bulk_tensor_global_to_cluster_{dim}d"
+        + (f"_multicast_{cta_mask}" if cta_mask != 0 else "")
+        + (f"_cta_group_{cta_group}" if cta_group == 2 else "")
+    )
+    coord_arg_list = ", ".join([f"int coord{i}" for i in range(dim)])
+
+    # The operand indices are different for unicast vs. multicast
+    unicast_indices = [str(3 + i) for i in range(dim)]
+    multicast_indices = [str(4 + i) for i in range(dim)]
+    arg_template_unicast = "{%" + ", %".join(unicast_indices) + "}"
+    arg_template_multicast = "{%" + ", %".join(multicast_indices) + "}"
+
+    coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(dim)])
+
+    def is_sm100_or_higher():
+        target = tvm.target.Target.current()
+        if target is None:
+            return False
+        arch = target.arch[3:]
+        if not arch[-1].isdigit():
+            arch = arch[:-1]
+        return int(arch) >= 100
+
+    is_sm100_or_higher = is_sm100_or_higher()
+
+    if cta_group == -1 or not is_sm100_or_higher:
+        cta_group_str = ""
+    else:
+        cta_group_str = f".cta_group::{cta_group}"
+
+    if cta_mask != 0:
+        source_code = f"""
+__forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensorMap& tensormap, {coord_arg_list}) {{
+  unsigned int dst_addr = __cvta_generic_to_shared(dst);
+  unsigned int bar_addr = __cvta_generic_to_shared(bar);
+  uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&tensormap);
+  uint16_t cta_mask = static_cast<uint16_t>({cta_mask});
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster{cta_group_str}"
+    " [%0], [%1, {arg_template_multicast}], [%2], %3;"
+    :
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr), "h"(cta_mask),
+        {coord_list_constraints}
+    : "memory"
+  );
+}}
+"""
+    else:
+        source_code = f"""
+__forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensorMap& tensormap, {coord_arg_list}) {{
+  unsigned int dst_addr = __cvta_generic_to_shared(dst);
+  unsigned int bar_addr = __cvta_generic_to_shared(bar);
+  uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&tensormap);
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes{cta_group_str}"
+    " [%0], [%1, {arg_template_unicast}], [%2];"
+    :
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
+        {coord_list_constraints}
+    : "memory"
+  );
+}}
+"""
+    return cuda_func_call(func_name, dst_ptr, bar, tensormap, *coords, source_code=source_code)
+
+
+@register_codegen("ptx_cp_async_bulk_tensor_shared_to_global")
+def codegen_ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
+    dim = int(dim)
+    if len(coords) != dim:
+        raise ValueError(
+            f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."
+        )
+
+    func_name = f"ptx_cp_async_bulk_tensor_shared_to_global_{dim}d"
+    coord_arg_list = ", ".join([f"int coord{i}" for i in range(dim)])
+
+    coord_indices = [str(2 + i) for i in range(dim)]
+    arg_template = "{%" + ", %".join(coord_indices) + "}"
+
+    coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(dim)])
+
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(void* src, const CUtensorMap& tensormap, {coord_arg_list}) {{
+  unsigned int src_addr = __cvta_generic_to_shared(src);
+  uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&tensormap);
+  __asm__ __volatile__(
+    "cp.async.bulk.tensor.{dim}d.global.shared::cta.tile.bulk_group"
+    " [%0, {arg_template}], [%1];"
+    :
+    : "l"(tensormap_addr), "r"(src_addr),
+      {coord_list_constraints}
+    : "memory"
+  );
+}}
+"""
+    return cuda_func_call(func_name, src_ptr, tensormap, *coords, source_code=source_code)
+
+
+@register_codegen("ptx_cp_async_bulk_commit_group")
+def codegen_ptx_cp_async_bulk_tensor_commit_group():
+    func_name = "ptx_cp_async_bulk_tensor_commit_group"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}() {{
+  asm volatile("cp.async.bulk.commit_group;");
+}}
+"""
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("ptx_cp_async_bulk_wait_group")
+def codegen_ptx_cp_async_bulk_wait_group(n, read):
+    n = int(n)
+    read_str = ".read" if bool(read) else ""
+    func_name = "ptx_cp_async_bulk_wait_group" + ("_read" if bool(read) else "") + f"_{n}"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}() {{
+  asm volatile("cp.async.bulk.wait_group{read_str} %0;" :: "n"({n}): "memory");
+}}
+"""
+    return cuda_func_call(func_name, source_code=source_code)
 
 
 ########################################################
@@ -2431,12 +2488,11 @@ def codegen_ptx_setmaxnreg(inc, nreg):
     nreg = int(nreg)
     action = "inc" if inc else "dec"
     func_name = f"tvm_builtin_ptx_setmaxnreg_{action}_{nreg}    "
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
-    asm volatile( "setmaxnreg.{action}.sync.aligned.u32 %0;\n" : : "n"({nreg}) );
+    asm volatile( "setmaxnreg.{action}.sync.aligned.u32 %0;\\n" : : "n"({nreg}) );
 }}
 """
-    source_code = source_code.format(func_name=func_name, action=action, nreg=nreg)
     return cuda_func_call(func_name, source_code=source_code)
 
 
@@ -2455,31 +2511,30 @@ def codegen_ptx_ld_global_acquire(res, addr):
         raise ValueError(f"Unsupported data type for ld.global.acquire: {dtype}")
 
     func_name = f"tvm_builtin_ptx_ld_global_acquire_{type_str}"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}({dtype_str}& res,{dtype_str}* addr) {{
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
-  asm volatile ("ld.global.acquire.gpu.{type_str} %0, [%1];\n" : "=r"(res) : "l"(addr));
+  asm volatile ("ld.global.acquire.gpu.{type_str} %0, [%1];\\n" : "=r"(res) : "l"(addr));
   #else
-  asm volatile ("ld.global.cg.{type_str} %0, [%1];\n" : "=r"(res) : "l"(addr));
+  asm volatile ("ld.global.cg.{type_str} %0, [%1];\\n" : "=r"(res) : "l"(addr));
   #endif
-}}"""
-    source_code = source_code.format(func_name=func_name, dtype_str=dtype_str, type_str=type_str)
+}}
+"""
     return cuda_func_call(func_name, res, addr, source_code=source_code)
 
 
 @register_codegen("ptx_map_shared_rank")
 def codegen_ptx_map_shared_rank(ptr, rank):
     func_name = "tvm_builtin_ptx_map_shared_rank"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ uint64_t {func_name}(void* addr, uint32_t rank) {{
     uint64_t result;
-    asm volatile("mapa.u64  %0, %1, %2;\n"
+    asm volatile("mapa.u64  %0, %1, %2;\\n"
                 : "=l"(result)
                 : "l"(reinterpret_cast<uint64_t>(addr)), "r"(rank));
     return result;
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, ptr, rank, source_code=source_code, return_type="uint64")
 
 
@@ -2494,13 +2549,13 @@ def codegen_ptx_fetch_register(bits, reg):
     func_name_safe_reg = reg.replace(".", "_")
 
     func_name = f"tvm_builtin_ptx_fetch_register_{func_name_safe_reg}"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ int{bits}_t {func_name}() {{
   uint{bits}_t x;
-  asm volatile("mov.u{bits} %0, %{reg};\\n" : "=r"(x) : );
+  asm volatile("mov.u{bits} %0, %{reg};\\n" : "=r"(x) : "r"(reg));
   return (int{bits}_t)x;
-}}"""
-    source_code = source_code.format(func_name=func_name, bits=bits, reg=reg)
+}}
+"""
     return cuda_func_call(func_name, source_code=source_code, return_type=f"int{bits}")
 
 
@@ -2513,7 +2568,7 @@ __forceinline__ __device__ int{bits}_t {func_name}() {{
 def codegen_timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
 
     func_name = "tvm_builtin_timer_init_cuda"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(void* profiler_buffer, void* profiler_tag, void* profiler_write_offset) {{
     // timer init
     const uint32_t NBLOCKS = (uint32_t)(gridDim.x * gridDim.y * gridDim.z);
@@ -2521,14 +2576,13 @@ __forceinline__ __device__ void {func_name}(void* profiler_buffer, void* profile
     const uint32_t NGROUPS = (uint32_t)(blockDim.x >> 7);
     const uint32_t WG_IDX = (uint32_t)(threadIdx.x >> 7);
     const uint32_t BLOCK_GROUP_IDX = BLOCK_IDX * NGROUPS + WG_IDX;
-    if ((blockIdx.x == 0) && (blockIdx.y == 0) && (blockIdx.z == 0) && (threadIdx.x == 0)) {
+    if ((blockIdx.x == 0) && (blockIdx.y == 0) && (blockIdx.z == 0) && (threadIdx.x == 0)) {{
         profiler_buffer[0] = ((uint64_t)NGROUPS << 32) | NBLOCKS;
-    }
+    }}
     profiler_write_offset[0] = 1 + BLOCK_GROUP_IDX;
     profiler_tag[0] = (uint64_t)BLOCK_GROUP_IDX << 12;
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(
         func_name, profiler_buffer, profiler_tag, profiler_write_offset, source_code=source_code
     )
@@ -2539,17 +2593,16 @@ def codegen_timer_start_cuda(
     event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride
 ):
     func_name = "tvm_builtin_timer_start_cuda"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffer, void* profiler_tag, void* profiler_write_offset, int profiler_write_stride) {{
     // timer start
-    if (threadIdx.x % 128 == 0) {
+    if (threadIdx.x % 128 == 0) {{
         profiler_tag[profiler_write_offset[0]] = ((uint64_t)tvm_builtin_get_timestamp() << 32) | (profiler_write_offset[0] | (uint32_t)event_type << 2 | 0x0);
         profiler_write_offset[0] += profiler_write_stride;
-    }
+    }}
     __threadfence_block();
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(
         func_name,
         event_type,
@@ -2566,17 +2619,16 @@ def codegen_timer_end_cuda(
     event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride
 ):
     func_name = "tvm_builtin_timer_end_cuda"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffer, void* profiler_tag, void* profiler_write_offset, int profiler_write_stride) {{
     // timer end
     __threadfence_block();
-    if (threadIdx.x % 128 == 0) {
+    if (threadIdx.x % 128 == 0) {{
         profiler_buffer[profiler_write_offset[0]] = ((uint64_t)tvm_builtin_get_timestamp() << 32) | (profiler_write_offset[0] | (uint32_t)event_type << 2 | 0x1);
         profiler_write_offset[0] += profiler_write_stride;
-    }
+    }}
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(
         func_name,
         event_type,
@@ -2596,14 +2648,13 @@ __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffe
 @register_codegen("cuda_atomic_add")
 def codegen_cuda_atomic_add(res_addr, value):
     func_name = "tvm_builtin_cuda_atomic_add"
-    source_code = R"""
+    source_code = f"""
 template <typename T>
 __forceinline__ __device__ T {func_name}(T* addr, T value) {{
     return atomicAdd(addr, value);
 }}
 """
     assert isinstance(value, tvm.tir.PrimExpr)
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(
         func_name, res_addr, value, source_code=source_code, return_type=value.dtype
     )
@@ -2612,36 +2663,33 @@ __forceinline__ __device__ T {func_name}(T* addr, T value) {{
 @register_codegen("cuda_thread_fence")
 def codegen_cuda_thread_fence():
     func_name = "tvm_builtin_cuda_thread_fence"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
     __threadfence();
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, source_code=source_code)
 
 
 @register_codegen("cuda_syncthreads_and")
 def codegen_cuda_syncthreads_and(predicate):
     func_name = "tvm_builtin_cuda_syncthreads_and"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ int {func_name}(int predicate) {{
     return __syncthreads_and(predicate);
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, predicate, source_code=source_code, return_type="int32")
 
 
 @register_codegen("cuda_nano_sleep")
 def codegen_cuda_nano_sleep(time):
     func_name = "tvm_builtin_cuda_nano_sleep"
-    source_code = R"""
+    source_code = f"""
 __forceinline__ __device__ void {func_name}(uint64_t time) {{
     __nanosleep(time);
 }}
 """
-    source_code = source_code.format(func_name=func_name)
     return cuda_func_call(func_name, time, source_code=source_code)
 
 
@@ -2655,7 +2703,6 @@ __forceinline__ __device__ T {func_name}(T* address, T compare, T val) {{
     return atomicCAS(address, compare, val);
 }}
 """
-    print(old_val.dtype)
     return cuda_func_call(
         func_name, ptr, old_val, new_val, source_code=source_code, return_type=old_val.dtype
     )
