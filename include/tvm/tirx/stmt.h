@@ -694,13 +694,19 @@ class While : public Stmt {
  */
 class BreakNode : public StmtNode {
  public:
-  void VisitAttrs(AttrVisitor* v) { v->Visit("span", &span); }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<BreakNode>().def_ro("span", &BreakNode::span);
+  }
 
   bool SEqualReduce(const BreakNode* other, SEqualReducer equal) const { return true; }
 
   void SHashReduce(SHashReducer hash_reduce) const {}
 
   static constexpr const char* _type_key = "tir.Break";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(BreakNode, StmtNode);
 };
 
@@ -721,13 +727,19 @@ class Break : public Stmt {
  */
 class ContinueNode : public StmtNode {
  public:
-  void VisitAttrs(AttrVisitor* v) { v->Visit("span", &span); }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ContinueNode>().def_ro("span", &ContinueNode::span);
+  }
 
   bool SEqualReduce(const ContinueNode* other, SEqualReducer equal) const { return true; }
 
   void SHashReduce(SHashReducer hash_reduce) const {}
 
   static constexpr const char* _type_key = "tir.Continue";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ContinueNode, StmtNode);
 };
 
@@ -842,10 +854,12 @@ class BufferViewNode : public Object {
   /*! \brief The dest buffer */
   Buffer dst_buffer;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("src_buffer", &src_buffer);
-    v->Visit("layout", &layout);
-    v->Visit("dst_buffer", &dst_buffer);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<BufferViewNode>()
+        .def_ro("src_buffer", &BufferViewNode::src_buffer)
+        .def_ro("layout", &BufferViewNode::layout)
+        .def_ro("dst_buffer", &BufferViewNode::dst_buffer);
   }
 
   bool SEqualReduce(const BufferViewNode* other, SEqualReducer equal) const {
@@ -862,6 +876,7 @@ class BufferViewNode : public Object {
   static constexpr const char* _type_key = "tirx.BufferView";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(BufferViewNode, Object);
 };
 
@@ -881,9 +896,11 @@ class BufferGetNode : public Object {
   /*! \brief The target buffer of the buffer get */
   Buffer dst_buffer;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("src_buffer", &src_buffer);
-    v->Visit("dst_buffer", &dst_buffer);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<BufferGetNode>()
+        .def_ro("src_buffer", &BufferGetNode::src_buffer)
+        .def_ro("dst_buffer", &BufferGetNode::dst_buffer);
   }
 
   bool SEqualReduce(const BufferGetNode* other, SEqualReducer equal) const {
@@ -898,6 +915,7 @@ class BufferGetNode : public Object {
   static constexpr const char* _type_key = "tirx.BufferGet";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(BufferGetNode, Object);
 };
 

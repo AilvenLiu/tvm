@@ -42,9 +42,11 @@ class PredicateNode : public Object {
   /*! \brief Replace the variables in the predicate with the given indices */
   PrimExpr Apply(const Array<PrimExpr>& indices) const;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("vars", &vars);
-    v->Visit("pred", &pred);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<PredicateNode>()
+        .def_ro("vars", &PredicateNode::vars)
+        .def_ro("pred", &PredicateNode::pred);
   }
 
   bool SEqualReduce(const PredicateNode* other, SEqualReducer equal) const {
@@ -59,6 +61,7 @@ class PredicateNode : public Object {
   static constexpr const char* _type_key = "tir.Predicate";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(PredicateNode, Object);
 };
 

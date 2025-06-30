@@ -27,7 +27,6 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ir/module.h>
-#include <tvm/ir/tensormap_type.h>
 #include <tvm/target/codegen.h>
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/function.h>

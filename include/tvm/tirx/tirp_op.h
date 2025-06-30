@@ -71,13 +71,15 @@ class ScheduleContextNode : public Object {
   /*! \brief Callback to be handled when the operator is scheduled. */
   Map<String, ObjectRef> callbacks;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("target", &target);
-    v->Visit("exec_scope", &exec_scope);
-    v->Visit("launch_params", &launch_params);
-    v->Visit("var_range_map", &var_range_map);
-    v->Visit("alloc_only", &alloc_only);
-    v->Visit("callbacks", &callbacks);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ScheduleContextNode>()
+        .def_ro("target", &ScheduleContextNode::target)
+        .def_ro("exec_scope", &ScheduleContextNode::exec_scope)
+        .def_ro("launch_params", &ScheduleContextNode::launch_params)
+        .def_ro("var_range_map", &ScheduleContextNode::var_range_map)
+        .def_ro("alloc_only", &ScheduleContextNode::alloc_only)
+        .def_ro("callbacks", &ScheduleContextNode::callbacks);
   }
 
   /*! \brief Add a buffer to be allocated in the kernel. */
@@ -94,6 +96,7 @@ class ScheduleContextNode : public Object {
   static constexpr const char* _type_key = "tirp.ScheduleContext";
   static constexpr bool _type_has_method_sequal_reduce = false;
   static constexpr bool _type_has_method_shash_reduce = false;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScheduleContextNode, Object);
 };
 

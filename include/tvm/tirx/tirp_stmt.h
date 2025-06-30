@@ -47,11 +47,13 @@ class OpCallNode : public StmtNode {
   // Schedule config for the operator.
   Map<String, ffi::Any> schedule_config;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("op", &op);
-    v->Visit("args", &args);
-    v->Visit("workspace", &workspace);
-    v->Visit("schedule_config", &schedule_config);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<OpCallNode>()
+        .def_ro("op", &OpCallNode::op)
+        .def_ro("args", &OpCallNode::args)
+        .def_ro("workspace", &OpCallNode::workspace)
+        .def_ro("schedule_config", &OpCallNode::schedule_config);
   }
 
   bool SEqualReduce(const OpCallNode* other, SEqualReducer equal) const {
@@ -67,6 +69,9 @@ class OpCallNode : public StmtNode {
   }
 
   static constexpr const char* _type_key = "tirx.OpCall";
+  static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(OpCallNode, StmtNode);
 };
 
@@ -85,8 +90,8 @@ class OpCall : public Stmt {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(OpCallNode);
 };
 
-}  // namespace tirxp
-}  // namespace tirx
+}  // namespace tirxxp
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_TIRP_STMT_H_

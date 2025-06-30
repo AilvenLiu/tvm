@@ -898,9 +898,13 @@ class WhileDoc : public StmtDoc {
  */
 class BreakDocNode : public StmtDocNode {
  public:
-  void VisitAttrs(AttrVisitor* v) { StmtDocNode::VisitAttrs(v); }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<BreakDocNode>();
+  }
 
   static constexpr const char* _type_key = "script.printer.BreakDoc";
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(BreakDocNode, StmtDocNode);
 };
 
@@ -925,9 +929,13 @@ class BreakDoc : public StmtDoc {
  */
 class ContinueDocNode : public StmtDocNode {
  public:
-  void VisitAttrs(AttrVisitor* v) { StmtDocNode::VisitAttrs(v); }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ContinueDocNode>();
+  }
 
   static constexpr const char* _type_key = "script.printer.ContinueDoc";
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ContinueDocNode, StmtDocNode);
 };
 
@@ -1308,15 +1316,17 @@ class OpCallDocNode : public StmtDocNode {
   /*! \brief The schedule config of this op call */
   DictDoc schedule_config{nullptr};
 
-  void VisitAttrs(AttrVisitor* v) {
-    StmtDocNode::VisitAttrs(v);
-    v->Visit("callee", &callee);
-    v->Visit("args", &args);
-    v->Visit("workspace", &workspace);
-    v->Visit("schedule_config", &schedule_config);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<OpCallDocNode>()
+        .def_ro("callee", &OpCallDocNode::callee)
+        .def_ro("args", &OpCallDocNode::args)
+        .def_ro("workspace", &OpCallDocNode::workspace)
+        .def_ro("schedule_config", &OpCallDocNode::schedule_config);
   }
 
   static constexpr const char* _type_key = "script.printer.OpCallDoc";
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(OpCallDocNode, StmtDocNode);
 };
 

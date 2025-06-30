@@ -38,9 +38,11 @@ class ScopePairNode : public Object {
   /*! \brief The current scope */
   String cur;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("parent", &parent);
-    v->Visit("cur", &cur);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ScopePairNode>()
+        .def_ro("parent", &ScopePairNode::parent)
+        .def_ro("cur", &ScopePairNode::cur);
   }
 
   bool SEqualReduce(const ScopePairNode* other, SEqualReducer equal) const {
@@ -55,6 +57,7 @@ class ScopePairNode : public Object {
   static constexpr const char* _type_key = "tirx.ScopePair";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScopePairNode, Object);
 };
 
@@ -87,10 +90,12 @@ class ScopeIdDefNode : public Object {
   /*! \brief The scope of the scope id */
   ScopePair scope;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("def_ids", &def_ids);
-    v->Visit("extents", &extents);
-    v->Visit("scope", &scope);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ScopeIdDefNode>()
+        .def_ro("def_ids", &ScopeIdDefNode::def_ids)
+        .def_ro("extents", &ScopeIdDefNode::extents)
+        .def_ro("scope", &ScopeIdDefNode::scope);
   }
 
   bool SEqualReduce(const ScopeIdDefNode* other, SEqualReducer equal) const {
@@ -107,6 +112,7 @@ class ScopeIdDefNode : public Object {
   static constexpr const char* _type_key = "tirx.ScopeIdDef";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdDefNode, Object);
 };
 
@@ -199,7 +205,10 @@ class ExecScopeNode : public Object {
   /*! \brief scope is higher than other sope */
   bool Higher(const String& other) const;
 
-  void VisitAttrs(AttrVisitor* v) { v->Visit("name", &name); }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ExecScopeNode>().def_ro("name", &ExecScopeNode::name);
+  }
 
   bool SEqualReduce(const ExecScopeNode* other, SEqualReducer equal) const {
     return equal(name, other->name);
@@ -210,6 +219,7 @@ class ExecScopeNode : public Object {
   static constexpr const char* _type_key = "tirx.ExecScope";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_BASE_OBJECT_INFO(ExecScopeNode, Object);
 };
 
@@ -231,9 +241,9 @@ class WorldScopeNode : public ExecScopeNode {
  public:
   ScopeIdDef scope_id_def;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("scope_id_def", &scope_id_def);
-    ExecScopeNode::VisitAttrs(v);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<WorldScopeNode>().def_ro("scope_id_def", &WorldScopeNode::scope_id_def);
   }
 
   bool SEqualReduce(const WorldScopeNode* other, SEqualReducer equal) const {
@@ -248,6 +258,7 @@ class WorldScopeNode : public ExecScopeNode {
   static constexpr const char* _type_key = "tirx.WorldScope";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(WorldScopeNode, ExecScopeNode);
 };
 
@@ -263,9 +274,9 @@ class KernelScopeNode : public ExecScopeNode {
  public:
   Array<ScopeIdDef> scope_id_def;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("scope_id_def", &scope_id_def);
-    ExecScopeNode::VisitAttrs(v);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<KernelScopeNode>().def_ro("scope_id_def", &KernelScopeNode::scope_id_def);
   }
 
   bool SEqualReduce(const KernelScopeNode* other, SEqualReducer equal) const {
@@ -280,6 +291,7 @@ class KernelScopeNode : public ExecScopeNode {
   static constexpr const char* _type_key = "tirx.KernelScope";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(KernelScopeNode, ExecScopeNode);
 };
 
@@ -302,11 +314,12 @@ class ExecScopeSliceNode : public ExecScopeNode {
 
   bool Is(const ExecScope& other) const final;
 
-  void VisitAttrs(AttrVisitor* v) {
-    // v->Visit("slice", &slice);
-    v->Visit("extents", &extents);
-    v->Visit("parent", &parent);
-    ExecScopeNode::VisitAttrs(v);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ExecScopeSliceNode>()
+        .def_ro("slice", &ExecScopeSliceNode::slice)
+        .def_ro("extents", &ExecScopeSliceNode::extents)
+        .def_ro("parent", &ExecScopeSliceNode::parent);
   }
 
   bool SEqualReduce(const ExecScopeSliceNode* other, SEqualReducer equal) const {
@@ -324,6 +337,7 @@ class ExecScopeSliceNode : public ExecScopeNode {
   static constexpr const char* _type_key = "tirx.ExecScopeSlice";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ExecScopeSliceNode, ExecScopeNode);
 };
 

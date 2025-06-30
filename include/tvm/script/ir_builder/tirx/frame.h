@@ -102,7 +102,7 @@ class PrimFuncFrameNode : public TIRFrameNode {
         .def_ro("attrs", &PrimFuncFrameNode::attrs)
         .def_ro("env_threads", &PrimFuncFrameNode::env_threads)
         .def_ro("root_alloc_buffers", &PrimFuncFrameNode::root_alloc_buffers)
-        .def_ro("is_tirp", &PrimFuncFrameNode::is_tirp)
+        .def_ro("is_tirp", &PrimFuncFrameNode::is_tirp);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.PrimFuncFrame", PrimFuncFrameNode,
                                     TIRFrameNode);

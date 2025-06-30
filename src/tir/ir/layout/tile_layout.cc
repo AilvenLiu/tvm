@@ -21,6 +21,14 @@
 namespace tvm {
 namespace tir {
 
+TVM_FFI_STATIC_INIT_BLOCK({
+  AxisNode::RegisterReflection();
+  IterNode::RegisterReflection();
+  TileLayoutNode::RegisterReflection();
+  SwizzleLayoutNode::RegisterReflection();
+  ComposeLayoutNode::RegisterReflection();
+});
+
 /**************** Axis ****************/
 // AxisNode
 ObjectPtr<Object> CreateAxis(const std::string& name) {

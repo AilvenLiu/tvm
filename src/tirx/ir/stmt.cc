@@ -46,10 +46,14 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   IfThenElseNode::RegisterReflection();
   ForNode::RegisterReflection();
   WhileNode::RegisterReflection();
+  BreakNode::RegisterReflection();
+  ContinueNode::RegisterReflection();
   BufferRegionNode::RegisterReflection();
   MatchBufferRegionNode::RegisterReflection();
   SBlockNode::RegisterReflection();
   SBlockRealizeNode::RegisterReflection();
+  BufferViewNode::RegisterReflection();
+  BufferGetNode::RegisterReflection();
 }
 
 // Bind

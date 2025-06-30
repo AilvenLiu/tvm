@@ -22,7 +22,6 @@
  * \brief Common type system AST nodes throughout the IR.
  */
 #include <tvm/ffi/function.h>
-#include <tvm/ir/tensormap_type.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/type.h>

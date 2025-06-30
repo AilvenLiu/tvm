@@ -26,6 +26,8 @@
 namespace tvm {
 namespace tir {
 
+TVM_FFI_STATIC_INIT_BLOCK({ PredicateNode::RegisterReflection(); });
+
 PrimExpr PredicateNode::Apply(const Array<PrimExpr>& indices) const {
   ICHECK_EQ(indices.size(), vars.size());
 

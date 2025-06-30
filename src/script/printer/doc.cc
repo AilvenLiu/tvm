@@ -45,6 +45,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   AssignDocNode::RegisterReflection();
   IfDocNode::RegisterReflection();
   WhileDocNode::RegisterReflection();
+  BreakDocNode::RegisterReflection();
+  ContinueDocNode::RegisterReflection();
   ForDocNode::RegisterReflection();
   ScopeDocNode::RegisterReflection();
   ExprStmtDocNode::RegisterReflection();

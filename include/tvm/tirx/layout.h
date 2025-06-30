@@ -119,7 +119,10 @@ class AxisNode : public Object {
  public:
   String name;
 
-  void VisitAttrs(AttrVisitor* v) { v->Visit("name", &name); }
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AxisNode>().def_ro("name", &AxisNode::name);
+  }
 
   bool SEqualReduce(const AxisNode* other, SEqualReducer equal) const {
     return equal(name, other->name);
@@ -148,6 +151,7 @@ class AxisNode : public Object {
   static constexpr const char* _type_key = "tirx.Axis";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(AxisNode, Object);
 
  private:
@@ -254,10 +258,12 @@ class IterNode : public Object {
   PrimExpr stride;
   Axis axis;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("extent", &extent);
-    v->Visit("stride", &stride);
-    v->Visit("axis", &axis);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<IterNode>()
+        .def_ro("extent", &IterNode::extent)
+        .def_ro("stride", &IterNode::stride)
+        .def_ro("axis", &IterNode::axis);
   }
 
   bool SEqualReduce(const IterNode* other, SEqualReducer equal) const {
@@ -273,6 +279,7 @@ class IterNode : public Object {
   static constexpr const char* _type_key = "tirx.Iter";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(IterNode, Object);
 };
 
@@ -288,10 +295,12 @@ class TileLayoutNode : public TLayoutNode {
   Array<Iter> replicate;
   Map<Axis, PrimExpr> exclude;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("shard", &shard);
-    v->Visit("replicate", &replicate);
-    v->Visit("exclude", &exclude);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TileLayoutNode>()
+        .def_ro("shard", &TileLayoutNode::shard)
+        .def_ro("replicate", &TileLayoutNode::replicate)
+        .def_ro("exclude", &TileLayoutNode::exclude);
   }
 
   bool SEqualReduce(const TileLayoutNode* other, SEqualReducer equal) const {
@@ -357,6 +366,7 @@ class TileLayoutNode : public TLayoutNode {
   static constexpr const char* _type_key = "tirx.TileLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, TLayoutNode);
 };
 
@@ -377,11 +387,13 @@ class SwizzleLayoutNode : public TLayoutNode {
   int atom_len;
   bool swizzle_inner;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("per_element", &per_element);
-    v->Visit("swizzle_len", &swizzle_len);
-    v->Visit("atom_len", &atom_len);
-    v->Visit("swizzle_inner", &swizzle_inner);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<SwizzleLayoutNode>()
+        .def_ro("per_element", &SwizzleLayoutNode::per_element)
+        .def_ro("swizzle_len", &SwizzleLayoutNode::swizzle_len)
+        .def_ro("atom_len", &SwizzleLayoutNode::atom_len)
+        .def_ro("swizzle_inner", &SwizzleLayoutNode::swizzle_inner);
   }
 
   bool SEqualReduce(const SwizzleLayoutNode* other, SEqualReducer equal) const {
@@ -430,6 +442,7 @@ class SwizzleLayoutNode : public TLayoutNode {
   static constexpr const char* _type_key = "tirx.SwizzleLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(SwizzleLayoutNode, TLayoutNode);
 
  private:
@@ -453,9 +466,11 @@ class ComposeLayoutNode : public TLayoutNode {
   SwizzleLayout layout_A;
   TileLayout layout_B;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("layout_A", &layout_A);
-    v->Visit("layout_B", &layout_B);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ComposeLayoutNode>()
+        .def_ro("layout_A", &ComposeLayoutNode::layout_A)
+        .def_ro("layout_B", &ComposeLayoutNode::layout_B);
   }
 
   bool SEqualReduce(const ComposeLayoutNode* other, SEqualReducer equal) const {
@@ -501,6 +516,7 @@ class ComposeLayoutNode : public TLayoutNode {
   static constexpr const char* _type_key = "tirx.ComposeLayout";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ComposeLayoutNode, TLayoutNode);
 };
 

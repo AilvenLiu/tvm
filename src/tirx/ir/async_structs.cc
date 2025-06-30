@@ -28,6 +28,11 @@
 namespace tvm {
 namespace tirx {
 
+TVM_FFI_STATIC_INIT_BLOCK({
+  PipelineNode::RegisterReflection();
+  CopyPipelineNode::RegisterReflection();
+});
+
 /*************************** Pipeline ***************************/
 TVM_REGISTER_NODE_TYPE(PipelineNode);
 

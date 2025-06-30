@@ -117,6 +117,7 @@ def _to_region(buffer: Union[BufferRegion, Buffer]):
     assert isinstance(buffer, BufferRegion)
     return buffer
 
+
 @register_object("tirx.CopyPipeline")
 class CopyPipeline(Pipeline):
     """A pipeline for copying data asynchronously."""

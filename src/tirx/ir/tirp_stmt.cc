@@ -30,6 +30,8 @@ namespace tvm {
 namespace tirx {
 namespace tirp {
 
+TVM_FFI_STATIC_INIT_BLOCK({ OpCallNode::RegisterReflection(); });
+
 // OpCall
 OpCall::OpCall(tvm::Op op, Array<ffi::Any> args, Map<String, Buffer> workspace,
                Map<String, ffi::Any> schedule_config) {

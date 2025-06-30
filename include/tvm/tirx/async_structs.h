@@ -49,13 +49,15 @@ class PipelineNode : public Object {
   /*! \brief The schedule config of the pipeline. */
   Map<String, ffi::Any> schedule_config;
 
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("thread_scope", &thread_scope);
-    v->Visit("name_hint", &name_hint);
-    v->Visit("depth", &depth);
-    v->Visit("separate_pc", &separate_pc);
-    v->Visit("workspace", &workspace);
-    v->Visit("schedule_config", &schedule_config);
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<PipelineNode>()
+        .def_ro("thread_scope", &PipelineNode::thread_scope)
+        .def_ro("name_hint", &PipelineNode::name_hint)
+        .def_ro("depth", &PipelineNode::depth)
+        .def_ro("separate_pc", &PipelineNode::separate_pc)
+        .def_ro("workspace", &PipelineNode::workspace)
+        .def_ro("schedule_config", &PipelineNode::schedule_config);
   }
 
   bool SEqualReduce(const PipelineNode* other, SEqualReducer equal) const {
@@ -79,6 +81,7 @@ class PipelineNode : public Object {
   static constexpr const char* _type_key = "tirx.Pipeline";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_BASE_OBJECT_INFO(PipelineNode, Object);
 };
 
@@ -94,9 +97,25 @@ class Pipeline : public ObjectRef {
 // CopyPipeline
 class CopyPipelineNode : public PipelineNode {
  public:
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<CopyPipelineNode>()
+        .def_ro("thread_scope", &CopyPipelineNode::thread_scope)
+        .def_ro("name_hint", &CopyPipelineNode::name_hint)
+        .def_ro("depth", &CopyPipelineNode::depth)
+        .def_ro("separate_pc", &CopyPipelineNode::separate_pc)
+        .def_ro("workspace", &CopyPipelineNode::workspace)
+        .def_ro("schedule_config", &CopyPipelineNode::schedule_config);
+  }
+
+  bool SEqualReduce(const CopyPipelineNode* other, SEqualReducer equal) const { return true; }
+
+  void SHashReduce(SHashReducer hash_reduce) const {}
+
   static constexpr const char* _type_key = "tirx.CopyPipeline";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
+  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(CopyPipelineNode, PipelineNode);
 };
 
@@ -110,7 +129,7 @@ class CopyPipeline : public Pipeline {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(CopyPipelineNode);
 };
 
-}  // namespace tirxxxxxx
+}  // namespace tirxxxxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_ASYNC_STRUCTS_H_

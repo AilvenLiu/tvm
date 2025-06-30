@@ -25,6 +25,15 @@
 namespace tvm {
 namespace tirx {
 
+TVM_FFI_STATIC_INIT_BLOCK({
+  ExecScopeNode::RegisterReflection();
+  WorldScopeNode::RegisterReflection();
+  KernelScopeNode::RegisterReflection();
+  ExecScopeSliceNode::RegisterReflection();
+  ScopePairNode::RegisterReflection();
+  ScopeIdDefNode::RegisterReflection();
+});
+
 /******** Definition of Execution Scope ********/
 // ExecScope
 ExecScope::ExecScope(String name) {
@@ -61,7 +70,9 @@ bool ExecScopeNode::Higher(const ExecScope& other) const { return Higher(other->
 
 TVM_REGISTER_NODE_TYPE(ExecScopeNode);
 
-TVM_FFI_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](String name) { return ExecScope(name); });
+TVM_FFI_REGISTER_GLOBAL("tirx.ExecScope").set_body_typed([](String name) {
+  return ExecScope(name);
+});
 
 TVM_FFI_REGISTER_GLOBAL("tirx.ExecScopeCreate").set_body_typed([](String name) {
   return ExecScope::Create(name);
@@ -343,5 +354,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm

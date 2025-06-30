@@ -772,7 +772,6 @@ class OpCall(Stmt):
         The schedule config.
     """
 
-    op: Op
     args: List[PrimExpr]
     workspace: Dict[str, Buffer]
     schedule_config: Dict[str, Any]
@@ -792,10 +791,6 @@ class OpCall(Stmt):
         if op is None:
             assert self.__class__ != OpCall, "Directly instantiating OpCall needs to specify the op"
             op = self.__class__.op
-        else:
-            assert (
-                not hasattr(self.__class__, "op") or self.__class__.op == op
-            ), f"op {op} conflicts with subclass {self.__class__}"
         args = list(map(normalize_const_arg, args))
         self.__init_handle_by_constructor__(
             _ffi_api.OpCall, op, args, workspace, schedule_config  # pylint: disable=no-member

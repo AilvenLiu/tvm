@@ -30,6 +30,8 @@ namespace tvm {
 namespace tirx {
 namespace tirp {
 
+TVM_FFI_STATIC_INIT_BLOCK({ ScheduleContextNode::RegisterReflection(); });
+
 /********************* Utils **********************/
 
 #define TVM_TIRP_REGISTER_OP(OpName) \
