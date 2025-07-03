@@ -58,7 +58,6 @@ enum BufferType : int {
   // Maps buffer[i][j][k] -> buffer[i][0][k] if dimension i's shape equals 1.
   kAutoBroadcast = 2,
 };
-
 /*! \brief Node to represent a buffer */
 class BufferNode : public Object {
  public:
@@ -258,6 +257,16 @@ class Buffer : public ObjectRef {
    * \brief Return a new buffer with the allocated address.
    */
   TVM_DLL Buffer with_allocated_addr(ffi::Array<Integer> allocated_addr) const;
+
+  /*!
+   * \brief Return a new buffer with the dtype.
+   */
+  TVM_DLL Buffer with_dtype(DataType dtype) const;
+
+  /*!   
+   * \brief Return a new buffer with the data.
+   */
+  TVM_DLL Buffer with_data(Var data) const;
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Buffer, ObjectRef, BufferNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(BufferNode);

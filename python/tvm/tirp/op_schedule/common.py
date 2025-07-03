@@ -40,6 +40,7 @@ class MapOpType(Enum):
     MAX = 8
     MIN = 9
     EXP = 10
+    FILL = 11 # FIXME: FILL and MEMSET are the same. merge them.
 
 
 class ReduceOpType(Enum):

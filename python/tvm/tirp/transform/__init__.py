@@ -17,3 +17,4 @@
 
 from .private_buffer_alloc import PrivateBufferAlloc
 from .naive_allocator import NaiveAllocator
+from .legalize_event_tensor import EventTensorLegalizer

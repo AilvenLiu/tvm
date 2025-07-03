@@ -18,12 +18,13 @@
 from typing import List, Dict
 import functools
 
-from tvm.tir.stmt_functor import StmtVisitor, StmtExprMutator
-from tvm.tir import BufferLoad, Block, BufferStore, OpCall, BufferRegion
+from tvm.tir.stmt_functor import StmtVisitor
+from tvm.tir import Block
 from tvm.tir.buffer import Buffer
 from tvm.tir.transform.function_pass import prim_func_pass
-from tvm.tir import IntImm, BufferView, BufferGet
+from tvm.tir import IntImm
 from tvm import DataType
+from .common import BufferReplacer
 
 
 def is_const_shape(buffer: Buffer) -> bool:
@@ -68,103 +69,6 @@ class AllocInfoCollector(StmtVisitor):
                 self.alloc_pool_start, buffer.allocated_addr[-1] + buffer_size
             )
         return super().visit_block_(op)
-
-
-class BufferReplacer(StmtExprMutator):
-    def __init__(self, buffer_map: Dict[Buffer, Buffer] = {}):
-        super().__init__()
-        self.buffer_map = buffer_map
-
-    def visit_buffer_load_(self, op: BufferLoad):
-        op = super().visit_buffer_load_(op)
-        if op.buffer in self.buffer_map:
-            return BufferLoad(self.buffer_map[op.buffer], op.indices)
-        return op
-
-    def visit_buffer_store_(self, op: BufferStore):
-        op = super().visit_buffer_store_(op)
-        if op.buffer in self.buffer_map:
-            return BufferStore(self.buffer_map[op.buffer], op.value, op.indices)
-        return op
-
-    def visit_buffer_region_(self, op: BufferRegion):
-        op = super().visit_buffer_region_(op)
-        if op.buffer in self.buffer_map:
-            return BufferRegion(self.buffer_map[op.buffer], op.region)
-        return op
-
-    def visit_op_call_(self, op):
-        op = super().visit_op_call_(op)
-        new_workspace = {
-            key: self.buffer_map[value] if value in self.buffer_map else value
-            for key, value in op.workspace.items()
-        }
-        return OpCall(
-            *op.args, op=op.op, workspace=new_workspace, schedule_config=op.schedule_config
-        )
-
-    def visit_block_(self, op):
-        op = super().visit_block_(op)
-        new_buffer_views = []
-        new_buffer_gets = []
-        changed = False
-        for buffer_view in op.buffer_views:
-            if (
-                not buffer_view.src_buffer in self.buffer_map
-                and not buffer_view.dst_buffer in self.buffer_map
-            ):
-                new_buffer_views.append(buffer_view)
-            else:
-                new_src_buffer = (
-                    self.buffer_map[buffer_view.src_buffer]
-                    if buffer_view.src_buffer in self.buffer_map
-                    else buffer_view.src_buffer
-                )
-                new_dst_buffer = (
-                    self.buffer_map[buffer_view.dst_buffer]
-                    if buffer_view.dst_buffer in self.buffer_map
-                    else buffer_view.dst_buffer
-                )
-                new_buffer_views.append(
-                    BufferView(new_src_buffer, buffer_view.layout, new_dst_buffer)
-                )
-                changed = True
-
-        for buffer_get in op.buffer_gets:
-            if (
-                not buffer_get.src_buffer in self.buffer_map
-                and not buffer_get.dst_buffer in self.buffer_map
-            ):
-                new_buffer_gets.append(buffer_get)
-            else:
-                new_src_buffer = (
-                    self.buffer_map[buffer_get.src_buffer]
-                    if buffer_get.src_buffer in self.buffer_map
-                    else buffer_get.src_buffer
-                )
-                new_dst_buffer = (
-                    self.buffer_map[buffer_get.dst_buffer]
-                    if buffer_get.dst_buffer in self.buffer_map
-                    else buffer_get.dst_buffer
-                )
-                new_buffer_gets.append(BufferGet(new_src_buffer, new_dst_buffer))
-                changed = True
-        if changed:
-            return Block(
-                op.iter_vars,
-                op.reads,
-                op.writes,
-                op.name_hint,
-                body=op.body,
-                alloc_buffers=op.alloc_buffers,
-                match_buffers=op.match_buffers,
-                annotations=op.annotations,
-                exec_scope=op.exec_scope,
-                buffer_views=new_buffer_views,
-                buffer_gets=new_buffer_gets,
-                pipelines=op.pipelines,
-            )
-        return op
 
 
 class AllocMutator(BufferReplacer):

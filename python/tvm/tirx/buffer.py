@@ -23,7 +23,7 @@ import tvm_ffi
 import tvm
 from tvm.ir import PointerType, PrimExpr, PrimType, Range
 from tvm.runtime import Object, Scriptable, convert
-
+from enum import IntEnum
 from . import _ffi_api
 
 
@@ -189,6 +189,16 @@ class Buffer(Object, Scriptable):
         """Return a new buffer with the allocated address.
         """
         return _ffi_api.BufferWithAllocatedAddr(self, allocated_addr)  # type: ignore
+    
+    def with_dtype(self, dtype):
+        """Return a new buffer with the dtype.
+        """
+        return _ffi_api.BufferWithDtype(self, dtype)  # type: ignore
+
+    def with_data(self, data):
+        """Return a new buffer with the data.
+        """
+        return _ffi_api.BufferWithData(self, data)  # type: ignore
 
     def offset_of(self, indices):
         """Determine the offset of the provided indices in the flattened buffer.
@@ -276,6 +286,19 @@ class Buffer(Object, Scriptable):
                 else:
                     expr_indices.append(index)
             return BufferLoad(self, expr_indices)
+
+    def is_event_tensor(self):
+        """Check if the buffer is an event tensor."""
+        return "event_i" in self.dtype
+    
+    @property
+    def event_impl(self):
+        """Get the event implementation of the buffer."""
+        assert self.is_event_tensor()
+        scope_split = self.scope().split(".")
+        if len(scope_split) == 1:
+            return ""
+        return scope_split[-1]
 
 
 def decl_buffer(

@@ -48,20 +48,24 @@ class ScopeIdDefResolver : public StmtExprMutator {
  private:
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
 
-  Stmt VisitStmt_(const BlockNode* op) override {
-    Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(op));
-    ICHECK(op->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
-    const auto& scope = op->exec_scope.value();
+  Stmt VisitStmt_(const BlockRealizeNode* op) override {
+    Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(op->block.get()));
+    ICHECK(block->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
+    const auto& scope = block->exec_scope.value();
     ICHECK(!scope->Is("world")) << "Internal Error: world scope is not supported at the moment";
+    auto n_realize = CopyOnWrite(op);
+
     // Resolve under kernel exec scope
     auto opt_kernel = scope.as<KernelScope>();
     if (!opt_kernel) {
-      return std::move(block);
+      n_realize->block = block;
+      return Stmt(n_realize);
     }
     auto kernel = opt_kernel.value();
     if (kernel->scope_id_def.empty()) {
       // No ScopeIdDef to resolve, return the block as is
-      return std::move(block);
+      n_realize->block = block;
+      return Stmt(n_realize);
     }
     // Step 1: Verify the ScopeIdDef is well-formed
     ScopeIdDefVerifier verifier;
@@ -88,19 +92,21 @@ class ScopeIdDefResolver : public StmtExprMutator {
     }
     Stmt body = Substitute(n->body, id_map);
 
-    // Step 4. Wrap the body with thread_extent attributes
-    for (const auto& [tag, iv] : launch_params) {
-      body = AttrStmt(iv, tirx::attr::thread_extent, iv->dom->extent, body);
-    }
-
     // Clear the scope_id_def
     auto* n_scope = kernel.CopyOnWrite();
     n_scope->scope_id_def = {};
 
-    // Return the resolved block
+    // set the resolved exec_scope and body
     n->exec_scope = kernel;
     n->body = body;
-    return block;
+
+    n_realize->block = block;
+    Stmt ret = Stmt(n_realize);
+    // Step 4. Wrap the block with thread_extent attributes
+    for (const auto& [tag, iv] : launch_params) {
+      ret = AttrStmt(iv, tirx::attr::thread_extent, iv->dom->extent, ret);
+    }
+    return ret;
   }
 
   void ExtractKernelLaunchParams(const ScopeIdDefVerifier::ScopeIdSet& id_set, const Target& target,
@@ -193,8 +199,8 @@ class TIRpOpScheduler : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const BlockNode* op) final {
-    bool is_first_block = is_first_block_;
-    is_first_block_ = false;
+    bool is_first_block = false;
+    std::swap(is_first_block, is_first_block_);
     Block block = GetRef<Block>(op);
     auto* n = block.CopyOnWrite();
     // Get the exec_scope
@@ -212,11 +218,14 @@ class TIRpOpScheduler : public StmtExprMutator {
         n->body = KernelReplacePointSearcher::Seek(stmt, n->body);
       }
       n->alloc_buffers.insert(n->alloc_buffers.end(), alloc_buffers_.begin(), alloc_buffers_.end());
-      // Insert host init stmts
       Stmt res = BlockRealize({}, Bool(true), std::move(block));
-      for (const auto& stmt : host_init_stmts_) {
-        res = KernelReplacePointSearcher::Seek(stmt, std::move(res));
+      if (is_first_thread_attr_) {
+        // Insert host init stmts outside the outermost thread binding or block
+        for (const auto& stmt : host_init_stmts_) {
+          res = KernelReplacePointSearcher::Seek(stmt, std::move(res));
+        }
       }
+      std::swap(is_first_block, is_first_block_);
       return std::move(res);
     }
     return std::move(block);
@@ -225,10 +234,21 @@ class TIRpOpScheduler : public StmtExprMutator {
   Stmt VisitStmt_(const AttrStmtNode* op) final {
     // Collect the launch parameters
     if (op->attr_key == tirx::attr::thread_extent) {
+      bool is_first_thread_attr = false;
+      std::swap(is_first_thread_attr, is_first_thread_attr_);
       auto thread_extent = Downcast<IterVar>(op->node);
       ICHECK(thread_extent->thread_tag.defined())
           << "Internal Error: thread_extent without thread_tag";
       launch_params_[thread_extent->thread_tag] = op->value;
+      Stmt res = StmtExprMutator::VisitStmt_(op);
+      if (is_first_thread_attr && is_first_block_) {
+        // Insert host init stmts outside the outermost thread binding or block
+        for (const auto& stmt : host_init_stmts_) {
+          res = KernelReplacePointSearcher::Seek(stmt, std::move(res));
+        }
+      }
+      std::swap(is_first_thread_attr, is_first_thread_attr_);
+      return res;
     }
     return StmtExprMutator::VisitStmt_(op);
   }
@@ -276,6 +296,7 @@ class TIRpOpScheduler : public StmtExprMutator {
   std::vector<Stmt> host_init_stmts_;
 
   bool is_first_block_{true};
+  bool is_first_thread_attr_{true};
 };
 
 class ScopeMerger : public StmtExprMutator {
@@ -383,7 +404,9 @@ class ExecScopeSliceResolver : public StmtExprMutator {
         CHECK(false) << "TIRpError: Block with scope partition at has invalid body " << op->body;
       }
     }
-    ICHECK(op->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
+    if (!op->exec_scope.defined()) {
+      return std::move(StmtExprMutator::VisitStmt_(op));
+    }
     auto exec_scope = op->exec_scope.value();
     auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
     if (!scope_slice_opt.has_value()) {
@@ -728,7 +751,7 @@ Pass LowerTIRp() {
       n->body = TIRpOpScheduler::LowerOpCalls(n->body, target.value());
       n->body = ScopeMerger::Merge(n->body);
       if (max_try == 0) {
-        LOG(FATAL) << "Failed to lower the TIRp program after " << 100 << " tries";
+        LOG(FATAL) << "Failed to lower the TIRp program after " << 100 << " tries: " << f;
         break;
       }
       max_try--;
@@ -747,5 +770,5 @@ Pass LowerTIRp() {
 TVM_FFI_REGISTER_GLOBAL("tirx.transform.LowerTIRp").set_body_typed(LowerTIRp);
 
 }  // namespace transform
-}  // namespace tirxxxxxx
+}  // namespace tirxxxxxxx
 }  // namespace tvm

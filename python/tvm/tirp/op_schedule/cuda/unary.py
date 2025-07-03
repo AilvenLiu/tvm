@@ -33,6 +33,7 @@ from .common import get_indices
 
 unary_op_table = {
     MapOpType.ZERO: lambda x: 0.0,
+    MapOpType.FILL: lambda x: x,
     MapOpType.SQRT: lambda x: T.sqrt(x),
     MapOpType.RECIPROCAL: lambda x: 1.0 / x,
     MapOpType.EXP: T.exp2,

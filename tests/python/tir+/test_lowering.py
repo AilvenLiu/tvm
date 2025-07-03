@@ -74,11 +74,11 @@ def test_lower_view_get():
 
     @T.prim_func(private=True, tirp=True)
     def after1(in_buf: T.Buffer(64, "float32"), out: T.Buffer(64, "float32")) -> None:
+        blockIdx_x = T.launch_thread("blockIdx.x", 1)
+        threadIdx_x = T.launch_thread("threadIdx.x", 32)
+        blockIdx_y = T.launch_thread("blockIdx.y", 1)
+        blockIdx_z = T.launch_thread("blockIdx.z", 1)
         with T.kernel():
-            blockIdx_x = T.launch_thread("blockIdx.x", 1)
-            threadIdx_x = T.launch_thread("threadIdx.x", 32)
-            blockIdx_y = T.launch_thread("blockIdx.y", 1)
-            blockIdx_z = T.launch_thread("blockIdx.z", 1)
             with T.thread():
                 A = T.alloc_buffer((2,), "float16", scope="local")
                 with T.warp():
@@ -131,11 +131,11 @@ def test_lower_view_get():
 
     @T.prim_func(private=True, tirp=True)
     def after2(in_buf: T.Buffer((16, 16), "float32"), out: T.Buffer((16, 16), "float32")):
+        blockIdx_x = T.launch_thread("blockIdx.x", 1)
+        threadIdx_x = T.launch_thread("threadIdx.x", 32)
+        blockIdx_y = T.launch_thread("blockIdx.y", 1)
+        blockIdx_z = T.launch_thread("blockIdx.z", 1)
         with T.kernel():
-            blockIdx_x = T.launch_thread("blockIdx.x", 1)
-            threadIdx_x = T.launch_thread("threadIdx.x", 32)
-            blockIdx_y = T.launch_thread("blockIdx.y", 1)
-            blockIdx_z = T.launch_thread("blockIdx.z", 1)
             with T.thread():
                 A = T.alloc_buffer((8,), scope="local", logical_scope="thread")
                 with T.warp():
@@ -202,11 +202,11 @@ def test_lower_view_get():
 
     @T.prim_func(private=True, tirp=True)
     def after3_wgmma_layout(in_buf: T.Buffer((128, 128), "float32"), out: T.Buffer((128, 128), "float32")):
+        blockIdx_x = T.launch_thread("blockIdx.x", 1)
+        threadIdx_x = T.launch_thread("threadIdx.x", 256)
+        blockIdx_y = T.launch_thread("blockIdx.y", 1)
+        blockIdx_z = T.launch_thread("blockIdx.z", 1)
         with T.kernel():
-            blockIdx_x = T.launch_thread("blockIdx.x", 1)
-            threadIdx_x = T.launch_thread("threadIdx.x", 256)
-            blockIdx_y = T.launch_thread("blockIdx.y", 1)
-            blockIdx_z = T.launch_thread("blockIdx.z", 1)
             with T.thread():
                 acc = T.alloc_buffer((64,), scope="local", logical_scope="thread")
                 with T.cta():
@@ -268,11 +268,11 @@ def test_lower_view_get():
 
     @T.prim_func(private=True, tirp=True)
     def after4_multi_view_get(in_buf: T.Buffer(64, "float32"), out: T.Buffer(64, "float32")) -> None:
+        blockIdx_x = T.launch_thread("blockIdx.x", 1)
+        threadIdx_x = T.launch_thread("threadIdx.x", 32)
+        blockIdx_y = T.launch_thread("blockIdx.y", 1)
+        blockIdx_z = T.launch_thread("blockIdx.z", 1)
         with T.kernel():
-            blockIdx_x = T.launch_thread("blockIdx.x", 1)
-            threadIdx_x = T.launch_thread("threadIdx.x", 32)
-            blockIdx_y = T.launch_thread("blockIdx.y", 1)
-            blockIdx_z = T.launch_thread("blockIdx.z", 1)
             with T.thread():
                 A = T.alloc_buffer((2,), "float16", scope="local", logical_scope="thread")
                 with T.warp():
@@ -303,11 +303,11 @@ def test_lower_scope_id():
 
     @T.prim_func(private=True, tirp=True)
     def after1() -> None:
+        blockIdx_x = T.launch_thread("blockIdx.x", 3)
+        threadIdx_x = T.launch_thread("threadIdx.x", 32)
+        blockIdx_y = T.launch_thread("blockIdx.y", 4)
+        blockIdx_z = T.launch_thread("blockIdx.z", 5)
         with T.kernel():
-            blockIdx_x = T.launch_thread("blockIdx.x", 3)
-            threadIdx_x = T.launch_thread("threadIdx.x", 32)
-            blockIdx_y = T.launch_thread("blockIdx.y", 4)
-            blockIdx_z = T.launch_thread("blockIdx.z", 5)
             with T.thread():
                 T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x)
     # fmt: on
@@ -327,14 +327,14 @@ def test_lower_scope_id():
 
     @T.prim_func(private=True, tirp=True)
     def after2() -> None:
+        clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
+        clusterCtaIdx_y = T.launch_thread("clusterCtaIdx.y", 2)
+        clusterCtaIdx_z = T.launch_thread("clusterCtaIdx.z", 2)
+        blockIdx_x = T.launch_thread("blockIdx.x", 8)
+        threadIdx_x = T.launch_thread("threadIdx.x", 128)
+        blockIdx_y = T.launch_thread("blockIdx.y", 8)
+        blockIdx_z = T.launch_thread("blockIdx.z", 8)
         with T.kernel():
-            clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
-            clusterCtaIdx_y = T.launch_thread("clusterCtaIdx.y", 2)
-            clusterCtaIdx_z = T.launch_thread("clusterCtaIdx.z", 2)
-            blockIdx_x = T.launch_thread("blockIdx.x", 8)
-            threadIdx_x = T.launch_thread("threadIdx.x", 128)
-            blockIdx_y = T.launch_thread("blockIdx.y", 8)
-            blockIdx_z = T.launch_thread("blockIdx.z", 8)
             with T.thread():
                 T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x // 32 + threadIdx_x % 32 + clusterCtaIdx_x + clusterCtaIdx_y + clusterCtaIdx_z)
 
@@ -362,14 +362,14 @@ def test_lower_scope_id():
 
     @T.prim_func(private=True, tirp=True)   
     def after3() -> None:
+        clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
+        clusterCtaIdx_y = T.launch_thread("clusterCtaIdx.y", 2)
+        clusterCtaIdx_z = T.launch_thread("clusterCtaIdx.z", 1)
+        blockIdx_x = T.launch_thread("blockIdx.x", 8)
+        threadIdx_x = T.launch_thread("threadIdx.x", 384)
+        blockIdx_y = T.launch_thread("blockIdx.y", 10)
+        blockIdx_z = T.launch_thread("blockIdx.z", 12)
         with T.kernel():
-            clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
-            clusterCtaIdx_y = T.launch_thread("clusterCtaIdx.y", 2)
-            clusterCtaIdx_z = T.launch_thread("clusterCtaIdx.z", 1)
-            blockIdx_x = T.launch_thread("blockIdx.x", 8)
-            threadIdx_x = T.launch_thread("threadIdx.x", 384)
-            blockIdx_y = T.launch_thread("blockIdx.y", 10)
-            blockIdx_z = T.launch_thread("blockIdx.z", 12)
             with T.cta():
                 with T.warpgroup():
                     with T.thread():
@@ -402,11 +402,11 @@ def test_lower_scope_slice():
 
     @T.prim_func(private=True, tirp=True)
     def after():
+        blockIdx_x = T.launch_thread("blockIdx.x", 3)
+        threadIdx_x = T.launch_thread("threadIdx.x", 128)
+        blockIdx_y = T.launch_thread("blockIdx.y", 4)
+        blockIdx_z = T.launch_thread("blockIdx.z", 5)
         with T.kernel():
-            blockIdx_x = T.launch_thread("blockIdx.x", 3)
-            threadIdx_x = T.launch_thread("threadIdx.x", 128)
-            blockIdx_y = T.launch_thread("blockIdx.y", 4)
-            blockIdx_z = T.launch_thread("blockIdx.z", 5)
             if blockIdx_x >= 0 and blockIdx_x < 1 and blockIdx_y >= 0 and blockIdx_y < 2 and blockIdx_z >= 0 and blockIdx_z < 3:
                 with T.cta():
                     if threadIdx_x >= 0 and threadIdx_x < 64:
@@ -446,11 +446,11 @@ def test_lower_scope_partition():
 
     @T.prim_func(private=True, tirp=True)
     def main():
+        blockIdx_x = T.launch_thread("blockIdx.x", 3)
+        threadIdx_x = T.launch_thread("threadIdx.x", 128)
+        blockIdx_y = T.launch_thread("blockIdx.y", 4)
+        blockIdx_z = T.launch_thread("blockIdx.z", 5)
         with T.kernel():
-            blockIdx_x = T.launch_thread("blockIdx.x", 3)
-            threadIdx_x = T.launch_thread("threadIdx.x", 128)
-            blockIdx_y = T.launch_thread("blockIdx.y", 4)
-            blockIdx_z = T.launch_thread("blockIdx.z", 5)
             if threadIdx_x >= 0 and threadIdx_x < 32:
                 with T.thread():
                     T.evaluate(threadIdx_x)
@@ -493,11 +493,11 @@ def test_lower_layout():
 
     @T.prim_func(private=True, tirp=True)
     def after(A: T.Buffer((128, 32), "float16")) -> None:
+        blockIdx_x = T.launch_thread("blockIdx.x", 1)
+        threadIdx_x = T.launch_thread("threadIdx.x", 128)
+        blockIdx_y = T.launch_thread("blockIdx.y", 1)
+        blockIdx_z = T.launch_thread("blockIdx.z", 1)
         with T.kernel():
-            blockIdx_x = T.launch_thread("blockIdx.x", 1)
-            threadIdx_x = T.launch_thread("threadIdx.x", 128)
-            blockIdx_y = T.launch_thread("blockIdx.y", 1)
-            blockIdx_z = T.launch_thread("blockIdx.z", 1)
             with T.cta():
                 A_smem = T.alloc_buffer((4096,), "float16", scope="shared", logical_scope="cta")
                 with T.thread():
@@ -550,9 +550,9 @@ def test_lower_decl_buffer_access_ptr():
 
     @T.prim_func(private=True, tirp=True)
     def after():
+        blockIdx_x = T.launch_thread("blockIdx.x", 1)
+        threadIdx_x = T.launch_thread("threadIdx.x", 128)
         with T.kernel():
-            blockIdx_x = T.launch_thread("blockIdx.x", 1)
-            threadIdx_x = T.launch_thread("threadIdx.x", 128)
             with T.cta():
                 buf = T.alloc_buffer((1024,), "uint8", scope="shared.dyn", logical_scope="cta")
                 A = T.decl_buffer((128,), "float16", data=buf.data, elem_offset=32, scope="shared.dyn")

@@ -150,7 +150,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
                    ffi::String buffer_type_str, ffi::Optional<ffi::Array<IntImm>> axis_separators,
                    ffi::String logical_scope, ffi::Optional<TLayout> layout) {
   Buffer buffer = BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align,
-                             offset_factor, buffer_type_str, axis_separators, "kernel", layout);
+                             offset_factor, buffer_type_str, axis_separators, "kernel", layout, {});
   if (const auto* var = param.as<tvm::tirx::VarNode>()) {
     PrimFuncFrame frame = FindPrimFuncFrame("T.match_buffer");
     Var v = ffi::GetRef<Var>(var);
@@ -1160,7 +1160,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

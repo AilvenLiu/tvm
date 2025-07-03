@@ -21,7 +21,7 @@ from typing import List, Tuple, Dict, Any, Optional
 
 import tvm
 from tvm.tir.stmt import OpCall
-from tvm.tir import PrimExpr, BufferRegion, FloatImm, Buffer, Stmt, IntImm
+from tvm.tir import PrimExpr, BufferRegion, FloatImm, Buffer, Stmt, IntImm, BufferLoad
 from tvm.ir import Op
 from tvm.tir.async_structs import Pipeline
 from tvm.tir.predicate import Predicate
@@ -72,8 +72,8 @@ class UnaryOp(OpCall):
         ), f"{self} expects BufferRegion as output, got {self.output}"
         if self.scalar_input:
             assert isinstance(
-                self.input, FloatImm
-            ), f"{self} expects FloatImm as value, got {self.input}"
+                self.input, (FloatImm, IntImm)
+            ), f"{self} expects FloatImm or IntImm as value, got {self.input}"
         else:
             assert isinstance(
                 self.input, BufferRegion
@@ -435,6 +435,59 @@ class PipelineConsumerRelease(PipelineOp):
     """Release a consumer slot after data has been consumed."""
 
     op = get_tirp_op("pipeline_consumer_release")
+
+
+class EventTensorInit(OpCall):
+    """Initialize an event tensor."""
+
+    op = get_tirp_op("event_tensor_init")
+
+    event_tensor = ArgProperty(0)
+    init_value = ArgProperty(1)
+
+    def validate(self) -> None:
+        """Validate that the operator has the correct number and types of arguments."""
+        assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
+        assert isinstance(
+            self.event_tensor, Buffer
+        ), f"{self} expects Buffer as event_tensor, got {self.event_tensor}"
+        assert self.event_tensor.is_event_tensor(), f"{self.event_tensor} is not an event tensor"
+        assert (
+            isinstance(self.init_value, IntImm) or self.init_value is None
+        ), f"{self} expects IntImm as init_value, got {self.init_value}"
+
+
+class EventCommit(OpCall):
+    """Commit an event."""
+
+    op = get_tirp_op("event_commit")
+
+    event = ArgProperty(0)
+    tx_count = ArgProperty(1)
+
+    def validate(self) -> None:
+        """Validate that the operator has the correct number and types of arguments."""
+        assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
+        assert isinstance(
+            self.event, BufferLoad
+        ), f"{self} expects BufferLoad as event, got {self.event}"
+        assert self.event.is_event(), f"{self.event} is not an event"
+
+
+class EventWait(OpCall):
+    """Wait for an event to be committed."""
+
+    op = get_tirp_op("event_wait")
+
+    event = ArgProperty(0)
+
+    def validate(self) -> None:
+        """Validate that the operator has the correct number and types of arguments."""
+        assert len(self.args) == 1, f"{self} expects 1 argument, got {len(self.args)}"
+        assert isinstance(
+            self.event, BufferLoad
+        ), f"{self} expects BufferLoad as event, got {self.event}"
+        assert self.event.is_event(), f"{self.event} is not an event"
 
 
 class KernelReplacePoint(OpCall):

@@ -138,7 +138,9 @@ def tirp_pipeline():
         pass_ctx = tvm.transform.PassContext.current()
         config = pass_ctx.config
         passes = [
+            tvm.tirp.transform.PrivateBufferAlloc(),
             tir.transform.LowerTIRp(),
+            tvm.tirp.transform.EventTensorLegalizer(),
             tvm.ir.transform.PrintIR(),
             tir.transform.LowerCrossThreadReduction(),
             tir.transform.LowerInitBlock(),

@@ -661,6 +661,20 @@ Buffer Buffer::with_allocated_addr(ffi::Array<Integer> allocated_addr) const {
   return output;
 }
 
+Buffer Buffer::with_dtype(DataType dtype) const {
+  Buffer output = *this;
+  auto writer = output.CopyOnWrite();
+  writer->dtype = dtype;
+  return output;
+}
+
+Buffer Buffer::with_data(Var data) const {
+  Buffer output = *this;
+  auto writer = output.CopyOnWrite();
+  writer->data = data;
+  return output;
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
@@ -690,8 +704,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("tirx.BufferVStore", &Buffer::vstore)
       .def_method("tirx.BufferStorageScope", &Buffer::scope)
       .def_method("tirx.BufferLogicalScope", &Buffer::logical_scope)
-      .def_method("tirx.BufferWithAllocatedAddr", &Buffer::with_allocated_addr);
+      .def_method("tirx.BufferWithAllocatedAddr", &Buffer::with_allocated_addr)
+      .def_method("tirx.BufferWithDtype", &Buffer::with_dtype)
+      .def_method("tirx.BufferWithData", &Buffer::with_data);
 }
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm

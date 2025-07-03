@@ -29,9 +29,9 @@ from tvm.tir.transform.function_pass import prim_func_pass
 
 
 class PrivateAllocCollector(StmtVisitor):
-    def __init__(self):
+    def __init__(self, target: Target):
         super().__init__()
-        self.target = Target.current(allow_none=False)
+        self.target = target
         self.exec_scope_stack_ = []
         self.launch_params = {}
         self.var_range_map = {}
@@ -47,7 +47,7 @@ class PrivateAllocCollector(StmtVisitor):
 
     def visit_attr_(self, op: AttrStmt):
         if op.attr_key == "thread_extent":
-            self.launch_params[op.thread_tag] = op.value
+            self.launch_params[op.node.thread_tag] = op.value
         super().visit_attr_(op)
 
     def visit_for_(self, op: For):
@@ -132,8 +132,8 @@ class PrivateAllocMutator(StmtMutator):
         return op
 
 
-def private_alloc(stmt: Stmt) -> Stmt:
-    collector = PrivateAllocCollector()
+def private_alloc(stmt: Stmt, target: Target) -> Stmt:
+    collector = PrivateAllocCollector(target)
     collector(stmt)
 
     alloc_buffers = [buffer for buffer, _ in collector.buffer_dict.values()]
@@ -155,6 +155,9 @@ class PrivateBufferAlloc:
     """Generate private buffer allocations for each OpCall"""
 
     def transform_function(self, func, mod, ctx):
-        new_body = private_alloc(func.body)
+        target = func.attrs.get("target", None)
+        if target is None:
+            target = Target.current(allow_none=False)
+        new_body = private_alloc(func.body, target)
         new_func = func.with_body(new_body)
         return new_func

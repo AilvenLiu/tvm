@@ -16,7 +16,7 @@
 # under the License.
 """Builtin ops in TIR+"""
 from typing import Union, Optional, Dict, Any, Tuple, Callable, List
-from tvm.tirx import BufferRegion, Buffer, PrimExpr
+from tvm.tirx import BufferRegion, Buffer, PrimExpr, BufferLoad
 from tvm.ir import Op
 from tvm.tirx.async_structs import CopyPipeline
 from tvm.tirx.exec_scope import ExecScope
@@ -1057,6 +1057,81 @@ def select(
     return f_insert(tirp_op.Select(dst, true_value, false_value, pred))
 
 
+def event_tensor_init(
+    event_tensor: Buffer,
+    init_value: Optional[int] = None,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
+    """Initialize an event tensor.
+
+    Parameters
+    ----------
+    event_tensor : Buffer
+        The event tensor to initialize.
+
+    init_value : Optional[int]
+        The initial value to set for the event tensor.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+
+    schedule_config : Dict[str, Any]
+        The schedule configuration.
+    """
+    return f_insert(
+        tirp_op.EventTensorInit(
+            event_tensor, init_value, workspace=workspace, schedule_config=schedule_config
+        )
+    )
+
+
+def event_commit(
+    event: BufferLoad,
+    tx_count: Optional[int] = None,
+    workspace: Dict[str, Buffer] = {},
+    schedule_config: Dict[str, Any] = {},
+):
+    """Commit an event.
+
+    Parameters
+    ----------
+    event : BufferLoad
+        The event to commit.
+
+    tx_count : Optional[int]
+        The number of transactions to commit. Only applicable on TMA load.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+
+    schedule_config : Dict[str, Any]
+        The schedule configuration.
+    """
+    return f_insert(
+        tirp_op.EventCommit(event, tx_count, workspace=workspace, schedule_config=schedule_config)
+    )
+
+
+def event_wait(
+    event: BufferLoad, workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}
+):
+    """Wait for an event.
+
+    Parameters
+    ----------
+    event : BufferLoad
+        The event to wait for.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+
+    schedule_config : Dict[str, Any]
+        The schedule configuration.
+    """
+    return f_insert(tirp_op.EventWait(event, workspace=workspace, schedule_config=schedule_config))
+
+
 __all__ = [
     "zero",
     "sqrt",
@@ -1083,4 +1158,7 @@ __all__ = [
     "binary_chain",
     "reduce_negate",
     "select",
+    "event_tensor_init",
+    "event_commit",
+    "event_wait",
 ]
