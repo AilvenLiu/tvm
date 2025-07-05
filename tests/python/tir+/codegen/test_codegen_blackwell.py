@@ -46,17 +46,18 @@ def test_tmem_alloc_dealloc_relinquish():
             lane_id = T.thread_id([32], parent="warp")
             tx = T.thread_id([128], parent="cta")
             with T.cta():
-                tmem_addr = T.alloc_buffer((1,), "uint32", scope="shared", align=8)
+                # tmem_addr = T.alloc_buffer((1,), "uint32", scope="shared", align=8)
+                tmem_addr = T.shared_cell("uint32")
 
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(tmem_addr.data, n_cols=N_COLS, cta_group=cta_group)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
                 T.tvm_storage_sync("shared")
 
                 # dealloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
-                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=N_COLS, cta_group=cta_group)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
     # fmt: on
 
     target = tvm.target.Target("cuda")
@@ -108,11 +109,12 @@ def test_tcgen05_ld_st_roundtrip():
             tx = T.thread_id([128], parent="cta")
             with T.cta():
                 reg = T.alloc_buffer((WIDTH,), "float32", scope="local")
-                tmem_addr = T.alloc_buffer((1,), "uint32", scope="shared", align=8)
+                # tmem_addr = T.alloc_buffer((1,), "uint32", scope="shared", align=8)
+                tmem_addr = T.shared_cell("uint32")
 
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(tmem_addr.data, n_cols=N_COLS, cta_group=cta_group)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
                 T.tvm_storage_sync("shared")
 
                 with T.thread():
@@ -121,7 +123,7 @@ def test_tcgen05_ld_st_roundtrip():
                         reg[i] = A[tx, i]
                     # RF -> TMEM
                     for i in range(WIDTH):
-                        T.ptx.tcgen05.st(tmem_addr[0], warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])
+                        T.ptx.tcgen05.st(tmem_addr, warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])
                     T.ptx.tcgen05.wait.st()
                     T.tvm_storage_sync("shared")
                     # reset RF
@@ -131,7 +133,7 @@ def test_tcgen05_ld_st_roundtrip():
                     # TMEM -> RF
                     T.ptx.tcgen05.fence.after_thread_sync()
                     for i in range(WIDTH):
-                        T.ptx.tcgen05.ld(tmem_addr[0], warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])
+                        T.ptx.tcgen05.ld(tmem_addr, warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])
                     T.ptx.tcgen05.wait.ld()
                     # RF -> GMEM
                     for i in range(WIDTH):
@@ -140,7 +142,7 @@ def test_tcgen05_ld_st_roundtrip():
                 # dealloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
-                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=N_COLS, cta_group=cta_group)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
     # fmt: on
 
     DEV = tvm.cuda(0)
@@ -182,14 +184,15 @@ def test_tcgen05_cp_ld_roundtrip():
             with T.cta():
                 A_smem = T.alloc_buffer((HEIGHT, WIDTH), dtype, scope="shared", layout=A_layout)
                 reg = T.alloc_buffer((WIDTH,), dtype, scope="local")
-                tmem_addr = T.alloc_buffer((1,), "uint32", scope="shared", align=8)
+                # tmem_addr = T.alloc_buffer((1,), "uint32", scope="shared", align=8)
+                tmem_addr = T.shared_cell("uint32")
                 descA = T.alloc_buffer((1,), "uint64", scope="local")
                 bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
                 phase = T.alloc_buffer((1,), "int32", scope="local")
 
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(tmem_addr.data, n_cols=N_COLS, cta_group=cta_group)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
                 T.tvm_storage_sync("shared")
 
                 # GMEM -> SMEM
@@ -208,7 +211,7 @@ def test_tcgen05_cp_ld_roundtrip():
                         T.ptx.mbarrier.init(bar.data, 1)
                         for k in range(dtype_bits * WIDTH // 256):
                             T.ptx.tcgen05.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([0, k * 8])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
-                            T.ptx.tcgen05.cp(tmem_addr[0], 0, k * 256 // 32, descA[0], "128x256b", dtype, dtype, cta_group=cta_group)
+                            T.ptx.tcgen05.cp(tmem_addr, 0, k * 256 // 32, descA[0], "128x256b", dtype, dtype, cta_group=cta_group)
                         T.ptx.tcgen05.commit(bar.data, cta_group)
                     T.ptx.mbarrier.try_wait(bar.data, phase[0])
                     phase[0] = phase[0] ^ 1
@@ -216,7 +219,7 @@ def test_tcgen05_cp_ld_roundtrip():
                     # TMEM -> RF (ld)
                     T.ptx.tcgen05.fence.after_thread_sync()
                     for i in range(WIDTH):
-                        T.ptx.tcgen05.ld(tmem_addr[0], warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])
+                        T.ptx.tcgen05.ld(tmem_addr, warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])
                     T.ptx.tcgen05.wait.ld()
                     # RF -> GMEM
                     for i in range(WIDTH):
@@ -225,7 +228,7 @@ def test_tcgen05_cp_ld_roundtrip():
                 # dealloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
-                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=N_COLS, cta_group=cta_group)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
     # fmt: on
 
     DEV = tvm.cuda(0)
@@ -304,7 +307,8 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                 A_smem = T.alloc_buffer((M, K), a_type, scope="shared", layout=A_layout)
                 B_smem = T.alloc_buffer((N, K), b_type, scope="shared", layout=B_layout)
                 reg = T.alloc_buffer((N,), d_type, scope="local")
-                tmem_addr = T.alloc_buffer((1,), "uint32", scope="shared", align=8)
+                # tmem_addr = T.alloc_buffer((1,), "uint32", scope="shared", align=8)
+                tmem_addr = T.shared_cell("uint32")
                 descA = T.alloc_buffer((1,), "uint64", scope="local")
                 descB = T.alloc_buffer((1,), "uint64", scope="local")
                 descI = T.alloc_buffer((1,), "uint32", scope="local")
@@ -313,7 +317,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
 
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(tmem_addr.data, n_cols=N_COLS, cta_group=cta_group)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
                 T.tvm_storage_sync("shared")
 
                 # reset RF
@@ -338,9 +342,9 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                             T.ptx.tcgen05.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
                             T.ptx.tcgen05.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
                             if k == 0:
-                                T.ptx.tcgen05.mma(d_type, a_type, b_type, tmem_addr[0], descA[0], descB[0], descI[0], use_a_tmem=False, cta_group=cta_group, enable_input_d=False)
+                                T.ptx.tcgen05.mma(d_type, a_type, b_type, tmem_addr, descA[0], descB[0], descI[0], use_a_tmem=False, cta_group=cta_group, enable_input_d=False)
                             else:
-                                T.ptx.tcgen05.mma(d_type, a_type, b_type, tmem_addr[0], descA[0], descB[0], descI[0], use_a_tmem=False, cta_group=cta_group, enable_input_d=True)
+                                T.ptx.tcgen05.mma(d_type, a_type, b_type, tmem_addr, descA[0], descB[0], descI[0], use_a_tmem=False, cta_group=cta_group, enable_input_d=True)
                         T.ptx.tcgen05.commit(bar.data, cta_group)
                     T.ptx.mbarrier.try_wait(bar.data, phase[0])
                     phase[0] = phase[0] ^ 1
@@ -349,7 +353,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                     # TMEM -> RF
                     T.ptx.tcgen05.fence.after_thread_sync()
                     for i in range(N):
-                        T.ptx.tcgen05.ld(tmem_addr[0], warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])
+                        T.ptx.tcgen05.ld(tmem_addr, warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])
                     T.ptx.tcgen05.wait.ld()
                     # RF -> GMEM
                     for i in range(N):
@@ -358,7 +362,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                 # dealloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
-                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=N_COLS, cta_group=cta_group)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
     # fmt: on
 
     import torch

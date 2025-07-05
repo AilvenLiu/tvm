@@ -133,7 +133,7 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
   // Step 5. Handle `buffer.elem_offset`
   bool needs_print_factor = false;
   if (const auto* int_imm = buffer->elem_offset.as<IntImmNode>()) {
-    if (int_imm->value != 0) {
+    if (int_imm->value != 0 || int_imm->dtype != buffer->DefaultIndexType()) {
       kwargs.Set("elem_offset",
                  d->AsDoc<ExprDoc>(buffer->elem_offset,  //
                                    buffer_p->Attr("elem_offset")));
@@ -178,7 +178,7 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
   // Step 11. Handle `buffer.logical_scope`
   {
     String scope = buffer.logical_scope();
-    if (scope != "") {
+    if (scope != "" && scope != tvm::tir::StorageToLogicalScope(buffer.scope())) {
       kwargs.Set(
           "logical_scope",
           LiteralDoc::Str(scope,
@@ -220,15 +220,57 @@ ExprDoc BufferCall(const ExprDoc& prefix, const ffi::Map<ffi::String, ExprDoc>& 
       kwargs_values.push_back(doc.value());
     }
   }
+
   return prefix->Call(args, kwargs_keys, kwargs_values);
 }
 
 ExprDoc BufferDecl(const tirx::Buffer& buffer, const ffi::String& method,
                    const ffi::Array<ExprDoc>& args, const AccessPath& p, const Frame& frame,
                    const IRDocsifier& d, BufferVarDefinition var_definitions) {
-  return BufferCall(/*prefix=*/TIR(d, method),
-                    /*attrs=*/BufferAttrs(buffer, p, frame, d, var_definitions),
-                    /*args=*/args);
+  auto prefix = TIR(d, method);
+  auto attrs = BufferAttrs(buffer, p, frame, d, var_definitions);
+  if (method == "alloc_buffer") {
+    if (buffer.IsCell()) {
+      // The buffer can be allocated by the alloc_cell function
+      auto dtype = d->AsDoc<ExprDoc>(buffer->dtype, p->Attr("dtype"));
+      if (buffer.scope() == "shared") {
+        // shared_cell
+        prefix = TIR(d, "shared_cell");
+        attrs = Map<String, ExprDoc>({{"dtype", dtype}});
+      } else if (buffer.scope() == "local") {
+        // local_cell
+        prefix = TIR(d, "local_cell");
+        attrs = Map<String, ExprDoc>({{"dtype", dtype}});
+      } else {
+        // alloc_cell
+        prefix = TIR(d, "alloc_cell");
+        auto scope = d->AsDoc<ExprDoc>(buffer.scope(), p->Attr("scope"));
+        attrs = Map<String, ExprDoc>({{"dtype", dtype}, {"scope", scope}});
+      }
+    } else {
+      if (buffer.scope() == "shared") {
+        // alloc_shared
+        prefix = TIR(d, "alloc_shared");
+        attrs.erase("scope");
+      } else if (buffer.scope() == "local") {
+        // alloc_local
+        prefix = TIR(d, "alloc_local");
+        attrs.erase("scope");
+      }
+    }
+  } else if (method == "decl_buffer") {
+    if (buffer.IsCell(false)) {
+      // decl_cell
+      prefix = TIR(d, "decl_cell");
+      auto dtype = d->AsDoc<ExprDoc>(buffer->dtype, p->Attr("dtype"));
+      auto scope = d->AsDoc<ExprDoc>(buffer.scope(), p->Attr("scope"));
+      auto elem_offset = d->AsDoc<ExprDoc>(buffer->elem_offset, p->Attr("elem_offset"));
+      auto data = d->AsDoc<ExprDoc>(buffer->data, p->Attr("data"));
+      attrs = Map<String, ExprDoc>(
+          {{"dtype", dtype}, {"scope", scope}, {"elem_offset", elem_offset}, {"data", data}});
+    }
+  }
+  return BufferCall(prefix, attrs, args);
 }
 
 ExprDoc BufferAttn(const tirx::Buffer& buffer, const AccessPath& p, const Frame& frame,
@@ -300,6 +342,15 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           ExprDoc buffer = d->AsDoc<ExprDoc>(store->buffer, p->Attr("buffer"));
           ExprDoc value = d->AsDoc<ExprDoc>(store->value, p->Attr("value"));
 
+          // special case for all 0-dim buffers (no matter cell or normal)
+          if (store->buffer->shape.size() == 0) {
+            ICHECK(store->indices.empty()) << "0-dim buffer store with indices is not supported";
+            Optional<ExprDoc> doc = d->GetVarDoc(store->buffer);
+            ICHECK(doc.has_value())
+                << "0-dim buffer is not defined in the environment: " << store->buffer;
+            return AssignDoc(doc.value(), value, std::nullopt);
+          }
+
           // Use .vstore(...) syntax when there is a predicate
           if (store->predicate.defined()) {
             ExprDoc indices = d->AsDoc<ExprDoc>(store->indices, p->Attr("indices"));
@@ -317,6 +368,16 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::BufferLoad>(  //
         "", [](tirx::BufferLoad load, AccessPath p, IRDocsifier d) -> Doc {
           ExprDoc buffer = d->AsDoc<ExprDoc>(load->buffer, p->Attr("buffer"));
+
+          // special case for cell
+          if ((load->buffer.IsCell(true) || load->buffer.IsCell(false)) &&
+              !load->predicate.defined()) {
+            ICHECK(load->indices.empty()) << "Cell buffer load with indices is not supported";
+            Optional<ExprDoc> doc = d->GetVarDoc(load->buffer);
+            ICHECK(doc.has_value())
+                << "Cell buffer is not defined in the environment: " << load->buffer;
+            return doc.value();
+          }
 
           // Use .vload(...) syntax when there is a predicate
           if (load->predicate.defined()) {
@@ -339,6 +400,10 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
         }
       }
       if (ffi::Optional<ExprDoc> doc = d->GetVarDoc(buffer)) {
+        // special case for cell buffer
+        if (buffer.IsCell()) {
+          return doc.value()->Attr("buffer");
+        }
         return doc.value();
       }
       TVM_FFI_THROW(IndexError) << "Buffer is not defined in the environment: " << buffer;

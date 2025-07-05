@@ -19,6 +19,7 @@ import tvm.script
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.script.ir_builder import IRBuilder
 from tvm.ir import assert_structural_equal
 
 
@@ -737,5 +738,72 @@ def test_grid():
     assert_structural_equal(test, from_source(code))
 
 
+def test_alloc_apis():
+    # fmt: off
+    class Test:
+        def __init__(self, Ta, inner_pool):
+            self.Ta = Ta
+            self.inner_pool = inner_pool
+            self.Tb = T.shared_cell("float16", "Tb")
+            self.idx = T.local_cell("int32", "idx")
+            self.inner_pool2 = T.decl_cell("float16", self.inner_pool.data, "shared.dyn", 5, "inner_pool2")
+
+        @T.macro
+        def init(self):
+            self.Ta = self.Ta + T.float16(1)
+            self.Tb = self.Tb + T.float16(2)
+            self.idx.buffer[()] = T.int32(0)
+            self.idx = self.idx + T.int32(1)
+            self.inner_pool2 = self.inner_pool2 + T.float16(1)
+            T.evaluate(T.address_of(self.Ta))
+            T.evaluate(T.address_of(self.Tb))
+            T.evaluate(T.address_of(self.idx))
+            T.evaluate(T.address_of(self.inner_pool))
+            T.evaluate(T.address_of(self.inner_pool2))
+
+    @T.prim_func(tirp=True)
+    def test():
+        with T.kernel():
+            # normal buffer
+            A = T.alloc_shared([10], "float16")
+            B = T.alloc_local([10], "float16")
+            # cell buffer (alloc)
+            C = T.shared_cell("float16")
+            D = T.local_cell("float16")
+            pool = T.alloc_buffer([10], "uint8", scope="shared.dyn")
+            # cell buffer (decl)
+            E = T.decl_cell("float16", pool.data, "shared.dyn", 0)
+            # normal 0-dim buffer
+            F = T.alloc_local((), "float16")
+            with T.thread():
+                Ta = T.local_cell("float16")
+                inner_pool = T.decl_buffer(shape=[10], data=pool.data, dtype="uint8", scope="shared.dyn")
+                test = T.meta_var(Test(Ta, inner_pool))
+                test.init()
+                A[0] = C
+                A[0] = C + D
+                A[1] = B[0] * C
+                D.buffer[()] = D + T.float16(1)
+                D = D + T.float16(1)
+                C = D
+                T.evaluate(E)
+                E = E + T.float16(1)
+                # normal 0-dim buffer can be assigned directly,
+                # but not loaded directly
+                F = F[()] + T.float16(1)
+                T.evaluate(T.address_of(C))
+                T.evaluate(C.buffer.access_ptr("rw", offset=0))
+                T.evaluate(C.buffer.data)
+                T.evaluate(D)
+                T.evaluate(T.address_of(D))
+    # fmt: on
+
+    code = test.script()
+    print(code)
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
 if __name__ == "__main__":
-    tvm.testing.main()
+    # tvm.testing.main()
+    test_alloc_apis()

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 import contextlib
 import functools
+from functools import partial
 import inspect
 import threading
 from collections.abc import Callable
@@ -97,6 +98,7 @@ from tvm.tirx.expr import (
 from tvm.tirx.generic import cast
 
 from . import _ffi_api, frame
+from .. import IRBuilder
 from .external_kernel import call_kernel
 
 # pylint: enable=unused-import
@@ -1462,6 +1464,7 @@ def decl_buffer(
     offset_factor=0,
     buffer_type="",
     axis_separators=None,
+    logical_scope="",
     layout=None,
 ) -> Buffer:
     """Create a buffer declaration node.
@@ -1503,6 +1506,9 @@ def decl_buffer(
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
 
+    logical_scope : str
+        The logical scope of the buffer.
+
     layout : TLayout
         The layout of the buffer.
 
@@ -1528,8 +1534,87 @@ def decl_buffer(
         offset_factor,
         buffer_type,
         axis_separators,
+        logical_scope,
         _get_layout(layout, shape),
     )
+
+
+alloc_shared = functools.partial(alloc_buffer, scope="shared")
+alloc_local = functools.partial(alloc_buffer, scope="local")
+
+
+if TYPE_CHECKING:
+    CellT = TypeVar("CellT")
+
+    # Keep type checking/linting simple by treating wrapper as identity.
+    def cell_wrapper(x: CellT) -> CellT:
+        return x
+
+else:
+
+    class cell_wrapper:
+        """Internal wrapper to allow IRBuilder auto-naming on cell assignment."""
+
+        def __init__(self, cell: BufferLoad):
+            assert isinstance(cell, BufferLoad)
+            self.cell = cell
+
+        def __getattr__(self, name: str) -> Any:
+            return self.cell.__getattr__(name)
+
+
+def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) -> BufferLoad:
+    """Allocate a zero-dimensional buffer (cell)."""
+    buf = alloc_buffer(
+        shape=(),
+        dtype=dtype,
+        scope=scope,
+        strides=None,
+        align=-1,
+        buffer_type="default",
+        axis_separators=None,
+        logical_scope="",
+        layout=TileLayout(),
+        allocated_addr=None,
+    )
+    if name is None:
+        return cell_wrapper(buf[()])
+    IRBuilder.name(name, buf)
+    return buf[()]
+
+
+def decl_cell(dtype, data, scope, elem_offset, name=None) -> BufferLoad:
+    """Declare a zero-dimensional buffer (cell) from a pointer."""
+    decl_frame = decl_buffer(
+        shape=(),
+        dtype=dtype,
+        data=data,
+        scope=scope,
+        elem_offset=elem_offset,
+        strides=None,
+        align=-1,
+        offset_factor=0,
+        buffer_type="default",
+        axis_separators=None,
+        logical_scope="",
+        layout=TileLayout(),
+    )
+    decl_frame.add_callback(partial(decl_frame.__exit__, None, None, None))
+    buf = decl_frame.__enter__()
+    if name is None:
+        return cell_wrapper(buf[()])
+    IRBuilder.name(name, buf)
+    return buf[()]
+
+
+def shared_cell(dtype: str = "float32", name: str = None) -> BufferLoad:
+    """Allocate a zero-dimensional buffer in shared memory."""
+    return alloc_cell(dtype=dtype, scope="shared", name=name)
+
+
+def local_cell(dtype: str = "float32", name: str = None) -> BufferLoad:
+    """Allocate a zero-dimensional buffer in local memory."""
+    return alloc_cell(dtype=dtype, scope="local", name=name)
 
 
 def launch_thread(
@@ -2955,4 +3040,11 @@ __all__ += [
     "view",
     "get",
     "static_assert",
+    "alloc_shared",
+    "alloc_local",
+    "cell_wrapper",
+    "alloc_cell",
+    "decl_cell",
+    "shared_cell",
+    "local_cell",
 ]

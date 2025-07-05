@@ -186,8 +186,7 @@ class Buffer(Object, Scriptable):
         return _ffi_api.BufferGetFlattenedBuffer(self)  # type: ignore
 
     def with_allocated_addr(self, allocated_addr):
-        """Return a new buffer with the allocated address.
-        """
+        """Return a new buffer with the allocated address."""
         return _ffi_api.BufferWithAllocatedAddr(self, allocated_addr)  # type: ignore
     
     def with_dtype(self, dtype):
@@ -233,6 +232,21 @@ class Buffer(Object, Scriptable):
             The buffer_offset op for the given index.
         """
         return _ffi_api.BufferOffsetOfp(self, indices)
+
+    def is_cell(self, alloc_or_decl=True):
+        """Check if the buffer is a cell.
+
+        Parameters
+        ----------
+        alloc_or_decl : bool, optional
+            Whether to consider alloc_cell and decl_cell as cell. True for alloc_cell,
+            False for decl_cell.
+
+        Returns
+        -------
+            bool: True if the buffer is a cell, False otherwise.
+        """
+        return _ffi_api.BufferIsCell(self, alloc_or_decl)
 
     def __getitem__(self, indices):
         from ..arith import Analyzer  # pylint: disable=import-outside-toplevel

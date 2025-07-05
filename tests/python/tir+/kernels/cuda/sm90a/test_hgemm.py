@@ -48,20 +48,14 @@ def test_hgemm_hopper_ws_cooperative():
     def ceildiv(a, b):
         return (a + b - 1) // b
 
-    def int_var():
-        return T.alloc_buffer([1], "int32", scope="local", align=4)
-
     class TileScheduler:
         m_blocks = ceildiv(ceildiv(M, BLK_M), CLUSTER_M) * CLUSTER_M
         n_blocks = ceildiv(ceildiv(N, BLK_N), CLUSTER_N) * CLUSTER_N
 
         def __init__(self, prefix: str):
-            self.m_idx = int_var()
-            self.n_idx = int_var()
-            self.linear_idx = int_var()
-            IRBuilder.current().name(prefix + "_m_idx", self.m_idx)
-            IRBuilder.current().name(prefix + "_n_idx", self.n_idx)
-            IRBuilder.current().name(prefix + "_linear_idx", self.linear_idx)
+            self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
+            self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
+            self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
 
         def get_current_m_n_idx(self, linear_idx):
             clusters_per_row = self.n_blocks // CLUSTER_N
@@ -79,42 +73,40 @@ def test_hgemm_hopper_ws_cooperative():
 
         @T.macro
         def init(self, linear_init):
-            self.linear_idx[0] = linear_init
-            self.m_idx[0] = self.get_current_m_n_idx(linear_init)[0]
-            self.n_idx[0] = self.get_current_m_n_idx(linear_init)[1]
+            self.linear_idx = linear_init
+            self.m_idx = self.get_current_m_n_idx(linear_init)[0]
+            self.n_idx = self.get_current_m_n_idx(linear_init)[1]
 
         @T.macro
         def next_tile(self):
-            self.linear_idx[0] = self.linear_idx[0] + SM_COUNT
-            self.m_idx[0] = self.get_current_m_n_idx(self.linear_idx[0])[0]
-            self.n_idx[0] = self.get_current_m_n_idx(self.linear_idx[0])[1]
+            self.linear_idx = self.linear_idx + SM_COUNT
+            self.m_idx = self.get_current_m_n_idx(self.linear_idx)[0]
+            self.n_idx = self.get_current_m_n_idx(self.linear_idx)[1]
 
         def valid(self):
-            return self.linear_idx[0] < self.m_blocks * self.n_blocks
+            return self.linear_idx < self.m_blocks * self.n_blocks
 
     class PipelineState:
         def __init__(self, prefix: str):
-            self.index = int_var()
-            self.phase = int_var()
-            IRBuilder.current().name(prefix + "_index", self.index)
-            IRBuilder.current().name(prefix + "_phase", self.phase)
+            self.index = T.local_cell("int32", name=prefix + "_index")
+            self.phase = T.local_cell("int32", name=prefix + "_phase")
 
         @T.macro
         def init(self, index, phase):
-            self.index[0] = index
-            self.phase[0] = phase
+            self.index = index
+            self.phase = phase
 
         @T.macro
         def copy(self, other):
-            self.index[0] = other.index[0]
-            self.phase[0] = other.phase[0]
+            self.index = other.index
+            self.phase = other.phase
 
         @T.macro
         def advance(self):
-            self.index[0] = self.index[0] + 1
-            if self.index[0] == STAGES_MMA:
-                self.index[0] = 0
-                self.phase[0] = self.phase[0] ^ 1
+            self.index = self.index + 1
+            if self.index == STAGES_MMA:
+                self.index = 0
+                self.phase = self.phase ^ 1
 
     class WarpGroupRole:
         PRODUCER = 0
@@ -189,16 +181,16 @@ def test_hgemm_hopper_ws_cooperative():
                     consumer_read = T.meta_var(PipelineState("consumer_read"))
                     consumer_release = T.meta_var(PipelineState("consumer_release"))
                     # consumer signals
-                    is_signal_thread = int_var()
-                    dst_block_ID = int_var()
+                    is_signal_thread = T.local_cell("int32")
+                    dst_block_ID = T.local_cell("int32")
                     # smem desc_A, desc_B
-                    desc_A = T.alloc_buffer([1], "uint64", scope="local", align=8)
-                    desc_B = T.alloc_buffer([1], "uint64", scope="local", align=8)
+                    desc_A = T.local_cell("uint64")
+                    desc_B = T.local_cell("uint64")
                     # accumulators
                     accum = T.alloc_buffer([128], "float32", scope="local")
                     # epilogue
-                    col_swizzle = int_var()
-                    smem_offset = int_var()
+                    col_swizzle = T.local_cell("int32")
+                    smem_offset = T.local_cell("int32")
 
                     ############################################################################## INITIALIZATION
                     # initialize work tile info
@@ -208,10 +200,10 @@ def test_hgemm_hopper_ws_cooperative():
                     # initialize consumer pipeline states
                     consumer_read.init(0, 0)
                     # initialize consumer signals, each consumer WG signals 2 CTAs
-                    is_signal_thread[0] = T.Select(tid_in_wg % 8 == 0, 1, 0)
-                    dst_block_ID[0] = (warp_id_in_wg % 4) * 4 + (tid_in_wg // 8) % 4
-                    is_signal_thread[0] = is_signal_thread[0] & (dst_block_ID[0] < 2)
-                    is_signal_thread[0] = is_signal_thread[0] & (dst_block_ID[0] % 2 == cbx or dst_block_ID[0] // 2 == cby)
+                    is_signal_thread = T.Select(tid_in_wg % 8 == 0, 1, 0)
+                    dst_block_ID = (warp_id_in_wg % 4) * 4 + (tid_in_wg // 8) % 4
+                    is_signal_thread = is_signal_thread & (dst_block_ID < 2)
+                    is_signal_thread = is_signal_thread & (dst_block_ID % 2 == cbx or dst_block_ID // 2 == cby)
                     # initialize mainloop pipeline barriers per CTA
                     if (tid // 32 == 0 and T.ptx.elect_sync(0xFFFFFFFF) > 0):
                         for i in range(STAGES_MMA):
@@ -228,7 +220,7 @@ def test_hgemm_hopper_ws_cooperative():
                         ############################################################################## PRODUCER
                         # producer WG
                         with T.warp(parent="warpgroup")[0:1]:
-                            stage = T.meta_var(producer.index[0])
+                            stage = T.meta_var(producer.index)
                             cur_full = T.meta_var(full.access_ptr("rw", offset=stage))
                             cur_empty = T.meta_var(empty.access_ptr("rw", offset=stage))
                             # mainloop producer warp
@@ -237,19 +229,19 @@ def test_hgemm_hopper_ws_cooperative():
                                     # only the leader thread does the TMA load
                                     for i in range(k_tile_count):
                                         # producer acquire the slot
-                                        T.ptx.mbarrier.try_wait(cur_empty, producer.phase[0])
+                                        T.ptx.mbarrier.try_wait(cur_empty, producer.phase)
                                         T.ptx.mbarrier.arrive.expect_tx(cur_full, TMA_BYTES)
                                         # issue TMA loads for A
                                         T.ptx.cp_async.bulk.tensor.g2c(
                                             2, A_smem.access_ptr("w", offset=A_smem.offset_of_p([stage, 0])),
-                                            cur_full, A_map, i * BLK_K, tile_scheduler.m_idx[0] * BLK_M
+                                            cur_full, A_map, i * BLK_K, tile_scheduler.m_idx * BLK_M
                                         )
                                         # issue TMA loads for B
                                         for n_tile in range(4):
                                             multicast_stride_b = T.meta_var(BLK_K // CLUSTER_M)
                                             T.ptx.cp_async.bulk.tensor.g2c(
                                                 2, B_smem.access_ptr("w", offset=B_smem.offset_of_p([stage, cbx * multicast_stride_b * 64 + n_tile * BLK_K * 64])),
-                                                cur_full, B_map, tile_scheduler.n_idx[0] * BLK_N + n_tile * 64, i * BLK_K + cbx * multicast_stride_b,
+                                                cur_full, B_map, tile_scheduler.n_idx * BLK_N + n_tile * 64, i * BLK_K + cbx * multicast_stride_b,
                                                 cta_mask=0x3
                                             )
                                         # move to the next stage
@@ -261,7 +253,7 @@ def test_hgemm_hopper_ws_cooperative():
                             with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
                                 for _ in range(STAGES_MMA):
                                     # producer acquire the slot
-                                    T.ptx.mbarrier.try_wait(cur_empty, producer.phase[0])
+                                    T.ptx.mbarrier.try_wait(cur_empty, producer.phase)
                                     # move to the next stage
                                     producer.advance()
                     with T.warpgroup()[1:3]:
@@ -273,30 +265,30 @@ def test_hgemm_hopper_ws_cooperative():
                             for i in range(128):
                                 accum[i] = 0
                                 T.ptx.wgmma.noop_barrier(accum[i])
-                            read_stage = T.meta_var(consumer_read.index[0])
-                            release_stage = T.meta_var(consumer_release.index[0])
+                            read_stage = T.meta_var(consumer_read.index)
+                            release_stage = T.meta_var(consumer_release.index)
                             full_read = T.meta_var(full.access_ptr("rw", offset=read_stage))
                             empty_release = T.meta_var(empty.access_ptr("rw", offset=release_stage))
                             for k_iter in range(k_tile_count):
                                 # consumer acquire the slot
-                                T.ptx.mbarrier.try_wait(full_read, consumer_read.phase[0])
+                                T.ptx.mbarrier.try_wait(full_read, consumer_read.phase)
                                 # issue WGMMA for the current stage
                                 ptx_wgmma_noop_barrier(accum)
                                 T.ptx.wgmma.fence()
                                 for inner_k in range(BLK_K // WGMMA_K):
                                     A_offset = T.meta_var((wg_id - 1) * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)
                                     B_offset = T.meta_var(inner_k * WGMMA_K * 64)
-                                    T.ptx.wgmma.encode_matrix_descriptor(desc_A.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([read_stage, A_offset])), 1, 64, swizzle=3)
-                                    T.ptx.wgmma.encode_matrix_descriptor(desc_B.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([read_stage, B_offset])), 512, 64, swizzle=3)
+                                    T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_A), A_smem.access_ptr("r", offset=A_smem.offset_of_p([read_stage, A_offset])), 1, 64, swizzle=3)
+                                    T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_B), B_smem.access_ptr("r", offset=B_smem.offset_of_p([read_stage, B_offset])), 512, 64, swizzle=3)
                                     T.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float16", "float32", False, True, 1.0, 1.0, True,
-                                                             desc_A[0], desc_B[0], *get_accum_list(accum, 128))
+                                                             desc_A, desc_B, *get_accum_list(accum, 128))
                                 T.ptx.wgmma.commit_group()
                                 if k_iter > 0:
                                     # wait for the previous stage to finish
                                     T.ptx.wgmma.wait_group(n = 1)
                                     ptx_wgmma_noop_barrier(accum)
                                     # release the previous stage, send the signal to the producer
-                                    T.ptx.mbarrier.arrive(empty_release, dst_block_ID[0], is_signal_thread[0])
+                                    T.ptx.mbarrier.arrive(empty_release, dst_block_ID, is_signal_thread)
                                 # move to the next stage
                                 consumer_release.copy(consumer_read)
                                 consumer_read.advance()
@@ -304,10 +296,10 @@ def test_hgemm_hopper_ws_cooperative():
                             # wait for the last stage to finish
                             T.ptx.wgmma.wait_group(0)
                             ptx_wgmma_noop_barrier(accum)
-                            T.ptx.mbarrier.arrive(empty_release, dst_block_ID[0], is_signal_thread[0])
+                            T.ptx.mbarrier.arrive(empty_release, dst_block_ID, is_signal_thread)
                             # ####################################### Epilogue
-                            m_glb_offset = T.meta_var(tile_scheduler.m_idx[0] * BLK_M)
-                            n_glb_offset = T.meta_var(tile_scheduler.n_idx[0] * BLK_N)
+                            m_glb_offset = T.meta_var(tile_scheduler.m_idx * BLK_M)
+                            n_glb_offset = T.meta_var(tile_scheduler.n_idx * BLK_N)
                             T.ptx.bar.sync(0, 256)
                             epi_tile_count = T.meta_var(BLK_N // 32)
                             for i in T.serial(epi_tile_count):
@@ -316,16 +308,16 @@ def test_hgemm_hopper_ws_cooperative():
                                     tma_store(i - 1, C_smem, C_map, m_glb_offset, n_glb_offset, tid)
                                 quad_id = T.meta_var(lane_id // 4)
                                 quad_lane = T.meta_var(lane_id % 4)
-                                smem_offset[0] = ((wg_id - 1) * BLK_M // 2 + 16 * warp_id_in_wg + quad_id) * 32
+                                smem_offset = ((wg_id - 1) * BLK_M // 2 + 16 * warp_id_in_wg + quad_id) * 32
                                 r2S_stage = T.meta_var(i % STAGES_EPI)
                                 T.ptx.bar.sync(0, 256)
                                 for reg in T.serial(4):
                                     col_id = T.meta_var(quad_lane // 2 + reg * 2)
-                                    col_swizzle[0] = (quad_id ^ col_id) * 4 + quad_lane % 2 * 2
-                                    C_smem[r2S_stage, smem_offset[0] + col_swizzle[0]] = accum[16 * i + reg * 4]
-                                    C_smem[r2S_stage, smem_offset[0] + col_swizzle[0] + 1] = accum[16 * i + reg * 4 + 1]
-                                    C_smem[r2S_stage, smem_offset[0] + 8*32 + col_swizzle[0]] = accum[16 * i + reg * 4 + 2]
-                                    C_smem[r2S_stage, smem_offset[0] + 8*32 + col_swizzle[0] + 1] = accum[16 * i + reg * 4 + 3]
+                                    col_swizzle = (quad_id ^ col_id) * 4 + quad_lane % 2 * 2
+                                    C_smem[r2S_stage, smem_offset + col_swizzle] = accum[16 * i + reg * 4]
+                                    C_smem[r2S_stage, smem_offset + col_swizzle + 1] = accum[16 * i + reg * 4 + 1]
+                                    C_smem[r2S_stage, smem_offset + 8*32 + col_swizzle] = accum[16 * i + reg * 4 + 2]
+                                    C_smem[r2S_stage, smem_offset + 8*32 + col_swizzle + 1] = accum[16 * i + reg * 4 + 3]
                             tma_store(epi_tile_count - 1, C_smem, C_map, m_glb_offset, n_glb_offset, tid)
                             T.ptx.cp_async.bulk.wait_group(n = 0, read=False)
 
@@ -399,12 +391,9 @@ def test_hgemm_hopper_no_ws():
         n_blocks = (N + BLK_N - 1) // BLK_N
 
         def __init__(self, prefix: str):
-            self.m_idx = int_var()
-            self.n_idx = int_var()
-            self.linear_idx = int_var()
-            IRBuilder.current().name(prefix + "_m_idx", self.m_idx)
-            IRBuilder.current().name(prefix + "_n_idx", self.n_idx)
-            IRBuilder.current().name(prefix + "_linear_idx", self.linear_idx)
+            self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
+            self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
+            self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
 
         def get_current_m_n_idx(self, linear_idx):
             group_row_outer = linear_idx // (GROUP_SIZE * self.n_blocks)
@@ -415,21 +404,18 @@ def test_hgemm_hopper_no_ws():
 
         @T.macro
         def init(self, linear_init):
-            self.linear_idx[0] = linear_init
-            self.m_idx[0] = self.get_current_m_n_idx(linear_init)[0]
-            self.n_idx[0] = self.get_current_m_n_idx(linear_init)[1]
+            self.linear_idx = linear_init
+            self.m_idx = self.get_current_m_n_idx(linear_init)[0]
+            self.n_idx = self.get_current_m_n_idx(linear_init)[1]
 
         @T.macro
         def next_tile(self):
-            self.linear_idx[0] = self.linear_idx[0] + SM_COUNT
-            self.m_idx[0] = self.get_current_m_n_idx(self.linear_idx[0])[0]
-            self.n_idx[0] = self.get_current_m_n_idx(self.linear_idx[0])[1]
+            self.linear_idx = self.linear_idx + SM_COUNT
+            self.m_idx = self.get_current_m_n_idx(self.linear_idx)[0]
+            self.n_idx = self.get_current_m_n_idx(self.linear_idx)[1]
 
         def valid(self):
-            return self.linear_idx[0] < self.m_blocks * self.n_blocks
-
-    def int_var():
-        return T.alloc_buffer([1], "int32", scope="local", align=4)
+            return self.linear_idx < self.m_blocks * self.n_blocks
 
     # fmt: off
     @T.macro
@@ -457,10 +443,10 @@ def test_hgemm_hopper_no_ws():
         for inner_k in T.serial(BLK_K // WGMMA_K):
             A_offset = T.meta_var(wg_id * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)
             B_offset = T.meta_var(inner_k * WGMMA_K)
-            T.ptx.wgmma.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
-            T.ptx.wgmma.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descA), A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
             T.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float16", "float32", False, False, 1.0, 1.0, True,
-                                     descA[0], descB[0], *get_accum_list(accum, 128))
+                                     descA, descB, *get_accum_list(accum, 128))
         T.ptx.wgmma.commit_group()
 
     @T.macro
@@ -527,13 +513,13 @@ def test_hgemm_hopper_no_ws():
                 C_smem = T.alloc_buffer([STAGES_EPI, BLK_M, 64], "float16", scope="shared.dyn", align=1024)
                 # barriers
                 bars = T.alloc_buffer([STAGES_TMA], "uint64", scope="shared.dyn", align=8)
-                desc_A = T.alloc_buffer([1], "uint64", scope="local", align=8)
-                desc_B = T.alloc_buffer([1], "uint64", scope="local", align=8)
+                desc_A = T.local_cell("uint64")
+                desc_B = T.local_cell("uint64")
 
                 with T.thread():
                     # index
-                    tma_index = int_var()
-                    mma_index = int_var()
+                    tma_index = T.local_cell("int32")
+                    mma_index = T.local_cell("int32")
                     # acuumulators
                     accum = T.alloc_buffer([128], "float32", scope="local")
                     # temp accum
@@ -551,29 +537,29 @@ def test_hgemm_hopper_no_ws():
                                 T.ptx.mbarrier.init(bars.access_ptr("rw", offset=i), 1)
                         T.tvm_storage_sync("shared")
                         # initialize the index
-                        tma_index[0] = 0
-                        mma_index[0] = 0
+                        tma_index = 0
+                        mma_index = 0
                         # initialize the accumulators
                         for i in range(128):
                             accum[i] = 0
                         T.tvm_storage_sync("shared")
 
-                        m_idx = T.meta_var(tile_scheduler.m_idx[0])
-                        n_idx = T.meta_var(tile_scheduler.n_idx[0])
+                        m_idx = T.meta_var(tile_scheduler.m_idx)
+                        n_idx = T.meta_var(tile_scheduler.n_idx)
                         # prelogue
                         for _ in range(STAGES_TMA):
-                            tma_load(tid, m_idx, n_idx, tma_index[0], A_smem, B_smem, A_map, B_map, bars)
-                            tma_index[0] = tma_index[0] + 1
+                            tma_load(tid, m_idx, n_idx, tma_index, A_smem, B_smem, A_map, B_map, bars)
+                            tma_index = tma_index + 1
                         for _ in range(STAGES_WGMMA - 1):
-                            mma_compute(wg_id, mma_index[0], A_smem, B_smem, accum, bars, desc_A, desc_B)
-                            mma_index[0] = mma_index[0] + 1
+                            mma_compute(wg_id, mma_index, A_smem, B_smem, accum, bars, desc_A, desc_B)
+                            mma_index = mma_index + 1
 
                         # mainloop
                         k_tile_count = T.meta_var((K + BLK_K - 1) // BLK_K)
                         for _ in range(k_tile_count):
-                            if mma_index[0] < k_tile_count:
-                                mma_compute(wg_id, mma_index[0], A_smem, B_smem, accum, bars, desc_A, desc_B)
-                                mma_index[0] = mma_index[0] + 1
+                            if mma_index < k_tile_count:
+                                mma_compute(wg_id, mma_index, A_smem, B_smem, accum, bars, desc_A, desc_B)
+                                mma_index = mma_index + 1
                             # wait for oldest one stage to finish
                             if _ == k_tile_count - 1:
                                 T.ptx.wgmma.wait_group(0)
@@ -581,9 +567,9 @@ def test_hgemm_hopper_no_ws():
                                 T.ptx.wgmma.wait_group(STAGES_WGMMA - 1)
                             T.tvm_storage_sync("shared")
                             # load the next tile
-                            if tma_index[0] < k_tile_count:
-                                tma_load(tid, m_idx, n_idx, tma_index[0], A_smem, B_smem, A_map, B_map, bars)
-                                tma_index[0] = tma_index[0] + 1
+                            if tma_index < k_tile_count:
+                                tma_load(tid, m_idx, n_idx, tma_index, A_smem, B_smem, A_map, B_map, bars)
+                                tma_index = tma_index + 1
 
                         # epilogue
                         write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem, C_map, accum, accum_half)

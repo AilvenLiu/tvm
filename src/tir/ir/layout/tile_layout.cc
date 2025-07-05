@@ -420,7 +420,7 @@ PrimExpr TileLayoutNode::GetSize(Optional<String> axis_name) const {
     }
     return acc;
   };
-  PrimExpr res = IntImm(shard[0]->extent->dtype, 1);
+  PrimExpr res = 1;
   for (const auto& iter : shard) {
     res = filter(iter, res);
   }
@@ -429,7 +429,7 @@ PrimExpr TileLayoutNode::GetSize(Optional<String> axis_name) const {
 
 PrimExpr TileLayoutNode::GetCosize(Optional<String> axis_name) const {
   arith::Analyzer analyzer;
-  PrimExpr result = IntImm(shard[0]->extent->dtype, 1);
+  PrimExpr result = 1;
   auto filter = [&](const Axis& axis) {
     return (!axis_name.has_value() && axis->IsMemoryAxis()) ||
            (axis_name.has_value() && axis->name == axis_name.value());

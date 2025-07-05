@@ -51,12 +51,9 @@ def test_fp8_gemm_hopper_no_ws():
         n_blocks = (N + BLK_N - 1) // BLK_N
 
         def __init__(self, prefix: str):
-            self.m_idx = int_var()
-            self.n_idx = int_var()
-            self.linear_idx = int_var()
-            IRBuilder.current().name(prefix + "_m_idx", self.m_idx)
-            IRBuilder.current().name(prefix + "_n_idx", self.n_idx)
-            IRBuilder.current().name(prefix + "_linear_idx", self.linear_idx)
+            self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
+            self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
+            self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
 
         def get_current_m_n_idx(self, linear_idx):
             group_row_outer = linear_idx // (GROUP_SIZE * self.n_blocks)
@@ -67,21 +64,18 @@ def test_fp8_gemm_hopper_no_ws():
 
         @T.macro
         def init(self, linear_init):
-            self.linear_idx[0] = linear_init
-            self.m_idx[0] = self.get_current_m_n_idx(linear_init)[0]
-            self.n_idx[0] = self.get_current_m_n_idx(linear_init)[1]
+            self.linear_idx = linear_init
+            self.m_idx = self.get_current_m_n_idx(linear_init)[0]
+            self.n_idx = self.get_current_m_n_idx(linear_init)[1]
 
         @T.macro
         def next_tile(self):
-            self.linear_idx[0] = self.linear_idx[0] + SM_COUNT
-            self.m_idx[0] = self.get_current_m_n_idx(self.linear_idx[0])[0]
-            self.n_idx[0] = self.get_current_m_n_idx(self.linear_idx[0])[1]
+            self.linear_idx = self.linear_idx + SM_COUNT
+            self.m_idx = self.get_current_m_n_idx(self.linear_idx)[0]
+            self.n_idx = self.get_current_m_n_idx(self.linear_idx)[1]
 
         def valid(self):
-            return self.linear_idx[0] < self.m_blocks * self.n_blocks
-
-    def int_var():
-        return T.alloc_buffer([1], "int32", scope="local", align=4)
+            return self.linear_idx < self.m_blocks * self.n_blocks
 
     # fmt: off
     @T.macro
@@ -109,10 +103,10 @@ def test_fp8_gemm_hopper_no_ws():
         for inner_k in T.serial(BLK_K // WGMMA_K):
             A_offset = T.meta_var(wg_id * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)
             B_offset = T.meta_var(inner_k * WGMMA_K)
-            T.ptx.wgmma.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
-            T.ptx.wgmma.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descA), A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
             T.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True,
-                                     descA[0], descB[0], *get_accum_list(accum, 128))
+                                     descA, descB, *get_accum_list(accum, 128))
         T.ptx.wgmma.commit_group()
 
     @T.macro
@@ -179,13 +173,13 @@ def test_fp8_gemm_hopper_no_ws():
                 C_smem = T.alloc_buffer([STAGES_EPI, BLK_M, 64], "float16", scope="shared.dyn", align=1024)
                 # barriers
                 bars = T.alloc_buffer([STAGES_TMA], "uint64", scope="shared.dyn", align=8)
-                desc_A = T.alloc_buffer([1], "uint64", scope="local", align=8)
-                desc_B = T.alloc_buffer([1], "uint64", scope="local", align=8)
+                desc_A = T.local_cell("uint64")
+                desc_B = T.local_cell("uint64")
 
                 with T.thread():
                     # index
-                    tma_index = int_var()
-                    mma_index = int_var()
+                    tma_index = T.local_cell("int32")
+                    mma_index = T.local_cell("int32")
                     # acuumulators
                     accum = T.alloc_buffer([128], "float32", scope="local")
                     accum_half = T.alloc_buffer([8], "float16", scope="local")
@@ -202,29 +196,29 @@ def test_fp8_gemm_hopper_no_ws():
                                 T.ptx.mbarrier.init(bars.access_ptr("rw", offset=i), 1)
                         T.tvm_storage_sync("shared")
                         # initialize the index
-                        tma_index[0] = 0
-                        mma_index[0] = 0
+                        tma_index = 0
+                        mma_index = 0
                         # initialize the accumulators
                         for i in range(128):
                             accum[i] = 0
                         T.tvm_storage_sync("shared")
 
-                        m_idx = T.meta_var(tile_scheduler.m_idx[0])
-                        n_idx = T.meta_var(tile_scheduler.n_idx[0])
+                        m_idx = T.meta_var(tile_scheduler.m_idx)
+                        n_idx = T.meta_var(tile_scheduler.n_idx)
                         # prelogue
                         for _ in range(STAGES_TMA):
-                            tma_load(tid, m_idx, n_idx, tma_index[0], A_smem, B_smem, A_map, B_map, bars)
-                            tma_index[0] = tma_index[0] + 1
+                            tma_load(tid, m_idx, n_idx, tma_index, A_smem, B_smem, A_map, B_map, bars)
+                            tma_index = tma_index + 1
                         for _ in range(STAGES_WGMMA - 1):
-                            mma_compute(wg_id, mma_index[0], A_smem, B_smem, accum, bars, desc_A, desc_B)
-                            mma_index[0] = mma_index[0] + 1
+                            mma_compute(wg_id, mma_index, A_smem, B_smem, accum, bars, desc_A, desc_B)
+                            mma_index = mma_index + 1
 
                         # mainloop
                         k_tile_count = T.meta_var((K + BLK_K - 1) // BLK_K)
                         for _ in range(k_tile_count):
-                            if mma_index[0] < k_tile_count:
-                                mma_compute(wg_id, mma_index[0], A_smem, B_smem, accum, bars, desc_A, desc_B)
-                                mma_index[0] = mma_index[0] + 1
+                            if mma_index < k_tile_count:
+                                mma_compute(wg_id, mma_index, A_smem, B_smem, accum, bars, desc_A, desc_B)
+                                mma_index = mma_index + 1
                             # wait for oldest one stage to finish
                             if _ == k_tile_count - 1:
                                 T.ptx.wgmma.wait_group(0)
@@ -232,9 +226,9 @@ def test_fp8_gemm_hopper_no_ws():
                                 T.ptx.wgmma.wait_group(STAGES_WGMMA - 1)
                             T.tvm_storage_sync("shared")
                             # load the next tile
-                            if tma_index[0] < k_tile_count:
-                                tma_load(tid, m_idx, n_idx, tma_index[0], A_smem, B_smem, A_map, B_map, bars)
-                                tma_index[0] = tma_index[0] + 1
+                            if tma_index < k_tile_count:
+                                tma_load(tid, m_idx, n_idx, tma_index, A_smem, B_smem, A_map, B_map, bars)
+                                tma_index = tma_index + 1
 
                         # epilogue
                         write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem, C_map, accum, accum_half)

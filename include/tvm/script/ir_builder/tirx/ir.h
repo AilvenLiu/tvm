@@ -446,6 +446,7 @@ ElseFrame Else();
  * \param offset_factor The factor of elem_offset field.
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
+ * \param logical_scope The logical scope of the buffer.
  * \param layout The layout of the buffer.
  * \return The declared buffer.
  */
@@ -454,6 +455,7 @@ Buffer DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
                   ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                  ffi::String logical_scope = "",
                   ffi::Optional<TLayout> layout = std::nullopt);
 
 /*!

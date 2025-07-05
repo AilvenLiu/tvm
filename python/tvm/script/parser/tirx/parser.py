@@ -16,6 +16,7 @@
 # under the License.
 """The base parser for tirx"""
 
+from copy import deepcopy
 import contextlib
 from functools import partial
 from typing import Any
@@ -29,6 +30,7 @@ from ...ir_builder import ir as I
 from ...ir_builder import tirx as T
 from ...ir_builder.base import IRBuilder
 from ...ir_builder.base import IRBuilderFrame as Frame
+from ...ir_builder.tir.frame import DeclBufferFrame
 from .._core import Parser, dispatch, doc
 
 
@@ -128,6 +130,11 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
     res : Any
         The bound value.
     """
+    if isinstance(value, T.cell_wrapper):  # pylint: disable=protected-access
+        # special case for cell, name the buffer, but the var is used as BufferLoad
+        assert isinstance(value.cell, T.BufferLoad)
+        IRBuilder.name(var_name, value.cell.buffer)
+        return value.cell
     if isinstance(value, T.meta_var):
         return value.value
     elif isinstance(value, list | tuple):
@@ -310,6 +317,22 @@ def visit_assign(self: Parser, node: doc.Assign) -> None:
             indices = self.eval_expr(lhs.slice)
         T.buffer_store(self.eval_expr(lhs.value), rhs, indices)
     else:
+        # special case for cell
+        # cell = xxx <=> cell.buffer[()] = xxx
+        # or for a normal 0-dim buffer
+        # buffer = xxx <=> buffer[()] = xxx
+        try:
+            lhs_copy = deepcopy(lhs)
+            if hasattr(lhs_copy, "ctx"):
+                lhs_copy.ctx = doc.Load()
+            lhs_value = self.eval_expr(lhs_copy)
+            if isinstance(lhs_value, (T.BufferLoad, tvm.tir.Buffer)):
+                buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
+                assert len(buffer.shape) == 0, "0-dim buffer required for direct assignment"
+                T.buffer_store(buffer, rhs, [])
+                return
+        except Exception:
+            pass
         self.eval_assign(target=lhs, source=rhs, bind_value=bind_assign_value)
 
 

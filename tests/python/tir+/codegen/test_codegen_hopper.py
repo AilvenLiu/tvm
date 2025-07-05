@@ -256,18 +256,20 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
                 for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
                     for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
                         with T.thread():
-                            bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
-                            phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+                            # bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
+                            bar = T.shared_cell("uint64")
+                            # phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+                            phase = T.local_cell("int32")
                             A_smem = T.alloc_buffer(shape, dtype, scope="shared", logical_scope="cta", align=128)
 
-                            phase[0] = 0
+                            phase = 0
                             if threadIdx == 0:
-                                T.ptx.mbarrier.init(bar.data, 1)
+                                T.ptx.mbarrier.init(T.address_of(bar), 1)
                                 T.ptx.fence.proxy("shared")
-                                T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, bar.data, A_map, *coord)
-                                T.ptx.mbarrier.arrive.expect_tx(bar.data, total_bytes)
-                            T.ptx.mbarrier.try_wait(bar.data, phase[0])
-                            phase[0] = phase[0] ^ 1
+                                T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, T.address_of(bar), A_map, *coord)
+                                T.ptx.mbarrier.arrive.expect_tx(T.address_of(bar), total_bytes)
+                            T.ptx.mbarrier.try_wait(T.address_of(bar), phase)
+                            phase = phase ^ 1
 
                             T.tvm_storage_sync("shared")
                             T.ptx.fence.proxy("shared")
@@ -345,17 +347,19 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
                     for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
                         with T.thread():
                             A_smem = T.alloc_buffer((total_elems,), dtype, scope="shared", logical_scope="cta", align=128)
-                            bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
-                            phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+                            # bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
+                            bar = T.shared_cell("uint64")
+                            # phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+                            phase = T.local_cell("int32")
 
-                            phase[0] = 0
+                            phase = 0
                             if threadIdx == 0:
-                                T.ptx.mbarrier.init(bar.data, 1)
+                                T.ptx.mbarrier.init(T.address_of(bar), 1)
                                 T.ptx.fence.proxy("shared")
-                                T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, bar.data, A_map, *coord)
-                                T.ptx.mbarrier.arrive.expect_tx(bar.data, total_bytes)
-                            T.ptx.mbarrier.try_wait(bar.data, phase[0])
-                            phase[0] = phase[0] ^ 1
+                                T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, T.address_of(bar), A_map, *coord)
+                                T.ptx.mbarrier.arrive.expect_tx(T.address_of(bar), total_bytes)
+                                T.ptx.mbarrier.try_wait(T.address_of(bar), phase)
+                            phase = phase ^ 1
 
                             T.tvm_storage_sync("shared")
                             T.ptx.fence.proxy("shared")
@@ -428,22 +432,24 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
                     for bx in T.thread_binding(4, thread="blockIdx.x"):
                         for tx in T.thread_binding(128, thread="threadIdx.x"):
                             with T.thread():
-                                bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
-                                phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+                                # bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
+                                bar = T.shared_cell("uint64")
+                                # phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+                                phase = T.local_cell("int32")
                                 A_smem = T.alloc_buffer(shape[::-1], "float32", scope="shared", logical_scope="cta", align=128)
 
-                                phase[0] = 0
+                                phase = 0
                                 if tx == 0:
                                     # leader thread in each CTA
-                                    T.ptx.mbarrier.init(bar.data, 1)
+                                    T.ptx.mbarrier.init(T.address_of(bar), 1)
                                     T.ptx.fence.proxy("shared")
-                                    T.ptx.mbarrier.arrive.expect_tx(bar.data, total_bytes)
+                                    T.ptx.mbarrier.arrive.expect_tx(T.address_of(bar), total_bytes)
                                     if clusterCtaIdx == 0:
                                         # only the first CTA in the cluster does the copy, and then multicast
-                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, bar.data, A_map, *coord, cta_mask=int("1111", 2))
+                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.data, T.address_of(bar), A_map, *coord, cta_mask=int("1111", 2))
                                 # wait for the copy to finish
-                                T.ptx.mbarrier.try_wait(bar.data, phase[0])
-                                phase[0] = phase[0] ^ 1
+                                T.ptx.mbarrier.try_wait(T.address_of(bar), phase)
+                                phase = phase ^ 1
                                 T.tvm_storage_sync("shared")
                                 T.ptx.fence.proxy("shared")
 
@@ -510,31 +516,33 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
                     for bx in T.thread_binding(4, thread="blockIdx.x"):
                         for tx in T.thread_binding(128, thread="threadIdx.x"):
                             with T.thread():
-                                bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
-                                phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+                                # bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
+                                bar = T.shared_cell("uint64")
+                                # phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
+                                phase = T.local_cell("int32")
                                 A_smem = T.alloc_buffer(shape[::-1], "float32", scope="shared", logical_scope="cta", align=128)
 
-                                phase[0] = 0
+                                phase = 0
                                 if tx == 0:
                                     # leader thread in each CTA
-                                    T.ptx.mbarrier.init(bar.data, 1)
+                                    T.ptx.mbarrier.init(T.address_of(bar), 1)
                                     T.ptx.fence.proxy("shared")
-                                    T.ptx.mbarrier.arrive.expect_tx(bar.data, total_bytes)
+                                    T.ptx.mbarrier.arrive.expect_tx(T.address_of(bar), total_bytes)
                                     if clusterCtaIdx == 0:
                                         T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.offset_of_p(coord0[::-1])),
-                                                                       bar.data, A_map, *coord0, cta_mask=int("1111", 2))
+                                                                       T.address_of(bar), A_map, *coord0, cta_mask=int("1111", 2))
                                     if clusterCtaIdx == 1:
                                         T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.offset_of_p(coord1[::-1])),
-                                                                       bar.data, A_map, *coord1, cta_mask=int("1111", 2))
+                                                                       T.address_of(bar), A_map, *coord1, cta_mask=int("1111", 2))
                                     if clusterCtaIdx == 2:
                                         T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.offset_of_p(coord2[::-1])),
-                                                                       bar.data, A_map, *coord2, cta_mask=int("1111", 2))
+                                                                       T.address_of(bar), A_map, *coord2, cta_mask=int("1111", 2))
                                     if clusterCtaIdx == 3:
                                         T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.offset_of_p(coord3[::-1])),
-                                                                       bar.data, A_map, *coord3, cta_mask=int("1111", 2))
+                                                                       T.address_of(bar), A_map, *coord3, cta_mask=int("1111", 2))
                                 # wait for the copy to finish
-                                T.ptx.mbarrier.try_wait(bar.data, phase[0])
-                                phase[0] = phase[0] ^ 1
+                                T.ptx.mbarrier.try_wait(T.address_of(bar), phase)
+                                phase = phase ^ 1
                                 T.tvm_storage_sync("shared")
 
                                 if bx == 1:
@@ -674,26 +682,30 @@ def test_wgmma_ss_nt():
                 with T.thread():
                     A_smem = T.alloc_buffer(shapeA, in_dtype, scope="shared", align=1024)
                     B_smem = T.alloc_buffer(shapeB, in_dtype, scope="shared", align=1024)
-                    bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
-                    phase = T.alloc_buffer((1,), "int32", scope="local")
+                    # bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+                    bar = T.shared_cell("uint64")
+                    # phase = T.alloc_buffer((1,), "int32", scope="local")
+                    phase = T.local_cell("int32")
                     
-                    descA = T.alloc_buffer((1,), "uint64", scope="local")
-                    descB = T.alloc_buffer((1,), "uint64", scope="local")
+                    # descA = T.alloc_buffer((1,), "uint64", scope="local")
+                    descA = T.local_cell("uint64")
+                    #descB = T.alloc_buffer((1,), "uint64", scope="local")
+                    descB = T.local_cell("uint64")
                     C_local = T.alloc_buffer((C_elems,), out_dtype, scope="local")
 
                     # init phase and bar
-                    phase[0] = 0
+                    phase = 0
                     if tx == 0:
-                        T.ptx.mbarrier.init(bar.data, 1)
+                        T.ptx.mbarrier.init(T.address_of(bar), 1)
                     T.ptx.fence.proxy("shared")
                     T.tvm_storage_sync("shared")
                     # load A and B to smem
                     if tx == 0:
-                        T.ptx.cp_async.bulk.tensor.g2c(len(shapeA), A_smem.data, bar.data, A_map, *coordA)
-                        T.ptx.cp_async.bulk.tensor.g2c(len(shapeB), B_smem.data, bar.data, B_map, *coordB)
-                        T.ptx.mbarrier.arrive.expect_tx(bar.data, A_bytes + B_bytes)
-                    T.ptx.mbarrier.try_wait(bar.data, phase[0])
-                    phase[0] = phase[0] ^ 1
+                        T.ptx.cp_async.bulk.tensor.g2c(len(shapeA), A_smem.data, T.address_of(bar), A_map, *coordA)
+                        T.ptx.cp_async.bulk.tensor.g2c(len(shapeB), B_smem.data, T.address_of(bar), B_map, *coordB)
+                        T.ptx.mbarrier.arrive.expect_tx(T.address_of(bar), A_bytes + B_bytes)
+                    T.ptx.mbarrier.try_wait(T.address_of(bar), phase)
+                    phase = phase ^ 1
                     T.tvm_storage_sync("shared")
 
                     # init C_local
@@ -702,11 +714,11 @@ def test_wgmma_ss_nt():
                         T.ptx.wgmma.noop_barrier(C_local[i])
                     
                     # do wgmma
-                    T.ptx.wgmma.encode_matrix_descriptor(descA.data, A_smem.data, *A_encode_args)
-                    T.ptx.wgmma.encode_matrix_descriptor(descB.data, B_smem.data, *B_encode_args)
+                    T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descA), A_smem.data, *A_encode_args)
+                    T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.data, *B_encode_args)
                     T.ptx.wgmma.fence()
                     T.ptx.wgmma.mma_async.ss(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False, 
-                                             descA[0], descB[0], *get_accum_list(C_local, C_elems))
+                                             descA, descB, *get_accum_list(C_local, C_elems))
                     T.ptx.wgmma.commit_group()
                     T.ptx.wgmma.wait_group(0)
                     
@@ -828,9 +840,11 @@ def test_wgmma_rs_nt():
 
                 with T.thread():
                     B_smem = T.alloc_buffer(shapeB, in_dtype, scope="shared", align=1024)
-                    bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+                    # bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+                    bar = T.shared_cell("uint64")
 
-                    descB = T.alloc_buffer((1,), "uint64", scope="local")
+                    # descB = T.alloc_buffer((1,), "uint64", scope="local")
+                    descB = T.local_cell("uint64")
                     A_local = T.alloc_buffer((A_elems,), in_dtype, scope="local")
                     C_local = T.alloc_buffer((C_elems,), out_dtype, scope="local")
                     
@@ -847,14 +861,14 @@ def test_wgmma_rs_nt():
                         A_local[i * 4 + 3] = A[row + 8, col + 1]
                     # init bar, and make sure it's visible to all threads and async proxy
                     if tx == 0:
-                        T.ptx.mbarrier.init(bar.data, 1)
+                        T.ptx.mbarrier.init(T.address_of(bar), 1)
                     T.ptx.fence.proxy("shared")
                     T.tvm_storage_sync("shared")
                     # load B to smem
                     if tx == 0:
-                        T.ptx.cp_async.bulk.tensor.g2c(len(shapeB), B_smem.data, bar.data, B_map, *coordB)
-                        T.ptx.mbarrier.arrive.expect_tx(bar.data, B_bytes)
-                    T.ptx.mbarrier.try_wait(bar.data, 0)
+                        T.ptx.cp_async.bulk.tensor.g2c(len(shapeB), B_smem.data, T.address_of(bar), B_map, *coordB)
+                        T.ptx.mbarrier.arrive.expect_tx(T.address_of(bar), B_bytes)
+                    T.ptx.mbarrier.try_wait(T.address_of(bar), 0)
                     T.tvm_storage_sync("shared")
 
                     # init C_local
@@ -867,10 +881,10 @@ def test_wgmma_rs_nt():
                     for i in T.serial(0, C_elems):
                         T.ptx.wgmma.noop_barrier(C_local[i]) 
                     # do wgmma
-                    T.ptx.wgmma.encode_matrix_descriptor(descB.data, B_smem.data, *B_encode_args)
+                    T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.data, *B_encode_args)
                     T.ptx.wgmma.fence()
                     T.ptx.wgmma.mma_async.rs(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False,
-                                             descB[0], *(get_A_list(A_local_b32, A_elems_b32) + get_accum_list(C_local, C_elems)))
+                                             descB, *(get_A_list(A_local_b32, A_elems_b32) + get_accum_list(C_local, C_elems)))
                     T.ptx.wgmma.commit_group()
                     T.ptx.wgmma.wait_group(0)
 
