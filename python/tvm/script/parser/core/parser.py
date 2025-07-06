@@ -681,7 +681,12 @@ class Parser(doc.NodeVisitor):
         token = self.get_dispatch_token(node)
         func = dispatch.get(token=token, type_name="FunctionDef", default=None)
         if func is None:
-            self.report_error(node, "The parser does not understand the decorator")
+            self.report_error(
+                node,
+                """The parser does not understand the decorator, 
+                or visit_FunctionDef is not implemented for the decorator with token: """
+                + token,
+            )
         _dispatch(self, "pre_visit_local_function")(self, node)
         _dispatch_wrapper(func)(self, node)
         _dispatch(self, "post_visit_local_function")(self, node)

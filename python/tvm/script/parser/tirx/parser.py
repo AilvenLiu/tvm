@@ -328,11 +328,13 @@ def visit_assign(self: Parser, node: doc.Assign) -> None:
             lhs_value = self.eval_expr(lhs_copy)
             if isinstance(lhs_value, (T.BufferLoad, tvm.tir.Buffer)):
                 buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
-                assert len(buffer.shape) == 0, "0-dim buffer required for direct assignment"
-                T.buffer_store(buffer, rhs, [])
-                return
+                if len(buffer.shape) == 0:
+                    # only 0-dim buffer can be assigned directly
+                    T.buffer_store(buffer, rhs, [])
+                    return
         except Exception:
             pass
+        # otherwise
         self.eval_assign(target=lhs, source=rhs, bind_value=bind_assign_value)
 
 

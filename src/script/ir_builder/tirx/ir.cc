@@ -462,19 +462,24 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                                      << "'T.alloc_buffer' is called under T.prim_func()";
   auto func_frame = opt_func_frame.value();
 
-  if (ffi::Optional<SBlockFrame> frame = builder->GetLastFrame<SBlockFrame>()) {
-    frame.value()->alloc_buffers.push_back(buffer);
-  } else if (ffi::Optional<PrimFuncFrame> frame = builder->GetLastFrame<PrimFuncFrame>()) {
-    frame.value()->root_alloc_buffers.push_back(buffer);
-  } else if (!func_frame->is_tirp) {
-    TVM_FFI_THROW(InternalError) << "ValueError: Block frame or PrimFunc frame not find. Please ensure "
-                  "'T.alloc_buffer' is called under T.block() or T.prim_func()";
-  } else if (ffi::Optional<SBlockFrame> frame = builder->FindFrame<SBlockFrame>()) {
-    frame.value()->alloc_buffers.push_back(buffer);
-  } else if (ffi::Optional<PrimFuncFrame> frame = builder->FindFrame<PrimFuncFrame>()) {
-    frame.value()->root_alloc_buffers.push_back(buffer);
+  // First try to get the last frame (most recent)
+  if (ffi::Optional<SBlockFrame> block_frame = builder->GetLastFrame<SBlockFrame>()) {
+    block_frame.value()->alloc_buffers.push_back(buffer);
+  } else if (ffi::Optional<PrimFuncFrame> prim_func_frame =
+                 builder->GetLastFrame<PrimFuncFrame>()) {
+    prim_func_frame.value()->root_alloc_buffers.push_back(buffer);
+  } else if (func_frame->is_tirp) {
+    // For TIR+ functions, try to find any block or function frame
+    if (ffi::Optional<SBlockFrame> block_frame = builder->FindFrame<SBlockFrame>()) {
+      block_frame.value()->alloc_buffers.push_back(buffer);
+    } else if (ffi::Optional<PrimFuncFrame> prim_func_frame = builder->FindFrame<PrimFuncFrame>()) {
+      prim_func_frame.value()->root_alloc_buffers.push_back(buffer);
+    } else {
+      TVM_FFI_THROW(InternalError) << "ValueError: Block frame or PrimFunc frame not found. Please ensure "
+                    "'T.alloc_buffer' is called under T.sblock() or T.prim_func()";
+    }
   } else {
-    TVM_FFI_THROW(InternalError) << "ValueError: Block frame or PrimFunc frame not find. Please ensure "
+    TVM_FFI_THROW(InternalError) << "ValueError: Block frame or PrimFunc frame not found. Please ensure "
                   "'T.alloc_buffer' is called under T.sblock() or T.prim_func()";
   }
   return buffer;
