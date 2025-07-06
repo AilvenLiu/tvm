@@ -130,7 +130,7 @@ def test_hgemm_hopper_ws_cooperative():
             # only 1 thread in 2 consumers write to TMA
             T.ptx.cp_async.bulk.tensor.s2g(
                 2,
-                C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0])),
+                C_smem.ptr_to([n_tile % STAGES_EPI, 0]),
                 C_map,
                 n_glb_offset + n_tile * 32,
                 m_glb_offset,
@@ -207,8 +207,8 @@ def test_hgemm_hopper_ws_cooperative():
                     # initialize mainloop pipeline barriers per CTA
                     if (tid // 32 == 0 and T.ptx.elect_sync(0xFFFFFFFF) > 0):
                         for i in range(STAGES_MMA):
-                            T.ptx.mbarrier.init(full.access_ptr("rw", offset=i), 1) # 1 producer per CTA
-                            T.ptx.mbarrier.init(empty.access_ptr("rw", offset=i), 4) # 2 CTA, 2 consumers per CTA
+                            T.ptx.mbarrier.init(full.ptr_to([i]), 1) # 1 producer per CTA
+                            T.ptx.mbarrier.init(empty.ptr_to([i]), 4) # 2 CTA, 2 consumers per CTA
                     # fence the barrier init, the memory ordering is visble across the cluster
                     T.ptx.fence.mbarrier_init()
                     # cluster synchronization
@@ -221,8 +221,8 @@ def test_hgemm_hopper_ws_cooperative():
                         # producer WG
                         with T.warp(parent="warpgroup")[0:1]:
                             stage = T.meta_var(producer.index)
-                            cur_full = T.meta_var(full.access_ptr("rw", offset=stage))
-                            cur_empty = T.meta_var(empty.access_ptr("rw", offset=stage))
+                            cur_full = T.meta_var(full.ptr_to([stage]))
+                            cur_empty = T.meta_var(empty.ptr_to([stage]))
                             # mainloop producer warp
                             while (tile_scheduler.valid()):
                                 with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
@@ -232,15 +232,12 @@ def test_hgemm_hopper_ws_cooperative():
                                         T.ptx.mbarrier.try_wait(cur_empty, producer.phase)
                                         T.ptx.mbarrier.arrive.expect_tx(cur_full, TMA_BYTES)
                                         # issue TMA loads for A
-                                        T.ptx.cp_async.bulk.tensor.g2c(
-                                            2, A_smem.access_ptr("w", offset=A_smem.offset_of_p([stage, 0])),
-                                            cur_full, A_map, i * BLK_K, tile_scheduler.m_idx * BLK_M
-                                        )
+                                        T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]),cur_full, A_map, i * BLK_K, tile_scheduler.m_idx * BLK_M)
                                         # issue TMA loads for B
                                         for n_tile in range(4):
                                             multicast_stride_b = T.meta_var(BLK_K // CLUSTER_M)
                                             T.ptx.cp_async.bulk.tensor.g2c(
-                                                2, B_smem.access_ptr("w", offset=B_smem.offset_of_p([stage, cbx * multicast_stride_b * 64 + n_tile * BLK_K * 64])),
+                                                2, B_smem.ptr_to([stage, cbx * multicast_stride_b * 64 + n_tile * BLK_K * 64]),
                                                 cur_full, B_map, tile_scheduler.n_idx * BLK_N + n_tile * 64, i * BLK_K + cbx * multicast_stride_b,
                                                 cta_mask=0x3
                                             )
@@ -267,8 +264,8 @@ def test_hgemm_hopper_ws_cooperative():
                                 T.ptx.wgmma.noop_barrier(accum[i])
                             read_stage = T.meta_var(consumer_read.index)
                             release_stage = T.meta_var(consumer_release.index)
-                            full_read = T.meta_var(full.access_ptr("rw", offset=read_stage))
-                            empty_release = T.meta_var(empty.access_ptr("rw", offset=release_stage))
+                            full_read = T.meta_var(full.ptr_to([read_stage]))
+                            empty_release = T.meta_var(empty.ptr_to([release_stage]))
                             for k_iter in range(k_tile_count):
                                 # consumer acquire the slot
                                 T.ptx.mbarrier.try_wait(full_read, consumer_read.phase)
@@ -278,8 +275,8 @@ def test_hgemm_hopper_ws_cooperative():
                                 for inner_k in range(BLK_K // WGMMA_K):
                                     A_offset = T.meta_var((wg_id - 1) * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)
                                     B_offset = T.meta_var(inner_k * WGMMA_K * 64)
-                                    T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_A), A_smem.access_ptr("r", offset=A_smem.offset_of_p([read_stage, A_offset])), 1, 64, swizzle=3)
-                                    T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_B), B_smem.access_ptr("r", offset=B_smem.offset_of_p([read_stage, B_offset])), 512, 64, swizzle=3)
+                                    T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_A), A_smem.ptr_to([read_stage, A_offset]), 1, 64, swizzle=3)
+                                    T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_B), B_smem.ptr_to([read_stage, B_offset]), 512, 64, swizzle=3)
                                     T.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float16", "float32", False, True, 1.0, 1.0, True,
                                                              desc_A, desc_B, *get_accum_list(accum, 128))
                                 T.ptx.wgmma.commit_group()
@@ -422,15 +419,9 @@ def test_hgemm_hopper_no_ws():
     def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, A_map, B_map, bars: tvm.tir.Buffer):
         with T.thread()[tid == 0]:
             stage = T.meta_var(k_tile % STAGES_TMA)
-            T.ptx.mbarrier.arrive.expect_tx(bars.access_ptr("rw", offset=stage), TMA_BYTES)
-            T.ptx.cp_async.bulk.tensor.g2c(
-                2, A_smem.access_ptr("w", offset=A_smem.offset_of_p([stage, 0])),
-                bars.access_ptr("rw", offset=stage), A_map, k_tile * BLK_K, m_idx * BLK_M,
-            )
-            T.ptx.cp_async.bulk.tensor.g2c(
-                2, B_smem.access_ptr("w", offset=B_smem.offset_of_p([stage, 0])),
-                bars.access_ptr("rw", offset=stage), B_map, k_tile * BLK_K, n_idx * BLK_N,
-            )
+            T.ptx.mbarrier.arrive.expect_tx(bars.ptr_to([stage]), TMA_BYTES)
+            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), A_map, k_tile * BLK_K, m_idx * BLK_M)
+            T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), B_map, k_tile * BLK_K, n_idx * BLK_N)
 
     def get_accum_list(C, C_elems):
         return [C[i] for i in range(C_elems)]
@@ -439,12 +430,12 @@ def test_hgemm_hopper_no_ws():
     def mma_compute(wg_id, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, accum, bars: tvm.tir.Buffer, descA, descB):
         stage = T.meta_var(k_tile % STAGES_TMA)
         parity = T.meta_var((k_tile // STAGES_TMA) % 2)
-        T.ptx.mbarrier.try_wait(bars.access_ptr("rw", offset=stage), parity)
+        T.ptx.mbarrier.try_wait(bars.ptr_to([stage]), parity)
         for inner_k in T.serial(BLK_K // WGMMA_K):
             A_offset = T.meta_var(wg_id * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)
             B_offset = T.meta_var(inner_k * WGMMA_K)
-            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descA), A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
-            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([stage, A_offset]), 1, 64, swizzle=3)
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([stage, B_offset]), 1, 64, swizzle=3)
             T.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float16", "float32", False, False, 1.0, 1.0, True,
                                      descA, descB, *get_accum_list(accum, 128))
         T.ptx.wgmma.commit_group()
@@ -458,7 +449,7 @@ def test_hgemm_hopper_no_ws():
             col_noswizzle = T.meta_var(st_tile * 2 + lane_id // 16)
             col = T.meta_var((lane_id % 8) ^ col_noswizzle)
             row = T.meta_var(warp_id * 16 + lane_id % 16)
-            T.ptx.stmatrix(4, False, C_smem.access_ptr("w", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, row, col * 8])),
+            T.ptx.stmatrix(4, False, C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]),
                            accum_half[0], accum_half[1], accum_half[2], accum_half[3],
                            accum_half[4], accum_half[5], accum_half[6], accum_half[7])
 
@@ -467,8 +458,7 @@ def test_hgemm_hopper_no_ws():
         T.ptx.fence.proxy("shared")
         T.tvm_storage_sync("shared")
         with T.thread()[warp_id == 0 and lane_id == 0]:
-            T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
-                                           C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
+            T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
             T.ptx.cp_async.bulk.commit_group()
             T.ptx.cp_async.bulk.wait_group(1, read=True)
 
@@ -534,7 +524,7 @@ def test_hgemm_hopper_no_ws():
                         # initialize the barriers
                         with T.thread()[tid == 0]:
                             for i in range(STAGES_TMA):
-                                T.ptx.mbarrier.init(bars.access_ptr("rw", offset=i), 1)
+                                T.ptx.mbarrier.init(bars.ptr_to([i]), 1)
                         T.tvm_storage_sync("shared")
                         # initialize the index
                         tma_index = 0

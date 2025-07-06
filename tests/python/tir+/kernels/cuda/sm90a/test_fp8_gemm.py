@@ -82,15 +82,9 @@ def test_fp8_gemm_hopper_no_ws():
     def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, A_map, B_map, bars: tvm.tir.Buffer):
         with T.thread()[tid == 0]:
             stage = T.meta_var(k_tile % STAGES_TMA)
-            T.ptx.mbarrier.arrive.expect_tx(bars.access_ptr("rw", offset=stage), TMA_BYTES)
-            T.ptx.cp_async.bulk.tensor.g2c(
-                2, A_smem.access_ptr("w", offset=A_smem.offset_of_p([stage, 0])),
-                bars.access_ptr("rw", offset=stage), A_map, k_tile * BLK_K, m_idx * BLK_M,
-            )
-            T.ptx.cp_async.bulk.tensor.g2c(
-                2, B_smem.access_ptr("w", offset=B_smem.offset_of_p([stage, 0])),
-                bars.access_ptr("rw", offset=stage), B_map, k_tile * BLK_K, n_idx * BLK_N,
-            )
+            T.ptx.mbarrier.arrive.expect_tx(bars.ptr_to([stage]), TMA_BYTES)
+            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), A_map, k_tile * BLK_K, m_idx * BLK_M)
+            T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([stage, 0]), bars.ptr_to([stage]), B_map, k_tile * BLK_K, n_idx * BLK_N)
 
     def get_accum_list(C, C_elems):
         return [C[i] for i in range(C_elems)]
@@ -99,14 +93,13 @@ def test_fp8_gemm_hopper_no_ws():
     def mma_compute(wg_id, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, accum, bars: tvm.tir.Buffer, descA, descB):
         stage = T.meta_var(k_tile % STAGES_TMA)
         parity = T.meta_var((k_tile // STAGES_TMA) % 2)
-        T.ptx.mbarrier.try_wait(bars.access_ptr("rw", offset=stage), parity)
+        T.ptx.mbarrier.try_wait(bars.ptr_to([stage]), parity)
         for inner_k in T.serial(BLK_K // WGMMA_K):
             A_offset = T.meta_var(wg_id * BLK_M * BLK_K // 2 + inner_k * WGMMA_K)
             B_offset = T.meta_var(inner_k * WGMMA_K)
-            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descA), A_smem.access_ptr("r", offset=A_smem.offset_of_p([stage, A_offset])), 1, 64, swizzle=3)
-            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.access_ptr("r", offset=B_smem.offset_of_p([stage, B_offset])), 1, 64, swizzle=3)
-            T.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True,
-                                     descA, descB, *get_accum_list(accum, 128))
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([stage, A_offset]), 1, 64, swizzle=3)
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([stage, B_offset]), 1, 64, swizzle=3)
+            T.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float8_e4m3fn", "float32", False, False, 1.0, 1.0, True, descA, descB, *get_accum_list(accum, 128))
         T.ptx.wgmma.commit_group()
 
     @T.macro
@@ -118,17 +111,15 @@ def test_fp8_gemm_hopper_no_ws():
             col_noswizzle = T.meta_var(st_tile * 2 + lane_id // 16)
             col = T.meta_var((lane_id % 8) ^ col_noswizzle)
             row = T.meta_var(warp_id * 16 + lane_id % 16)
-            T.ptx.stmatrix(4, False, C_smem.access_ptr("w", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, row, col * 8])),
-                           accum_half[0], accum_half[1], accum_half[2], accum_half[3],
-                           accum_half[4], accum_half[5], accum_half[6], accum_half[7])
+            T.ptx.stmatrix(4, False, C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]), 
+                           accum_half[0], accum_half[1], accum_half[2], accum_half[3], accum_half[4], accum_half[5], accum_half[6], accum_half[7])
 
     @T.macro
     def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):
         T.ptx.fence.proxy("shared")
         T.tvm_storage_sync("shared")
         with T.thread()[warp_id == 0 and lane_id == 0]:
-            T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.access_ptr("r", offset=C_smem.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
-                                           C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
+            T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
             T.ptx.cp_async.bulk.commit_group()
             T.ptx.cp_async.bulk.wait_group(1, read=True)
 
@@ -193,7 +184,7 @@ def test_fp8_gemm_hopper_no_ws():
                         # initialize the barriers
                         with T.thread()[tid == 0]:
                             for i in range(STAGES_TMA):
-                                T.ptx.mbarrier.init(bars.access_ptr("rw", offset=i), 1)
+                                T.ptx.mbarrier.init(bars.ptr_to([i]), 1)
                         T.tvm_storage_sync("shared")
                         # initialize the index
                         tma_index = 0

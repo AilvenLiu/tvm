@@ -145,16 +145,16 @@ def test_fp16_fused_attn():
         def init(self, tid):
             with T.thread()[tid == 0]:
                 for i in T.serial(KV_STAGES):
-                    T.ptx.mbarrier.init(self.full.access_ptr("rw", offset=i), 1)
-                    T.ptx.mbarrier.init(self.empty.access_ptr("rw", offset=i), 2 * WG_SIZE)  # 2 consumers
+                    T.ptx.mbarrier.init(self.full.ptr_to([i]), 1)
+                    T.ptx.mbarrier.init(self.empty.ptr_to([i]), 2 * WG_SIZE)  # 2 consumers
             # fence the barrier init, the memory ordering is visible across the whole block
             T.ptx.fence.mbarrier_init()
 
         @T.macro
         def producer_acquire(self, state, profiler_buffer, profiler_tag, profiler_write_offset):
             stage = T.meta_var(state.index)
-            cur_empty = T.meta_var(self.empty.access_ptr("rw", offset=stage))
-            cur_full = T.meta_var(self.full.access_ptr("rw", offset=stage))
+            cur_empty = T.meta_var(self.empty.ptr_to([stage]))
+            cur_full = T.meta_var(self.full.ptr_to([stage]))
             T.ptx.mbarrier.try_wait(cur_empty, state.phase)
             T.timer_start_cuda(ProfileEventType.IssueLoadKV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
             T.ptx.mbarrier.arrive.expect_tx(cur_full, self.bytes)
@@ -162,7 +162,7 @@ def test_fp16_fused_attn():
         @T.macro
         def producer_tail(self, state):
             stage = T.meta_var(state.index)
-            cur_empty = T.meta_var(self.empty.access_ptr("rw", offset=stage))
+            cur_empty = T.meta_var(self.empty.ptr_to([stage]))
             for _ in T.serial(KV_STAGES):
                 T.ptx.mbarrier.try_wait(cur_empty, state.phase)
                 state.advance()
@@ -170,13 +170,13 @@ def test_fp16_fused_attn():
         @T.macro
         def consumer_wait(self, state):
             stage = T.meta_var(state.index)
-            cur_full = T.meta_var(self.full.access_ptr("rw", offset=stage))
+            cur_full = T.meta_var(self.full.ptr_to([stage]))
             T.ptx.mbarrier.try_wait(cur_full, state.phase)
 
         @T.macro
         def consumer_release(self, state):
             stage = T.meta_var(state.index)
-            cur_empty = T.meta_var(self.empty.access_ptr("rw", offset=stage))
+            cur_empty = T.meta_var(self.empty.ptr_to([stage]))
             T.ptx.mbarrier.arrive(cur_empty)
 
         @T.macro
@@ -184,12 +184,9 @@ def test_fp16_fused_attn():
             # copy [HEAD_DIM, BLK_KV/BLK_Q] from global [HAED_DIM, hidx, BLK_KV/BLK_Q * idx, bidx] to smem
             # copy at most [TMA_TILE, BLK_KV/BLK_Q] elements per iteration due to the restriction of swizzle
             stage = T.meta_var(state.index)
-            cur_full = T.meta_var(self.full.access_ptr("rw", offset=stage))
+            cur_full = T.meta_var(self.full.ptr_to([stage]))
             for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
-                T.ptx.cp_async.bulk.tensor.g2c(
-                    4, smem.access_ptr("w", offset=smem.offset_of_p([stage, tma_tile * TMA_TILE * BLK_KV])), cur_full,
-                    tmap, coord[0] + tma_tile * TMA_TILE, coord[1], coord[2], coord[3],
-                )
+                T.ptx.cp_async.bulk.tensor.g2c(4, smem.ptr_to([stage, tma_tile * TMA_TILE * BLK_KV]), cur_full, tmap, coord[0] + tma_tile * TMA_TILE, coord[1], coord[2], coord[3])
 
     class PipelineState:
         def __init__(self, prefix: str):
@@ -343,10 +340,8 @@ def test_fp16_fused_attn():
         with T.thread():
             scaleD = T.local_cell("int32")
             scaleD = 0
-            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_Q), smem_q.access_ptr("r", offset=consumer_id * BLK_Q // 2 * TMA_TILE),
-                                       BLK_Q * 8, 64, SWIZZLE)
-            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_K), smem_k.access_ptr("r", offset=smem_k.offset_of_p([k_stage, 0])),
-                                       BLK_KV * 8, 64, SWIZZLE)
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_Q), smem_q.ptr_to([consumer_id * BLK_Q // 2 * TMA_TILE]), BLK_Q * 8, 64, SWIZZLE)
+            T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_K), smem_k.ptr_to([k_stage, 0]), BLK_KV * 8, 64, SWIZZLE)
             for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
                 for wgmma_tile in T.serial(TMA_TILE // WGMMA_QK_K):
                     T.ptx.wgmma.mma_async.ss(
@@ -369,8 +364,7 @@ def test_fp16_fused_attn():
         T.ptx.wgmma.fence()
 
         v_stage = T.meta_var(consumer_v.index)
-        T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_V), smem_v.access_ptr("r", offset=smem_v.offset_of_p([v_stage, 0])),
-                                   BLK_KV * 8, 64, SWIZZLE)
+        T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_V), smem_v.ptr_to([v_stage, 0]), BLK_KV * 8, 64, SWIZZLE)
         for wgmma_tile in T.serial(BLK_KV // WGMMA_PV_K):
             P_offset = T.meta_var(wgmma_tile * WGMMA_PV_K // 4)
             T.ptx.wgmma.mma_async.rs(
@@ -438,7 +432,7 @@ def test_fp16_fused_attn():
                 col_noswizzle = T.meta_var(st_tile * 2 + lane_id // 16)
                 col = T.meta_var((lane_id % 8) ^ col_noswizzle)
                 row = T.meta_var(warp_id * 16 + lane_id % 16)
-                T.ptx.stmatrix(4, False, smem_o.access_ptr("w", offset=smem_o.offset_of_p([n_tile % STAGES_EPI, row, col * 8])),
+                T.ptx.stmatrix(4, False, smem_o.ptr_to([n_tile % STAGES_EPI, row, col * 8]),
                                O_half[0], O_half[1], O_half[2], O_half[3], O_half[4], O_half[5], O_half[6], O_half[7])
 
     @T.macro
@@ -446,8 +440,7 @@ def test_fp16_fused_attn():
         T.ptx.fence.proxy("shared")
         T.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
         with T.thread()[warp_id == 0 and lane_id == 0]:
-            T.ptx.cp_async.bulk.tensor.s2g(4, smem_o.access_ptr("r", offset=smem_o.offset_of_p([n_tile % STAGES_EPI, 0, 0])),
-                                           O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)
+            T.ptx.cp_async.bulk.tensor.s2g(4, smem_o.ptr_to([n_tile % STAGES_EPI, 0, 0]), O_map, n_tile * 64, h_idx, q_idx * BLK_Q, b_idx)
             T.ptx.cp_async.bulk.commit_group()
             T.ptx.cp_async.bulk.wait_group(1, read=True)
 
@@ -556,8 +549,8 @@ def test_fp16_fused_attn():
                     tile_scheduler.init(bx)
                     # barriers
                     with T.thread()[tid == 0]:
-                        T.ptx.mbarrier.init(bar_Q.access_ptr("rw", offset=0), 1)
-                        T.ptx.mbarrier.init(bar_O.access_ptr("rw", offset=0), 1)
+                        T.ptx.mbarrier.init(bar_Q.ptr_to([0]), 1)
+                        T.ptx.mbarrier.init(bar_O.ptr_to([0]), 1)
                     T.ptx.fence.mbarrier_init()
                     # pipelines
                     pipeline_k.init(tid)
@@ -571,7 +564,7 @@ def test_fp16_fused_attn():
                     # sync to make sure everything is initialized and visible
                     T.tvm_storage_sync("shared")
 
-                    bar_Q_ptr = T.meta_var(bar_Q.access_ptr("rw", offset=0))
+                    bar_Q_ptr = T.meta_var(bar_Q.ptr_to([0]))
                     q_idx = T.meta_var(tile_scheduler.q_idx)
                     h_idx = T.meta_var(tile_scheduler.h_idx)
                     b_idx = T.meta_var(tile_scheduler.b_idx)
@@ -605,7 +598,7 @@ def test_fp16_fused_attn():
                                         T.ptx.mbarrier.arrive.expect_tx(bar_Q_ptr, TMA_BYTES_Q)
                                         for tma_tile in T.serial(HEAD_DIM // TMA_TILE):
                                             T.ptx.cp_async.bulk.tensor.g2c(
-                                                4, smem_q.access_ptr("w", offset=tma_tile * TMA_TILE * BLK_Q), bar_Q_ptr, Q_map,
+                                                4, smem_q.ptr_to([tma_tile * TMA_TILE * BLK_Q]), bar_Q_ptr, Q_map,
                                                 tma_tile * TMA_TILE, h_idx, q_idx * BLK_Q, b_idx
                                             )
                                     T.timer_end_cuda(ProfileEventType.IssueLoadQ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)

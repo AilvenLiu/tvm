@@ -188,15 +188,13 @@ class Buffer(Object, Scriptable):
     def with_allocated_addr(self, allocated_addr):
         """Return a new buffer with the allocated address."""
         return _ffi_api.BufferWithAllocatedAddr(self, allocated_addr)  # type: ignore
-    
+
     def with_dtype(self, dtype):
-        """Return a new buffer with the dtype.
-        """
+        """Return a new buffer with the dtype."""
         return _ffi_api.BufferWithDtype(self, dtype)  # type: ignore
 
     def with_data(self, data):
-        """Return a new buffer with the data.
-        """
+        """Return a new buffer with the data."""
         return _ffi_api.BufferWithData(self, data)  # type: ignore
 
     def offset_of(self, indices):
@@ -247,6 +245,13 @@ class Buffer(Object, Scriptable):
             bool: True if the buffer is a cell, False otherwise.
         """
         return _ffi_api.BufferIsCell(self, alloc_or_decl)
+
+    def ptr_to(self, indices):
+        """Get the pointer to the buffer at the given indices (logical indices).
+
+        Note that the bufferload inside requires LowerTIPp pass to apply the layout to get the physical indices.
+        """
+        return self.access_ptr("rw", offset=self.offset_of_p(indices))
 
     def __getitem__(self, indices):
         from ..arith import Analyzer  # pylint: disable=import-outside-toplevel
@@ -304,7 +309,7 @@ class Buffer(Object, Scriptable):
     def is_event_tensor(self):
         """Check if the buffer is an event tensor."""
         return "event_i" in self.dtype
-    
+
     @property
     def event_impl(self):
         """Get the event implementation of the buffer."""
