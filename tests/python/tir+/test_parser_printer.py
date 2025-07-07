@@ -804,6 +804,80 @@ def test_alloc_apis():
     assert_structural_equal(test, from_source(code))
 
 
+def test_macro():
+    # fmt: off
+    @T.macro(hygienic=True)
+    def mul(x, c):
+        T.evaluate(x * c)
+
+    @T.prim_func(tirp=True, private=True)
+    def test():
+        with T.kernel():
+            for x in T.serial(10):
+
+                @T.macro(hygienic=True)
+                def add(c):
+                    T.evaluate(x + c)
+
+                @T.macro(hygienic=False)
+                def two_add_and_mul(c):
+                    add(c)
+                    add(c + c)
+                    mul(x, c)
+
+                two_add_and_mul(1)
+                two_add_and_mul(2)
+                
+
+    @T.prim_func(tirp=True, private=True)
+    def expected():
+        with T.kernel():
+            for x in range(10):
+                T.evaluate(x + 1)
+                T.evaluate(x + 2)
+                T.evaluate(x)
+                T.evaluate(x + 2)
+                T.evaluate(x + 4)
+                T.evaluate(x * 2)
+    # fmt: on
+    code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+    assert_structural_equal(test, expected)
+
+
+def test_macro_recursive():
+    # fmt: off
+    @T.prim_func(tirp=True, private=True)
+    def test():
+        with T.kernel():
+            for x in T.serial(10):
+
+                @T.macro
+                def add(x, c):
+                    if c > 0:
+                        add(x, c - 1)
+                    T.evaluate(x)
+
+                add(x, 5)
+
+    @T.prim_func(private=True, tirp=True)
+    def expected():
+        with T.kernel():
+            for x in range(10):
+                T.evaluate(x)
+                T.evaluate(x)
+                T.evaluate(x)
+                T.evaluate(x)
+                T.evaluate(x)
+                T.evaluate(x)
+    # fmt: on
+    code = test.script()
+    print(code)
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+    assert_structural_equal(expected, from_source(code))
+
+
 if __name__ == "__main__":
-    # tvm.testing.main()
-    test_alloc_apis()
+    tvm.testing.main()

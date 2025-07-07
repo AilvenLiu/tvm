@@ -16,6 +16,7 @@
 # under the License.
 """The base parser for tirx"""
 
+import ast
 from copy import deepcopy
 import contextlib
 from functools import partial
@@ -30,8 +31,9 @@ from ...ir_builder import ir as I
 from ...ir_builder import tirx as T
 from ...ir_builder.base import IRBuilder
 from ...ir_builder.base import IRBuilderFrame as Frame
-from ...ir_builder.tir.frame import DeclBufferFrame
-from .._core import Parser, dispatch, doc
+from .._core import Parser, dispatch, doc, scan_macro, utils
+from ..tir.entry import TIRMacro
+from ..core.doc import from_doc
 
 
 def bind_with_value(self: Parser, node: doc.expr, var_name: str, value: Any) -> Any:
@@ -326,7 +328,7 @@ def visit_assign(self: Parser, node: doc.Assign) -> None:
             if hasattr(lhs_copy, "ctx"):
                 lhs_copy.ctx = doc.Load()
             lhs_value = self.eval_expr(lhs_copy)
-            if isinstance(lhs_value, (T.BufferLoad, tvm.tir.Buffer)):
+            if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
                 buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
                 if len(buffer.shape) == 0:
                     # only 0-dim buffer can be assigned directly
@@ -494,7 +496,60 @@ def visit_function_def(self: Parser, node: doc.FunctionDef) -> None:
     self.function_annotations = supplied_annotation
 
 
-@dispatch.register(token="tirx", type_name="tvm_annotation")
+@dispatch.register(token="tir.macro", type_name="FunctionDef")
+def visit_macro_function_def(self: Parser, node: doc.FunctionDef) -> None:
+    """The function definition visiting method for tir.
+
+    Parameters
+    ----------
+    self : Parser
+        The visiting parser.
+
+    node : doc.FunctionDef
+        The doc AST function definition node.
+    """
+    # get the hygienic flag from the macro decorator
+    macro_decorator = node.decorator_list[-1]
+    if isinstance(macro_decorator, doc.Call):
+        # T.macro(hygienic=True/False)
+        if macro_decorator.func.attr != "macro":
+            self.report_error(macro_decorator, "The decorator must be @T.macro")
+        hygienic = macro_decorator.keywords[0].value.value
+        assert isinstance(hygienic, bool)
+    elif isinstance(macro_decorator, doc.Attribute):
+        # T.macro
+        assert macro_decorator.attr == "macro"
+        hygienic = True
+    else:
+        self.report_error(
+            macro_decorator, "The decorator must be @T.macro or @T.macro(hygienic=True/False)"
+        )
+    # remove the macro decorator
+    node.decorator_list.pop()  # remove the macro decorator
+    func_ast = from_doc(node)
+
+    def get_func(func_ast):
+        module_ast = ast.Module(body=[func_ast], type_ignores=[])
+        ast.fix_missing_locations(module_ast)
+        code_obj = compile(module_ast, filename="<string>", mode="exec")
+        namespace = self.var_table.get()
+        exec(code_obj, namespace)  # pylint: disable=exec-used
+        func_name = func_ast.name
+        func = namespace[func_name]
+        return func, func_name
+
+    func, func_name = get_func(func_ast)
+    source, closure_vars = scan_macro(ast.unparse(func_ast), utils.inspect_function_capture(func))
+    obj = TIRMacro(source, closure_vars, func, hygienic=hygienic)
+
+    def wrapper(*args, **kwargs):
+        return obj(*args, **kwargs)
+
+    self.var_table.add(func_name, wrapper, allow_shadowing=False)
+    return None
+
+
+@dispatch.register(token="tir", type_name="tvm_annotation")
 def visit_tvm_annotation(self: Parser, node: doc.expr):
     """The TVM annotation visiting method for tirx.
 

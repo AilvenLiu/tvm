@@ -30,7 +30,7 @@ from ..core.parser import Parser, ScriptMacro
 def prim_func(
     func: Callable | None = None,
     private: bool = False,
-    check_well_formed = True,
+    check_well_formed=True,
     tirp: bool = False,
 ) -> PrimFunc | Callable:
     """The parsing method for tirx prim func, by using `@prim_func` as decorator.
@@ -166,6 +166,7 @@ def macro(*args, hygienic: bool = True) -> Callable:
         return wrapper
 
     if len(args) == 0:
+        setattr(_decorator, "dispatch_token", "tir.macro")
         return _decorator
     if len(args) == 1 and inspect.isfunction(args[0]):
         return _decorator(args[0])
@@ -173,6 +174,9 @@ def macro(*args, hygienic: bool = True) -> Callable:
     raise ValueError(
         "Invalid use of T.macro. Usage: @T.macro, @T.macro(), @T.macro(hygienic=[True|False])"
     )
+
+
+setattr(macro, "dispatch_token", "tir.macro")
 
 
 class BufferProxy:

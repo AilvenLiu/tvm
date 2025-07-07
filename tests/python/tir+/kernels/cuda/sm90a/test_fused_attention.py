@@ -377,50 +377,6 @@ def test_fp16_fused_attn():
         ptx_wgmma_noop_barrier(P_reg, S_REG_COUNT // 2)
         ptx_wgmma_noop_barrier(O_reg, O_REG_COUNT)
 
-    # TODO(@bohan): try hygienic=True
-    @T.macro
-    def consumer_body(
-        do_masking, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, P_reg_fp16, O_reg,
-        wg_id, warp_id_in_wg, lane_id, q_idx, kv_tile_idx_read, profiler_buffer, profiler_tag, profiler_write_offset
-    ):
-        pipeline_k.consumer_wait(consumer_k)
-        T.timer_start_cuda(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-        # commit S_i = Q^TK_i but do not wait
-        gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)
-        T.timer_start_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-        # scale O_{i-1} with scale_{i-1}
-        softmax.scale_o(O_reg)
-        T.timer_end_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-        # wait V_{i-1} to be loaded
-        pipeline_v.consumer_wait(consumer_v)
-        T.timer_start_cuda(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-        # commit O_{i-1} += P_{i-1}V_{i-1} but do not wait
-        gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v)
-        # wait for the gemm result of S_i = Q^TK_i
-        T.ptx.wgmma.wait_group(1)
-        T.timer_end_cuda(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-        # release the current K tile
-        pipeline_k.consumer_release(consumer_k)
-        T.timer_start_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-        # mask S_i
-        if do_masking:
-            mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read * BLK_KV, QO_LEN, KV_LEN)
-        # update m, P, l for the current tile
-        softmax.update_m_P_l(S_reg)
-        T.timer_end_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-        # wait for P_{i-1}V_{i-1} to be computed
-        T.ptx.wgmma.wait_group(0)
-        T.timer_end_cuda(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-        # release the previous V tile
-        pipeline_v.consumer_release(consumer_v)
-        consumer_k.advance()
-        consumer_v.advance()
-        T.timer_start_cuda(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-        # copy to P_{i-1} and downcast to float16
-        for i in T.serial(S_REG_COUNT):
-            P_reg_fp16[i] = T.Cast("float16", S_reg[i])
-        T.timer_end_cuda(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
-
     @T.macro
     def r2S(warp_id, lane_id, smem_o, O_reg, n_tile):
         T.ptx.bar.sync(NameBarrier.EPILOGUE, MMA_THREADS)
@@ -681,20 +637,56 @@ def test_fp16_fused_attn():
                                     n_masking_steps = 0 if not CAUSAL else ceildiv(BLK_Q, BLK_KV)
                                     kv_tile_idx_read = kv_tile_idx_read - 1
                                     # split out tiles of K and V that require masking
+                                    
+                                    @T.macro
+                                    def consumer_body(do_masking):
+                                        pipeline_k.consumer_wait(consumer_k)
+                                        T.timer_start_cuda(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        # commit S_i = Q^TK_i but do not wait
+                                        gemm_QK(S_reg, smem_q, smem_k, desc_Q, desc_K, wg_id - 1, consumer_k)
+                                        T.timer_start_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        # scale O_{i-1} with scale_{i-1}
+                                        softmax.scale_o(O_reg)
+                                        T.timer_end_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        # wait V_{i-1} to be loaded
+                                        pipeline_v.consumer_wait(consumer_v)
+                                        T.timer_start_cuda(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        # commit O_{i-1} += P_{i-1}V_{i-1} but do not wait
+                                        gemm_PV(O_reg, P_reg, smem_v, desc_V, consumer_v)
+                                        # wait for the gemm result of S_i = Q^TK_i
+                                        T.ptx.wgmma.wait_group(1)
+                                        T.timer_end_cuda(ProfileEventType.GemmQK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        # release the current K tile
+                                        pipeline_k.consumer_release(consumer_k)
+                                        T.timer_start_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        # mask S_i
+                                        if do_masking:
+                                            mask(S_reg, wg_id - 1, warp_id_in_wg, lane_id, q_idx * BLK_Q, kv_tile_idx_read * BLK_KV, QO_LEN, KV_LEN)
+                                        # update m, P, l for the current tile
+                                        softmax.update_m_P_l(S_reg)
+                                        T.timer_end_cuda(ProfileEventType.SoftmaxUpdate, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        # wait for P_{i-1}V_{i-1} to be computed
+                                        T.ptx.wgmma.wait_group(0)
+                                        T.timer_end_cuda(ProfileEventType.GemmPV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        # release the previous V tile
+                                        pipeline_v.consumer_release(consumer_v)
+                                        consumer_k.advance()
+                                        consumer_v.advance()
+                                        T.timer_start_cuda(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+                                        # copy to P_{i-1} and downcast to float16
+                                        for i in T.serial(S_REG_COUNT):
+                                            P_reg_fp16[i] = T.Cast("float16", S_reg[i])
+                                        T.timer_end_cuda(ProfileEventType.WritePReg, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
+
                                     while (masking_step < n_masking_steps and kv_tile_idx_read >= 0):
-                                        consumer_body(
-                                            True, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, P_reg_fp16, O_reg,
-                                            wg_id, warp_id_in_wg, lane_id, q_idx, kv_tile_idx_read, profiler_buffer, profiler_tag, profiler_write_offset
-                                        )
+                                        consumer_body(True)
                                         masking_step = masking_step + 1
                                         kv_tile_idx_read = kv_tile_idx_read - 1
                                     # no masking
                                     while kv_tile_idx_read >= 0:
-                                        consumer_body(
-                                            False, pipeline_k, pipeline_v, consumer_k, consumer_v, softmax, smem_q, smem_k, smem_v, desc_Q, desc_K, desc_V, S_reg, P_reg, P_reg_fp16, O_reg,
-                                            wg_id, warp_id_in_wg, lane_id, q_idx, kv_tile_idx_read, profiler_buffer, profiler_tag, profiler_write_offset
-                                        )
+                                        consumer_body(False)
                                         kv_tile_idx_read = kv_tile_idx_read - 1
+
                                 # notify the producer to load the next Q tile
                                 T.ptx.bar.arrive(NameBarrier.Q_EMPTY, 32 + MMA_THREADS)
                                 T.timer_start_cuda(ProfileEventType.ScaleO, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE)
