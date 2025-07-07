@@ -210,6 +210,8 @@ def visit_for(self: Parser, node: doc.For) -> None:
         The doc AST for node.
     """
     for_frame = self.eval_expr(node.iter)
+    if isinstance(for_frame, range):
+        for_frame = T.serial(for_frame.start, for_frame.stop)
     if not isinstance(for_frame, T.frame.ForFrame):
         self.report_error(
             node.iter,
@@ -476,7 +478,8 @@ def visit_function_def(self: Parser, node: doc.FunctionDef) -> None:
     tirp = find_decorator_annotation(node, "tirp", default=False)
     self.function_annotations = None
     with self.var_table.with_frame():
-        self.var_table.add("range", range_sugar)
+
+        # self.var_table.add("range", range_sugar)
         with T.prim_func(is_private=privacy, is_tirp=tirp):
             T.func_name(node.name)
             if node.returns is not None:

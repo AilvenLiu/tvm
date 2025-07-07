@@ -113,9 +113,6 @@ def test_hgemm_hopper_ws_cooperative():
         CONSUMER0 = 1
         CONSUMER1 = 2
 
-    def get_accum_list(C, C_elems):
-        return [C[i] for i in range(C_elems)]
-
     @T.macro
     def ptx_wgmma_noop_barrier(accum):
         for i in T.serial(128):
@@ -278,7 +275,7 @@ def test_hgemm_hopper_ws_cooperative():
                                     T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_A), A_smem.ptr_to([read_stage, A_offset]), 1, 64, swizzle=3)
                                     T.ptx.wgmma.encode_matrix_descriptor(T.address_of(desc_B), B_smem.ptr_to([read_stage, B_offset]), 512, 64, swizzle=3)
                                     T.ptx.wgmma.mma_async.ss(WGMMA_M, WGMMA_N, WGMMA_K, "float16", "float32", False, True, 1.0, 1.0, True,
-                                                             desc_A, desc_B, *get_accum_list(accum, 128))
+                                                             desc_A, desc_B, *[accum[i] for i in range(128)])
                                 T.ptx.wgmma.commit_group()
                                 if k_iter > 0:
                                     # wait for the previous stage to finish

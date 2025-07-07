@@ -215,9 +215,6 @@ def test_fp16_fused_attn():
         for i in T.serial(accum_count):
             T.ptx.wgmma.noop_barrier(accum[i])
 
-    def get_elems_list(arr, count, start=0):
-        return [arr[start + i] for i in range(count)]
-
     @T.macro
     def mask(S_reg, consumer_id, warp_id_in_wg, lane_id, q_row_base, kv_col_base, QO_LEN, KV_LEN):
         quad_id = T.meta_var(lane_id // 4)
@@ -346,7 +343,7 @@ def test_fp16_fused_attn():
                 for wgmma_tile in T.serial(TMA_TILE // WGMMA_QK_K):
                     T.ptx.wgmma.mma_async.ss(
                         WGMMA_QK_M, WGMMA_QK_N, WGMMA_QK_K, "float16", "float32", False, False,
-                        1.0, 1.0, scaleD, desc_Q, desc_K, *get_elems_list(S_reg, S_REG_COUNT)
+                        1.0, 1.0, scaleD, desc_Q, desc_K, *[S_reg[i] for i in range(S_REG_COUNT)]
                     )
                     scaleD = 1
                     desc_Q = desc_Q + (2 * (WGMMA_QK_K) >> 4)
@@ -369,7 +366,7 @@ def test_fp16_fused_attn():
             P_offset = T.meta_var(wgmma_tile * WGMMA_PV_K // 4)
             T.ptx.wgmma.mma_async.rs(
                 WGMMA_PV_M, WGMMA_PV_N, WGMMA_PV_K, "float16", "float32", False, True,
-                1.0, 1.0, True, desc_V, *(get_elems_list(P_reg, WGMMA_PV_K // 4, P_offset) + get_elems_list(O_reg, O_REG_COUNT, 0))
+                1.0, 1.0, True, desc_V, *([P_reg[P_offset + i] for i in range(WGMMA_PV_K // 4)] + [O_reg[i] for i in range(O_REG_COUNT)])
             )
             desc_V = desc_V + (2 * (WGMMA_PV_K * TMA_TILE) >> 4)
 

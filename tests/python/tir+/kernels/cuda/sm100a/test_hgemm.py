@@ -224,9 +224,6 @@ def test_tcgen05_mma_ss_tma():
     )
     ldo, sdo = 1, 64
 
-    def get_reg_lists(reg):
-        return [reg[j] for j in range(TMEM_LD_SIZE)]
-
     # fmt: off
     @T.prim_func(tirp=True)
     def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type, layout="default"), B: T.Buffer((N, K), b_type, layout="default"), C: T.Buffer((M, N), d_type, layout="default")):
@@ -338,9 +335,7 @@ def test_tcgen05_mma_ss_tma():
                             mma2ld_pipe.consumer_wait(0)
                             # TMEM -> RF
                             for i in range(BLK_N // TMEM_LD_SIZE):
-                                # FIXME: meta_var does not support list comprehension
-                                regs = T.meta_var(get_reg_lists(reg))
-                                T.ptx.tcgen05.ld(tmem_addr + wg_id * MMA_N, warp_id * 32, i * TMEM_LD_SIZE, "32x32b", TMEM_LD_SIZE, False, *regs)
+                                T.ptx.tcgen05.ld(tmem_addr + wg_id * MMA_N, warp_id * 32, i * TMEM_LD_SIZE, "32x32b", TMEM_LD_SIZE, False, *[reg[j] for j in range(TMEM_LD_SIZE)])
                                 T.ptx.tcgen05.wait.ld()
                                 for j in range(TMEM_LD_SIZE):
                                     reg_fp16[i * TMEM_LD_SIZE + j] = T.cast(reg[j], "float16")

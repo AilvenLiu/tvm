@@ -815,7 +815,7 @@ def test_macro():
     @T.prim_func(tirp=True, private=True)
     def test():
         with T.kernel():
-            for x in T.serial(10):
+            for x in range(10):
 
                 @T.macro(hygienic=True)
                 def add(c):
@@ -879,6 +879,25 @@ def test_macro_recursive():
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
     assert_structural_equal(expected, from_source(code))
+
+
+def test_list_comprehension():
+    # fmt: off
+    @T.prim_func(tirp=True, private=True)
+    def test():
+        with T.kernel():
+            with T.thread():
+                acc = T.alloc_local([10], "bool")
+                regs = T.meta_var([acc[_] for _ in range(10)])
+                T.evaluate(regs[0])
+                T.evaluate(tvm.tir.all(*regs))
+                T.evaluate(tvm.tir.all(*[acc[_] for _ in range(10)]))
+                T.evaluate(tvm.tir.all(*([acc[_] for _ in range(2, 4)] + [acc[_] for _ in range(6, 8)])))
+    # fmt: on
+    code = test.script()
+    print(code)
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
 
 
 if __name__ == "__main__":
