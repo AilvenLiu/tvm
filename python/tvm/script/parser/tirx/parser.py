@@ -32,7 +32,7 @@ from ...ir_builder import tirx as T
 from ...ir_builder.base import IRBuilder
 from ...ir_builder.base import IRBuilderFrame as Frame
 from .._core import Parser, dispatch, doc, scan_macro, utils
-from ..tir.entry import TIRMacro
+from ..tir.entry import TIRMacro, macro
 from ..core.doc import from_doc
 
 
@@ -509,6 +509,7 @@ def visit_macro_function_def(self: Parser, node: doc.FunctionDef) -> None:
         The doc AST function definition node.
     """
     # get the hygienic flag from the macro decorator
+
     macro_decorator = node.decorator_list[-1]
     if isinstance(macro_decorator, doc.Call):
         # T.macro(hygienic=True/False)
@@ -525,25 +526,27 @@ def visit_macro_function_def(self: Parser, node: doc.FunctionDef) -> None:
             macro_decorator, "The decorator must be @T.macro or @T.macro(hygienic=True/False)"
         )
     # remove the macro decorator
-    node.decorator_list.pop()  # remove the macro decorator
-    func_ast = from_doc(node)
+    node.decorator_list.pop()
+    # adjust the node location to the source code location
+    node.lineno += self.diag.source.start_line - 1
+    node.col_offset += self.diag.source.start_column + 1
+    node.end_lineno += self.diag.source.start_line - 1
+    node.end_col_offset += self.diag.source.start_column + 1
 
-    def get_func(func_ast):
+    def get_func():
+        func_ast = from_doc(node)
         module_ast = ast.Module(body=[func_ast], type_ignores=[])
         ast.fix_missing_locations(module_ast)
-        code_obj = compile(module_ast, filename="<string>", mode="exec")
+        # set the filename to the source name, so that the error message can be reported correctly
+        code_obj = compile(module_ast, filename=self.diag.source.source_name, mode="exec")
         namespace = self.var_table.get()
         exec(code_obj, namespace)  # pylint: disable=exec-used
         func_name = func_ast.name
         func = namespace[func_name]
         return func, func_name
 
-    func, func_name = get_func(func_ast)
-    source, closure_vars = scan_macro(ast.unparse(func_ast), utils.inspect_function_capture(func))
-    obj = TIRMacro(source, closure_vars, func, hygienic=hygienic)
-
-    def wrapper(*args, **kwargs):
-        return obj(*args, **kwargs)
+    func, func_name = get_func()
+    wrapper = macro(func, hygienic=hygienic)
 
     self.var_table.add(func_name, wrapper, allow_shadowing=False)
     return None
