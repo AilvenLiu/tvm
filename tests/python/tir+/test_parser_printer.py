@@ -791,6 +791,8 @@ def test_alloc_apis():
                 # normal 0-dim buffer can be assigned directly,
                 # but not loaded directly
                 F = F[()] + T.float16(1)
+                C += D
+                D += E + C + D
                 T.evaluate(T.address_of(C))
                 T.evaluate(C.buffer.access_ptr("rw", offset=0))
                 T.evaluate(C.buffer.data)

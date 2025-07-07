@@ -394,6 +394,19 @@ def visit_aug_assign(self: Parser, node: doc.AugAssign) -> None:
             indices = [self.eval_expr(lhs.slice)]
         T.buffer_store(self.eval_expr(lhs.value), rhs, indices)
     else:
+        try:
+            lhs_copy = deepcopy(lhs)
+            if hasattr(lhs_copy, "ctx"):
+                lhs_copy.ctx = doc.Load()
+            lhs_value = self.eval_expr(lhs_copy)
+            if isinstance(lhs_value, (T.BufferLoad, tvm.tir.Buffer)):
+                buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
+                if len(buffer.shape) == 0:
+                    # only 0-dim buffer can be assigned directly
+                    T.buffer_store(buffer, rhs, [])
+                    return
+        except Exception:
+            pass
         self.eval_assign(target=lhs, source=rhs, bind_value=bind_assign_value)
 
 
