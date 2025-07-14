@@ -2823,17 +2823,17 @@ __forceinline__ __device__ int{bits}_t {func_name}() {{
 
 
 @register_codegen("timer_init_cuda")
-def codegen_timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
+def codegen_timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset, num_groups, group_id):
 
     func_name = "tvm_builtin_timer_init_cuda"
     source_code = f"""
-__forceinline__ __device__ void {func_name}(void* profiler_buffer, void* profiler_tag, void* profiler_write_offset) {{
+__forceinline__ __device__ void {func_name}(uint64_t* profiler_buffer, uint64_t* profiler_tag, uint32_t* profiler_write_offset, int num_groups, int group_id) {{
     // timer init
     const uint32_t NBLOCKS = (uint32_t)(gridDim.x * gridDim.y * gridDim.z);
     const uint32_t BLOCK_IDX = (uint32_t)((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x);
-    const uint32_t NGROUPS = (uint32_t)(blockDim.x >> 7);
-    const uint32_t WG_IDX = (uint32_t)(threadIdx.x >> 7);
-    const uint32_t BLOCK_GROUP_IDX = BLOCK_IDX * NGROUPS + WG_IDX;
+    const uint32_t NGROUPS = num_groups;
+    const uint32_t GROUP_ID = group_id;
+    const uint32_t BLOCK_GROUP_IDX = BLOCK_IDX * NGROUPS + GROUP_ID;
     if ((blockIdx.x == 0) && (blockIdx.y == 0) && (blockIdx.z == 0) && (threadIdx.x == 0)) {{
         profiler_buffer[0] = ((uint64_t)NGROUPS << 32) | NBLOCKS;
     }}
@@ -2842,20 +2842,20 @@ __forceinline__ __device__ void {func_name}(void* profiler_buffer, void* profile
 }}
 """
     return cuda_func_call(
-        func_name, profiler_buffer, profiler_tag, profiler_write_offset, source_code=source_code
+        func_name, profiler_buffer, profiler_tag, profiler_write_offset, num_groups, group_id, source_code=source_code
     )
 
 
 @register_codegen("timer_start_cuda")
 def codegen_timer_start_cuda(
-    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride
+    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond
 ):
     func_name = "tvm_builtin_timer_start_cuda"
     source_code = f"""
-__forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffer, void* profiler_tag, void* profiler_write_offset, int profiler_write_stride) {{
+__forceinline__ __device__ void {func_name}(int event_type, uint64_t* profiler_buffer, uint64_t* profiler_tag, uint32_t* profiler_write_offset, int profiler_write_stride, bool leader_cond) {{
     // timer start
-    if (threadIdx.x % 128 == 0) {{
-        profiler_tag[profiler_write_offset[0]] = ((uint64_t)tvm_builtin_get_timestamp() << 32) | (profiler_write_offset[0] | (uint32_t)event_type << 2 | 0x0);
+    if (leader_cond) {{
+        profiler_buffer[profiler_write_offset[0]] = ((uint64_t)tvm_builtin_get_timestamp() << 32) | (profiler_tag[0] | (uint32_t)event_type << 2 | 0x0);
         profiler_write_offset[0] += profiler_write_stride;
     }}
     __threadfence_block();
@@ -2868,21 +2868,22 @@ __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffe
         profiler_tag,
         profiler_write_offset,
         profiler_write_stride,
+        leader_cond,
         source_code=source_code,
     ), ["get_time_stamp"]
 
 
 @register_codegen("timer_end_cuda")
 def codegen_timer_end_cuda(
-    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride
+    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond
 ):
     func_name = "tvm_builtin_timer_end_cuda"
     source_code = f"""
-__forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffer, void* profiler_tag, void* profiler_write_offset, int profiler_write_stride) {{
+__forceinline__ __device__ void {func_name}(int event_type, uint64_t* profiler_buffer, uint64_t* profiler_tag, uint32_t* profiler_write_offset, int profiler_write_stride, bool leader_cond) {{
     // timer end
     __threadfence_block();
-    if (threadIdx.x % 128 == 0) {{
-        profiler_buffer[profiler_write_offset[0]] = ((uint64_t)tvm_builtin_get_timestamp() << 32) | (profiler_write_offset[0] | (uint32_t)event_type << 2 | 0x1);
+    if (leader_cond) {{
+        profiler_buffer[profiler_write_offset[0]] = ((uint64_t)tvm_builtin_get_timestamp() << 32) | (profiler_tag[0] | (uint32_t)event_type << 2 | 0x1);
         profiler_write_offset[0] += profiler_write_stride;
     }}
 }}
@@ -2894,6 +2895,7 @@ __forceinline__ __device__ void {func_name}(int event_type, void* profiler_buffe
         profiler_tag,
         profiler_write_offset,
         profiler_write_stride,
+        leader_cond,
         source_code=source_code,
     ), ["get_time_stamp"]
 

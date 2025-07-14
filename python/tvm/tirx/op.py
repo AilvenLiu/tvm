@@ -7166,7 +7166,7 @@ def print_buffer(buffer_var, dtype, is_string, is_scalar, dim_num, *shape):
     )
 
 
-def timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
+def timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset, num_groups, group_id):
     """TVM intrinsic for initializing the CUDA profiler, and store profiling result in a buffer.
 
     Parameters
@@ -7181,6 +7181,12 @@ def timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
         Buffer of length 1 storing the offset in buffer to write the next
         profiling result for the current thread.
 
+    num_groups: int
+        The number of groups in the profiler.
+
+    group_id: PrimExpr
+        The group id of the current thread.
+
     Returns
     -------
     call : PrimExpr
@@ -7193,11 +7199,13 @@ def timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset):
         profiler_buffer,
         profiler_tag,
         profiler_write_offset,
+        num_groups,
+        group_id,
     )
 
 
 def timer_start_cuda(
-    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride
+    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond
 ):
     """TVM intrinsic for starting the timer for profiling a specific event, and storing profiling result in a buffer.
 
@@ -7219,6 +7227,9 @@ def timer_start_cuda(
     profiler_write_stride: int
         The stride to advance in buffer in the next write.
 
+    leader_cond: PrimExpr
+        The condition to check if the current thread is the leader.
+
     Returns
     -------
     call : PrimExpr
@@ -7233,11 +7244,12 @@ def timer_start_cuda(
         profiler_tag,
         profiler_write_offset,
         profiler_write_stride,
+        leader_cond,
     )
 
 
 def timer_end_cuda(
-    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride
+    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond
 ):
     """TVM intrinsic for ending the timer for profiling a specific event, and storing profiling result in a buffer.
 
@@ -7259,6 +7271,9 @@ def timer_end_cuda(
     profiler_write_stride: int
         The stride to advance in buffer in the next write.
 
+    leader_cond: PrimExpr
+        The condition to check if the current thread is the leader.
+
     Returns
     -------
     call : PrimExpr
@@ -7273,6 +7288,7 @@ def timer_end_cuda(
         profiler_tag,
         profiler_write_offset,
         profiler_write_stride,
+        leader_cond,
     )
 
 

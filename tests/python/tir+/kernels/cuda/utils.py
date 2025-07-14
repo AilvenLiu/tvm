@@ -87,30 +87,6 @@ class ProtonContext:
 
 
 # utils for tg4perfetto profiler, adapted from https://github.com/flashinfer-ai/flashinfer
-class ProfileEventType(Enum):
-    IssueLoadQ = 0
-    IssueLoadKV = 1
-    WriteO = 2
-    SoftmaxUpdate = 3
-    GemmQK = 4
-    GemmPV = 5
-    ScaleO = 6
-    WritePReg = 7
-    SplitK = 8
-
-
-event_type_names = [
-    "issue-load-q",
-    "issue-load-kv",
-    "write-o",
-    "softmax-update",
-    "gemm-qk",
-    "gemm-pv",
-    "scale-o",
-    "write-p-reg",
-    "split-k",
-]
-
 
 class EventType(Enum):
     kBegin = 0
@@ -133,6 +109,7 @@ def decode_tag(tag, num_groups):
 def export_to_perfetto_trace(
     profiler_buffer: np.ndarray,
     file_name: str,
+    event_type_names: List[str],
 ) -> None:
     if is_running_under_pytest():
         return
@@ -146,7 +123,6 @@ def export_to_perfetto_trace(
     num_blocks, num_groups = profiler_buffer_host[:1].view(dtype=torch.int32)
     num_blocks = int(num_blocks)
     num_groups = int(num_groups)
-
     tgen = TraceGenerator(file_name)
 
     tid_map = {}
