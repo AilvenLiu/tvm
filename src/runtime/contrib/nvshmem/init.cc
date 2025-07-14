@@ -136,12 +136,18 @@ void NVSHMEMXCumoduleInit(void* cuModule) {
   }
 }
 
+void NVSHMEMBarrierAllOnStream() {
+  CUstream strm = static_cast<CUstream>(CUDAThreadEntry::ThreadLocal()->stream);
+  nvshmemx_barrier_all_on_stream(strm);
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("runtime.disco.nvshmem.init_nvshmem_uid", InitNVSHMEMUID)
       .def("runtime.disco.nvshmem.init_nvshmem", InitNVSHMEM)
       .def("runtime.disco.nvshmem.init_nvshmem_wrapper", InitNVSHMEMWrapper)
+      .def("runtime.disco.nvshmem.barrier_all_on_stream", NVSHMEMBarrierAllOnStream)
       .def("runtime.nvshmem.cumodule_init", NVSHMEMXCumoduleInit);
 }
 

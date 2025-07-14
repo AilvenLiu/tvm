@@ -7402,6 +7402,390 @@ def cuda_atomic_cas(ptr, old_val, new_val):
 
 
 ########################################################
+# NVSHMEM builtins
+########################################################
+
+
+def nvshmem_my_pe():
+    """TVM intrinsic to call nvshmem_my_pe()
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("int32", "tir.nvshmem_my_pe")
+
+
+def nvshmem_n_pes():
+    """TVM intrinsic to call nvshmem_n_pes()
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("int32", "tir.nvshmem_n_pes")
+
+
+def nvshmem_getmem_nbi(dst, src, nelems, pe):
+    """TVM intrinsic to call nvshmem_getmem_nbi()
+
+    Parameters
+    ----------
+    dst: PrimExpr
+        The pointer to the symmetric address or host/device address of the data object to be updated.
+
+    src: PrimExpr
+        The pointer to the symmetric address of the source data object.
+
+    nelems: int
+        The number of bytes to get per thread.
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_getmem_nbi", dst, src, nelems, pe)
+
+
+def nvshmem_putmem_nbi(dst, src, nelems, pe):
+    """TVM intrinsic to call nvshmem_putmem_nbi()
+
+    Parameters
+    ----------
+    dst: PrimExpr
+        The pointer to the symmetric address of the destination data object.
+
+    src: PrimExpr
+        The pointer to the symmetric address or host/device address of the data object to be copied.
+
+    nelems: int
+        The number of bytes to put per thread.
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_putmem_nbi", dst, src, nelems, pe)
+
+
+def nvshmem_getmem_nbi_warp(dst, src, nelems, pe):
+    """TVM intrinsic to call nvshmem_getmem_nbi_warp()
+
+    Parameters
+    ----------
+    dst: PrimExpr
+        The pointer to the symmetric address or host/device address of the data object to be updated.
+
+    src: PrimExpr
+        The pointer to the symmetric address of the source data object.
+
+    nelems: int
+        The number of bytes to get per warp.
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_getmem_nbi_warp", dst, src, nelems, pe)
+
+
+def nvshmem_putmem_nbi_warp(dst, src, nelems, pe):
+    """TVM intrinsic to call nvshmem_putmem_nbi_warp()
+
+    Parameters
+    ----------
+    dst: PrimExpr
+        The pointer to the symmetric address of the destination data object.
+
+    src: PrimExpr
+        The pointer to the symmetric address or host/device address of the data object to be copied.
+
+    nelems: int
+        The number of bytes to put per warp.
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_putmem_nbi_warp", dst, src, nelems, pe)
+
+
+def nvshmem_getmem_nbi_block(dst, src, nelems, pe):
+    """TVM intrinsic to call nvshmem_getmem_nbi_block()
+
+    Parameters
+    ----------
+    dst: PrimExpr
+        The pointer to the symmetric address or host/device address of the data object to be updated.
+
+    src: PrimExpr
+        The pointer to the symmetric address of the source data object.
+
+    nelems: int
+        The number of bytes to get per block.
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_getmem_nbi_block", dst, src, nelems, pe)
+
+
+def nvshmem_putmem_nbi_block(dst, src, nelems, pe):
+    """TVM intrinsic to call nvshmem_putmem_nbi_block()
+
+    Parameters
+    ----------
+    dst: PrimExpr
+        The pointer to the symmetric address of the destination data object.
+
+    src: PrimExpr
+        The pointer to the symmetric address or host/device address of the data object to be copied.
+
+    nelems: int
+        The number of bytes to put per block.
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_putmem_nbi_block", dst, src, nelems, pe)
+
+
+def nvshmem_signal_op(sig_addr, signal, sig_op, pe):
+    """TVM intrinsic to call nvshmem_signal_op()
+
+    Parameters
+    ----------
+    sig_addr: PrimExpr
+        The pointer to the symmetric address of the signal word to be updated, must be uint64_t*.
+
+    signal: uint64_t
+        The value used to update sig_addr.
+
+    sig_op: str
+        Operation used to update sig_addr with signal, typical sig_op values are "set" and "add".
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_signal_op", sig_addr, signal, sig_op, pe)
+
+
+def nvshmem_wait_until(ivar, cmp, cmp_value, type="uint64_t"):
+    """TVM intrinsic to call nvshmem_wait_until()
+
+    Parameters
+    ----------
+    ivar: PrimExpr
+        The pointer to the symmetric address of a remotely accessible data object, must be TYPE*.
+
+    cmp: str
+        The compare operator that compares ivar with cmp_value.
+
+    cmp_value: TYPE
+        The value to be compared with ivar.
+
+    type: str
+        The TYPE of ivar and cmp_value.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_wait_until", ivar, cmp, cmp_value, type)
+
+
+def nvshmem_quiet():
+    """TVM intrinsic to call nvshmem_quiet()
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_quiet")
+
+
+def nvshmem_putmem_signal_nbi(dst, src, nelems, sig_addr, signal, sig_op, pe):
+    """TVM intrinsic to call nvshmem_putmem_signal_nbi()
+
+    Parameters
+    ----------
+    dst: PrimExpr
+        The pointer to the symmetric address of the data object to be updated on the remote PE.
+
+    src: PrimExpr
+        The pointer to the symmetric address or host/device address of data object containing the data to be copied.
+
+    nelems: int
+        The number of bytes to put per thread.
+
+    sig_addr: PrimExpr
+        The pointer to the symmetric address of the signal data object to be updated on the remote PE as a signal, must be uint64_t*.
+
+    signal: uint64_t
+        The unsigned 64-bit value that is used for updating the remote sig_addr signal data object.
+
+    sig_op: str
+        Signal operator that represents the type of update to be performed on the remote sig_addr signal data object.
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin(
+        "", "tir.nvshmem_putmem_signal_nbi", dst, src, nelems, sig_addr, signal, sig_op, pe
+    )
+
+
+def nvshmem_putmem_signal_nbi_warp(dst, src, nelems, sig_addr, signal, sig_op, pe):
+    """TVM intrinsic to call nvshmem_putmem_signal_nbi_warp()
+
+    Parameters
+    ----------
+    dst: PrimExpr
+        The pointer to the symmetric address of the data object to be updated on the remote PE.
+
+    src: PrimExpr
+        The pointer to the symmetric address or host/device address of data object containing the data to be copied.
+
+    nelems: int
+        The number of bytes to put per warp.
+
+    sig_addr: PrimExpr
+        The pointer to the symmetric address of the signal data object to be updated on the remote PE as a signal, must be uint64_t*.
+
+    signal: uint64_t
+        The unsigned 64-bit value that is used for updating the remote sig_addr signal data object.
+
+    sig_op: str
+        Signal operator that represents the type of update to be performed on the remote sig_addr signal data object.
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin(
+        "", "tir.nvshmem_putmem_signal_nbi_warp", dst, src, nelems, sig_addr, signal, sig_op, pe
+    )
+
+
+def nvshmem_putmem_signal_nbi_block(dst, src, nelems, sig_addr, signal, sig_op, pe):
+    """TVM intrinsic to call nvshmem_putmem_signal_nbi_block()
+
+    Parameters
+    ----------
+    dst: PrimExpr
+        The pointer to the symmetric address of the data object to be updated on the remote PE.
+
+    src: PrimExpr
+        The pointer to the symmetric address or host/device address of data object containing the data to be copied.
+
+    nelems: int
+        The number of bytes to put per block.
+
+    sig_addr: PrimExpr
+        The pointer to the symmetric address of the signal data object to be updated on the remote PE as a signal, must be uint64_t*.
+
+    signal: uint64_t
+        The unsigned 64-bit value that is used for updating the remote sig_addr signal data object.
+
+    sig_op: str
+        Signal operator that represents the type of update to be performed on the remote sig_addr signal data object.
+
+    pe: int
+        The PE number of the remote PE.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin(
+        "", "tir.nvshmem_putmem_signal_nbi_block", dst, src, nelems, sig_addr, signal, sig_op, pe
+    )
+
+
+def nvshmem_fence():
+    """TVM intrinsic to call nvshmem_fence()
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_fence")
+
+
+def nvshmem_barrier_all():
+    """TVM intrinsic to call nvshmem_barrier_all()
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin("", "tir.nvshmem_barrier_all")
+
+
+########################################################
 # NKI builtins
 ########################################################
 

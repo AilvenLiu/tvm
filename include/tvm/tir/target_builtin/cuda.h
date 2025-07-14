@@ -562,6 +562,121 @@ TVM_DLL const Op& ptx_map_shared_rank();
  */
 TVM_DLL const Op& cuda_func_call();
 
+/*!
+ * \brief nvshmem intrinsics for nvshmem_my_pe() operation.
+ *
+ * int nvshmem_my_pe()
+ */
+TVM_DLL const Op& nvshmem_my_pe();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmem_n_pes() operation.
+ *
+ * int nvshmem_n_pes()
+ */
+TVM_DLL const Op& nvshmem_n_pes();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmem_getmem_nbi() operation.
+ *
+ * void nvshmem_getmem_nbi(void *dest, const void *source, size_t nelems, int pe)
+ */
+TVM_DLL const Op& nvshmem_getmem_nbi();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmem_putmem_nbi() operation.
+ *
+ * void nvshmem_putmem_nbi(void *dest, const void *source, size_t nelems, int pe)
+ */
+TVM_DLL const Op& nvshmem_putmem_nbi();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmemx_getmem_nbi_warp() operation.
+ *
+ * void nvshmemx_getmem_nbi_warp(void *dest, const void *source, size_t nelems, int pe)
+ */
+TVM_DLL const Op& nvshmem_getmem_nbi_warp();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmemx_putmem_nbi_warp() operation.
+ *
+ * void nvshmemx_putmem_nbi_warp(void *dest, const void *source, size_t nelems, int pe)
+ */
+TVM_DLL const Op& nvshmem_putmem_nbi_warp();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmemx_getmem_nbi_block() operation.
+ *
+ * void nvshmemx_getmem_nbi_block(void *dest, const void *source, size_t nelems, int pe)
+ */
+TVM_DLL const Op& nvshmem_getmem_nbi_block();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmemx_putmem_nbi_block() operation.
+ *
+ * void nvshmemx_putmem_nbi_block(void *dest, const void *source, size_t nelems, int pe)
+ */
+TVM_DLL const Op& nvshmem_putmem_nbi_block();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmemx_signal_op() operation.
+ *
+ * void nvshmemx_signal_op(uint64_t *sig_addr, uint64_t signal, int sig_op, int pe)
+ */
+TVM_DLL const Op& nvshmem_signal_op();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmem_FuncParam{TYPENAME}_wait_until() operation.
+ *
+ * void nvshmem_FuncParam{TYPENAME}_wait_until(TYPE *ivar, int cmp, TYPE cmp_value)
+ */
+TVM_DLL const Op& nvshmem_wait_until();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmem_quiet() operation.
+ *
+ * void nvshmem_quiet()
+ */
+TVM_DLL const Op& nvshmem_quiet();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmemx_putmem_signal_nbi() operation.
+ *
+ * void nvshmemx_putmem_signal_nbi(void *dest, const void *source, size_t nelems, uint64_t
+ * *sig_addr, uint64_t signal, int sig_op, int pe)
+ */
+TVM_DLL const Op& nvshmem_putmem_signal_nbi();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmemx_putmem_signal_nbi_warp() operation.
+ *
+ * void nvshmemx_putmem_signal_nbi_warp(void *dest, const void *source, size_t nelems, uint64_t
+ * *sig_addr, uint64_t signal, int sig_op, int pe)
+ */
+TVM_DLL const Op& nvshmem_putmem_signal_nbi_warp();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmemx_putmem_signal_nbi_block() operation.
+ *
+ * void nvshmemx_putmem_signal_nbi_block(void *dest, const void *source, size_t nelems,
+ * uint64_t *sig_addr, uint64_t signal, int sig_op, int pe)
+ */
+TVM_DLL const Op& nvshmem_putmem_signal_nbi_block();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmem_fence() operation.
+ *
+ * void nvshmem_fence()
+ */
+TVM_DLL const Op& nvshmem_fence();
+
+/*!
+ * \brief nvshmem intrinsics for nvshmem_barrier_all() operation.
+ *
+ * void nvshmem_barrier_all()
+ */
+TVM_DLL const Op& nvshmem_barrier_all();
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

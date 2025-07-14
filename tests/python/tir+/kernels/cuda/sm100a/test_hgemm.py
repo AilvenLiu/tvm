@@ -24,18 +24,8 @@ import pytest
 import tvm
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tir as T
-from tvm.script import tirp as Tp
 import tvm.testing
-from tvm.script.ir_builder import IRBuilder
-from tvm.tir.async_structs import CopyPipeline
-
-
-def _get_source(func: tvm.tir.PrimFunc) -> str:
-    target = tvm.target.Target("cuda")
-    mod = tvm.IRModule({"main": func})
-    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
-    return src, mod
+from ..utils import bench, ProtonContext
 
 
 def ceildiv(a, b):
@@ -365,18 +355,41 @@ def test_tcgen05_mma_ss_tma():
     torch.manual_seed(42)
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
-    with target:
-        src, mod = _get_source(test_mma_ss_tma_2sm_persistent)
-        print(src)
-        A_torch = torch.randn((M, K), dtype=torch.float16)
-        B_torch = torch.randn((N, K), dtype=torch.float16)
-        C_torch = torch.zeros((M, N), dtype=torch.float16)
+    A_torch = torch.randn((M, K), dtype=torch.float16)
+    B_torch = torch.randn((N, K), dtype=torch.float16)
+    C_torch = torch.zeros((M, N), dtype=torch.float16)
+
+    def flops(ms):
+        return M * N * K * 2 / ms / 1e9
+
+    def tir_gemm(A_torch, B_torch, C_torch):
         A = tvm.nd.array(A_torch, device=DEV)
         B = tvm.nd.array(B_torch, device=DEV)
         C = tvm.nd.array(C_torch, device=DEV)
-        mod(A, B, C)
-        ref = torch.matmul(A_torch, B_torch.T)
-        np.testing.assert_allclose(C.numpy(), ref.numpy(), rtol=1e-3, atol=1e-2)
+        with target:
+            mod = tvm.IRModule({"main": test_mma_ss_tma_2sm_persistent})
+            mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+            func = lambda: mod(A, B, C)
+            ms = bench(func, warmup=0, repeat=10, proton_name="tir")
+            print(f"TIR flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
+
+        return C.numpy()
+
+    def cublas_gemm(A_torch, B_torch):
+        torch_dev = torch.device("cuda")
+        A_torch = A_torch.to(torch_dev)
+        B_torch = B_torch.to(torch_dev)
+        func = lambda: torch.matmul(A_torch, B_torch.T)
+        ms = bench(func, warmup=0, repeat=10, proton_name="cublas")
+        print(f"CUBLAS flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
+        C_torch = func()
+        return C_torch.cpu().numpy()
+
+    with ProtonContext("blackwell_gemm"):
+        C_tvm = tir_gemm(A_torch, B_torch, C_torch)
+        C_cublas = cublas_gemm(A_torch, B_torch)
+
+    np.testing.assert_allclose(C_tvm, C_cublas, rtol=1e-3, atol=1e-2)
 
 
 if __name__ == "__main__":

@@ -2496,6 +2496,55 @@ class CUDANamespace:
         self.func_call = _op_wrapper(_tir_op.cuda_func_call)
 
 
+class NVSHMEMNamespace:
+    """The NVSHMEM intrinsics submodule."""
+
+    def __init__(self):
+        self.my_pe = _op_wrapper(_tir_op.nvshmem_my_pe)
+        self.n_pes = _op_wrapper(_tir_op.nvshmem_n_pes)
+        self.signal_op = _op_wrapper(_tir_op.nvshmem_signal_op)
+        self.wait_until = _op_wrapper(_tir_op.nvshmem_wait_until)
+        self.quiet = _op_wrapper(_tir_op.nvshmem_quiet)
+        self.fence = _op_wrapper(_tir_op.nvshmem_fence)
+        self.barrier_all = _op_wrapper(_tir_op.nvshmem_barrier_all)
+        self.getmem_nbi = NVSHMEMGetMemNBINamespace()
+        self.putmem_nbi = NVSHMEMPutMemNBINamespace()
+        self.putmem_signal_nbi = NVSHMEMPutMemSignalNBINamespace()
+
+
+class NVSHMEMGetMemNBINamespace:
+    """The NVSHMEM GetMemNBI intrinsics submodule."""
+
+    def __init__(self):
+        self.warp = _op_wrapper(_tir_op.nvshmem_getmem_nbi_warp)
+        self.block = _op_wrapper(_tir_op.nvshmem_getmem_nbi_block)
+
+    def __call__(self, *args, **kwds):
+        return _op_wrapper(_tir_op.nvshmem_getmem_nbi)(*args, **kwds)
+
+
+class NVSHMEMPutMemNBINamespace:
+    """The NVSHMEM PutMemNBI intrinsics submodule."""
+
+    def __init__(self):
+        self.warp = _op_wrapper(_tir_op.nvshmem_putmem_nbi_warp)
+        self.block = _op_wrapper(_tir_op.nvshmem_putmem_nbi_block)
+
+    def __call__(self, *args, **kwds):
+        return _op_wrapper(_tir_op.nvshmem_putmem_nbi)(*args, **kwds)
+
+
+class NVSHMEMPutMemSignalNBINamespace:
+    """The NVSHMEM PutMemSignalNBI intrinsics submodule."""
+
+    def __init__(self):
+        self.warp = _op_wrapper(_tir_op.nvshmem_putmem_signal_nbi_warp)
+        self.block = _op_wrapper(_tir_op.nvshmem_putmem_signal_nbi_block)
+
+    def __call__(self, *args, **kwds):
+        return _op_wrapper(_tir_op.nvshmem_putmem_signal_nbi)(*args, **kwds)
+
+
 class NKINamespace:
     """The NKI instructions submodule."""
 
@@ -2520,6 +2569,7 @@ class NKINamespace:
 
 ptx = PTXNamespace()
 cuda = CUDANamespace()
+nvshmem = NVSHMEMNamespace()
 nki = NKINamespace()
 
 
@@ -3014,6 +3064,7 @@ __all__ = float_types + [
 __all__ += [
     "ptx",
     "cuda",
+    "nvshmem",
     "nki",
     "world",
     "kernel",
