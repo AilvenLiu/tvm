@@ -1330,30 +1330,32 @@ PrimExpr PrintOpPacked(Var data, DataType dtype, bool is_string, bool is_scalar,
   return tir::Call(dtype, tir::builtin::print_buffer(), args);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.print_buffer")
-    .set_body_packed([](ffi::PackedArgs args, ffi::Any* ret) {
-      // Expected arguments:
-      // args[0]: buffer_var (Var)
-      // args[1]: dtype (DataType)
-      // args[2]: is_string (bool or IntImm)
-      // args[3]: is_scalar (bool or IntImm)
-      // args[4]: dim_num (int or IntImm)
-      // args[5...]: shape dimensions (PrimExpr)
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def_packed("tir.print_buffer", [](ffi::PackedArgs args, ffi::Any* ret) {
+    // Expected arguments:
+    // args[0]: buffer_var (Var)
+    // args[1]: dtype (DataType)
+    // args[2]: is_string (bool or IntImm)
+    // args[3]: is_scalar (bool or IntImm)
+    // args[4]: dim_num (int or IntImm)
+    // args[5...]: shape dimensions (PrimExpr)
 
-      ICHECK_GE(args.size(), 5) << "print_buffer expects at least 5 arguments";
+    ICHECK_GE(args.size(), 5) << "print_buffer expects at least 5 arguments";
 
-      Var buffer_var = args[0].cast<Var>();
-      DataType dtype = args[1].cast<DataType>();
-      bool is_string = ExtractBool(args, 2);
-      bool is_scalar = ExtractBool(args, 3);
-      int dim_num = ExtractInt(args, 4);
+    Var buffer_var = args[0].cast<Var>();
+    DataType dtype = args[1].cast<DataType>();
+    bool is_string = ExtractBool(args, 2);
+    bool is_scalar = ExtractBool(args, 3);
+    int dim_num = ExtractInt(args, 4);
 
-      Array<PrimExpr> shape;
-      for (int i = 5; i < args.size(); ++i) {
-        shape.push_back(args[i].cast<PrimExpr>());
-      }
+    Array<PrimExpr> shape;
+    for (int i = 5; i < args.size(); ++i) {
+      shape.push_back(args[i].cast<PrimExpr>());
+    }
 
-      *ret = PrintOpPacked(buffer_var, dtype, is_string, is_scalar, dim_num, shape);
-    });
+    *ret = PrintOpPacked(buffer_var, dtype, is_string, is_scalar, dim_num, shape);
+  });
+});
 
 }  // namespace tvm

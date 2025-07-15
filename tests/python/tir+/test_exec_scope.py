@@ -18,15 +18,14 @@ import pytest
 
 import tvm
 import tvm.testing
-from tvm.tir.exec_scope import ExecScope, WorldScope, KernelScope
+from tvm.tir.exec_scope import ExecScope
 
 
 def test_exec_scope_create():
-    def is_trivial_scope(scope):
+    def is_trivial_scope(scope, name):
         return (
             isinstance(scope, ExecScope)
-            and not isinstance(scope, WorldScope)
-            and not isinstance(scope, KernelScope)
+            and scope.name == name
         )
 
     thread = ExecScope.create("thread")
@@ -37,13 +36,13 @@ def test_exec_scope_create():
     kernel = ExecScope.create("kernel")
     world = ExecScope.create("world")
 
-    assert isinstance(world, WorldScope)
-    assert isinstance(kernel, KernelScope)
-    assert is_trivial_scope(thread)
-    assert is_trivial_scope(warp)
-    assert is_trivial_scope(wg)
-    assert is_trivial_scope(cta)
-    assert is_trivial_scope(cluster)
+    assert is_trivial_scope(world, "world")
+    assert is_trivial_scope(kernel, "kernel")
+    assert is_trivial_scope(thread, "thread")
+    assert is_trivial_scope(warp, "warp")
+    assert is_trivial_scope(wg, "warpgroup")
+    assert is_trivial_scope(cta, "cta")
+    assert is_trivial_scope(cluster, "cluster")
 
     with pytest.raises(Exception, match="Unknown scope name"):
         ExecScope.create("aaa")

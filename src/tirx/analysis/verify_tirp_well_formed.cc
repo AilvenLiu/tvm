@@ -82,29 +82,23 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
       return;
     }
     // C0: exec_scope is defined
-    auto roof = cur_roof_;
     Verify(op->exec_scope != nullptr) << "TIRpError: Block at " << path << " has no exec_scope";
     auto scope = op->exec_scope.value();
     // C1: exec_scope is valid
     Verify(ExecScope::Valid(scope->name))
         << "TIRpError: Block at " << path << " has unknown exec_scope " << scope->name;
-    // C2: exec_scope is valid for root
+    bool is_root = false;
+    if (!root_.has_value()) {
+      root_ = scope;
+      is_root = true;
+    }
     if (scope_stack_.empty()) {
-      Verify(scope->Is("world") || scope->Is("kernel"))
-          << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
-          << " as root";
+      // do nothing
     } else {
-      // C3: exec_scope is valid for nested scope
-      if (scope_stack_.back()->Higher(scope)) {
-        cur_roof_ = scope_stack_.back();
-      } else if (scope_stack_.back()->Is(scope->name)) {
-        // do nothing
-      } else {
-        ICHECK(cur_roof_.defined()) << "TIRpError: root scope should be the highest scope";
-        Verify(!scope->Higher(cur_roof_.value()))
-            << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
-            << " under " << cur_roof_.value()->name;
-      }
+      ICHECK(root_.has_value()) << "TIRpError: root scope should be the highest scope";
+      Verify(!scope->Higher(root_.value()))
+          << "TIRpError: Block at " << path << " has invalid exec_scope " << scope->name
+          << " under " << root_.value()->name;
     }
     // C4: exec_scope slice is consistent
     bool erase_slices{false}, erase_select_cond{false}, pop_scope{false};
@@ -174,7 +168,9 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
         it_slices->second.pop_back();
       }
     }
-    cur_roof_ = roof;
+    if (is_root) {
+      root_ = std::nullopt;
+    }
   }
 
   void VisitStmt_(const tirp::OpCallNode* op, ObjectPath path) override {
@@ -183,7 +179,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
         << "TIRpError: OpCall at " << path << " has unknown TIR+ op " << op->op;
   }
 
-  Optional<ExecScope> cur_roof_ = std::nullopt;
+  Optional<ExecScope> root_ = std::nullopt;
   std::vector<ExecScope> scope_stack_;
   std::unordered_map<std::string, std::vector<Array<Range>>> scope_slices_;
   std::unordered_map<std::string, PrimExpr> scope_select_cond_;
@@ -200,13 +196,18 @@ class ScopeIdVerifier : public Verifier<ScopeIdVerifier> {
     Verify(op->exec_scope.defined())
         << "InternalError: exec_scope is not defined for block at " << path;
     const auto& scope = op->exec_scope.value();
-    if (auto opt_kernel = scope.as<KernelScope>()) {
+    auto it = scope_id_def_.end();
+    scope_id_def_.insert(it, scope->scope_id_def.begin(), scope->scope_id_def.end());
+    Verifier::VisitStmt_(op, path);
+    if (!scope->scope_id_def.empty()) {
       ScopeIdDefVerifier verifier;
-      Verify(verifier.Verify(opt_kernel.value()->scope_id_def))
-          << "TIRpError: Kernel at " << path << " has invalid scope_id_def";
+      Verify(verifier.Verify(scope_id_def_))
+          << "TIRpError: Scope at " << path << " has invalid scope_id_def";
     }
+    scope_id_def_.erase(scope_id_def_.end() - scope->scope_id_def.size(), scope_id_def_.end());
   }
 
+  Array<ScopeIdDef> scope_id_def_;
   arith::Analyzer ana_;
 };
 
@@ -255,7 +256,25 @@ class AsyncStructsVerifier : public Verifier<AsyncStructsVerifier> {
   std::vector<ExecScope> scope_stack_;
 };
 
-bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode) {
+class DeviceFuncVerifier : public Verifier<DeviceFuncVerifier> {
+ public:
+  using Verifier::Verifier;
+
+ private:
+  using Verifier::Visit;
+
+  void VisitStmt_(const BlockNode* op, ObjectPath path) override {
+    Verify(!root_.has_value()) << "TIRpError: Only one root scope is allowed in device function";
+    root_ = op->exec_scope.value();
+    auto kernel_scope = ExecScope::Create("kernel");
+    Verify(kernel_scope->Higher(root_.value()))
+        << "TIRpError: Root scope of device function at " << path << " is higher than kernel scope";
+  }
+
+  Optional<ExecScope> root_ = std::nullopt;
+};
+
+bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode, bool device_func) {
   if (!ExecScopeVerifier::Verify(func, assert_mode)) {
     return false;
   }
@@ -268,13 +287,18 @@ bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode) {
   if (!AsyncStructsVerifier::Verify(func, assert_mode)) {
     return false;
   }
+  if (device_func) {
+    if (!DeviceFuncVerifier::Verify(func, assert_mode)) {
+      return false;
+    }
+  }
   return true;
 }
 
-bool VerifyTIRpWellFormed(const IRModule& mod, bool assert_mode) {
+bool VerifyTIRpWellFormed(const IRModule& mod, bool assert_mode, bool device_func) {
   for (const auto& [gvar, base_func] : mod->functions) {
     if (auto prim_func = base_func.as<PrimFunc>()) {
-      bool res = VerifyTIRpWellFormed(prim_func.value(), assert_mode);
+      bool res = VerifyTIRpWellFormed(prim_func.value(), assert_mode, device_func);
       if (!res) {
         return false;
       }
@@ -283,17 +307,20 @@ bool VerifyTIRpWellFormed(const IRModule& mod, bool assert_mode) {
   return true;
 }
 
-TVM_FFI_REGISTER_GLOBAL("tirx.analysis.VerifyTIRpWellFormed")
-    .set_body_typed([](const ObjectRef& obj, bool assert_mode) {
-      if (auto n = obj.as<PrimFunc>()) {
-        return VerifyTIRpWellFormed(n.value(), assert_mode);
-      } else if (auto n = obj.as<IRModule>()) {
-        return VerifyTIRpWellFormed(n.value(), assert_mode);
-      } else {
-        LOG(FATAL) << "Expects PrimFunc or IRModule,  but get " << obj->GetTypeKey() << " instead.";
-        return false;
-      }
-    });
-
-}  // namespace tirxxxx
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tirx.analysis.VerifyTIRpWellFormed",
+                        [](const ObjectRef& obj, bool assert_mode, bool device_func) {
+                          if (auto n = obj.as<PrimFunc>()) {
+                            return VerifyTIRpWellFormed(n.value(), assert_mode, device_func);
+                          } else if (auto n = obj.as<IRModule>()) {
+                            return VerifyTIRpWellFormed(n.value(), assert_mode, device_func);
+                          } else {
+                            LOG(FATAL) << "Expects PrimFunc or IRModule,  but get "
+                                       << obj->GetTypeKey() << " instead.";
+                            return false;
+                          }
+                        });
+});
+}  // namespace tirx
 }  // namespace tvm

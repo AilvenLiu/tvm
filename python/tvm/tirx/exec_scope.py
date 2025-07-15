@@ -45,6 +45,7 @@ class ExecScope(Object):
     """Base class for execution scopes."""
 
     name: str
+    scope_id_def: List[ScopeIdDef]
 
     def __init__(self, name: str):
         self.__init_handle_by_constructor__(_ffi_api.ExecScope, name)
@@ -52,8 +53,6 @@ class ExecScope(Object):
     @staticmethod
     def create(name: str):
         """Create a new execution scope with the given name.
-        If the name is "world", it will create a WorldScope.
-        If the name is "kernel", it will create a KernelScope.
 
         Parameters
         ----------
@@ -66,26 +65,6 @@ class ExecScope(Object):
             The created execution scope.
         """
         return get_global_func("tir.ExecScopeCreate")(name)
-
-
-@register_object("tirx.WorldScope")
-class WorldScope(ExecScope):
-    """Top-level execution scope that contains scope identifier definitions."""
-
-    scope_id_def: ScopeIdDef
-
-    def __init__(self, scope_id_def: ScopeIdDef):
-        self.__init_handle_by_constructor__(_ffi_api.WorldScope, scope_id_def)
-
-
-@register_object("tirx.KernelScope")
-class KernelScope(ExecScope):
-    """Execution scope for kernels containing multiple scope identifier definitions."""
-
-    scope_id_def: List[ScopeIdDef]
-
-    def __init__(self, scope_id_def: List[ScopeIdDef]):
-        self.__init_handle_by_constructor__(_ffi_api.KernelScope, scope_id_def)
 
 
 @register_object("tirx.ExecScopeSlice")

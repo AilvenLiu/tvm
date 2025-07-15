@@ -33,6 +33,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   CallTIRWithGradAttrs::RegisterReflection();
   CallTIRInplaceAttrs::RegisterReflection();
   CallInplacePackedAttrs::RegisterReflection();
+  CallTIRDeviceAttrs::RegisterReflection();
   ToVDeviceAttrs::RegisterReflection();
   HintOnDeviceAttrs::RegisterReflection();
 }
@@ -292,20 +293,22 @@ static ffi::Optional<StructInfo> InferCallTIROutputStructInfoFromArguments(
     StructInfo func_sinfo, StructInfo arg_sinfo, ffi::Optional<StructInfo> packed_ints_sinfo,
     ffi::Optional<ffi::Array<Integer>> opt_inplace_indices) {
   auto opt_callee_sinfo = func_sinfo.as<FuncStructInfo>();
-  TVM_FFI_CHECK(opt_callee_sinfo, TypeError)
-      << "The first argument to `R.call_tir` must be a function, "
-      << "but instead received argument of type " << func_sinfo;
+  TVM_FFI_ICHECK(opt_callee_sinfo) << "TypeError: "
+                                   << "The first argument to `R.call_tir` must be a function, "
+                                   << "but instead received argument of type " << func_sinfo;
   auto callee_sinfo = opt_callee_sinfo.value();
 
-  TVM_FFI_CHECK(callee_sinfo->params.defined(), ValueError)
+  TVM_FFI_ICHECK(callee_sinfo->params.defined())
+      << "ValueError: "
       << "The first argument to `R.call_tir` must be a function "
       << "with known argument types.  "
       << "However, the first argument was of type " << callee_sinfo;
   auto callee_params = callee_sinfo->params.value();
 
   const TupleStructInfoNode* args = arg_sinfo.as<TupleStructInfoNode>();
-  TVM_FFI_CHECK(args, TypeError) << "The second argument to `R.call_tir` must be a tuple, "
-                                 << "but instead received expression of type " << arg_sinfo;
+  TVM_FFI_ICHECK(args) << "TypeError: "
+                       << "The second argument to `R.call_tir` must be a tuple, "
+                       << "but instead received expression of type " << arg_sinfo;
 
   // R.call_tir expects the PrimFunc to have three groups of arguments.
   //
@@ -322,7 +325,8 @@ static ffi::Optional<StructInfo> InferCallTIROutputStructInfoFromArguments(
   if (packed_ints_sinfo) {
     auto packed_sinfo = packed_ints_sinfo.value();
     packed_tuple_sinfo = packed_sinfo.as<ShapeStructInfoNode>();
-    TVM_FFI_CHECK(packed_tuple_sinfo && !packed_tuple_sinfo->IsUnknownNdim(), TypeError)
+    TVM_FFI_ICHECK(packed_tuple_sinfo && !packed_tuple_sinfo->IsUnknownNdim())
+        << "TypeError: "
         << "The third argument to `R.call_tir`, if present, "
         << "must be a ffi::Shape with known dimensionality.  "
         << "However, the argument received was of type " << packed_sinfo;
@@ -331,8 +335,8 @@ static ffi::Optional<StructInfo> InferCallTIROutputStructInfoFromArguments(
     num_trailing_int_arguments = 0;
   }
 
-  TVM_FFI_CHECK_LE(num_input_arguments + num_trailing_int_arguments, callee_params.size(),
-                   ValueError)
+  TVM_FFI_ICHECK_LE(num_input_arguments + num_trailing_int_arguments, callee_params.size())
+      << "ValueError: "
       << "R.call_tir attempted to call a function using " << num_input_arguments
       << " input arguments and " << num_trailing_int_arguments << " trailing integer arguments.  "
       << "However, the callee only accepts " << callee_params.size() << " arguments in total.";
@@ -452,10 +456,18 @@ Expr NormalizeCallTIR(const BlockBuilder& ctx, Call call) {
   // `relax.call_tir_inplace`.  Therefore, all error messages should
   // be written in terms of `call->op`, and should not explicitly
   // reference the `relax.call_tir` operator.`
-  TVM_FFI_ICHECK(call->args.size() == 2 || call->args.size() == 3)
-      << "Operation " << call->op << " expects either two arguments [callee, arg_tuple], "
-      << "or three arguments [callee, arg_tuple, tir_args], "
-      << "but " << call << " has " << call->args.size() << " arguments.";
+  if (call->attrs.as<CallTIRDeviceAttrs>()) {
+    TVM_FFI_ICHECK(call->args.size() == 5 || call->args.size() == 6)
+        << "Operation " << call->op
+        << " expects either five arguments [callee, arg_tuple, tile_num, in_events, out_events], "
+        << "or six arguments [callee, arg_tuple, tile_num, in_events, out_events, tir_args], "
+        << "but " << call << " has " << call->args.size() << " arguments.";
+  } else {
+    TVM_FFI_ICHECK(call->args.size() == 2 || call->args.size() == 3)
+        << "Operation " << call->op << " expects either two arguments [callee, arg_tuple], "
+        << "or three arguments [callee, arg_tuple, tir_args], "
+        << "but " << call << " has " << call->args.size() << " arguments.";
+  }
 
   auto callee = call->args[0];
   TVM_FFI_ICHECK(callee->struct_info_.as<FuncStructInfoNode>())
@@ -566,7 +578,8 @@ void ValidateCallTIR(Call call) {
   auto inferred_sinfo = InferCallTIROutputStructInfoFromArguments(
       GetStructInfo(callee), GetStructInfo(arg_tuple), packed_int_sinfo, opt_inplace_indices);
   if (inferred_sinfo.defined()) {
-    TVM_FFI_CHECK(IsBaseOf(inferred_sinfo.value(), explicit_sinfo), TypeError)
+    TVM_FFI_ICHECK(IsBaseOf(inferred_sinfo.value(), explicit_sinfo))
+        << "TypeError: "
         << "The `out_sinfo` argument for R.call_tir must be compatible with the PrimFunc.  "
         << "However, the PrimFunc's signature implies that the output should be " << inferred_sinfo
         << ", but the `out_sinfo` argument was " << explicit_sinfo;
@@ -814,6 +827,73 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("relax.op.call_tir_inplace", MakeCallTIRInplace);
 }
+
+// call_tir_device
+
+TVM_REGISTER_NODE_TYPE(CallTIRDeviceAttrs);
+
+TVM_REGISTER_OP("relax.call_tir_device")
+    .set_num_inputs(6)
+    .set_attrs_type<CallTIRDeviceAttrs>()
+    .add_argument("func", "Expr", "The destination-passing-style function.")
+    .add_argument("args", "Tuple", "The input arguments.")
+    .add_argument("tile_num", "Expr", "The number of tiles launched.")
+    .add_argument("in_events", "Tuple", "The events that the tile relies on")
+    .add_argument("out_events", "Tuple", "The events that the tile triggers")
+    .add_argument("packed_ints", "Expr",
+                  "ShapeExpr representing a tuple of ints to unpack during runtime. Omitted from "
+                  "args if unused")
+    .set_attr<FInferStructInfo>("FInferStructInfo", InferStructInfoCallTIR)
+    .set_attr<FNormalize>("FNormalize", NormalizeCallTIR)
+    .set_attr<Bool>("FPurity", Bool(true));
+
+Expr MakeCallTIRDevice(Expr func, Tuple args, Array<TensorStructInfo> out_sinfo_list,
+                       ShapeExpr tile_num, Tuple in_events, Tuple out_events,
+                       Array<tir::IndexMap> in_deps, Array<tir::IndexMap> out_deps,
+                       Optional<Expr> packed_ints) {
+  ObjectPtr<CallTIRDeviceAttrs> attrs = make_object<CallTIRDeviceAttrs>();
+  attrs->in_deps = in_deps;
+  attrs->out_deps = out_deps;
+
+  for (const TensorStructInfo& sinfo : out_sinfo_list) {
+    const auto* shape = sinfo->shape.as<ShapeExprNode>();
+    TVM_FFI_ICHECK(shape != nullptr)
+        << "out_sinfo of call_tir should have defined ShapeExpr as shape. "
+           "However, one given structure info is "
+        << sinfo;
+  }
+
+  StructInfo out_sinfo{nullptr};
+  if (out_sinfo_list.size() == 1) {
+    out_sinfo = out_sinfo_list[0];
+  } else {
+    out_sinfo = TupleStructInfo({out_sinfo_list.begin(), out_sinfo_list.end()});
+  }
+
+  static const Op& op = Op::Get("relax.call_tir_device");
+  Call call;
+  if (!packed_ints) {
+    // don't use additional optional argument
+    call = Call(op, {func, args, tile_num, in_events, out_events}, Attrs(attrs), {out_sinfo});
+  } else {
+    call = Call(op,
+                {
+                    func,
+                    args,
+                    tile_num,
+                    in_events,
+                    out_events,
+                    packed_ints.value(),
+                },
+                Attrs(attrs), {out_sinfo});
+  }
+  return call;
+}
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("relax.op.call_tir_device", MakeCallTIRDevice);
+});
 
 // call_dps_packed
 

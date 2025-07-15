@@ -89,18 +89,18 @@ ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
   data_ = std::move(n);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tirp.ScheduleContext")
-    .set_body_typed([](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params,
-                       Map<Var, Range> var_range_map, bool alloc_only,
-                       Map<String, ObjectRef> callbacks) {
-      return ScheduleContext(target, exec_scope, launch_params, var_range_map, alloc_only,
-                             callbacks);
-    });
-
-TVM_FFI_REGISTER_GLOBAL("tirp.ScheduleContextAddAllocBuffer")
-    .set_body_method(&ScheduleContextNode::AddAllocBuffer);
-TVM_FFI_REGISTER_GLOBAL("tirp.ScheduleContextAddInitStmt")
-    .set_body_method(&ScheduleContextNode::AddInitStmt);
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()
+      .def("tirp.ScheduleContext",
+           [](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params,
+              Map<Var, Range> var_range_map, bool alloc_only, Map<String, ObjectRef> callbacks) {
+             return ScheduleContext(target, exec_scope, launch_params, var_range_map, alloc_only,
+                                    callbacks);
+           })
+      .def_method("tirp.ScheduleContextAddAllocBuffer", &ScheduleContextNode::AddAllocBuffer)
+      .def_method("tirp.ScheduleContextAddInitStmt", &ScheduleContextNode::AddInitStmt);
+});
 
 /********************* Schedule Ops **********************/
 #define TIRP_DEFINE_SCHEDULE_OP(OpName) \

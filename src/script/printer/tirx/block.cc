@@ -44,33 +44,21 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   }
 
   if (block->exec_scope.defined()) {
-    if (const tvm::tir::WorldScopeNode* scope = block->exec_scope.as<tvm::tir::WorldScopeNode>()) {
-      ExprDoc lhs = DefineVar(scope->scope_id_def->def_ids[0], *frame, d);
-      ExprDoc rhs =
-          TIR(d, "kernel_id")
-              ->Call({d->AsDoc<ExprDoc>(scope->scope_id_def->extents[0], block_p->Attr("exec_scope")
-                                                                             ->Attr("scope_id_def")
-                                                                             ->Attr("extents")
-                                                                             ->ArrayItem(0))});
-      (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
-    } else if (const tvm::tir::KernelScopeNode* scope =
-                   block->exec_scope.as<tvm::tir::KernelScopeNode>()) {
-      for (auto scope_id_def : scope->scope_id_def) {
-        Array<ExprDoc> lhs;
-        for (auto scope_id : scope_id_def->def_ids) {
-          lhs.push_back(DefineVar(scope_id, *frame, d));
-        }
-        ExprDoc rhs =
-            TIR(d, scope_id_def->scope->cur + "_id")
-                ->Call({d->AsDoc<ExprDoc>(
-                           scope_id_def->extents,
-                           block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("extents"))},
-                       {"parent"},
-                       {LiteralDoc::Str(
-                           scope_id_def->scope->parent,
-                           block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("parent"))});
-        (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, std::nullopt));
+    for (auto scope_id_def : block->exec_scope.value()->scope_id_def) {
+      Array<ExprDoc> lhs;
+      for (auto scope_id : scope_id_def->def_ids) {
+        lhs.push_back(DefineVar(scope_id, *frame, d));
       }
+      ExprDoc rhs =
+          TIR(d, scope_id_def->scope->cur + "_id")
+              ->Call({d->AsDoc<ExprDoc>(
+                         scope_id_def->extents,
+                         block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("extents"))},
+                     {"parent"},
+                     {LiteralDoc::Str(
+                         scope_id_def->scope->parent,
+                         block_p->Attr("exec_scope")->Attr("scope_id_def")->Attr("parent"))});
+      (*frame)->stmts.push_back(AssignDoc(TupleDoc(lhs), rhs, std::nullopt));
     }
   }
 
@@ -362,30 +350,11 @@ TVM_SCRIPT_REPR(tir::BufferGetNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tir::BufferViewNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::WorldScope>(
-        "", [](tir::WorldScope world, ObjectPath p, IRDocsifier d) -> Doc {
-          Doc doc = TIR(d, "ExecScope")
-                        ->Call({d->AsDoc<ExprDoc>(world->scope_id_def, p->Attr("scope_id_def"))});
-          return doc;
-        });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::KernelScope>(
-        "", [](tir::KernelScope kernel, ObjectPath p, IRDocsifier d) -> Doc {
-          Doc doc = TIR(d, "ExecScope")
-                        ->Call({d->AsDoc<ExprDoc>(kernel->scope_id_def, p->Attr("scope_id_def"))});
-          return doc;
-        });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tir::ExecScope>(
         "", [](tir::ExecScope exec_scope, ObjectPath p, IRDocsifier d) -> Doc {
           Doc doc = TIR(d, "ExecScope")->Call({LiteralDoc::Str(exec_scope->name, p->Attr("name"))});
           return doc;
         });
-
-TVM_SCRIPT_REPR(tir::WorldScopeNode, ReprPrintTIR);
-TVM_SCRIPT_REPR(tir::KernelScopeNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tir::ExecScopeNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)

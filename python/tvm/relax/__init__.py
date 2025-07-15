@@ -71,6 +71,7 @@ from .op.base import (
     call_pure_packed,
     call_dps_packed,
     call_tir_with_grad,
+    call_tir_device,
 )
 
 # BlockBuilder

@@ -26,6 +26,7 @@
 
 #include <tvm/ir/global_info.h>
 #include <tvm/relax/expr.h>
+#include <tvm/tir/index_map.h>
 
 namespace tvm {
 namespace relax {
@@ -118,6 +119,20 @@ struct HintOnDeviceAttrs : public AttrsNodeReflAdapter<HintOnDeviceAttrs> {
                                     BaseAttrsNode);
 };  // struct HintOnDeviceAttrs
 
+struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
+  Array<tir::IndexMap> in_deps;
+  Array<tir::IndexMap> out_deps;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<CallTIRDeviceAttrs>().def_ro("in_deps", &CallTIRDeviceAttrs::in_deps,
+                                                "The input dependencies.")
+        .def_ro("out_deps", &CallTIRDeviceAttrs::out_deps, "The output dependencies.");
+  }
+  
+  static constexpr const char* _type_key = "relax.attrs.CallTIRDeviceAttrs";
+  TVM_FFI_DECLARE_FINAL_OBJECT_INFO(CallTIRDeviceAttrs, BaseAttrsNode);
+};  // struct CallTIRDeviceAttrs
 }  // namespace relax
 }  // namespace tvm
 

@@ -20,12 +20,11 @@ from typing import List, Dict
 from tvm.tir.stmt_functor import StmtVisitor, StmtMutator
 from tvm.tirp.op_schedule.schedule_context import ScheduleContext
 from tvm.target import Target
-from tvm.tir.exec_scope import ExecScope
 from tvm.ir import Range
 from tvm.tir.stmt import Block, AttrStmt, For, OpCall, Stmt
 from tvm.tir.buffer import Buffer
-from tvm.tirp.operator.op import KernelReplacePoint
 from tvm.tir.transform.function_pass import prim_func_pass
+from tvm.tirp.transform.common import seek_kernel_replace_point
 
 
 class PrivateAllocCollector(StmtVisitor):
@@ -67,21 +66,6 @@ class PrivateAllocCollector(StmtVisitor):
         self.private_buf_refs[op] = private_buf_refs
 
 
-class KernelReplacePointSearcher(StmtMutator):
-    def __init__(self, body: Stmt):
-        super().__init__()
-        self.body = body
-
-    def visit_op_call_(self, op: OpCall):
-        op = OpCall.downcast(op)
-        if isinstance(op, KernelReplacePoint):
-            return self.body
-        return super().visit_op_call_(op)
-
-
-def seek_kernel_replace_point(stmt: Stmt, body: Stmt) -> Stmt:
-    """replace kernel replace point in stmt with body"""
-    return KernelReplacePointSearcher(body)(stmt)
 
 
 class PrivateAllocMutator(StmtMutator):

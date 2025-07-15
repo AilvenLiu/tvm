@@ -190,6 +190,9 @@ class ScopeIdResolveTable {
 class ExecScope;
 class ExecScopeNode : public Object {
  public:
+
+  Array<ScopeIdDef> scope_id_def;
+
   /*! \brief scope name, used when printing */
   String name;
 
@@ -207,14 +210,18 @@ class ExecScopeNode : public Object {
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ExecScopeNode>().def_ro("name", &ExecScopeNode::name);
+    refl::ObjectDef<ExecScopeNode>().def_ro("name", &ExecScopeNode::name)
+                                    .def_ro("scope_id_def", &ExecScopeNode::scope_id_def);
   }
 
   bool SEqualReduce(const ExecScopeNode* other, SEqualReducer equal) const {
-    return equal(name, other->name);
+    return equal(name, other->name) && equal(scope_id_def, other->scope_id_def);
   }
 
-  void SHashReduce(SHashReducer hash_reduce) const { hash_reduce(name); }
+  void SHashReduce(SHashReducer hash_reduce) const { 
+    hash_reduce(name);
+    hash_reduce(scope_id_def);
+  }
 
   static constexpr const char* _type_key = "tirx.ExecScope";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -225,7 +232,7 @@ class ExecScopeNode : public Object {
 
 class ExecScope : public ObjectRef {
  public:
-  TVM_DLL explicit ExecScope(String name);
+  TVM_DLL explicit ExecScope(String name, Array<ScopeIdDef> scope_id_def = {});
 
   /*! \brief create a exec scope from scope name */
   static ExecScope Create(String name);
@@ -234,73 +241,6 @@ class ExecScope : public ObjectRef {
   static bool Valid(const String& name);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScope, ObjectRef, ExecScopeNode);
-};
-
-// Two special ExecSope: World and Kernel
-class WorldScopeNode : public ExecScopeNode {
- public:
-  ScopeIdDef scope_id_def;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<WorldScopeNode>().def_ro("scope_id_def", &WorldScopeNode::scope_id_def);
-  }
-
-  bool SEqualReduce(const WorldScopeNode* other, SEqualReducer equal) const {
-    return equal(scope_id_def, other->scope_id_def) && ExecScopeNode::SEqualReduce(other, equal);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(scope_id_def);
-    ExecScopeNode::SHashReduce(hash_reduce);
-  }
-
-  static constexpr const char* _type_key = "tirx.WorldScope";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
-  TVM_DECLARE_FINAL_OBJECT_INFO(WorldScopeNode, ExecScopeNode);
-};
-
-class WorldScope : public ExecScope {
- public:
-  TVM_DLL explicit WorldScope(ScopeIdDef scope_id_def);
-
-  TVM_DEFINE_OBJECT_REF_METHODS(WorldScope, ExecScope, WorldScopeNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(WorldScopeNode);
-};
-
-class KernelScopeNode : public ExecScopeNode {
- public:
-  Array<ScopeIdDef> scope_id_def;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<KernelScopeNode>().def_ro("scope_id_def", &KernelScopeNode::scope_id_def);
-  }
-
-  bool SEqualReduce(const KernelScopeNode* other, SEqualReducer equal) const {
-    return equal(scope_id_def, other->scope_id_def) && ExecScopeNode::SEqualReduce(other, equal);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(scope_id_def);
-    ExecScopeNode::SHashReduce(hash_reduce);
-  }
-
-  static constexpr const char* _type_key = "tirx.KernelScope";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
-  TVM_DECLARE_FINAL_OBJECT_INFO(KernelScopeNode, ExecScopeNode);
-};
-
-class KernelScope : public ExecScope {
- public:
-  TVM_DLL explicit KernelScope(Array<ScopeIdDef> scope_id_def);
-
-  TVM_DEFINE_OBJECT_REF_METHODS(KernelScope, ExecScope, KernelScopeNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(KernelScopeNode);
 };
 
 class ExecScopeSliceNode : public ExecScopeNode {
@@ -367,7 +307,7 @@ bool IsStorageBuffer(const String& storage, const String& logical);
 /*! \brief Return the belonging logical scope of some storage scope */
 String StorageToLogicalScope(const String& storage);
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_EXEC_SCOPE_H_

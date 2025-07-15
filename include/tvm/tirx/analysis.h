@@ -391,17 +391,19 @@ TVM_DLL Pass OOBChecker();
  * \brief Verify if the given TIR+ is well-formed.
  * \param func The PrimFunc to be verified.
  * \param assert_mode The indicator if it raises an error when the function is not well-formed.
+ * \param device_func The indicator if it is a device function.
  * \return Whether it is a well-formed TIR+ function.
  */
-TVM_DLL bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode = true);
+TVM_DLL bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode = true, bool device_func = false);
 
 /*!
  * \brief Verify if the TIR+ in the given IRMOdule is well-formed.
  * \param mod The IRModule to be verified.
  * \param assert_mode The indicator if it raises an error when the function is not well-formed.
+ * \param device_func The indicator if it is a device function.
  * \return Whether it is a well-formed TIR+ module.
  */
-TVM_DLL bool VerifyTIRpWellFormed(const IRModule& mod, bool assert_mode = true);
+TVM_DLL bool VerifyTIRpWellFormed(const IRModule& mod, bool assert_mode = true, bool device_func = false);
 
 }  // namespace transform
 }  // namespace tirx

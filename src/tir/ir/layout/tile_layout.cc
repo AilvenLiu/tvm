@@ -74,20 +74,24 @@ Optional<FAxisSplitter> AxisNode::GetSplitter() const {
   return splitter_attr_map.get(GetRef<Axis>(this), std::nullopt);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.AxisIsThreadAxis").set_body_typed([](Axis axis) {
-  return axis->IsThreadAxis();
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.AxisIsThreadAxis", [](Axis axis) { return axis->IsThreadAxis(); });
 });
 
-TVM_FFI_REGISTER_GLOBAL("tir.AxisIsMemoryAxis").set_body_typed([](Axis axis) {
-  return axis->IsMemoryAxis();
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.AxisIsMemoryAxis", [](Axis axis) { return axis->IsMemoryAxis(); });
 });
 
-TVM_FFI_REGISTER_GLOBAL("tir.AxisGetScope").set_body_typed([](Axis axis) {
-  return axis->GetScope();
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.AxisGetScope", [](Axis axis) { return axis->GetScope(); });
 });
 
-TVM_FFI_REGISTER_GLOBAL("tir.AxisGetSubscope").set_body_typed([](Axis axis) {
-  return axis->GetSubscope();
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.AxisGetSubscope", [](Axis axis) { return axis->GetSubscope(); });
 });
 
 // Axis
@@ -334,8 +338,9 @@ TVM_REGISTER_AXIS("Bank").set_attr<bool>("thread", false);
 TVM_REGISTER_AXIS("TCol").set_attr<bool>("thread", false);
 TVM_REGISTER_AXIS("TLane").set_attr<bool>("thread", false);
 
-TVM_FFI_REGISTER_GLOBAL("tir.AxisGet").set_body_typed([](String name) -> Axis {
-  return Axis::Get(name);
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.AxisGet", [](String name) -> Axis { return Axis::Get(name); });
 });
 
 /**************** Iter ****************/
@@ -349,8 +354,11 @@ Iter::Iter(PrimExpr extent, PrimExpr stride, Axis axis) {
   data_ = std::move(n);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.Iter").set_body_typed([](PrimExpr extent, PrimExpr stride, Axis axis) {
-  return Iter(extent, stride, axis);
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.Iter", [](PrimExpr extent, PrimExpr stride, Axis axis) {
+    return Iter(extent, stride, axis);
+  });
 });
 
 /**************** TileLayout ****************/
@@ -365,10 +373,13 @@ TileLayout::TileLayout(Array<Iter> shard, Array<Iter> replicate, Map<Axis, PrimE
   data_ = std::move(n);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.TileLayout")
-    .set_body_typed([](Array<Iter> shard, Array<Iter> replicate, Map<Axis, PrimExpr> exclude) {
-      return TileLayout(shard, replicate, exclude);
-    });
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TileLayout",
+                        [](Array<Iter> shard, Array<Iter> replicate, Map<Axis, PrimExpr> exclude) {
+                          return TileLayout(shard, replicate, exclude);
+                        });
+});
 
 bool TileLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const { return true; }
 
@@ -626,11 +637,14 @@ std::pair<TileLayout, std::vector<int64_t>> GroupByShape(TileLayout layout,
   return {GetRef<TileLayout>(n), seps};
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.TileLayoutGroupByShape")
-    .set_body_typed([](const TileLayout& layout, const Array<PrimExpr>& shape) {
-      auto [res, seps] = GroupByShape(layout, shape);
-      return Tuple<TileLayout, Array<int64_t>>{res, Array<int64_t>(seps.begin(), seps.end())};
-    });
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def(
+      "tir.TileLayoutGroupByShape", [](const TileLayout& layout, const Array<PrimExpr>& shape) {
+        auto [res, seps] = GroupByShape(layout, shape);
+        return Tuple<TileLayout, Array<int64_t>>{res, Array<int64_t>(seps.begin(), seps.end())};
+      });
+});
 
 TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& outer_shape,
                              const Array<PrimExpr>& inner_shape) const {
@@ -1000,8 +1014,11 @@ bool TileLayoutNode::IsTrivial() const {
   return replicate.size() == 0 && exclude.size() == 0;
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.TileLayoutIsTrivial").set_body_typed([](const TileLayout& layout) {
-  return layout->Normalize().as<TileLayout>().value()->IsTrivial();
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TileLayoutIsTrivial", [](const TileLayout& layout) {
+    return layout->Normalize().as<TileLayout>().value()->IsTrivial();
+  });
 });
 
 bool TileLayoutNode::IsTrainium() const {
@@ -1011,8 +1028,10 @@ bool TileLayoutNode::IsTrainium() const {
   });
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.TileLayoutIsTrainium").set_body_typed([](const TileLayout& layout) {
-  return layout->IsTrainium();
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TileLayoutIsTrainium",
+                        [](const TileLayout& layout) { return layout->IsTrainium(); });
 });
 
 bool TileLayoutNode::HasMemoryAxis() const {
@@ -1070,10 +1089,13 @@ Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
                                      ExecScope::Create(outer_most)};
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.TileLayoutGetScope")
-    .set_body_typed([](const TileLayout& layout) -> Optional<Tuple<ExecScope, ExecScope>> {
-      return layout->GetScope();
-    });
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TileLayoutGetScope",
+                        [](const TileLayout& layout) -> Optional<Tuple<ExecScope, ExecScope>> {
+                          return layout->GetScope();
+                        });
+});
 
 }  // namespace tir
 }  // namespace tvm

@@ -32,6 +32,7 @@ from .base import (
     call_tir,
     call_tir_inplace,
     call_tir_with_grad,
+    call_tir_device,
     hint_on_device,
     invoke_closure,
     invoke_pure_closure,

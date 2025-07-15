@@ -29,59 +29,83 @@ Map<String, PrimExpr> TLayoutNode::Apply(const Array<PrimExpr>& coord,
   return Apply(FlattenCoord(coord, shape));
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutCompatibleWithShape")
-    .set_body_typed([](TLayout layout, Array<PrimExpr> shape) {
-      return layout->CompatibleWithShape(shape);
-    });
-
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutVerifyWellFormed").set_body_typed([](TLayout layout) {
-  return layout->VerifyWellFormed();
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def(
+      "tir.TLayoutCompatibleWithShape",
+      [](TLayout layout, Array<PrimExpr> shape) { return layout->CompatibleWithShape(shape); });
 });
 
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutGetSize")
-    .set_body_typed([](TLayout layout, Optional<String> axis_name) {
-      return layout->GetSize(axis_name);
-    });
-
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutGetCosize")
-    .set_body_typed([](TLayout layout, Optional<String> axis_name) {
-      return layout->GetCosize(axis_name);
-    });
-
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutApplyWithShape")
-    .set_body_typed([](TLayout layout, Array<PrimExpr> coord, Array<PrimExpr> shape) {
-      return layout->Apply(coord, shape);
-    });
-
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutApply").set_body_typed([](TLayout layout, Array<PrimExpr> coord) {
-  return layout->Apply(coord);
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TLayoutVerifyWellFormed",
+                        [](TLayout layout) { return layout->VerifyWellFormed(); });
 });
 
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutApplyLinear").set_body_typed([](TLayout layout, PrimExpr coord) {
-  return layout->Apply(coord);
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TLayoutGetSize", [](TLayout layout, Optional<String> axis_name) {
+    return layout->GetSize(axis_name);
+  });
 });
 
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutNormalize").set_body_typed([](TLayout layout) {
-  return layout->Normalize();
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TLayoutGetCosize", [](TLayout layout, Optional<String> axis_name) {
+    return layout->GetCosize(axis_name);
+  });
 });
 
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutTile")
-    .set_body_typed([](TLayout layout, TileLayout outer, Array<PrimExpr> outer_shape,
-                       Array<PrimExpr> inner_shape) {
-      return layout->Tile(outer, outer_shape, inner_shape);
-    });
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TLayoutApplyWithShape",
+                        [](TLayout layout, Array<PrimExpr> coord, Array<PrimExpr> shape) {
+                          return layout->Apply(coord, shape);
+                        });
+});
 
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutIsTileInner")
-    .set_body_typed([](TLayout layout, TLayout tile_layout, Array<PrimExpr> tiled_shape,
-                       Array<PrimExpr> inner_shape) {
-      return layout->IsTileInner(tile_layout, tiled_shape, inner_shape);
-    });
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TLayoutApply",
+                        [](TLayout layout, Array<PrimExpr> coord) { return layout->Apply(coord); });
+});
 
-TVM_FFI_REGISTER_GLOBAL("tir.TLayoutIsTileOuter")
-    .set_body_typed([](TLayout layout, TLayout tile_layout, Array<PrimExpr> tiled_shape,
-                       Array<PrimExpr> outer_shape) {
-      return layout->IsTileOuter(tile_layout, tiled_shape, outer_shape);
-    });
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TLayoutApplyLinear",
+                        [](TLayout layout, PrimExpr coord) { return layout->Apply(coord); });
+});
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TLayoutNormalize", [](TLayout layout) { return layout->Normalize(); });
+});
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def(
+      "tir.TLayoutTile",
+      [](TLayout layout, TileLayout outer, Array<PrimExpr> outer_shape,
+         Array<PrimExpr> inner_shape) { return layout->Tile(outer, outer_shape, inner_shape); });
+});
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TLayoutIsTileInner",
+                        [](TLayout layout, TLayout tile_layout, Array<PrimExpr> tiled_shape,
+                           Array<PrimExpr> inner_shape) {
+                          return layout->IsTileInner(tile_layout, tiled_shape, inner_shape);
+                        });
+});
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.TLayoutIsTileOuter",
+                        [](TLayout layout, TLayout tile_layout, Array<PrimExpr> tiled_shape,
+                           Array<PrimExpr> outer_shape) {
+                          return layout->IsTileOuter(tile_layout, tiled_shape, outer_shape);
+                        });
+});
 
 }  // namespace tir
 }  // namespace tvm

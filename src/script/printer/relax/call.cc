@@ -76,12 +76,17 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
   static const Op& call_dps_packed_op = Op::Get("relax.call_dps_packed");
   static const Op& call_tir_with_grad_op = Op::Get("relax.call_tir_with_grad");
   static const Op& call_tir_local_view = Op::Get("relax.dist.call_tir_local_view");
+  static const Op& call_tir_device_op = Op::Get("relax.call_tir_device");
   if (!n->op.same_as(call_tir_op) && !n->op.same_as(call_dps_packed_op) &&
       !n->op.same_as(call_tir_with_grad_op) && !n->op.same_as(call_tir_local_view) &&
-      !n->op.same_as(call_tir_inplace_op)) {
+      !n->op.same_as(call_tir_inplace_op) && !n->op.same_as(call_tir_device_op)) {
     return std::nullopt;
   }
-  TVM_FFI_ICHECK(n->args.size() == 2 || n->args.size() == 3);
+  if(n->op.same_as(call_tir_device_op)){
+    TVM_FFI_ICHECK(n->args.size() == 5 || n->args.size() == 6);
+  } else {
+    TVM_FFI_ICHECK(n->args.size() == 2 || n->args.size() == 3);
+  }
   TVM_FFI_ICHECK(n->sinfo_args.size() == 1);
   ffi::Array<ExprDoc> args;
   ffi::Array<ffi::String> kwargs_keys;
@@ -140,6 +145,28 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
     return Relax(d, "call_tir_with_grad")->Call(args, kwargs_keys, kwargs_values);
   }
   // end of specially handling call_tir_with_grad
+
+  // start of specially handling call_tir_device
+  if (n->op.same_as(call_tir_device_op)) {
+    kwargs_keys.push_back("tile_num");
+    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[2], n_p->Attr("args")->ArrayIndex(2)));
+    kwargs_keys.push_back("in_events");
+    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[3], n_p->Attr("args")->ArrayIndex(3)));
+    kwargs_keys.push_back("out_events");
+    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[4], n_p->Attr("args")->ArrayIndex(4)));
+    if(const auto* call_tir_device_attrs = n->attrs.as<relax::CallTIRDeviceAttrs>()) {
+      kwargs_keys.push_back("in_deps");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->in_deps, n_p->Attr("attrs")->Attr("in_deps")));
+      kwargs_keys.push_back("out_deps");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->out_deps, n_p->Attr("attrs")->Attr("out_deps")));
+    }
+    if(n->args.size() == 6){
+      kwargs_keys.push_back("tir_vars");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[5], n_p->Attr("args")->ArrayIndex(5)));
+    }
+    return Relax(d, "call_tir_device")->Call(args, kwargs_keys, kwargs_values);
+  }
+  // end of specially handling call_tir_device
 
   if (n->op.same_as(call_dps_packed_op)) {
     return Relax(d, "call_dps_packed")->Call(args, kwargs_keys, kwargs_values);
@@ -289,7 +316,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                      n->op->IsInstance<tvm::GlobalVarNode>()) {
             prefix = d->AsDoc<ExprDoc>(n->op, n_p->Attr("op"));
           } else {
-            TVM_FFI_THROW(TypeError) << "Unsupported op: " << n->op->GetTypeKey();
+            TVM_FFI_THROW(InternalError) << "TypeError: Unsupported op: " << n->op->GetTypeKey();
           }
           // Step 2. Print args
           if (!n->args.empty()) {

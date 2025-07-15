@@ -202,14 +202,12 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       Array<ExprDoc, void> kwargs_values;
       // mark private if there is no global symbol
       if (!func->attrs.defined() || !func->attrs->dict.count(tvm::attr::kGlobalSymbol)) {
-        ffi::Array<ExprDoc> pos_args;
-        decorator = decorator->Call(pos_args, {"private"},
-                                    {LiteralDoc::Boolean(true, ffi::Optional<AccessPath>())});
+        kwargs_keys.push_back("private");
+        kwargs_values.push_back(LiteralDoc::Boolean(true, ffi::Optional<AccessPath>()));
       }
       if (func->attrs.defined() && func->attrs->dict.count(tvm::attr::kIsTIRp)) {
-        Array<ExprDoc> pos_args;
-        decorator = decorator->Call(pos_args, {"tirp"},
-                                    {LiteralDoc::Boolean(true, Optional<ObjectPath>())});
+        kwargs_keys.push_back("tirp");
+        kwargs_values.push_back(LiteralDoc::Boolean(true, Optional<AccessPath>()));
       }
       Array<ExprDoc> pos_args;
       decorator = std::move(decorator->Call(pos_args, kwargs_keys, kwargs_values));

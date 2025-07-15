@@ -48,11 +48,15 @@ Pipeline::Pipeline(ExecScope thread_scope, size_t depth, bool separate_pc, Strin
   data_ = std::move(n);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tirx.Pipeline")
-    .set_body_typed([](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                       Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
-      return Pipeline(thread_scope, depth, separate_pc, name_hint, workspace, schedule_config);
-    });
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tirx.Pipeline",
+                        [](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
+                           Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
+                          return Pipeline(thread_scope, depth, separate_pc, name_hint, workspace,
+                                          schedule_config);
+                        });
+});
 
 /*************************** CopyPipeline ***************************/
 TVM_REGISTER_NODE_TYPE(CopyPipelineNode);
@@ -69,11 +73,15 @@ CopyPipeline::CopyPipeline(ExecScope thread_scope, size_t depth, bool separate_p
   data_ = std::move(n);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tirx.CopyPipeline")
-    .set_body_typed([](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
-                       Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
-      return CopyPipeline(thread_scope, depth, separate_pc, name_hint, workspace, schedule_config);
-    });
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tirx.CopyPipeline",
+                        [](ExecScope thread_scope, size_t depth, bool separate_pc, String name_hint,
+                           Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
+                          return CopyPipeline(thread_scope, depth, separate_pc, name_hint,
+                                              workspace, schedule_config);
+                        });
+});
 
-}  // namespace tirxxxxxxxx
+}  // namespace tirxxxxxxxxx
 }  // namespace tvm

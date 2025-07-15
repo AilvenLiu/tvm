@@ -304,35 +304,26 @@ BlockFrame ScopeSlice(ffi::Optional<ffi::Array<Range>> slices, ffi::Optional<Pri
   return BlockFrame(n);
 }
 
-tvm::tirx::Var KernelId(PrimExpr extent) {
-  BlockFrame frame = FindBlockFrame("T.kernel_id");
-  TVM_FFI_ICHECK(frame->exec_scope.defined()) << "InternalError: exec_scope is not defined.";
-  TVM_FFI_ICHECK(frame->exec_scope->IsInstance<tvm::tirx::WorldScopeNode>())
-      << "InternalError: exec_scope is not WorldScope.";
-  tvm::tirx::Var scope_id("");
-  frame->exec_scope = tvm::tirx::WorldScope(
-      tvm::tirx::ScopeIdDef({scope_id}, {extent}, tvm::tirx::ScopePair("world", "kernel")));
-  return scope_id;
-}
-
-ffi::Array<tvm::tirx::Var> KernelScopeId(ffi::Array<PrimExpr> extents, ffi::String parent,
-                                        ffi::String name, ffi::String cur) {
+Array<tvm::tirx::Var> ScopeId(Array<PrimExpr> extents, String parent, String name, String cur) {
   BlockFrame frame = FindBlockFrame(name);
   TVM_FFI_ICHECK(frame->exec_scope.defined()) << "InternalError: exec_scope is not defined.";
-  TVM_FFI_ICHECK(frame->exec_scope->IsInstance<tvm::tirx::KernelScopeNode>())
-      << "InternalError: exec_scope is not KernelScope.";
-  ffi::Array<tvm::tirx::Var> scope_ids;
+  Array<tvm::tirx::Var> scope_ids;
   for (size_t i = 0; i < extents.size(); ++i) {
     scope_ids.push_back(tvm::tirx::Var(""));
   }
-  const_cast<tvm::tirx::KernelScopeNode*>(frame->exec_scope.as<tvm::tirx::KernelScopeNode>())
+  const_cast<tvm::tirx::ExecScopeNode*>(frame->exec_scope.as<tvm::tirx::ExecScopeNode>())
       ->scope_id_def.push_back(
           tvm::tirx::ScopeIdDef(scope_ids, extents, tvm::tirx::ScopePair(parent, cur)));
   return scope_ids;
 }
 
+Array<tvm::tirx::Var> KernelId(Array<PrimExpr> extents, String parent) {
+  TVM_FFI_ICHECK(parent == "world") << "ValueError: KernelId only supports parent=world";
+  return ScopeId(extents, "world", "T.kernel_id", "kernel");
+}
+
 ffi::Array<tvm::tirx::Var> ClusterId(ffi::Array<PrimExpr> extents, ffi::String parent) {
-  return KernelScopeId(extents, parent, "T.cluster_id", "cluster");
+  return ScopeId(extents, parent, "T.cluster_id", "cluster");
 }
 
 ffi::Array<tvm::tirx::Var> ClusterId(ffi::Array<PrimExpr> extents, ffi::String parent) {
@@ -340,18 +331,18 @@ ffi::Array<tvm::tirx::Var> ClusterId(ffi::Array<PrimExpr> extents, ffi::String p
 }
 
 ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent) {
-  return KernelScopeId(extents, parent, "T.cta_id", "cta");
+  return ScopeId(extents, parent, "T.cta_id", "cta");
 }
 
 Array<tvm::tirx::Var> WarpgroupId(ffi::Array<PrimExpr> extents, ffi::String parent) {
-  return KernelScopeId(extents, parent, "T.warpgroup_id", "warpgroup");
+  return ScopeId(extents, parent, "T.warpgroup_id", "warpgroup");
 }
 ffi::Array<tvm::tirx::Var> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent) {
-  return KernelScopeId(extents, parent, "T.warp_id", "warp");
+  return ScopeId(extents, parent, "T.warp_id", "warp");
 }
 
 ffi::Array<tvm::tirx::Var> ThreadId(ffi::Array<PrimExpr> extents, ffi::String parent) {
-  return KernelScopeId(extents, parent, "T.thread_id", "thread");
+  return ScopeId(extents, parent, "T.thread_id", "thread");
 }
 
 BlockInitFrame Init() { return BlockInitFrame(ffi::make_object<BlockInitFrameNode>()); }
@@ -992,13 +983,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.WarpGroup", WarpGroup)
       .def("script.ir_builder.tir.Warp", Warp)
       .def("script.ir_builder.tir.Thread", Thread)
-      .def("script.ir_builder.tir.ScopeSlice", ScopeSlice)
       .def("script.ir_builder.tir.KernelId", KernelId)
       .def("script.ir_builder.tir.ClusterId", ClusterId)
-      .def("script.ir_builder.tir.CTAId", CtaId)
+      .def("script.ir_builder.tir.CtaId", CtaId)
       .def("script.ir_builder.tir.WarpgroupId", WarpgroupId)
       .def("script.ir_builder.tir.WarpId", WarpId)
       .def("script.ir_builder.tir.ThreadId", ThreadId)
+      .def("script.ir_builder.tir.ScopeId", ScopeId)
       .def("script.ir_builder.tir.Init", Init)
       .def("script.ir_builder.tir.Where", Where)
       .def("script.ir_builder.tir.Reads", Reads)
@@ -1056,7 +1047,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def(Prefix TVM_TMP_STR(64), DType##64)
 
 #define TVM_FFI_REFL_DEF_GLOBAL_LANES(Prefix, Func) \
-  def(Prefix TVM_TMP_STR(x2), Func##x2)             \ 
+  def(Prefix TVM_TMP_STR(x2), Func##x2)             \
       .def(Prefix TVM_TMP_STR(x4), Func##x4)        \
       .def(Prefix TVM_TMP_STR(x8), Func##x8)        \
       .def(Prefix TVM_TMP_STR(x16), Func##x16)      \
@@ -1174,7 +1165,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tirx.max",
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
+});
+
+}  // namespace tirx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

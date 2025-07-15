@@ -635,7 +635,12 @@ void tvm_cublaslt_fp8_gemm(ffi::PackedArgs args, ffi::Any* ret) {
                              cublas_entry->workspace_size, CUBLASLT_EPILOGUE_DEFAULT, std::nullopt);
 }
 
-TVM_FFI_REGISTER_GLOBAL("cublaslt.fp8_gemm").set_body_packed(tvm_cublaslt_fp8_gemm);
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def_packed(
+      "tvm.contrib.cublaslt.fp8_gemm",
+      [](ffi::PackedArgs args, ffi::Any* ret) { tvm_cublaslt_fp8_gemm(args, ret); });
+});
 
 }  // namespace contrib
 }  // namespace tvm

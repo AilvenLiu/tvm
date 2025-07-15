@@ -198,7 +198,7 @@ def verify_well_formed(obj: Union[PrimFunc, IRModule], assert_mode: bool = True)
     return _ffi_api.VerifyWellFormed(obj, assert_mode)  # type: ignore # pylint: disable=no-member
 
 
-def verify_tirp_well_formed(obj: Union[PrimFunc, IRModule], assert_mode: bool = True) -> bool:
+def verify_tirp_well_formed(obj: Union[PrimFunc, IRModule], assert_mode: bool = True, device_func: bool = False) -> bool:
     """Verify if the given TIR+ is well-formed.
 
     Parameters
@@ -209,12 +209,15 @@ def verify_tirp_well_formed(obj: Union[PrimFunc, IRModule], assert_mode: bool = 
     assert_mode: bool
         The indicator if it raises an error when the function is not well-formed.
 
+    device_func: bool
+        The indicator if it is a device function.
+
     Returns
     -------
     result: bool
         Whether it is a well-formed TIR+ function.
     """
-    return _ffi_api.VerifyTIRpWellFormed(obj, assert_mode)  # type: ignore # pylint: disable=no-member
+    return _ffi_api.VerifyTIRpWellFormed(obj, assert_mode, device_func)  # type: ignore # pylint: disable=no-member
 
 
 def OOBChecker():

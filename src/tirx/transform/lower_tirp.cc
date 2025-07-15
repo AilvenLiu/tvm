@@ -50,26 +50,21 @@ class ScopeIdDefResolver : public StmtExprMutator {
 
   Stmt VisitStmt_(const BlockRealizeNode* op) override {
     Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(op->block.get()));
-    ICHECK(block->exec_scope.defined()) << "Internal Error: exec_scope is not defined";
-    const auto& scope = block->exec_scope.value();
-    ICHECK(!scope->Is("world")) << "Internal Error: world scope is not supported at the moment";
     auto n_realize = CopyOnWrite(op);
-
-    // Resolve under kernel exec scope
-    auto opt_kernel = scope.as<KernelScope>();
-    if (!opt_kernel) {
+    if (!block->exec_scope.defined()) {
       n_realize->block = block;
       return Stmt(n_realize);
     }
-    auto kernel = opt_kernel.value();
-    if (kernel->scope_id_def.empty()) {
+    const auto& scope = block->exec_scope.value();
+    ICHECK(!scope->Is("world")) << "Internal Error: world scope is not supported at the moment";
+    if (scope->scope_id_def.empty()) {
       // No ScopeIdDef to resolve, return the block as is
       n_realize->block = block;
       return Stmt(n_realize);
     }
     // Step 1: Verify the ScopeIdDef is well-formed
     ScopeIdDefVerifier verifier;
-    CHECK(verifier.Verify(kernel->scope_id_def)) << "Inconsistent ScopeIdDef";
+    CHECK(verifier.Verify(scope->scope_id_def)) << "Inconsistent ScopeIdDef";
 
     // Step 2: Extract kernel launch parameters
     LaunchParams launch_params;
@@ -79,8 +74,8 @@ class ScopeIdDefResolver : public StmtExprMutator {
     auto* n = block.CopyOnWrite();
 
     std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> id_map;
-    for (const auto& def : kernel->scope_id_def) {
-      // Resolve the scope ids defined in the kernel
+    for (const auto& def : scope->scope_id_def) {
+      // Resolve the scope ids defined in the scope
       auto resolved = ScopeIdResolveTable::Resolve(def->scope, def->extents, def->extents.size(),
                                                    target_->kind->name, launch_params);
       ICHECK_EQ(resolved.size(), def->extents.size())
@@ -93,11 +88,11 @@ class ScopeIdDefResolver : public StmtExprMutator {
     Stmt body = Substitute(n->body, id_map);
 
     // Clear the scope_id_def
-    auto* n_scope = kernel.CopyOnWrite();
+    auto n_scope = make_object<ExecScopeNode>(*scope.get());
     n_scope->scope_id_def = {};
 
     // set the resolved exec_scope and body
-    n->exec_scope = kernel;
+    n->exec_scope = ExecScope(n_scope);
     n->body = body;
 
     n_realize->block = block;
@@ -113,7 +108,9 @@ class ScopeIdDefResolver : public StmtExprMutator {
                                  LaunchParams* launch_params) {
     auto add_launch_param = [&](const ScopePair& pair, const std::string& prefix) {
       auto it = id_set.find(pair);
-      CHECK(it != id_set.end()) << "ValueError: Expected " << pair << " to be defined";
+      if (it == id_set.end()) {
+        return;
+      }
       const auto& def = (*it).second;
       CHECK_LE(def->extents.size(), 3) << "ValueError: Only up to 3 extents are supported";
       for (size_t i = 0; i < def->extents.size(); i++) {
@@ -767,8 +764,11 @@ Pass LowerTIRp() {
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRp", {});
 }
 
-TVM_FFI_REGISTER_GLOBAL("tirx.transform.LowerTIRp").set_body_typed(LowerTIRp);
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tirx.transform.LowerTIRp", LowerTIRp);
+});
 
 }  // namespace transform
-}  // namespace tirxxxxxxx
+}  // namespace tirxxxxxxxx
 }  // namespace tvm

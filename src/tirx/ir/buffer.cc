@@ -675,6 +675,10 @@ Buffer Buffer::with_data(Var data) const {
   return output;
 }
 
+PrimExpr Buffer::OffsetOf_p(const Array<PrimExpr>& indices) const {
+  return tirx::Call(DataType::Int(32), tirx::builtin::buffer_offset(), {BufferLoad(*this, indices)});
+}
+
 bool Buffer::IsCell(bool alloc_or_decl) const {
   // TODO(@bohan): logical scope is not considered
   auto is_cell_layout = [](const TLayout& layout) -> bool {
@@ -717,6 +721,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("tirx.BufferAccessPtr", &Buffer::access_ptr)
       .def_method("tirx.BufferGetFlattenedBuffer", &Buffer::GetFlattenedBuffer)
       .def_method("tirx.BufferOffsetOf", &Buffer::OffsetOf)
+      .def_method("tirx.BufferOffsetOfp", &Buffer::OffsetOf_p)
       .def_method("tirx.BufferVLoad", &Buffer::vload)
       .def_method("tirx.BufferVStore", &Buffer::vstore)
       .def_method("tirx.BufferStorageScope", &Buffer::scope)
@@ -727,5 +732,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("tirx.BufferIsCell", &Buffer::IsCell);
 }
 
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace tvm

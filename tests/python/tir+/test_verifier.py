@@ -16,7 +16,7 @@
 # under the License.
 import pytest
 
-from tvm.script import tir as T
+from tvm.script import tir as T, tirp as Tp
 from tvm.tir.analysis import verify_tirp_well_formed as verify
 
 
@@ -56,16 +56,24 @@ def test_root_scope():
                     with T.warp():
                         with T.thread():
                             pass
+    
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test6() -> None:
+        with T.world():
+            with T.kernel():
+                with T.cta():
+                    with T.warp():
+                        with T.cluster():
+                            pass
+
     # fmt: on
 
-    with pytest.raises(Exception, match="invalid exec_scope thread as root"):
-        verify(test1)
-    with pytest.raises(Exception, match="invalid exec_scope warp as root"):
-        verify(test2)
-    with pytest.raises(Exception, match="invalid exec_scope cta as root"):
-        verify(test3)
+    verify(test1)
+    verify(test2)
+    verify(test3)
     verify(test4)
     verify(test5)
+    verify(test6)
 
 
 def test_nested_scope():
@@ -108,13 +116,20 @@ def test_nested_scope():
                     with T.warp():
                         with T.thread():
                             pass
+                        
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test5() -> None:
+        with T.kernel():
+            with T.world():
+                pass
     # fmt: on
 
     verify(test1)
     verify(test2)
-    with pytest.raises(Exception, match="invalid exec_scope cta under warp"):
-        verify(test3)
+    verify(test3)
     verify(test4)
+    with pytest.raises(Exception, match="has invalid exec_scope world under kernel"):
+        verify(test5)
 
 
 def test_scope_slice():
@@ -300,6 +315,33 @@ def test_scope_id_consistency():
                         T.evaluate(bx + by + bz)
                         T.evaluate(cbx + cby + cbz)
                         T.evaluate(clx + cly + clz)
+                        
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test6():
+        with T.kernel():
+            clx, cly, clz = T.cluster_id([4, 5, 12], parent="kernel")
+            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
+            with T.cluster():
+                cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
+                with T.warp():
+                    with T.thread():
+                        T.evaluate(bx + by + bz)
+                        T.evaluate(cbx + cby + cbz)
+                        T.evaluate(clx + cly + clz)
+    
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test7():
+        with T.kernel():
+            clx, cly, clz = T.cluster_id([3, 5, 12], parent="kernel")
+            bx, by, bz = T.cta_id([8, 10, 12], parent="kernel")
+            with T.cluster():
+                cbx, cby, cbz = T.cta_id([2, 2, 1], parent="cluster")
+                with T.warp():
+                    with T.thread():
+                        T.evaluate(bx + by + bz)
+                        T.evaluate(cbx + cby + cbz)
+                        T.evaluate(clx + cly + clz)
+
     # fmt: on
 
     verify(test1)
@@ -309,6 +351,9 @@ def test_scope_id_consistency():
     verify(test4)
     with pytest.raises(Exception, match="Inconsistent extents for scope"):
         verify(test5)
+    verify(test6)
+    with pytest.raises(Exception, match="Inconsistent extents for scope"):
+        verify(test7)
 
 
 def test_layout():
@@ -375,6 +420,37 @@ def test_host():
     verify(test1)
 
 
+def test_device_func():
+    # fmt: off
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test1(A: T.Buffer((128,), "float32")):
+        with T.cta():
+            thread_id = T.thread_id([128], parent="cta")
+            Tp.fill(A, 0.)
+            
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test2(A: T.Buffer((128,), "float32")):
+        with T.kernel():
+            cta_id = T.cta_id([128], parent="kernel")
+            thread_id = T.thread_id([128], parent="cta")
+            Tp.fill(A, 0.)
+            
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def test3(A: T.Buffer((128,), "float32")):
+        with T.cta():
+            thread_id = T.thread_id([128], parent="cta")
+            Tp.fill(A, 0.)
+        with T.cta():
+            thread_id = T.thread_id([128], parent="cta")
+            Tp.fill(A, 0.)
+    # fmt: on
+    verify(test1, device_func=True)
+    with pytest.raises(Exception, match="higher than kernel scope"):
+        verify(test2, device_func=True)
+    with pytest.raises(Exception, match="Only one root scope is allowed in device function"):
+        verify(test3, device_func=True)
+
+
 if __name__ == "__main__":
     test_root_scope()
     test_nested_scope()
@@ -382,3 +458,4 @@ if __name__ == "__main__":
     test_scope_id_consistency()
     test_layout()
     test_host()
+    test_device_func()

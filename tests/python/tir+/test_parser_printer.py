@@ -79,7 +79,7 @@ def test_roundtrip_exec_scope():
     @T.prim_func(tirp=True)
     def test():
         with T.world():
-            kid = T.kernel_id(2)
+            kid = T.kernel_id([2])
             with T.kernel():
                 bx, by, bz = T.cta_id([32, 32, 1], parent="kernel")
                 tx, ty, tz = T.thread_id([16, 8, 1], parent="cta")

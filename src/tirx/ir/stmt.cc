@@ -250,7 +250,7 @@ Break::Break(Span span) {
   data_ = std::move(node);
 }
 
-TVM_FFI_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.Break", [](Span span) { return Break(span); });
 });
@@ -262,7 +262,7 @@ Continue::Continue(Span span) {
   data_ = std::move(node);
 }
 
-TVM_FFI_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.Continue", [](Span span) { return Continue(span); });
 });
@@ -579,7 +579,7 @@ BufferView::BufferView(Buffer src_buffer, TLayout layout, Buffer dst_buffer) {
   data_ = std::move(node);
 }
 
-TVM_FFI_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.BufferView", [](Buffer src_buffer, TLayout layout, Buffer dst_buffer) {
     return BufferView(src_buffer, layout, dst_buffer);
@@ -594,8 +594,11 @@ BufferGet::BufferGet(Buffer src_buffer, Buffer dst_buffer) {
   data_ = std::move(node);
 }
 
-TVM_FFI_REGISTER_GLOBAL("tir.BufferGet").set_body_typed([](Buffer src_buffer, Buffer dst_buffer) {
-  return BufferGet(src_buffer, dst_buffer);
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.BufferGet", [](Buffer src_buffer, Buffer dst_buffer) {
+    return BufferGet(src_buffer, dst_buffer);
+  });
 });
 
 TVM_REGISTER_NODE_TYPE(BufferGetNode);

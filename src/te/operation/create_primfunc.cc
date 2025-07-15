@@ -23,7 +23,6 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/name_supply.h>
-#include <tvm/s_tir/stmt.h>
 #include <tvm/te/operation.h>
 #include <tvm/tirx/analysis.h>
 #include <tvm/tirx/function.h>
@@ -54,7 +53,7 @@ class ProducerToBufferTransformer : public StmtExprMutator {
     auto visited_op = Downcast<ProducerLoad>(StmtExprMutator::VisitExpr_(op));
     te::Tensor tensor = Downcast<te::Tensor>(visited_op->producer);
     auto it = tensor2buffers_.find(tensor);
-    TVM_FFI_CHECK(it != tensor2buffers_.end(), IndexError) << "Cannot find the tensor " << tensor;
+    TVM_FFI_ICHECK(it != tensor2buffers_.end()) << "IndexError: Cannot find the tensor " << tensor;
     const Buffer& buffer = it->second;
     return BufferLoad(buffer, visited_op->indices);
   }
@@ -146,7 +145,7 @@ class LayoutFreePlaceholdersNormalizer : public StmtMutator {
     for (int i : this->layout_free_buffer_indices_) {
       indices.push_back(i);
     }
-    return WithAttr(std::move(func), s_tir::attr::layout_free_buffers, indices);
+    return WithAttr(std::move(func), tir::attr::layout_free_buffers, indices);
   }
 
   Stmt VisitStmt_(const SBlockNode* _block) final {
@@ -319,7 +318,7 @@ ffi::Map<ffi::String, ffi::Any> GenerateBlockAnnotations(const te::ComputeOp& co
     }
   }
   // Set script_parsing_detect_access
-  annotations.Set(s_tir::attr::script_parsing_detect_access, IntImm(DataType::Int(32), 3));
+  annotations.Set(tir::attr::script_parsing_detect_access, IntImm(DataType::Int(32), 3));
   return annotations;
 }
 
@@ -684,8 +683,8 @@ ffi::Array<te::Operation> CollectOrderedOps(const ffi::Array<te::Tensor>& arg_li
   for (const te::Operation& op : order) {
     if (!(op->IsInstance<te::PlaceholderOpNode>() || op->IsInstance<te::ComputeOpNode>() ||
           op->IsInstance<te::ExternOpNode>()))
-      TVM_FFI_THROW(TypeError) << "Unsupported Operation: " << op->GetTypeKey() << ". "
-                               << "Only te.placeholder and te.compute are allowed for now.";
+      TVM_FFI_THROW(InternalError) << "TypeError: Unsupported Operation: " << op->GetTypeKey() << ". "
+                 << "Only te.placeholder and te.compute are allowed for now.";
   }
   return order;
 }
@@ -712,10 +711,9 @@ void RewriteStageToBlock(const te::Operation& op, CreateFuncInfo* info,
     TVM_FFI_ICHECK_EQ(op->num_outputs(), 1);
     const te::Tensor& tensor = op.output(0);
     // Check op is in op list
-    TVM_FFI_ICHECK(info->IsArg(tensor))
-        << "The operation " << op << " produces tensor " << tensor
-        << ", but this tensor does not appear as a function argument.  "
-        << "The function accepts arguments " << info->arg_list;
+    TVM_FFI_ICHECK(info->IsArg(tensor)) << "The operation " << op << " produces tensor " << tensor
+                                << ", but this tensor does not appear as a function argument.  "
+                                << "The function accepts arguments " << info->arg_list;
     // Declare a buffer for any argument tensors without a pre-existing
     // buffer declaration recorded in the tensor2buffer binds map
     if (info->tensor2buffers.count(tensor) == 0) {
@@ -730,8 +728,8 @@ void RewriteStageToBlock(const te::Operation& op, CreateFuncInfo* info,
     // Case 3. ExternOp (te.extern)
     root_stmts->push_back(GenerateStmtFromExternOp(extern_op.value(), info));
   } else {
-    TVM_FFI_CHECK(false, TypeError) << "Unsupported Operation: " << op->GetTypeKey() << ". "
-                                    << "Only te.placeholder and te.compute are allowed for now.";
+    TVM_FFI_ICHECK(false) << "TypeError: Unsupported Operation: " << op->GetTypeKey() << ". "
+                  << "Only te.placeholder and te.compute are allowed for now.";
   }
 }
 
@@ -823,7 +821,7 @@ PrimFunc GenerateAndCompletePrimFunc(const ffi::Array<ObjectRef>& arg_tir_var_li
                             {{"global_symbol", ffi::String("main")}, {"tirx.noalias", true}});
   const auto fcomplete = tvm::ffi::Function::GetGlobal("script.Complete");
   TVM_FFI_ICHECK(fcomplete.has_value());
-  func = (*fcomplete)(std::move(func), info->root_alloc).cast<PrimFunc>();
+  func = (*fcomplete)(std::move(func), info->root_alloc, false).cast<PrimFunc>();
   return func;
 }
 

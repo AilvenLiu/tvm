@@ -183,7 +183,7 @@ BlockFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
 BlockFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
                   ffi::String scope_slice_parent);
 
-tvm::tirx::Var KernelId(PrimExpr extent);
+Array<tvm::tirx::Var> KernelId(Array<PrimExpr> extents, String parent);
 
 ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
@@ -618,7 +618,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -17,10 +17,11 @@
 
 from typing import Dict
 
-from tvm.tir.stmt_functor import StmtExprMutator
+from tvm.tir.stmt_functor import StmtExprMutator, StmtMutator
 from tvm.tir import BufferLoad, Block, BufferStore, OpCall, BufferRegion, Var
 from tvm.tir.buffer import Buffer
-from tvm.tir import BufferView, BufferGet
+from tvm.tir import BufferView, BufferGet, Stmt
+from tvm.tirp.operator.op import KernelReplacePoint
 
 
 class BufferReplacer(StmtExprMutator):
@@ -129,3 +130,20 @@ class BufferReplacer(StmtExprMutator):
                 pipelines=op.pipelines,
             )
         return op
+
+
+class KernelReplacePointSearcher(StmtMutator):
+    def __init__(self, body: Stmt):
+        super().__init__()
+        self.body = body
+
+    def visit_op_call_(self, op: OpCall):
+        op = OpCall.downcast(op)
+        if isinstance(op, KernelReplacePoint):
+            return self.body
+        return super().visit_op_call_(op)
+
+
+def seek_kernel_replace_point(stmt: Stmt, body: Stmt) -> Stmt:
+    """replace kernel replace point in stmt with body"""
+    return KernelReplacePointSearcher(body)(stmt)

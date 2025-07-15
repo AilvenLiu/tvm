@@ -561,8 +561,28 @@ def test_lower_decl_buffer_access_ptr():
     # fmt: on
 
     compare(before, after, LowerTIRp)
-
+    
+def test_lower_separate_scope_id_def():
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before():
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            with T.cta():
+                tx = T.thread_id([128], parent="cta")
+                with T.thread():
+                    T.evaluate(tx)
+    @T.prim_func(private=True, tirp=True)
+    def after():
+        blockIdx_x = T.launch_thread("blockIdx.x", 1)
+        with T.kernel():
+            threadIdx_x = T.launch_thread("threadIdx.x", 128)
+            with T.cta():
+                with T.thread():
+                    T.evaluate(threadIdx_x)
+    # fmt: on
+    
+    compare(before, after, LowerTIRp)
 
 if __name__ == "__main__":
     tvm.testing.main()
-    # test_lower_scope_partition()

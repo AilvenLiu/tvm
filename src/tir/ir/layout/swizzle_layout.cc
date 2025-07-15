@@ -37,10 +37,13 @@ SwizzleLayout::SwizzleLayout(int per_element, int swizzle_len, int atom_len, boo
 
 TVM_REGISTER_NODE_TYPE(SwizzleLayoutNode);
 
-TVM_FFI_REGISTER_GLOBAL("tir.SwizzleLayout")
-    .set_body_typed([](int per_element, int swizzle_len, int atom_len, bool swizzle_inner) {
-      return SwizzleLayout(per_element, swizzle_len, atom_len, swizzle_inner);
-    });
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.SwizzleLayout",
+                        [](int per_element, int swizzle_len, int atom_len, bool swizzle_inner) {
+                          return SwizzleLayout(per_element, swizzle_len, atom_len, swizzle_inner);
+                        });
+});
 
 bool SwizzleLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const { return true; }
 
