@@ -841,6 +841,11 @@ TVM_DLL const Op& cuda_nano_sleep();
  */
 TVM_DLL const Op& cuda_atomic_cas();
 
+/*!
+ * \brief tvm intrinsic for cuda printf instruction
+ */
+TVM_DLL const Op& cuda_printf();
+
 }  // namespace builtin
 }  // namespace tirx
 }  // namespace tvm

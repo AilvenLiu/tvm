@@ -21,6 +21,7 @@ import functools
 import enum
 
 import tvm.ffi
+from tvm.ffi.dtype import DataTypeCode
 from tvm.tir.op import cuda_func_call
 
 
@@ -723,7 +724,7 @@ union InstrDescriptor
 };
 """
 
-    if "instr_descriptor_scaled" in tags:
+    if "instr_descriptor_block_scaled" in tags:
         header += R"""
 #ifndef HOST_DEVICE
 #define HOST_DEVICE __forceinline__ __host__ __device__
@@ -1499,7 +1500,7 @@ def _get_tcgen05_mma_kind(
             if (
                 sfa_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
                 and sfb_dtype_enum == PTXDataType.FLOAT8_E8M0FNU
-                and dtype_enum == PTXDataType.FLOAT32
+                and dtype == PTXDataType.FLOAT32
             ):
                 kind = "mxf8f6f4"
     elif (
@@ -2143,7 +2144,7 @@ __forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_typ
         "[%0], {a_operand_placeholder}, %2, {sparse_placeholder}%3, [%5], [%6], p;\\n"
         "}}\\n"
         :
-        : "r"(d_tmem_addr_expr), {a_constraint}(a_operand_expr), "l"(b_desc), "r"(i_desc), "r"({enable_input_d_str}), "r"(sfa_tmem_addr), "r"(sfb_tmem_addr){sp_tmem_addr_operand}
+        : "r"(d_tmem_addr), {a_constraint}(a_operand), "l"(b_desc), "r"(i_desc), "r"({enable_input_d_str}), "r"(sfa_tmem_addr), "r"(sfb_tmem_addr){sp_tmem_addr_operand}
     );
 }}
 """
@@ -2157,8 +2158,8 @@ __forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_typ
     return cuda_func_call(*args, source_code=source_code)
 
 
-@register_codegen("ptx_tcgen05_mma_block_scaled")
-def codegen_ptx_tcgen05_mma_block_scaled(
+@register_codegen("ptx_tcgen05_mma_block_scale")
+def codegen_ptx_tcgen05_mma_block_scale(
     d_dtype,
     a_dtype,
     b_dtype,
@@ -2966,6 +2967,21 @@ __forceinline__ __device__ T {func_name}(T* address, T compare, T val) {{
     return cuda_func_call(
         func_name, ptr, old_val, new_val, source_code=source_code, return_type=old_val.dtype
     )
+
+
+@register_codegen("cuda_printf")
+def codegen_cuda_printf(fmt, *args):
+    func_name = "tvm_builtin_cuda_printf"
+    if isinstance(fmt, tvm.tir.StringImm):
+        fmt = fmt.value
+    fmt = repr(fmt)[1:-1]
+    source_code = f"""
+template<typename... Args>
+__forceinline__ __device__ void {func_name}(const char* fmt, Args... args) {{
+    printf(fmt, args...);
+}}
+"""
+    return cuda_func_call(func_name, fmt, *args, source_code=source_code)
 
 
 ########################################################

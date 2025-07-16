@@ -80,6 +80,7 @@ from .op import (
     simdgroup_multiply_accumulate,
     simdgroup_store,
 )
+from .op import cuda_printf
 from .op import (
     timer_init_cuda,
     timer_start_cuda,

@@ -7365,6 +7365,24 @@ def cuda_nano_sleep(time):
     return call_intrin("", "tir.cuda_nano_sleep", time)
 
 
+def cuda_printf(fmt, *args):
+    """TVM intrinsic to call cuda printf instruction
+
+    Parameters
+    ----------
+    fmt: str
+        The format string.
+
+    *args: list
+        The arguments to the format string.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_printf", fmt, *args)
+
 def ptx_ld_global_acquire(res, addr):
     """TVM intrinsic to call ptx ld.global.acquire instruction
 
