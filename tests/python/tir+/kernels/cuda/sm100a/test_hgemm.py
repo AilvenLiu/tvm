@@ -244,9 +244,11 @@ def test_tcgen05_mma_ss_tma():
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
                 descI = T.local_cell("uint32")
+                base_desc_A = T.local_cell("uint64")
+                base_desc_B = T.local_cell("uint64")
                 tma2mma_pipe = T.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))
                 mma2ld_pipe = T.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))
-                mma2ld_pipe.init(c2p_thread_count=128 * 2)
+                mma2ld_pipe.init(c2p_thread_count=128 * 2, p2c_thread_count=2)
                 tma2mma_pipe.init(c2p_thread_count=NUM_CONSUMER)
                 ptr: T.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret("handle", T.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
                 tma_finished = T.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
@@ -263,9 +265,6 @@ def test_tcgen05_mma_ss_tma():
                     with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
                         T.ptx.setmaxnreg(False, 56)
                         if warp_id == 3:
-                            # first_iter = T.alloc_buffer((1,), "bool", scope="local")
-                            first_iter = T.local_cell("bool")
-                            first_iter = True
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx) # represent cluster task id
                                 n_idx = T.meta_var(tile_scheduler.n_idx)
@@ -273,10 +272,6 @@ def test_tcgen05_mma_ss_tma():
                                     # GMEM -> SMEM
                                     if lane_id == 0:
                                         tma2mma_pipe.producer_wait(0)
-                                        if not first_iter and ko == PIPE_DEPTH - 1:
-                                            # wait for the completion of all the mma of the same tile
-                                            # and then notify the epilogue stage to load the result
-                                            T.ptx.mbarrier.arrive(mma2ld_pipe.mbar_p2c.ptr_to([0, 0]))
                                         T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 0, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + cbx) * BLK_M, cta_group=2)
                                         T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 1, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + 2 + cbx) * BLK_M, cta_group=2)
                                         T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), B_tensor_map, ko * BLK_K, n_idx * BLK_N + cbx * BLK_N // 2, cta_group=2)
@@ -284,14 +279,12 @@ def test_tcgen05_mma_ss_tma():
                                             # notify the mma stage that tma load is finished
                                             T.ptx.mbarrier.arrive.expect_tx(tma_finished.ptr_to([tma2mma_pipe.idx]), (BLK_K * BLK_M * 2 * 2 + BLK_K * BLK_N) * 2)
                                         tma2mma_pipe.advance()
-                                first_iter = False  
                                 tile_scheduler.next_tile()
                             for i in range(PIPE_DEPTH):
                                 # wait for the completion of all the mma of the last tile
-                                tma2mma_pipe.producer_wait(0)
-                                tma2mma_pipe.advance()
-                            if lane_id == 0:
-                                T.ptx.mbarrier.arrive(mma2ld_pipe.mbar_p2c.ptr_to([0, 0]))
+                                if lane_id == 0:
+                                    tma2mma_pipe.producer_wait(0)
+                                    tma2mma_pipe.advance()
                         elif warp_id < NUM_CONSUMER:
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx) # represent cluster task id
@@ -304,18 +297,20 @@ def test_tcgen05_mma_ss_tma():
                                         for ko in T.serial(0, K // BLK_K):
                                             # wait for tma load to finish
                                             tma2mma_pipe.consumer_wait(0)
+                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_A), A_smem.ptr_to([tma2mma_pipe.idx, warp_id, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
+                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_B), B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)    
                                             for ki in range(BLK_K // MMA_K):
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([tma2mma_pipe.idx, warp_id, 0, ki * MMA_K]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([tma2mma_pipe.idx, 0, ki * MMA_K]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
+                                                descA = base_desc_A + ((ki * MMA_K * 2) >> 0x4)
+                                                descB = base_desc_B + ((ki * MMA_K * 2) >> 0x4)
                                                 if ki == 0 and ko == 0:
                                                     T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=False)
                                                 else:
                                                     T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=True)
                                             tma2mma_pipe.consumer_release(0)
                                             tma2mma_pipe.advance()
+                                        T.ptx.tcgen05.commit(mma2ld_pipe.mbar_p2c.ptr_to([0, 0]), cta_group=2, cta_mask=3)
                                         mma2ld_pipe.advance()
                                 tile_scheduler.next_tile()
-
                     with T.warpgroup()[0:NUM_CONSUMER]:
                         T.ptx.setmaxnreg(True, 224)
                         while tile_scheduler.valid():
@@ -336,13 +331,13 @@ def test_tcgen05_mma_ss_tma():
                                 for it in range(EPI_TILE // 8):
                                     for vec in T.vectorized(8):
                                         C_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
-                                T.ptx.bar.sync(wg_id, 128)
+                                T.ptx.bar.sync(wg_id+1, 128)
                                 T.ptx.fence.proxy(scope="shared")
                                 if lane_id == 0 and warp_id == 0:
                                     T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, n_idx * BLK_N + i * EPI_TILE, (m_idx * 4 + wg_id * 2 + cbx) * BLK_M)
                                     T.ptx.cp_async.bulk.commit_group()
                                     T.ptx.cp_async.bulk.wait_group(0)
-                                T.ptx.bar.sync(wg_id, 128)
+                                T.ptx.bar.sync(wg_id+1, 128)
                             mma2ld_pipe.advance()
                             tile_scheduler.next_tile()
                 # dealloc TMEM
