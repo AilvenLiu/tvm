@@ -293,6 +293,8 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
     else:
         raise ValueError(f"Invalid swizzle: {SWIZZLE}")
 
+    dyn_smem_bytes = 1024 + (M * K + N * K) * 2
+
     # fmt: off
     @T.prim_func(tirp=True)
     def test_mma_ss_no_tma(A: T.Buffer((M, K), a_type, layout=T.TileLayout((M, K))), 
@@ -304,15 +306,16 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
             lane_id = T.thread_id([32], parent="warp")
             tx = T.thread_id([128], parent="cta")
             with T.cta():
-                A_smem = T.alloc_buffer((M, K), a_type, scope="shared", layout=A_layout)
-                B_smem = T.alloc_buffer((N, K), b_type, scope="shared", layout=B_layout)
+                dyn = T.alloc_buffer((dyn_smem_bytes,), "uint8", scope="shared")
+                tmem_addr = T.decl_cell("uint32", dyn.data, scope="shared", elem_offset=0)
+                A_smem = T.decl_buffer((M, K), a_type, dyn.data, elem_offset=256, layout=A_layout)
+                B_smem = T.decl_buffer((N, K), b_type, dyn.data, elem_offset=256 + M*K, layout=B_layout)
+                bar = T.decl_buffer((1,), "uint64", dyn.data, scope="shared", elem_offset=8)
+
                 reg = T.alloc_buffer((N,), d_type, scope="local")
-                # tmem_addr = T.alloc_buffer((1,), "uint32", scope="shared", align=8)
-                tmem_addr = T.shared_cell("uint32")
                 descA = T.alloc_buffer((1,), "uint64", scope="local")
                 descB = T.alloc_buffer((1,), "uint64", scope="local")
                 descI = T.alloc_buffer((1,), "uint32", scope="local")
-                bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
                 phase = T.alloc_buffer((1,), "int32", scope="local")
 
                 # alloc TMEM

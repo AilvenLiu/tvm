@@ -64,7 +64,6 @@ def header_generator(tags):
             raise ValueError(f"Invalid tag: {tag}")
 
     header = ""
-
     if "nvshmem" in tags:
         header += R"""
 #include <nvshmem.h>
@@ -2824,7 +2823,9 @@ __forceinline__ __device__ int{bits}_t {func_name}() {{
 
 
 @register_codegen("timer_init_cuda")
-def codegen_timer_init_cuda(profiler_buffer, profiler_tag, profiler_write_offset, num_groups, group_id):
+def codegen_timer_init_cuda(
+    profiler_buffer, profiler_tag, profiler_write_offset, num_groups, group_id
+):
 
     func_name = "tvm_builtin_timer_init_cuda"
     source_code = f"""
@@ -2843,13 +2844,24 @@ __forceinline__ __device__ void {func_name}(uint64_t* profiler_buffer, uint64_t*
 }}
 """
     return cuda_func_call(
-        func_name, profiler_buffer, profiler_tag, profiler_write_offset, num_groups, group_id, source_code=source_code
+        func_name,
+        profiler_buffer,
+        profiler_tag,
+        profiler_write_offset,
+        num_groups,
+        group_id,
+        source_code=source_code,
     )
 
 
 @register_codegen("timer_start_cuda")
 def codegen_timer_start_cuda(
-    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond
+    event_type,
+    profiler_buffer,
+    profiler_tag,
+    profiler_write_offset,
+    profiler_write_stride,
+    leader_cond,
 ):
     func_name = "tvm_builtin_timer_start_cuda"
     source_code = f"""
@@ -2876,7 +2888,12 @@ __forceinline__ __device__ void {func_name}(int event_type, uint64_t* profiler_b
 
 @register_codegen("timer_end_cuda")
 def codegen_timer_end_cuda(
-    event_type, profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond
+    event_type,
+    profiler_buffer,
+    profiler_tag,
+    profiler_write_offset,
+    profiler_write_stride,
+    leader_cond,
 ):
     func_name = "tvm_builtin_timer_end_cuda"
     source_code = f"""
@@ -2998,7 +3015,7 @@ __forceinline__ __device__ int32_t {func_name}() {{
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, source_code=source_code, return_type="int32")
+    return cuda_func_call(func_name, source_code=source_code, return_type="int32"), ["nvshmem"]
 
 
 @register_codegen("nvshmem_n_pes")
@@ -3010,7 +3027,7 @@ __forceinline__ __device__ int32_t {func_name}() {{
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, source_code=source_code, return_type="int32")
+    return cuda_func_call(func_name, source_code=source_code, return_type="int32"), ["nvshmem"]
 
 
 @register_codegen("nvshmem_getmem_nbi")
@@ -3022,7 +3039,7 @@ __forceinline__ __device__ void {func_name}(void *dest, const void *source, size
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code)
+    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
 
 @register_codegen("nvshmem_putmem_nbi")
@@ -3034,7 +3051,7 @@ __forceinline__ __device__ void {func_name}(void *dest, const void *source, size
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code)
+    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
 
 @register_codegen("nvshmem_getmem_nbi_warp")
@@ -3046,7 +3063,7 @@ __forceinline__ __device__ void {func_name}(void *dest, const void *source, size
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code)
+    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
 
 @register_codegen("nvshmem_putmem_nbi_warp")
@@ -3058,7 +3075,7 @@ __forceinline__ __device__ void {func_name}(void *dest, const void *source, size
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code)
+    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
 
 @register_codegen("nvshmem_getmem_nbi_block")
@@ -3070,7 +3087,7 @@ __forceinline__ __device__ void {func_name}(void *dest, const void *source, size
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code)
+    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
 
 @register_codegen("nvshmem_putmem_nbi_block")
@@ -3082,7 +3099,7 @@ __forceinline__ __device__ void {func_name}(void *dest, const void *source, size
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code)
+    return cuda_func_call(func_name, dst, src, nelems, pe, source_code=source_code), ["nvshmem"]
 
 
 @register_codegen("nvshmem_signal_op")
@@ -3101,7 +3118,7 @@ __forceinline__ __device__ void {func_name}(uint64_t *sig_addr, uint64_t signal,
     assert sig_op in sig_op_val, f"Unsupported signal operation in nvshmem_signal_op: {sig_op}"
     return cuda_func_call(
         func_name, sig_addr, signal, sig_op_val.get(sig_op), pe, source_code=source_code
-    )
+    ), ["nvshmem"]
 
 
 @register_codegen("nvshmem_wait_until")
@@ -3123,7 +3140,9 @@ __forceinline__ __device__ void {func_name}({type} *ivar, int cmp, {type} cmp_va
     source_code = source_code.format(func_name=func_name, type=type_val.get(type)[0], TYPE=TYPE)
     cmp_val = {"eq": 0, "ne": 1, "gt": 2, "ge": 3, "lt": 4, "le": 5}
     assert cmp in cmp_val, f"Unsupported cmp operation in nvshmem_wait_until: {cmp}"
-    return cuda_func_call(func_name, ivar, cmp_val.get(cmp), cmp_value, source_code=source_code)
+    return cuda_func_call(func_name, ivar, cmp_val.get(cmp), cmp_value, source_code=source_code), [
+        "nvshmem"
+    ]
 
 
 @register_codegen("nvshmem_quiet")
@@ -3135,7 +3154,7 @@ __forceinline__ __device__ void {func_name}() {{
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, source_code=source_code)
+    return cuda_func_call(func_name, source_code=source_code), ["nvshmem"]
 
 
 @register_codegen("nvshmem_putmem_signal_nbi")
@@ -3162,7 +3181,7 @@ __forceinline__ __device__ void {func_name}(void *dest, const void *source, size
         sig_op_val.get(sig_op),
         pe,
         source_code=source_code,
-    )
+    ), ["nvshmem"]
 
 
 @register_codegen("nvshmem_putmem_signal_nbi_warp")
@@ -3189,7 +3208,7 @@ __forceinline__ __device__ void {func_name}(void *dest, const void *source, size
         sig_op_val.get(sig_op),
         pe,
         source_code=source_code,
-    )
+    ), ["nvshmem"]
 
 
 @register_codegen("nvshmem_putmem_signal_nbi_block")
@@ -3216,7 +3235,7 @@ __forceinline__ __device__ void {func_name}(void *dest, const void *source, size
         sig_op_val.get(sig_op),
         pe,
         source_code=source_code,
-    )
+    ), ["nvshmem"]
 
 
 @register_codegen("nvshmem_fence")
@@ -3228,7 +3247,7 @@ __forceinline__ __device__ void {func_name}() {{
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, source_code=source_code)
+    return cuda_func_call(func_name, source_code=source_code), ["nvshmem"]
 
 
 @register_codegen("nvshmem_barrier_all")
@@ -3240,4 +3259,4 @@ __forceinline__ __device__ void {func_name}() {{
 }}
 """
     source_code = source_code.format(func_name=func_name)
-    return cuda_func_call(func_name, source_code=source_code)
+    return cuda_func_call(func_name, source_code=source_code), ["nvshmem"]

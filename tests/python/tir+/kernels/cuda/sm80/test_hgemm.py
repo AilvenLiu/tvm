@@ -335,7 +335,7 @@ def test_hgemm_ampere():
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
 
-    target = tvm.target.Target.from_device(DEV)
+    target = tvm.target.Target("cuda")
     print(target)
 
     def tvm_gemm(func):

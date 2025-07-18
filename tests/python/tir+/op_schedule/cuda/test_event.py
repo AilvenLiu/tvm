@@ -40,7 +40,7 @@ def test_gpu_semaphore_init():
             with T.cta():
                 Tp.event_tensor_init(sem, init_value=128)
 
-    target = tvm.target.Target.from_device(tvm.cuda(0))
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gpu_semaphore_init})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
@@ -64,7 +64,7 @@ def test_gpu_semaphore_commit():
             with T.cta():
                 Tp.event_commit(sem[cta_id])
 
-    target = tvm.target.Target.from_device(tvm.cuda(0))
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gpu_semaphore_commit})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
@@ -90,7 +90,7 @@ def test_gpu_semaphore_wait():
             with T.cta()[64:128]:
                 Tp.event_wait(sem[cta_id - 64])
 
-    target = tvm.target.Target.from_device(tvm.cuda(0))
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": gpu_semaphore_wait})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")

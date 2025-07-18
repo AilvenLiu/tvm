@@ -138,7 +138,7 @@ def verify_cuda_code_string(func, expected_var_name):
 
 def test_print():
     DEV = tvm.cuda()
-    target = tvm.target.Target.from_device(DEV)
+    target = tvm.target.Target("cuda")
 
     def test_vector_add_1D(dtype, dtype_str):
         M = 6

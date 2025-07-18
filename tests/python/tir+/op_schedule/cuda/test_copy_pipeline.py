@@ -115,7 +115,7 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
     # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": copy_async})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
@@ -185,8 +185,10 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
             128,
             TileLayout((8192, 8192)),
             TileLayout((8192, 8192)),
-            lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (128, 64)) if dtype == "float16" else None,
-        )
+            lambda dtype, swizzle_len: (
+                tma_shared_layout(dtype, swizzle_len, (128, 64)) if dtype == "float16" else None
+            ),
+        ),
     ],
 )
 def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len):
@@ -238,7 +240,7 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len):
                     Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
 
     with target:
         mod = tvm.IRModule({"main": copy_async})
@@ -350,7 +352,7 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
                         Tp.copy(B[*r_gmem(stage)], A_smem[*r_smem])
     # fmt: on
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
 
     with target:
         mod = tvm.IRModule({"main": copy_async})
@@ -451,17 +453,19 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len):
                     pipeline.init()
                     for stage in range(n):
                         Tp.copy(A_smem[*r_smem], A[*r_gmem(stage)])
+                        T.ptx.fence.proxy("shared")
                         pipeline.copy(B[*r_gmem(stage)], A_smem[*r_smem])
                         pipeline.producer_commit()
                         pipeline.consumer_wait(0)
                         T.tvm_storage_sync("shared")
     # fmt: on
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
 
     with target:
         mod = tvm.IRModule({"main": copy_async})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        print(mod.mod.imported_modules[0].get_source())
 
         np.random.seed(0)
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
@@ -533,7 +537,7 @@ def test_copy_pipeline_no_specialize_cta_vec_load():
     # fmt: on
 
     DEV = tvm.cuda(0)
-    target = tvm.target.Target.from_device(DEV)
+    target = tvm.target.Target("cuda")
 
     with target:
         mod = tvm.IRModule({"main": test})

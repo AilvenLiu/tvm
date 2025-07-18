@@ -88,7 +88,7 @@ def test_unary_op_shared(input, op_type, dtype):
 
         return A_ref
 
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
     with target:
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(dtype)
@@ -257,7 +257,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
 
         return A_ref
 
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
     with target:
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(dtype)
@@ -377,7 +377,7 @@ def test_unary_op_local(input, op_type, dtype):
 
     # fmt: on
 
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": test_unary})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
@@ -520,7 +520,7 @@ def test_binary_op_local(input, op_type, dtype):
 
     # fmt: on
 
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": test_broadcast_and_apply_const})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")

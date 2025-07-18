@@ -135,7 +135,7 @@ def test_copy_g2s_s2g_cta(task, dtype):
     # fmt: on
 
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": copy_sync})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")

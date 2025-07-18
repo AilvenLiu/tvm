@@ -415,7 +415,7 @@ class _Rewriter(PyExprMutator):
             None,
             new_buffer_map,
             tvm.ir.make_node(
-                "DictAttrs", is_tirp=True, global_symbol=f"persistent_kernel_{self.cur_func_name}"
+                "ir.DictAttrs", is_tirp=True, global_symbol=f"persistent_kernel_{self.cur_func_name}"
             ),
         )
         new_gvar = self.builder_.add_func(new_prim_func, f"persistent_kernel_{self.cur_func_name}")

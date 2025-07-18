@@ -110,7 +110,7 @@ def test_reduction_op_shared(input, op_type, dtype):
                 Tp.copy(B[*copy_slice_b], B_smem[*copy_slice_b])
     # fmt: on
 
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": test_reduction})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
@@ -250,7 +250,7 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
 
     # fmt: on
 
-    target = tvm.target.Target.from_device(dev)
+    target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": test_reduction})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")

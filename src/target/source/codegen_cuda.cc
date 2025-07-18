@@ -195,11 +195,6 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
 }
 
 std::string CodeGenCUDA::Finish() {
-  // check for nvshmem
-  static auto nvshmem_init_hook = ffi::Function::GetGlobal("runtime.nvshmem.cumodule_init");
-  if (nvshmem_init_hook.has_value()) {
-    codegen_tags_.insert("nvshmem");
-  }
   // Generate header
   auto header_generator = ffi::Function::GetGlobal("tir.hw_ops.cuda.header_generator");
   TVM_FFI_ICHECK(header_generator.has_value()) << "tir.hw_ops.cuda.header_generator is not defined";
