@@ -609,8 +609,8 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
                ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
                ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
                Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views,
-               ffi::Array<BufferGet> buffer_gets, ffi::Array<Pipeline> pipelines,
-               ffi::Array<BaseEvent> events, ffi::Array<EventTensor> event_tensors) {
+               ffi::Array<BufferGet> buffer_gets, ffi::Array<BaseEvent> events,
+               ffi::Array<EventTensor> event_tensors) {
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = std::move(iter_vars);
   node->reads = std::move(reads);
@@ -625,7 +625,6 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
   node->span = std::move(span);
   node->buffer_views = std::move(buffer_views);
   node->buffer_gets = std::move(buffer_gets);
-  node->pipelines = std::move(pipelines);
   node->events = std::move(events);
   node->event_tensors = std::move(event_tensors);
   data_ = std::move(node);
@@ -633,8 +632,8 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
 
 SBlock::SBlock(ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_scope,
                ffi::Array<Buffer> alloc_buffers, ffi::Array<BufferView> buffer_views,
-               ffi::Array<BufferGet> buffer_gets, ffi::Array<Pipeline> pipelines,
-               ffi::Array<BaseEvent> events, ffi::Array<EventTensor> event_tensors, Span span) {
+               ffi::Array<BufferGet> buffer_gets, ffi::Array<BaseEvent> events,
+               ffi::Array<EventTensor> event_tensors, Span span) {
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = {};
   node->reads = {};
@@ -649,7 +648,6 @@ SBlock::SBlock(ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_s
   node->span = std::move(span);
   node->buffer_views = std::move(buffer_views);
   node->buffer_gets = std::move(buffer_gets);
-  node->pipelines = std::move(pipelines);
   node->events = std::move(events);
   node->event_tensors = std::move(event_tensors);
   data_ = std::move(node);
@@ -664,10 +662,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
          ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
          ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
          Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views,
-         ffi::Array<BufferGet> buffer_gets, ffi::Array<Pipeline> pipelines,
-         ffi::Array<BaseEvent> events, ffi::Array<EventTensor> event_tensors) {
+         ffi::Array<BufferGet> buffer_gets, ffi::Array<BaseEvent> events,
+         ffi::Array<EventTensor> event_tensors) {
         return SBlock(iter_vars, reads, writes, name_hint, body, init, alloc_buffers, match_buffers,
-                      annotations, span, exec_scope, buffer_views, buffer_gets, pipelines, events,
+                      annotations, span, exec_scope, buffer_views, buffer_gets, events,
                       event_tensors);
       });
 }

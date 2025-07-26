@@ -738,10 +738,6 @@ Pass LowerTIRp() {
     // Collect the extents of the ScopeIds for OpCall scheduling
     n->body = ScopeIdDefResolver::Resolve(n->body, target.value());
 
-    // // Decide the schedule strategy for pipeline ops, attach the strategy to the pipeline ops
-    // // Defer the actual schedule to the TIRp OpCall Scheduling pass
-    // n->body = PipelineOpScheduler::DecideStrategy(n->body, target.value());
-
     // TIRp OpCall Scheduling
     int max_try = 100;
     while (!NoOpCallVerifier::Verify(n->body, false)) {

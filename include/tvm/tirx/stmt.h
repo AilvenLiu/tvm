@@ -26,7 +26,6 @@
 
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/node/script_printer.h>
-#include <tvm/tirx/async_structs.h>
 #include <tvm/tirx/event.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/expr.h>
@@ -983,8 +982,6 @@ class SBlockNode : public StmtNode {
   Array<BufferView> buffer_views;
   // Local views of buffers
   Array<BufferGet> buffer_gets;
-  // Pipelines in the block
-  Array<Pipeline> pipelines;
   // Events in the block
   Array<BaseEvent> events;
   // Event tensors in the block
@@ -1005,7 +1002,6 @@ class SBlockNode : public StmtNode {
         .def_ro("exec_scope", &SBlockNode::exec_scope)
         .def_ro("buffer_views", &SBlockNode::buffer_views)
         .def_ro("buffer_gets", &SBlockNode::buffer_gets)
-        .def_ro("pipelines", &SBlockNode::pipelines)
         .def_ro("events", &SBlockNode::events, refl::AttachFieldFlag::SEqHashDef())
         .def_ro("event_tensors", &SBlockNode::event_tensors, refl::AttachFieldFlag::SEqHashDef());
   }
@@ -1027,7 +1023,6 @@ class SBlock : public Stmt {
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
       Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt,
       ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
-      ffi::Array<Pipeline> pipelines = ffi::Array<Pipeline>(),
       ffi::Array<BaseEvent> events = ffi::Array<BaseEvent>(),
       ffi::Array<EventTensor> event_tensors = ffi::Array<EventTensor>());
 
@@ -1036,7 +1031,6 @@ class SBlock : public Stmt {
                          ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
                          ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
                          ffi::Array<BufferGet> buffer_gets = ffi::Array<BufferGet>(),
-                         ffi::Array<Pipeline> pipelines = ffi::Array<Pipeline>(),
                          ffi::Array<BaseEvent> events = ffi::Array<BaseEvent>(),
                          ffi::Array<EventTensor> event_tensors = ffi::Array<EventTensor>(),
                          Span span = Span());
@@ -1395,6 +1389,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxxxxx
+}  // namespace tirxxxxxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

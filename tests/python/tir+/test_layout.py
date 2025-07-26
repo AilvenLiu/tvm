@@ -21,7 +21,7 @@ import pytest
 import tvm
 from tvm.tir.layout import TileLayout, Axis, SwizzleLayout, ComposeLayout
 from tvm.ir import assert_structural_equal
-from tvm.tirp.op_schedule.cuda.async_structs import tma_shared_layout, SwizzleMode
+from tvm.tirp.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
 
 
 def test_axis():

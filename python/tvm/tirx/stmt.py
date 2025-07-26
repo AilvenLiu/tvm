@@ -37,7 +37,6 @@ from tvm.runtime import NDArray, Object, Scriptable, const
 from tvm.tir import FloatImm
 
 from . import _ffi_api
-from .async_structs import Pipeline
 from .buffer import Buffer
 from .expr import IterVar, StringImm, Var
 from .exec_scope import ExecScope
@@ -568,9 +567,6 @@ class SBlock(Stmt):
     annotations: Optional[Mapping[str, Object]]
         Additional annotation hints.
 
-    pipelines: List[tvm.tir.async_structs.Pipeline]
-        The pipelines in the block.
-
     event: List["tvm.tir.event.Event"]
         The events in the block.
 
@@ -593,7 +589,6 @@ class SBlock(Stmt):
     exec_scope: ExecScope | None
     buffer_views: list[BufferView]
     buffer_gets: list[BufferGet]
-    pipelines: list[Pipeline]
     events: list["tvm.tir.event.Event"]
     event_tensors: list["tvm.tir.event.EventTensor"]
     span: Span | None
@@ -613,7 +608,6 @@ class SBlock(Stmt):
         exec_scope: ExecScope | None = None,
         buffer_views: list[BufferView] | None = None,
         buffer_gets: list[BufferGet] | None = None,
-        pipelines: list[Pipeline] | None = None,
         events: list["tvm.tir.event.Event"] | None = None,
         event_tensors: list["tvm.tir.event.EventTensor"] | None = None,
     ) -> None:
@@ -627,8 +621,6 @@ class SBlock(Stmt):
             buffer_views = []
         if buffer_gets is None:
             buffer_gets = []
-        if pipelines is None:
-            pipelines = []
         if events is None:
             events = []
         if event_tensors is None:
@@ -648,7 +640,6 @@ class SBlock(Stmt):
             exec_scope,
             buffer_views,
             buffer_gets,
-            pipelines,
             events,
             event_tensors,
         )  # type: ignore

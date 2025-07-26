@@ -28,7 +28,6 @@ from tvm.tirp.operator import EventInit, EventCommit, EventWait
 from tvm.tir.event import (
     EventImpl,
     SemaphoreEvent,
-    BulkGroupEvent,
     EventTensor,
     EventTensorItem,
     BaseEvent,

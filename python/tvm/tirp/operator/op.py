@@ -22,7 +22,6 @@ from typing import List
 from tvm.tir.stmt import OpCall
 from tvm.tir import PrimExpr, BufferRegion, FloatImm, IntImm
 from tvm.ir import Op
-from tvm.tir.async_structs import Pipeline
 from tvm.tir.predicate import Predicate
 from tvm.tir import event
 from tvm.tir.event import BaseEvent
@@ -166,31 +165,6 @@ class ReduceOp(OpCall):
         assert isinstance(
             self.accum, (bool, IntImm)
         ), f"{self} expects bool or IntImm as accum, got {self.accum}"
-
-
-class PipelineOp(OpCall):
-    """Base class for pipeline operators.
-
-    Pipeline operators manage the execution pipeline for tensor operations.
-    """
-
-    pipeline = ArgProperty(0)
-
-    @property
-    def srcs(self) -> List[PrimExpr]:
-        """Get the source expressions (inputs) of the operator."""
-        return []
-
-    @property
-    def dsts(self) -> List[PrimExpr]:
-        """Get the destination expressions (outputs) of the operator."""
-        return []
-
-    def validate(self) -> None:
-        """Validate that the operator has the correct number and types of arguments."""
-        assert isinstance(
-            self.pipeline, Pipeline
-        ), f"{self} expects Pipeline as argument, got {self.pipeline}"
 
 
 ### Schedule Operators ###
@@ -441,66 +415,6 @@ class Select(BinaryOp):
         assert isinstance(
             self.predicate, Predicate
         ), f"{self} expects Predicate as predicate, got {self.predicate}"
-
-
-### Pipeline Ops ###
-class PipelineInit(PipelineOp):
-    """Initialize a pipeline."""
-
-    op = get_tirp_op("pipeline_init")
-
-
-class PipelineProducerAcquire(PipelineOp):
-    """Acquire a producer slot in the pipeline."""
-
-    op = get_tirp_op("pipeline_producer_acquire")
-
-
-class PipelineCopy(PipelineOp):
-    """Copy data through the pipeline from src to dst."""
-
-    op = get_tirp_op("pipeline_copy")
-    input = ArgProperty(2)
-    output = ArgProperty(1)
-
-    @property
-    def srcs(self) -> List[PrimExpr]:
-        """Get the source buffer region."""
-        return [self.input]
-
-    @property
-    def dsts(self) -> List[PrimExpr]:
-        """Get the destination buffer region."""
-        return [self.output]
-
-    def validate(self) -> None:
-        """Validate that the operator has the correct number and types of arguments."""
-        super().validate()
-        assert len(self.args) == 3, f"{self} expects 3 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.output, BufferRegion
-        ), f"{self} expects BufferRegion as output, got {self.output}"
-        assert isinstance(
-            self.input, BufferRegion
-        ), f"{self} expects BufferRegion as input, got {self.input}"
-
-
-class PipelineProducerCommit(PipelineOp):
-    """Commit a producer operation in the pipeline."""
-
-    op = get_tirp_op("pipeline_producer_commit")
-
-
-class PipelineConsumerWait(PipelineOp):
-    """Wait for data to be available for consumption in the pipeline."""
-
-    op = get_tirp_op("pipeline_consumer_wait")
-
-
-class PipelineConsumerRelease(PipelineOp):
-    """Release a consumer slot after data has been consumed."""
-
-    op = get_tirp_op("pipeline_consumer_release")
 
 
 class EventInit(OpCall):

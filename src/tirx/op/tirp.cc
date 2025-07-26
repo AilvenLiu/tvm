@@ -135,17 +135,6 @@ TIRP_DEFINE_SCHEDULE_OP(select);
 
 TIRP_DEFINE_COMPOSE_OP(compose_op);
 
-/********************* Pipeline Ops **********************/
-#define TIRP_DEFINE_PIPELINE_OP(OpName) \
-  TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsPipelineOp", Bool(true))
-
-TIRP_DEFINE_PIPELINE_OP(pipeline_init);
-TIRP_DEFINE_PIPELINE_OP(pipeline_producer_acquire);
-TIRP_DEFINE_PIPELINE_OP(pipeline_copy);
-TIRP_DEFINE_PIPELINE_OP(pipeline_producer_commit);
-TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_wait);
-TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_release);
-
 /********************* Event Ops **********************/
 #define TIRP_DEFINE_EVENT_OP(OpName) TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsEventOp", Bool(true))
 

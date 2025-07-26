@@ -23,7 +23,6 @@
 #include <tvm/ffi/container/variant.h>
 #include <tvm/script/ir_builder/base.h>
 #include <tvm/script/ir_builder/tir/frame.h>
-#include <tvm/tirx/async_structs.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/layout.h>
 #include <tvm/tirx/op.h>
@@ -39,7 +38,6 @@ using tvm::ffi::Variant;
 using tvm::runtime::Tensor;
 using tvm::tirx::Buffer;
 using tvm::tirx::ExecScope;
-using tvm::tirx::Pipeline;
 using tvm::tirx::TLayout;
 using tvm::tirx::Var;
 
@@ -242,16 +240,6 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::
                          ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
                          ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt,
                          ffi::Array<Integer> allocated_addr = {});
-
-/*!
- * \brief The pipeline allocation function.
- * \param thread_scope The thread scope of the pipeline.
- * \param depth The depth of the pipeline.
- * \param specialize whether the pipeline has specialized producer/consumer threads.
- * \param name_hint The name hint of the pipeline.
- */
-Pipeline AllocPipeline(ExecScope thread_scope, size_t depth, bool specialize,
-                       ffi::String name_hint = "");
 
 namespace axis {
 /*!
@@ -618,7 +606,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -21,7 +21,7 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.async_structs import CopyPipeline
+from tvm.tir.event import EventImpl
 from ..utils import bench, ProtonContext
 
 
@@ -84,12 +84,10 @@ def test_layernorm(dtype):
                 Tp.copy(norm_weight_smem[:], norm_weight[:])
 
                 # two cp.async
-                pipeline = Tp.alloc_copy_pipeline("cta", depth=0, separate_pc=False,
-                                                  schedule_config={CopyPipeline.StrategyKind.IMPL: CopyPipeline.Impl.VEC_LOAD})
-                pipeline.copy(x_smem[:, 0, :], inp[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :])
-                pipeline.producer_commit()
-                pipeline.copy(resid_smem[:, 0, :], inp_resid[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :])
-                pipeline.producer_commit()
+                event = Tp.alloc_bulk_group_event(EventImpl.kCpAsync, state=[])
+                Tp.copy_async(x_smem[:, 0, :], inp[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], event)
+                Tp.copy_async(resid_smem[:, 0, :], inp_resid[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], event)
+                event.commit()
                 T.tvm_storage_sync("shared")
 
                 # main loop
@@ -100,11 +98,10 @@ def test_layernorm(dtype):
 
                     if k < n_loops - 1:
                         # TODO(@kathy): support pipeline token flip when pipeline is long
-                        pipeline.copy(x_smem[:, 1, :], inp[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :])
-                        pipeline.producer_commit()
-                        pipeline.copy(resid_smem[:, 1, :], inp_resid[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :])
-                        pipeline.producer_commit()
-                    pipeline.consumer_wait(0)
+                        Tp.copy_async(x_smem[:, 1, :], inp[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], event)
+                        Tp.copy_async(resid_smem[:, 1, :], inp_resid[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], event)
+                        event.commit()
+                    event.wait(0)
                     T.tvm_storage_sync("shared")
 
                     # store residual

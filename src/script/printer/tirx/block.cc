@@ -227,18 +227,6 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   }
 
   /*********** tir+ ***********/
-  for (size_t i = 0; i < block->pipelines.size(); ++i) {
-    tir::Pipeline pipeline = block->pipelines[i];
-    if (pipeline->IsInstance<tir::CopyPipelineNode>()) {
-      ObjectPath pipeline_p = block_p->Attr("pipelines")->ArrayIndex(i);
-      IdDoc lhs = DefinePipeline(pipeline, *frame, d);
-      ExprDoc rhs = PipelineDecl(pipeline, "alloc_copy_pipeline", pipeline_p, d);
-      (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
-    } else {
-      LOG(FATAL) << "ValueError: Unknown Pipeline type in block signature: "
-                 << pipeline->GetTypeKey();
-    }
-  }
   // event
   for (size_t i = 0; i < block->events.size(); ++i) {
     tir::BaseEvent event = block->events[i];

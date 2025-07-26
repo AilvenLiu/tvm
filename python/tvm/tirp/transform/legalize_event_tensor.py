@@ -55,7 +55,6 @@ class EventTensorReplacer(BufferReplacer):
                 exec_scope=op.exec_scope,
                 buffer_views=op.buffer_views,
                 buffer_gets=op.buffer_gets,
-                pipelines=op.pipelines,
             )
         return op
 

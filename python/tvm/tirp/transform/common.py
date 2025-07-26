@@ -136,7 +136,6 @@ class BufferReplacer(StmtExprMutator):
                 exec_scope=op.exec_scope,
                 buffer_views=new_buffer_views,
                 buffer_gets=new_buffer_gets,
-                pipelines=op.pipelines,
             )
         return op
 

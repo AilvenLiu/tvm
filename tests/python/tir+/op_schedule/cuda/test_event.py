@@ -27,7 +27,7 @@ from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
 from tvm.tir.layout import TileLayout
 
-from tvm.tirp.op_schedule.cuda.async_structs import (
+from tvm.tirp.op_schedule.cuda.copy_async import (
     tma_shared_layout,
     tma_atom_layout,
     tma_atom_shape,

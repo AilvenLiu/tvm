@@ -37,7 +37,6 @@ namespace tirx {
 
 using tvm::tirx::BaseEvent;
 using tvm::tirx::BulkGroupEvent;
-using tvm::tirx::CopyPipeline;
 using tvm::tirx::EventTensor;
 using tvm::tirx::EventTensorItem;
 using tvm::tirx::IterVar;
@@ -243,7 +242,6 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
   n->scope_slice_extents = scope_slice_extents;
   n->buffer_views.clear();
   n->buffer_gets.clear();
-  n->pipelines.clear();
   return SBlockFrame(n);
 }
 
@@ -483,23 +481,6 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
   return buffer;
 }
 
-CopyPipeline AllocCopyPipeline(ExecScope thread_scope, size_t depth, bool separate_pc,
-                               String name_hint, Map<String, Buffer> workspace,
-                               Map<String, ffi::Any> schedule_config) {
-  CopyPipeline pipeline = tvm::tirx::CopyPipeline(thread_scope, depth, separate_pc, name_hint,
-                                                 workspace, schedule_config);
-  IRBuilder builder = IRBuilder::Current();
-  if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
-    frame.value()->pipelines.push_back(pipeline);
-  } else if (Optional<BlockFrame> frame = builder->FindFrame<BlockFrame>()) {
-    frame.value()->pipelines.push_back(pipeline);
-  } else {
-    TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_copy_pipeline' is "
-                  "called under T.block()";
-  }
-  return pipeline;
-}
-
 SemaphoreEvent AllocSemaphoreEvent(int exp_count, kEventImpl impl, Array<ffi::Any> state,
                                    String name) {
   SemaphoreEvent event = SemaphoreEvent(exp_count, impl, state, name);
@@ -507,7 +488,7 @@ SemaphoreEvent AllocSemaphoreEvent(int exp_count, kEventImpl impl, Array<ffi::An
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->events.push_back(event);
   } else {
-    LOG(FATAL) << "ValueError: Block frame not find. Please ensure 'T.alloc_semaphore_event' is "
+    TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_semaphore_event' is "
                   "called under T.block()";
   }
   return event;
@@ -519,7 +500,7 @@ BulkGroupEvent AllocBulkGroupEvent(kEventImpl impl, Array<ffi::Any> state, Strin
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->events.push_back(event);
   } else {
-    LOG(FATAL) << "ValueError: Block frame not find. Please ensure 'T.alloc_bulk_group_event' is "
+    TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_bulk_group_event' is "
                   "called under T.block()";
   }
   return event;
@@ -531,7 +512,7 @@ EventTensor AllocEventTensor(SemaphoreEvent event, Array<PrimExpr> shape) {
   if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
     frame.value()->event_tensors.push_back(event_tensor);
   } else {
-    LOG(FATAL) << "ValueError: Block frame not find. Please ensure 'T.alloc_event_tensor' is "
+    TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_event_tensor' is "
                   "called under T.block()";
   }
   return event_tensor;
@@ -984,20 +965,6 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     });
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<tvm::tirx::PipelineNode>([](const ObjectRef& node, ffi::String name) -> void {
-      using namespace tvm::tir;
-      PipelineNode* pipeline = const_cast<PipelineNode*>(node.as<PipelineNode>());
-      pipeline->name_hint = name;
-    });
-
-TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<tvm::tirx::CopyPipelineNode>([](const ObjectRef& node, ffi::String name) -> void {
-      using namespace tvm::tir;
-      CopyPipelineNode* pipeline = const_cast<CopyPipelineNode*>(node.as<CopyPipelineNode>());
-      pipeline->name_hint = name;
-    });
-
-TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     .set_dispatch<tvm::tirx::SizeVarNode>([](const ObjectRef& node, ffi::String name) -> void {
       using namespace tvm::tir;
       SizeVarNode* var = const_cast<SizeVarNode*>(node.as<SizeVarNode>());
@@ -1064,7 +1031,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.Writes", Writes)
       .def("script.ir_builder.tir.BlockAttrs", BlockAttrs)
       .def("script.ir_builder.tir.SBlockAllocBuffer", SBlockAllocBuffer)
-      .def("script.ir_builder.tir.AllocCopyPipeline", AllocCopyPipeline)
+      .def("script.ir_builder.tir.AllocBuffer", AllocBuffer)
       .def("script.ir_builder.tir.AllocSemaphoreEvent", AllocSemaphoreEvent)
       .def("script.ir_builder.tir.AllocBulkGroupEvent", AllocBulkGroupEvent)
       .def("script.ir_builder.tir.AllocEventTensor", AllocEventTensor)
@@ -1242,7 +1209,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 });
 
-}  // namespace tirxx
+}  // namespace tirxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

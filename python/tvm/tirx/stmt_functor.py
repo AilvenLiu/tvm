@@ -710,7 +710,6 @@ class StmtMutator(StmtFunctor):
             op.exec_scope,
             op.buffer_views,
             op.buffer_gets,
-            op.pipelines,
             op.events,
             op.event_tensors,
         )

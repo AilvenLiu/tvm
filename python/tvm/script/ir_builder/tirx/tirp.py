@@ -18,7 +18,6 @@
 from typing import Union, Optional, Dict, Any, Tuple, Callable, List
 from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
-from tvm.tirx.async_structs import CopyPipeline
 from tvm.tirx.event import BaseEvent
 from tvm.tirx.exec_scope import ExecScope
 from tvm.tirx.expr import FloatImm
@@ -695,51 +694,6 @@ def exp(
     )
 
 
-def alloc_copy_pipeline(
-    thread_scope: ExecScope,
-    depth: int,
-    separate_pc: bool,
-    name_hint: str = "",
-    workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
-) -> CopyPipeline:
-    """The copy pipeline allocation function.
-
-    Parameters
-    ----------
-    thread_scope : ExecScope
-        The thread scope of the pipeline.
-
-    depth : int
-        The depth of the pipeline.
-
-    separate_pc : bool
-        The flag whether the pipeline is separate pc.
-
-    name_hint : str
-        The name hint of the pipeline.
-
-    workspace : Optional[Dict[str, Buffer]]
-        The workspace of the operator.
-
-    Returns
-    -------
-    res : CopyPipeline
-        The allocated copy pipeline.
-    """
-    if workspace is None:
-        workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
-    if isinstance(thread_scope, str):
-        thread_scope = ExecScope(thread_scope)
-    else:
-        assert isinstance(thread_scope, ExecScope)
-    return _ffi_api.AllocCopyPipeline(  # pylint: disable=no-member
-        thread_scope, depth, separate_pc, name_hint, workspace, schedule_config
-    )
-
-
 def compose_op(
     workspace: Dict[str, Buffer] = None, schedule_config: Dict[str, Any] = None
 ) -> frame.ComposeOpFrame:
@@ -1107,7 +1061,6 @@ __all__ = [
     "sum",
     "max",
     "min",
-    "alloc_copy_pipeline",
     "compose_op",
     "maximum",
     "minimum",
