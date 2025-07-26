@@ -571,6 +571,12 @@ class SBlock(Stmt):
     pipelines: List[tvm.tir.async_structs.Pipeline]
         The pipelines in the block.
 
+    event: List["tvm.tir.event.Event"]
+        The events in the block.
+
+    event_tensors: List["tvm.tir.event.EventTensor"]
+        The event tensors in the block.
+
     span : Optional[Span]
         The location of this block in the source code.
     """
@@ -588,6 +594,8 @@ class SBlock(Stmt):
     buffer_views: list[BufferView]
     buffer_gets: list[BufferGet]
     pipelines: list[Pipeline]
+    events: list["tvm.tir.event.Event"]
+    event_tensors: list["tvm.tir.event.EventTensor"]
     span: Span | None
 
     def __init__(
@@ -606,6 +614,8 @@ class SBlock(Stmt):
         buffer_views: list[BufferView] | None = None,
         buffer_gets: list[BufferGet] | None = None,
         pipelines: list[Pipeline] | None = None,
+        events: list["tvm.tir.event.Event"] | None = None,
+        event_tensors: list["tvm.tir.event.EventTensor"] | None = None,
     ) -> None:
         if alloc_buffers is None:
             alloc_buffers = []
@@ -619,6 +629,10 @@ class SBlock(Stmt):
             buffer_gets = []
         if pipelines is None:
             pipelines = []
+        if events is None:
+            events = []
+        if event_tensors is None:
+            event_tensors = []
         self.__init_handle_by_constructor__(
             _ffi_api.SBlock,  # type: ignore
             iter_vars,
@@ -635,6 +649,8 @@ class SBlock(Stmt):
             buffer_views,
             buffer_gets,
             pipelines,
+            events,
+            event_tensors,
         )  # type: ignore
 
 

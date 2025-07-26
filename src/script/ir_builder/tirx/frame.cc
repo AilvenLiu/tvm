@@ -115,7 +115,7 @@ void SBlockFrameNode::ExitWithScope() {
   tvm::tirx::SBlock block(iter_vars, reads.value_or(ffi::Array<tvm::tirx::BufferRegion>()),
                          writes.value_or(ffi::Array<tvm::tirx::BufferRegion>()), name, AsStmt(stmts),
                          init, tir_alloc_buffers, match_buffers, attrs, tvm::Span(), exec_scope,
-                         buffer_views, buffer_gets, pipelines);
+                         buffer_views, buffer_gets, pipelines, events, event_tensors);
   if (no_realize) {
     TVM_FFI_CHECK(iter_values.empty(), ValueError)
         << "Block bindings are not allowed when `no_realize=True`";

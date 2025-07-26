@@ -19,6 +19,8 @@ from .registry import ScheduleContext, register_schedule
 from .cuda.copy import *
 from .cuda.async_structs import *
 from .cuda.reduction import *
+from .cuda.event import *
+from .cuda.copy_async import *
 from .trn import *
 
 __all__ = ["ScheduleContext", "register_schedule"]

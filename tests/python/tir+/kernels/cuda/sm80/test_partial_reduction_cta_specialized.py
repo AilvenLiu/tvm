@@ -20,6 +20,7 @@ import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
+from tvm.tir.event import EventImpl
 from typing import Tuple
 import functools
 
@@ -169,17 +170,22 @@ def partial_reduction_fused(A: T.handle, B: T.handle, C: T.handle, semaphore: T.
                 Tp.sum(C_smem, B_smem)
                 Tp.copy(C_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, 0], C_smem)
                 stage2_scheduler.next_tile()
-                
+
+ 
 @T.prim_func(tirp=True)
 def partial_reduction_fused_event(A: T.handle, B: T.handle, C: T.handle, semaphore: T.handle):
     A_ptr = T.match_buffer(A, (M, N), "float32", layout="default")
     B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32", layout="default")
     C_ptr = T.match_buffer(C, (M, 1), "float32", layout="default")
-    sem = T.match_buffer(semaphore, (NUM_BLOCK_M, ), scope="global.semaphore", dtype="event_i32", layout="default")
-    
+    sem_buf = T.match_buffer(semaphore, (NUM_BLOCK_M, ), scope="global", dtype="int32")
+
     with T.kernel():
         bx = T.cta_id([TOTAL_SM_CNT], parent="kernel")
         tx = T.thread_id([1024], parent="cta")
+
+        state = T.alloc_local((1,), "int32")
+        sem = Tp.alloc_semaphore_event_tensor(NUM_BLOCK_M, EventImpl.kGlobalSemaphore, state=[sem_buf, state], shape=[NUM_BLOCK_M])
+
         with T.cta()[0: STAGE_1_SM_CNT]:
             A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared", layout="default")
             B_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared", layout="default")
@@ -191,7 +197,7 @@ def partial_reduction_fused_event(A: T.handle, B: T.handle, C: T.handle, semapho
                 Tp.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])                
                 Tp.sum(B_smem, A_smem)
                 Tp.copy(B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx], B_smem)
-                Tp.event_commit(sem[m_idx])
+                sem[m_idx].commit()
                 stage1_scheduler.next_tile()
         with T.cta()[STAGE_1_SM_CNT: TOTAL_SM_CNT]:
             B_smem = T.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared", layout="default")
@@ -200,14 +206,14 @@ def partial_reduction_fused_event(A: T.handle, B: T.handle, C: T.handle, semapho
             stage2_scheduler.init(bx - STAGE_1_SM_CNT)
             while stage2_scheduler.valid():
                 m_idx = T.meta_var(stage2_scheduler.m_idx[0])
-                Tp.event_wait(sem[m_idx])
+                sem[m_idx].wait()
                 Tp.copy(B_smem, B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, :])
                 Tp.sum(C_smem, B_smem)
                 Tp.copy(C_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, 0], C_smem)
                 stage2_scheduler.next_tile()                
-
-
 # fmt: on
+
+
 @tvm.testing.requires_cuda_compute_version(8)
 def test_partial_reduction():
     A_np = np.random.randn(M, N).astype(np.float32)

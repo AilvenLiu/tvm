@@ -642,7 +642,7 @@ def tvm_thread_invariant(cond):
     return call_intrin(cond.dtype, "tirx.tvm_thread_invariant", cond)
 
 
-def tvm_storage_sync(storage_scope):
+def tvm_storage_sync(storage_scope, is_load=False, num_blocks=-1):
     """Perform synchronization in specified scope.
 
     Parameters
@@ -650,12 +650,29 @@ def tvm_storage_sync(storage_scope):
     storage_scope : str
         The storage scope to perform synchronization.
 
+    is_load : bool
+        Whether to perform load synchronization. (for global sync only)
+
+    num_blocks : int
+        The number of blocks to synchronize. (for global sync only)
+
     Returns
     -------
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("void", "tir.tvm_storage_sync", storage_scope)
+    return call_intrin("void", "tir.tvm_storage_sync", storage_scope, is_load, num_blocks)
+
+
+def tvm_global_barrier_kinit():
+    """Initialize the global barrier.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("void", "tir.tvm_global_barrier_kinit")
 
 
 def tvm_warp_shuffle(mask, value, warp_id, width, warp_size):
@@ -7382,6 +7399,7 @@ def cuda_printf(fmt, *args):
         The call expression.
     """
     return call_intrin("", "tir.cuda_printf", fmt, *args)
+
 
 def ptx_ld_global_acquire(res, addr):
     """TVM intrinsic to call ptx ld.global.acquire instruction

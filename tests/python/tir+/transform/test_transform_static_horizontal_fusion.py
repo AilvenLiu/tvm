@@ -137,6 +137,7 @@ def test_two_stage_reduction():
     mod = relax.transform.StaticHorizontalFusion(SM_CNT, {"mega_kernel": SpatialTileScheduler})(
         Before
     )
+    mod.show()
     mod_std = relax.transform.LowerCallTIRDevice()(Before)
 
     # testing correctness

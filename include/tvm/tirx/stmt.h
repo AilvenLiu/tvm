@@ -27,6 +27,7 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/node/script_printer.h>
 #include <tvm/tirx/async_structs.h>
+#include <tvm/tirx/event.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/layout.h>
@@ -703,7 +704,7 @@ class BreakNode : public StmtNode {
 
   void SHashReduce(SHashReducer hash_reduce) const {}
 
-  static constexpr const char* _type_key = "tir.Break";
+  static constexpr const char* _type_key = "tirx.Break";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
   static constexpr bool _type_has_method_visit_attrs = false;
@@ -736,7 +737,7 @@ class ContinueNode : public StmtNode {
 
   void SHashReduce(SHashReducer hash_reduce) const {}
 
-  static constexpr const char* _type_key = "tir.Continue";
+  static constexpr const char* _type_key = "tirx.Continue";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;
   static constexpr bool _type_has_method_visit_attrs = false;
@@ -984,6 +985,10 @@ class SBlockNode : public StmtNode {
   Array<BufferGet> buffer_gets;
   // Pipelines in the block
   Array<Pipeline> pipelines;
+  // Events in the block
+  Array<BaseEvent> events;
+  // Event tensors in the block
+  Array<EventTensor> event_tensors;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -1000,7 +1005,9 @@ class SBlockNode : public StmtNode {
         .def_ro("exec_scope", &SBlockNode::exec_scope)
         .def_ro("buffer_views", &SBlockNode::buffer_views)
         .def_ro("buffer_gets", &SBlockNode::buffer_gets)
-        .def_ro("pipelines", &SBlockNode::pipelines);
+        .def_ro("pipelines", &SBlockNode::pipelines)
+        .def_ro("events", &SBlockNode::events, refl::AttachFieldFlag::SEqHashDef())
+        .def_ro("event_tensors", &SBlockNode::event_tensors, refl::AttachFieldFlag::SEqHashDef());
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SBlock", SBlockNode, StmtNode);
 };
@@ -1020,7 +1027,9 @@ class SBlock : public Stmt {
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
       Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt,
       ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
-      ffi::Array<Pipeline> pipelines = ffi::Array<Pipeline>());
+      ffi::Array<Pipeline> pipelines = ffi::Array<Pipeline>(),
+      ffi::Array<BaseEvent> events = ffi::Array<BaseEvent>(),
+      ffi::Array<EventTensor> event_tensors = ffi::Array<EventTensor>());
 
   TVM_DLL explicit SBlock(ffi::String name_hint, Stmt body,
                          ffi::Optional<ExecScope> exec_scope = std::nullopt,
@@ -1028,6 +1037,8 @@ class SBlock : public Stmt {
                          ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
                          ffi::Array<BufferGet> buffer_gets = ffi::Array<BufferGet>(),
                          ffi::Array<Pipeline> pipelines = ffi::Array<Pipeline>(),
+                         ffi::Array<BaseEvent> events = ffi::Array<BaseEvent>(),
+                         ffi::Array<EventTensor> event_tensors = ffi::Array<EventTensor>(),
                          Span span = Span());
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SBlock, Stmt, SBlockNode);
@@ -1221,7 +1232,7 @@ constexpr const char* hand_threaded = "hand_threaded";
  *       if (mask & 1) the read region should be detected,
  *       if (mask & 2) the write region should be detected.
  */
-constexpr const char* script_parsing_detect_access = "tir.script_parsing_detect_access";
+constexpr const char* script_parsing_detect_access = "tirx.script_parsing_detect_access";
 
 /*!
  * \brief Mark that the loop should be partitioned.
@@ -1244,7 +1255,7 @@ constexpr const char* software_pipeline_async_stages = "software_pipeline_async_
 constexpr const char* layout_free_buffers = "layout_free_buffers";
 
 /*! \brief Mark the local stage for the shared memory access should be added. */
-constexpr const char* manifest_shared_memory_local_stage = "tir.manifest_shared_memory_local_stage";
+constexpr const char* manifest_shared_memory_local_stage = "tirx.manifest_shared_memory_local_stage";
 
 /*! \brief Mark the tiling structure of blocks that are applied by rule Multi-Level-Tiling */
 constexpr const char* meta_schedule_tiling_structure = "meta_schedule.tiling_structure";
@@ -1384,6 +1395,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

@@ -226,7 +226,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     (*frame)->stmts.push_back(doc);
   }
 
-  // tir+
+  /*********** tir+ ***********/
   for (size_t i = 0; i < block->pipelines.size(); ++i) {
     tir::Pipeline pipeline = block->pipelines[i];
     if (pipeline->IsInstance<tir::CopyPipelineNode>()) {
@@ -239,6 +239,33 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
                  << pipeline->GetTypeKey();
     }
   }
+  // event
+  for (size_t i = 0; i < block->events.size(); ++i) {
+    tir::BaseEvent event = block->events[i];
+    ObjectPath event_p = block_p->Attr("events")->ArrayIndex(i);
+    IdDoc lhs = DefineEvent(event, *frame, d);
+    std::string method;
+    if (event->IsInstance<tir::SemaphoreEventNode>()) {
+      method = "alloc_semaphore_event";
+    } else if (event->IsInstance<tir::BulkGroupEventNode>()) {
+      method = "alloc_bulk_group_event";
+    } else {
+      LOG(FATAL) << "ValueError: Unknown Event type in block signature: " << event->GetTypeKey();
+    }
+    ExprDoc rhs = EventDecl(event, method, event_p, d);
+    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
+  }
+  // event_tensor
+  for (size_t i = 0; i < block->event_tensors.size(); ++i) {
+    tir::EventTensor event_tensor = block->event_tensors[i];
+    ObjectPath event_tensor_p = block_p->Attr("event_tensors")->ArrayIndex(i);
+    IdDoc lhs = DefineEventTensor(event_tensor, *frame, d);
+    std::string method;
+    method = "alloc_semaphore_event_tensor";
+    ExprDoc rhs = EventTensorDecl(event_tensor, method, event_tensor_p, d);
+    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
+  }
+  // buffer_view
   for (size_t i = 0; i < block->buffer_views.size(); ++i) {
     tir::BufferView buffer_view = block->buffer_views[i];
     ObjectPath buffer_view_p = block_p->Attr("buffer_views")->ArrayIndex(i);
@@ -246,6 +273,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     ExprDoc rhs = d->AsDoc<ExprDoc>(buffer_view, buffer_view_p);
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
   }
+  // buffer_get
   for (size_t i = 0; i < block->buffer_gets.size(); ++i) {
     tir::BufferGet buffer_get = block->buffer_gets[i];
     ObjectPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayIndex(i);
@@ -270,7 +298,8 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     kwargs_keys.push_back("no_realize");
     kwargs_values.push_back(LiteralDoc::Boolean(true, std::nullopt));
   }
-  // tir+
+
+  /*********** tir+ ***********/
   if (block->exec_scope.defined()) {
     if (auto scope_slice_opt = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
       auto scope_slice = scope_slice_opt.value();

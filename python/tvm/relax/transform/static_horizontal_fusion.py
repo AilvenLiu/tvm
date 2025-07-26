@@ -30,7 +30,8 @@ from tvm.relax.expr import Expr
 from tvm.relax.expr_functor import PyExprMutator, mutator
 from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
 from tvm.tir import Block, PrimFunc, PrimExpr, Buffer, IndexMap, BufferLoad, SeqStmt, Stmt, Var
-from tvm.tirp.operator import EventCommit, EventWait
+from tvm.tirp.operator import EventWait, EventCommit
+from tvm.tir.event import EventTensor, EventTensorItem, SemaphoreEvent, EventImpl
 from tvm.script import tir as T, tirp as Tp
 from tvm.tirp.transform.common import seek_kernel_replace_point, BufferReplacer
 from tvm.tir.analysis import verify_tirp_well_formed
@@ -72,15 +73,15 @@ class StaticHorizontalFusion:
 class EventOpInserter(StmtExprMutator):
     def __init__(
         self,
-        in_event_tensors: List[Buffer],
-        out_event_tensors: List[Buffer],
+        in_event_bufs: List[Buffer],
+        out_event_bufs: List[Buffer],
         in_deps: List[IndexMap],
         out_deps: List[IndexMap],
         tile_idx: List[PrimExpr],
     ):
         super().__init__()
-        self.in_event_tensors = in_event_tensors
-        self.out_event_tensors = out_event_tensors
+        self.in_event_bufs = in_event_bufs
+        self.out_event_bufs = out_event_bufs
         self.in_deps = in_deps
         self.out_deps = out_deps
         self.tile_idx = tile_idx
@@ -88,24 +89,48 @@ class EventOpInserter(StmtExprMutator):
     @staticmethod
     def rewrite(
         stmt: Stmt,
-        in_event_tensors: List[Buffer],
-        out_event_tensors: List[Buffer],
+        in_event_bufs: List[Buffer],
+        out_event_bufs: List[Buffer],
         in_deps: List[IndexMap],
         out_deps: List[IndexMap],
         tile_idx: List[PrimExpr],
     ) -> Stmt:
-        inserter = EventOpInserter(in_event_tensors, out_event_tensors, in_deps, out_deps, tile_idx)
+        inserter = EventOpInserter(in_event_bufs, out_event_bufs, in_deps, out_deps, tile_idx)
         return inserter.visit_stmt(stmt)
 
     def visit_block_(self, block: Block):
+        # define state regs for event tensors
+        in_state_regs = [
+            T.buffer((1,), "int32", scope="local", buffer_name="event_state")
+            for _ in self.in_event_bufs
+        ]
+        out_state_regs = [
+            T.buffer((1,), "int32", scope="local", buffer_name="event_state")
+            for _ in self.out_event_bufs
+        ]
+        # define event tensors
+        in_event_tensors = [
+            EventTensor(
+                SemaphoreEvent(1, EventImpl.kGlobalSemaphore, state=[buf, state_reg]),
+                buf.shape,
+            )
+            for buf, state_reg in zip(self.in_event_bufs, in_state_regs)
+        ]
+        out_event_tensors = [
+            EventTensor(
+                SemaphoreEvent(1, EventImpl.kGlobalSemaphore, state=[buf, state_reg]),
+                buf.shape,
+            )
+            for buf, state_reg in zip(self.out_event_bufs, out_state_regs)
+        ]
         # only process root block
         waits = [
-            EventWait(T.BufferLoad(tensor, dep.map_indices(self.tile_idx)))
-            for tensor, dep in zip(self.in_event_tensors, self.in_deps)
+            EventWait(EventTensorItem(tensor, dep.map_indices(self.tile_idx)))
+            for tensor, dep in zip(in_event_tensors, self.in_deps)
         ]
         commits = [
-            EventCommit(T.BufferLoad(tensor, dep.map_indices(self.tile_idx)), 0)
-            for tensor, dep in zip(self.out_event_tensors, self.out_deps)
+            EventCommit(EventTensorItem(tensor, dep.map_indices(self.tile_idx)))
+            for tensor, dep in zip(out_event_tensors, self.out_deps)
         ]
 
         new_body = SeqStmt(waits + [block.body] + commits)
@@ -117,7 +142,7 @@ class EventOpInserter(StmtExprMutator):
             block.name_hint,
             new_body,
             block.init,
-            block.alloc_buffers,
+            list(block.alloc_buffers) + in_state_regs + out_state_regs,
             block.match_buffers,
             block.annotations,
             block.span,
@@ -125,6 +150,7 @@ class EventOpInserter(StmtExprMutator):
             block.buffer_views,
             block.buffer_gets,
             block.pipelines,
+            event_tensors=in_event_tensors + out_event_tensors,
         )
 
 
@@ -232,7 +258,7 @@ class _Rewriter(PyExprMutator):
             self.event_buffers[event] = T.buffer(
                 event.struct_info.shape.values,
                 event.struct_info.dtype,
-                scope="global.semaphore",
+                scope="global",
                 logical_scope="kernel",
                 buffer_name="event",
             )
@@ -415,7 +441,9 @@ class _Rewriter(PyExprMutator):
             None,
             new_buffer_map,
             tvm.ir.make_node(
-                "ir.DictAttrs", is_tirp=True, global_symbol=f"persistent_kernel_{self.cur_func_name}"
+                "ir.DictAttrs",
+                is_tirp=True,
+                global_symbol=f"persistent_kernel_{self.cur_func_name}",
             ),
         )
         new_gvar = self.builder_.add_func(new_prim_func, f"persistent_kernel_{self.cur_func_name}")

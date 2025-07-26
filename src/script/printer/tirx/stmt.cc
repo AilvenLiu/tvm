@@ -125,6 +125,106 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 TVM_SCRIPT_REPR(tirx::CopyPipelineNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::PipelineNode, ReprPrintTIR);
 
+ExprDoc EventDecl(const tir::BaseEvent& event, const String& method, const ObjectPath& p,
+                  const IRDocsifier& d) {
+  if (const auto* sem_event = event.as<tir::SemaphoreEventNode>()) {
+    return TIRp(d, method)->Call(
+        {d->AsDoc<ExprDoc>(sem_event->expected_count, p->Attr("expected_count")),
+         LiteralDoc::Int(static_cast<int64_t>(sem_event->impl), p->Attr("impl")),
+         d->AsDoc<ExprDoc>(sem_event->state, p->Attr("state"))});
+  } else if (const auto* bulk_event = event.as<tir::BulkGroupEventNode>()) {
+    return TIRp(d, method)->Call(
+        {LiteralDoc::Int(static_cast<int64_t>(bulk_event->impl), p->Attr("impl")),
+         d->AsDoc<ExprDoc>(bulk_event->state, p->Attr("state"))});
+  } else {
+    LOG(FATAL) << "Unknown event type: " << event;
+  }
+}
+
+ExprDoc HandleEvent(const tir::BaseEvent& event, const String& method, const ObjectPath& p,
+                    const IRDocsifier& d) {
+  if (!d->IsVarDefined(event)) {
+    if (Optional<Frame> opt_f = FindLowestVarDef(event, d)) {
+      ExprDoc lhs = DefineEvent(event, opt_f.value(), d);
+      ExprDoc rhs = EventDecl(event, method, p, d);
+      opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
+    }
+  }
+  if (Optional<ExprDoc> doc = d->GetVarDoc(event)) {
+    return doc.value();
+  }
+  LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << event;
+}
+
+ExprDoc EventTensorDecl(const tir::EventTensor& event_tensor, const String& method,
+                        const ObjectPath& p, const IRDocsifier& d) {
+  const auto& event = event_tensor->event;
+  if (const auto* sem_event = event.as<tir::SemaphoreEventNode>()) {
+    return TIRp(d, method)->Call({
+        d->AsDoc<ExprDoc>(sem_event->expected_count, p->Attr("expected_count")),
+        LiteralDoc::Int(static_cast<int64_t>(sem_event->impl), p->Attr("impl")),
+        d->AsDoc<ExprDoc>(sem_event->state, p->Attr("state")),
+        d->AsDoc<ExprDoc>(event_tensor->shape, p->Attr("shape")),
+    });
+  } else if (const auto* bulk_event = event.as<tir::BulkGroupEventNode>()) {
+    return TIRp(d, method)->Call({
+        LiteralDoc::Int(static_cast<int64_t>(bulk_event->impl), p->Attr("impl")),
+        d->AsDoc<ExprDoc>(bulk_event->state, p->Attr("state")),
+        d->AsDoc<ExprDoc>(event_tensor->shape, p->Attr("shape")),
+    });
+  } else {
+    LOG(FATAL) << "Unknown event tensor type: " << event_tensor;
+  }
+}
+
+ExprDoc HandleEventTensor(const tir::EventTensor& event_tensor, const String& method,
+                          const ObjectPath& p, const IRDocsifier& d) {
+  if (!d->IsVarDefined(event_tensor)) {
+    if (Optional<Frame> opt_f = FindLowestVarDef(event_tensor, d)) {
+      ExprDoc lhs = DefineEventTensor(event_tensor, opt_f.value(), d);
+      ExprDoc rhs = EventTensorDecl(event_tensor, method, p, d);
+      opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
+    }
+  }
+  if (Optional<ExprDoc> doc = d->GetVarDoc(event_tensor)) {
+    return doc.value();
+  }
+  LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << event_tensor;
+}
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::SemaphoreEvent>("",
+                                       [](tir::SemaphoreEvent event, ObjectPath p,
+                                          IRDocsifier d) -> Doc {
+                                         return HandleEvent(event, "SemaphoreEvent", p, d);
+                                       });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::BulkGroupEvent>("",
+                                       [](tir::BulkGroupEvent event, ObjectPath p,
+                                          IRDocsifier d) -> Doc {
+                                         return HandleEvent(event, "BulkGroupEvent", p, d);
+                                       });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::EventTensor>("",
+                                    [](tir::EventTensor event_tensor, ObjectPath p,
+                                       IRDocsifier d) -> Doc {
+                                      return HandleEventTensor(event_tensor, "EventTensor", p, d);
+                                    });
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tir::EventTensorItem>(
+        "", [](tir::EventTensorItem item, ObjectPath p, IRDocsifier d) -> Doc {
+          const auto& e_tensor_doc = d->AsDoc<ExprDoc>(item->tensor, p->Attr("tensor"));
+          Array<Doc> indices_doc;
+          for (size_t i = 0, n = item->indices.size(); i < n; ++i) {
+            indices_doc.push_back(
+                d->AsDoc<Doc>(item->indices[i], p->Attr("indices")->ArrayIndex(i)));
+          }
+          return e_tensor_doc->operator[](indices_doc);
+        });
+
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::tirp::OpCall>(
         "", [](tirx::tirp::OpCall op_call, AccessPath p, IRDocsifier d) -> Doc {
@@ -150,10 +250,13 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
           static const auto& pipeline_op_map = Op::GetAttrMap<Bool>("TIsPipelineOp");
           static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
+          static const auto& event_op_map = Op::GetAttrMap<Bool>("TIsEventOp");
+          static const auto& async_op_map = Op::GetAttrMap<Bool>("TIsAsyncOp");
           ICHECK(bool(tirp_op_map.get(op, tvm::Bool(false))))
               << "Only TIR+ ops can be used in tirx::tirp::OpCall";
           String name = op_names.get(op, op->name);
-          if (bool(schedule_op_map.get(op, tvm::Bool(false)))) {
+          if (bool(schedule_op_map.get(op, tvm::Bool(false))) ||
+              bool(async_op_map.get(op, tvm::Bool(false)))) {
             // Schedule ops
             Array<Doc> args;
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
@@ -184,6 +287,14 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                                         d->AsDoc<DictDoc>(op_call->schedule_config,
                                                           p->Attr("schedule_config"))}),
                             (*f)->stmts);
+          } else if (bool(event_op_map.get(op, tvm::Bool(false)))) {
+            // Event ops
+            ICHECK(op_call->args[0].as<tir::EventTensorNode>() ||
+                   op_call->args[0].as<tir::BaseEventNode>())
+                << "First argument must be a EventTensor or BaseEvent";
+            // event_method_name
+            std::string method = std::string(name).substr(6);
+            return print_member_function_call(method);
           } else {
             // Misc ops
             Array<Doc> args;

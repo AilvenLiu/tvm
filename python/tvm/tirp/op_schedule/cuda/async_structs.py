@@ -16,7 +16,7 @@
 # under the License.
 
 """Implementation of async structs schedules."""
-
+import functools
 import copy
 from typing import Optional, List, Union
 from enum import Enum
@@ -27,6 +27,7 @@ from tvm.script import tirp as Tp
 from tvm.tirp.op_schedule import ScheduleContext
 from tvm.tir import Buffer, PrimFunc, BufferRegion
 from tvm.tir.async_structs import CopyPipeline
+from tvm.tir.event import SemaphoreEvent
 from tvm.tir.stmt import OpCall
 from tvm.tir.layout import SwizzleLayout, TileLayout
 from .common import CopyInstType, copy_g2s_s2g_cta_vec_load_impl, target_cuda, validate_copy_op
@@ -106,7 +107,7 @@ def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
 
 
 def copy_tma_impl(
-    pipeline: "CopyPipeline",
+    evt: "SemaphoreEvent",
     dst_buffer_region: "BufferRegion",
     src_buffer_region: "BufferRegion",
     sctx: "ScheduleContext",
@@ -254,10 +255,10 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     tx = sctx.launch_params["threadIdx.x"]
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
-    if sctx.target.arch == "sm_100a":
-        cta_group = pipeline.schedule_config.get("cta_group", 1)
-    else:
-        cta_group = -1
+    # if sctx.target.arch == "sm_100a":
+    #     cta_group = pipeline.schedule_config.get("cta_group", 1)
+    # else:
+    cta_group = -1
 
     tensor_map = T.Var(g_buf.data.name + "_tensormap", dtype=T.handle("tensormap").type_annotation)
 
@@ -289,23 +290,39 @@ def copy_tma_impl(
             coord[i] *= atom_shape[i]
         return coord
 
+    if direction == "g2s":
+        mbar, phase, tx_cnt = evt.state
+        assert mbar and phase and tx_cnt, "mbarrier, phase, and tx_cnt must be provided"
+        assert isinstance(mbar, Buffer), "mbarrier must be a Buffer"
+        assert isinstance(phase, Buffer), "phase must be a Buffer"
+        assert isinstance(tx_cnt, Buffer), "tx_cnt must be a Buffer"
+
     # ---------------------------------------------------------------------
     # Device‑side TIR implementation
     # ---------------------------------------------------------------------
+
+    def total_bytes():
+        return (
+            functools.reduce(lambda acc, extent: acc * extent, s_ext, 1)
+            * tvm.DataType(s_buf.dtype).bits
+            // 8
+        )
+
+    rank = len(g_buf.shape)
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def impl():
-        rank = len(g_buf.shape)
         # TODO(@bohan): reconsider this under warp specialized scenario. Q: should we place the fence here?
         # make sure smem write is visible to tma proxy
         for tid_x in T.thread_binding(tx, "threadIdx.x"):
             with T.thread()[tid_x == 0]:
                 if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
                     if direction == "g2s":
+                        tx_cnt[0] += total_bytes()
                         T.ptx.cp_async.bulk.tensor.g2c(
                             rank,
-                            s_buf.access_ptr("w", offset=s_buf.offset_of_p(s_st)),
-                            pipeline.workspace.get("mbarrier", None).access_ptr("rw", offset=0)  # type: ignore
+                            s_buf.ptr_to(s_st),
+                            mbar.ptr_to([0])  # type: ignore
                             if direction == "g2s" else 0,  # dummy when not needed
                             tensor_map,
                             *reversed(g_st),
@@ -314,19 +331,21 @@ def copy_tma_impl(
                     else:
                         T.ptx.cp_async.bulk.tensor.s2g(
                             rank,
-                            s_buf.access_ptr("r", offset=s_buf.offset_of_p(s_st)),
+                            s_buf.ptr_to(s_st),
                             tensor_map,
                             *reversed(g_st),
                         )
                 else:
+                    if direction == "g2s":
+                        tx_cnt[0] += total_bytes()
                     for lvs in T.grid(*iter_ranges):
                         if direction == "g2s":
                             s_coord = T.meta_var(make_shared_coord(s_st, lvs))
                             g_coord = T.meta_var(make_global_coord(s_coord))
                             T.ptx.cp_async.bulk.tensor.g2c(
                                 rank,
-                                s_buf.access_ptr("w", offset=s_buf.offset_of_p(s_coord)),
-                                pipeline.workspace.get("mbarrier", None).access_ptr("rw", offset=0),  # type: ignore
+                                s_buf.ptr_to(s_coord),
+                                mbar.ptr_to([0]),
                                 tensor_map,
                                 *reversed(g_coord),
                                 cta_group=cta_group,
@@ -336,7 +355,7 @@ def copy_tma_impl(
                             g_coord = T.meta_var(make_global_coord(s_coord))
                             T.ptx.cp_async.bulk.tensor.s2g(
                                 rank,
-                                s_buf.access_ptr("r", offset=s_buf.offset_of_p(s_coord)),
+                                s_buf.ptr_to(s_coord),
                                 tensor_map,
                                 *reversed(g_coord),
                             )
@@ -458,7 +477,9 @@ def copy_pipeline_cta_impl(
                     for cta_id in T.thread_binding(cbx, "clusterCtaIdx.x"):
                         with T.thread()[tid == 0]:
                             if cta_group == 1 or cta_id % 2 == 0:
-                                T.ptx.mbarrier.arrive.expect_tx(mbarrier.access_ptr("rw"), tma_bytes)
+                                T.ptx.mbarrier.arrive.expect_tx(
+                                    mbarrier.access_ptr("rw"), tma_bytes
+                                )
 
             return func
         if op_type == PipelineOp.CONSUMER_WAIT:

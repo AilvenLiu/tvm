@@ -60,7 +60,7 @@ class ScheduleContextNode : public Object {
  public:
   /*! \brief The target of the kernel. */
   Target target;
-  /*! \brief The exec scope of the operator*/
+  /*! \brief The exec scope of the operator */
   ExecScope exec_scope;
   /*! \brief The kernel launch parameters. */
   Map<String, PrimExpr> launch_params;
@@ -140,6 +140,13 @@ TVM_DLL const Op& copy();
 /*!
  * \brief See pesudo code below:
  *
+ * Tp.Async.copy(BufferRegion dst, BufferRegion src, BaseEvent event)
+ */
+TVM_DLL const Op& copy_async();
+
+/*!
+ * \brief See pesudo code below:
+ *
  *  Tp.fill(BufferRegion dst, PrimExpr value)
  */
 TVM_DLL const Op& fill();
@@ -150,6 +157,50 @@ TVM_DLL const Op& fill();
  * Tp.gemm(Buffer A, Buffer B, Buffer C, Buffer D, PrimExpr alpha, PrimExpr beta)
  */
 TVM_DLL const Op& gemm();
+
+TVM_DLL const Op& zero();
+
+TVM_DLL const Op& sqrt();
+
+TVM_DLL const Op& exp();
+
+TVM_DLL const Op& add();
+
+TVM_DLL const Op& sub();
+
+TVM_DLL const Op& mul();
+
+TVM_DLL const Op& fdiv();
+
+TVM_DLL const Op& minimum();
+
+TVM_DLL const Op& maximum();
+
+TVM_DLL const Op& reciprocal();
+
+TVM_DLL const Op& sum();
+
+TVM_DLL const Op& max();
+
+TVM_DLL const Op& min();
+
+TVM_DLL const Op& memset();
+
+TVM_DLL const Op& reduce_negate();
+
+TVM_DLL const Op& binary_reduce();
+
+TVM_DLL const Op& unary_reduce();
+
+TVM_DLL const Op& binary_chain();
+
+TVM_DLL const Op& select();
+
+TVM_DLL const Op& event_init();
+
+TVM_DLL const Op& event_commit();
+
+TVM_DLL const Op& event_wait();
 
 /*!
  * \brief See pesudo code below:

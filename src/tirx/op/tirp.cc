@@ -128,9 +128,6 @@ TIRP_DEFINE_SCHEDULE_OP(binary_reduce);
 TIRP_DEFINE_SCHEDULE_OP(unary_reduce);
 TIRP_DEFINE_SCHEDULE_OP(binary_chain);
 TIRP_DEFINE_SCHEDULE_OP(select);
-TIRP_DEFINE_SCHEDULE_OP(event_tensor_init);
-TIRP_DEFINE_SCHEDULE_OP(event_commit);
-TIRP_DEFINE_SCHEDULE_OP(event_wait);
 
 /********************* Compose Ops **********************/
 #define TIRP_DEFINE_COMPOSE_OP(OpName) \
@@ -148,6 +145,18 @@ TIRP_DEFINE_PIPELINE_OP(pipeline_copy);
 TIRP_DEFINE_PIPELINE_OP(pipeline_producer_commit);
 TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_wait);
 TIRP_DEFINE_PIPELINE_OP(pipeline_consumer_release);
+
+/********************* Event Ops **********************/
+#define TIRP_DEFINE_EVENT_OP(OpName) TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsEventOp", Bool(true))
+
+TIRP_DEFINE_EVENT_OP(event_init);
+TIRP_DEFINE_EVENT_OP(event_commit);
+TIRP_DEFINE_EVENT_OP(event_wait);
+
+/********************* Async Ops **********************/
+#define TIRP_DEFINE_ASYNC_OP(OpName) TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsAsyncOp", Bool(true))
+
+TIRP_DEFINE_ASYNC_OP(copy_async);
 
 /********************* Misc Ops **********************/
 TIRP_DEFINE_OP(tvm_kernel_replace_point);

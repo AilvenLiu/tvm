@@ -77,7 +77,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       IdDoc func_name = IdDoc(FindFunctionName(d, func).value_or("main"));
       d->SetCommonPrefix(func, [](const ObjectRef& obj) {
         return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>() ||
-               obj->IsInstance<tirx::PipelineNode>() || obj->IsInstance<tirx::CopyPipelineNode>();
+               obj->IsInstance<tirx::PipelineNode>() || obj->IsInstance<tirx::CopyPipelineNode>() ||
+               obj->IsInstance<tirx::BaseEventNode>() || obj->IsInstance<tirx::EventTensorNode>();
       });
       int n_args = func->params.size();
       std::unordered_map<const tirx::VarNode*, int> buffer_data_counter;

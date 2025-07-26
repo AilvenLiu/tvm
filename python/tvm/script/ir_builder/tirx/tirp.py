@@ -16,11 +16,13 @@
 # under the License.
 """Builtin ops in TIR+"""
 from typing import Union, Optional, Dict, Any, Tuple, Callable, List
-from tvm.tirx import BufferRegion, Buffer, PrimExpr, BufferLoad
+from tvm.tirx import BufferRegion, Buffer, PrimExpr
 from tvm.ir import Op
 from tvm.tirx.async_structs import CopyPipeline
+from tvm.tirx.event import BaseEvent
 from tvm.tirx.exec_scope import ExecScope
 from tvm.tirx.expr import FloatImm
+from tvm.tirx import event
 import tvm.tirp.operator as tirp_op
 from tvm.tirx.predicate import Predicate
 from . import _ffi_api, frame
@@ -279,6 +281,9 @@ def copy(
 
     workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
+
+    schedule_config : Optional[Dict[str, Any]]
+        The schedule config of the operator.
     """
     if workspace is None:
         workspace = {}
@@ -287,6 +292,18 @@ def copy(
     dst = _to_region(dst)
     src = _to_region(src)
     return f_insert(tirp_op.Copy(dst, src, workspace=workspace, schedule_config=schedule_config))
+
+
+def copy_async(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    evt: BaseEvent,
+    workspace: Dict[str, Buffer] = None,
+    schedule_config: Dict[str, Any] = None,
+):
+    return f_insert(
+        tirp_op.CopyAsync(dst, src, evt, workspace=workspace, schedule_config=schedule_config)
+    )
 
 
 def fill(
@@ -1057,79 +1074,21 @@ def select(
     return f_insert(tirp_op.Select(dst, true_value, false_value, pred))
 
 
-def event_tensor_init(
-    event_tensor: Buffer,
-    init_value: Optional[int] = None,
-    workspace: Dict[str, Buffer] = {},
-    schedule_config: Dict[str, Any] = {},
-):
-    """Initialize an event tensor.
-
-    Parameters
-    ----------
-    event_tensor : Buffer
-        The event tensor to initialize.
-
-    init_value : Optional[int]
-        The initial value to set for the event tensor.
-
-    workspace : Dict[str, Buffer]
-        The workspace of the operator.
-
-    schedule_config : Dict[str, Any]
-        The schedule configuration.
-    """
-    return f_insert(
-        tirp_op.EventTensorInit(
-            event_tensor, init_value, workspace=workspace, schedule_config=schedule_config
-        )
-    )
+def alloc_semaphore_event(
+    exp_count: int, impl: event.EventImpl, state: List[Any] = []
+) -> event.SemaphoreEvent:
+    return _ffi_api.AllocSemaphoreEvent(exp_count, int(impl), state, "")
 
 
-def event_commit(
-    event: BufferLoad,
-    tx_count: Optional[int] = None,
-    workspace: Dict[str, Buffer] = {},
-    schedule_config: Dict[str, Any] = {},
-):
-    """Commit an event.
-
-    Parameters
-    ----------
-    event : BufferLoad
-        The event to commit.
-
-    tx_count : Optional[int]
-        The number of transactions to commit. Only applicable on TMA load.
-
-    workspace : Dict[str, Buffer]
-        The workspace of the operator.
-
-    schedule_config : Dict[str, Any]
-        The schedule configuration.
-    """
-    return f_insert(
-        tirp_op.EventCommit(event, tx_count, workspace=workspace, schedule_config=schedule_config)
-    )
+def alloc_bulk_group_event(impl: event.EventImpl, state: List[Any] = []) -> event.BulkGroupEvent:
+    return _ffi_api.AllocBulkGroupEvent(int(impl), state, "")
 
 
-def event_wait(
-    event: BufferLoad, workspace: Dict[str, Buffer] = {}, schedule_config: Dict[str, Any] = {}
-):
-    """Wait for an event.
-
-    Parameters
-    ----------
-    event : BufferLoad
-        The event to wait for.
-
-    workspace : Dict[str, Buffer]
-        The workspace of the operator.
-
-    schedule_config : Dict[str, Any]
-        The schedule configuration.
-    """
-    return f_insert(tirp_op.EventWait(event, workspace=workspace, schedule_config=schedule_config))
+def alloc_semaphore_event_tensor(
+    exp_count: int, impl: event.EventImpl, state: List[Any] = [], shape: List[int] = []
+) -> event.EventTensor:
+    e = event.SemaphoreEvent(exp_count, int(impl), state, "")
+    return _ffi_api.AllocEventTensor(e, shape)
 
 
 __all__ = [
@@ -1140,6 +1099,7 @@ __all__ = [
     "mul",
     "fdiv",
     "copy",
+    "copy_async",
     "fill",
     "gemm",
     "reciprocal",
@@ -1158,7 +1118,7 @@ __all__ = [
     "binary_chain",
     "reduce_negate",
     "select",
-    "event_tensor_init",
-    "event_commit",
-    "event_wait",
+    "alloc_semaphore_event",
+    "alloc_bulk_group_event",
+    "alloc_semaphore_event_tensor",
 ]

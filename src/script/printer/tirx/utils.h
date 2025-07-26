@@ -27,10 +27,10 @@
 #include <tvm/tirx/function.h>
 #include <tvm/tirx/index_map.h>
 #include <tvm/tirx/op.h>
+#include <tvm/tirx/predicate.h>
 #include <tvm/tirx/stmt.h>
 #include <tvm/tirx/stmt_functor.h>
 #include <tvm/tirx/tirp_op.h>
-#include <tvm/tirx/predicate.h>
 
 #include <string>
 #include <unordered_map>
@@ -116,6 +116,39 @@ inline IdDoc DefinePipeline(const tirx::Pipeline& pipeline, const Frame& frame,
 }
 
 /*!
+ * \brief Defines a event in the IRDocsifier at the given frame,
+ * and returns the corresponding IdDoc
+ * \param event The event to define
+ * \param frame The frame to define the event in
+ * \param d The IRDocsifier
+ * \return The IdDoc corresponding to the event
+ */
+inline IdDoc DefineEvent(const tirx::BaseEvent& event, const Frame& frame, const IRDocsifier& d) {
+  if (const auto* sem_event = event.as<tirx::SemaphoreEventNode>()) {
+    return d->Define(event, frame, sem_event->name.empty() ? "sem_event" : sem_event->name);
+  } else if (const auto* bulk_event = event.as<tirx::BulkGroupEventNode>()) {
+    return d->Define(event, frame, bulk_event->name.empty() ? "bulk_event" : bulk_event->name);
+  } else {
+    LOG(FATAL) << "Unknown event type: " << event;
+    return IdDoc("");
+  }
+}
+
+/*!
+ * \brief Defines a event tensor in the IRDocsifier at the given frame,
+ * and returns the corresponding IdDoc
+ * \param event_tensor The event tensor to define
+ * \param frame The frame to define the event tensor in
+ * \param d The IRDocsifier
+ * \return The IdDoc corresponding to the event tensor
+ */
+inline IdDoc DefineEventTensor(const tirx::EventTensor& event_tensor, const Frame& frame,
+                               const IRDocsifier& d) {
+  return d->Define(event_tensor, frame,
+                   event_tensor->name().empty() ? "event_tensor" : event_tensor->name());
+}
+
+/*!
  * \brief Recursively process the body statements of a TIR fragment represented by a frame
  * \param stmt The body statement to process
  * \param p The object path
@@ -186,7 +219,8 @@ inline std::string ReprPrintTIR(const ObjectRef& obj, const PrinterConfig& cfg) 
   IRDocsifier d(cfg);
   d->SetCommonPrefix(obj, [](const ObjectRef& obj) {
     return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>() ||
-           obj->IsInstance<tirx::PipelineNode>() || obj->IsInstance<tirx::CopyPipelineNode>();
+           obj->IsInstance<tirx::PipelineNode>() || obj->IsInstance<tirx::CopyPipelineNode>() ||
+           obj->IsInstance<tirx::BaseEventNode>() || obj->IsInstance<tirx::EventTensorNode>();
   });
   With<TIRFrame> f(d, ObjectRef{nullptr});
   (*f)->AddDispatchToken(d, "tirx");
@@ -242,6 +276,28 @@ ExprDoc BufferDecl(const tirx::Buffer& buffer, const ffi::String& method,
  */
 ExprDoc PipelineDecl(const tirx::Pipeline& pipeline, const String& method, const ObjectPath& p,
                      const IRDocsifier& d);
+
+/*!
+ * \brief Declare and define a event
+ * \param event The event to be defined
+ * \param method The method used to declare the event
+ * \param p The object path
+ * \param d The IRDocsifier
+ * \return The ExprDoc corresponding to the event declaration
+ */
+ExprDoc EventDecl(const tirx::BaseEvent& event, const String& method, const ObjectPath& p,
+                  const IRDocsifier& d);
+
+/*!
+ * \brief Declare and define a event tensor
+ * \param event_tensor The event tensor to be defined
+ * \param method The method used to declare the event tensor
+ * \param p The object path
+ * \param d The IRDocsifier
+ * \return The ExprDoc corresponding to the event tensor declaration
+ */
+ExprDoc EventTensorDecl(const tirx::EventTensor& event_tensor, const String& method,
+                        const ObjectPath& p, const IRDocsifier& d);
 
 /*!
  * \brief Declare and define a buffer as annotation

@@ -19,8 +19,8 @@ import tvm.script
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
 from tvm.ir import assert_structural_equal
+from tvm.tir.event import EventImpl
 
 
 def from_source(code):
@@ -894,6 +894,40 @@ def test_list_comprehension():
                 T.evaluate(tvm.tir.all(*[acc[_] for _ in range(10)]))
                 T.evaluate(tvm.tir.all(*([acc[_] for _ in range(2, 4)] + [acc[_] for _ in range(6, 8)])))
     # fmt: on
+    code = test.script()
+    print(code)
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_event():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        with T.kernel():
+            with T.cta():
+                event_s = Tp.alloc_semaphore_event(1, EventImpl.kTMALoad)
+                event_b = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
+                event_s_tensor = Tp.alloc_semaphore_event_tensor(1, EventImpl.kTMALoad, [], [10])
+
+                event_s.commit()
+                event_s.wait()
+
+                event_b.commit()
+                event_b.wait()
+                event_b.wait(1)
+
+                event_s_tensor.init()
+                event_s_tensor[0].commit()
+                event_s_tensor[0].wait()
+
+                A = T.alloc_buffer([10], "float32", scope="shared")
+                B = T.alloc_buffer([10], "float32", scope="shared")
+                Tp.copy_async(A[:], B[:], event_s)
+                Tp.copy_async(A[:], B[:], event_b)
+                Tp.copy_async(A[:], B[:], event_s_tensor[0])
+    # fmt: on
+
     code = test.script()
     print(code)
     assert from_source(code).script() == code

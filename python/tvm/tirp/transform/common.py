@@ -15,20 +15,22 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Dict
+from typing import Dict, List
 
 from tvm.tir.stmt_functor import StmtExprMutator, StmtMutator
-from tvm.tir import BufferLoad, Block, BufferStore, OpCall, BufferRegion, Var
+from tvm.tir import BufferLoad, Block, BufferStore, OpCall, BufferRegion, Var, PrimExpr
 from tvm.tir.buffer import Buffer
 from tvm.tir import BufferView, BufferGet, Stmt
 from tvm.tirp.operator.op import KernelReplacePoint
+from tvm.tir.event import EventTensorItem
 
 
 class BufferReplacer(StmtExprMutator):
     """
-        Replace buffer with another buffer.
-        Also replace the data of the buffer with another var.
+    Replace buffer with another buffer.
+    Also replace the data of the buffer with another var.
     """
+
     def __init__(self, buffer_map: Dict[Buffer, Buffer] = {}, var_map: Dict[Var, Var] = {}):
         super().__init__()
         self.buffer_map = buffer_map
@@ -58,15 +60,22 @@ class BufferReplacer(StmtExprMutator):
             return BufferRegion(self.buffer_map[op.buffer], op.region)
         return op
 
+    def visit_array_prim_expr_(self, op: List[PrimExpr]):
+        return [self.visit_expr(expr) for expr in op]
+
     def visit_op_call_(self, op):
         op = super().visit_op_call_(op)
         new_workspace = {
             key: self.buffer_map[value] if value in self.buffer_map else value
             for key, value in op.workspace.items()
         }
-        return OpCall(
-            *op.args, op=op.op, workspace=new_workspace, schedule_config=op.schedule_config
-        )
+        args = list()
+        for arg in op.args:
+            if isinstance(arg, EventTensorItem):
+                args.append(EventTensorItem(arg.tensor, self.visit_array_prim_expr_(arg.indices)))
+            else:
+                args.append(arg)
+        return OpCall(*args, op=op.op, workspace=new_workspace, schedule_config=op.schedule_config)
 
     def visit_block_(self, op):
         op = super().visit_block_(op)

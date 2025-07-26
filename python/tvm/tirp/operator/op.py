@@ -17,16 +17,15 @@
 
 """Implementation of TIR operator."""
 
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List
 
-import tvm
 from tvm.tir.stmt import OpCall
-from tvm.tir import PrimExpr, BufferRegion, FloatImm, Buffer, Stmt, IntImm, BufferLoad
+from tvm.tir import PrimExpr, BufferRegion, FloatImm, IntImm
 from tvm.ir import Op
 from tvm.tir.async_structs import Pipeline
 from tvm.tir.predicate import Predicate
-from tvm.script import tir as T
-from tvm.target import Target
+from tvm.tir import event
+from tvm.tir.event import BaseEvent
 
 
 def get_tirp_op(op_name: str):
@@ -210,12 +209,6 @@ class Sqrt(UnaryOpWithBiasScale):
     op = get_tirp_op("sqrt")
 
 
-class Copy(UnaryOp):
-    """Copy all elements from src to dst."""
-
-    op = get_tirp_op("copy")
-
-
 class Fill(UnaryOp):
     """Fill dst with a scalar value."""
 
@@ -245,6 +238,79 @@ class FDiv(BinaryOp):
     """Divide src1 by src2 element-wise using floating point division and store to dst."""
 
     op = get_tirp_op("fdiv")
+
+
+class Copy(OpCall):
+    """Copy all elements from src to dst.
+
+    Args:
+        dst: Destination buffer region
+        src: Source buffer region
+    """
+
+    op = get_tirp_op("copy")
+
+    dst = ArgProperty(0)
+    src = ArgProperty(1)
+
+    @property
+    def srcs(self) -> List[PrimExpr]:
+        """Get the source expressions (inputs) of the operator."""
+        return [self.src]
+
+    @property
+    def dsts(self) -> List[PrimExpr]:
+        """Get the destination expressions (outputs) of the operator."""
+        return [self.dst]
+
+    def validate(self) -> None:
+        """Validate that the operator has the correct number and types of arguments."""
+        assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
+        assert isinstance(
+            self.dst, BufferRegion
+        ), f"{self} expects BufferRegion as dst, got {self.dst}"
+        assert isinstance(
+            self.src, BufferRegion
+        ), f"{self} expects BufferRegion as src, got {self.src}"
+
+
+class CopyAsync(OpCall):
+    """Copy all elements from src to dst asynchronously.
+
+    Args:
+        dst: Destination buffer region
+        src: Source buffer region
+        event: Event to be used for the copy
+    """
+
+    op = get_tirp_op("copy_async")
+
+    dst = ArgProperty(0)
+    src = ArgProperty(1)
+    event = ArgProperty(2)
+
+    @property
+    def srcs(self) -> List[PrimExpr]:
+        """Get the source expressions (inputs) of the operator."""
+        return [self.src]
+
+    @property
+    def dsts(self) -> List[PrimExpr]:
+        """Get the destination expressions (outputs) of the operator."""
+        return [self.dst]
+
+    def validate(self) -> None:
+        """Validate that the operator has the correct number and types of arguments."""
+        assert len(self.args) == 3, f"{self} expects 3 arguments, got {len(self.args)}"
+        assert isinstance(
+            self.dst, BufferRegion
+        ), f"{self} expects BufferRegion as dst, got {self.dst}"
+        assert isinstance(
+            self.src, BufferRegion
+        ), f"{self} expects BufferRegion as src, got {self.src}"
+        assert isinstance(
+            self.event, BaseEvent
+        ), f"{self} expects BaseEvent as event, got {self.event}"
 
 
 class Gemm(OpCall):
@@ -437,24 +503,19 @@ class PipelineConsumerRelease(PipelineOp):
     op = get_tirp_op("pipeline_consumer_release")
 
 
-class EventTensorInit(OpCall):
-    """Initialize an event tensor."""
+class EventInit(OpCall):
+    """Initialize an event/event tensor."""
 
-    op = get_tirp_op("event_tensor_init")
+    op = get_tirp_op("event_init")
 
-    event_tensor = ArgProperty(0)
-    init_value = ArgProperty(1)
+    event = ArgProperty(0)
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
-        assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
+        assert len(self.args) == 1, f"{self} expects 1 argument, got {len(self.args)}"
         assert isinstance(
-            self.event_tensor, Buffer
-        ), f"{self} expects Buffer as event_tensor, got {self.event_tensor}"
-        assert self.event_tensor.is_event_tensor(), f"{self.event_tensor} is not an event tensor"
-        assert (
-            isinstance(self.init_value, IntImm) or self.init_value is None
-        ), f"{self} expects IntImm as init_value, got {self.init_value}"
+            self.event, (event.EventTensor, event.BaseEvent)
+        ), f"{self.event} expected to be EventTensor or BaseEvent, got {self.event}"
 
 
 class EventCommit(OpCall):
@@ -463,15 +524,13 @@ class EventCommit(OpCall):
     op = get_tirp_op("event_commit")
 
     event = ArgProperty(0)
-    tx_count = ArgProperty(1)
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
-        assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
+        assert len(self.args) == 1, f"{self} expects 2 arguments, got {len(self.args)}"
         assert isinstance(
-            self.event, BufferLoad
-        ), f"{self} expects BufferLoad as event, got {self.event}"
-        assert self.event.is_event(), f"{self.event} is not an event"
+            self.event, event.BaseEvent
+        ), f"{self} expects BaseEvent as event, got {self.event}"
 
 
 class EventWait(OpCall):
@@ -480,14 +539,17 @@ class EventWait(OpCall):
     op = get_tirp_op("event_wait")
 
     event = ArgProperty(0)
+    n_groups = ArgProperty(1)
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
-        assert len(self.args) == 1, f"{self} expects 1 argument, got {len(self.args)}"
+        if isinstance(self.event, event.BulkGroupEvent):
+            assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
+        else:
+            assert len(self.args) == 1, f"{self} expects 1 argument, got {len(self.args)}"
         assert isinstance(
-            self.event, BufferLoad
-        ), f"{self} expects BufferLoad as event, got {self.event}"
-        assert self.event.is_event(), f"{self.event} is not an event"
+            self.event, event.BaseEvent
+        ), f"{self} expects BaseEvent as event, got {self.event}"
 
 
 class KernelReplacePoint(OpCall):

@@ -22,6 +22,7 @@
 #include <tvm/script/ir_builder/base.h>
 #include <tvm/script/ir_builder/ir/frame.h>
 #include <tvm/tirx/async_structs.h>
+#include <tvm/tirx/event.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/stmt.h>
 
@@ -170,6 +171,8 @@ class SBlockFrameNode : public TIRFrameNode {
   Array<tvm::tirx::BufferView> buffer_views;
   Array<tvm::tirx::BufferGet> buffer_gets;
   Array<tvm::tirx::Pipeline> pipelines;
+  Array<tvm::tirx::BaseEvent> events;
+  Array<tvm::tirx::EventTensor> event_tensors;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -190,7 +193,9 @@ class SBlockFrameNode : public TIRFrameNode {
         .def_ro("scope_slice_extents", &SBlockFrameNode::scope_slice_extents)
         .def_ro("buffer_views", &SBlockFrameNode::buffer_views)
         .def_ro("buffer_gets", &SBlockFrameNode::buffer_gets)
-        .def_ro("pipelines", &SBlockFrameNode::pipelines);
+        .def_ro("pipelines", &SBlockFrameNode::pipelines)
+        .def_ro("events", &SBlockFrameNode::events)
+        .def_ro("event_tensors", &SBlockFrameNode::event_tensors);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.SSBlockFrame", SBlockFrameNode,
                                     TIRFrameNode);
@@ -671,7 +676,7 @@ class ComposeOpFrame : public TIRFrame {
   }
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ComposeOpFrame, TIRFrame, ComposeOpFrameNode);
 };
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

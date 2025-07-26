@@ -26,13 +26,14 @@ import tvm
 from tvm.ir import GlobalVar, PrimType
 from tvm.tirx import Buffer, IterVar, PrimExpr, Var, TLayout
 from tvm.tirx.async_structs import Pipeline
+from tvm.tirx.event import BaseEvent, EventTensor
 
 from ...ir_builder import ir as I
 from ...ir_builder import tirx as T
 from ...ir_builder.base import IRBuilder
 from ...ir_builder.base import IRBuilderFrame as Frame
-from .._core import Parser, dispatch, doc, scan_macro, utils
-from ..tir.entry import TIRMacro, macro
+from .._core import Parser, dispatch, doc
+from ..tir.entry import macro
 from ..core.doc import from_doc
 
 
@@ -148,7 +149,7 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
         res = value.__enter__()
         IRBuilder.name(var_name, res)
         return res
-    elif isinstance(value, Buffer | IterVar | TLayout | Pipeline) or (
+    elif isinstance(value, Buffer | IterVar | TLayout | Pipeline | BaseEvent | EventTensor) or (
         isinstance(value, Var) and not self.var_table.exist(value)
     ):
         IRBuilder.name(var_name, value)
@@ -401,7 +402,7 @@ def visit_aug_assign(self: Parser, node: doc.AugAssign) -> None:
             if hasattr(lhs_copy, "ctx"):
                 lhs_copy.ctx = doc.Load()
             lhs_value = self.eval_expr(lhs_copy)
-            if isinstance(lhs_value, (T.BufferLoad, tvm.tir.Buffer)):
+            if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
                 buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
                 if len(buffer.shape) == 0:
                     # only 0-dim buffer can be assigned directly
