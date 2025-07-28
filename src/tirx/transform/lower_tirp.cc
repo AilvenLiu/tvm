@@ -380,35 +380,41 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const BlockNode* op) final {
+    Block block = GetRef<Block>(op);
+    auto* n = block.CopyOnWrite();
     if (op->annotations.count("tirp.scope_partition")) {
-      // scope partition is enabled, check if body is a list of BlockRealize
-      if (auto seq = op->body.as<SeqStmt>()) {
-        Array<Stmt> new_seq;
-        // First visit each stmt to get IfThenElse stmts
-        for (const auto& stmt : seq.value()->seq) {
-          new_seq.push_back(VisitStmt(stmt));
-        }
-        // Connect the IfThenElse stmts
-        Stmt result = new_seq[new_seq.size() - 1];
-        for (int i = new_seq.size() - 2; i >= 0; i--) {
-          auto if_then = new_seq[i].as<IfThenElse>();
-          CHECK(if_then.has_value())
-              << "TIRpError: Block with scope partition has invalid body " << op->body;
-          result = IfThenElse(if_then.value()->condition, if_then.value()->then_case, result);
-        }
-        return result;
-      } else {
-        CHECK(false) << "TIRpError: Block with scope partition at has invalid body " << op->body;
+      // scope partition is enabled, rewrite the body
+      auto seq = block->body.as<SeqStmt>();
+      if (!seq.has_value()) {
+        CHECK(false) << "TIRpError: Block with scope partition at has invalid body " << block->body;
       }
+      Array<Stmt> new_seq;
+      for (const auto& stmt : seq.value()->seq) {
+        new_seq.push_back(VisitStmt(stmt));
+      }
+      // Connect the IfThenElse stmts into a single IfThenElse
+      Stmt body = new_seq[new_seq.size() - 1];
+      for (int i = new_seq.size() - 2; i >= 0; i--) {
+        auto if_then = new_seq[i].as<IfThenElse>();
+        CHECK(if_then.has_value() && !if_then.value()->else_case.defined())
+            << "TIRpError: Block with scope partition has invalid body " << block->body;
+        body = IfThenElse(if_then.value()->condition, if_then.value()->then_case, body);
+      }
+      n->body = body;
+      n->annotations.erase("tirp.scope_partition");
+    } else {
+      // no scope partition, visit the body
+      n->body = VisitStmt(n->body);
     }
+    // no scope partition, return the block as is
     if (!op->exec_scope.defined()) {
-      return std::move(StmtExprMutator::VisitStmt_(op));
+      return std::move(block);
     }
     auto exec_scope = op->exec_scope.value();
     auto scope_slice_opt = exec_scope.as<ExecScopeSlice>();
     if (!scope_slice_opt.has_value()) {
-      // No scope slice, return the block as is
-      return std::move(StmtExprMutator::VisitStmt_(op));
+      // no scope slice, return the block as is
+      return std::move(block);
     }
     auto scope_slice = scope_slice_opt.value();
     auto scope = ScopePair(scope_slice->parent, scope_slice->name);
@@ -418,8 +424,6 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     auto resolved = ScopeIdResolveTable::Resolve(scope, scope_slice->extents, out_dim,
                                                  target_->kind->name, launch_params_);
     ICHECK_EQ(resolved.size(), out_dim);
-    Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(op));
-    auto n = block.CopyOnWrite();
     n->exec_scope = ExecScope::Create(scope_slice->name);
     if (auto select_cond = scope_slice->slice.as<PrimExpr>()) {
       return IfThenElse(select_cond.value(), BlockRealize({}, Bool(true), block));

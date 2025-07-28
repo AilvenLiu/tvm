@@ -33,6 +33,7 @@ def compare(before, after, transform):
     assert isinstance(after, tvm.IRModule)
 
     with tvm.target.Target("cuda"):
+        transform()(before).show()
         tvm.ir.assert_structural_equal(transform()(before), after, map_free_vars=False)
 
 
@@ -424,7 +425,7 @@ def test_lower_scope_slice():
     compare(before, after, LowerTIRp)
 
 
-def test_lower_scope_partition():
+def test_lower_scope_partition1():
     # fmt: off
     @T.prim_func(private=True, tirp=True)
     def before():
@@ -451,21 +452,79 @@ def test_lower_scope_partition():
         blockIdx_y = T.launch_thread("blockIdx.y", 4)
         blockIdx_z = T.launch_thread("blockIdx.z", 5)
         with T.kernel():
-            if threadIdx_x >= 0 and threadIdx_x < 32:
-                with T.thread():
-                    T.evaluate(threadIdx_x)
-            elif threadIdx_x >= 32 and threadIdx_x < 64:
-                with T.thread():
-                    T.evaluate(threadIdx_x)
-            elif threadIdx_x >= 64 and threadIdx_x < 96:
-                with T.thread():
-                    T.evaluate(threadIdx_x)
-            elif threadIdx_x >= 96 and threadIdx_x < 128:
-                with T.thread():
-                    T.evaluate(threadIdx_x)
+            with T.cta():
+                if threadIdx_x >= 0 and threadIdx_x < 32:
+                    with T.thread():
+                        T.evaluate(threadIdx_x)
+                elif threadIdx_x >= 32 and threadIdx_x < 64:
+                    with T.thread():
+                        T.evaluate(threadIdx_x)
+                elif threadIdx_x >= 64 and threadIdx_x < 96:
+                    with T.thread():
+                        T.evaluate(threadIdx_x)
+                elif threadIdx_x >= 96 and threadIdx_x < 128:
+                    with T.thread():
+                        T.evaluate(threadIdx_x)
     # fmt: on
 
     compare(before, main, LowerTIRp)
+
+
+def test_lower_scope_partition2():
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before():
+        with T.kernel():
+            cbx, cby = T.cta_id([2, 1], parent="cluster")
+            bx = T.cta_id([148], parent="kernel")
+            wg_id = T.warpgroup_id([2], parent="cta")
+            warp_id = T.warp_id([4], parent="warpgroup")
+            lane_id = T.thread_id([32], parent="warp")
+            with T.cta():
+                T.block_attr({"tirp.scope_partition": True})
+                with T.warpgroup()[1:2]:
+                    T.block_attr({"tirp.scope_partition": True})
+                    with T.warp(parent="warpgroup")[3:4]:
+                        T.evaluate(warp_id)
+                    with T.warp(parent="warpgroup")[2:3]:
+                        T.evaluate(warp_id)
+                    with T.warp(parent="warpgroup")[0:1]:
+                        T.evaluate(warp_id)
+                with T.warpgroup()[0:1]:
+                    with T.thread():
+                        T.evaluate(warp_id)
+    # fmt: on
+
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def after():
+        clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
+        clusterCtaIdx_y = T.launch_thread("clusterCtaIdx.y", 1)
+        blockIdx_x = T.launch_thread("blockIdx.x", 148)
+        threadIdx_x = T.launch_thread("threadIdx.x", 256)
+        with T.kernel():
+            with T.cta():
+                if threadIdx_x // 128 >= 1 and threadIdx_x // 128 < 2:
+                    with T.warpgroup():
+                        if threadIdx_x % 128 // 32 >= 3 and threadIdx_x % 128 // 32 < 4:
+                            with T.warp():
+                                T.evaluate(threadIdx_x % 128 // 32)
+                        else:
+                            if threadIdx_x % 128 // 32 >= 2 and threadIdx_x % 128 // 32 < 3:
+                                with T.warp():
+                                    T.evaluate(threadIdx_x % 128 // 32)
+                            else:
+                                if threadIdx_x % 128 // 32 >= 0 and threadIdx_x % 128 // 32 < 1:
+                                    with T.warp():
+                                        T.evaluate(threadIdx_x % 128 // 32)
+                else:
+                    if threadIdx_x // 128 >= 0 and threadIdx_x // 128 < 1:
+                        with T.warpgroup():
+                            with T.thread():
+                                T.evaluate(threadIdx_x % 128 // 32)
+    # fmt: on
+
+    compare(before, after, LowerTIRp)
 
 
 def test_lower_layout():
@@ -561,7 +620,8 @@ def test_lower_decl_buffer_access_ptr():
     # fmt: on
 
     compare(before, after, LowerTIRp)
-    
+
+
 def test_lower_separate_scope_id_def():
     # fmt: off
     @T.prim_func(private=True, tirp=True)
@@ -581,8 +641,9 @@ def test_lower_separate_scope_id_def():
                 with T.thread():
                     T.evaluate(threadIdx_x)
     # fmt: on
-    
+
     compare(before, after, LowerTIRp)
+
 
 if __name__ == "__main__":
     tvm.testing.main()
