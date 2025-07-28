@@ -2637,10 +2637,10 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
 
     is_sm100_or_higher = is_sm100_or_higher()
 
-    if cta_group == -1 or not is_sm100_or_higher:
-        cta_group_str = ""
-    else:
+    if cta_group == 2 or (cta_group != -1 and is_sm100_or_higher):
         cta_group_str = f".cta_group::{cta_group}"
+    else:
+        cta_group_str = ""
 
     if cta_mask != 0:
         source_code = f"""
@@ -2758,13 +2758,13 @@ __forceinline__ __device__ void {func_name}() {{
 def codegen_ptx_ld_global_acquire(res, addr):
     dtype = str(res.dtype)
     if dtype == "uint32":
-        dtype_str, type_str = "uint32_t", "b32"
+        dtype_str, type_str, specifier = "uint32_t", "b32", "r"
     elif dtype == "int32":
-        dtype_str, type_str = "int32_t", "b32"
+        dtype_str, type_str, specifier = "int32_t", "b32", "r"
     elif dtype == "uint64":
-        dtype_str, type_str = "uint64_t", "b64"
+        dtype_str, type_str, specifier = "uint64_t", "b64", "l"
     elif dtype == "int64":
-        dtype_str, type_str = "int64_t", "b64"
+        dtype_str, type_str, specifier = "int64_t", "b64", "l"
     else:
         raise ValueError(f"Unsupported data type for ld.global.acquire: {dtype}")
 
@@ -2772,9 +2772,9 @@ def codegen_ptx_ld_global_acquire(res, addr):
     source_code = f"""
 __forceinline__ __device__ void {func_name}({dtype_str}& res,{dtype_str}* addr) {{
   #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
-  asm volatile ("ld.global.acquire.gpu.{type_str} %0, [%1];\\n" : "=r"(res) : "l"(addr));
+  asm volatile ("ld.global.acquire.gpu.{type_str} %0, [%1];\\n" : "={specifier}"(res) : "l"(addr));
   #else
-  asm volatile ("ld.global.cg.{type_str} %0, [%1];\\n" : "=r"(res) : "l"(addr));
+  asm volatile ("ld.global.cg.{type_str} %0, [%1];\\n" : "={specifier}"(res) : "l"(addr));
   #endif
 }}
 """
