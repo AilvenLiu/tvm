@@ -27,8 +27,9 @@ from tvm.tir import PrimFunc, Buffer
 from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from .common import target_cuda
-from tvm.tir import event
-from .common import CopyInstType, copy_g2s_s2g_cta_vec_load_impl
+from tvm.tir import BufferRegion
+from tvm.tir.event import SemaphoreEventTensor, EventImpl, BulkGroupEvent, SemaphoreEventTensorItem
+from .common import CopyInstType, copy_g2s_s2g_cta_vec_load_impl, validate_copy_op
 from tvm.tir.layout import TileLayout, SwizzleLayout
 
 
@@ -96,7 +97,7 @@ def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
 
 
 def copy_tma_impl(
-    evt: "SemaphoreEvent",
+    evt: Union["SemaphoreEventTensor", "SemaphoreEventTensorItem"],
     dst_buffer_region: "BufferRegion",
     src_buffer_region: "BufferRegion",
     sctx: "ScheduleContext",
@@ -113,13 +114,6 @@ def copy_tma_impl(
     If neither pattern matches, the function returns *None* so that other
     schedule rules may attempt to handle the copy.
     """
-
-    # ---------------------------------------------------------------------
-    # Guard: CTA scope only
-    # ---------------------------------------------------------------------
-    if sctx.exec_scope.name != "cta":
-        return None
-
     # ---------------------------------------------------------------------
     # Identify direction & basic legality checks
     # ---------------------------------------------------------------------
@@ -204,14 +198,11 @@ def copy_tma_impl(
                     st_i, ext_i = s_st[i], s_ext[i]
                     for j in reversed(range(seps[i], seps[i + 1])):
                         if st_i % outer.shard[j].extent == 0:
-                            assert ext_i % outer.shard[j].extent == 0
                             iter_ranges_[j] = outer.shard[j].extent
                             st_i //= outer.shard[j].extent
                             ext_i //= outer.shard[j].extent
                         else:
                             # Region falls within a partial tile
-                            assert st_i < outer.shard[j].extent
-                            assert st_i + ext_i <= outer.shard[j].extent
                             iter_ranges_[j] = ext_i
                             break
                 return iters_, iter_ranges_
@@ -244,10 +235,10 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     tx = sctx.launch_params["threadIdx.x"]
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
-    # if sctx.target.arch == "sm_100a":
-    #     cta_group = pipeline.schedule_config.get("cta_group", 1)
-    # else:
-    cta_group = -1
+    if sctx.target.arch == "sm_100a":
+        cta_group = 1
+    else:
+        cta_group = -1
 
     tensor_map = T.Var(g_buf.data.name + "_tensormap", dtype=T.handle("tensormap").type_annotation)
 
@@ -280,11 +271,7 @@ def copy_tma_impl(
         return coord
 
     if direction == "g2s":
-        mbar, phase, tx_cnt = evt.state
-        assert mbar and phase and tx_cnt, "mbarrier, phase, and tx_cnt must be provided"
-        assert isinstance(mbar, Buffer), "mbarrier must be a Buffer"
-        assert isinstance(phase, Buffer), "phase must be a Buffer"
-        assert isinstance(tx_cnt, Buffer), "tx_cnt must be a Buffer"
+        mbar, phase, tx_cnt = evt.get_state()
 
     # ---------------------------------------------------------------------
     # Device‑side TIR implementation
@@ -297,44 +284,50 @@ def copy_tma_impl(
             // 8
         )
 
+    if sctx.exec_scope.name == "cta":
+        thread_selector = T.thread()[0:1]
+    elif sctx.exec_scope.name == "warp":
+        thread_selector = T.thread()[T.ptx.elect_sync()]
+    else:
+        raise ValueError(f"Invalid exec scope: {sctx.exec_scope.name}")
+
     rank = len(g_buf.shape)
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def impl():
         # TODO(@bohan): reconsider this under warp specialized scenario. Q: should we place the fence here?
         # make sure smem write is visible to tma proxy
-        for tid_x in T.thread_binding(tx, "threadIdx.x"):
-            with T.thread()[tid_x == 0]:
-                if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
-                    if direction == "g2s":
-                        tx_cnt[0] += total_bytes()
-                        T.ptx.cp_async.bulk.tensor.g2c(
-                            rank,
-                            s_buf.ptr_to(s_st),
-                            mbar.ptr_to([0])  # type: ignore
-                            if direction == "g2s" else 0,  # dummy when not needed
-                            tensor_map,
-                            *reversed(g_st),
-                            cta_group=cta_group,
-                        )
-                    else:
-                        T.ptx.cp_async.bulk.tensor.s2g(
-                            rank,
-                            s_buf.ptr_to(s_st),
-                            tensor_map,
-                            *reversed(g_st),
-                        )
+        with thread_selector:
+            if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
+                if direction == "g2s":
+                    tx_cnt[0] += total_bytes()
+                    T.ptx.cp_async.bulk.tensor.g2c(
+                        rank,
+                        s_buf.ptr_to(s_st),
+                        mbar.ptr_to(evt.indices)  # type: ignore
+                        if direction == "g2s" else 0,  # dummy when not needed
+                        tensor_map,
+                        *reversed(g_st),
+                        cta_group=cta_group,
+                    )
                 else:
-                    if direction == "g2s":
-                        tx_cnt[0] += total_bytes()
-                    for lvs in T.grid(*iter_ranges):
+                    T.ptx.cp_async.bulk.tensor.s2g(
+                        rank,
+                        s_buf.ptr_to(s_st),
+                        tensor_map,
+                        *reversed(g_st),
+                    )
+            else:
+                if direction == "g2s":
+                    tx_cnt[0] += total_bytes()
+                for lvs in T.grid(*iter_ranges):
                         if direction == "g2s":
                             s_coord = T.meta_var(make_shared_coord(s_st, lvs))
                             g_coord = T.meta_var(make_global_coord(s_coord))
                             T.ptx.cp_async.bulk.tensor.g2c(
                                 rank,
                                 s_buf.ptr_to(s_coord),
-                                mbar.ptr_to([0]),
+                                mbar.ptr_to(evt.indices),
                                 tensor_map,
                                 *reversed(g_coord),
                                 cta_group=cta_group,
@@ -348,6 +341,9 @@ def copy_tma_impl(
                                 tensor_map,
                                 *reversed(g_coord),
                             )
+
+    # impl.show()
+
     # fmt: on
     # ---------------------------------------------------------------------
     # Host‑side tensor‑map creation
@@ -376,6 +372,8 @@ def copy_tma_impl(
             )
             Tp.tvm_kernel_replace_point()
     # fmt: on
+    # create_tensor_map.show()
+
     # Insert host‑side initialization
     sctx.add_init_stmt(create_tensor_map.body, host=True)
 
@@ -386,35 +384,27 @@ def copy_tma_impl(
 @target_cuda
 def copy_async(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule copy_async operation."""
-    if sctx.exec_scope.name != "cta":
-        return None
-
     evt = op.args[2]
     dst, src = op.args[0], op.args[1]
-    if isinstance(evt, event.BulkGroupEvent):
-        if evt.impl == event.EventImpl.kCpAsync:
+    if not validate_copy_op(dst, src, sctx):
+        return None
+
+    if isinstance(evt, BulkGroupEvent):
+        if evt.get_impl() == EventImpl.kCpAsync:
             for schedule in [copy_g2s_s2g_cta_vec_load_impl]:
                 res = schedule(dst, src, sctx, CopyInstType.CP_ASYNC)
                 if res is not None:
                     return res
-            raise ValueError(
-                f"No valid implementation found for copy_async op + BulkGroupEvent + impl = {evt.impl}"
-            )
-        if evt.impl == event.EventImpl.kTMAStore:
+        elif evt.get_impl() == EventImpl.kTMAStore:
             for schedule in [copy_tma_impl]:
                 res = schedule(evt, dst, src, sctx)
                 if res is not None:
                     return res
-            raise ValueError(
-                f"No valid implementation found for copy_async op + BulkGroupEvent + impl = {evt.impl}"
-            )
-    elif isinstance(evt, event.SemaphoreEvent):
-        if evt.impl == event.EventImpl.kTMALoad:
+    elif isinstance(evt, SemaphoreEventTensorItem):
+        if evt.get_impl() in [EventImpl.kTMALoad, EventImpl.kTMALoadOnly]:
             for schedule in [copy_tma_impl]:
                 res = schedule(evt, dst, src, sctx)
                 if res is not None:
                     return res
-            raise ValueError(
-                f"No valid implementation found for copy_async op + SemaphoreEvent + impl = {evt.impl}"
-            )
+
     return None

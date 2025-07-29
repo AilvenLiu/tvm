@@ -31,10 +31,16 @@ namespace tir {
 enum class kEventImpl : int {
   kMbarrier = 0,
   kCpAsync = 1,
+  kTMALoadOnly = 2,
+  kTMAStore2 = 3,
+  kGlobalSemaphore = 4,
 };
 
 class BaseEventNode : public Object {
  public:
+  virtual kEventImpl GetImpl() const = 0;
+  virtual Array<ffi::Any> GetState() const = 0;
+
   static constexpr const char* _type_key = "tirp.BaseEvent";
   static constexpr bool _type_has_method_sequal_reduce = false;
   static constexpr bool _type_has_method_shash_reduce = false;
@@ -47,57 +53,14 @@ class BaseEvent : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_METHODS(BaseEvent, ObjectRef, BaseEventNode);
 };
 
-class SemaphoreEventNode : public BaseEventNode {
- public:
-  PrimExpr expected_count;
-  String name;
-  kEventImpl impl;
-  Array<ffi::Any> state;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<SemaphoreEventNode>()
-        .def_ro("expected_count", &SemaphoreEventNode::expected_count)
-        .def_ro("name", &SemaphoreEventNode::name)
-        .def_ro("impl", &SemaphoreEventNode::impl)
-        .def_ro("state", &SemaphoreEventNode::state);
-  }
-
-  bool SEqualReduce(const SemaphoreEventNode* other, SEqualReducer equal) const {
-    if (!equal(expected_count, other->expected_count)) return false;
-    if (!equal(name, other->name)) return false;
-    if (!equal(impl, other->impl)) return false;
-    if (!equal(state, other->state)) return false;
-    return equal.FreeVarEqualImpl(this, other);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(expected_count);
-    hash_reduce(name);
-    hash_reduce(impl);
-    hash_reduce(state);
-    hash_reduce.FreeVarHashImpl(this);
-  }
-
-  static constexpr const char* _type_key = "tirp.SemaphoreEvent";
-  static constexpr bool _type_has_method_sequal_reduce = true;
-  static constexpr bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
-  TVM_DECLARE_FINAL_OBJECT_INFO(SemaphoreEventNode, BaseEventNode);
-};
-
-class SemaphoreEvent : public BaseEvent {
- public:
-  TVM_DLL SemaphoreEvent(const PrimExpr& expected_count, kEventImpl impl,
-                         const Array<ffi::Any>& state, const String& name);
-  TVM_DEFINE_OBJECT_REF_METHODS(SemaphoreEvent, BaseEvent, SemaphoreEventNode);
-};
-
 class BulkGroupEventNode : public BaseEventNode {
  public:
   String name;
   kEventImpl impl;
   Array<ffi::Any> state;
+
+  kEventImpl GetImpl() const final;
+  Array<ffi::Any> GetState() const final;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -134,58 +97,68 @@ class BulkGroupEvent : public BaseEvent {
   TVM_DEFINE_OBJECT_REF_METHODS(BulkGroupEvent, BaseEvent, BulkGroupEventNode);
 };
 
-class EventTensorNode : public Object {
+class SemaphoreEventTensorNode : public Object {
  public:
-  SemaphoreEvent event;
+  String name;
+  kEventImpl impl;
+  Array<ffi::Any> state;
   Array<PrimExpr> shape;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<EventTensorNode>()
-        .def_ro("event", &EventTensorNode::event)
-        .def_ro("shape", &EventTensorNode::shape);
+    refl::ObjectDef<SemaphoreEventTensorNode>()
+        .def_ro("name", &SemaphoreEventTensorNode::name)
+        .def_ro("impl", &SemaphoreEventTensorNode::impl)
+        .def_ro("state", &SemaphoreEventTensorNode::state)
+        .def_ro("shape", &SemaphoreEventTensorNode::shape);
   }
 
-  bool SEqualReduce(const EventTensorNode* other, SEqualReducer equal) const {
-    if (!equal(event, other->event)) return false;
+  bool SEqualReduce(const SemaphoreEventTensorNode* other, SEqualReducer equal) const {
+    if (!equal(name, other->name)) return false;
+    if (!equal(impl, other->impl)) return false;
+    if (!equal(state, other->state)) return false;
     if (!equal(shape, other->shape)) return false;
     return equal.FreeVarEqualImpl(this, other);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(event);
+    hash_reduce(name);
+    hash_reduce(impl);
+    hash_reduce(state);
     hash_reduce(shape);
     hash_reduce.FreeVarHashImpl(this);
   }
 
-  String name() const;
-
-  static constexpr const char* _type_key = "tirp.EventTensor";
+  static constexpr const char* _type_key = "tirp.SemaphoreEventTensor";
   static constexpr bool _type_has_method_sequal_reduce = true;
   static constexpr bool _type_has_method_shash_reduce = true;
   static constexpr bool _type_has_method_visit_attrs = false;
-  TVM_DECLARE_FINAL_OBJECT_INFO(EventTensorNode, Object);
+  TVM_DECLARE_FINAL_OBJECT_INFO(SemaphoreEventTensorNode, Object);
 };
 
-class EventTensor : public ObjectRef {
+class SemaphoreEventTensor : public ObjectRef {
  public:
-  TVM_DLL EventTensor(const SemaphoreEvent& event, const Array<PrimExpr>& shape);
-  TVM_DEFINE_OBJECT_REF_METHODS(EventTensor, ObjectRef, EventTensorNode);
+  TVM_DLL SemaphoreEventTensor(const kEventImpl& impl, const Array<ffi::Any>& state,
+                               const Array<PrimExpr>& shape, const String& name);
+  TVM_DEFINE_OBJECT_REF_METHODS(SemaphoreEventTensor, ObjectRef, SemaphoreEventTensorNode);
 };
 
-class EventTensorItemNode : public BaseEventNode {
+class SemaphoreEventTensorItemNode : public BaseEventNode {
  public:
-  EventTensor tensor;
+  SemaphoreEventTensor tensor;
   Array<PrimExpr> indices;
+
+  kEventImpl GetImpl() const final;
+  Array<ffi::Any> GetState() const final;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<EventTensorItemNode>()
-        .def_ro("tensor", &EventTensorItemNode::tensor)
-        .def_ro("indices", &EventTensorItemNode::indices);
+    refl::ObjectDef<SemaphoreEventTensorItemNode>()
+        .def_ro("tensor", &SemaphoreEventTensorItemNode::tensor)
+        .def_ro("indices", &SemaphoreEventTensorItemNode::indices);
   }
 
-  bool SEqualReduce(const EventTensorItemNode* other, SEqualReducer equal) const {
+  bool SEqualReduce(const SemaphoreEventTensorItemNode* other, SEqualReducer equal) const {
     return equal(tensor, other->tensor) && equal(indices, other->indices);
   }
 
@@ -195,18 +168,19 @@ class EventTensorItemNode : public BaseEventNode {
     hash_reduce.FreeVarHashImpl(this);
   }
 
-  static constexpr const char* _type_key = "tirp.EventTensorItem";
+  static constexpr const char* _type_key = "tirp.SemaphoreEventTensorItem";
   static constexpr bool _type_has_method_sequal_reduce = true;
   static constexpr bool _type_has_method_shash_reduce = true;
   static constexpr bool _type_has_method_visit_attrs = false;
-  TVM_DECLARE_FINAL_OBJECT_INFO(EventTensorItemNode, BaseEventNode);
+  TVM_DECLARE_FINAL_OBJECT_INFO(SemaphoreEventTensorItemNode, BaseEventNode);
 };
 
-class EventTensorItem : public BaseEvent {
+class SemaphoreEventTensorItem : public BaseEvent {
  public:
-  TVM_DLL EventTensorItem(const EventTensor& tensor, const Array<PrimExpr>& indices);
+  TVM_DLL SemaphoreEventTensorItem(const SemaphoreEventTensor& tensor,
+                                   const Array<PrimExpr>& indices);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(EventTensorItem, BaseEvent, EventTensorItemNode);
+  TVM_DEFINE_OBJECT_REF_METHODS(SemaphoreEventTensorItem, BaseEvent, SemaphoreEventTensorItemNode);
 };
 
 }  // namespace tir

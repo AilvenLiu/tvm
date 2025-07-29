@@ -184,7 +184,7 @@ def partial_reduction_fused_event(A: T.handle, B: T.handle, C: T.handle, semapho
         tx = T.thread_id([1024], parent="cta")
 
         state = T.alloc_local((1,), "int32")
-        sem = Tp.alloc_semaphore_event_tensor(NUM_BLOCK_M, EventImpl.kGlobalSemaphore, state=[sem_buf, state], shape=[NUM_BLOCK_M])
+        sem = Tp.alloc_semaphore_event_tensor(EventImpl.kGlobalSemaphore, state=[sem_buf, state], shape=[NUM_BLOCK_M])
 
         with T.cta()[0: STAGE_1_SM_CNT]:
             A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared", layout="default")

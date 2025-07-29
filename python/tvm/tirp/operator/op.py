@@ -423,13 +423,18 @@ class EventInit(OpCall):
     op = get_tirp_op("event_init")
 
     event = ArgProperty(0)
+    expected_count = ArgProperty(1)
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
-        assert len(self.args) == 1, f"{self} expects 1 argument, got {len(self.args)}"
-        assert isinstance(
-            self.event, (event.EventTensor, event.BaseEvent)
-        ), f"{self.event} expected to be EventTensor or BaseEvent, got {self.event}"
+        if isinstance(self.event, (event.SemaphoreEventTensor, event.SemaphoreEventTensorItem)):
+            assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
+        elif isinstance(self.event, event.BulkGroupEvent):
+            assert len(self.args) == 1, f"{self} expects 1 argument, got {len(self.args)}"
+        else:
+            raise ValueError(
+                f"{self.event} expected to be SemaphoreEventTensor, SemaphoreEventTensorItem, or BulkGroupEvent, got {self.event}"
+            )
 
 
 class EventCommit(OpCall):

@@ -79,23 +79,13 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
   return call->args[0];
 }
 
-ExprDoc EventDecl(const tirx::BaseEvent& event, const String& method, const ObjectPath& p,
+ExprDoc EventDecl(const tirx::BulkGroupEvent& event, const String& method, const ObjectPath& p,
                   const IRDocsifier& d) {
-  if (const auto* sem_event = event.as<tirx::SemaphoreEventNode>()) {
-    return TIRp(d, method)->Call(
-        {d->AsDoc<ExprDoc>(sem_event->expected_count, p->Attr("expected_count")),
-         LiteralDoc::Int(static_cast<int64_t>(sem_event->impl), p->Attr("impl")),
-         d->AsDoc<ExprDoc>(sem_event->state, p->Attr("state"))});
-  } else if (const auto* bulk_event = event.as<tirx::BulkGroupEventNode>()) {
-    return TIRp(d, method)->Call(
-        {LiteralDoc::Int(static_cast<int64_t>(bulk_event->impl), p->Attr("impl")),
-         d->AsDoc<ExprDoc>(bulk_event->state, p->Attr("state"))});
-  } else {
-    LOG(FATAL) << "Unknown event type: " << event;
-  }
+  return TIRp(d, method)->Call({LiteralDoc::Int(static_cast<int64_t>(event->impl), p->Attr("impl")),
+                                d->AsDoc<ExprDoc>(event->state, p->Attr("state"))});
 }
 
-ExprDoc HandleEvent(const tirx::BaseEvent& event, const String& method, const ObjectPath& p,
+ExprDoc HandleEvent(const tirx::BulkGroupEvent& event, const String& method, const ObjectPath& p,
                     const IRDocsifier& d) {
   if (!d->IsVarDefined(event)) {
     if (Optional<Frame> opt_f = FindLowestVarDef(event, d)) {
@@ -110,28 +100,16 @@ ExprDoc HandleEvent(const tirx::BaseEvent& event, const String& method, const Ob
   LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << event;
 }
 
-ExprDoc EventTensorDecl(const tirx::EventTensor& event_tensor, const String& method,
+ExprDoc EventTensorDecl(const tirx::SemaphoreEventTensor& event_tensor, const String& method,
                         const ObjectPath& p, const IRDocsifier& d) {
-  const auto& event = event_tensor->event;
-  if (const auto* sem_event = event.as<tirx::SemaphoreEventNode>()) {
-    return TIRp(d, method)->Call({
-        d->AsDoc<ExprDoc>(sem_event->expected_count, p->Attr("expected_count")),
-        LiteralDoc::Int(static_cast<int64_t>(sem_event->impl), p->Attr("impl")),
-        d->AsDoc<ExprDoc>(sem_event->state, p->Attr("state")),
-        d->AsDoc<ExprDoc>(event_tensor->shape, p->Attr("shape")),
-    });
-  } else if (const auto* bulk_event = event.as<tirx::BulkGroupEventNode>()) {
-    return TIRp(d, method)->Call({
-        LiteralDoc::Int(static_cast<int64_t>(bulk_event->impl), p->Attr("impl")),
-        d->AsDoc<ExprDoc>(bulk_event->state, p->Attr("state")),
-        d->AsDoc<ExprDoc>(event_tensor->shape, p->Attr("shape")),
-    });
-  } else {
-    LOG(FATAL) << "Unknown event tensor type: " << event_tensor;
-  }
+  return TIRp(d, method)->Call({
+      LiteralDoc::Int(static_cast<int64_t>(event_tensor->impl), p->Attr("impl")),
+      d->AsDoc<ExprDoc>(event_tensor->state, p->Attr("state")),
+      d->AsDoc<ExprDoc>(event_tensor->shape, p->Attr("shape")),
+  });
 }
 
-ExprDoc HandleEventTensor(const tirx::EventTensor& event_tensor, const String& method,
+ExprDoc HandleEventTensor(const tirx::SemaphoreEventTensor& event_tensor, const String& method,
                           const ObjectPath& p, const IRDocsifier& d) {
   if (!d->IsVarDefined(event_tensor)) {
     if (Optional<Frame> opt_f = FindLowestVarDef(event_tensor, d)) {
@@ -147,13 +125,6 @@ ExprDoc HandleEventTensor(const tirx::EventTensor& event_tensor, const String& m
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::SemaphoreEvent>("",
-                                       [](tirx::SemaphoreEvent event, ObjectPath p,
-                                          IRDocsifier d) -> Doc {
-                                         return HandleEvent(event, "SemaphoreEvent", p, d);
-                                       });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::BulkGroupEvent>("",
                                        [](tirx::BulkGroupEvent event, ObjectPath p,
                                           IRDocsifier d) -> Doc {
@@ -161,15 +132,14 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                                        });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::EventTensor>("",
-                                    [](tirx::EventTensor event_tensor, ObjectPath p,
-                                       IRDocsifier d) -> Doc {
-                                      return HandleEventTensor(event_tensor, "EventTensor", p, d);
-                                    });
+    .set_dispatch<tirx::SemaphoreEventTensor>(
+        "", [](tirx::SemaphoreEventTensor event_tensor, ObjectPath p, IRDocsifier d) -> Doc {
+          return HandleEventTensor(event_tensor, "SemaphoreEventTensor", p, d);
+        });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::EventTensorItem>(
-        "", [](tirx::EventTensorItem item, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::SemaphoreEventTensorItem>(
+        "", [](tirx::SemaphoreEventTensorItem item, ObjectPath p, IRDocsifier d) -> Doc {
           const auto& e_tensor_doc = d->AsDoc<ExprDoc>(item->tensor, p->Attr("tensor"));
           Array<Doc> indices_doc;
           for (size_t i = 0, n = item->indices.size(); i < n; ++i) {
@@ -236,9 +206,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                             (*f)->stmts);
           } else if (bool(event_op_map.get(op, tvm::Bool(false)))) {
             // Event ops
-            ICHECK(op_call->args[0].as<tirx::EventTensorNode>() ||
+            ICHECK(op_call->args[0].as<tirx::SemaphoreEventTensorNode>() ||
                    op_call->args[0].as<tirx::BaseEventNode>())
-                << "First argument must be a EventTensor or BaseEvent";
+                << "First argument must be a SemaphoreEventTensor or BulkGroupEvent";
             // event_method_name
             std::string method = std::string(name).substr(6);
             return print_member_function_call(method);

@@ -567,10 +567,10 @@ class SBlock(Stmt):
     annotations: Optional[Mapping[str, Object]]
         Additional annotation hints.
 
-    event: List["tvm.tir.event.Event"]
-        The events in the block.
+    bulk_events: List["tvm.tir.event.BulkGroupEvent"]
+        The bulk events in the block.
 
-    event_tensors: List["tvm.tir.event.EventTensor"]
+    sem_event_tensors: List["tvm.tir.event.SemaphoreEventTensor"]
         The event tensors in the block.
 
     span : Optional[Span]
@@ -589,8 +589,8 @@ class SBlock(Stmt):
     exec_scope: ExecScope | None
     buffer_views: list[BufferView]
     buffer_gets: list[BufferGet]
-    events: list["tvm.tir.event.Event"]
-    event_tensors: list["tvm.tir.event.EventTensor"]
+    bulk_events: list["tvm.tir.event.BulkGroupEvent"]
+    sem_event_tensors: list["tvm.tir.event.SemaphoreEventTensor"]
     span: Span | None
 
     def __init__(
@@ -608,8 +608,8 @@ class SBlock(Stmt):
         exec_scope: ExecScope | None = None,
         buffer_views: list[BufferView] | None = None,
         buffer_gets: list[BufferGet] | None = None,
-        events: list["tvm.tir.event.Event"] | None = None,
-        event_tensors: list["tvm.tir.event.EventTensor"] | None = None,
+        bulk_events: list["tvm.tir.event.BulkGroupEvent"] | None = None,
+        sem_event_tensors: list["tvm.tir.event.SemaphoreEventTensor"] | None = None,
     ) -> None:
         if alloc_buffers is None:
             alloc_buffers = []
@@ -621,10 +621,10 @@ class SBlock(Stmt):
             buffer_views = []
         if buffer_gets is None:
             buffer_gets = []
-        if events is None:
-            events = []
-        if event_tensors is None:
-            event_tensors = []
+        if bulk_events is None:
+            bulk_events = []
+        if sem_event_tensors is None:
+            sem_event_tensors = []
         self.__init_handle_by_constructor__(
             _ffi_api.SBlock,  # type: ignore
             iter_vars,
@@ -640,8 +640,8 @@ class SBlock(Stmt):
             exec_scope,
             buffer_views,
             buffer_gets,
-            events,
-            event_tensors,
+            bulk_events,
+            sem_event_tensors,
         )  # type: ignore
 
 

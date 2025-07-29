@@ -169,8 +169,8 @@ class SBlockFrameNode : public TIRFrameNode {
 
   Array<tvm::tirx::BufferView> buffer_views;
   Array<tvm::tirx::BufferGet> buffer_gets;
-  Array<tvm::tirx::BaseEvent> events;
-  Array<tvm::tirx::EventTensor> event_tensors;
+  Array<tvm::tirx::BulkGroupEvent> bulk_events;
+  Array<tvm::tirx::SemaphoreEventTensor> sem_event_tensors;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -191,8 +191,8 @@ class SBlockFrameNode : public TIRFrameNode {
         .def_ro("scope_slice_extents", &SBlockFrameNode::scope_slice_extents)
         .def_ro("buffer_views", &SBlockFrameNode::buffer_views)
         .def_ro("buffer_gets", &SBlockFrameNode::buffer_gets)
-        .def_ro("events", &SBlockFrameNode::events)
-        .def_ro("event_tensors", &SBlockFrameNode::event_tensors);
+        .def_ro("bulk_events", &SBlockFrameNode::bulk_events)
+        .def_ro("sem_event_tensors", &SBlockFrameNode::sem_event_tensors);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.SSBlockFrame", SBlockFrameNode,
                                     TIRFrameNode);
@@ -673,7 +673,7 @@ class ComposeOpFrame : public TIRFrame {
   }
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ComposeOpFrame, TIRFrame, ComposeOpFrameNode);
 };
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

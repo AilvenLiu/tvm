@@ -27,10 +27,8 @@ from .common import target_cuda
 from tvm.tirp.operator import EventInit, EventCommit, EventWait
 from tvm.tir.event import (
     EventImpl,
-    SemaphoreEvent,
-    EventTensor,
-    EventTensorItem,
-    BaseEvent,
+    SemaphoreEventTensor,
+    SemaphoreEventTensorItem,
 )
 
 
@@ -39,21 +37,12 @@ EVENT_COMMIT_IMPL_DICT = dict()
 EVENT_WAIT_IMPL_DICT = dict()
 
 
-def get_event_impl(event: Union[EventTensor, BaseEvent]):
-    if isinstance(event, EventTensor):
-        return EventImpl(event.event.impl)
-    elif isinstance(event, EventTensorItem):
-        return EventImpl(event.tensor.event.impl)
-    else:
-        return EventImpl(event.impl)
-
-
 @register_schedule("event_init", "cuda")
 @target_cuda
 def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event init."""
     event = op.args[0]
-    impl = get_event_impl(event)
+    impl = event.get_impl()
     if impl not in EVENT_INIT_IMPL_DICT:
         return None
 
@@ -65,7 +54,7 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event commit."""
     event = op.args[0]
-    impl = get_event_impl(event)
+    impl = event.get_impl()
     if impl not in EVENT_COMMIT_IMPL_DICT:
         return None
 
@@ -77,7 +66,7 @@ def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event wait."""
     event = op.args[0]
-    impl = get_event_impl(event)
+    impl = event.get_impl()
     if impl not in EVENT_WAIT_IMPL_DICT:
         return None
 
@@ -96,7 +85,7 @@ def target_event_impl(op_name: str, exp_impl: EventImpl):
             ), f"{op_call} is not a EventInit, EventCommit, or EventWait"
 
             event = op_call.event
-            impl = get_event_impl(event)
+            impl = event.get_impl()
 
             if impl != exp_impl:
                 return None
@@ -124,23 +113,35 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     if sctx.exec_scope.name != "cta":
         return None
 
-    evt = op.args[0]
-    assert isinstance(evt, SemaphoreEvent), "event must be a SemaphoreEvent"
-    mbar, phase, tx_cnt = evt.state
-    assert mbar and phase and tx_cnt, "mbarrier, phase, and tx_cnt must be provided"
-    assert isinstance(mbar, Buffer), "mbarrier must be a Buffer"
-    assert isinstance(phase, Buffer), "phase must be a Buffer"
-    assert isinstance(tx_cnt, Buffer), "tx_cnt must be a Buffer"
+    evt, expected_count = op.args
+    mbar, phase, tx_cnt = evt.get_state()
 
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def func():
-        phase[0] = 0
-        tx_cnt[0] = 0
-        with T.thread()[0:1]:
-            T.evaluate(T.ptx.mbarrier.init(mbar.ptr_to([0]), evt.expected_count))
-        T.tvm_storage_sync("shared")
+    if isinstance(evt, SemaphoreEventTensorItem):
 
-    return func
+        @T.prim_func(tirp=True, check_well_formed=False)
+        def func():
+            phase[*evt.indices] = 0
+            tx_cnt[*evt.indices] = 0
+            with T.thread()[0:1]:
+                T.evaluate(T.ptx.mbarrier.init(mbar.ptr_to([*evt.indices]), expected_count))
+            T.tvm_storage_sync("shared")
+
+        return func
+    elif isinstance(evt, SemaphoreEventTensor):
+
+        @T.prim_func(tirp=True, check_well_formed=False)
+        def func():
+            for i in T.grid(*evt.shape):
+                phase[i] = 0
+                tx_cnt[i] = 0
+            with T.thread()[0:1]:
+                for i in T.grid(*evt.shape):
+                    T.evaluate(T.ptx.mbarrier.init(mbar.ptr_to([i]), expected_count))
+            T.tvm_storage_sync("shared")
+
+        return func
+    else:
+        raise ValueError(f"Invalid event type: {type(evt)}")
 
 
 @target_event_impl("event_commit", EventImpl.kTMALoad)
@@ -150,17 +151,15 @@ def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         return None
 
     evt = op.args[0]
-    assert isinstance(evt, SemaphoreEvent), "event must be a SemaphoreEvent"
-    mbar, phase, tx_cnt = evt.state
-    assert mbar and phase and tx_cnt, "mbarrier, phase, and tx_cnt must be provided"
-    assert isinstance(mbar, Buffer), "mbarrier must be a Buffer"
-    assert isinstance(phase, Buffer), "phase must be a Buffer"
-    assert isinstance(tx_cnt, Buffer), "tx_cnt must be a Buffer"
+    assert isinstance(evt, SemaphoreEventTensorItem), "event must be a SemaphoreEventTensor"
+    mbar, phase, tx_cnt = evt.get_state()
 
     @T.prim_func(tirp=True, check_well_formed=False)
     def func():
         with T.thread()[0:1]:
-            T.evaluate(T.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to([0]), tx_cnt[0]))
+            T.evaluate(
+                T.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to([*evt.indices]), tx_cnt[*evt.indices])
+            )
 
     return func
 
@@ -172,19 +171,86 @@ def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         return None
 
     evt = op.args[0]
-    assert isinstance(evt, SemaphoreEvent), "event must be a SemaphoreEvent"
-    mbar, phase, tx_cnt = evt.state
-    assert mbar and phase and tx_cnt, "mbarrier, phase, and tx_cnt must be provided"
-    assert isinstance(mbar, Buffer), "mbarrier must be a Buffer"
-    assert isinstance(phase, Buffer), "phase must be a Buffer"
-    assert isinstance(tx_cnt, Buffer), "tx_cnt must be a Buffer"
+    assert isinstance(evt, SemaphoreEventTensorItem), "event must be a SemaphoreEventTensor"
+    mbar, phase, tx_cnt = evt.get_state()
 
     @T.prim_func(tirp=True, check_well_formed=False)
     def func():
-        T.evaluate(T.ptx.mbarrier.try_wait(mbar.ptr_to([0]), phase[0]))
-        tx_cnt[0] = 0
-        phase[0] = phase[0] ^ 1
+        T.evaluate(T.ptx.mbarrier.try_wait(mbar.ptr_to([*evt.indices]), phase[*evt.indices]))
+        tx_cnt[*evt.indices] = 0
+        phase[*evt.indices] = phase[*evt.indices] ^ 1
         T.tvm_storage_sync("shared")
+
+    return func
+
+
+######################## kTMALoadOnly ########################
+@target_event_impl("event_init", EventImpl.kTMALoadOnly)
+def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    """Schedule event initialization."""
+    if sctx.exec_scope.name != "cta":
+        return None
+
+    evt, expected_count = op.args
+    mbar, phase, tx_cnt = evt.get_state()
+
+    if isinstance(evt, SemaphoreEventTensor):
+        # init all mbars in the tensor
+        @T.prim_func(tirp=True, check_well_formed=False)
+        def func():
+            tx_cnt[0] = 0
+            with T.thread()[0:1]:
+                for i in T.grid(*evt.shape):
+                    T.ptx.mbarrier.init(mbar.ptr_to([i]), expected_count)
+            T.tvm_storage_sync("shared")
+
+        return func
+    elif isinstance(evt, SemaphoreEventTensorItem):
+        # init the mbar
+        @T.prim_func(tirp=True, check_well_formed=False)
+        def func():
+            tx_cnt[0] = 0
+            with T.thread()[0:1]:
+                T.ptx.mbarrier.init(mbar.ptr_to(evt.indices), expected_count)
+            T.tvm_storage_sync("shared")
+
+        return func
+    else:
+        raise ValueError(f"Invalid event type: {type(evt)}")
+
+
+@target_event_impl("event_commit", EventImpl.kTMALoadOnly)
+def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    """Schedule event commit."""
+    if sctx.exec_scope.name != "warp":
+        return None
+
+    evt = op.args[0]
+    assert isinstance(evt, SemaphoreEventTensorItem), "evt must be a SemaphoreEventTensorItem"
+    mbar, phase, tx_cnt = evt.get_state()
+
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def func():
+        with T.thread()[T.ptx.elect_sync()]:
+            T.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to(evt.indices), tx_cnt[0])
+            tx_cnt[0] = 0
+
+    return func
+
+
+@target_event_impl("event_wait", EventImpl.kTMALoadOnly)
+def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    """Schedule event wait."""
+    if sctx.exec_scope.name != "warp":
+        return None
+
+    evt = op.args[0]
+    assert isinstance(evt, SemaphoreEventTensorItem), "evt must be a SemaphoreEventTensorItem"
+    mbar, phase, tx_cnt = evt.get_state()
+
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def func():
+        T.ptx.mbarrier.try_wait(mbar.ptr_to(evt.indices), phase[0])
 
     return func
 
@@ -280,21 +346,28 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     if sctx.exec_scope.name != "kernel":
         return None
 
-    evt = op.args[0]
-    assert isinstance(evt, EventTensor), "evt must be a EventTensor"
-    sem, state = evt.event.state
-    assert list(sem.shape) == list(
-        evt.shape
-    ), f"sem and evt must have the same shape, but got {sem.shape} and {evt.shape}"
+    evt, expected_count = op.args
+    sem, state = evt.get_state()
 
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def func():
-        with T.thread()[0:1]:
-            for i in T.grid(*sem.shape):
-                sem[i] = evt.event.expected_count
-        T.cuda.thread_fence()
+    if isinstance(evt, SemaphoreEventTensor):
 
-    return func
+        @T.prim_func(tirp=True, check_well_formed=False)
+        def func():
+            with T.thread()[0:1]:
+                for i in T.grid(*sem.shape):
+                    sem[i] = expected_count
+            T.cuda.thread_fence()
+
+        return func
+    elif isinstance(evt, SemaphoreEventTensorItem):
+
+        @T.prim_func(tirp=True, check_well_formed=False)
+        def func():
+            with T.thread()[0:1]:
+                sem[*evt.indices] = expected_count
+            T.cuda.thread_fence()
+
+        return func
 
 
 @target_event_impl("event_commit", EventImpl.kGlobalSemaphore)
@@ -304,9 +377,8 @@ def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         return None
 
     evt = op.args[0]
-    assert isinstance(evt, EventTensorItem)
-    sem, state = evt.tensor.event.state
-    assert isinstance(sem, Buffer), "sem must be a Buffer"
+    assert isinstance(evt, SemaphoreEventTensorItem)
+    sem, state = evt.get_state()
 
     @T.prim_func(tirp=True, check_well_formed=False)
     def func():
@@ -324,10 +396,8 @@ def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         return None
 
     evt = op.args[0]
-    assert isinstance(evt, EventTensorItem)
-    sem, state = evt.tensor.event.state
-    assert isinstance(sem, Buffer), "sem must be a Buffer"
-    assert state is not None, "state must be provided"
+    assert isinstance(evt, SemaphoreEventTensorItem)
+    sem, state = evt.get_state()
 
     @T.prim_func(tirp=True, check_well_formed=False)
     def func():

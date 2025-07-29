@@ -595,12 +595,12 @@ Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
       return this->VisitExpr(expr.value());
     } else if (auto stmt = e.as<Stmt>()) {
       return this->VisitStmt(stmt.value());
-    } else if (auto evt_item = e.as<EventTensorItemNode>()) {
+    } else if (auto evt_item = e.as<SemaphoreEventTensorItemNode>()) {
       auto indices = Internal::Mutate(this, evt_item->indices);
       if (indices.same_as(evt_item->indices)) {
         return e;
       } else {
-        return EventTensorItem(evt_item->tensor, indices);
+        return SemaphoreEventTensorItem(evt_item->tensor, indices);
       }
     }
     return e;

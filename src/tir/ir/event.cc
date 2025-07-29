@@ -24,25 +24,13 @@ namespace tvm {
 namespace tir {
 
 TVM_FFI_STATIC_INIT_BLOCK({
-  SemaphoreEventNode::RegisterReflection();
   BulkGroupEventNode::RegisterReflection();
-  EventTensorNode::RegisterReflection();
-  EventTensorItemNode::RegisterReflection();
+  SemaphoreEventTensorNode::RegisterReflection();
+  SemaphoreEventTensorItemNode::RegisterReflection();
 });
 
-TVM_REGISTER_NODE_TYPE(BaseEventNode);
-
-SemaphoreEvent::SemaphoreEvent(const PrimExpr& expected_count, kEventImpl impl,
-                               const Array<ffi::Any>& state, const String& name) {
-  ObjectPtr<SemaphoreEventNode> n = make_object<SemaphoreEventNode>();
-  n->expected_count = std::move(expected_count);
-  n->name = std::move(name);
-  n->impl = impl;
-  n->state = std::move(state);
-  data_ = std::move(n);
-}
-
-TVM_REGISTER_NODE_TYPE(SemaphoreEventNode);
+kEventImpl BulkGroupEventNode::GetImpl() const { return impl; }
+Array<ffi::Any> BulkGroupEventNode::GetState() const { return state; }
 
 BulkGroupEvent::BulkGroupEvent(kEventImpl impl, const Array<ffi::Any>& state, const String& name) {
   ObjectPtr<BulkGroupEventNode> n = make_object<BulkGroupEventNode>();
@@ -54,49 +42,45 @@ BulkGroupEvent::BulkGroupEvent(kEventImpl impl, const Array<ffi::Any>& state, co
 
 TVM_REGISTER_NODE_TYPE(BulkGroupEventNode);
 
-EventTensor::EventTensor(const SemaphoreEvent& event, const Array<PrimExpr>& shape) {
-  ObjectPtr<EventTensorNode> n = make_object<EventTensorNode>();
-  ICHECK(!event->IsInstance<EventTensorItemNode>());
-  n->event = std::move(event);
+SemaphoreEventTensor::SemaphoreEventTensor(const kEventImpl& impl, const Array<ffi::Any>& state,
+                                           const Array<PrimExpr>& shape, const String& name) {
+  ObjectPtr<SemaphoreEventTensorNode> n = make_object<SemaphoreEventTensorNode>();
+  n->name = std::move(name);
+  n->impl = impl;
+  n->state = std::move(state);
   n->shape = std::move(shape);
   data_ = std::move(n);
 }
 
-String EventTensorNode::name() const {
-  if (const auto* sem_event = event.as<SemaphoreEventNode>()) {
-    return sem_event->name;
-  } else if (const auto* bulk_event = event.as<BulkGroupEventNode>()) {
-    return bulk_event->name;
-  } else {
-    LOG(FATAL) << "Unsupported event type: " << event->GetTypeKey();
-  }
-}
+kEventImpl SemaphoreEventTensorItemNode::GetImpl() const { return tensor->impl; }
+Array<ffi::Any> SemaphoreEventTensorItemNode::GetState() const { return tensor->state; }
 
-EventTensorItem::EventTensorItem(const EventTensor& tensor, const Array<PrimExpr>& indices) {
-  ObjectPtr<EventTensorItemNode> n = make_object<EventTensorItemNode>();
+SemaphoreEventTensorItem::SemaphoreEventTensorItem(const SemaphoreEventTensor& tensor,
+                                                   const Array<PrimExpr>& indices) {
+  ObjectPtr<SemaphoreEventTensorItemNode> n = make_object<SemaphoreEventTensorItemNode>();
   n->tensor = std::move(tensor);
   n->indices = std::move(indices);
   data_ = std::move(n);
 }
 
-TVM_REGISTER_NODE_TYPE(EventTensorNode);
-
-TVM_REGISTER_NODE_TYPE(EventTensorItemNode);
+TVM_REGISTER_NODE_TYPE(SemaphoreEventTensorNode);
+TVM_REGISTER_NODE_TYPE(SemaphoreEventTensorItemNode);
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-      .def("tirp.SemaphoreEvent",
-           [](PrimExpr expected_count, kEventImpl impl, Array<ffi::Any> state, String name) {
-             return SemaphoreEvent(expected_count, impl, state, name);
-           })
       .def("tirp.BulkGroupEvent", [](kEventImpl impl, Array<ffi::Any> state,
                                      String name) { return BulkGroupEvent(impl, state, name); })
-      .def("tirp.EventTensor",
-           [](SemaphoreEvent event, Array<PrimExpr> shape) { return EventTensor(event, shape); })
-      .def("tirp.EventTensorItem", [](EventTensor tensor, Array<PrimExpr> indices) {
-        return EventTensorItem(tensor, indices);
-      });
+      .def("tirp.SemaphoreEventTensor",
+           [](kEventImpl impl, Array<ffi::Any> state, Array<PrimExpr> shape, String name) {
+             return SemaphoreEventTensor(impl, state, shape, name);
+           })
+      .def("tirp.SemaphoreEventTensorItem",
+           [](SemaphoreEventTensor tensor, Array<PrimExpr> indices) {
+             return SemaphoreEventTensorItem(tensor, indices);
+           })
+      .def("tirp.BaseEventImplGet", [](BaseEvent event) { return event->GetImpl(); })
+      .def("tirp.BaseEventStateGet", [](BaseEvent event) { return event->GetState(); });
 });
 
 }  // namespace tir

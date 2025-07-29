@@ -22,7 +22,7 @@ from tvm.tir import BufferLoad, Block, BufferStore, OpCall, BufferRegion, Var, P
 from tvm.tir.buffer import Buffer
 from tvm.tir import BufferView, BufferGet, Stmt
 from tvm.tirp.operator.op import KernelReplacePoint
-from tvm.tir.event import EventTensorItem
+from tvm.tir.event import SemaphoreEventTensorItem
 
 
 class BufferReplacer(StmtExprMutator):
@@ -71,8 +71,10 @@ class BufferReplacer(StmtExprMutator):
         }
         args = list()
         for arg in op.args:
-            if isinstance(arg, EventTensorItem):
-                args.append(EventTensorItem(arg.tensor, self.visit_array_prim_expr_(arg.indices)))
+            if isinstance(arg, SemaphoreEventTensorItem):
+                args.append(
+                    SemaphoreEventTensorItem(arg.tensor, self.visit_array_prim_expr_(arg.indices))
+                )
             else:
                 args.append(arg)
         return OpCall(*args, op=op.op, workspace=new_workspace, schedule_config=op.schedule_config)

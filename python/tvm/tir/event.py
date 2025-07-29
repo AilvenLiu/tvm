@@ -35,10 +35,12 @@ def make_op_call(op_name: str, *args):
 
 
 class EventImpl(IntEnum):
+    # see also include/tvm/tir/event.h kEventImpl
     kCpAsync = 0
     kTMALoad = 1
-    kTMAStore = 2
-    kGlobalSemaphore = 3
+    kTMALoadOnly = 2
+    kTMAStore = 3
+    kGlobalSemaphore = 4
 
 
 @tvm.ffi.register_object("tirp.BaseEvent")
@@ -48,29 +50,11 @@ class BaseEvent(Object):
     def __init__(self, name: str):
         raise NotImplementedError("BaseEvent is not instantiable")
 
+    def get_impl(self) -> EventImpl:
+        return _ffi_api.BaseEventImplGet(self)
 
-@tvm.ffi.register_object("tirp.SemaphoreEvent")
-class SemaphoreEvent(BaseEvent):
-    """Semaphore event"""
-
-    expected_count: int
-    impl: EventImpl
-    state: List[Any]
-    name: str
-
-    def __init__(self, expected_count: int, impl: EventImpl, state: List[Any] = [], name: str = ""):
-        self.__init_handle_by_constructor__(
-            _ffi_api.SemaphoreEvent, expected_count, impl, state, name
-        )
-
-    def init(self):
-        return make_op_call("event_init", self)
-
-    def commit(self):
-        return make_op_call("event_commit", self)
-
-    def wait(self):
-        return make_op_call("event_wait", self)
+    def get_state(self) -> List[Any]:
+        return _ffi_api.BaseEventStateGet(self)
 
 
 @tvm.ffi.register_object("tirp.BulkGroupEvent")
@@ -94,18 +78,18 @@ class BulkGroupEvent(BaseEvent):
         return make_op_call("event_wait", self, n_groups)
 
 
-@tvm.ffi.register_object("tirp.EventTensorItem")
-class EventTensorItem(BaseEvent):
+@tvm.ffi.register_object("tirp.SemaphoreEventTensorItem")
+class SemaphoreEventTensorItem(BaseEvent):
     """Event tensor item"""
 
-    tensor: "EventTensor"
+    tensor: "SemaphoreEventTensor"
     indices: List[PrimExpr]
 
-    def __init__(self, tensor: "EventTensor", indices: List[PrimExpr]):
-        self.__init_handle_by_constructor__(_ffi_api.EventTensorItem, tensor, indices)
+    def __init__(self, tensor: "SemaphoreEventTensor", indices: List[PrimExpr]):
+        self.__init_handle_by_constructor__(_ffi_api.SemaphoreEventTensorItem, tensor, indices)
 
-    def init(self):
-        return make_op_call("event_init", self)
+    def init(self, expected_count: PrimExpr):
+        return make_op_call("event_init", self, expected_count)
 
     def commit(self):
         return make_op_call("event_commit", self)
@@ -114,22 +98,33 @@ class EventTensorItem(BaseEvent):
         return make_op_call("event_wait", self)
 
 
-@tvm.ffi.register_object("tirp.EventTensor")
-class EventTensor(Object):
+@tvm.ffi.register_object("tirp.SemaphoreEventTensor")
+class SemaphoreEventTensor(Object):
     """Event tensor"""
 
-    event: SemaphoreEvent
+    impl: EventImpl
+    state: List[Any]
+    name: str
     shape: List[PrimExpr]
 
-    def __init__(self, event: SemaphoreEvent, shape: List[PrimExpr]):
-        assert isinstance(
-            event, SemaphoreEvent
-        ), "EventTensor can only be a tensor of SemaphoreEvents"
-        self.__init_handle_by_constructor__(_ffi_api.EventTensor, event, shape)
+    def __init__(
+        self, impl: EventImpl, state: List[Any] = [], shape: List[PrimExpr] = [], name: str = ""
+    ):
+        self.__init_handle_by_constructor__(_ffi_api.SemaphoreEventTensor, impl, state, shape, name)
 
     def __getitem__(self, *indices: List[PrimExpr]):
-        assert len(indices) == len(self.shape), "indices must be the same length as shape"
-        return EventTensorItem(self, indices)
+        assert len(indices) == len(
+            self.shape
+        ), "indices must be the same length as shape, but got {} and {}".format(
+            len(indices), len(self.shape)
+        )
+        return SemaphoreEventTensorItem(self, indices)
 
-    def init(self):
-        return make_op_call("event_init", self)
+    def init(self, expected_count: PrimExpr):
+        return make_op_call("event_init", self, expected_count)
+
+    def get_impl(self) -> EventImpl:
+        return self.impl
+
+    def get_state(self) -> List[Any]:
+        return self.state

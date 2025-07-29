@@ -31,7 +31,7 @@ from tvm.relax.expr_functor import PyExprMutator, mutator
 from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
 from tvm.tir import Block, PrimFunc, PrimExpr, Buffer, IndexMap, BufferLoad, SeqStmt, Stmt, Var
 from tvm.tirp.operator import EventWait, EventCommit
-from tvm.tir.event import EventTensor, EventTensorItem, SemaphoreEvent, EventImpl
+from tvm.tir.event import SemaphoreEventTensor, SemaphoreEventTensorItem, EventImpl
 from tvm.script import tir as T, tirp as Tp
 from tvm.tirp.transform.common import seek_kernel_replace_point, BufferReplacer
 from tvm.tir.analysis import verify_tirp_well_formed
@@ -110,26 +110,24 @@ class EventOpInserter(StmtExprMutator):
         ]
         # define event tensors
         in_event_tensors = [
-            EventTensor(
-                SemaphoreEvent(1, EventImpl.kGlobalSemaphore, state=[buf, state_reg]),
-                buf.shape,
+            SemaphoreEventTensor(
+                EventImpl.kGlobalSemaphore, state=[buf, state_reg], shape=buf.shape
             )
             for buf, state_reg in zip(self.in_event_bufs, in_state_regs)
         ]
         out_event_tensors = [
-            EventTensor(
-                SemaphoreEvent(1, EventImpl.kGlobalSemaphore, state=[buf, state_reg]),
-                buf.shape,
+            SemaphoreEventTensor(
+                EventImpl.kGlobalSemaphore, state=[buf, state_reg], shape=buf.shape
             )
             for buf, state_reg in zip(self.out_event_bufs, out_state_regs)
         ]
         # only process root block
         waits = [
-            EventWait(EventTensorItem(tensor, dep.map_indices(self.tile_idx)))
+            EventWait(SemaphoreEventTensorItem(tensor, dep.map_indices(self.tile_idx)))
             for tensor, dep in zip(in_event_tensors, self.in_deps)
         ]
         commits = [
-            EventCommit(EventTensorItem(tensor, dep.map_indices(self.tile_idx)))
+            EventCommit(SemaphoreEventTensorItem(tensor, dep.map_indices(self.tile_idx)))
             for tensor, dep in zip(out_event_tensors, self.out_deps)
         ]
 
@@ -149,7 +147,7 @@ class EventOpInserter(StmtExprMutator):
             block.exec_scope,
             block.buffer_views,
             block.buffer_gets,
-            event_tensors=in_event_tensors + out_event_tensors,
+            sem_event_tensors=in_event_tensors + out_event_tensors,
         )
 
 

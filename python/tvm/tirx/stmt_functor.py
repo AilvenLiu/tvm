@@ -710,8 +710,8 @@ class StmtMutator(StmtFunctor):
             op.exec_scope,
             op.buffer_views,
             op.buffer_gets,
-            op.events,
-            op.event_tensors,
+            op.bulk_events,
+            op.sem_event_tensors,
         )
 
     def visit_block_realize_(self, op):

@@ -25,6 +25,7 @@ from tvm import DataTypeCode
 from tvm.tir.function import PrimFunc
 from .common import BufferReplacer
 
+
 class EventTensorReplacer(BufferReplacer):
     def __init__(self, buffer_map: Dict[Buffer, Buffer], var_map: Dict[Var, Var]):
         super().__init__(buffer_map, var_map)
@@ -58,13 +59,23 @@ class EventTensorReplacer(BufferReplacer):
             )
         return op
 
+
 def convert_event_tensor(buffer: Buffer) -> Tuple[Buffer, Var]:
     new_dtype = buffer.dtype.with_code(DataTypeCode.INT)
     new_buffer = buffer.with_dtype(new_dtype)
     data = buffer.data
     old_type = data.type_annotation
-    new_data = Var(data.name, PointerType(PrimType(new_dtype), storage_scope=old_type.storage_scope, logical_scope=old_type.logical_scope), data.span)
+    new_data = Var(
+        data.name,
+        PointerType(
+            PrimType(new_dtype),
+            storage_scope=old_type.storage_scope,
+            logical_scope=old_type.logical_scope,
+        ),
+        data.span,
+    )
     return new_buffer.with_data(new_data), new_data
+
 
 @prim_func_pass(opt_level=0, name="EventTensorLegalizer")
 class EventTensorLegalizer:
@@ -82,5 +93,7 @@ class EventTensorLegalizer:
                 new_buffer_map[var] = buffer
         legalizer = EventTensorReplacer(buffer_replace_map, var_replace_map)
         new_body = legalizer(func.body)
-        new_func = PrimFunc(func.params, new_body, func.ret_type, new_buffer_map, func.attrs, func.span)
+        new_func = PrimFunc(
+            func.params, new_body, func.ret_type, new_buffer_map, func.attrs, func.span
+        )
         return new_func

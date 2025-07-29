@@ -1028,21 +1028,14 @@ def select(
     return f_insert(tirp_op.Select(dst, true_value, false_value, pred))
 
 
-def alloc_semaphore_event(
-    exp_count: int, impl: event.EventImpl, state: List[Any] = []
-) -> event.SemaphoreEvent:
-    return _ffi_api.AllocSemaphoreEvent(exp_count, int(impl), state, "")
-
-
 def alloc_bulk_group_event(impl: event.EventImpl, state: List[Any] = []) -> event.BulkGroupEvent:
     return _ffi_api.AllocBulkGroupEvent(int(impl), state, "")
 
 
 def alloc_semaphore_event_tensor(
-    exp_count: int, impl: event.EventImpl, state: List[Any] = [], shape: List[int] = []
-) -> event.EventTensor:
-    e = event.SemaphoreEvent(exp_count, int(impl), state, "")
-    return _ffi_api.AllocEventTensor(e, shape)
+    impl: event.EventImpl, state: List[Any] = [], shape: List[int] = (1,)
+) -> event.SemaphoreEventTensor:
+    return _ffi_api.AllocSemaphoreEventTensor(int(impl), state, shape, "")
 
 
 __all__ = [
@@ -1071,7 +1064,6 @@ __all__ = [
     "binary_chain",
     "reduce_negate",
     "select",
-    "alloc_semaphore_event",
     "alloc_bulk_group_event",
     "alloc_semaphore_event_tensor",
 ]

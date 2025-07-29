@@ -983,9 +983,9 @@ class SBlockNode : public StmtNode {
   // Local views of buffers
   Array<BufferGet> buffer_gets;
   // Events in the block
-  Array<BaseEvent> events;
+  Array<BulkGroupEvent> bulk_events;
   // Event tensors in the block
-  Array<EventTensor> event_tensors;
+  Array<SemaphoreEventTensor> sem_event_tensors;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -1002,8 +1002,9 @@ class SBlockNode : public StmtNode {
         .def_ro("exec_scope", &SBlockNode::exec_scope)
         .def_ro("buffer_views", &SBlockNode::buffer_views)
         .def_ro("buffer_gets", &SBlockNode::buffer_gets)
-        .def_ro("events", &SBlockNode::events, refl::AttachFieldFlag::SEqHashDef())
-        .def_ro("event_tensors", &SBlockNode::event_tensors, refl::AttachFieldFlag::SEqHashDef());
+        .def_ro("bulk_events", &SBlockNode::bulk_events, refl::AttachFieldFlag::SEqHashDef())
+        .def_ro("sem_event_tensors", &SBlockNode::sem_event_tensors,
+                refl::AttachFieldFlag::SEqHashDef());
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SBlock", SBlockNode, StmtNode);
 };
@@ -1023,17 +1024,17 @@ class SBlock : public Stmt {
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
       Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt,
       ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
-      ffi::Array<BaseEvent> events = ffi::Array<BaseEvent>(),
-      ffi::Array<EventTensor> event_tensors = ffi::Array<EventTensor>());
+      ffi::Array<BulkGroupEvent> bulk_events = ffi::Array<BulkGroupEvent>(),
+      ffi::Array<SemaphoreEventTensor> sem_event_tensors = ffi::Array<SemaphoreEventTensor>());
 
-  TVM_DLL explicit SBlock(ffi::String name_hint, Stmt body,
-                         ffi::Optional<ExecScope> exec_scope = std::nullopt,
-                         ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
-                         ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
-                         ffi::Array<BufferGet> buffer_gets = ffi::Array<BufferGet>(),
-                         ffi::Array<BaseEvent> events = ffi::Array<BaseEvent>(),
-                         ffi::Array<EventTensor> event_tensors = ffi::Array<EventTensor>(),
-                         Span span = Span());
+  TVM_DLL explicit SBlock(
+      ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_scope = std::nullopt,
+      ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
+      ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
+      ffi::Array<BufferGet> buffer_gets = ffi::Array<BufferGet>(),
+      ffi::Array<BulkGroupEvent> bulk_events = ffi::Array<BulkGroupEvent>(),
+      ffi::Array<SemaphoreEventTensor> sem_event_tensors = ffi::Array<SemaphoreEventTensor>(),
+      Span span = Span());
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SBlock, Stmt, SBlockNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SBlockNode);

@@ -228,25 +228,19 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
 
   /*********** tir+ ***********/
   // event
-  for (size_t i = 0; i < block->events.size(); ++i) {
-    tir::BaseEvent event = block->events[i];
-    ObjectPath event_p = block_p->Attr("events")->ArrayIndex(i);
+  for (size_t i = 0; i < block->bulk_events.size(); ++i) {
+    tir::BulkGroupEvent event = block->bulk_events[i];
+    ObjectPath event_p = block_p->Attr("bulk_events")->ArrayIndex(i);
     IdDoc lhs = DefineEvent(event, *frame, d);
     std::string method;
-    if (event->IsInstance<tir::SemaphoreEventNode>()) {
-      method = "alloc_semaphore_event";
-    } else if (event->IsInstance<tir::BulkGroupEventNode>()) {
-      method = "alloc_bulk_group_event";
-    } else {
-      LOG(FATAL) << "ValueError: Unknown Event type in block signature: " << event->GetTypeKey();
-    }
+    method = "alloc_bulk_group_event";
     ExprDoc rhs = EventDecl(event, method, event_p, d);
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
   }
   // event_tensor
-  for (size_t i = 0; i < block->event_tensors.size(); ++i) {
-    tir::EventTensor event_tensor = block->event_tensors[i];
-    ObjectPath event_tensor_p = block_p->Attr("event_tensors")->ArrayIndex(i);
+  for (size_t i = 0; i < block->sem_event_tensors.size(); ++i) {
+    tir::SemaphoreEventTensor event_tensor = block->sem_event_tensors[i];
+    ObjectPath event_tensor_p = block_p->Attr("sem_event_tensors")->ArrayIndex(i);
     IdDoc lhs = DefineEventTensor(event_tensor, *frame, d);
     std::string method;
     method = "alloc_semaphore_event_tensor";

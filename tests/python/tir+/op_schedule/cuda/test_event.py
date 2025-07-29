@@ -232,12 +232,12 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len):
                 tx_cnt = T.alloc_buffer([1], "int32", scope="local")
 
                 with T.cta():
-                    event = Tp.alloc_semaphore_event(1, EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
-                    event.init()
+                    event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
+                    event[0].init(1)
 
-                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event)
-                    event.commit()
-                    event.wait()
+                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0])
+                    event[0].commit()
+                    event[0].wait()
 
                     Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
@@ -344,13 +344,13 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
                 tx_cnt = T.alloc_buffer([1], "int32", scope="local")
 
                 with T.cta():
-                    event = Tp.alloc_semaphore_event(1, EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
-                    event.init()
+                    event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
+                    event[0].init(1)
 
                     for stage in range(n):
-                        Tp.copy_async(A_smem[*r_smem], A[*r_gmem(stage)], event)
-                        event.commit()
-                        event.wait()
+                        Tp.copy_async(A_smem[*r_smem], A[*r_gmem(stage)], event[0])
+                        event[0].commit()
+                        event[0].wait()
 
                         Tp.copy(B[*r_gmem(stage)], A_smem[*r_smem])
     # fmt: on
@@ -489,10 +489,10 @@ def test_kernel_sempaphore():
             tx = T.thread_id([128], parent="cta")
             
             state = T.alloc_local((1,), "int32")
-            evt = Tp.alloc_semaphore_event_tensor(1, EventImpl.kGlobalSemaphore, state=[sem, state], shape=[64])
+            evt = Tp.alloc_semaphore_event_tensor(EventImpl.kGlobalSemaphore, state=[sem, state], shape=[64])
 
             T.tvm_global_barrier_kinit()
-            evt.init()
+            evt.init(1)
             T.tvm_storage_sync("global", True, 128)
             
             with T.cta()[0:64]:

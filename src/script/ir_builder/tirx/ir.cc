@@ -37,11 +37,10 @@ namespace tirx {
 
 using tvm::tirx::BaseEvent;
 using tvm::tirx::BulkGroupEvent;
-using tvm::tirx::EventTensor;
-using tvm::tirx::EventTensorItem;
 using tvm::tirx::IterVar;
 using tvm::tirx::kEventImpl;
-using tvm::tirx::SemaphoreEvent;
+using tvm::tirx::SemaphoreEventTensor;
+using tvm::tirx::SemaphoreEventTensorItem;
 using tvm::tirx::TLayout;
 
 Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
@@ -481,24 +480,11 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
   return buffer;
 }
 
-SemaphoreEvent AllocSemaphoreEvent(int exp_count, kEventImpl impl, Array<ffi::Any> state,
-                                   String name) {
-  SemaphoreEvent event = SemaphoreEvent(exp_count, impl, state, name);
-  IRBuilder builder = IRBuilder::Current();
-  if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
-    frame.value()->events.push_back(event);
-  } else {
-    TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_semaphore_event' is "
-                  "called under T.block()";
-  }
-  return event;
-}
-
 BulkGroupEvent AllocBulkGroupEvent(kEventImpl impl, Array<ffi::Any> state, String name) {
   BulkGroupEvent event = BulkGroupEvent(impl, state, name);
   IRBuilder builder = IRBuilder::Current();
-  if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
-    frame.value()->events.push_back(event);
+  if (Optional<BlockFrame> frame = builder->FindFrame<BlockFrame>()) {
+    frame.value()->bulk_events.push_back(event);
   } else {
     TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_bulk_group_event' is "
                   "called under T.block()";
@@ -506,14 +492,16 @@ BulkGroupEvent AllocBulkGroupEvent(kEventImpl impl, Array<ffi::Any> state, Strin
   return event;
 }
 
-EventTensor AllocEventTensor(SemaphoreEvent event, Array<PrimExpr> shape) {
-  EventTensor event_tensor = EventTensor(event, shape);
+SemaphoreEventTensor AllocSemaphoreEventTensor(kEventImpl impl, Array<ffi::Any> state,
+                                               Array<PrimExpr> shape, String name) {
+  SemaphoreEventTensor event_tensor = SemaphoreEventTensor(impl, state, shape, name);
   IRBuilder builder = IRBuilder::Current();
-  if (Optional<BlockFrame> frame = builder->GetLastFrame<BlockFrame>()) {
-    frame.value()->event_tensors.push_back(event_tensor);
+  if (Optional<BlockFrame> frame = builder->FindFrame<BlockFrame>()) {
+    frame.value()->sem_event_tensors.push_back(event_tensor);
   } else {
-    TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_event_tensor' is "
-                  "called under T.block()";
+    TVM_FFI_THROW(InternalError)
+        << "ValueError: Block frame not find. Please ensure 'T.alloc_semaphore_event_tensor' is "
+           "called under T.block()";
   }
   return event_tensor;
 }
@@ -911,30 +899,21 @@ PrimExpr Ptr(runtime::DataType dtype, ffi::String storage_scope = "global",
 }
 
 using tvm::script::ir_builder::details::Namer;
-using tvm::tirx::BaseEventNode;
-using tvm::tirx::BulkGroupEventNode;
-using tvm::tirx::EventTensorItemNode;
-using tvm::tirx::EventTensorNode;
-using tvm::tirx::SemaphoreEventNode;
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<SemaphoreEventNode>([](const ObjectRef& node, String name) -> void {
-      SemaphoreEventNode* semaphore_event =
-          const_cast<SemaphoreEventNode*>(node.as<SemaphoreEventNode>());
-      semaphore_event->name = name;
+    .set_dispatch<tvm::tirx::BulkGroupEventNode>([](const ObjectRef& node, String name) -> void {
+      tvm::tirx::BulkGroupEventNode* bulk_event =
+          const_cast<tvm::tirx::BulkGroupEventNode*>(node.as<tvm::tirx::BulkGroupEventNode>());
+      bulk_event->name = name;
     });
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<BulkGroupEventNode>([](const ObjectRef& node, String name) -> void {
-      BulkGroupEventNode* bulk_group_event =
-          const_cast<BulkGroupEventNode*>(node.as<BulkGroupEventNode>());
-      bulk_group_event->name = name;
-    });
-
-TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<EventTensorNode>([](const ObjectRef& node, String name) -> void {
-      EventTensorNode* event_tensor = const_cast<EventTensorNode*>(node.as<EventTensorNode>());
-      Namer::Name(event_tensor->event, name);
+    .set_dispatch<tvm::tirx::SemaphoreEventTensorNode>([](const ObjectRef& node,
+                                                         String name) -> void {
+      tvm::tirx::SemaphoreEventTensorNode* sem_event_tensor =
+          const_cast<tvm::tirx::SemaphoreEventTensorNode*>(
+              node.as<tvm::tirx::SemaphoreEventTensorNode>());
+      sem_event_tensor->name = name;
     });
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
@@ -1032,9 +1011,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.BlockAttrs", BlockAttrs)
       .def("script.ir_builder.tir.SBlockAllocBuffer", SBlockAllocBuffer)
       .def("script.ir_builder.tir.AllocBuffer", AllocBuffer)
-      .def("script.ir_builder.tir.AllocSemaphoreEvent", AllocSemaphoreEvent)
       .def("script.ir_builder.tir.AllocBulkGroupEvent", AllocBulkGroupEvent)
-      .def("script.ir_builder.tir.AllocEventTensor", AllocEventTensor)
+      .def("script.ir_builder.tir.AllocSemaphoreEventTensor", AllocSemaphoreEventTensor)
       .def("script.ir_builder.tir.AxisSpatial", axis::Spatial)
       .def("script.ir_builder.tir.AxisReduce", axis::Reduce)
       .def("script.ir_builder.tir.AxisScan", axis::Scan)
@@ -1209,7 +1187,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 });
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

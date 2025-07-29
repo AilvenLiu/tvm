@@ -830,24 +830,19 @@ def test_event():
     def test():
         with T.kernel():
             with T.cta():
-                event_s = Tp.alloc_semaphore_event(1, EventImpl.kTMALoad)
                 event_b = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
-                event_s_tensor = Tp.alloc_semaphore_event_tensor(1, EventImpl.kTMALoad, [], [10])
-
-                event_s.commit()
-                event_s.wait()
+                event_s_tensor = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, [], [10])
 
                 event_b.commit()
                 event_b.wait()
                 event_b.wait(1)
 
-                event_s_tensor.init()
+                event_s_tensor.init(1)
                 event_s_tensor[0].commit()
                 event_s_tensor[0].wait()
 
                 A = T.alloc_buffer([10], "float32", scope="shared")
                 B = T.alloc_buffer([10], "float32", scope="shared")
-                Tp.copy_async(A[:], B[:], event_s)
                 Tp.copy_async(A[:], B[:], event_b)
                 Tp.copy_async(A[:], B[:], event_s_tensor[0])
     # fmt: on

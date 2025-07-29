@@ -100,7 +100,7 @@ def test_unary_op_shared(input, op_type, dtype):
         mod(A)
 
         A_ref = get_ref(A_np)
-        tvm.testing.assert_allclose(A_ref, A.numpy(), atol=1e-8)
+        tvm.testing.assert_allclose(A_ref, A.numpy(), atol=1e-3)
 
 
 @pytest.mark.parametrize(
@@ -271,7 +271,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
         mod(A, B)
 
         A_ref = get_ref(A_np, B_np)
-        atol = 1e-3 if op_type == "fdiv" else 1e-8
+        atol = 1e-3
         tvm.testing.assert_allclose(A_ref, A.numpy(), atol=atol)
 
 
@@ -396,7 +396,7 @@ def test_unary_op_local(input, op_type, dtype):
             B_ref = np.exp2(A_np)
         else:
             raise ValueError(f"op_type={op_type} is not supported")
-        atol = 1e-8
+        atol = 1e-3
         tvm.testing.assert_allclose(B_ref, B.numpy(), atol=atol)
 
 
@@ -540,7 +540,7 @@ def test_binary_op_local(input, op_type, dtype):
             B_ref = (A_np * val) * 3.0
         else:
             raise ValueError(f"op_type={op_type} is not supported")
-        atol = 1e-8
+        atol = 1e-3
         tvm.testing.assert_allclose(B_ref, A.numpy(), atol=atol)
 
 

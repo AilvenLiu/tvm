@@ -25,7 +25,7 @@ from typing import Any
 import tvm
 from tvm.ir import GlobalVar, PrimType
 from tvm.tirx import Buffer, IterVar, PrimExpr, Var, TLayout
-from tvm.tirx.event import BaseEvent, EventTensor
+from tvm.tirx.event import BulkGroupEvent, SemaphoreEventTensor
 
 from ...ir_builder import ir as I
 from ...ir_builder import tirx as T
@@ -148,7 +148,9 @@ def bind_assign_value(self: Parser, node: doc.expr, var_name: str, value: Any) -
         res = value.__enter__()
         IRBuilder.name(var_name, res)
         return res
-    elif isinstance(value, Buffer | IterVar | TLayout | BaseEvent | EventTensor) or (
+    elif isinstance(
+        value, Buffer | IterVar | TLayout | BulkGroupEvent | SemaphoreEventTensor
+    ) or (
         isinstance(value, Var) and not self.var_table.exist(value)
     ):
         IRBuilder.name(var_name, value)
