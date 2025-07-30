@@ -73,7 +73,7 @@ def test_two_stage_reduction():
                 Tp.copy(C_ptr[m * BLOCK_M : (m + 1) * BLOCK_M, 0], C_smem)
 
         @R.function
-        def mega_kernel(A: R.Tensor((M, N), "float32"), event: R.Tensor((NUM_BLOCK_M, ), "event_i32")):
+        def mega_kernel(A: R.Tensor((M, N), "float32"), event: R.Tensor((NUM_BLOCK_M, ), "int32")):
             cls = Before
             with R.dataflow():
                 B = R.call_tir_device(cls.stage_1,  A, R.Tensor((M, NUM_BLOCK_N), "float32"), (NUM_BLOCK_M, NUM_BLOCK_N), out_events=[event], out_deps=[lambda x, y: x])

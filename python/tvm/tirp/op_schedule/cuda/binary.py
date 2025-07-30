@@ -149,7 +149,7 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
             if src2_extent[-i] not in (1, src1_extent[-i]):
                 return None
 
-    thread_cnt = sctx.launch_params["threadIdx.x"]
+    thread_cnt = sctx.launch_params["threadIdx.x"].dom.extent
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
     op_func = binary_op_table.get(binary_op)

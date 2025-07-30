@@ -530,11 +530,11 @@ Stmt StmtMutator::VisitStmt_(const SBlockNode* op) {
       auto scope_slice_opt = scope.value().as<ExecScopeSlice>();
       if (scope_slice_opt.has_value()) {
         auto scope_slice = scope_slice_opt.value();
-        ffi::Variant<ffi::Array<Range>, PrimExpr> slice;
-        if (auto slices = scope_slice->slice.as<ffi::Array<Range>>()) {
+        ffi::Variant<ffi::Array<Range>, PrimExpr> slice = Array<Range>();
+        if (auto slices = scope_slice->slices.as<ffi::Array<Range>>()) {
           slice = Internal::Mutate(this, slices.value());
         } else {
-          slice = this->VisitExpr(scope_slice->slice.as<PrimExpr>().value());
+          slice = this->VisitExpr(scope_slice->slices.as<PrimExpr>().value());
         }
         ffi::Optional<ffi::Array<PrimExpr>> extents = std::nullopt;
         if (scope_slice->extents.defined()) {

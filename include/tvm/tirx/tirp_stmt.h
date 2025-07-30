@@ -56,22 +56,7 @@ class OpCallNode : public StmtNode {
         .def_ro("schedule_config", &OpCallNode::schedule_config);
   }
 
-  bool SEqualReduce(const OpCallNode* other, SEqualReducer equal) const {
-    return equal(op, other->op) && equal(args, other->args) && equal(workspace, other->workspace) &&
-           equal(schedule_config, other->schedule_config);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(op);
-    hash_reduce(args);
-    hash_reduce(workspace);
-    hash_reduce(schedule_config);
-  }
-
   static constexpr const char* _type_key = "tirx.OpCall";
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(OpCallNode, StmtNode);
 };
 
@@ -90,8 +75,8 @@ class OpCall : public Stmt {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(OpCallNode);
 };
 
-}  // namespace tirxxp
-}  // namespace tirxx
+}  // namespace tirxxxp
+}  // namespace tirxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_TIRP_STMT_H_

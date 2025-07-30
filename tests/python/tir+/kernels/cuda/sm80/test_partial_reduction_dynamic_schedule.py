@@ -24,6 +24,7 @@ from typing import Tuple
 import functools
 import enum
 
+
 @tvm.testing.requires_cuda_compute_version(8)
 def test_partial_reduction():
 
@@ -35,7 +36,6 @@ def test_partial_reduction():
 
     NUM_BLOCK_M = M // BLOCK_M
     NUM_BLOCK_N = N // BLOCK_N
-
 
     # fmt: off
 
@@ -212,7 +212,7 @@ def test_partial_reduction():
     C_np = np.zeros((M, 1), dtype=np.float32)
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
-    
+
     class MPMCQueueHost:
         def __init__(self, capacity: int):
             self.capacity = capacity
@@ -220,18 +220,17 @@ def test_partial_reduction():
             self.task_idxs = np.zeros((capacity, 2), dtype=np.int32)
             self.head = np.zeros((1,), dtype=np.int32)
             self.tail = np.zeros((1,), dtype=np.int32)
-            
+
         def init(self):
             self.head[0] = 0
             self.tail[0] = 0
-            
+
         def enqueue(self, task_type: TaskType, *task_idx: int):
             pos = self.tail[0] & (self.capacity - 1)
             self.task_types[pos] = task_type.value
             for i in range(TASK_IDX_LEN):
                 self.task_idxs[pos, i] = task_idx[i]
             self.tail[0] = self.tail[0] + 1
-            
 
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
@@ -260,7 +259,9 @@ def test_partial_reduction():
 
         fused_mod = tvm.IRModule({"main": partial_reduction_fused})
         fused_mod = tvm.compile(fused_mod, target=target, tir_pipeline="tirp")
-        fused_mod(A_tvm, B_tvm, C_tvm_fused, sem_tvm, task_types_tvm, task_idxs_tvm, head_tvm, tail_tvm)
+        fused_mod(
+            A_tvm, B_tvm, C_tvm_fused, sem_tvm, task_types_tvm, task_idxs_tvm, head_tvm, tail_tvm
+        )
         ret_fused = C_tvm_fused.numpy()
         tvm.testing.assert_allclose(ret_fused, ret_ref_stage_2, rtol=1e-3, atol=1e-3)
 

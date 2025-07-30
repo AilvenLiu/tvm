@@ -61,8 +61,10 @@ class SBlockFrame(TIRFrame):
             if isinstance(s, slice):
                 assert s.step is None, "Slice step is not supported"
                 slices_t.append(Range(s.start, s.stop))
+            elif isinstance(s, Range):
+                slices_t.append(s)
             else:
-                assert False, f"Slice must be a slice, got {type(s)}"
+                assert False, f"Slice must be a slice or Range, got {s} of type {type(s)}"
         return _ffi_api.BlockFrameSlice(self, slices_t)  # pylint: disable=no-member
 
 

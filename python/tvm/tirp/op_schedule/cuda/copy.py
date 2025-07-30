@@ -59,7 +59,7 @@ def copy_g2s_s2g_cta_default_impl(
     dst_extent = [r.extent for r in dst_region]
 
     # Thread and vectorization setup
-    tx = sctx.launch_params["threadIdx.x"]
+    tx = sctx.launch_params["threadIdx.x"].dom.extent
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
     def copy(dst, src):

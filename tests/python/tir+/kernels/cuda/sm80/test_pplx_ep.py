@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
- 
+
 import math
 import numpy as np
 import pytest
@@ -585,7 +585,9 @@ def test_dispatch_combine(world_size=8):
             # launch kernels
             rt_dispatch_mod = sess.load_vm_module(dispatch_path)
             rt_combine_mod = sess.load_vm_module(combine_path)
-            barrier_dfunc = sess.get_global_func("runtime.disco.nvshmem.barrier_all_on_current_stream")
+            barrier_dfunc = sess.get_global_func(
+                "runtime.disco.nvshmem.barrier_all_on_current_stream"
+            )
             sess._sync_all()
             for i in range(N_REPEAT):
                 barrier_dfunc()

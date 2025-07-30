@@ -98,8 +98,7 @@ class TLayoutNode : public Object {
                                         const Array<PrimExpr>& outer_shape) const = 0;
 
   static constexpr const char* _type_key = "tirx.TLayout";
-  static constexpr const bool _type_has_method_sequal_reduce = false;
-  static constexpr const bool _type_has_method_shash_reduce = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_BASE_OBJECT_INFO(TLayoutNode, Object);
 };
 
@@ -124,12 +123,6 @@ class AxisNode : public Object {
     refl::ObjectDef<AxisNode>().def_ro("name", &AxisNode::name);
   }
 
-  bool SEqualReduce(const AxisNode* other, SEqualReducer equal) const {
-    return equal(name, other->name);
-  }
-
-  void SHashReduce(SHashReducer hash_reducer) const { hash_reducer(name); }
-
   /*! \brief Check if the axis is a thread axis. */
   bool IsThreadAxis() const;
 
@@ -149,9 +142,7 @@ class AxisNode : public Object {
   Optional<FAxisSplitter> GetSplitter() const;
 
   static constexpr const char* _type_key = "tirx.Axis";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_FINAL_OBJECT_INFO(AxisNode, Object);
 
  private:
@@ -266,20 +257,8 @@ class IterNode : public Object {
         .def_ro("axis", &IterNode::axis);
   }
 
-  bool SEqualReduce(const IterNode* other, SEqualReducer equal) const {
-    return equal(extent, other->extent) && equal(stride, other->stride) && equal(axis, other->axis);
-  }
-
-  void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(extent);
-    hash_reducer(stride);
-    hash_reducer(axis);
-  }
-
   static constexpr const char* _type_key = "tirx.Iter";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_FINAL_OBJECT_INFO(IterNode, Object);
 };
 
@@ -301,17 +280,6 @@ class TileLayoutNode : public TLayoutNode {
         .def_ro("shard", &TileLayoutNode::shard)
         .def_ro("replicate", &TileLayoutNode::replicate)
         .def_ro("exclude", &TileLayoutNode::exclude);
-  }
-
-  bool SEqualReduce(const TileLayoutNode* other, SEqualReducer equal) const {
-    return equal(shard, other->shard) && equal(replicate, other->replicate) &&
-           equal(exclude, other->exclude);
-  }
-
-  void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(shard);
-    hash_reducer(replicate);
-    hash_reducer(exclude);
   }
 
   /*! \brief Check if the layout is compatible with the shape */
@@ -364,9 +332,6 @@ class TileLayoutNode : public TLayoutNode {
   Optional<Tuple<ExecScope, ExecScope>> GetScope() const;
 
   static constexpr const char* _type_key = "tirx.TileLayout";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, TLayoutNode);
 };
 
@@ -394,18 +359,6 @@ class SwizzleLayoutNode : public TLayoutNode {
         .def_ro("swizzle_len", &SwizzleLayoutNode::swizzle_len)
         .def_ro("atom_len", &SwizzleLayoutNode::atom_len)
         .def_ro("swizzle_inner", &SwizzleLayoutNode::swizzle_inner);
-  }
-
-  bool SEqualReduce(const SwizzleLayoutNode* other, SEqualReducer equal) const {
-    return equal(per_element, other->per_element) && equal(swizzle_len, other->swizzle_len) &&
-           equal(atom_len, other->atom_len) && equal(swizzle_inner, other->swizzle_inner);
-  }
-
-  void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(per_element);
-    hash_reducer(swizzle_len);
-    hash_reducer(atom_len);
-    hash_reducer(swizzle_inner);
   }
 
   /*! \brief Check if the layout is compatible with the shape */
@@ -440,9 +393,6 @@ class SwizzleLayoutNode : public TLayoutNode {
                                 const Array<PrimExpr>& outer_shape) const final;
 
   static constexpr const char* _type_key = "tirx.SwizzleLayout";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(SwizzleLayoutNode, TLayoutNode);
 
  private:
@@ -471,15 +421,6 @@ class ComposeLayoutNode : public TLayoutNode {
     refl::ObjectDef<ComposeLayoutNode>()
         .def_ro("layout_A", &ComposeLayoutNode::layout_A)
         .def_ro("layout_B", &ComposeLayoutNode::layout_B);
-  }
-
-  bool SEqualReduce(const ComposeLayoutNode* other, SEqualReducer equal) const {
-    return equal(layout_A, other->layout_A) && equal(layout_B, other->layout_B);
-  }
-
-  void SHashReduce(SHashReducer hash_reducer) const {
-    hash_reducer(layout_A);
-    hash_reducer(layout_B);
   }
 
   /*! \brief Check if the layout is compatible with the shape */
@@ -514,9 +455,6 @@ class ComposeLayoutNode : public TLayoutNode {
                                 const Array<PrimExpr>& outer_shape) const final;
 
   static constexpr const char* _type_key = "tirx.ComposeLayout";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ComposeLayoutNode, TLayoutNode);
 };
 
@@ -531,7 +469,7 @@ class ComposeLayout : public TLayout {
 constexpr int kPSUMMaxElemPerBank = 512;
 constexpr int kPSUMBankNum = 8;
 
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

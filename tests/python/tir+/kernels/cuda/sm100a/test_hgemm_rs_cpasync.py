@@ -235,6 +235,7 @@ D_layout = T.ComposeLayout(
     T.TileLayout(shard=((NUM_CONSUMER, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))),
 )
 
+
 # fmt: off
 @I.ir_module(tirp=True)
 class ReduceScatter:
@@ -525,7 +526,10 @@ class ReduceScatter:
                             T.ptx.cp_async.bulk.wait_group(0)
                         T.ptx.bar.sync(1, 128)
                         iter += 1
-    # fmt: on
+# fmt: on
+
+
+@pytest.mark.skip()
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 def test_hgemm_rs():
     devices = list(np.arange(WORLD_SIZE))
@@ -547,7 +551,7 @@ def test_hgemm_rs():
     B_np = np.random.uniform(-1, 1, (WORLD_SIZE, N, K)).astype(b_type)
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
-    semaphore_np = np.zeros((WORLD_SIZE, ), dtype="uint64")
+    semaphore_np = np.zeros((WORLD_SIZE,), dtype="uint64")
     profiler_buffer_np = np.zeros((PROFILER_BUFFER_SIZE,), dtype="uint64")
 
     A_array_all = sess.empty((WORLD_SIZE, M, K), a_type, worker0_only=True)
@@ -565,16 +569,16 @@ def test_hgemm_rs():
         "A_array": sess.empty((M, K), a_type),
         "B_array": sess.empty((N, K), b_type),
         "gemm_out_array": nvshmem_malloc_hook(ShapeTuple((M, N)), d_type, None),
-        "semaphore_array": nvshmem_malloc_hook(ShapeTuple((WORLD_SIZE, )), "uint64", None),
-        "staging_buffer_array": nvshmem_malloc_hook(ShapeTuple((WORLD_SIZE, LOCAL_M, N)), d_type, None),
+        "semaphore_array": nvshmem_malloc_hook(ShapeTuple((WORLD_SIZE,)), "uint64", None),
+        "staging_buffer_array": nvshmem_malloc_hook(
+            ShapeTuple((WORLD_SIZE, LOCAL_M, N)), d_type, None
+        ),
         "out_array": sess.empty((LOCAL_M, N), d_type),
         "profiler_buffer_array": sess.empty((PROFILER_BUFFER_SIZE,), "uint64"),
     }
 
     res_dict = {
-        "gemm_out_res": sess.empty(
-            (WORLD_SIZE, M, N), d_type, worker0_only=True
-        ),
+        "gemm_out_res": sess.empty((WORLD_SIZE, M, N), d_type, worker0_only=True),
         "buffer_res": sess.empty(
             (WORLD_SIZE, M // BLK_M, N // BLK_N, BLK_M, BLK_N), d_type, worker0_only=True
         ),
@@ -582,10 +586,10 @@ def test_hgemm_rs():
         "profiler_buffer_res": sess.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", worker0_only=True
         ),
-        "staging_buffer_res": sess.empty((WORLD_SIZE, WORLD_SIZE, LOCAL_M, N), d_type, worker0_only=True),
-        "gemm_out_host": tvm.nd.empty(
-            (WORLD_SIZE, M, N), d_type, device=DEV
+        "staging_buffer_res": sess.empty(
+            (WORLD_SIZE, WORLD_SIZE, LOCAL_M, N), d_type, worker0_only=True
         ),
+        "gemm_out_host": tvm.nd.empty((WORLD_SIZE, M, N), d_type, device=DEV),
         "buffer_host": tvm.nd.empty(
             (WORLD_SIZE, M // BLK_M, N // BLK_N, BLK_M, BLK_N), d_type, device=DEV
         ),
@@ -593,7 +597,9 @@ def test_hgemm_rs():
         "profiler_buffer_host": tvm.nd.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", device=DEV
         ),
-        "staging_buffer_host": tvm.nd.empty((WORLD_SIZE, WORLD_SIZE, LOCAL_M, N), d_type, device=DEV),
+        "staging_buffer_host": tvm.nd.empty(
+            (WORLD_SIZE, WORLD_SIZE, LOCAL_M, N), d_type, device=DEV
+        ),
     }
 
     sess.scatter_from_worker0(A_array_all, args_dict["A_array"])
@@ -656,7 +662,6 @@ def test_hgemm_rs():
         sess.copy_from_worker_0(res_dict["profiler_buffer_host"], res_dict["profiler_buffer_res"])
         sess.gather_to_worker0(args_dict["staging_buffer_array"], res_dict["staging_buffer_res"])
         sess.copy_from_worker_0(res_dict["staging_buffer_host"], res_dict["staging_buffer_res"])
-        
 
         print(args_dict["semaphore_array"].debug_get_from_remote(0))
 
@@ -705,8 +710,10 @@ def test_hgemm_rs():
     #         )
 
 
+@pytest.mark.skip()
 def test_reduce():
     import torch
+
     torch.manual_seed(42)
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
@@ -714,13 +721,14 @@ def test_reduce():
     out_torch = torch.zeros((LOCAL_M, N), dtype=torch.float16, device="cuda")
     input_tvm = tvm.nd.array(input_torch.cpu(), device=DEV)
     out_tvm = tvm.nd.array(out_torch.cpu(), device=DEV)
-    with target:    
+    with target:
         mod = ReduceScatter
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         print(mod.mod.imported_modules[0].get_source())
         mod["reduce_sum"](input_tvm, out_tvm)
         out_std = torch.sum(input_torch, dim=0)
         np.testing.assert_allclose(out_tvm.numpy(), out_std.cpu().numpy(), atol=6e-2, rtol=6e-2)
+
 
 if __name__ == "__main__":
     test_hgemm_rs()

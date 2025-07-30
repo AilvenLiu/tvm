@@ -71,22 +71,22 @@ TVM_FFI_STATIC_INIT_BLOCK({
 });
 
 // ExecScopeSlice
-ExecScopeSlice::ExecScopeSlice(Variant<Array<Range>, PrimExpr> slice,
+ExecScopeSlice::ExecScopeSlice(Variant<Array<Range>, PrimExpr> slices,
                                Optional<Array<PrimExpr>> extents, String parent, String cur) {
   auto n = make_object<ExecScopeSliceNode>();
   n->name = cur;
   n->parent = parent;
   n->extents = std::move(extents);
   if (extents.defined()) {
-    if (auto slices = slice.as<Array<Range>>()) {
-      CHECK_EQ(slices.value().size(), extents.value().size())
+    if (auto slices_ = slices.as<Array<Range>>()) {
+      CHECK_EQ(slices_.value().size(), extents.value().size())
           << "ValueError: Number of slices must match the number of extents";
-    } else if (auto cond = slice.as<PrimExpr>()) {
+    } else if (auto cond = slices.as<PrimExpr>()) {
       CHECK_EQ(1, extents.value().size())
           << "ValueError: Number of select_cond must match the number of extents";
     }
   }
-  n->slice = std::move(slice);
+  n->slices = std::move(slices);
   data_ = std::move(n);
 }
 
@@ -95,7 +95,7 @@ bool ExecScopeSliceNode::Is(const ExecScope& other) const {
   if (!other_slice) {
     return false;
   }
-  return ExecScopeNode::Is(other) && StructuralEqual()(this->slice, other_slice->slice);
+  return ExecScopeNode::Is(other) && StructuralEqual()(this->slices, other_slice->slices);
 }
 
 TVM_REGISTER_NODE_TYPE(ExecScopeSliceNode);
@@ -104,8 +104,8 @@ TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(
       "tirx.ExecScopeSlice",
-      [](Variant<Array<Range>, PrimExpr> slice, Optional<Array<PrimExpr>> extents, String parent,
-         String cur) { return ExecScopeSlice(slice, extents, parent, cur); });
+      [](Variant<Array<Range>, PrimExpr> slices, Optional<Array<PrimExpr>> extents, String parent,
+         String cur) { return ExecScopeSlice(slices, extents, parent, cur); });
 });
 
 /******** Definition of Var ********/
@@ -331,5 +331,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace tvm

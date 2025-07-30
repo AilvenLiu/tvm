@@ -64,6 +64,7 @@ SMEM_SIZE = (
 assert SMEM_SIZE <= 232448
 assert TMEM_PIPE_DEPTH * (MMA_N + BLK_SFA // 32 + BLK_SFB // 32) <= 512
 
+
 class ProfileEventType(Enum):
     IssueTMA = 0
     IssueMMA = 1
@@ -83,9 +84,8 @@ event_type_names = [
     "tmem-ld",
     "issue-writeback",
     "wait-tma",
-    "wait-mma"
+    "wait-mma",
 ]
-
 
 
 def get_source(func: tvm.tir.PrimFunc) -> str:
@@ -148,7 +148,6 @@ class TileScheduler:
 
     def valid(self):
         return self.linear_idx < TILE_M_NUM * TILE_N_NUM
-    
 
 
 class Barriers:
@@ -181,23 +180,27 @@ class BarTMA2TRANS(Barriers):
     def arrive_only(self, idx):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
 
+
 class BarTRANS2MMA(Barriers):
 
     @T.macro
     def arrive(self, idx):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
+
 class BarMMA2LD(Barriers):
 
     @T.macro
     def arrive(self, idx):
         T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
-        
+
+
 class BarMMA2TMA(Barriers):
 
     @T.macro
     def arrive(self, idx):
         T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
+
 
 class BarLD2MMA(Barriers):
 
@@ -205,42 +208,63 @@ class BarLD2MMA(Barriers):
     def arrive(self, idx):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
+
 @T.macro
 def warp_sync():
-    T.cuda.func_call("sync_warp", source_code = f"""
+    T.cuda.func_call(
+        "sync_warp",
+        source_code=f"""
 __forceinline__ __device__ void sync_warp() {{
     __syncwarp();
 }}
-    """)   
+    """,
+    )
+
 
 @T.macro
 def make_runtime_instr_desc(desc, sf_id):
-    T.cuda.func_call("runtime_instr_desc", desc, sf_id, source_code=f"""
+    T.cuda.func_call(
+        "runtime_instr_desc",
+        desc,
+        sf_id,
+        source_code=f"""
 __forceinline__ __device__ void runtime_instr_desc(uint32_t* desc, const uint32_t& sf_id) {{
     *desc = (*desc & ~0x60000030) | ((sf_id << 29) | (sf_id << 4));
 }}
-""")
-    
+""",
+    )
+
+
 @T.macro
 def trap_when_assert_failed(cond):
-    T.cuda.func_call("trap_when_assert_fail", cond, source_code=f"""
+    T.cuda.func_call(
+        "trap_when_assert_fail",
+        cond,
+        source_code=f"""
 __forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
     do {{
         if (not (cond))
             asm("trap;");
     }} while (0);
 }}
-    """)
+    """,
+    )
+
 
 @T.macro
 def float22half2(dst, src):
-    T.cuda.func_call("float22half2", dst, src, source_code=f"""
+    T.cuda.func_call(
+        "float22half2",
+        dst,
+        src,
+        source_code=f"""
 __forceinline__ __device__ void float22half2(void* dst, void* src) {{
     half2* dst_p = (half2*) dst;
     float2* src_p = (float2*) src;
     *dst_p = __float22half2_rn(*src_p);
 }}
-    """)
+    """,
+    )
 
 
 def prepare_data():
@@ -321,11 +345,10 @@ def test():
 
     SFA_layout = T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), (BLK_SFA, 32, 1)))
     SFB_layout = T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), (BLK_SFB, 32, 1)))
-    
+
     NUM_GP = 4
     PROFILER_BUFFER_SIZE = int(1e7)
     PROFILER_WRITE_STRIDE = SM_NUMBER * NUM_GP
-
 
     # fmt: off
     @T.prim_func(tirp=True)

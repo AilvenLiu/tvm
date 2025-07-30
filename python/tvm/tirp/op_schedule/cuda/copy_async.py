@@ -29,7 +29,7 @@ from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from .common import target_cuda
 from tvm.tir import BufferRegion
 from tvm.tir.event import SemaphoreEventTensor, EventImpl, BulkGroupEvent, SemaphoreEventTensorItem
-from .common import CopyInstType, copy_g2s_s2g_cta_vec_load_impl, validate_copy_op
+from .common import CopyInstType, copy_g2s_s2g_cta_vec_load_impl, validate_copy_op, thread_selector
 from tvm.tir.layout import TileLayout, SwizzleLayout
 
 
@@ -233,8 +233,6 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     # Launch configuration & common symbols
     # ---------------------------------------------------------------------
-    tx = sctx.launch_params["threadIdx.x"]
-    assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
     if sctx.target.arch == "sm_100a":
         cta_group = 1
     else:
@@ -284,65 +282,58 @@ def copy_tma_impl(
             // 8
         )
 
-    if sctx.exec_scope.name == "cta":
-        thread_selector = T.thread()[0:1]
-    elif sctx.exec_scope.name == "warp":
-        thread_selector = T.thread()[T.ptx.elect_sync()]
-    else:
-        raise ValueError(f"Invalid exec scope: {sctx.exec_scope.name}")
-
     rank = len(g_buf.shape)
+
     # fmt: off
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def impl():
+    @T.macro
+    def inner_impl():
         # TODO(@bohan): reconsider this under warp specialized scenario. Q: should we place the fence here?
         # make sure smem write is visible to tma proxy
-        with thread_selector:
-            if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
+        if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
+            if direction == "g2s":
+                tx_cnt[0] += total_bytes()
+                T.ptx.cp_async.bulk.tensor.g2c(
+                    rank,
+                    s_buf.ptr_to(s_st),
+                    mbar.ptr_to(evt.indices)  # type: ignore
+                    if direction == "g2s" else 0,  # dummy when not needed
+                    tensor_map,
+                    *reversed(g_st),
+                    cta_group=cta_group,
+                )
+            else:
+                T.ptx.cp_async.bulk.tensor.s2g(
+                    rank,
+                    s_buf.ptr_to(s_st),
+                    tensor_map,
+                    *reversed(g_st),
+                )
+        else:
+            if direction == "g2s":
+                tx_cnt[0] += total_bytes()
+            for lvs in T.grid(*iter_ranges):
                 if direction == "g2s":
-                    tx_cnt[0] += total_bytes()
+                    s_coord = T.meta_var(make_shared_coord(s_st, lvs))
+                    g_coord = T.meta_var(make_global_coord(s_coord))
                     T.ptx.cp_async.bulk.tensor.g2c(
                         rank,
-                        s_buf.ptr_to(s_st),
-                        mbar.ptr_to(evt.indices)  # type: ignore
-                        if direction == "g2s" else 0,  # dummy when not needed
+                        s_buf.ptr_to(s_coord),
+                        mbar.ptr_to(evt.indices),
                         tensor_map,
-                        *reversed(g_st),
+                        *reversed(g_coord),
                         cta_group=cta_group,
                     )
                 else:
+                    s_coord = T.meta_var(make_shared_coord(s_st, lvs))
+                    g_coord = T.meta_var(make_global_coord(s_coord))
                     T.ptx.cp_async.bulk.tensor.s2g(
                         rank,
-                        s_buf.ptr_to(s_st),
+                        s_buf.ptr_to(s_coord),
                         tensor_map,
-                        *reversed(g_st),
+                        *reversed(g_coord),
                     )
-            else:
-                if direction == "g2s":
-                    tx_cnt[0] += total_bytes()
-                for lvs in T.grid(*iter_ranges):
-                        if direction == "g2s":
-                            s_coord = T.meta_var(make_shared_coord(s_st, lvs))
-                            g_coord = T.meta_var(make_global_coord(s_coord))
-                            T.ptx.cp_async.bulk.tensor.g2c(
-                                rank,
-                                s_buf.ptr_to(s_coord),
-                                mbar.ptr_to(evt.indices),
-                                tensor_map,
-                                *reversed(g_coord),
-                                cta_group=cta_group,
-                            )
-                        else:
-                            s_coord = T.meta_var(make_shared_coord(s_st, lvs))
-                            g_coord = T.meta_var(make_global_coord(s_coord))
-                            T.ptx.cp_async.bulk.tensor.s2g(
-                                rank,
-                                s_buf.ptr_to(s_coord),
-                                tensor_map,
-                                *reversed(g_coord),
-                            )
-
-    # impl.show()
+    
+    impl = thread_selector(sctx, inner_impl)
 
     # fmt: on
     # ---------------------------------------------------------------------
@@ -388,7 +379,6 @@ def copy_async(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     dst, src = op.args[0], op.args[1]
     if not validate_copy_op(dst, src, sctx):
         return None
-
     if isinstance(evt, BulkGroupEvent):
         if evt.get_impl() == EventImpl.kCpAsync:
             for schedule in [copy_g2s_s2g_cta_vec_load_impl]:

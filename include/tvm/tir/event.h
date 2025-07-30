@@ -42,9 +42,7 @@ class BaseEventNode : public Object {
   virtual Array<ffi::Any> GetState() const = 0;
 
   static constexpr const char* _type_key = "tirp.BaseEvent";
-  static constexpr bool _type_has_method_sequal_reduce = false;
-  static constexpr bool _type_has_method_shash_reduce = false;
-  static constexpr bool _type_has_method_visit_attrs = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_BASE_OBJECT_INFO(BaseEventNode, Object);
 };
 
@@ -70,24 +68,7 @@ class BulkGroupEventNode : public BaseEventNode {
         .def_ro("state", &BulkGroupEventNode::state);
   }
 
-  bool SEqualReduce(const BulkGroupEventNode* other, SEqualReducer equal) const {
-    if (!equal(name, other->name)) return false;
-    if (!equal(impl, other->impl)) return false;
-    if (!equal(state, other->state)) return false;
-    return equal.FreeVarEqualImpl(this, other);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(name);
-    hash_reduce(impl);
-    hash_reduce(state);
-    hash_reduce.FreeVarHashImpl(this);
-  }
-
   static constexpr const char* _type_key = "tirp.BulkGroupEvent";
-  static constexpr bool _type_has_method_sequal_reduce = true;
-  static constexpr bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(BulkGroupEventNode, BaseEventNode);
 };
 
@@ -113,26 +94,8 @@ class SemaphoreEventTensorNode : public Object {
         .def_ro("shape", &SemaphoreEventTensorNode::shape);
   }
 
-  bool SEqualReduce(const SemaphoreEventTensorNode* other, SEqualReducer equal) const {
-    if (!equal(name, other->name)) return false;
-    if (!equal(impl, other->impl)) return false;
-    if (!equal(state, other->state)) return false;
-    if (!equal(shape, other->shape)) return false;
-    return equal.FreeVarEqualImpl(this, other);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(name);
-    hash_reduce(impl);
-    hash_reduce(state);
-    hash_reduce(shape);
-    hash_reduce.FreeVarHashImpl(this);
-  }
-
   static constexpr const char* _type_key = "tirp.SemaphoreEventTensor";
-  static constexpr bool _type_has_method_sequal_reduce = true;
-  static constexpr bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_FINAL_OBJECT_INFO(SemaphoreEventTensorNode, Object);
 };
 
@@ -158,20 +121,7 @@ class SemaphoreEventTensorItemNode : public BaseEventNode {
         .def_ro("indices", &SemaphoreEventTensorItemNode::indices);
   }
 
-  bool SEqualReduce(const SemaphoreEventTensorItemNode* other, SEqualReducer equal) const {
-    return equal(tensor, other->tensor) && equal(indices, other->indices);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(tensor);
-    hash_reduce(indices);
-    hash_reduce.FreeVarHashImpl(this);
-  }
-
   static constexpr const char* _type_key = "tirp.SemaphoreEventTensorItem";
-  static constexpr bool _type_has_method_sequal_reduce = true;
-  static constexpr bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(SemaphoreEventTensorItemNode, BaseEventNode);
 };
 

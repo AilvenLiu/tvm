@@ -17,7 +17,7 @@
 # pylint: disable=no-member, super-init-not-called
 
 """Definition of execution scope."""
-from typing import List
+from typing import List, Union
 
 from tvm.ffi import register_object, get_global_func
 from tvm.runtime import Object
@@ -71,9 +71,9 @@ class ExecScope(Object):
 class ExecScopeSlice(ExecScope):
     """A slice of an execution scope with their slices and parent scope name."""
 
-    slices: List[Range]
+    slices: Union[List[Range], PrimExpr]
     parent: str
     cur: str
 
-    def __init__(self, slices: List[Range], parent: str, cur: str):
+    def __init__(self, slices: Union[List[Range], PrimExpr], parent: str, cur: str):
         self.__init_handle_by_constructor__(_ffi_api.ExecScopeSlice, slices, parent, cur)

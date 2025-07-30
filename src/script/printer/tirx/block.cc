@@ -290,7 +290,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
       ExprDoc parent_doc =
           LiteralDoc::Str(scope_slice->parent, block_p->Attr("exec_scope")->Attr("parent"));
       ExprDoc call = TIR(d, block->exec_scope.value()->name)->Call({extents_doc, parent_doc});
-      if (auto slices_opt = scope_slice->slice.as<Array<Range>>()) {
+      if (auto slices_opt = scope_slice->slices.as<Array<Range>>()) {
         auto slices = slices_opt.value();
         // slices
         Array<Doc> slices_doc;
@@ -303,7 +303,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
         return ScopeDoc(std::nullopt, call.operator[](slices_doc), (*frame)->stmts);
       } else {
         // select_cond
-        auto cond = scope_slice->slice.as<PrimExpr>().value();
+        auto cond = scope_slice->slices.as<PrimExpr>().value();
         auto cond_doc = d->AsDoc<ExprDoc>(cond, block_p->Attr("exec_scope")->Attr("select_cond"));
         return ScopeDoc(std::nullopt, call.operator[]({cond_doc}), (*frame)->stmts);
       }

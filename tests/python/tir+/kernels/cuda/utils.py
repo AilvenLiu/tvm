@@ -88,6 +88,7 @@ class ProtonContext:
 
 # utils for tg4perfetto profiler, adapted from https://github.com/flashinfer-ai/flashinfer
 
+
 class EventType(Enum):
     kBegin = 0
     kEnd = 1

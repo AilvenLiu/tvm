@@ -45,19 +45,8 @@ class ScopePairNode : public Object {
         .def_ro("cur", &ScopePairNode::cur);
   }
 
-  bool SEqualReduce(const ScopePairNode* other, SEqualReducer equal) const {
-    return equal(parent, other->parent) && equal(cur, other->cur);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(parent);
-    hash_reduce(cur);
-  }
-
   static constexpr const char* _type_key = "tirx.ScopePair";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScopePairNode, Object);
 };
 
@@ -93,26 +82,13 @@ class ScopeIdDefNode : public Object {
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<ScopeIdDefNode>()
-        .def_ro("def_ids", &ScopeIdDefNode::def_ids)
+        .def_ro("def_ids", &ScopeIdDefNode::def_ids, refl::AttachFieldFlag::SEqHashDef())
         .def_ro("extents", &ScopeIdDefNode::extents)
         .def_ro("scope", &ScopeIdDefNode::scope);
   }
 
-  bool SEqualReduce(const ScopeIdDefNode* other, SEqualReducer equal) const {
-    return equal.DefEqual(def_ids, other->def_ids) && equal(extents, other->extents) &&
-           equal(scope, other->scope);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(def_ids);
-    hash_reduce(extents);
-    hash_reduce(scope);
-  }
-
   static constexpr const char* _type_key = "tirx.ScopeIdDef";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdDefNode, Object);
 };
 
@@ -190,7 +166,6 @@ class ScopeIdResolveTable {
 class ExecScope;
 class ExecScopeNode : public Object {
  public:
-
   Array<ScopeIdDef> scope_id_def;
 
   /*! \brief scope name, used when printing */
@@ -210,23 +185,13 @@ class ExecScopeNode : public Object {
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ExecScopeNode>().def_ro("name", &ExecScopeNode::name)
-                                    .def_ro("scope_id_def", &ExecScopeNode::scope_id_def);
-  }
-
-  bool SEqualReduce(const ExecScopeNode* other, SEqualReducer equal) const {
-    return equal(name, other->name) && equal(scope_id_def, other->scope_id_def);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const { 
-    hash_reduce(name);
-    hash_reduce(scope_id_def);
+    refl::ObjectDef<ExecScopeNode>()
+        .def_ro("name", &ExecScopeNode::name)
+        .def_ro("scope_id_def", &ExecScopeNode::scope_id_def);
   }
 
   static constexpr const char* _type_key = "tirx.ExecScope";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_BASE_OBJECT_INFO(ExecScopeNode, Object);
 };
 
@@ -246,7 +211,7 @@ class ExecScope : public ObjectRef {
 class ExecScopeSliceNode : public ExecScopeNode {
  public:
   /*! \brief slices or select condition of the execution scope */
-  Variant<Array<Range>, PrimExpr> slice = Array<Range>({});
+  Variant<Array<Range>, PrimExpr> slices = Array<Range>({});
   /*! \brief extents of the execution scope */
   Optional<Array<PrimExpr>> extents;
   /*! \brief parent scope name */
@@ -257,33 +222,20 @@ class ExecScopeSliceNode : public ExecScopeNode {
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<ExecScopeSliceNode>()
-        .def_ro("slice", &ExecScopeSliceNode::slice)
+        .def_ro("slices", &ExecScopeSliceNode::slices)
         .def_ro("extents", &ExecScopeSliceNode::extents)
-        .def_ro("parent", &ExecScopeSliceNode::parent);
-  }
-
-  bool SEqualReduce(const ExecScopeSliceNode* other, SEqualReducer equal) const {
-    return /*equal(slice, other->slice) &&*/ equal(extents, other->extents) &&
-           equal(parent, other->parent) && ExecScopeNode::SEqualReduce(other, equal);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    // hash_reduce(slice);
-    hash_reduce(extents);
-    hash_reduce(parent);
-    ExecScopeNode::SHashReduce(hash_reduce);
+        .def_ro("parent", &ExecScopeSliceNode::parent)
+        .def_ro("name", &ExecScopeSliceNode::name)
+        .def_ro("scope_id_def", &ExecScopeSliceNode::scope_id_def);
   }
 
   static constexpr const char* _type_key = "tirx.ExecScopeSlice";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ExecScopeSliceNode, ExecScopeNode);
 };
 
 class ExecScopeSlice : public ExecScope {
  public:
-  TVM_DLL explicit ExecScopeSlice(Variant<Array<Range>, PrimExpr> slice,
+  TVM_DLL explicit ExecScopeSlice(Variant<Array<Range>, PrimExpr> slices,
                                   Optional<Array<PrimExpr>> extents, String parent, String cur);
 
   TVM_DEFINE_OBJECT_REF_METHODS(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
@@ -307,7 +259,7 @@ bool IsStorageBuffer(const String& storage, const String& logical);
 /*! \brief Return the belonging logical scope of some storage scope */
 String StorageToLogicalScope(const String& storage);
 
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_EXEC_SCOPE_H_

@@ -24,36 +24,38 @@ from typing import Tuple
 import functools
 import enum
 
+
 def extract_values(filename):
     # List to store all extracted values
     extracted_values = []
-    
+
     # Open and read the file
-    with open(filename, 'r') as file:
+    with open(filename, "r") as file:
         for line in file:
             # Use string manipulation to extract values
-            parts = line.strip().split(', ')
-            
+            parts = line.strip().split(", ")
+
             # Extract value a from "block_id: a"
-            a_part = parts[0].split(': ')[1]
+            a_part = parts[0].split(": ")[1]
             a = int(a_part)
-            
+
             # Extract value b from "fetched_task_type[0]: b"
-            b_part = parts[1].split(': ')[1]
+            b_part = parts[1].split(": ")[1]
             b = int(b_part)
-            
+
             # Extract value c from "fetched_task_idx[0]: c"
-            c_part = parts[2].split(': ')[1]
+            c_part = parts[2].split(": ")[1]
             c = int(c_part)
-            
+
             # Extract value d from "fetched_task_idx[1]: d"
-            d_part = parts[3].split(': ')[1]
+            d_part = parts[3].split(": ")[1]
             d = int(d_part)
-            
+
             # Add the extracted values as a tuple to the result list
             extracted_values.append((a, b, c, d))
-    
+
     return extracted_values
+
 
 @tvm.testing.requires_cuda_compute_version(8)
 def test_partial_reduction():
@@ -66,7 +68,6 @@ def test_partial_reduction():
 
     NUM_BLOCK_M = M // BLOCK_M
     NUM_BLOCK_N = N // BLOCK_N
-
 
     # fmt: off
 
@@ -216,8 +217,6 @@ def test_partial_reduction():
     C_np = np.zeros((M, 1), dtype=np.float32)
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
- 
-            
 
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
@@ -225,20 +224,21 @@ def test_partial_reduction():
     C_tvm_fused = tvm.nd.array(C_np, device=DEV)
     sem_tvm = tvm.nd.array(np.zeros((NUM_BLOCK_M,), dtype=np.int32), device=DEV)
     from pathlib import Path
+
     script_directory = Path(__file__).parent.resolve()
     file_path = script_directory / "partial_reduction_sm_log.txt"
     sm_trace = extract_values(file_path)
     sm_trace = sorted(sm_trace, key=lambda x: x[0])
-    indices = np.zeros((TOTAL_SM_CNT+1,), dtype=np.int32)
+    indices = np.zeros((TOTAL_SM_CNT + 1,), dtype=np.int32)
     for num in sm_trace:
-        indices[num[0]+1] += 1
+        indices[num[0] + 1] += 1
     indptr = np.cumsum(indices)
     task_types = np.array(list(map(lambda x: x[1], sm_trace)), dtype=np.int32)
     task_indices = np.array(list(map(lambda x: x[2:], sm_trace)), dtype=np.int32)
     task_types_tvm = tvm.nd.array(task_types, device=DEV)
     task_indices_tvm = tvm.nd.array(task_indices, device=DEV)
     task_indptr_tvm = tvm.nd.array(np.array(indptr, dtype=np.int32), device=DEV)
-    
+
     with target:
 
         ref_mod_stage_1 = tvm.IRModule({"main": partial_reduction_ref_stage1})
@@ -252,7 +252,9 @@ def test_partial_reduction():
 
         fused_mod = tvm.IRModule({"main": partial_reduction_fused})
         fused_mod = tvm.compile(fused_mod, target=target, tir_pipeline="tirp")
-        fused_mod(A_tvm, B_tvm, C_tvm_fused, sem_tvm, task_types_tvm, task_indices_tvm, task_indptr_tvm)
+        fused_mod(
+            A_tvm, B_tvm, C_tvm_fused, sem_tvm, task_types_tvm, task_indices_tvm, task_indptr_tvm
+        )
         ret_fused = C_tvm_fused.numpy()
         tvm.testing.assert_allclose(ret_fused, ret_ref_stage_2, rtol=1e-3, atol=1e-3)
 

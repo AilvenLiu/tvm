@@ -23,7 +23,7 @@ from tvm.script import tir as T
 from tvm.tir import PrimFunc, Buffer
 from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
-from .common import target_cuda
+from .common import target_cuda, thread_selector
 from tvm.tirp.operator import EventInit, EventCommit, EventWait
 from tvm.tir.event import (
     EventImpl,
@@ -117,7 +117,6 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     mbar, phase, tx_cnt = evt.get_state()
 
     if isinstance(evt, SemaphoreEventTensorItem):
-
         @T.prim_func(tirp=True, check_well_formed=False)
         def func():
             phase[*evt.indices] = 0
@@ -259,8 +258,6 @@ def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 @target_event_impl("event_init", EventImpl.kTMAStore)
 def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event initialization."""
-    if sctx.exec_scope.name != "cta":
-        return None
 
     @T.prim_func(tirp=True, check_well_formed=False)
     def func():
@@ -272,29 +269,24 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 @target_event_impl("event_commit", EventImpl.kTMAStore)
 def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event commit."""
-    if sctx.exec_scope.name != "cta":
-        return None
 
-    @T.prim_func(tirp=True, check_well_formed=False)
+    @T.macro()
     def func():
         T.ptx.cp_async.bulk.commit_group()
 
-    return func
+    return thread_selector(sctx, func)
 
 
 @target_event_impl("event_wait", EventImpl.kTMAStore)
 def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event wait."""
-    if sctx.exec_scope.name != "cta":
-        return None
-
     n = op.args[1]
 
-    @T.prim_func(tirp=True, check_well_formed=False)
+    @T.macro()
     def func():
         T.ptx.cp_async.bulk.wait_group(n)
 
-    return func
+    return thread_selector(sctx, func)
 
 
 ######################## kCpAsync ########################

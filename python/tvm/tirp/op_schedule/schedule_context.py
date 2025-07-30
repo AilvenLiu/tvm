@@ -19,7 +19,7 @@ from typing import Dict, List
 
 from tvm.ffi import register_object
 from tvm.ir import Range
-from tvm.tir import PrimExpr, Var, Buffer, Stmt
+from tvm.tir import PrimExpr, Var, Buffer, Stmt, IterVar
 from tvm.runtime import Object, Scriptable
 from tvm.target import Target
 from tvm.tir.exec_scope import ExecScope
@@ -50,7 +50,7 @@ class ScheduleContext(Object, Scriptable):
 
     target: Target
     exec_scope: ExecScope
-    launch_params: Dict[str, PrimExpr]
+    launch_params: Dict[str, IterVar]
     var_range_map: Dict[Var, Range]
     alloc_only: bool
     callbacks: Dict[str, Object]
@@ -63,7 +63,7 @@ class ScheduleContext(Object, Scriptable):
         self,
         target: Target,
         exec_scope: ExecScope,
-        launch_params: Dict[str, PrimExpr],
+        launch_params: Dict[str, IterVar],
         var_range_map: Dict[Var, Range],
         alloc_only: bool = False,
         callbacks: Dict[str, Object] = {},

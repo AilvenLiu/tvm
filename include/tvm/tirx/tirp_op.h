@@ -63,7 +63,7 @@ class ScheduleContextNode : public Object {
   /*! \brief The exec scope of the operator */
   ExecScope exec_scope;
   /*! \brief The kernel launch parameters. */
-  Map<String, PrimExpr> launch_params;
+  Map<String, IterVar> launch_params;
   /*! \brief A map from loop variables to their ranges. */
   Map<Var, Range> var_range_map;
   /*! \brief Whether the schedule context is only used for buffer allocation. */
@@ -94,9 +94,6 @@ class ScheduleContextNode : public Object {
   void AddInitStmt(Stmt stmt, bool host = false);
 
   static constexpr const char* _type_key = "tirp.ScheduleContext";
-  static constexpr bool _type_has_method_sequal_reduce = false;
-  static constexpr bool _type_has_method_shash_reduce = false;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ScheduleContextNode, Object);
 };
 
@@ -115,7 +112,7 @@ class ScheduleContext : public ObjectRef {
    * \param callbacks The callbacks to be handled when the operator is scheduled.
    */
   TVM_DLL ScheduleContext(Target target, ExecScope exec_scope,
-                          Map<String, PrimExpr> launch_params = {},
+                          Map<String, IterVar> launch_params = {},
                           Map<Var, Range> var_range_map = {}, bool alloc_only = false,
                           Map<String, ObjectRef> callbacks = {});
 

@@ -191,7 +191,7 @@ class TIRpOpScheduler : public StmtExprMutator {
       n->block = block.value();
       return std::move(block_realize);
     } else {
-      return std::move(body);
+      return body;
     }
   }
 
@@ -223,7 +223,7 @@ class TIRpOpScheduler : public StmtExprMutator {
         }
       }
       std::swap(is_first_block, is_first_block_);
-      return std::move(res);
+      return res;
     }
     return std::move(block);
   }
@@ -236,7 +236,7 @@ class TIRpOpScheduler : public StmtExprMutator {
       auto thread_extent = Downcast<IterVar>(op->node);
       ICHECK(thread_extent->thread_tag.defined())
           << "Internal Error: thread_extent without thread_tag";
-      launch_params_[thread_extent->thread_tag] = op->value;
+      launch_params_[thread_extent->thread_tag] = thread_extent;
       Stmt res = StmtExprMutator::VisitStmt_(op);
       if (is_first_thread_attr && is_first_block_) {
         // Insert host init stmts outside the outermost thread binding or block
@@ -287,7 +287,7 @@ class TIRpOpScheduler : public StmtExprMutator {
   Map<Var, Range> var_range_map_;
   const Target& target_;
   std::vector<ExecScope> exec_scope_stack_;
-  std::unordered_map<String, PrimExpr> launch_params_;
+  std::unordered_map<String, IterVar> launch_params_;
   std::vector<Buffer> alloc_buffers_;
   std::vector<Stmt> device_init_stmts_;
   std::vector<Stmt> host_init_stmts_;
@@ -418,17 +418,17 @@ class ExecScopeSliceResolver : public StmtExprMutator {
     }
     auto scope_slice = scope_slice_opt.value();
     auto scope = ScopePair(scope_slice->parent, scope_slice->name);
-    int out_dim = scope_slice->slice.as<PrimExpr>().has_value()
+    int out_dim = scope_slice->slices.as<PrimExpr>().has_value()
                       ? 1
-                      : scope_slice->slice.as<Array<Range>>().value().size();
+                      : scope_slice->slices.as<Array<Range>>().value().size();
     auto resolved = ScopeIdResolveTable::Resolve(scope, scope_slice->extents, out_dim,
                                                  target_->kind->name, launch_params_);
     ICHECK_EQ(resolved.size(), out_dim);
     n->exec_scope = ExecScope::Create(scope_slice->name);
-    if (auto select_cond = scope_slice->slice.as<PrimExpr>()) {
+    if (auto select_cond = scope_slice->slices.as<PrimExpr>()) {
       return IfThenElse(select_cond.value(), BlockRealize({}, Bool(true), block));
     } else {
-      auto slices = scope_slice->slice.as<Array<Range>>().value();
+      auto slices = scope_slice->slices.as<Array<Range>>().value();
       PrimExpr cond = Bool(true);
       for (size_t i = 0; i < slices.size(); i++) {
         cond = cond && resolved[i] >= slices[i]->min &&

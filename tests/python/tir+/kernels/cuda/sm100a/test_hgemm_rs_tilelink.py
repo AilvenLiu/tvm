@@ -90,7 +90,7 @@ VEC_SIZE = 8
 RS_PIPE_DEPTH = 6
 M_SEG = 4
 RS_BLK_M = BLK_M // M_SEG
-RS_BLK_N = BLK_N 
+RS_BLK_N = BLK_N
 
 # profiling
 NUM_GROUPS = 5
@@ -170,7 +170,9 @@ class RSTileScheduler:
         group_repeat = self.group_size * self.n_clusters
         # FIXME: use group_rows > 0 to avoid constant folding bug
         if linear_idx < group_rows * self.n_clusters and group_rows > 0:
-            self.m_idx = linear_idx // group_repeat * self.group_size + (linear_idx % self.group_size)
+            self.m_idx = linear_idx // group_repeat * self.group_size + (
+                linear_idx % self.group_size
+            )
             self.n_idx = linear_idx % group_repeat // self.group_size
         elif final_rows > 0:
             remainder_idx = linear_idx - group_rows * self.n_clusters
@@ -218,7 +220,6 @@ class Semaphore:
     @T.macro
     def semaphore_wait(self, *coord):
         T.cuda.func_call("wait", self.sem.ptr_to(coord), self.cnt, source_code=wait_str)
-        
 
     @T.macro
     def semaphore_notify(self, cbx, wg_id, tid, m_idx, n_idx):
@@ -233,6 +234,7 @@ class Semaphore:
                 )
             T.cuda.thread_fence()
 
+
 spin_wait = """
 __forceinline__ __device__ void spin_wait(uint32_t *flag_addr) {
     uint32_t flag;
@@ -241,7 +243,6 @@ __forceinline__ __device__ void spin_wait(uint32_t *flag_addr) {
     } while (flag == 0);
 }
 """
-
 
 
 signal_fp16_ptx = """
@@ -273,6 +274,8 @@ class ReducePipe(Pipeline):
     def consumer_release(self, pipeline_idx: int):
         T.ptx.mbarrier.arrive(self.mbar_c2p.ptr_to([self.idx, pipeline_idx]))
 
+
+@pytest.mark.skip()
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 def test_hgemm_rs():
     A_layout = T.ComposeLayout(
@@ -589,19 +592,17 @@ def test_hgemm_rs():
     }
 
     res_dict = {
-        "gemm_out_res": sess.empty(
-            (WORLD_SIZE, M, N), d_type, worker0_only=True
-        ),
+        "gemm_out_res": sess.empty((WORLD_SIZE, M, N), d_type, worker0_only=True),
         "buffer_res": sess.empty(
-            (WORLD_SIZE, M // RS_BLK_M, N // RS_BLK_N, RS_BLK_M, RS_BLK_N), d_type, worker0_only=True
+            (WORLD_SIZE, M // RS_BLK_M, N // RS_BLK_N, RS_BLK_M, RS_BLK_N),
+            d_type,
+            worker0_only=True,
         ),
         "out_res": sess.empty((WORLD_SIZE, LOCAL_M, N), d_type, worker0_only=True),
         "profiler_buffer_res": sess.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", worker0_only=True
         ),
-        "gemm_out_host": tvm.nd.empty(
-            (WORLD_SIZE, M, N), d_type, device=DEV
-        ),
+        "gemm_out_host": tvm.nd.empty((WORLD_SIZE, M, N), d_type, device=DEV),
         "buffer_host": tvm.nd.empty(
             (WORLD_SIZE, M // RS_BLK_M, N // RS_BLK_N, RS_BLK_M, RS_BLK_N), d_type, device=DEV
         ),

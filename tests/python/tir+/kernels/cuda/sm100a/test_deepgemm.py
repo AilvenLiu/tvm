@@ -381,6 +381,7 @@ def test():
                 tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
                 
                 tma2trans_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoadOnly, state=[tma2trans_bar.mbar, phase, tx_cnt], shape=[SMEM_PIPE_DEPTH])
+                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
                 tma2trans_event.init(1)
 
                 trans2mma_bar.init(CTA_GROUP * 32)
@@ -422,7 +423,7 @@ def test():
 
                 with T.cta():
                     T.block_attr({"tirp.scope_partition": True})
-                    with T.warpgroup()[1:2]:
+                    with T.warpgroup()[wg_id == 1]:
                         T.block_attr({"tirp.scope_partition": True})
                         with T.warp(parent="warpgroup")[warp_id == 3]:
                             phase[0] = 0
@@ -565,7 +566,7 @@ def test():
 
                                     tile_scheduler.next_tile()
                                     
-                    with T.warpgroup()[0:1]:
+                    with T.warpgroup()[wg_id == 0]:
                         trap_when_assert_failed(tmem_addr == 0)
                         tmem_idx = T.local_cell("int32", "tmem_idx")
                         tmem_phase = T.local_cell("int32", "tmem_phase")
@@ -577,8 +578,7 @@ def test():
                             tmem_phase = (tile_scheduler.tile_idx // TMEM_PIPE_DEPTH) & 1
 
                             # flush previous tma
-                            if lane_id == 0 and warp_id == 0:
-                                T.ptx.cp_async.bulk.wait_group(0)
+                            wb_event.wait(0)
                             T.ptx.bar.sync(10, 128)
                             # wait for the completion of all the mma of the same tile
                             mma2ld_bar.wait(tmem_idx, tmem_phase)
@@ -589,8 +589,7 @@ def test():
                                 
                                 # wait the smem to be free
                                 if ko >= TMEM_PIPE_DEPTH:
-                                    if lane_id == 0 and warp_id == 0:
-                                        T.ptx.cp_async.bulk.wait_group(TMEM_PIPE_DEPTH - 1)
+                                    wb_event.wait(TMEM_PIPE_DEPTH - 1)
                                     T.ptx.bar.sync(10, 128)
 
                                 # tmem -> rf (ld) -> smem
@@ -604,7 +603,7 @@ def test():
                                         float22half2(T.address_of(reg_fp16[ki * TMEM_LD_SIZE + vec * 2]), T.address_of(reg[vec * 2]))
                                     for vec in T.vectorized(TMEM_LD_SIZE):
                                         D_smem[stage, warp_id * 32 + lane_id, ki * TMEM_LD_SIZE + vec] = reg_fp16[ki * TMEM_LD_SIZE + vec]
-                            
+
                                 # the tmem can be overwritten
                                 if ko == MMA_N // EPI_TILE - 1:
                                     T.ptx.tcgen05.fence.before_thread_sync()
@@ -614,16 +613,14 @@ def test():
                                 T.ptx.bar.sync(10, 128)
                                     
                                 # smem -> gmem
-                                if lane_id == 0 and warp_id == 0:
-                                    T.ptx.cp_async.bulk.tensor.s2g(2, D_smem.ptr_to([stage, 0, 0]), 
-                                                                D_tensor_map, n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE,
-                                                                (m_idx * CTA_GROUP + cbx) * BLK_M)
-                                    T.ptx.cp_async.bulk.commit_group()
+                                m_start = (m_idx * CTA_GROUP + cbx) * BLK_M
+                                n_start = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
+                                Tp.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], evt=wb_event)
+                                wb_event.commit()
 
                             tile_scheduler.next_tile()
 
-                        if lane_id == 0 and warp_id == 0:
-                            T.ptx.cp_async.bulk.wait_group(0)
+                        wb_event.wait()
                         T.ptx.bar.sync(10, 128)
                                 
                 # dealloc TMEM

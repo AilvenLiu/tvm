@@ -84,7 +84,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
     ):
         return None
 
-    thread_cnt = sctx.launch_params["threadIdx.x"]
+    thread_cnt = sctx.launch_params["threadIdx.x"].dom.extent
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
     # Define operation lambda.

@@ -119,7 +119,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     if (const auto* slice = scope.as<ExecScopeSliceNode>()) {
       auto it_slices = scope_slices_.find(slice->name);
       auto it_select_cond = scope_select_cond_.find(slice->name);
-      if (auto cond = slice->slice.as<PrimExpr>()) {
+      if (auto cond = slice->slices.as<PrimExpr>()) {
         // current scope slice has select_cond, it should not have slices
         Verify(it_slices == scope_slices_.end())
             << "TIRpError: ExecScopeSlice at " << path << " has both slices and select_cond";
@@ -131,7 +131,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
         // current scope slice has slices, it should not have select_cond
         Verify(it_select_cond == scope_select_cond_.end())
             << "TIRpError: ExecScopeSlice at " << path << " has both slices and select_cond";
-        auto slices = slice->slice.as<Array<Range>>().value();
+        auto slices = slice->slices.as<Array<Range>>().value();
         if (it_slices == scope_slices_.end()) {
           scope_slices_[slice->name] = {slices};
           erase_slices = true;

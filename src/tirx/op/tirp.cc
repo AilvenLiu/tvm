@@ -77,7 +77,7 @@ void ScheduleContextNode::AddInitStmt(Stmt stmt, bool host) {
 }
 
 ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
-                                 Map<String, PrimExpr> launch_params, Map<Var, Range> var_range_map,
+                                 Map<String, IterVar> launch_params, Map<Var, Range> var_range_map,
                                  bool alloc_only, Map<String, ObjectRef> callbacks) {
   auto n = make_object<ScheduleContextNode>();
   n->target = std::move(target);
@@ -93,7 +93,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("tirp.ScheduleContext",
-           [](Target target, ExecScope exec_scope, Map<String, PrimExpr> launch_params,
+           [](Target target, ExecScope exec_scope, Map<String, IterVar> launch_params,
               Map<Var, Range> var_range_map, bool alloc_only, Map<String, ObjectRef> callbacks) {
              return ScheduleContext(target, exec_scope, launch_params, var_range_map, alloc_only,
                                     callbacks);

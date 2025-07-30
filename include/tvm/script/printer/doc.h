@@ -904,7 +904,6 @@ class BreakDocNode : public StmtDocNode {
   }
 
   static constexpr const char* _type_key = "script.printer.BreakDoc";
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(BreakDocNode, StmtDocNode);
 };
 
@@ -935,7 +934,6 @@ class ContinueDocNode : public StmtDocNode {
   }
 
   static constexpr const char* _type_key = "script.printer.ContinueDoc";
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ContinueDocNode, StmtDocNode);
 };
 
@@ -1326,7 +1324,6 @@ class OpCallDocNode : public StmtDocNode {
   }
 
   static constexpr const char* _type_key = "script.printer.OpCallDoc";
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(OpCallDocNode, StmtDocNode);
 };
 

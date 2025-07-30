@@ -699,14 +699,7 @@ class BreakNode : public StmtNode {
     refl::ObjectDef<BreakNode>().def_ro("span", &BreakNode::span);
   }
 
-  bool SEqualReduce(const BreakNode* other, SEqualReducer equal) const { return true; }
-
-  void SHashReduce(SHashReducer hash_reduce) const {}
-
   static constexpr const char* _type_key = "tirx.Break";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(BreakNode, StmtNode);
 };
 
@@ -732,14 +725,7 @@ class ContinueNode : public StmtNode {
     refl::ObjectDef<ContinueNode>().def_ro("span", &ContinueNode::span);
   }
 
-  bool SEqualReduce(const ContinueNode* other, SEqualReducer equal) const { return true; }
-
-  void SHashReduce(SHashReducer hash_reduce) const {}
-
   static constexpr const char* _type_key = "tirx.Continue";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
   TVM_DECLARE_FINAL_OBJECT_INFO(ContinueNode, StmtNode);
 };
 
@@ -862,21 +848,8 @@ class BufferViewNode : public Object {
         .def_ro("dst_buffer", &BufferViewNode::dst_buffer);
   }
 
-  bool SEqualReduce(const BufferViewNode* other, SEqualReducer equal) const {
-    return equal(src_buffer, other->src_buffer) && equal(layout, other->layout) &&
-           equal(dst_buffer, other->dst_buffer);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(src_buffer);
-    hash_reduce(layout);
-    hash_reduce(dst_buffer);
-  }
-
   static constexpr const char* _type_key = "tirx.BufferView";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_FINAL_OBJECT_INFO(BufferViewNode, Object);
 };
 
@@ -903,19 +876,8 @@ class BufferGetNode : public Object {
         .def_ro("dst_buffer", &BufferGetNode::dst_buffer);
   }
 
-  bool SEqualReduce(const BufferGetNode* other, SEqualReducer equal) const {
-    return equal(src_buffer, other->src_buffer) && equal(dst_buffer, other->dst_buffer);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(src_buffer);
-    hash_reduce(dst_buffer);
-  }
-
   static constexpr const char* _type_key = "tirx.BufferGet";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  static constexpr bool _type_has_method_visit_attrs = false;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
   TVM_DECLARE_FINAL_OBJECT_INFO(BufferGetNode, Object);
 };
 
@@ -991,6 +953,10 @@ class SBlockNode : public StmtNode {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<SBlockNode>()
         .def_ro("iter_vars", &SBlockNode::iter_vars, refl::AttachFieldFlag::SEqHashDef())
+        .def_ro("exec_scope", &SBlockNode::exec_scope)
+        .def_ro("bulk_events", &SBlockNode::bulk_events, refl::AttachFieldFlag::SEqHashDef())
+        .def_ro("sem_event_tensors", &SBlockNode::sem_event_tensors,
+                refl::AttachFieldFlag::SEqHashDef())
         .def_ro("reads", &SBlockNode::reads)
         .def_ro("writes", &SBlockNode::writes)
         .def_ro("name_hint", &SBlockNode::name_hint, refl::AttachFieldFlag::SEqHashIgnore())
@@ -999,12 +965,8 @@ class SBlockNode : public StmtNode {
         .def_ro("annotations", &SBlockNode::annotations)
         .def_ro("init", &SBlockNode::init)
         .def_ro("body", &SBlockNode::body)
-        .def_ro("exec_scope", &SBlockNode::exec_scope)
         .def_ro("buffer_views", &SBlockNode::buffer_views)
-        .def_ro("buffer_gets", &SBlockNode::buffer_gets)
-        .def_ro("bulk_events", &SBlockNode::bulk_events, refl::AttachFieldFlag::SEqHashDef())
-        .def_ro("sem_event_tensors", &SBlockNode::sem_event_tensors,
-                refl::AttachFieldFlag::SEqHashDef());
+        .def_ro("buffer_gets", &SBlockNode::buffer_gets);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SBlock", SBlockNode, StmtNode);
 };
@@ -1390,6 +1352,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxxxxxx
+}  // namespace tirxxxxxxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

@@ -850,7 +850,7 @@ def test_fp16_fused_attn():
         export_to_perfetto_trace(
             profiler_buffer_tvm.numpy(),
             f"mla-{BATCH_SIZE}-{QO_LEN}-{NHEADS}.perfetto-trace",
-            event_type_names
+            event_type_names,
         )
 
         return o_tvm.numpy()
