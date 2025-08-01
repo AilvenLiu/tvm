@@ -3789,7 +3789,7 @@ def ptx_bar_sync(name_bar_id, thread_count):
 
 
 def ptx_cp_async_bulk_tensor_global_to_cluster(
-    dim, dst_ptr, bar, tensormap, *coords, cta_mask=0, cta_group=1
+    dim, dst_ptr, bar, tensormap, *coords, cta_mask=0, cta_group=1, cache_hint=""
 ):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.shared::cluster.global.tile.mbarrier::complete_tx::bytes
 
@@ -3818,6 +3818,10 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
         If set to 1, mbarrier must be in the shared memory of the same CTA as the shared memory destination
         If set to 2, mbarrier can be in shared memory of either the same CTA as the shared memory destination
                      or the shared memory of the peer CTA.
+
+    cache_hint : str
+        The cache hint.
+
     Returns
     -------
     call : PrimExpr
@@ -3833,6 +3837,7 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
         *coords,
         cta_mask,
         cta_group,
+        cache_hint,
     )
 
 

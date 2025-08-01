@@ -21,7 +21,6 @@ import functools
 import enum
 
 import tvm.ffi
-from tvm.ffi.dtype import DataTypeCode
 from tvm.tir.op import cuda_func_call
 
 
@@ -2598,32 +2597,45 @@ __forceinline__ __device__ void {func_name}(void* barrier, int phase) {{
 # PTX Data Movement and Conversion Instructions
 ########################################################
 
+
+# see https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/copy_sm90_desc.hpp#L186
+CacheHint = {
+    "evict_normal": 0x1000000000000000,
+    "evict_first": 0x12F0000000000000,
+    "evict_last": 0x14F0000000000000,
+}
+
+
 #################### TMA (cp.async.bulk.tensor)
 
 
 @register_codegen("ptx_cp_async_bulk_tensor_global_to_cluster")
 def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *args):
     dim = int(dim)
-    coords, cta_mask, cta_group = args[:-2], int(args[-2]), int(args[-1])
+    coords, cta_mask, cta_group, cache_hint = args[:-3], int(args[-3]), int(args[-2]), args[-1]
     func_name = f"tvm_builtin_ptx_cp_async_bulk_tensor_global_to_cluster_{dim}d"
     if len(coords) != dim:
         raise ValueError(
             f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."
         )
+    if cache_hint != "":
+        cache_hint = str(cache_hint)[1:-1]
 
     func_name = (
         f"ptx_cp_async_bulk_tensor_global_to_cluster_{dim}d"
         + (f"_multicast_{cta_mask}" if cta_mask != 0 else "")
         + (f"_cta_group_{cta_group}" if cta_group == 2 else "")
+        + (f"_{cache_hint}" if cache_hint != "" else "")
     )
     coord_arg_list = ", ".join([f"int coord{i}" for i in range(dim)])
 
     # The operand indices are different for unicast vs. multicast
-    unicast_indices = [str(3 + i) for i in range(dim)]
-    multicast_indices = [str(4 + i) for i in range(dim)]
-    arg_template_unicast = "{%" + ", %".join(unicast_indices) + "}"
-    arg_template_multicast = "{%" + ", %".join(multicast_indices) + "}"
-
+    coord_arg_start = 3
+    if cta_mask != 0:
+        coord_arg_start += 1
+    if cache_hint != "":
+        coord_arg_start += 1
+    coord_arg_template = "{%" + ", %".join([str(coord_arg_start + i) for i in range(dim)]) + "}"
     coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(dim)])
 
     def is_sm100_or_higher():
@@ -2642,7 +2654,14 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
     else:
         cta_group_str = ""
 
+    if cache_hint != "":
+        cache_hint_str = f".L2::cache_hint"
+    else:
+        cache_hint_str = ""
+
     if cta_mask != 0:
+        cache_hint_operand = f", %4" if cache_hint != "" else ""
+        cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
         source_code = f"""
 __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensorMap& tensormap, {coord_arg_list}) {{
   unsigned int dst_addr = __cvta_generic_to_shared(dst);
@@ -2650,26 +2669,28 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
   uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&tensormap);
   uint16_t cta_mask = static_cast<uint16_t>({cta_mask});
   __asm__ __volatile__(
-    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster{cta_group_str}"
-    " [%0], [%1, {arg_template_multicast}], [%2], %3;"
+    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster{cta_group_str}{cache_hint_str}"
+    " [%0], [%1, {coord_arg_template}], [%2], %3{cache_hint_operand};"
     :
-    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr), "h"(cta_mask),
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr), "h"(cta_mask){cache_hint_value},
         {coord_list_constraints}
     : "memory"
   );
 }}
 """
     else:
+        cache_hint_operand = f", %3" if cache_hint != "" else ""
+        cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
         source_code = f"""
 __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensorMap& tensormap, {coord_arg_list}) {{
   unsigned int dst_addr = __cvta_generic_to_shared(dst);
   unsigned int bar_addr = __cvta_generic_to_shared(bar);
   uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&tensormap);
   __asm__ __volatile__(
-    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes{cta_group_str}"
-    " [%0], [%1, {arg_template_unicast}], [%2];"
+    "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes{cta_group_str}{cache_hint_str}"
+    " [%0], [%1, {coord_arg_template}], [%2]{cache_hint_operand};"
     :
-    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr),
+    : "r"(dst_addr), "l"(tensormap_addr), "r"(bar_addr){cache_hint_value},
         {coord_list_constraints}
     : "memory"
   );

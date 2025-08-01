@@ -29,8 +29,6 @@ from tvm.script.ir_builder import IRBuilder
 import tvm.testing
 from ..utils import export_to_perfetto_trace
 
-from .test_hgemm import TMA2MMAPipeline, MMA2LDpipeline, Pipeline
-
 
 class ProfileEventType(Enum):
     GEMM = 0
@@ -266,6 +264,97 @@ __device__ __forceinline__ void write_remote_tma(
     asm volatile("cp.async.bulk.global.shared::cta.bulk_group [%0], [%1], %2;" :: "l"(r), "l"(l), "r"(BLK_M * BLK_N * 2));
 }
 """
+
+
+class Pipeline:
+    def __init__(
+        self,
+        shared_buf,
+        base_offset,
+        pipeline_depth: int,
+        pipeline_num: int,
+        p_single_cta: bool = False,
+        c_single_cta: bool = False,
+    ):
+        self.pipeline_depth = pipeline_depth
+        self.pipeline_num = pipeline_num
+        self.mbar_p2c = T.decl_buffer(
+            (pipeline_depth, pipeline_num), "uint64", shared_buf, elem_offset=base_offset
+        ).buffer
+        self.mbar_c2p = T.decl_buffer(
+            (pipeline_depth, pipeline_num),
+            "uint64",
+            shared_buf,
+            elem_offset=base_offset + pipeline_depth * pipeline_num,
+        ).buffer
+        self.idx = T.local_cell("int32", name="pipeline_idx")
+        self.p2c_phase = T.local_cell("int32", name="pipeline_p2c_phase")
+        self.c2p_phase = T.local_cell("int32", name="pipeline_c2p_phase")
+        self.p_single_cta = p_single_cta
+        self.c_single_cta = c_single_cta
+
+    @T.macro
+    def init(self, p2c_thread_count: int = 1, c2p_thread_count: int = 1):
+        self.idx = 0
+        self.p2c_phase = 0
+        self.c2p_phase = 1
+        with T.thread()[0:1]:
+            for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+                for i in T.serial(0, self.pipeline_depth):
+                    for j in T.serial(0, self.pipeline_num):
+                        if not self.c_single_cta or cbx == 0:
+                            T.ptx.mbarrier.init(self.mbar_p2c.ptr_to([i, j]), p2c_thread_count)
+                        if not self.p_single_cta or cbx == 0:
+                            T.ptx.mbarrier.init(self.mbar_c2p.ptr_to([i, j]), c2p_thread_count)
+        T.ptx.fence.proxy("shared")
+
+    @T.macro
+    def advance(self):
+        self.idx = (self.idx + 1) % self.pipeline_depth
+        if self.idx == 0:
+            self.p2c_phase = self.p2c_phase ^ 1
+            self.c2p_phase = self.c2p_phase ^ 1
+
+    @T.macro
+    def producer_wait(self, pipeline_idx):
+        for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+            if not self.p_single_cta or cbx == 0:
+                T.ptx.mbarrier.try_wait(
+                    self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), self.c2p_phase
+                )
+
+    @T.macro
+    def consumer_wait(self, pipeline_idx):
+        for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+            if not self.c_single_cta or cbx == 0:
+                T.ptx.mbarrier.try_wait(
+                    self.mbar_p2c.ptr_to([self.idx, pipeline_idx]), self.p2c_phase
+                )
+
+
+class TMA2MMAPipeline(Pipeline):
+
+    @T.macro
+    def consumer_release(self, pipeline_idx):
+        for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+            for tx in T.thread_binding(NUM_THREADS, "threadIdx.x"):
+                if tx % 32 == 0:
+                    if not self.c_single_cta:
+                        T.ptx.tcgen05.commit(self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), 1)
+                    elif cbx == 0:
+                        T.ptx.tcgen05.commit(
+                            self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), 2, cta_mask=3
+                        )
+
+
+class MMA2LDpipeline(Pipeline):
+    @T.macro
+    def consumer_release(self, pipeline_idx):
+        for cbx in T.thread_binding(CLUSTER_M, "clusterCtaIdx.x"):
+            if not self.c_single_cta or cbx == 0:
+                T.ptx.mbarrier.arrive(
+                    self.mbar_c2p.ptr_to([self.idx, pipeline_idx]), cta_id=0, pred=True
+                )
 
 
 class ReducePipe(Pipeline):

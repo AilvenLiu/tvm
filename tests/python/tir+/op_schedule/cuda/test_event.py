@@ -193,7 +193,8 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
         ),
     ],
 )
-def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len):
+@pytest.mark.parametrize("cache_hint", ["evict_last", "evict_first", "evict_normal", ""])
+def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
     g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, layoutS_fn = task
     dev = tvm.cuda(0)
 
@@ -235,7 +236,7 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len):
                     event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
                     event[0].init(1)
 
-                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0])
+                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0], schedule_config={"cache_hint": cache_hint})
                     event[0].commit()
                     event[0].wait()
 

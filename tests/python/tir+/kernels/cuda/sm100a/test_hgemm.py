@@ -53,26 +53,33 @@ PIPE_CYCLE = (K // BLK_K) // PIPELINE_DEPTH
 assert (K // BLK_K) % PIPELINE_DEPTH == 0
 assert PIPELINE_DEPTH == 4
 
+
 @T.macro
 def warp_sync():
-    T.cuda.func_call("sync_warp", source_code = f"""
+    T.cuda.func_call(
+        "sync_warp",
+        source_code=f"""
 __forceinline__ __device__ void sync_warp() {{
     __syncwarp();
 }}
-    """)   
+    """,
+    )
+
 
 @T.macro
 def trap_when_assert_failed(cond):
-    T.cuda.func_call("trap_when_assert_fail", cond, source_code=f"""
+    T.cuda.func_call(
+        "trap_when_assert_fail",
+        cond,
+        source_code=f"""
 __forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
     do {{
         if (not (cond))
             asm("trap;");
     }} while (0);
 }}
-    """)
-
-
+    """,
+    )
 
 
 def get_source(func: tvm.tir.PrimFunc) -> str:
@@ -168,12 +175,14 @@ class BarMMA2LD(Barriers):
     @T.macro
     def arrive(self, idx):
         T.ptx.tcgen05.commit(self.mbar.ptr_to([0, idx]), cta_group=CTA_GROUP, cta_mask=3)
-        
+
+
 class BarMMA2TMA(Barriers):
 
     @T.macro
     def arrive(self, idx):
         T.ptx.tcgen05.commit(self.mbar.ptr_to([idx, 0]), cta_group=CTA_GROUP, cta_mask=3)
+
 
 class BarLD2MMA(Barriers):
 
@@ -184,12 +193,12 @@ class BarLD2MMA(Barriers):
 
 def prepare_data():
     import torch
+
     A_bf16 = torch.randn((M, K), dtype=torch.float16)
     B_bf16 = torch.randn((N, K), dtype=torch.float16)
     C_empty = torch.zeros((M, N), dtype=torch.float16)
 
     return A_bf16, B_bf16, C_empty
-
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
@@ -212,7 +221,6 @@ def test():
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
         T.TileLayout(shard=((NUM_CONSUMER, BLK_M, EPI_TILE), (BLK_M * EPI_TILE, EPI_TILE, 1))),
     )
-
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -427,7 +435,6 @@ def test():
         C_cublas = cublas_gemm(A_bf16, B_bf16)
 
     np.testing.assert_allclose(C_tvm, C_cublas, rtol=1e-3, atol=1e-2)
-
 
 
 if __name__ == "__main__":

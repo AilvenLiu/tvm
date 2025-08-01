@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Dict, Any
 from enum import Enum
 import copy
 import tvm
@@ -101,6 +101,7 @@ def copy_tma_impl(
     dst_buffer_region: "BufferRegion",
     src_buffer_region: "BufferRegion",
     sctx: "ScheduleContext",
+    schedule_config: Dict[str, Any],
 ) -> Optional["PrimFunc"]:
     """Schedule a copy between global <‑> shared memory using CUDA TMA.
 
@@ -300,6 +301,7 @@ def copy_tma_impl(
                     tensor_map,
                     *reversed(g_st),
                     cta_group=cta_group,
+                    cache_hint=schedule_config.get("cache_hint", ""),
                 )
             else:
                 T.ptx.cp_async.bulk.tensor.s2g(
@@ -322,6 +324,7 @@ def copy_tma_impl(
                         tensor_map,
                         *reversed(g_coord),
                         cta_group=cta_group,
+                        cache_hint=schedule_config.get("cache_hint", ""),
                     )
                 else:
                     s_coord = T.meta_var(make_shared_coord(s_st, lvs))
@@ -381,20 +384,17 @@ def copy_async(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         return None
     if isinstance(evt, BulkGroupEvent):
         if evt.get_impl() == EventImpl.kCpAsync:
-            for schedule in [copy_g2s_s2g_cta_vec_load_impl]:
-                res = schedule(dst, src, sctx, CopyInstType.CP_ASYNC)
-                if res is not None:
-                    return res
+            res = copy_g2s_s2g_cta_vec_load_impl(dst, src, sctx, CopyInstType.CP_ASYNC)
+            if res is not None:
+                return res
         elif evt.get_impl() == EventImpl.kTMAStore:
-            for schedule in [copy_tma_impl]:
-                res = schedule(evt, dst, src, sctx)
-                if res is not None:
-                    return res
+            res = copy_tma_impl(evt, dst, src, sctx, op.schedule_config)
+            if res is not None:
+                return res
     elif isinstance(evt, SemaphoreEventTensorItem):
         if evt.get_impl() in [EventImpl.kTMALoad, EventImpl.kTMALoadOnly]:
-            for schedule in [copy_tma_impl]:
-                res = schedule(evt, dst, src, sctx)
-                if res is not None:
-                    return res
+            res = copy_tma_impl(evt, dst, src, sctx, op.schedule_config)
+            if res is not None:
+                return res
 
     return None
