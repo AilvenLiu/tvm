@@ -339,25 +339,16 @@ def test():
             with T.cta():
                 # alloc shared memory
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
+                pool = T.meta_var(Tp.PoolAllocator(buf.data))
                 tmem_addr = T.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
-                A_smem = T.decl_buffer((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, buf.data, layout=A_layout,
-                                        elem_offset=1024 // F8_BYTES)
-                B_smem = T.decl_buffer((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, buf.data, layout=B_layout,
-                                        elem_offset=1024 // F8_BYTES + SMEM_PIPE_DEPTH * BLK_M * BLK_K)
-                D_smem = T.decl_buffer((TMEM_PIPE_DEPTH, BLK_M, EPI_TILE), d_type, buf.data, layout=D_layout,
-                                        elem_offset=1024 // F16_BYTES + SMEM_PIPE_DEPTH * (BLK_M + BLK_N) * BLK_K * F8_BYTES // F16_BYTES)
-                SFA_smem = T.decl_buffer((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), "uint32", buf.data, layout=SFA_layout,
-                                        elem_offset=1024 // F32_BYTES + SMEM_PIPE_DEPTH * (BLK_M + BLK_N) * BLK_K * F8_BYTES // F32_BYTES
-                                                    + TMEM_PIPE_DEPTH * BLK_M * EPI_TILE * F16_BYTES // F32_BYTES)
-                SFB_smem = T.decl_buffer((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), "uint32", buf.data, layout=SFB_layout,
-                                        elem_offset=1024 // F32_BYTES + SMEM_PIPE_DEPTH * (BLK_M + BLK_N) * BLK_K * F8_BYTES // F32_BYTES
-                                                    + TMEM_PIPE_DEPTH * BLK_M * EPI_TILE * F16_BYTES // F32_BYTES + SMEM_PIPE_DEPTH * BLK_SFA)
-                SFA_smem_2d = T.decl_buffer((SMEM_PIPE_DEPTH, BLK_SFA), "uint32", buf.data, layout=SFA_layout,
-                                           elem_offset=1024 // F32_BYTES + SMEM_PIPE_DEPTH * (BLK_M + BLK_N) * BLK_K * F8_BYTES // F32_BYTES
-                                                       + TMEM_PIPE_DEPTH * BLK_M * EPI_TILE * F16_BYTES // F32_BYTES)
-                SFB_smem_2d = T.decl_buffer((SMEM_PIPE_DEPTH, BLK_SFB), "uint32", buf.data, layout=SFB_layout,
-                                           elem_offset=1024 // F32_BYTES + SMEM_PIPE_DEPTH * (BLK_M + BLK_N) * BLK_K * F8_BYTES // F32_BYTES
-                                                       + TMEM_PIPE_DEPTH * BLK_M * EPI_TILE * F16_BYTES // F32_BYTES + SMEM_PIPE_DEPTH * BLK_SFA)
+                pool.move_base_to(1024)
+                A_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, layout=A_layout)
+                B_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_N, BLK_K), b_type, layout=B_layout)
+                D_smem = pool.alloc((TMEM_PIPE_DEPTH, BLK_M, EPI_TILE), d_type, layout=D_layout)
+                SFA_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), "uint32", layout=SFA_layout)
+                SFB_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), "uint32", layout=SFB_layout)
+                SFA_smem_2d = Tp.reshape(SFA_smem, (SMEM_PIPE_DEPTH, BLK_SFA))
+                SFB_smem_2d = Tp.reshape(SFB_smem, (SMEM_PIPE_DEPTH, BLK_SFB))
 
                 # alloc local memory
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")

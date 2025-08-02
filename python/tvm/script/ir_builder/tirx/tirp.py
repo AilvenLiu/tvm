@@ -15,16 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 """Builtin ops in TIR+"""
+import functools
 from typing import Union, Optional, Dict, Any, Tuple, Callable, List
-from tvm.tirx import BufferRegion, Buffer, PrimExpr
+from tvm import DataType
+from tvm.tirx import BufferRegion, Buffer, PrimExpr, Var
 from tvm.ir import Op
 from tvm.tirx.event import BaseEvent
-from tvm.tirx.exec_scope import ExecScope
 from tvm.tirx.expr import FloatImm
 from tvm.tirx import event
 import tvm.tirp.operator as tirp_op
 from tvm.tirx.predicate import Predicate
 from . import _ffi_api, frame
+from .ir import decl_buffer
 
 
 def _to_region(buffer: Union[BufferRegion, Buffer]):
@@ -1038,6 +1040,62 @@ def alloc_semaphore_event_tensor(
     return _ffi_api.AllocSemaphoreEventTensor(int(impl), state, shape, "")
 
 
+class PoolAllocator:
+    def __init__(self, ptr: Var):
+        self.ptr = ptr
+        self.offset = 0
+
+    def alloc(
+        self,
+        shape,
+        dtype="float32",
+        strides=None,
+        scope="global",
+        align=0,
+        buffer_type="",
+        axis_separators=None,
+        logical_scope="",
+        layout=None,
+    ) -> frame.DeclBufferFrame:
+        res = decl_buffer(
+            shape,
+            dtype,
+            self.ptr,
+            strides,
+            self.offset // (DataType(dtype).bits // 8),
+            scope,
+            align,
+            0,
+            buffer_type,
+            axis_separators,
+            logical_scope,
+            layout,
+        )
+        self.offset += functools.reduce(lambda x, y: x * y, shape) * (DataType(dtype).bits // 8)
+        return res
+
+    def move_base_to(self, offset):
+        self.offset = offset
+
+
+def reshape(buffer: Buffer, shape: List[PrimExpr]):
+    assert buffer.buffer_type == 1
+    return decl_buffer(
+        shape,
+        buffer.dtype,
+        buffer.data,
+        buffer.strides,
+        buffer.elem_offset,
+        buffer.scope(),
+        buffer.data_alignment,
+        buffer.offset_factor,
+        "",
+        buffer.axis_separators,
+        buffer.logical_scope(),
+        buffer.layout,
+    )
+
+
 __all__ = [
     "zero",
     "sqrt",
@@ -1066,4 +1124,6 @@ __all__ = [
     "select",
     "alloc_bulk_group_event",
     "alloc_semaphore_event_tensor",
+    "PoolAllocator",
+    "reshape",
 ]
