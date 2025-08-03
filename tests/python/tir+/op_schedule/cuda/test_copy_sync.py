@@ -111,11 +111,18 @@ ml_dtypes_dict = {
 @pytest.mark.parametrize(
     "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
 )
-def test_copy_g2s_s2g_cta(task, dtype):
+@pytest.mark.parametrize("scope", ["cta", "thread"])
+def test_copy_g2s_s2g(task, dtype, scope):
     g_shape, s_shape, g_region, thread_cnt, layoutA, layoutB, layoutS, dev = task
 
     r_smem = list(slice(None) for i in range(len(s_shape)))
     r_gmem = list(slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape)))
+
+    if scope == "cta":
+        scoper = T.cta
+    elif scope == "thread":
+        scoper = T.thread
+        thread_cnt = 1
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -127,7 +134,7 @@ def test_copy_g2s_s2g_cta(task, dtype):
             bx = T.cta_id([1], parent="kernel")
             tx = T.thread_id([thread_cnt], parent="cta")
 
-            with T.cta():
+            with scoper():
                 A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
 
                 Tp.copy(A_smem[*r_smem], A[*r_gmem])

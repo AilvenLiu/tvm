@@ -1217,6 +1217,14 @@ def test_apply():
 
     test_tile_layout_3()
 
+    def test_tile_layout_4():
+        layout = TileLayout(shard=([8, 8], [8, 1]))
+        v = tvm.tir.Var("v", dtype="int32")
+        res = layout.apply(v)
+        assert res["m"] == v
+
+    test_tile_layout_4()
+
     ################ Swizzle Layout
     def test_swizzle_layout_0():
         layout = SwizzleLayout(per_element=0, swizzle_len=3, atom_len=3)

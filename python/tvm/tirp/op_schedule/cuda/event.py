@@ -117,6 +117,7 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     mbar, phase, tx_cnt = evt.get_state()
 
     if isinstance(evt, SemaphoreEventTensorItem):
+
         @T.prim_func(tirp=True, check_well_formed=False)
         def func():
             phase[*evt.indices] = 0
@@ -293,7 +294,7 @@ def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 @target_event_impl("event_init", EventImpl.kCpAsync)
 def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event initialization."""
-    if sctx.exec_scope.name != "cta":
+    if sctx.exec_scope.name not in ["cta", "thread"]:
         return None
 
     @T.prim_func(tirp=True, check_well_formed=False)
@@ -306,7 +307,7 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 @target_event_impl("event_commit", EventImpl.kCpAsync)
 def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event commit."""
-    if sctx.exec_scope.name != "cta":
+    if sctx.exec_scope.name not in ["cta", "thread"]:
         return None
 
     @T.prim_func(tirp=True, check_well_formed=False)
@@ -319,7 +320,7 @@ def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 @target_event_impl("event_wait", EventImpl.kCpAsync)
 def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event wait."""
-    if sctx.exec_scope.name != "cta":
+    if sctx.exec_scope.name not in ["cta", "thread"]:
         return None
 
     n_groups = op.args[1]

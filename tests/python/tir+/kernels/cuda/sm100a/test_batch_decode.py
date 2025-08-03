@@ -21,7 +21,7 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.layout import TileLayout
+from tvm.tir.event import EventImpl
 from ..utils import bench, ProtonContext
 
 # TODO: split-kv; merge
@@ -115,6 +115,8 @@ def test_batch_decode(task):
         with T.kernel():
             bx, by = T.cta_id([BATCH_SIZE, NUM_HEADS], parent="kernel")
             tx, ty = T.thread_id([BDX, BDY], parent="cta")
+            
+            KV_global_1d = Tp.reshape(KV_global, (-1,))
 
             with T.cta():
                 # allocate the memory
@@ -124,8 +126,7 @@ def test_batch_decode(task):
                 v_smem = pool.alloc((PIPE_DEPTH, BDY, TILE_SIZE_PER_BDX, HEAD_DIM), "float16", layout="default")
                 offset = T.meta_var(pool.offset)
                 kv_offset_load = pool.alloc((TILE_SIZE_PER_BDX, BDY, BDX), "int32", layout="default")
-                pool.move_base_to(offset)
-                kv_offset_use = pool.alloc((BDX, BDY, TILE_SIZE_PER_BDX), "int32", layout="default")
+                kv_offset_use = Tp.reshape(kv_offset_load, (BDX, BDY, TILE_SIZE_PER_BDX))
                 pool.move_base_to(0)
                 epi_o = pool.alloc((BDY, BDX, VEC_SIZE), "float32", layout="default")
                 epi_md = pool.alloc((BDY, 2), "float32", layout="default")
@@ -147,6 +148,9 @@ def test_batch_decode(task):
                     m_tmp = T.alloc_local([1], "float32", layout="default")
                     d_tmp = T.alloc_local([1], "float32", layout="default")
                     o_tmp = T.alloc_local([VEC_SIZE], "float32", layout="default")
+                    
+                    evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
+                    tx_start = T.meta_var(tx * VEC_SIZE)
 
                     @T.macro
                     def fetch_kv_offset(kt, idx1):
@@ -157,7 +161,7 @@ def test_batch_decode(task):
                         kv_offset_load[kt, ty, tx] = indices[0] * 2 * NUM_HEADS * PAGE_SIZE * HEAD_DIM + by * PAGE_SIZE * HEAD_DIM + r * HEAD_DIM
 
                     # fetch q
-                    Tp.copy(tmp[:], Q_global[bx, by, tx * VEC_SIZE:tx * VEC_SIZE + VEC_SIZE])
+                    Tp.copy(tmp[:], Q_global[bx, by, tx_start:tx_start + VEC_SIZE])
                     Tp.cast(q[:], tmp[:])
 
                     # fetch kv-offset
@@ -175,17 +179,17 @@ def test_batch_decode(task):
 
                         # fetch K
                         for kt in T.unroll(TILE_SIZE_PER_BDX):
-                            for kc in T.unroll(VEC_SIZE * F16_BYTE // 16):
-                                T.ptx.cp_async("float16", k_smem.ptr_to([kp, ty, kt, tx * VEC_SIZE + kc * 16 // F16_BYTE]), 0, 
-                                            KV_global.data, kv_offset_cp[kt] + kc * 16 // F16_BYTE, 16)
-                        T.ptx.cp_async.commit_group()
+                            g_st = T.meta_var(kv_offset_cp[kt])
+                            Tp.copy_async(k_smem[kp, ty, kt, tx_start:tx_start + VEC_SIZE], KV_global_1d[g_st:g_st + VEC_SIZE], evt,
+                                          schedule_config={"vec_len": VEC_SIZE})
+                        evt.commit()
 
                         # fetch V
                         for kt in T.unroll(TILE_SIZE_PER_BDX):
-                            for kc in T.unroll(VEC_SIZE * F16_BYTE // 16):
-                                T.ptx.cp_async("float16", v_smem.ptr_to([kp, ty, kt, tx * VEC_SIZE + kc * 16 // F16_BYTE]), 0, 
-                                            KV_global.data, NUM_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kc * 16 // F16_BYTE, 16)
-                        T.ptx.cp_async.commit_group()
+                            g_st = T.meta_var(NUM_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt])
+                            Tp.copy_async(v_smem[kp, ty, kt, tx_start:tx_start + VEC_SIZE], KV_global_1d[g_st:g_st + VEC_SIZE], evt,
+                                          schedule_config={"vec_len": VEC_SIZE})
+                        evt.commit()
 
                     # initilize the value
                     idx[0] = 0
@@ -203,12 +207,12 @@ def test_batch_decode(task):
                             T.ptx.fence.proxy("shared")
                         
                         # compute qk
-                        T.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for K
+                        evt.wait(2 * PIPE_DEPTH - 1) # wait for K
                         T.ptx.bar.sync(1, NUM_THREADS)
                         m[1] = m[0]
                         for kt in T.unroll(TILE_SIZE_PER_BDX):
                             # cast k to f32
-                            Tp.cast(k[:], k_smem[idx[0], ty, kt, VEC_SIZE * tx:VEC_SIZE * tx + VEC_SIZE])
+                            Tp.cast(k[:], k_smem[idx[0], ty, kt, tx_start:tx_start + VEC_SIZE])
                             s[kt] = 0.0
                             # local gemm
                             for kv in T.unroll(VEC_SIZE):
@@ -237,16 +241,16 @@ def test_batch_decode(task):
                         # fetch K
                         if ki + PIPE_DEPTH < SEQ_LEN // (TILE_SIZE_PER_BDX * BDY):
                             for kt in T.unroll(TILE_SIZE_PER_BDX):
-                                for kc in T.unroll(VEC_SIZE * F16_BYTE // 16):
-                                    T.ptx.cp_async("float16", k_smem.ptr_to([idx[0], ty, kt, tx * VEC_SIZE + kc * 16 // F16_BYTE]), 0, 
-                                                KV_global.data, kv_offset_cp[kt] + kc * 16 // F16_BYTE, 16)
-                        T.ptx.cp_async.commit_group()
+                                g_st = T.meta_var(kv_offset_cp[kt])
+                                Tp.copy_async(k_smem[idx[0], ty, kt, tx_start:tx_start + VEC_SIZE], KV_global_1d[g_st:g_st + VEC_SIZE], evt,
+                                              schedule_config={"vec_len": VEC_SIZE})
+                        evt.commit()
 
                         # calculate softmax(qk)v
-                        T.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for V
+                        evt.wait(2 * PIPE_DEPTH - 1) # wait for V
                         T.ptx.bar.sync(1, NUM_THREADS)
                         for kt in T.unroll(TILE_SIZE_PER_BDX):
-                            Tp.cast(v[:], v_smem[idx[0], ty, kt, VEC_SIZE * tx:VEC_SIZE * tx + VEC_SIZE])
+                            Tp.cast(v[:], v_smem[idx[0], ty, kt, tx_start:tx_start + VEC_SIZE])
                             for kv in T.unroll(VEC_SIZE):
                                 o[kv] += s[kt] * v[kv]
                         T.ptx.bar.sync(1, NUM_THREADS)
@@ -254,13 +258,13 @@ def test_batch_decode(task):
                         # fetch V
                         if ki + PIPE_DEPTH < SEQ_LEN // (TILE_SIZE_PER_BDX * BDY):
                             for kt in T.unroll(TILE_SIZE_PER_BDX):
-                                for kc in T.unroll(VEC_SIZE * F16_BYTE // 16):
-                                    T.ptx.cp_async("float16", v_smem.ptr_to([idx[0], ty, kt, tx * VEC_SIZE + kc * 16 // F16_BYTE]), 0, 
-                                                KV_global.data, NUM_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kc * 16 // F16_BYTE, 16)
-                        T.ptx.cp_async.commit_group()
+                                g_st = T.meta_var(NUM_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt])
+                                Tp.copy_async(v_smem[idx[0], ty, kt, tx_start:tx_start + VEC_SIZE], KV_global_1d[g_st:g_st + VEC_SIZE], evt,
+                                              schedule_config={"vec_len": VEC_SIZE})
+                        evt.commit()
                         idx[0] = (idx[0] + 1) % PIPE_DEPTH
                     
-                    T.ptx.cp_async.wait_group(0)
+                    evt.wait(0)
                     T.ptx.bar.sync(1, NUM_THREADS)
 
                     # prepare o,m,d in smem for merging
@@ -293,10 +297,11 @@ def test_batch_decode(task):
                             o[kv] = o[kv] / d[0]
                         # store to global mem
                         Tp.cast(tmp[:], o[:])
-                        Tp.copy(O_global[bx, by, tx * VEC_SIZE:tx * VEC_SIZE + VEC_SIZE], tmp[:])
+                        Tp.copy(O_global[bx, by, tx_start:tx_start + VEC_SIZE], tmp[:])
                     T.ptx.bar.sync(1, NUM_THREADS)
 
     # fmt: on
+
     q, kv_data, kv_indptr, kv_last_page_len, kv_indices = perpare_data()
 
     def tir():
@@ -377,10 +382,13 @@ def test_batch_decode(task):
         return o.reshape(BATCH_SIZE, NUM_HEADS, HEAD_DIM).cpu().numpy()
 
     with ProtonContext("batch_decode"):
-        O_tir = tir()
         O_flashinfer = flashinfer()
+        O_tir = tir()
         np.testing.assert_allclose(O_tir, O_flashinfer, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
-    test()
+    test_batch_decode((4, 37, 4096, 128))
+    test_batch_decode((8, 37, 4096, 128))
+    test_batch_decode((16, 37, 4096, 128))
+    test_batch_decode((32, 37, 4096, 128))

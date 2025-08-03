@@ -39,6 +39,9 @@ def get_st_extent(buffer_region: BufferRegion):
 
 def get_indices(nth, start, extent):
     """Convert a fused index into multi-dimensional indices."""
+    assert len(start) == len(extent)
+    if len(start) == 1:
+        return [start[0] + nth]
     relative = []
     for e in reversed(extent):
         relative.append(nth % e)
@@ -186,11 +189,11 @@ class CopyInstType(Enum):
 
 
 def validate_copy_op(
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
+    op_call: OpCall,
     sctx: ScheduleContext,  # pylint: disable=unused-argument
 ) -> bool:
     """Sanity check for copy op"""
+    dst_buffer_region, src_buffer_region = op_call.args[:2]
     src: Buffer = src_buffer_region.buffer
     dst: Buffer = dst_buffer_region.buffer
     if not (src.layout and dst.layout and src.dtype == dst.dtype):
@@ -251,40 +254,45 @@ def get_vec_len(
         return None
 
 
-def copy_g2s_s2g_cta_vec_load_impl(
-    dst_buffer_region: BufferRegion,
-    src_buffer_region: BufferRegion,
+def copy_vec_load_impl(
+    op_call: OpCall,
     sctx: ScheduleContext,
     inst_type: CopyInstType,
 ) -> Optional[PrimFunc]:
-    """Schedule copy operation between global and shared memory on CUDA across a CTA.
+    """Schedule copy operation between global and local/shared memory on CUDA across a CTA/thread.
     The implementation tries to vectorize the copy operation and parallelize over
-    threads in a CTA.
+    threads in a CTA/using a single thread.
     """
 
-    # Sanity checks
-    if sctx.exec_scope.name != "cta":
-        return None
-
+    dst_buffer_region, src_buffer_region = op_call.args[:2]
     src: Buffer = src_buffer_region.buffer
     dst: Buffer = dst_buffer_region.buffer
     if not (
         (src.scope() == "global" and dst.scope().startswith("shared"))
         or (src.scope().startswith("shared") and dst.scope() == "global")
+        or (src.scope() == "global" and dst.scope() == "local")
+        or (src.scope() == "local" and dst.scope() == "global")
     ):
         return None
 
     # Thread and vectorization setup
-    tx = sctx.launch_params["threadIdx.x"].dom.extent
-    assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
+    if sctx.exec_scope.name == "cta":
+        tx = sctx.launch_params["threadIdx.x"].dom.extent
+        assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
+    elif sctx.exec_scope.name == "thread":
+        tx = 1
+    else:
+        return None
 
     elem_size = DataType(src.dtype).bits  # in bits
-    vec_len = get_vec_len(
-        dst_buffer_region,
-        src_buffer_region,
-        [128 // elem_size, 64 // elem_size, 32 // elem_size, 1],
-        thread_cnt=tx,
-    )
+    vec_len = op_call.schedule_config.get("vec_len", None)
+    if vec_len is None:
+        vec_len = get_vec_len(
+            dst_buffer_region,
+            src_buffer_region,
+            [128 // elem_size, 64 // elem_size, 32 // elem_size, 1],
+            thread_cnt=tx,
+        )
     if vec_len is None:
         return None
 
@@ -297,26 +305,45 @@ def copy_g2s_s2g_cta_vec_load_impl(
     src_st, src_extent = get_st_extent(src_buffer_region)
     dst_st, dst_extent = get_st_extent(dst_buffer_region)
     n_elements = functools.reduce(operator.mul, src_extent, 1)
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def impl():
-        """Implement copy operation with vectorized loads/stores."""
-        for s in T.serial(0, n_elements // (tx * vec_len)):
-            for tid_x in T.thread_binding(tx, "threadIdx.x"):
+
+    if sctx.exec_scope.name == "cta":
+        # fmt: off
+        @T.prim_func(tirp=True)
+        def impl():
+            """Implement copy operation with vectorized loads/stores."""
+            for s in T.serial(0, n_elements // (tx * vec_len)):
+                for tid_x in T.thread_binding(tx, "threadIdx.x"):
+                    if inst_type == CopyInstType.NORMAL:
+                        for vec in T.vectorized(vec_len):
+                            fused = T.meta_var((s * tx + tid_x) * vec_len + vec)
+                            dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
+                            src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
+                            dst[*dst_indices] = src[*src_indices]
+                    elif inst_type == CopyInstType.CP_ASYNC:
+                        fused = T.meta_var((s * tx + tid_x) * vec_len)
+                        dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
+                        src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
+                        T.evaluate(T.ptx.cp_async(dst.dtype, dst.ptr_to([*dst_indices]), 0, src.ptr_to([*src_indices]), 0, cp_size))
+            if dst.scope().startswith("shared") and inst_type == CopyInstType.NORMAL:
+                T.tvm_storage_sync("shared")
+        # fmt: on
+    elif sctx.exec_scope.name == "thread":
+        # fmt: off
+        @T.prim_func(tirp=True, check_well_formed=False)
+        def impl():
+            for s in T.serial(0, n_elements // (vec_len)):
                 if inst_type == CopyInstType.NORMAL:
                     for vec in T.vectorized(vec_len):
-                        fused = T.meta_var((s * tx + tid_x) * vec_len + vec)
+                        fused = T.meta_var(s * vec_len + vec)
                         dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
                         src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
                         dst[*dst_indices] = src[*src_indices]
                 elif inst_type == CopyInstType.CP_ASYNC:
-                    fused = T.meta_var((s * tx + tid_x) * vec_len)
+                    fused = T.meta_var(s * vec_len)
                     dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
                     src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
-                    T.evaluate(T.ptx.cp_async(dst.dtype, dst.data, dst.offset_of_p([*dst_indices]),
-                                              src.data, src.offset_of_p([*src_indices]), cp_size))
-        if dst.scope().startswith("shared") and inst_type == CopyInstType.NORMAL:
-            T.tvm_storage_sync("shared")
-    # fmt: on
-
+                    T.evaluate(T.ptx.cp_async(dst.dtype, dst.ptr_to([*dst_indices]), 0, src.ptr_to([*src_indices]), 0, cp_size))
+        # fmt: on
+    else:
+        return None
     return impl

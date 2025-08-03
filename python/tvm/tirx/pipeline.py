@@ -141,7 +141,7 @@ def tirp_pipeline():
             tvm.tirp.transform.PrivateBufferAlloc(),
             tir.transform.LowerTIRp(),
             # tvm.tirp.transform.EventTensorLegalizer(),
-            # tvm.ir.transform.PrintIR(),
+            tvm.ir.transform.PrintIR(),
             tir.transform.LowerCrossThreadReduction(),
             tir.transform.LowerInitBlock(),
             # tir.transform.PlanAndUpdateBufferAllocationLocation(),

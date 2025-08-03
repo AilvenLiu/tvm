@@ -29,7 +29,7 @@ from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 from .common import target_cuda
 from tvm.tir import BufferRegion
 from tvm.tir.event import SemaphoreEventTensor, EventImpl, BulkGroupEvent, SemaphoreEventTensorItem
-from .common import CopyInstType, copy_g2s_s2g_cta_vec_load_impl, validate_copy_op, thread_selector
+from .common import CopyInstType, copy_vec_load_impl, validate_copy_op, thread_selector
 from tvm.tir.layout import TileLayout, SwizzleLayout
 
 
@@ -97,11 +97,8 @@ def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
 
 
 def copy_tma_impl(
-    evt: Union["SemaphoreEventTensor", "SemaphoreEventTensorItem"],
-    dst_buffer_region: "BufferRegion",
-    src_buffer_region: "BufferRegion",
+    op_call: OpCall,
     sctx: "ScheduleContext",
-    schedule_config: Dict[str, Any],
 ) -> Optional["PrimFunc"]:
     """Schedule a copy between global <‑> shared memory using CUDA TMA.
 
@@ -118,6 +115,7 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     # Identify direction & basic legality checks
     # ---------------------------------------------------------------------
+    dst_buffer_region, src_buffer_region, evt = op_call.args
     src: "Buffer" = src_buffer_region.buffer
     dst: "Buffer" = dst_buffer_region.buffer
 
@@ -301,7 +299,7 @@ def copy_tma_impl(
                     tensor_map,
                     *reversed(g_st),
                     cta_group=cta_group,
-                    cache_hint=schedule_config.get("cache_hint", ""),
+                    cache_hint=op_call.schedule_config.get("cache_hint", ""),
                 )
             else:
                 T.ptx.cp_async.bulk.tensor.s2g(
@@ -324,7 +322,7 @@ def copy_tma_impl(
                         tensor_map,
                         *reversed(g_coord),
                         cta_group=cta_group,
-                        cache_hint=schedule_config.get("cache_hint", ""),
+                        cache_hint=op_call.schedule_config.get("cache_hint", ""),
                     )
                 else:
                     s_coord = T.meta_var(make_shared_coord(s_st, lvs))
@@ -379,21 +377,20 @@ def copy_tma_impl(
 def copy_async(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule copy_async operation."""
     evt = op.args[2]
-    dst, src = op.args[0], op.args[1]
-    if not validate_copy_op(dst, src, sctx):
+    if not validate_copy_op(op, sctx):
         return None
     if isinstance(evt, BulkGroupEvent):
         if evt.get_impl() == EventImpl.kCpAsync:
-            res = copy_g2s_s2g_cta_vec_load_impl(dst, src, sctx, CopyInstType.CP_ASYNC)
+            res = copy_vec_load_impl(op, sctx, CopyInstType.CP_ASYNC)
             if res is not None:
                 return res
         elif evt.get_impl() == EventImpl.kTMAStore:
-            res = copy_tma_impl(evt, dst, src, sctx, op.schedule_config)
+            res = copy_tma_impl(op, sctx)
             if res is not None:
                 return res
     elif isinstance(evt, SemaphoreEventTensorItem):
         if evt.get_impl() in [EventImpl.kTMALoad, EventImpl.kTMALoadOnly]:
-            res = copy_tma_impl(evt, dst, src, sctx, op.schedule_config)
+            res = copy_tma_impl(op, sctx)
             if res is not None:
                 return res
 

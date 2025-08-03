@@ -111,7 +111,7 @@ def _get_layout(
         layout = TileLayout.trainium(layout, shape).to_psum()
     else:
         assert layout == "default"
-        layout = TileLayout(shape)
+        layout = TileLayout(shape)#.normalize()
     return layout
 
 

@@ -24,9 +24,13 @@ namespace tir {
 
 Array<PrimExpr> SplitCoord(PrimExpr coord, const Array<PrimExpr>& shape) {
   Array<PrimExpr> result;
-  for (size_t i = shape.size(); i-- > 0;) {
-    result.push_back(floormod(coord, shape[i]));
-    coord = floordiv(coord, shape[i]);
+  for (int i = shape.size() - 1; i >= 0; --i) {
+    if (i == 0) {
+      result.push_back(coord);
+    } else {
+      result.push_back(floormod(coord, shape[i]));
+      coord = floordiv(coord, shape[i]);
+    }
   }
   return Array<PrimExpr>(result.rbegin(), result.rend());
 }

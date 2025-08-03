@@ -1110,6 +1110,24 @@ class PoolAllocator:
 
 
 def reshape(buffer: Buffer, shape: List[PrimExpr]):
+    # auto-infer the shape if shape has only one -1
+    # for example, if buffer.shape is (1024, 1024) and shape is (128, -1, 2), then the new shape will be (128, 4, 2)
+    shape = list(shape)
+    if -1 in shape and shape.count(-1) == 1:
+        size = functools.reduce(lambda x, y: x * y, buffer.shape)
+        n_size = functools.reduce(lambda x, y: x * y, [s for s in shape if s != -1], 1)
+        shape[shape.index(-1)] = size // n_size
+    else:
+        assert functools.reduce(lambda x, y: x * y, shape) == functools.reduce(
+            lambda x, y: x * y, buffer.shape
+        ), (
+            "The shape of the buffer "
+            + str(buffer.shape)
+            + " and the new shape "
+            + str(shape)
+            + " are not compatible"
+        )
+
     assert buffer.buffer_type == 1
     return decl_buffer(
         shape,
