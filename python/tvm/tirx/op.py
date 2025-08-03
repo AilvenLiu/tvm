@@ -7406,6 +7406,22 @@ def cuda_printf(fmt, *args):
     return call_intrin("", "tir.cuda_printf", fmt, *args)
 
 
+def cuda_ldg(addr, dtype):
+    """TVM intrinsic to call CUDA C++ __ldg() function
+
+    Parameters
+    ----------
+    addr : PrimExpr
+        The memory address to load.
+
+    dtype : str
+        The data type of the loaded value.
+
+    Returns
+    """
+    return call_intrin(dtype, "tir.cuda_ldg", addr, dtype)
+
+
 def ptx_ld_global_acquire(res, addr):
     """TVM intrinsic to call ptx ld.global.acquire instruction
 

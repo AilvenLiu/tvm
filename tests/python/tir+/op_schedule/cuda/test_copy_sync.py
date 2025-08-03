@@ -153,5 +153,66 @@ def test_copy_g2s_s2g_cta(task, dtype):
         np.testing.assert_allclose(B_ref, B.numpy())
 
 
+@pytest.mark.parametrize(
+    "task",
+    [
+        ################################################################################ vectorized copy
+        # A[0:8, 0:8] -> A_local[0:8, 0:8] -> B[0:8, 0:8]
+        (
+            (4, 16, 16),  # g_shape
+            (8, 8),  # l_shape
+            ((3, 4), (8, 16), (8, 16)),  # g_region
+            1,  # thread_cnt
+            TileLayout([4, 16, 16]),  # layoutA
+            TileLayout([4, 16, 16]),  # layoutB
+            TileLayout([8, 8]),  # layoutLocal
+            tvm.cuda(0),
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "dtype", ["int8", "float8_e4m3fn", "float8_e5m2", "float16", "bfloat16", "float32"]
+)
+def test_copy_g2l_l2g_vec_load(task, dtype):
+    g_shape, l_shape, g_region, thread_cnt, layoutA, layoutB, layoutLocal, dev = task
+
+    r_lmem = list(slice(None) for i in range(len(l_shape)))
+    r_gmem = list(slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape)))
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def copy_sync(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
+        B = T.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([thread_cnt], parent="cta")
+
+            with T.thread():
+                A_local = T.alloc_buffer(l_shape, dtype, scope="local", layout=layoutLocal)
+
+                Tp.copy(A_local[*r_lmem], A[*r_gmem])
+                Tp.copy(B[*r_gmem], A_local[*r_lmem])
+    # fmt: on
+
+    np_dtype = tvm.testing.np_dtype_from_str(dtype)
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": copy_sync})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        np.random.seed(0)
+        A_np = tvm.testing.generate_random_array(dtype, g_shape)
+        B_np = np.zeros(g_shape, dtype=np_dtype)
+
+        A = tvm.nd.array(A_np, dev)
+        B = tvm.nd.array(B_np, dev)
+        mod(A, B)
+
+        B_ref = B_np.copy()
+        B_ref[*r_gmem] = A_np[*r_gmem]
+        np.testing.assert_allclose(B_ref, B.numpy())
+
+
 if __name__ == "__main__":
     tvm.testing.main()

@@ -1542,7 +1542,7 @@ def decl_buffer(
         buffer_type,
         axis_separators,
         logical_scope,
-        _get_layout(layout, shape),
+        _get_layout(layout, shape, scope),
     )
 
 
@@ -2506,6 +2506,8 @@ class CUDANamespace:
         self.nano_sleep = _op_wrapper(_tir_op.cuda_nano_sleep)
         self.atomic_cas = _op_wrapper(_tir_op.cuda_atomic_cas)
         self.func_call = _op_wrapper(_tir_op.cuda_func_call)
+        self.printf = _op_wrapper(_tir_op.cuda_printf)
+        self.ldg = _op_wrapper(_tir_op.cuda_ldg)
 
 
 class NVSHMEMNamespace:
@@ -2698,7 +2700,6 @@ print_buffer = _op_wrapper(_tir_op.print_buffer)
 timer_init_cuda = _op_wrapper(_tir_op.timer_init_cuda)
 timer_start_cuda = _op_wrapper(_tir_op.timer_start_cuda)
 timer_end_cuda = _op_wrapper(_tir_op.timer_end_cuda)
-cuda_printf = _op_wrapper(_tir_op.cuda_printf)
 
 reinterpret = _dtype_forward(_tir_op.reinterpret)
 call_extern = _dtype_forward(_tir_op.call_extern)
@@ -3074,7 +3075,6 @@ __all__ = float_types + [
     "timer_init_cuda",
     "timer_start_cuda",
     "timer_end_cuda",
-    "cuda_printf",
 ]
 
 __all__ += [

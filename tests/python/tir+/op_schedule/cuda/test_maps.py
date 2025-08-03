@@ -544,5 +544,47 @@ def test_binary_op_local(input, op_type, dtype):
         tvm.testing.assert_allclose(B_ref, A.numpy(), atol=atol)
 
 
+@pytest.mark.parametrize("shape", [(8,), (16, 16), (5, 5)])
+@pytest.mark.parametrize("A_dtype", ["float16", "float32"])
+@pytest.mark.parametrize("B_dtype", ["float16", "float32"])
+def test_cast_thread_local(shape, A_dtype, B_dtype):
+    if A_dtype == B_dtype:
+        return
+
+    dev = tvm.cuda(0)
+    A_ref = np.random.rand(*shape).astype(A_dtype)
+    B_ref = np.random.rand(*shape).astype(B_dtype)
+    A = tvm.nd.array(A_ref, dev)
+    B = tvm.nd.array(B_ref, dev)
+
+    B_ref = A_ref.astype(B_dtype)
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test_cast(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, shape, A_dtype, layout=TileLayout(shape))
+        B = T.match_buffer(B_ptr, shape, B_dtype, layout=TileLayout(shape))
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([1], parent="cta")
+
+            with T.thread():
+                A_local = T.alloc_local(shape, dtype=A_dtype, layout=TileLayout(shape))
+                B_local = T.alloc_local(shape, dtype=B_dtype, layout=TileLayout(shape))
+                Tp.copy(A_local, A)
+                Tp.cast(B_local, A_local)
+                Tp.copy(B, B_local)
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": test_cast})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        mod(A, B)
+        print(mod.mod.imported_modules[0].get_source())
+        tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

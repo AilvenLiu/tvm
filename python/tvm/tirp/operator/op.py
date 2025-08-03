@@ -214,6 +214,12 @@ class FDiv(BinaryOp):
     op = get_tirp_op("fdiv")
 
 
+class Cast(UnaryOp):
+    """Cast src to dst."""
+
+    op = get_tirp_op("cast")
+
+
 class Copy(OpCall):
     """Copy all elements from src to dst.
 

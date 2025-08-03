@@ -18,7 +18,7 @@
 """Common utilities for operator scheduling."""
 
 from enum import Enum
-from typing import Optional, Callable
+from typing import Optional, Callable, List
 import functools
 import operator
 from functools import wraps
@@ -29,6 +29,12 @@ from tvm.arith.analyzer import Analyzer
 from tvm.tir import BufferRegion, PrimFunc, Buffer, PrimExpr
 from tvm.tir.exec_scope import ExecScopeSlice
 from tvm.tir.stmt import OpCall
+
+
+def get_st_extent(buffer_region: BufferRegion):
+    """Get the start and extent of a buffer region."""
+    region = buffer_region.region
+    return [r.min for r in region], [r.extent for r in region]
 
 
 def get_indices(nth, start, extent):
@@ -202,6 +208,49 @@ def validate_copy_op(
     return True
 
 
+def get_vec_len(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    vec_candidates: List[int],
+    thread_cnt=1,
+) -> Optional[int]:
+    """Get the vector length for the copy operation."""
+
+    dst: Buffer = dst_buffer_region.buffer
+    src: Buffer = src_buffer_region.buffer
+    if not (src.layout.is_trivial() and dst.layout.is_trivial()):
+        return None
+
+    # Extract regions and validate dimensions
+    analyzer = Analyzer()
+    src_st, src_extent = get_st_extent(src_buffer_region)
+    dst_st, dst_extent = get_st_extent(dst_buffer_region)
+
+    # Thread and vectorization setup
+    elem_size = DataType(src.dtype).bits  # in bits
+    n_elements = functools.reduce(operator.mul, src_extent, 1)
+    if n_elements % thread_cnt != 0:
+        return None
+
+    # Find valid vector length
+    for vec_len in vec_candidates:
+        if vec_len > 0 and all(
+            analyzer.can_prove_equal(x % vec_len, 0)
+            for x in [
+                src_st[-1],
+                dst_st[-1],
+                src.shape[-1],
+                dst.shape[-1],
+                src_extent[-1],
+                dst_extent[-1],
+                n_elements // thread_cnt,
+            ]
+        ):
+            return vec_len
+    else:
+        return None
+
+
 def copy_g2s_s2g_cta_vec_load_impl(
     dst_buffer_region: BufferRegion,
     src_buffer_region: BufferRegion,
@@ -219,55 +268,35 @@ def copy_g2s_s2g_cta_vec_load_impl(
 
     src: Buffer = src_buffer_region.buffer
     dst: Buffer = dst_buffer_region.buffer
-    if not all(
-        [
-            src.layout.is_trivial() and dst.layout.is_trivial(),
-            (src.scope() == "global" and dst.scope().startswith("shared"))
-            or (src.scope().startswith("shared") and dst.scope() == "global"),
-        ]
+    if not (
+        (src.scope() == "global" and dst.scope().startswith("shared"))
+        or (src.scope().startswith("shared") and dst.scope() == "global")
     ):
         return None
-
-    # Extract regions and validate dimensions
-    analyzer = Analyzer()
-    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
-    src_st = [r.min for r in src_region]
-    dst_st = [r.min for r in dst_region]
-    src_extent = [r.extent for r in src_region]
-    dst_extent = [r.extent for r in dst_region]
 
     # Thread and vectorization setup
     tx = sctx.launch_params["threadIdx.x"].dom.extent
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
     elem_size = DataType(src.dtype).bits  # in bits
-    n_elements = functools.reduce(operator.mul, src_extent, 1)
+    vec_len = get_vec_len(
+        dst_buffer_region,
+        src_buffer_region,
+        [128 // elem_size, 64 // elem_size, 32 // elem_size, 1],
+        thread_cnt=tx,
+    )
+    if vec_len is None:
+        return None
 
-    # Find valid vector length
-    if n_elements % tx != 0:
-        return None
-    for vec_len in [128 // elem_size, 64 // elem_size, 32 // elem_size, 1]:
-        if vec_len > 0 and all(
-            analyzer.can_prove_equal(x % vec_len, 0)
-            for x in [
-                src_st[-1],
-                dst_st[-1],
-                src.shape[-1],
-                dst.shape[-1],
-                src_extent[-1],
-                dst_extent[-1],
-                n_elements // tx,
-            ]
-        ):
-            break
-    else:
-        return None
     # cp-size (the size of data in bytes) can only be 4, 8 and 16 for cp.async
     if inst_type == CopyInstType.CP_ASYNC:
         cp_size = vec_len * elem_size // 8  # in bytes
         if cp_size not in [4, 8, 16]:
             return None
 
+    src_st, src_extent = get_st_extent(src_buffer_region)
+    dst_st, dst_extent = get_st_extent(dst_buffer_region)
+    n_elements = functools.reduce(operator.mul, src_extent, 1)
     # fmt: off
     @T.prim_func(tirp=True)
     def impl():

@@ -20,6 +20,7 @@ from .cuda.copy import *
 from .cuda.reduction import *
 from .cuda.event import *
 from .cuda.copy_async import *
+from .cuda.cast import *
 from .trn import *
 
 __all__ = ["ScheduleContext", "register_schedule"]

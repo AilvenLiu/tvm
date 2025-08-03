@@ -783,7 +783,8 @@ TVM_DLL const Op& print_buffer();
 /*!
  * \brief tvm intrinsic for initializing the CUDA profiler, and store profiling result in a buffer.
  *
- *  void timer_init_cuda(Var profiler_buffer, Var profiler_tag, Var profiler_write_offset, int num_groups, Expr group_id) {
+ *  void timer_init_cuda(Var profiler_buffer, Var profiler_tag, Var profiler_write_offset, int
+ * num_groups, Expr group_id) {
  *    // initialize the tag and write to pos 0 in the buffer
  *    // initialize write offset for every leader thread in warp group across all blocks
  *  }
@@ -795,7 +796,8 @@ TVM_DLL const Op& timer_init_cuda();
  *        and storing profiling result in a buffer.
  *
  *  void timer_start_cuda(IntImm event_type, Var profiler_buffer, Var profiler_tag,
- *                        Var profiler_write_offset, IntImm profiler_write_stride, Expr leader_cond) {
+ *                        Var profiler_write_offset, IntImm profiler_write_stride, Expr leader_cond)
+ * {
  *    // each leader thread in warp group gets the time stamp and event type, combine with the tag
  *    // and write to corresponding offset in buffer
  *    // each leader thread advance offset by stride
@@ -845,6 +847,11 @@ TVM_DLL const Op& cuda_atomic_cas();
  * \brief tvm intrinsic for cuda printf instruction
  */
 TVM_DLL const Op& cuda_printf();
+
+/*!
+ * \brief tvm intrinsic for cuda ldg instruction
+ */
+TVM_DLL const Op& cuda_ldg();
 
 }  // namespace builtin
 }  // namespace tirx

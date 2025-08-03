@@ -130,6 +130,13 @@ using FOpScheduler = ffi::TypedFunction<Stmt(tvm::Op, Array<ObjectRef>, Schedule
 /*!
  * \brief See pesudo code below:
  *
+ * Tp.cast(BufferRegion dst, BufferRegion src)
+ */
+TVM_DLL const Op& cast();
+
+/*!
+ * \brief See pesudo code below:
+ *
  * Tp.copy(BufferRegion dst, BufferRegion src)
  */
 TVM_DLL const Op& copy();
@@ -198,48 +205,6 @@ TVM_DLL const Op& event_init();
 TVM_DLL const Op& event_commit();
 
 TVM_DLL const Op& event_wait();
-
-/*!
- * \brief See pesudo code below:
- *
- *  pipe.init()
- */
-TVM_DLL const Op& pipeline_init();
-
-/*!
- * \brief See pesudo code below:
- *
- *  pipe.producer_acquire()
- */
-TVM_DLL const Op& pipeline_producer_acquire();
-
-/*!
- * \brief See pesudo code below:
- *
- *  pipe.producer_commit()
- */
-TVM_DLL const Op& pipeline_producer_commit();
-
-/*!
- * \brief See pesudo code below:
- *
- *  pipe.consumer_wait(size_t num_stages)
- */
-TVM_DLL const Op& pipeline_consumer_wait();
-
-/*!
- * \brief See pesudo code below:
- *
- *  pipe.consumer_release()
- */
-TVM_DLL const Op& pipeline_consumer_release();
-
-/*!
- * \brief See pesudo code below:
- *
- *  pipe.copy(BufferRegion dst, BufferRegion src)
- */
-TVM_DLL const Op& pipeline_copy();
 
 /*!
  * \brief See pesudo code below:

@@ -14,10 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import pytest
+
 import numpy as np
 import tvm
 import tvm.testing
 from tvm.script import tir as T
+from tvm.script import tirp as Tp
+from tvm.tir.layout import TileLayout
 from ..utils import bench, ProtonContext
 
 # TODO: split-kv; merge
@@ -26,127 +30,87 @@ from ..utils import bench, ProtonContext
 def ceildiv(a, b):
     return (a + b - 1) // b
 
+
 def find_power_of_two(n):
     assert n > 0 and (n & (n - 1)) == 0
     return n.bit_length() - 1
 
-# problem size
-KV_LAYOUT = "HND"
-BATCH_SIZE = 32
-NUM_HEADS = 37
-SEQ_LEN = 4096
-HEAD_DIM = 128
-QO_SHAPE = BATCH_SIZE, NUM_HEADS, HEAD_DIM
-# KV_SHAPE = BATCH_SIZE, SEQ_LEN, NUM_HEADS, HEAD_DIM (logically)
 
-# paged cache size
-PAGE_SIZE = 16
-PAGE_NUM = ceildiv(SEQ_LEN, PAGE_SIZE)
-TOTAL_PAGE_NUM = PAGE_NUM * BATCH_SIZE
-MAX_PAGE_NUM = 8192
-KV_CACHE_SHAPE = MAX_PAGE_NUM, 2, NUM_HEADS, PAGE_SIZE, HEAD_DIM
-assert TOTAL_PAGE_NUM <= MAX_PAGE_NUM
+@pytest.mark.parametrize(
+    "task",
+    [
+        (4, 37, 4096, 128),
+        (8, 37, 4096, 128),
+        (16, 37, 4096, 128),
+        (32, 37, 4096, 128),
+    ],
+)
+def test_batch_decode(task):
+    # problem size
+    KV_LAYOUT = "HND"
+    BATCH_SIZE, NUM_HEADS, SEQ_LEN, HEAD_DIM = task
+    QO_SHAPE = BATCH_SIZE, NUM_HEADS, HEAD_DIM
+    # KV_SHAPE = BATCH_SIZE, SEQ_LEN, NUM_HEADS, HEAD_DIM (logically)
 
-# other
-F16_BYTE = 2
-F32_BYTE = 4
-SM_SCALE = (1 / 0.6931471805599453) * (1 / HEAD_DIM ** 0.5)
-SM_COUNT = 148
+    # paged cache size
+    PAGE_SIZE = 16
+    PAGE_NUM = ceildiv(SEQ_LEN, PAGE_SIZE)
+    TOTAL_PAGE_NUM = PAGE_NUM * BATCH_SIZE
+    MAX_PAGE_NUM = 8192
+    KV_CACHE_SHAPE = MAX_PAGE_NUM, 2, NUM_HEADS, PAGE_SIZE, HEAD_DIM
+    assert TOTAL_PAGE_NUM <= MAX_PAGE_NUM
 
-def perpare_data():
-    import torch
+    # other
+    F16_BYTE = 2
+    F32_BYTE = 4
+    SM_SCALE = (1 / 0.6931471805599453) * (1 / HEAD_DIM**0.5)
+    SM_COUNT = 148
 
-    page_last_len = PAGE_SIZE if SEQ_LEN % PAGE_SIZE == 0 else SEQ_LEN % PAGE_SIZE
+    def perpare_data():
+        import torch
 
-    kv_indptr = torch.empty(BATCH_SIZE + 1, dtype=torch.int32).int()
-    for i in range(BATCH_SIZE + 1):
-        kv_indptr[i] = i * PAGE_NUM
-    kv_last_page_len = torch.empty(BATCH_SIZE, dtype=torch.int32).int()
-    for i in range(BATCH_SIZE):
-        kv_last_page_len[i] = page_last_len
-    kv_indices = torch.arange(MAX_PAGE_NUM, dtype=torch.int32).int()
-    kv_indices = kv_indices[torch.randperm(MAX_PAGE_NUM)]
-    kv_indices = kv_indices[:TOTAL_PAGE_NUM]
-    q = torch.randn(QO_SHAPE).half()
-    kv_data = torch.randn(KV_CACHE_SHAPE).half()
+        page_last_len = PAGE_SIZE if SEQ_LEN % PAGE_SIZE == 0 else SEQ_LEN % PAGE_SIZE
 
-    return q, kv_data, kv_indptr, kv_last_page_len, kv_indices
+        kv_indptr = torch.empty(BATCH_SIZE + 1, dtype=torch.int32).int()
+        for i in range(BATCH_SIZE + 1):
+            kv_indptr[i] = i * PAGE_NUM
+        kv_last_page_len = torch.empty(BATCH_SIZE, dtype=torch.int32).int()
+        for i in range(BATCH_SIZE):
+            kv_last_page_len[i] = page_last_len
+        kv_indices = torch.arange(MAX_PAGE_NUM, dtype=torch.int32).int()
+        kv_indices = kv_indices[torch.randperm(MAX_PAGE_NUM)]
+        kv_indices = kv_indices[:TOTAL_PAGE_NUM]
+        q = torch.randn(QO_SHAPE).half()
+        kv_data = torch.randn(KV_CACHE_SHAPE).half()
 
-
-
-
-@tvm.testing.requires_cuda_compute_version(10, exact=True)
-def test():
+        return q, kv_data, kv_indptr, kv_last_page_len, kv_indices
 
     # kernel config
     VEC_SIZE = 8
-    assert VEC_SIZE * F16_BYTE >= 16 and VEC_SIZE * 32 >= HEAD_DIM # ensure cp_async_size >= 128bit && bdx <= 32
+    assert (
+        VEC_SIZE * F16_BYTE >= 16 and VEC_SIZE * 32 >= HEAD_DIM
+    )  # ensure cp_async_size >= 128bit && bdx <= 32
     NUM_THREADS = 256
     BDX = HEAD_DIM // VEC_SIZE
     BDY = NUM_THREADS // BDX
     TILE_SIZE_PER_BDX = 4
     PIPE_DEPTH = 2
-    SMEM_SIZE = 2 * PIPE_DEPTH * TILE_SIZE_PER_BDX * BDY * HEAD_DIM * F16_BYTE + max(VEC_SIZE, TILE_SIZE_PER_BDX) * BDY * BDX * F32_BYTE
+    SMEM_SIZE = (
+        2 * PIPE_DEPTH * TILE_SIZE_PER_BDX * BDY * HEAD_DIM * F16_BYTE
+        + max(VEC_SIZE, TILE_SIZE_PER_BDX) * BDY * BDX * F32_BYTE
+    )
     assert PIPE_DEPTH <= BDX
 
-    def ldg(addr):
-        return T.cuda.func_call("ldg", addr, source_code=f"""
-__forceinline__ __device__ int ldg(int* src) {{
-    return __ldg(src);
-}}                                                        
-        """, return_type="int32")
-
+    # fmt: off
     @T.prim_func(tirp=True)
     def decode(Q_ptr: T.handle, KV_ptr: T.handle, O_ptr: T.handle, KV_indptr: T.handle, KV_last_page_len: T.handle, KV_indices: T.handle):
 
-        Q_global = T.match_buffer(Q_ptr, QO_SHAPE, "float16", scope="global")
-        KV_global = T.match_buffer(KV_ptr, KV_CACHE_SHAPE, "float16", scope="global")
-        O_global = T.match_buffer(O_ptr, QO_SHAPE, "float16", scope="global")
-        KV_indptr_global = T.match_buffer(KV_indptr, [BATCH_SIZE + 1], "int32", scope="global")
-        KV_last_page_len_global = T.match_buffer(KV_last_page_len, [BATCH_SIZE], "int32", scope="global")
-        KV_indices_global = T.match_buffer(KV_indices, [TOTAL_PAGE_NUM], "int32", scope="global")
-
-        # f16 -> f32
-        @T.macro
-        def load_cast(dst: T.handle, src: T.handle, tmp: T.handle, vec_size):
-            T.cuda.func_call("load_cast", dst, src, tmp, vec_size,
-                            source_code=f"""
-            __forceinline__ __device__ void load_cast(void* dst, void* src, void* tmp, int vec_size) {{
-                for (int i = 0; i < vec_size / 8; ++i) {{
-                    ((int4*)tmp)[i] = ((int4*)src)[i];
-                }}
-                for (int i = 0; i < vec_size / 2; ++i) {{
-                    ((float2*)dst)[i] = __half22float2(((half2*)tmp)[i]);
-                }}
-            }}
-            """)
-        
-        # f32 -> f16
-        @T.macro
-        def store_cast(dst: T.handle, src: T.handle, tmp: T.handle, vec_size):
-            T.cuda.func_call("store_cast", dst, src, tmp, vec_size,
-                            source_code=f"""
-            __forceinline__ __device__ void store_cast(void* dst, void* src, void* tmp, int vec_size) {{
-                for (int i = 0; i < vec_size / 2; ++i) {{
-                    ((half2*)tmp)[i] = __float22half2_rn(((float2*)src)[i]);
-                }}
-                    for (int i = 0; i < vec_size / 8; ++i) {{
-                    ((int4*)dst)[i] = ((int4*)tmp)[i];
-                }}
-            }}
-            """)
-
-        # f16 -> f32
-        @T.macro
-        def cast(dst: T.handle, src: T.handle, vec_size):
-            T.cuda.func_call("cast", dst, src, vec_size, 
-                            source_code=f"""
-            __forceinline__ __device__ void cast(void* dst, void* src, int vec_size) {{
-                for (int i = 0; i < vec_size / 2; ++i) {{
-                    ((float2*)dst)[i] = __half22float2(((half2*)src)[i]);
-                }}
-            }}
-            """)
+        Q_global = T.match_buffer(Q_ptr, QO_SHAPE, "float16", scope="global", layout="default")
+        KV_global = T.match_buffer(KV_ptr, KV_CACHE_SHAPE, "float16", scope="global", layout="default")
+        O_global = T.match_buffer(O_ptr, QO_SHAPE, "float16", scope="global", layout="default")
+        KV_indptr_global = T.match_buffer(KV_indptr, [BATCH_SIZE + 1], "int32", scope="global", layout="default")
+        KV_last_page_len_global = T.match_buffer(KV_last_page_len, [BATCH_SIZE], "int32", scope="global", layout="default")
+        KV_indices_global = T.match_buffer(KV_indices, [TOTAL_PAGE_NUM], "int32", scope="global", layout="default")
 
         with T.kernel():
             bx, by = T.cta_id([BATCH_SIZE, NUM_HEADS], parent="kernel")
@@ -155,47 +119,51 @@ __forceinline__ __device__ int ldg(int* src) {{
             with T.cta():
                 # allocate the memory
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                k_smem = T.decl_buffer([PIPE_DEPTH, BDY, TILE_SIZE_PER_BDX, HEAD_DIM], "float16", buf.data, elem_offset=0)
-                v_smem = T.decl_buffer([PIPE_DEPTH, BDY, TILE_SIZE_PER_BDX, HEAD_DIM], "float16", buf.data, elem_offset=PIPE_DEPTH * TILE_SIZE_PER_BDX * BDY * HEAD_DIM)
-                kv_offset_load = T.decl_buffer([TILE_SIZE_PER_BDX, BDY, BDX], "int32", buf.data, elem_offset=2 * PIPE_DEPTH * TILE_SIZE_PER_BDX * BDY * HEAD_DIM * F16_BYTE // F32_BYTE)
-                kv_offset_use = T.decl_buffer([BDX, BDY, TILE_SIZE_PER_BDX], "int32", buf.data, elem_offset=2 * PIPE_DEPTH * TILE_SIZE_PER_BDX * BDY * HEAD_DIM * F16_BYTE // F32_BYTE)
-                epi_o = T.decl_buffer([BDY, BDX, VEC_SIZE], "float32", buf.data, elem_offset=0)
-                epi_md = T.decl_buffer([BDY, 2], "float32", buf.data, elem_offset=BDY * BDX * VEC_SIZE)
+                pool = T.meta_var(Tp.PoolAllocator(buf.data))
+                k_smem = pool.alloc((PIPE_DEPTH, BDY, TILE_SIZE_PER_BDX, HEAD_DIM), "float16", layout="default")
+                v_smem = pool.alloc((PIPE_DEPTH, BDY, TILE_SIZE_PER_BDX, HEAD_DIM), "float16", layout="default")
+                offset = T.meta_var(pool.offset)
+                kv_offset_load = pool.alloc((TILE_SIZE_PER_BDX, BDY, BDX), "int32", layout="default")
+                pool.move_base_to(offset)
+                kv_offset_use = pool.alloc((BDX, BDY, TILE_SIZE_PER_BDX), "int32", layout="default")
+                pool.move_base_to(0)
+                epi_o = pool.alloc((BDY, BDX, VEC_SIZE), "float32", layout="default")
+                epi_md = pool.alloc((BDY, 2), "float32", layout="default")
 
                 with T.thread():
-
                     # allocate the reg
-                    idx = T.alloc_local([1], "int32")
-                    tmp = T.alloc_local([VEC_SIZE], "float16")
-                    q = T.alloc_local([VEC_SIZE], "float32")
-                    k = T.alloc_local([VEC_SIZE], "float32")
-                    v = T.alloc_local([VEC_SIZE], "float32")
-                    s = T.alloc_local([TILE_SIZE_PER_BDX], "float32")
-                    page_base = T.alloc_local([1], "int32")
-                    indices = T.alloc_local([1], "int32")
-                    kv_offset_cp = T.alloc_local([TILE_SIZE_PER_BDX], "int32")
-                    o = T.alloc_local([VEC_SIZE], "float32")
-                    m = T.alloc_local([2], "float32")
-                    d = T.alloc_local([2], "float32")
-                    m_tmp = T.alloc_local([1], "float32")
-                    d_tmp = T.alloc_local([1], "float32")
-                    o_tmp = T.alloc_local([VEC_SIZE], "float32")
+                    idx = T.alloc_local([1], "int32", layout="default")
+                    tmp = T.alloc_local([VEC_SIZE], "float16", layout="default")
+                    q = T.alloc_local([VEC_SIZE], "float32", layout="default")
+                    k = T.alloc_local([VEC_SIZE], "float32", layout="default")
+                    v = T.alloc_local([VEC_SIZE], "float32", layout="default")
+                    s = T.alloc_local([TILE_SIZE_PER_BDX], "float32", layout="default")
+                    page_base = T.alloc_local([1], "int32", layout="default")
+                    indices = T.alloc_local([1], "int32", layout="default")
+                    kv_offset_cp = T.alloc_local([TILE_SIZE_PER_BDX], "int32", layout="default")
+                    o = T.alloc_local([VEC_SIZE], "float32", layout="default")
+                    m = T.alloc_local([2], "float32", layout="default")
+                    d = T.alloc_local([2], "float32", layout="default")
+                    m_tmp = T.alloc_local([1], "float32", layout="default")
+                    d_tmp = T.alloc_local([1], "float32", layout="default")
+                    o_tmp = T.alloc_local([VEC_SIZE], "float32", layout="default")
 
                     @T.macro
                     def fetch_kv_offset(kt, idx1):
                         token_id = T.meta_var(page_base[0] + idx1)
                         p = T.meta_var(token_id // PAGE_SIZE)
                         r = T.meta_var(token_id % PAGE_SIZE)
-                        indices[0] = ldg(KV_indices_global.ptr_to([p]))
+                        indices[0] = T.cuda.ldg(KV_indices_global.ptr_to([p]), "int32")
                         kv_offset_load[kt, ty, tx] = indices[0] * 2 * NUM_HEADS * PAGE_SIZE * HEAD_DIM + by * PAGE_SIZE * HEAD_DIM + r * HEAD_DIM
-                        
+
                     # fetch q
-                    load_cast(T.address_of(q), Q_global.ptr_to([bx, by, tx * VEC_SIZE]), T.address_of(tmp), VEC_SIZE)
+                    Tp.copy(tmp[:], Q_global[bx, by, tx * VEC_SIZE:tx * VEC_SIZE + VEC_SIZE])
+                    Tp.cast(q[:], tmp[:])
 
                     # fetch kv-offset
                     page_base[0] = KV_indptr_global[bx] * PAGE_SIZE 
                     for kt in T.unroll(TILE_SIZE_PER_BDX):
-                       fetch_kv_offset(kt, (kt * BDY + ty) * BDX + tx)
+                        fetch_kv_offset(kt, (kt * BDY + ty) * BDX + tx)
                     T.ptx.fence.proxy("shared")
                     T.ptx.bar.sync(1, NUM_THREADS)
 
@@ -209,14 +177,14 @@ __forceinline__ __device__ int ldg(int* src) {{
                         for kt in T.unroll(TILE_SIZE_PER_BDX):
                             for kc in T.unroll(VEC_SIZE * F16_BYTE // 16):
                                 T.ptx.cp_async("float16", k_smem.ptr_to([kp, ty, kt, tx * VEC_SIZE + kc * 16 // F16_BYTE]), 0, 
-                                               KV_global.data, kv_offset_cp[kt] + kc * 16 // F16_BYTE, 16)
+                                            KV_global.data, kv_offset_cp[kt] + kc * 16 // F16_BYTE, 16)
                         T.ptx.cp_async.commit_group()
 
                         # fetch V
                         for kt in T.unroll(TILE_SIZE_PER_BDX):
                             for kc in T.unroll(VEC_SIZE * F16_BYTE // 16):
                                 T.ptx.cp_async("float16", v_smem.ptr_to([kp, ty, kt, tx * VEC_SIZE + kc * 16 // F16_BYTE]), 0, 
-                                               KV_global.data, NUM_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kc * 16 // F16_BYTE, 16)
+                                            KV_global.data, NUM_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kc * 16 // F16_BYTE, 16)
                         T.ptx.cp_async.commit_group()
 
                     # initilize the value
@@ -240,7 +208,7 @@ __forceinline__ __device__ int ldg(int* src) {{
                         m[1] = m[0]
                         for kt in T.unroll(TILE_SIZE_PER_BDX):
                             # cast k to f32
-                            cast(T.address_of(k), k_smem.ptr_to([idx[0], ty, kt, VEC_SIZE * tx]), VEC_SIZE)
+                            Tp.cast(k[:], k_smem[idx[0], ty, kt, VEC_SIZE * tx:VEC_SIZE * tx + VEC_SIZE])
                             s[kt] = 0.0
                             # local gemm
                             for kv in T.unroll(VEC_SIZE):
@@ -278,7 +246,7 @@ __forceinline__ __device__ int ldg(int* src) {{
                         T.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for V
                         T.ptx.bar.sync(1, NUM_THREADS)
                         for kt in T.unroll(TILE_SIZE_PER_BDX):
-                            cast(T.address_of(v), v_smem.ptr_to([idx[0], ty, kt, VEC_SIZE * tx]), VEC_SIZE)
+                            Tp.cast(v[:], v_smem[idx[0], ty, kt, VEC_SIZE * tx:VEC_SIZE * tx + VEC_SIZE])
                             for kv in T.unroll(VEC_SIZE):
                                 o[kv] += s[kt] * v[kv]
                         T.ptx.bar.sync(1, NUM_THREADS)
@@ -324,10 +292,11 @@ __forceinline__ __device__ int ldg(int* src) {{
                         for kv in T.unroll(VEC_SIZE):
                             o[kv] = o[kv] / d[0]
                         # store to global mem
-                        store_cast(O_global.ptr_to([bx, by, tx * VEC_SIZE]), T.address_of(o), T.address_of(tmp), VEC_SIZE)
+                        Tp.cast(tmp[:], o[:])
+                        Tp.copy(O_global[bx, by, tx * VEC_SIZE:tx * VEC_SIZE + VEC_SIZE], tmp[:])
                     T.ptx.bar.sync(1, NUM_THREADS)
 
-
+    # fmt: on
     q, kv_data, kv_indptr, kv_last_page_len, kv_indices = perpare_data()
 
     def tir():
@@ -346,7 +315,9 @@ __forceinline__ __device__ int ldg(int* src) {{
             mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
             src = mod.mod.imported_modules[0].get_source()
             # print(src)
-            func = lambda: mod(q_tvm, kv_data_tvm, o_tvm, kv_indptr_tvm, kv_last_page_len_tvm, kv_indices_tvm)
+            func = lambda: mod(
+                q_tvm, kv_data_tvm, o_tvm, kv_indptr_tvm, kv_last_page_len_tvm, kv_indices_tvm
+            )
             ms = bench(func, warmup=0, repeat=100, proton_name="tir")
             print(f"TIR time: {ms:.3f} ms")
             func()
@@ -398,17 +369,16 @@ __forceinline__ __device__ int ldg(int* src) {{
 
         torch.testing.assert_close(o, o_tc, rtol=1e-3, atol=1e-3)
 
-
         func = lambda: wrapper.run(q_f, kv_data_f)
         ms = bench(func, warmup=0, repeat=100, proton_name="flashinfer")
         func()
         print(f"FlashInfer time: {ms:.3f} ms")
 
         return o.reshape(BATCH_SIZE, NUM_HEADS, HEAD_DIM).cpu().numpy()
-    
+
     with ProtonContext("batch_decode"):
-        O_flashinfer = flashinfer()
         O_tir = tir()
+        O_flashinfer = flashinfer()
         np.testing.assert_allclose(O_tir, O_flashinfer, rtol=1e-3, atol=1e-3)
 
 

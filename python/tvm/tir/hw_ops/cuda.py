@@ -21,6 +21,7 @@ import functools
 import enum
 
 import tvm.ffi
+from tvm import DataType
 from tvm.tir.op import cuda_func_call
 
 
@@ -3020,6 +3021,19 @@ __forceinline__ __device__ void {func_name}(const char* fmt, Args... args) {{
 }}
 """
     return cuda_func_call(func_name, fmt, *args, source_code=source_code)
+
+
+@register_codegen("cuda_ldg")
+def codegen_cuda_ldg(addr, dtype):
+    dtype = DataType(str(dtype)[1:-1])
+    func_name = "tvm_builtin_cuda_ldg"
+    source_code = f"""
+template <typename T>
+__forceinline__ __device__ T {func_name}(T* src) {{
+    return __ldg(src);
+}}
+"""
+    return cuda_func_call(func_name, addr, source_code=source_code, return_type=dtype)
 
 
 ########################################################

@@ -264,6 +264,37 @@ def fdiv(
     )
 
 
+def cast(
+    dst: Union[BufferRegion, Buffer],
+    src: Union[BufferRegion, Buffer],
+    workspace: Dict[str, Buffer] = None,
+    schedule_config: Dict[str, Any] = None,
+):
+    """Cast src to dst.
+
+    Parameters
+    ----------
+    dst : Union[BufferRegion, Buffer]
+        The destination buffer region for cast result.
+
+    src : Union[BufferRegion, Buffer]
+        The source buffer region.
+
+    workspace : Optional[Dict[str, Buffer]]
+        The workspace of the operator.
+
+    schedule_config : Optional[Dict[str, Any]]
+        The schedule config of the operator.
+    """
+    if workspace is None:
+        workspace = {}
+    if schedule_config is None:
+        schedule_config = {}
+    dst = _to_region(dst)
+    src = _to_region(src)
+    return f_insert(tirp_op.Cast(dst, src, workspace=workspace, schedule_config=schedule_config))
+
+
 def copy(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
@@ -1103,6 +1134,7 @@ __all__ = [
     "sub",
     "mul",
     "fdiv",
+    "cast",
     "copy",
     "copy_async",
     "fill",

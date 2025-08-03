@@ -16,15 +16,27 @@
 # under the License.
 
 """Implementation of copy operator schedules."""
+import functools
+import operator
 from typing import Optional
 
 import tvm
+from tvm import DataType
 from tvm.script import tir as T
 from tvm.tir import PrimFunc, BufferRegion, Buffer
 from tvm.tir.stmt import OpCall
+from tvm.arith.analyzer import Analyzer
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
-from .common import CopyInstType, copy_g2s_s2g_cta_vec_load_impl, target_cuda, validate_copy_op
+from .common import (
+    CopyInstType,
+    copy_g2s_s2g_cta_vec_load_impl,
+    target_cuda,
+    validate_copy_op,
+    get_indices,
+    get_vec_len,
+    get_st_extent,
+)
 
 
 def copy_g2s_s2g_cta_default_impl(
@@ -52,11 +64,8 @@ def copy_g2s_s2g_cta_default_impl(
     assert inst_type == CopyInstType.NORMAL
 
     # Extract regions and validate dimensions
-    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
-    src_st = [r.min for r in src_region]
-    dst_st = [r.min for r in dst_region]
-    src_extent = [r.extent for r in src_region]
-    dst_extent = [r.extent for r in dst_region]
+    src_st, src_extent = get_st_extent(src_buffer_region)
+    dst_st, dst_extent = get_st_extent(dst_buffer_region)
 
     # Thread and vectorization setup
     tx = sctx.launch_params["threadIdx.x"].dom.extent
@@ -101,16 +110,72 @@ def copy_g2s_s2g_cta_default_impl(
     return impl
 
 
+def copy_g2l_l2g_vec_load_impl(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    sctx: ScheduleContext,
+) -> Optional[PrimFunc]:
+    """Schedule copy operation between global and local memory on CUDA of a single thread."""
+
+    if sctx.exec_scope.name != "thread":
+        return None
+
+    dst: Buffer = dst_buffer_region.buffer
+    src: Buffer = src_buffer_region.buffer
+    if not (src.scope() == "global" and dst.scope() == "local") and not (
+        src.scope() == "local" and dst.scope() == "global"
+    ):
+        return None
+
+    # Extract regions and validate dimensions
+    src_st, src_extent = get_st_extent(src_buffer_region)
+    dst_st, dst_extent = get_st_extent(dst_buffer_region)
+
+    # Thread and vectorization setup
+    elem_size = DataType(src.dtype).bits  # in bits
+    n_elements = functools.reduce(operator.mul, src_extent, 1)
+
+    # Find valid vector length
+    vec_len = get_vec_len(
+        dst_buffer_region,
+        src_buffer_region,
+        [128 // elem_size, 64 // elem_size, 32 // elem_size, 1],
+    )
+    # fmt: off
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def impl():
+        for s in T.serial(0, n_elements // (vec_len)):
+            for vec in T.vectorized(vec_len):
+                fused = T.meta_var(s * vec_len + vec)
+                dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
+                src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
+                dst[*dst_indices] = src[*src_indices]
+    # fmt: on
+
+    return impl
+
+
 @register_schedule("copy", "cuda")
 @target_cuda
 def copy_schedule(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     dst_buffer_region, src_buffer_region = op_call.args
+
     if not validate_copy_op(dst_buffer_region, src_buffer_region, sctx):
         return None
 
-    for schedule in [copy_g2s_s2g_cta_vec_load_impl, copy_g2s_s2g_cta_default_impl]:
-        res = schedule(dst_buffer_region, src_buffer_region, sctx, CopyInstType.NORMAL)
-        if res:
+    for schedule_fn, args in [
+        (
+            copy_g2s_s2g_cta_vec_load_impl,
+            (dst_buffer_region, src_buffer_region, sctx, CopyInstType.NORMAL),
+        ),
+        (
+            copy_g2s_s2g_cta_default_impl,
+            (dst_buffer_region, src_buffer_region, sctx, CopyInstType.NORMAL),
+        ),
+        (copy_g2l_l2g_vec_load_impl, (dst_buffer_region, src_buffer_region, sctx)),
+    ]:
+        res = schedule_fn(*args)
+        if res is not None:
             return res
     return None
