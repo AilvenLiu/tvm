@@ -3841,7 +3841,7 @@ def ptx_cp_async_bulk_tensor_global_to_cluster(
     )
 
 
-def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
+def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords, cache_hint=""):
     """TVM intrinsic to call cp.async.bulk.tensor.dim.global.shared::cta.tile.bulk_group
 
     Parameters
@@ -3858,6 +3858,9 @@ def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
     coords : List[PrimExpr]
         specifies the starting coordinates in the tensor data in the global memory
 
+    cache_hint : str
+        The cache hint.
+
     Returns
     -------
     call : PrimExpr
@@ -3870,6 +3873,7 @@ def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords):
         src_ptr,
         tensormap,
         *coords,
+        cache_hint,
     )
 
 
