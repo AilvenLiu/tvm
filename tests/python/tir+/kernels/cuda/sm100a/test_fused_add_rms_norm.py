@@ -8,6 +8,8 @@ from ..utils import bench, ProtonContext
 EPS = 1e-6
 F16_BYTES = 2
 F32_BYTES = 4
+SM_COUNT = 148
+SMEM_SIZE = 232448
 
 def ceildiv(a, b):
     return (a + b - 1) // b
@@ -40,12 +42,12 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
         weight_global = T.match_buffer(weight_ptr, [hidden_size], "float16", scope="global", layout="default")
 
         with T.kernel():
-            bx = T.cta_id([batch_size], parent="kernel")
+            bx = T.cta_id([SM_COUNT], parent="kernel")
             tx, ty = T.thread_id([bdx, bdy], parent="cta")
             thread_id = T.meta_var(ty * bdx + tx)
 
             with T.cta():
-                buf = T.alloc_buffer([smem_size], "uint8", scope="shared.dyn")
+                buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 pool = T.meta_var(Tp.PoolAllocator(buf.data))
 
                 x_smem = pool.alloc([hidden_size], "float32", layout="default")
@@ -62,67 +64,71 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
                     x_tmp = T.alloc_local([1], "float32", layout="default")
                     sum_sq = T.alloc_local([1], "float32", layout="default")
                     rms_norm = T.alloc_local([1], "float32", layout="default")
+                    idx = T.alloc_local([1], "int32", layout="default")
 
-                    # add & sum square
-                    sum_sq[0] = 0.0
-                    for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
-                        for kv in T.unroll(vec_size):
-                            input_vec[kv] = 0.0
-                            residual_vec[kv] = 0.0
-                            x_vec[kv] = 0.0
-                        st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
-                        if st < hidden_size:
-                            Tp.copy(input_vec[:], input_global[bx, st:st + vec_size])
-                            Tp.copy(residual_vec[:], residual_global[bx, st:st + vec_size])
-                            Tp.cast(input_vec_f32[:], input_vec[:])
-                            Tp.cast(residual_vec_f32[:], residual_vec[:])
-                        for kv in T.unroll(vec_size):
-                            x_tmp[0] = input_vec_f32[kv] + residual_vec_f32[kv]
-                            sum_sq[0] += x_tmp[0] * x_tmp[0]
-                            residual_vec[kv] = T.cast(x_tmp[0], "float16")
-                            x_vec[kv] = x_tmp[0]
-                        if st < hidden_size:
-                            Tp.copy(residual_global[bx, st:st + vec_size], residual_vec[:])
-                            Tp.copy(x_smem[st:st + vec_size], x_vec[:])
-                    
-                    # warp reduce sum
-                    for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
-                        sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
-                    sum_sq_smem[ty] = sum_sq[0]
-                    T.ptx.bar.sync(1, bdx * bdy)
-                    T.ptx.fence.proxy("shared")
-                    # reduce sum through different warps
-                    if ty == 0:
-                        if tx < bdy:
-                            sum_sq[0] = sum_sq_smem[tx]
-                        else:
-                            sum_sq[0] = 0.0
+                    idx[0] = bx
+                    while idx[0] < batch_size:
+                        # add & sum square
+                        sum_sq[0] = 0.0
+                        for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
+                            for kv in T.unroll(vec_size):
+                                input_vec[kv] = 0.0
+                                residual_vec[kv] = 0.0
+                                x_vec[kv] = 0.0
+                            st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
+                            if st < hidden_size:
+                                Tp.copy(input_vec[:], input_global[idx[0], st:st + vec_size])
+                                Tp.copy(residual_vec[:], residual_global[idx[0], st:st + vec_size])
+                                Tp.cast(input_vec_f32[:], input_vec[:])
+                                Tp.cast(residual_vec_f32[:], residual_vec[:])
+                            for kv in T.unroll(vec_size):
+                                x_tmp[0] = input_vec_f32[kv] + residual_vec_f32[kv]
+                                sum_sq[0] += x_tmp[0] * x_tmp[0]
+                                residual_vec[kv] = T.cast(x_tmp[0], "float16")
+                                x_vec[kv] = x_tmp[0]
+                            if st < hidden_size:
+                                Tp.copy(residual_global[idx[0], st:st + vec_size], residual_vec[:])
+                                Tp.copy(x_smem[st:st + vec_size], x_vec[:])
+                        
+                        # warp reduce sum
                         for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
                             sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
-                        sum_sq_smem[0] = sum_sq[0]
-                    T.ptx.bar.sync(1, bdx * bdy)
-                    T.ptx.fence.proxy("shared")
-                    # rms norm
-                    rms_norm[0] = T.rsqrt(sum_sq_smem[0] / hidden_size + EPS)
+                        sum_sq_smem[ty] = sum_sq[0]
+                        T.ptx.bar.sync(1, bdx * bdy)
+                        T.ptx.fence.proxy("shared")
+                        # reduce sum through different warps
+                        if ty == 0:
+                            if tx < bdy:
+                                sum_sq[0] = sum_sq_smem[tx]
+                            else:
+                                sum_sq[0] = 0.0
+                            for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
+                                sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
+                            sum_sq_smem[0] = sum_sq[0]
+                        T.ptx.bar.sync(1, bdx * bdy)
+                        T.ptx.fence.proxy("shared")
+                        # rms norm
+                        rms_norm[0] = T.rsqrt(sum_sq_smem[0] / hidden_size + EPS)
 
-                    # handle the weight
-                    for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
-                        for kv in T.unroll(vec_size):
-                            input_vec[kv] = 0.0
-                            weight_vec_f32[kv] = 0.0
-                            x_vec[kv] = 0.0
-                        st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
-                        if st < hidden_size:
-                            Tp.copy(weight_vec[:], weight_global[st:st + vec_size])
-                            Tp.copy(x_vec[:], x_smem[st:st + vec_size])
-                            Tp.cast(weight_vec_f32[:], weight_vec[:])
-                        for kv in T.unroll(vec_size):
-                            input_vec_f32[kv] = x_vec[kv] * rms_norm[0] * weight_vec_f32[kv]
-                        if st < hidden_size:
-                            Tp.cast(input_vec[:], input_vec_f32[:])
-                            Tp.copy(input_global[bx, st:st + vec_size], input_vec[:])
+                        # handle the weight
+                        for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
+                            for kv in T.unroll(vec_size):
+                                input_vec[kv] = 0.0
+                                weight_vec_f32[kv] = 0.0
+                                x_vec[kv] = 0.0
+                            st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
+                            if st < hidden_size:
+                                Tp.copy(weight_vec[:], weight_global[st:st + vec_size])
+                                Tp.copy(x_vec[:], x_smem[st:st + vec_size])
+                                Tp.cast(weight_vec_f32[:], weight_vec[:])
+                            for kv in T.unroll(vec_size):
+                                input_vec_f32[kv] = x_vec[kv] * rms_norm[0] * weight_vec_f32[kv]
+                            if st < hidden_size:
+                                Tp.cast(input_vec[:], input_vec_f32[:])
+                                Tp.copy(input_global[idx[0], st:st + vec_size], input_vec[:])
 
-                    T.ptx.bar.sync(1, bdx * bdy)
+                        T.ptx.bar.sync(1, bdx * bdy)
+                        idx[0] += SM_COUNT
                     
 
     def test_dynamic_batch(batch_size, mod):
@@ -162,16 +168,15 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
             mod(x_tvm, residual_tvm, weight_tvm)
             return x_tvm.numpy(), residual_tvm.numpy()
 
-        x_native, residual_native = naive()
+        x_naive, residual_native = naive()
         x_fused, residual_fused = flashinfer()
         x_tir, residual_tir = tir()
 
         torch.testing.assert_close(residual_fused, residual_native, rtol=1e-3, atol=1e-3)
-        torch.testing.assert_close(x_fused, x_native, rtol=1e-3, atol=1e-3)
-        
-        torch.testing.assert_close(x_tir, x_native, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(x_fused, x_naive, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(residual_tir, residual_native, rtol=1e-3, atol=1e-3)
-
+        torch.testing.assert_close(x_tir, x_naive, rtol=1e-3, atol=1e-3)
+        
     # compile tir kernel
     target = tvm.target.Target("cuda")
     with target:

@@ -1,0 +1,200 @@
+import torch
+import tvm
+from tvm.script import tir as T
+from tvm.script import tirp as Tp
+from ..utils import bench, ProtonContext
+
+F16_BYTES = 2
+F32_BYTES = 4
+SM_COUNT = 148
+MAX_BLK_PER_SM = 32
+
+def ceildiv(a, b):
+    return (a + b - 1) // b
+
+def find_power_of_two(n):
+    assert n > 0 and (n & (n - 1)) == 0
+    return n.bit_length() - 1
+
+def prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size):
+    base = 8000
+    inv_freq = 1.0 / (base ** (torch.arange(0, rotary_dim, 2, dtype=torch.float, device="cuda") / rotary_dim))
+    t = torch.arange(max_position_embeddings, dtype=torch.float, device="cuda")
+    freqs = torch.einsum("i,j -> ij", t, inv_freq)
+    cos = freqs.cos()
+    sin = freqs.sin()
+    cos_sin_cache = torch.cat((cos, sin), dim=-1) # shape: [max_position_embeddings, rotary_dim]
+    pos_ids = torch.arange(seq_len, device="cuda", dtype=torch.int32).repeat(batch_size) # shape: [nnz]
+    query = torch.randn(batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda") # shape: [nnz, num_heads * head_dim]
+    key = torch.randn(batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda") # shape: [nnz, num_heads * head_dim]
+    return cos_sin_cache, pos_ids, query, key
+
+
+def test_rope(num_heads, seq_len, head_dim, batch_size_list):
+
+    rotary_dim = head_dim # can be different
+    max_position_embeddings = seq_len # can be larger
+    vec_size = max(16 // F16_BYTES, rotary_dim // 32)
+    bdx = rotary_dim // vec_size
+    num_threads = max(256, bdx)
+    bdy = num_threads // bdx
+
+    @T.prim_func(tirp=True)
+    def rope_with_cos_sin_cache(q: T.handle, k: T.handle, q_rope: T.handle, k_rope: T.handle, cos_sin_cache: T.handle, pos_ids: T.handle):
+        nnz = T.int32()
+        q_global = T.match_buffer(q, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
+        k_global = T.match_buffer(k, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
+        q_rope_global = T.match_buffer(q_rope, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
+        k_rope_global = T.match_buffer(k_rope, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
+        cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_position_embeddings, rotary_dim], "float32", scope="global", layout="default")
+        pos_ids_global = T.match_buffer(pos_ids, [nnz], "int32", scope="global", layout="default")
+        half_rotary_dim = rotary_dim // 2
+
+        with T.kernel():
+            bx = T.cta_id([SM_COUNT], parent="kernel")
+            tx, ty = T.thread_id([bdx, bdy], parent="cta")
+
+            stx = T.meta_var(tx * vec_size)
+
+            with T.thread():
+                cos = T.alloc_local([vec_size], "float32", layout="default")
+                sin = T.alloc_local([vec_size], "float32", layout="default")
+                qk_vec = T.alloc_local([vec_size], "float16", layout="default")
+                qk_vec32 = T.alloc_local([vec_size], "float32", layout="default")
+                qk_vec32_other = T.alloc_local([vec_size], "float32", layout="default")
+                idx = T.alloc_local([1], "int32", layout="default")
+                pos = T.alloc_local([1], "int32", layout="default")
+                head = T.alloc_local([1], "int32", layout="default")
+
+                @T.macro
+                def compute_rope(global_in, global_out):
+                    Tp.copy(qk_vec[:], global_in[pos[0], head[0], stx:stx + vec_size])
+                    Tp.cast(qk_vec32[:], qk_vec[:])
+                    if stx < half_rotary_dim:
+                        Tp.copy(qk_vec[:], global_in[pos[0], head[0], stx + half_rotary_dim:stx + half_rotary_dim + vec_size])
+                    else:
+                        Tp.copy(qk_vec[:], global_in[pos[0], head[0], stx - half_rotary_dim:stx - half_rotary_dim + vec_size])
+                    Tp.cast(qk_vec32_other[:], qk_vec[:])
+                    if stx < half_rotary_dim:
+                        for kv in T.unroll(vec_size):
+                            qk_vec32[kv] = qk_vec32[kv] * cos[kv] - qk_vec32_other[kv] * sin[kv]
+                    else:
+                        for kv in T.unroll(vec_size):
+                            qk_vec32[kv] = qk_vec32[kv] * cos[kv] + qk_vec32_other[kv] * sin[kv]
+                    Tp.cast(qk_vec[:], qk_vec32[:])
+                    Tp.copy(global_out[pos[0], head[0], stx:stx + vec_size], qk_vec[:])
+
+                idx[0] = bx
+                while idx[0] < nnz * num_heads * 2 // bdy:
+                    pos[0] = (idx[0] * bdy // 2 + ty % (bdy // 2)) % nnz
+                    head[0] = (idx[0] * bdy // 2 + ty % (bdy // 2)) // nnz
+                    cache_stx = T.meta_var(stx % half_rotary_dim)
+                    Tp.copy(cos[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx:cache_stx + vec_size])
+                    Tp.copy(sin[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx + half_rotary_dim:cache_stx + half_rotary_dim + vec_size])
+                    if ty < bdy // 2:
+                        compute_rope(q_global, q_rope_global)
+                    else:
+                        compute_rope(k_global, k_rope_global)
+                    idx[0] += SM_COUNT
+                
+
+    def test_dynamic_batch(num_heads, seq_len, head_dim, batch_size, mod):
+        cos_sin_cache, pos_ids, query, key = prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size)
+
+        def naive():
+            pos_ids_naive, query_naive, key_naive = pos_ids, query.clone(), key.clone()
+            pos_ids_naive = pos_ids_naive.flatten()
+            num_tokens = pos_ids_naive.shape[0]
+            cos_sin = cos_sin_cache.index_select(0, pos_ids_naive)
+            query_naive = query_naive.to(torch.float32)
+            key_naive = key_naive.to(torch.float32)
+            cos, sin = cos_sin.chunk(2, dim=-1)
+
+            def rotary_emb(x):
+                cos_r = cos.unsqueeze(-2).to(x.dtype)
+                sin_r = sin.unsqueeze(-2).to(x.dtype)
+                x1, x2 = torch.chunk(x, 2, dim=-1)
+                o1 = x1 * cos_r - x2 * sin_r
+                o2 = x2 * cos_r + x1 * sin_r
+                return torch.cat((o1, o2), dim=-1)
+
+            query_shape = query_naive.shape
+            query_naive = query_naive.view(num_tokens, -1, head_dim)
+            query_rot = query_naive[..., : rotary_dim]
+            query_pass = query_naive[..., rotary_dim :]
+            query_rot = rotary_emb(query_rot)
+            query_naive = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
+
+            key_shape = key_naive.shape
+            key_naive = key_naive.view(num_tokens, -1, head_dim)
+            key_rot = key_naive[..., : rotary_dim]
+            key_pass = key_naive[..., rotary_dim :]
+            key_rot = rotary_emb(key_rot)
+            key_naive = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
+
+            query_naive = query_naive.to(torch.float16)
+            key_naive = key_naive.to(torch.float16)
+            return query_naive.cpu().numpy(), key_naive.cpu().numpy()
+
+        def flashinfer():
+            import flashinfer
+            pos_ids_flashinfer, query_flashinfer, key_flashinfer = pos_ids, query.clone(), key.clone()
+            func = lambda: flashinfer.rope.apply_rope_with_cos_sin_cache(
+                positions=pos_ids_flashinfer,
+                query=query_flashinfer,
+                key=key_flashinfer,
+                head_size=head_dim,
+                cos_sin_cache=cos_sin_cache,
+                is_neox=True,
+            )
+            ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer")
+            print(f"flashinfer time: {ms:.3f} ms")
+            q_out, k_out = func()
+            return q_out.cpu().numpy(), k_out.cpu().numpy()
+        
+        def tir():
+            DEV = tvm.cuda(0)
+            pos_ids_tvm = tvm.nd.array(pos_ids.cpu().numpy(), DEV)
+            query_tvm = tvm.nd.array(query.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
+            key_tvm = tvm.nd.array(key.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
+            query_out_tvm = tvm.nd.array(query.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
+            key_out_tvm = tvm.nd.array(key.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
+            cos_sin_cache_tvm = tvm.nd.array(cos_sin_cache.cpu().numpy(), DEV)
+            func = lambda: mod(query_tvm, key_tvm, query_out_tvm, key_out_tvm, cos_sin_cache_tvm, pos_ids_tvm)
+            ms = bench(func, warmup=10, repeat=30, proton_name="tir")
+            print(f"flashinfer time: {ms:.3f} ms")
+            return query_out_tvm.numpy().reshape(-1, num_heads * head_dim), key_out_tvm.numpy().reshape(-1, num_heads * head_dim)
+            
+
+        q_n, k_n = naive()
+        q_f, k_f = flashinfer()
+        q_t, k_t = tir()
+
+        torch.testing.assert_close(q_n, q_f, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(k_n, k_f, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(q_n, q_t, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(k_n, k_t, rtol=1e-3, atol=1e-3)
+
+
+    # compile tir kernel
+    target = tvm.target.Target("cuda")
+    with target:
+        mod= tvm.IRModule({"main": rope_with_cos_sin_cache})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        src = mod.mod.imported_modules[0].get_source()
+        print(src)
+
+    for batch_size in batch_size_list:
+        with ProtonContext("rope"):
+            test_dynamic_batch(num_heads, seq_len, head_dim, batch_size, mod)
+
+
+if __name__ == "__main__":
+    num_heads_list = [1]
+    seq_len_list = [1]
+    head_dim_list = [128]
+    batch_size_list = [128]
+
+    import itertools
+    for (num_heads, seq_len, head_dim) in itertools.product(num_heads_list, seq_len_list, head_dim_list):
+        test_rope(num_heads, seq_len, head_dim, batch_size_list)
