@@ -3,7 +3,7 @@ import torch
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from ..utils import bench, ProtonContext
+from utils import bench, ProtonContext
 
 EPS = 1e-6
 F16_BYTES = 2
@@ -28,7 +28,7 @@ def prepare_data(hidden_size, batch_size):
 def test_fused_add_rmsnorm(hidden_size, batch_size_list):
 
     vec_size = math.gcd(16 // F16_BYTES, hidden_size)
-    block_size = min(1024, hidden_size // vec_size)
+    block_size = min(256, hidden_size // vec_size)
     bdx = 32
     bdy = ceildiv(block_size, 32) 
     smem_size = (bdy + hidden_size) * F32_BYTES
