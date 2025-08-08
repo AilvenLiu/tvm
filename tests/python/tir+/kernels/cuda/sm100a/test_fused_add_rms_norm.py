@@ -1,9 +1,10 @@
 import math
+import pytest
 import torch
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from utils import bench, ProtonContext
+from ..utils import bench, ProtonContext
 
 EPS = 1e-6
 F16_BYTES = 2
@@ -11,12 +12,15 @@ F32_BYTES = 4
 SM_COUNT = 148
 SMEM_SIZE = 232448
 
+
 def ceildiv(a, b):
     return (a + b - 1) // b
+
 
 def find_power_of_two(n):
     assert n > 0 and (n & (n - 1)) == 0
     return n.bit_length() - 1
+
 
 def prepare_data(hidden_size, batch_size):
     x = torch.randn(batch_size, hidden_size, dtype=torch.float16, device="cuda")
@@ -25,15 +29,20 @@ def prepare_data(hidden_size, batch_size):
     return x, residual, weight
 
 
+@pytest.mark.parametrize("hidden_size", [4096])
+@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64, 128]])
 def test_fused_add_rmsnorm(hidden_size, batch_size_list):
 
     vec_size = math.gcd(16 // F16_BYTES, hidden_size)
     block_size = min(256, hidden_size // vec_size)
     bdx = 32
-    bdy = ceildiv(block_size, 32) 
+    bdy = ceildiv(block_size, 32)
     smem_size = (bdy + hidden_size) * F32_BYTES
-    print(f"hidden_size: {hidden_size}, vec_size: {vec_size}, block_size: {block_size}, bdx: {bdx}, bdy: {bdy}, smem_size: {smem_size}")
+    print(
+        f"hidden_size: {hidden_size}, vec_size: {vec_size}, block_size: {block_size}, bdx: {bdx}, bdy: {bdy}, smem_size: {smem_size}"
+    )
 
+    # fmt: off
     @T.prim_func(tirp=True)
     def fused_add_rmsnorm(input_ptr: T.handle, residual_ptr: T.handle, weight_ptr: T.handle):
         batch_size = T.int32()
@@ -129,7 +138,7 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
 
                         T.ptx.bar.sync(1, bdx * bdy)
                         idx[0] += SM_COUNT
-                    
+    # fmt: on
 
     def test_dynamic_batch(batch_size, mod):
         x, residual, weight = prepare_data(hidden_size, batch_size)
@@ -145,6 +154,7 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
 
         def flashinfer():
             import flashinfer
+
             func = lambda: flashinfer.norm.fused_add_rmsnorm(
                 x.clone(), residual.clone(), weight, EPS, enable_pdl=False
             )
@@ -156,11 +166,15 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
                 x_fused, residual_fused, weight, EPS, enable_pdl=False
             )
             return x_fused.cpu().numpy(), residual_fused.cpu().numpy()
-        
+
         def tir():
             DEV = tvm.cuda(0)
             weight_tvm = tvm.nd.array(weight.cpu().numpy(), DEV)
-            func = lambda: mod(tvm.nd.array(x.cpu().numpy(), DEV), tvm.nd.array(residual.cpu().numpy(), DEV), weight_tvm)
+            func = lambda: mod(
+                tvm.nd.array(x.cpu().numpy(), DEV),
+                tvm.nd.array(residual.cpu().numpy(), DEV),
+                weight_tvm,
+            )
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
             print(f"tir time: {ms:.3f} ms")
             x_tvm = tvm.nd.array(x.cpu().numpy(), DEV)
@@ -176,11 +190,11 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
         torch.testing.assert_close(x_fused, x_naive, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(residual_tir, residual_native, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(x_tir, x_naive, rtol=1e-3, atol=1e-3)
-        
+
     # compile tir kernel
     target = tvm.target.Target("cuda")
     with target:
-        mod= tvm.IRModule({"main": fused_add_rmsnorm})
+        mod = tvm.IRModule({"main": fused_add_rmsnorm})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         # src = mod_decode_no_split_kv.mod.imported_modules[0].get_source()
         # print(src)

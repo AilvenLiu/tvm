@@ -20,13 +20,17 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
 from ..utils import bench, ProtonContext
+import pytest
+
 
 def ceildiv(a, b):
     return (a + b - 1) // b
 
+
 def find_power_of_two(n):
     assert n > 0 and (n & (n - 1)) == 0
     return n.bit_length() - 1
+
 
 # Paged kv-cache config
 KV_LAYOUT = "HND"
@@ -44,6 +48,7 @@ F32_BYTE = 4
 
 def perpare_data(batch_size, num_heads, seq_len, head_dim):
     import torch
+
     torch.manual_seed(42)
 
     page_last_len = PAGE_SIZE if seq_len % PAGE_SIZE == 0 else seq_len % PAGE_SIZE
@@ -72,8 +77,8 @@ class PlanInfo:
         self.max_blk_per_sm = 1
         self.num_heads = num_heads
         self.head_dim = head_dim
-        self.vec_size_d = max(8, head_dim // 32) # ensure cp_async_size >= 128bit && bdx <= 32
-        self.vec_size_m = max(4, head_dim // 32) # ensure cp_async_size >= 128bit && bdx <= 32
+        self.vec_size_d = max(8, head_dim // 32)  # ensure cp_async_size >= 128bit && bdx <= 32
+        self.vec_size_m = max(4, head_dim // 32)  # ensure cp_async_size >= 128bit && bdx <= 32
         bdx_d = self.head_dim // self.vec_size_d
         self.num_threads_d = max(256, bdx_d)
         bdy_d = self.num_threads_d // bdx_d
@@ -85,7 +90,7 @@ class PlanInfo:
         self.pipe_d = 2
         self.pipe_m = 2
         self.tile_per_bdx = 4
-        self.sm_scale = (1 / 0.6931471805599453) * (1 / head_dim ** 0.5)
+        self.sm_scale = (1 / 0.6931471805599453) * (1 / head_dim**0.5)
 
         # dynamic info
         self.batch_size = 0
@@ -113,8 +118,11 @@ class PlanInfo:
         gdx_d = batch_size
         gdy_d = self.num_heads
         bdx_d, bdy_d = self.bd_d
-        smem_size_d = max(2 * self.pipe_d * self.tile_per_bdx * bdy_d * self.head_dim * F16_BYTE + self.tile_per_bdx * bdy_d * bdx_d * F32_BYTE,
-                            bdx_d * bdy_d * self.vec_size_d * F32_BYTE + bdy_d * 2 * F32_BYTE)
+        smem_size_d = max(
+            2 * self.pipe_d * self.tile_per_bdx * bdy_d * self.head_dim * F16_BYTE
+            + self.tile_per_bdx * bdy_d * bdx_d * F32_BYTE,
+            bdx_d * bdy_d * self.vec_size_d * F32_BYTE + bdy_d * 2 * F32_BYTE,
+        )
         assert smem_size_d <= SMEM_SIZE
         assert self.pipe_d <= bdx_d
         self.gd_d = (gdx_d, gdy_d)
@@ -130,7 +138,7 @@ class PlanInfo:
         else:
             page_num_list = [kv_indptr_h[idx + 1] - kv_indptr_h[idx] for idx in range(batch_size)]
             new_batch_size = batch_size
-            low = max(128 // PAGE_SIZE, 1) # avoid having the sequence fragmented too much
+            low = max(128 // PAGE_SIZE, 1)  # avoid having the sequence fragmented too much
             high = max(page_num_list)
             while low < high:
                 mid = (low + high) // 2
@@ -149,16 +157,22 @@ class PlanInfo:
 
         self.split_kv = split_kv
         self.new_batch_size = new_batch_size
-        self.max_chunk_size = tvm.nd.array(np.array([max_page_num * PAGE_SIZE], dtype=np.int32), device=DEV)
-        
+        self.max_chunk_size = tvm.nd.array(
+            np.array([max_page_num * PAGE_SIZE], dtype=np.int32), device=DEV
+        )
+
         # kernel config for merge kernel when split-kv
         if split_kv:
             bdx_m, bdy_m = self.bd_m
-            num_blk_per_sm = min(self.max_blk_per_sm, ceildiv(batch_size * self.num_heads, SM_COUNT))
+            num_blk_per_sm = min(
+                self.max_blk_per_sm, ceildiv(batch_size * self.num_heads, SM_COUNT)
+            )
             gdx_m = num_blk_per_sm * SM_COUNT
-            
-            smem_size_m = max(self.pipe_m * bdy_m * self.head_dim * F32_BYTE +  bdy_m * bdx_m * F32_BYTE,
-                                bdy_m * self.head_dim * F32_BYTE + bdy_d * F32_BYTE)
+
+            smem_size_m = max(
+                self.pipe_m * bdy_m * self.head_dim * F32_BYTE + bdy_m * bdx_m * F32_BYTE,
+                bdy_m * self.head_dim * F32_BYTE + bdy_d * F32_BYTE,
+            )
             assert smem_size_m <= SMEM_SIZE
             assert self.pipe_m <= bdx_m
             self.gd_m = (gdx_m,)
@@ -173,18 +187,29 @@ class PlanInfo:
             for tile_idx in range(num_tiles_kv):
                 request_indices.append(idx)
                 kv_tile_indices.append(tile_idx)
-            o_indptr.append(o_indptr[-1] + num_tiles_kv)  
+            o_indptr.append(o_indptr[-1] + num_tiles_kv)
         assert len(request_indices) == len(kv_tile_indices) == new_batch_size
-        
+
         self.request_indices_tvm = tvm.nd.array(np.array(request_indices, dtype=np.int32), DEV)
         self.kv_tile_indices_tvm = tvm.nd.array(np.array(kv_tile_indices, dtype=np.int32), DEV)
         self.o_indptr_tvm = tvm.nd.array(np.array(o_indptr, dtype=np.int32), DEV)
-        self.o_tvm = tvm.nd.array(np.zeros([batch_size, self.num_heads, self.head_dim], dtype=np.float16), DEV)
+        self.o_tvm = tvm.nd.array(
+            np.zeros([batch_size, self.num_heads, self.head_dim], dtype=np.float16), DEV
+        )
         self.lse_tvm = tvm.nd.array(np.zeros([batch_size, self.num_heads], dtype=np.float32), DEV)
         if split_kv:
-            self.tmp_o_tvm = tvm.nd.array(np.zeros([new_batch_size, self.num_heads, self.head_dim], dtype=np.float32), DEV) 
-            self.tmp_lse_tvm = tvm.nd.array(np.zeros([new_batch_size, self.num_heads], dtype=np.float32), DEV) 
+            self.tmp_o_tvm = tvm.nd.array(
+                np.zeros([new_batch_size, self.num_heads, self.head_dim], dtype=np.float32), DEV
+            )
+            self.tmp_lse_tvm = tvm.nd.array(
+                np.zeros([new_batch_size, self.num_heads], dtype=np.float32), DEV
+            )
 
+
+@pytest.mark.parametrize("num_heads", [8])
+@pytest.mark.parametrize("seq_len", [2048])
+@pytest.mark.parametrize("head_dim", [128])
+@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64]])
 def test(num_heads, seq_len, head_dim, batch_size_list):
 
     plan_info = PlanInfo(num_heads, head_dim)
@@ -200,6 +225,7 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
         O_TYPE = "float32" if SPLIT_KV else "float16"
         BDX, BDY = plan_info.bd_d
 
+        # fmt: off
         @T.prim_func(tirp=True)
         def decode_kernel(q_ptr: T.handle, kv_ptr: T.handle, o_ptr: T.handle, lse_ptr: T.handle,
                         kv_indptr: T.handle, kv_last_page_len: T.handle, kv_indices: T.handle,
@@ -440,7 +466,7 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
                                 
                             T.ptx.bar.sync(1, BDX * BDY)
                             cur[0] += SM_COUNT
-        
+        # fmt: on
         return decode_kernel
 
     def merge():
@@ -450,6 +476,7 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
         PIPE_DEPTH = plan_info.pipe_m
         BDX, BDY = plan_info.bd_m
 
+        # fmt: off
         @T.prim_func(tirp=True)
         def merge_kernel(o_tmp_ptr: T.handle, o_indptr: T.handle, o_ptr: T.handle, lse_tmp_ptr: T.handle, lse_ptr: T.handle):
             batch_size = T.int32()
@@ -590,11 +617,13 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
                                     lse_global[batch_idx[0], head_idx[0]] = m[0] + T.log2(d[0])
                             idx[0] += SM_COUNT
                         T.ptx.bar.sync(2, BDX * BDY)  
-        
+        # fmt: on
         return merge_kernel
 
     def test_dynamic_batch_size(batch_size, mod_decode_no_split_kv, mod_decode_split_kv, mod_merge):
-        Q, KV_data, KV_indptr, KV_last_page_len, KV_indices = perpare_data(batch_size, num_heads, seq_len, head_dim)
+        Q, KV_data, KV_indptr, KV_last_page_len, KV_indices = perpare_data(
+            batch_size, num_heads, seq_len, head_dim
+        )
 
         def tir():
 
@@ -608,15 +637,39 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
 
             def func():
                 if plan_info.split_kv:
-                    mod_decode_split_kv(q_tvm, kv_data_tvm, plan_info.tmp_o_tvm, plan_info.tmp_lse_tvm, 
-                                        kv_indptr_tvm, kv_last_page_len_tvm, kv_indices_tvm, plan_info.request_indices_tvm, 
-                                        plan_info.kv_tile_indices_tvm, plan_info.max_chunk_size) 
-                    mod_merge(plan_info.tmp_o_tvm, plan_info.o_indptr_tvm, plan_info.o_tvm, plan_info.tmp_lse_tvm, plan_info.lse_tvm)
+                    mod_decode_split_kv(
+                        q_tvm,
+                        kv_data_tvm,
+                        plan_info.tmp_o_tvm,
+                        plan_info.tmp_lse_tvm,
+                        kv_indptr_tvm,
+                        kv_last_page_len_tvm,
+                        kv_indices_tvm,
+                        plan_info.request_indices_tvm,
+                        plan_info.kv_tile_indices_tvm,
+                        plan_info.max_chunk_size,
+                    )
+                    mod_merge(
+                        plan_info.tmp_o_tvm,
+                        plan_info.o_indptr_tvm,
+                        plan_info.o_tvm,
+                        plan_info.tmp_lse_tvm,
+                        plan_info.lse_tvm,
+                    )
                 else:
-                    mod_decode_no_split_kv(q_tvm, kv_data_tvm, plan_info.o_tvm, plan_info.lse_tvm, 
-                                           kv_indptr_tvm, kv_last_page_len_tvm, kv_indices_tvm, plan_info.request_indices_tvm, 
-                                           plan_info.kv_tile_indices_tvm, plan_info.max_chunk_size)
-            
+                    mod_decode_no_split_kv(
+                        q_tvm,
+                        kv_data_tvm,
+                        plan_info.o_tvm,
+                        plan_info.lse_tvm,
+                        kv_indptr_tvm,
+                        kv_last_page_len_tvm,
+                        kv_indices_tvm,
+                        plan_info.request_indices_tvm,
+                        plan_info.kv_tile_indices_tvm,
+                        plan_info.max_chunk_size,
+                    )
+
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
             func()
             print(f"TIR time: {ms:.3f} ms")
@@ -674,7 +727,10 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
             func()
             print(f"FlashInfer time: {ms:.3f} ms")
 
-            return o.reshape(batch_size, num_heads, head_dim).cpu().numpy(), lse.reshape(batch_size, num_heads).cpu().numpy()
+            return (
+                o.reshape(batch_size, num_heads, head_dim).cpu().numpy(),
+                lse.reshape(batch_size, num_heads).cpu().numpy(),
+            )
 
         with ProtonContext("batch_decode"):
             print(f"Testing (B,H,N,D) = ({batch_size},{num_heads},{seq_len},{head_dim})")
@@ -687,7 +743,9 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
     target = tvm.target.Target("cuda")
     with target:
         mod_decode_no_split_kv = tvm.IRModule({"main": decode(False)})
-        mod_decode_no_split_kv = tvm.compile(mod_decode_no_split_kv, target=target, tir_pipeline="tirp")
+        mod_decode_no_split_kv = tvm.compile(
+            mod_decode_no_split_kv, target=target, tir_pipeline="tirp"
+        )
         # src = mod_decode_no_split_kv.mod.imported_modules[0].get_source()
         # print(src)
         mod_decode_split_kv = tvm.IRModule({"main": decode(True)})
@@ -696,7 +754,8 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
         mod_merge = tvm.compile(mod_merge, target=target, tir_pipeline="tirp")
 
     for batch_size in batch_size_list:
-        test_dynamic_batch_size(batch_size, mod_decode_no_split_kv, mod_decode_split_kv, mod_merge)     
+        test_dynamic_batch_size(batch_size, mod_decode_no_split_kv, mod_decode_split_kv, mod_merge)
+
 
 if __name__ == "__main__":
     import itertools
@@ -705,6 +764,8 @@ if __name__ == "__main__":
     seq_len_list = [2048]
     head_dim_list = [128]
     batch_size_list = [1, 2, 4, 8, 16, 32, 64]
-    
-    for (num_heads, seq_len, head_dim) in itertools.product(num_heads_list, seq_len_list, head_dim_list):
+
+    for num_heads, seq_len, head_dim in itertools.product(
+        num_heads_list, seq_len_list, head_dim_list
+    ):
         test(num_heads, seq_len, head_dim, batch_size_list)

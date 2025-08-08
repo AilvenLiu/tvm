@@ -2697,6 +2697,7 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
   );
 }}
 """
+
     return cuda_func_call(func_name, dst_ptr, bar, tensormap, *coords, source_code=source_code)
 
 
@@ -2711,7 +2712,7 @@ def codegen_ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *
     if cache_hint != "":
         cache_hint = str(cache_hint)[1:-1]
 
-    func_name = f"ptx_cp_async_bulk_tensor_shared_to_global_{dim}d" + f"_{cache_hint}" if cache_hint != "" else ""
+    func_name = f"ptx_cp_async_bulk_tensor_shared_to_global_{dim}d" + (f"_{cache_hint}" if cache_hint != "" else "")
     coord_arg_list = ", ".join([f"int coord{i}" for i in range(dim)])
 
     coord_indices = [str(2 + i) for i in range(dim)] if cache_hint == "" else [str(3 + i) for i in range(dim)]

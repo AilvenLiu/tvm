@@ -22,8 +22,10 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from ..utils import bench, ProtonContext
 
+
 def ceildiv(a, b):
     return (a + b - 1) // b
+
 
 # Problem config
 SEQ_LEN = 128
@@ -43,12 +45,16 @@ THREAD_NUM = min(256, INTERMEDIATE_SIZE // VEC_SIZE)
 BDX = 32
 BDY = THREAD_NUM // BDX
 
+
 def perpare_data():
     import torch
+
     torch.manual_seed(42)
     input_cat = torch.randn(SEQ_LEN, INTERMEDIATE_SIZE * 2).half()
     return input_cat
 
+
+# fmt: off
 @T.prim_func(tirp=True)
 def fused_split_silu_multiply(input_cat_ptr: T.handle, output_ptr: T.handle):
     input_cat_global = T.match_buffer(input_cat_ptr, [SEQ_LEN, INTERMEDIATE_SIZE * 2], "float16", scope="global", layout="default")
@@ -94,17 +100,22 @@ def fused_split1_silu1_multiply1(p_fastertransformer_gemm_fp16_int514: T.handle,
                 T.reads(fastertransformer_gemm_fp16_int514[T.int64(0), v0, v1:v1 + T.int64(INTERMEDIATE_SIZE + 1)])
                 T.writes(T_multiply_intermediate_1[T.int64(0), v0, v1])
                 T_multiply_intermediate_1[T.int64(0), v0, v1] = fastertransformer_gemm_fp16_int514[T.int64(0), v0, v1] * T.sigmoid(fastertransformer_gemm_fp16_int514[T.int64(0), v0, v1]) * fastertransformer_gemm_fp16_int514[T.int64(0), v0, v1 + T.int64(INTERMEDIATE_SIZE)]
-    
+# fmt: on
+
+
 def test():
 
     input_cat = perpare_data()
 
     def naive():
         import torch
+
         input_cat_naive = input_cat.clone().to("cuda")
 
         def func():
-            return input_cat_naive[..., INTERMEDIATE_SIZE:] * torch.nn.functional.silu(input_cat_naive[..., :INTERMEDIATE_SIZE])
+            return input_cat_naive[..., INTERMEDIATE_SIZE:] * torch.nn.functional.silu(
+                input_cat_naive[..., :INTERMEDIATE_SIZE]
+            )
 
         ms = bench(func, warmup=0, repeat=30, proton_name="naive")
         print(f"torch time: {ms:.3f} ms")
@@ -114,7 +125,9 @@ def test():
     def tir():
         DEV = tvm.cuda(0)
         input_cat_tvm = tvm.nd.array(input_cat.clone(), device=DEV)
-        output_tvm = tvm.nd.array(np.zeros((SEQ_LEN, INTERMEDIATE_SIZE), dtype=np.float16), device=DEV)
+        output_tvm = tvm.nd.array(
+            np.zeros((SEQ_LEN, INTERMEDIATE_SIZE), dtype=np.float16), device=DEV
+        )
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule({"main": fused_split_silu_multiply})
@@ -124,11 +137,15 @@ def test():
             print(f"TIR time: {ms:.3f} ms")
 
         return output_tvm.numpy()
-    
+
     def tir2():
         DEV = tvm.cuda(0)
-        input_cat_tvm = tvm.nd.array(input_cat.clone().reshape(1, SEQ_LEN, INTERMEDIATE_SIZE * 2), device=DEV)
-        output_tvm = tvm.nd.array(np.zeros((1, SEQ_LEN, INTERMEDIATE_SIZE), dtype=np.float16), device=DEV)
+        input_cat_tvm = tvm.nd.array(
+            input_cat.clone().reshape(1, SEQ_LEN, INTERMEDIATE_SIZE * 2), device=DEV
+        )
+        output_tvm = tvm.nd.array(
+            np.zeros((1, SEQ_LEN, INTERMEDIATE_SIZE), dtype=np.float16), device=DEV
+        )
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule({"main": fused_split1_silu1_multiply1})

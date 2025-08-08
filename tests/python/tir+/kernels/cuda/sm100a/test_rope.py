@@ -3,42 +3,59 @@ import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from ..utils import bench, ProtonContext
+import pytest
 
 F16_BYTES = 2
 F32_BYTES = 4
 SM_COUNT = 148
 MAX_BLK_PER_SM = 32
 
+
 def ceildiv(a, b):
     return (a + b - 1) // b
+
 
 def find_power_of_two(n):
     assert n > 0 and (n & (n - 1)) == 0
     return n.bit_length() - 1
 
+
 def prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size):
     base = 8000
-    inv_freq = 1.0 / (base ** (torch.arange(0, rotary_dim, 2, dtype=torch.float, device="cuda") / rotary_dim))
+    inv_freq = 1.0 / (
+        base ** (torch.arange(0, rotary_dim, 2, dtype=torch.float, device="cuda") / rotary_dim)
+    )
     t = torch.arange(max_position_embeddings, dtype=torch.float, device="cuda")
     freqs = torch.einsum("i,j -> ij", t, inv_freq)
     cos = freqs.cos()
     sin = freqs.sin()
-    cos_sin_cache = torch.cat((cos, sin), dim=-1) # shape: [max_position_embeddings, rotary_dim]
-    pos_ids = torch.arange(seq_len, device="cuda", dtype=torch.int32).repeat(batch_size) # shape: [nnz]
-    query = torch.randn(batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda") # shape: [nnz, num_heads * head_dim]
-    key = torch.randn(batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda") # shape: [nnz, num_heads * head_dim]
+    cos_sin_cache = torch.cat((cos, sin), dim=-1)  # shape: [max_position_embeddings, rotary_dim]
+    pos_ids = torch.arange(seq_len, device="cuda", dtype=torch.int32).repeat(
+        batch_size
+    )  # shape: [nnz]
+    query = torch.randn(
+        batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda"
+    )  # shape: [nnz, num_heads * head_dim]
+    key = torch.randn(
+        batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda"
+    )  # shape: [nnz, num_heads * head_dim]
     return cos_sin_cache, pos_ids, query, key
 
 
+@pytest.mark.parametrize("num_heads", [1])
+@pytest.mark.parametrize("seq_len", [1])
+@pytest.mark.parametrize("head_dim", [128])
+@pytest.mark.parametrize("batch_size_list", [[128]])
 def test_rope(num_heads, seq_len, head_dim, batch_size_list):
 
-    rotary_dim = head_dim # can be different
-    max_position_embeddings = seq_len # can be larger
+    rotary_dim = head_dim  # can be different
+    max_position_embeddings = seq_len  # can be larger
     vec_size = max(16 // F16_BYTES, rotary_dim // 32)
     bdx = rotary_dim // vec_size
     num_threads = max(256, bdx)
     bdy = num_threads // bdx
 
+    # fmt: off
     @T.prim_func(tirp=True)
     def rope_with_cos_sin_cache(q: T.handle, k: T.handle, q_rope: T.handle, k_rope: T.handle, cos_sin_cache: T.handle, pos_ids: T.handle):
         nnz = T.int32()
@@ -96,10 +113,12 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
                     else:
                         compute_rope(k_global, k_rope_global)
                     idx[0] += SM_COUNT
-                
+    # fmt: on
 
     def test_dynamic_batch(num_heads, seq_len, head_dim, batch_size, mod):
-        cos_sin_cache, pos_ids, query, key = prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size)
+        cos_sin_cache, pos_ids, query, key = prepare_data(
+            rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size
+        )
 
         def naive():
             pos_ids_naive, query_naive, key_naive = pos_ids, query.clone(), key.clone()
@@ -120,15 +139,15 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
 
             query_shape = query_naive.shape
             query_naive = query_naive.view(num_tokens, -1, head_dim)
-            query_rot = query_naive[..., : rotary_dim]
-            query_pass = query_naive[..., rotary_dim :]
+            query_rot = query_naive[..., :rotary_dim]
+            query_pass = query_naive[..., rotary_dim:]
             query_rot = rotary_emb(query_rot)
             query_naive = torch.cat((query_rot, query_pass), dim=-1).reshape(query_shape)
 
             key_shape = key_naive.shape
             key_naive = key_naive.view(num_tokens, -1, head_dim)
-            key_rot = key_naive[..., : rotary_dim]
-            key_pass = key_naive[..., rotary_dim :]
+            key_rot = key_naive[..., :rotary_dim]
+            key_pass = key_naive[..., rotary_dim:]
             key_rot = rotary_emb(key_rot)
             key_naive = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
 
@@ -138,7 +157,12 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
 
         def flashinfer():
             import flashinfer
-            pos_ids_flashinfer, query_flashinfer, key_flashinfer = pos_ids, query.clone(), key.clone()
+
+            pos_ids_flashinfer, query_flashinfer, key_flashinfer = (
+                pos_ids,
+                query.clone(),
+                key.clone(),
+            )
             func = lambda: flashinfer.rope.apply_rope_with_cos_sin_cache(
                 positions=pos_ids_flashinfer,
                 query=query_flashinfer,
@@ -151,7 +175,7 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
             print(f"flashinfer time: {ms:.3f} ms")
             q_out, k_out = func()
             return q_out.cpu().numpy(), k_out.cpu().numpy()
-        
+
         def tir():
             DEV = tvm.cuda(0)
             pos_ids_tvm = tvm.nd.array(pos_ids.cpu().numpy(), DEV)
@@ -160,11 +184,14 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
             query_out_tvm = tvm.nd.array(query.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
             key_out_tvm = tvm.nd.array(key.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
             cos_sin_cache_tvm = tvm.nd.array(cos_sin_cache.cpu().numpy(), DEV)
-            func = lambda: mod(query_tvm, key_tvm, query_out_tvm, key_out_tvm, cos_sin_cache_tvm, pos_ids_tvm)
+            func = lambda: mod(
+                query_tvm, key_tvm, query_out_tvm, key_out_tvm, cos_sin_cache_tvm, pos_ids_tvm
+            )
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
             print(f"flashinfer time: {ms:.3f} ms")
-            return query_out_tvm.numpy().reshape(-1, num_heads * head_dim), key_out_tvm.numpy().reshape(-1, num_heads * head_dim)
-            
+            return query_out_tvm.numpy().reshape(
+                -1, num_heads * head_dim
+            ), key_out_tvm.numpy().reshape(-1, num_heads * head_dim)
 
         q_n, k_n = naive()
         q_f, k_f = flashinfer()
@@ -175,11 +202,10 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
         torch.testing.assert_close(q_n, q_t, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(k_n, k_t, rtol=1e-3, atol=1e-3)
 
-
     # compile tir kernel
     target = tvm.target.Target("cuda")
     with target:
-        mod= tvm.IRModule({"main": rope_with_cos_sin_cache})
+        mod = tvm.IRModule({"main": rope_with_cos_sin_cache})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         src = mod.mod.imported_modules[0].get_source()
         print(src)
@@ -196,5 +222,8 @@ if __name__ == "__main__":
     batch_size_list = [128]
 
     import itertools
-    for (num_heads, seq_len, head_dim) in itertools.product(num_heads_list, seq_len_list, head_dim_list):
+
+    for num_heads, seq_len, head_dim in itertools.product(
+        num_heads_list, seq_len_list, head_dim_list
+    ):
         test_rope(num_heads, seq_len, head_dim, batch_size_list)
