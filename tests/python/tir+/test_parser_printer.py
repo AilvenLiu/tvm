@@ -855,5 +855,24 @@ def test_event():
     assert_structural_equal(test, from_source(code))
 
 
+def test_range():
+    # fmt: off
+    @T.prim_func(tirp=True, private=True)
+    def test():
+        l = T.meta_var([i for i in range(10)])
+        T.evaluate(l[3])
+        
+    @T.prim_func(tirp=True, private=True)
+    def expected():
+        T.evaluate(3)
+    # fmt: on
+
+    code = test.script()
+    print(code)
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+    tvm.ir.assert_structural_equal(test, expected)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

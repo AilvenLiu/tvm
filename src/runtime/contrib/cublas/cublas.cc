@@ -152,7 +152,7 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
   auto compute_type = CUBLAS_COMPUTE_32F;
   auto scale_type = CUDA_R_32F;
   cudaDataType_t ab_type = CUDA_R_32F;
-  cudaDataType_t d_type = CUDA_R_32F;
+  cudaDataType_t c_type = CUDA_R_32F;
   float one_fp32 = 1.0;
   float zero_fp32 = 0.0;
   int32_t one_i32 = 1;
@@ -175,17 +175,15 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
   }
 
   if (TypeMatch(C->dtype, kDLFloat, 16)) {
-    d_type = CUDA_R_16F;
+    c_type = CUDA_R_16F;
   } else if (TypeMatch(C->dtype, kDLBfloat, 16)) {
-    d_type = CUDA_R_16BF;
+    c_type = CUDA_R_16BF;
   } else if (TypeMatch(C->dtype, kDLInt, 32)) {
-    d_type = CUDA_R_32I;
+    c_type = CUDA_R_32I;
     compute_type = CUBLAS_COMPUTE_32I;
     scale_type = CUDA_R_32I;
     alpha = &one_i32;
     beta = &zero_i32;
-  } else if (TypeMatch(C->dtype, DataType::TypeCode::kFloat8_e4m3fn, 8)) {
-    d_type = CUDA_R_8F_E4M3;
   }
 
   cublasLtMatmulDesc_t op_desc;
@@ -219,10 +217,6 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
                                                       &epilogue, sizeof(epilogue)));
   }
 
-  int8_t fastAccum = 1;
-  CHECK_CUBLAS_ERROR(cublasLtMatmulDescSetAttribute(op_desc, CUBLASLT_MATMUL_DESC_FAST_ACCUM,
-                                                    &fastAccum, sizeof(fastAccum)));
-
   int batch_offset_A = A->ndim - 2;
   int batch_offset_B = B->ndim - 2;
 
@@ -248,13 +242,12 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
   int ldb = transa ? N : K;
   int ldc = M;
 
-  cublasLtMatrixLayout_t A_desc, B_desc, C_desc, D_desc;
+  cublasLtMatrixLayout_t A_desc, B_desc, C_desc;
   CHECK_CUBLAS_ERROR(
       cublasLtMatrixLayoutCreate(&A_desc, ab_type, !transb ? M : K, !transb ? K : M, lda));
   CHECK_CUBLAS_ERROR(
       cublasLtMatrixLayoutCreate(&B_desc, ab_type, !transa ? K : N, !transa ? N : K, ldb));
-  CHECK_CUBLAS_ERROR(cublasLtMatrixLayoutCreate(&C_desc, CUDA_R_16F, M, N, ldc));
-  CHECK_CUBLAS_ERROR(cublasLtMatrixLayoutCreate(&D_desc, d_type, M, N, ldc));
+  CHECK_CUBLAS_ERROR(cublasLtMatrixLayoutCreate(&C_desc, c_type, M, N, ldc));
 
   if (use_batched_gemm) {
     auto get_batch_count = [](int64_t* shape, int batch_offset) {
@@ -285,19 +278,19 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
 
     set_batch(A_desc, batch_count_A, batch_stride_A);
     set_batch(B_desc, batch_count_B, batch_stride_B);
-    set_batch(D_desc, batch_count_C, batch_stride_C);
+    set_batch(C_desc, batch_count_C, batch_stride_C);
   }
 
   auto A_data = static_cast<char*>(A->data) + A->byte_offset;
   auto B_data = static_cast<char*>(B->data) + B->byte_offset;
-  auto D_data = static_cast<char*>(C->data) + C->byte_offset;
+  auto C_data = static_cast<char*>(C->data) + C->byte_offset;
 
   cublasLtMatmulPreferenceSetAttribute(matmul_pref_desc, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
                                        &workspace_size, sizeof(size_t));
 
   cublasLtMatmulHeuristicResult_t heuristic_result = {};
   int returned_result = 0;
-  CHECK_CUBLAS_ERROR(cublasLtMatmulAlgoGetHeuristic(hdl, op_desc, A_desc, B_desc, C_desc, D_desc,
+  CHECK_CUBLAS_ERROR(cublasLtMatmulAlgoGetHeuristic(hdl, op_desc, A_desc, B_desc, C_desc, C_desc,
                                                     matmul_pref_desc, 1, &heuristic_result,
                                                     &returned_result));
   if (returned_result == 0) {
@@ -305,14 +298,13 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
   }
 
   CHECK_CUBLAS_ERROR(cublasLtMatmul(hdl, op_desc, alpha, B_data, A_desc, A_data, B_desc, beta,
-                                    nullptr, C_desc, D_data, D_desc, &heuristic_result.algo,
+                                    C_data, C_desc, C_data, C_desc, &heuristic_result.algo,
                                     workspace_ptr, workspace_size, stream));
 
   cublasLtMatmulDescDestroy(op_desc);
   cublasLtMatrixLayoutDestroy(A_desc);
   cublasLtMatrixLayoutDestroy(B_desc);
   cublasLtMatrixLayoutDestroy(C_desc);
-  cublasLtMatrixLayoutDestroy(D_desc);
 }
 
 inline void CallLtIgemm(ffi::PackedArgs args, ffi::Any* ret, cublasLtHandle_t hdl,
@@ -598,49 +590,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
         }
       });
 }
-
-void tvm_cublaslt_fp8_gemm(ffi::PackedArgs args, ffi::Any* ret) {
-  auto x = args[0].cast<DLTensor*>();
-  auto weight = args[1].cast<DLTensor*>();
-  auto workspace = args[2].cast<DLTensor*>();
-  auto alpha = args[3].cast<DLTensor*>();
-  auto out = args[4].cast<DLTensor*>();
-
-  // Workspace is used for storing device-side gemm arguments and cutlass internal workspace.
-  // Recommened size is 4MB.
-  auto func = tvm::ffi::Function::GetGlobalRequired("runtime.get_cuda_stream");
-  ICHECK(func != nullptr);
-  CHECK_GE(x->ndim, 2);
-  CHECK_EQ(weight->ndim, 2);
-  CHECK_EQ(workspace->ndim, 1);
-  CHECK_GE(out->ndim, 2);
-  CHECK_EQ(alpha->dtype.code, kDLFloat);
-  CHECK_EQ(alpha->dtype.bits, 32);
-  CHECK_EQ(alpha->ndim, 1);
-  CHECK_EQ(alpha->shape[0], 1);
-  int64_t m = 1;
-  for (int i = 0; i < x->ndim - 1; ++i) {
-    m *= x->shape[i];
-  }
-  int64_t n = weight->shape[0];
-  CHECK_EQ(x->shape[x->ndim - 1], weight->shape[1]) << "Only col-major weight is supported now.";
-  int64_t k = x->shape[x->ndim - 1];
-  const float* beta = nullptr;
-  cudaStream_t stream = static_cast<cudaStream_t>(func().cast<void*>());
-  tvm::contrib::CuBlasLtThreadEntry* cublas_entry =
-      tvm::contrib::CuBlasLtThreadEntry::ThreadLocal();
-  tvm::contrib::CallCublasLt(cublas_entry->handle, stream, cublas_entry->matmul_pref_desc, x,
-                             weight, nullptr, alpha, nullptr, out, /*transa=*/false,
-                             /*transb=*/true, cublas_entry->workspace_ptr,
-                             cublas_entry->workspace_size, CUBLASLT_EPILOGUE_DEFAULT, std::nullopt);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK({
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def_packed(
-      "tvm.contrib.cublaslt.fp8_gemm",
-      [](ffi::PackedArgs args, ffi::Any* ret) { tvm_cublaslt_fp8_gemm(args, ret); });
-});
 
 }  // namespace contrib
 }  // namespace tvm

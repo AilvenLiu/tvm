@@ -164,7 +164,7 @@ def gpu_2d_continuous_cumsum(
         block_inclusive_inside_block(
             m, n, A, Out, Tmp, src_offset=T.int64(0), tmp_offset=T.int64(0)
         )
-        for i in range(total_rounds):
+        for i in T.serial(total_rounds):
             cur_len = T.ceildiv(n, 1 << (LOG_BLOCK_N * (i + 1)))
             block_inclusive_inside_block(
                 m,
@@ -175,7 +175,7 @@ def gpu_2d_continuous_cumsum(
                 src_offset=i * T.ceildiv(n, block_elem),
                 tmp_offset=(i + 1) * T.ceildiv(n, block_elem),
             )
-        for i in range(total_rounds - 1):
+        for i in T.serial(total_rounds - 1):
             real_idx = total_rounds - 1 - i - 1
             cur_len = T.ceildiv(n, 1 << (LOG_BLOCK_N * (real_idx + 1)))
             update_cross_block(
