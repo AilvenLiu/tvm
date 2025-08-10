@@ -827,7 +827,7 @@ def test():
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
-
+    # fmt: on
 
     DEV = tvm.cuda(0)
     A_fp8, B_fp8, A_scale, B_scale, C, C_standard, C_ref = prepare_data()

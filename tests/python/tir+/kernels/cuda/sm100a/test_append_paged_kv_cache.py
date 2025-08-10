@@ -48,8 +48,10 @@ THREAD_NUM = 256
 BDX = HEAD_DIM // VEC_SIZE
 BDY = THREAD_NUM // BDX
 
+
 def perpare_data():
     import torch
+
     torch.manual_seed(42)
 
     cache = torch.randn(CACHE_SHAPE).half()
@@ -60,6 +62,8 @@ def perpare_data():
 
     return cache, k, v, pos_map
 
+
+# fmt: off
 @T.prim_func(tirp=True)
 def append_paged_kv_cache(cache_ptr: T.handle, k_ptr: T.handle, v_ptr: T.handle, pos_map_ptr: T.handle):
     cache_global = T.match_buffer(cache_ptr, CACHE_SHAPE, "float16", scope="global", layout="default")
@@ -98,6 +102,8 @@ def append_paged_kv_cache(cache_ptr: T.handle, k_ptr: T.handle, v_ptr: T.handle,
                     Tp.copy(cache_global[pos[0] // PAGE_SIZE, 1, head_id[0], pos[0] % PAGE_SIZE, stx:stx + VEC_SIZE], vec[:])
                 
                 idx[0] += SM_COUNT
+# fmt: on
+
 
 def test():
 
@@ -105,20 +111,21 @@ def test():
 
     def naive():
         import torch
+
         cache_naive = cache.clone().to("cuda")
         k_naive = k.to("cuda")
         v_naive = v.to("cuda")
         pos_map_naive = pos_map.to("cuda")
 
         def func():
-            page_indices = torch.div(pos_map_naive, PAGE_SIZE, rounding_mode='floor')
+            page_indices = torch.div(pos_map_naive, PAGE_SIZE, rounding_mode="floor")
             offsets_in_page = torch.remainder(pos_map_naive, PAGE_SIZE)
-            cache_naive[page_indices, 0, :, offsets_in_page, :] = k_naive.permute(0, 2, 1, 3).reshape(
-                cache_naive[page_indices, 0, :, offsets_in_page, :].shape
-            )
-            cache_naive[page_indices, 1, :, offsets_in_page, :] = v_naive.permute(0, 2, 1, 3).reshape(
-                cache_naive[page_indices, 1, :, offsets_in_page, :].shape
-            )
+            cache_naive[page_indices, 0, :, offsets_in_page, :] = k_naive.permute(
+                0, 2, 1, 3
+            ).reshape(cache_naive[page_indices, 0, :, offsets_in_page, :].shape)
+            cache_naive[page_indices, 1, :, offsets_in_page, :] = v_naive.permute(
+                0, 2, 1, 3
+            ).reshape(cache_naive[page_indices, 1, :, offsets_in_page, :].shape)
 
         ms = bench(func, warmup=0, repeat=30, proton_name="naive")
         print(f"torch time: {ms:.3f} ms")

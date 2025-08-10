@@ -81,6 +81,7 @@ assert N % (BLK_N * CTA_GROUP) == 0
 TILE_M_NUM = ceildiv(M, BLK_M * CTA_GROUP)
 TILE_N_NUM = ceildiv(N, BLK_N * CTA_GROUP)
 
+
 class TileScheduler:
 
     def __init__(self, prefix: str):
@@ -100,12 +101,12 @@ class TileScheduler:
                 linear_idx % TILE_GROUPS_ROW_SIZE
             )
             self.n_idx = (linear_idx // TILE_GROUPS_ROW_SIZE) % TILE_N_NUM
-            self.k_idx = ((linear_idx % TILE_GROUPS_SIZE) // (TILE_GROUPS_ROW_SIZE * TILE_N_NUM))
+            self.k_idx = (linear_idx % TILE_GROUPS_SIZE) // (TILE_GROUPS_ROW_SIZE * TILE_N_NUM)
         elif TILE_FINAL_ROWS > 0:
             remainder_idx = linear_idx - TILE_GROUPS_SIZE * TILE_GROUPS_NUM
             self.m_idx = TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE + remainder_idx % TILE_FINAL_ROWS
             self.n_idx = (remainder_idx // TILE_FINAL_ROWS) % TILE_N_NUM
-            self.k_idx = (remainder_idx // (TILE_FINAL_ROWS * TILE_N_NUM))
+            self.k_idx = remainder_idx // (TILE_FINAL_ROWS * TILE_N_NUM)
 
     @T.macro
     def init(self, linear_init):
@@ -278,18 +279,12 @@ class ProfileEventType(Enum):
     INIT = 5
 
 
-event_type_names = [
-    "issue-tma",
-    "issue-mma",
-    "tmem-ld",
-    "writeback",
-    "wait",
-    "init"
-]
+event_type_names = ["issue-tma", "issue-mma", "tmem-ld", "writeback", "wait", "init"]
 NUM_GROUPS = 3
 PROFILER_BUFFER_SIZE = int(2e6)
 PROFILER_WRITE_STRIDE = SM_NUMBER * NUM_GROUPS
 PROFILER_ON = False
+
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 def test():
@@ -577,19 +572,21 @@ def test():
                             T.ptx.bar.sync(10, 128)
                             sem.semaphore_notify(tid, m_idx, n_idx)
                             tile_scheduler.next_tile()
-                            
-                                
+                      
                 # dealloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
                     T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=1)
 
                 T.tvm_storage_sync("shared")
+    # fmt: on
 
     VEC_SIZE = math.gcd(16 // F32_BYTES, N)
     NUM_THREADS = 512
     BDX = 32
     BDY = NUM_THREADS // BDX
+
+    # fmt: off
     @T.prim_func(tirp=True)
     def reduce(partial_sum: T.Buffer((TILE_K_NUM, M, N), "float32", layout="default"),
                D: T.Buffer((M, N), d_type, layout="default"), 
@@ -625,10 +622,9 @@ def test():
                     for kv in T.vectorized(VEC_SIZE):
                         D[m_idx, n_idx + kv] = vec_16[kv]                    
                     idx[0] += SM_NUMBER
-
+    # fmt: on
 
     A_bf16, B_bf16, C_bf16 = prepare_data()
-
 
     def tir_gemm(A_bf16, B_bf16, C_bf16):
         DEV = tvm.cuda(0)
@@ -662,6 +658,7 @@ def test():
 
     def cublas_gemm(A_bf16, B_bf16):
         import torch
+
         torch_dev = torch.device("cuda")
         A_torch = A_bf16.to(torch_dev)
         B_torch = B_bf16.to(torch_dev)
@@ -675,8 +672,9 @@ def test():
         C_cublas = cublas_gemm(A_bf16, B_bf16)
         partial_sum_tvm, C_tvm = tir_gemm(A_bf16, B_bf16, C_bf16)
 
-
-    np.testing.assert_allclose(partial_sum_tvm.sum(axis=0).astype(np.float16), C_cublas, rtol=1e-3, atol=1e-2)
+    np.testing.assert_allclose(
+        partial_sum_tvm.sum(axis=0).astype(np.float16), C_cublas, rtol=1e-3, atol=1e-2
+    )
     np.testing.assert_allclose(C_tvm, C_cublas, rtol=1e-3, atol=1e-2)
 
 

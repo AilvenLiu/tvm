@@ -37,7 +37,7 @@ MMA_M, MMA_N, MMA_K = 256, 256, 16
 PIPE_CIRCLE_NUM = (K // BLK_K) // SMEM_PIPE_DEPTH
 PIPE_REMAIN_NUM = (K // BLK_K) % SMEM_PIPE_DEPTH
 EPI_TILE = 64
-TMEM_LD_SIZE = 8 
+TMEM_LD_SIZE = 8
 N_COLS = 512
 CTA_GROUP = 2
 SWIZZLE = 3
@@ -50,8 +50,6 @@ SMEM_SIZE = (
 
 assert SMEM_SIZE <= 232448
 assert TMEM_PIPE_DEPTH * MMA_N <= 512
-
-
 
 
 def get_source(func: tvm.tir.PrimFunc) -> str:
@@ -114,7 +112,6 @@ class TileScheduler:
 
     def valid(self):
         return self.linear_idx < TILE_M_NUM * TILE_N_NUM
-    
 
 
 class Barriers:
@@ -153,12 +150,14 @@ class BarMMA2LD(Barriers):
     @T.macro
     def arrive(self, idx):
         T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
-        
+
+
 class BarMMA2TMA(Barriers):
 
     @T.macro
     def arrive(self, idx):
         T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP, cta_mask=3)
+
 
 class BarLD2MMA(Barriers):
 
@@ -166,39 +165,54 @@ class BarLD2MMA(Barriers):
     def arrive(self, idx):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
+
 @T.macro
 def warp_sync():
-    T.cuda.func_call("sync_warp", source_code = f"""
+    T.cuda.func_call(
+        "sync_warp",
+        source_code=f"""
 __forceinline__ __device__ void sync_warp() {{
     __syncwarp();
 }}
-    """)   
+    """,
+    )
 
-    
+
 @T.macro
 def trap_when_assert_failed(cond):
-    T.cuda.func_call("trap_when_assert_fail", cond, source_code=f"""
+    T.cuda.func_call(
+        "trap_when_assert_fail",
+        cond,
+        source_code=f"""
 __forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
     do {{
         if (not (cond))
             asm("trap;");
     }} while (0);
 }}
-    """)
+    """,
+    )
+
 
 @T.macro
 def float22half2(dst, src):
-    T.cuda.func_call("float22half2", dst, src, source_code=f"""
+    T.cuda.func_call(
+        "float22half2",
+        dst,
+        src,
+        source_code=f"""
 __forceinline__ __device__ void float22half2(void* dst, void* src) {{
     half2* dst_p = (half2*) dst;
     float2* src_p = (float2*) src;
     *dst_p = __float22half2_rn(*src_p);
 }}
-    """)
+    """,
+    )
 
 
 def prepare_data():
     import torch
+
     A_bf16 = torch.randn((M, K), dtype=torch.float16)
     B_bf16 = torch.randn((N, K), dtype=torch.float16)
     C_empty = torch.zeros((M, N), dtype=torch.float16)
@@ -474,10 +488,9 @@ def test():
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
-
+    # fmt: on
 
     A_bf16, B_bf16, C_bf16 = prepare_data()
-
 
     def tir_gemm(A_bf16, B_bf16, C_bf16):
         DEV = tvm.cuda(0)
@@ -496,6 +509,7 @@ def test():
 
     def cublas_gemm(A_bf16, B_bf16):
         import torch
+
         torch_dev = torch.device("cuda")
         A_torch = A_bf16.to(torch_dev)
         B_torch = B_bf16.to(torch_dev)
