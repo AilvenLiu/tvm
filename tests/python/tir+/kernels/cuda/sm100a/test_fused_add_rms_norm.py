@@ -90,14 +90,14 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
                                 Tp.copy(residual_vec[:], residual_global[idx[0], st:st + vec_size])
                                 Tp.cast(input_vec_f32[:], input_vec[:])
                                 Tp.cast(residual_vec_f32[:], residual_vec[:])
-                            for kv in T.unroll(vec_size):
-                                x_tmp[0] = input_vec_f32[kv] + residual_vec_f32[kv]
-                                sum_sq[0] += x_tmp[0] * x_tmp[0]
-                                residual_vec[kv] = T.cast(x_tmp[0], "float16")
-                                x_vec[kv] = x_tmp[0]
-                            if st < hidden_size:
-                                Tp.copy(residual_global[idx[0], st:st + vec_size], residual_vec[:])
-                                Tp.copy(x_smem[st:st + vec_size], x_vec[:])
+                                for kv in T.unroll(vec_size):
+                                    x_tmp[0] = input_vec_f32[kv] + residual_vec_f32[kv]
+                                    sum_sq[0] += x_tmp[0] * x_tmp[0]
+                                    residual_vec[kv] = T.cast(x_tmp[0], "float16")
+                                    x_vec[kv] = x_tmp[0]
+                                if st < hidden_size:
+                                    Tp.copy(residual_global[idx[0], st:st + vec_size], residual_vec[:])
+                                    Tp.copy(x_smem[st:st + vec_size], x_vec[:])
                         
                         # warp reduce sum
                         for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
@@ -205,7 +205,7 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
 
 
 if __name__ == "__main__":
-    hidden_size_list = [4096]
+    hidden_size_list = [5120]
     batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128]
     for hidden_size in hidden_size_list:
         test_fused_add_rmsnorm(hidden_size, batch_size_list)

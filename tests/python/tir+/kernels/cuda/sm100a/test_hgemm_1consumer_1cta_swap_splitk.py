@@ -466,9 +466,9 @@ def test(batch_size):
                                                                                     ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)          
                                                             
                                                 if ko == 0 and ks == 0 and ki == 0:
-                                                    T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descB, descA, descI, False, CTA_GROUP, False)
+                                                    T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_M, descB, descA, descI, False, CTA_GROUP, False)
                                                 else:
-                                                    T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descB, descA, descI, False, CTA_GROUP, True)
+                                                    T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_M, descB, descA, descI, False, CTA_GROUP, True)
                                             mma2tma_bar.arrive(ks)
                                             if PROFILER_ON:
                                                 T.timer_end_cuda(ProfileEventType.IssueMMA, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id==0)
