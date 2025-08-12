@@ -2,7 +2,7 @@ import math
 import ml_dtypes
 import numpy as np
 from enum import Enum
-
+import pytest
 import tvm
 from tvm.ir import PointerType, PrimType
 from tvm.script import tir as T
@@ -40,7 +40,7 @@ F128_BYTES = 16
 a_type = tvm.DataType("float16")
 b_type = tvm.DataType("float16")
 d_type = tvm.DataType("float16")
-M, N, K = 128, 8192, 8192
+N, K = 8192, 8192
 TILE_K = 4096
 BLK_M, BLK_N, BLK_K = 128, 128, 64
 MMA_M, MMA_N, MMA_K = 128, 128, 16
@@ -71,31 +71,31 @@ def get_source(func: tvm.tir.PrimFunc) -> str:
     return src, mod
 
 
-def flops(ms):
+def flops(M, ms):
     return M * N * K * 2 / (ms * 1e-3)
 
 
 TILE_GROUPS_ROW_SIZE = 16
 # assert M % (BLK_M * CTA_GROUP) == 0
 assert N % (BLK_N * CTA_GROUP) == 0
-TILE_M_NUM = ceildiv(M, BLK_M * CTA_GROUP)
 TILE_N_NUM = ceildiv(N, BLK_N * CTA_GROUP)
 
 
 class TileScheduler:
 
-    def __init__(self, prefix: str):
+    def __init__(self, prefix: str, M):
         self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
         self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
         self.k_idx = T.local_cell("int32", name=prefix + "_k_idx")
         self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
         self.tile_idx = T.local_cell("int32", name="tile_idx")
+        self.TILE_M_NUM = ceildiv(M, BLK_M * CTA_GROUP)
 
     @T.macro
     def update_current_m_n_idx(self, linear_idx):
-        TILE_GROUPS_NUM = TILE_M_NUM // TILE_GROUPS_ROW_SIZE
+        TILE_GROUPS_NUM = self.TILE_M_NUM // TILE_GROUPS_ROW_SIZE
         TILE_GROUPS_SIZE = TILE_GROUPS_ROW_SIZE * TILE_N_NUM * TILE_K_NUM
-        TILE_FINAL_ROWS = TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE)
+        TILE_FINAL_ROWS = self.TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE)
         if linear_idx < TILE_GROUPS_NUM * TILE_GROUPS_SIZE and TILE_GROUPS_NUM > 0:
             self.m_idx = linear_idx // TILE_GROUPS_SIZE * TILE_GROUPS_ROW_SIZE + (
                 linear_idx % TILE_GROUPS_ROW_SIZE
@@ -121,7 +121,7 @@ class TileScheduler:
         self.update_current_m_n_idx(self.linear_idx)
 
     def valid(self):
-        return self.linear_idx < TILE_M_NUM * TILE_N_NUM * TILE_K_NUM
+        return self.linear_idx < self.TILE_M_NUM * TILE_N_NUM * TILE_K_NUM
 
 
 atomic_add_system_uint64 = f"""
@@ -259,7 +259,7 @@ __forceinline__ __device__ void float22half2(void* dst, void* src) {{
     )
 
 
-def prepare_data():
+def prepare_data(M):
     import torch
 
     A_bf16 = torch.randn((M, K), dtype=torch.float16)
@@ -287,7 +287,8 @@ PROFILER_ON = False
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
-def test():
+@pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128])
+def test(batch_size):
 
     A_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
@@ -303,21 +304,20 @@ def test():
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def hgemm(A: T.Buffer((M, K), a_type, layout="default"), B: T.Buffer((N, K), b_type, layout="default"), partial_sum: T.Buffer((TILE_K_NUM, M, N), "float32", layout="default"),
-                D: T.Buffer((M, N), d_type, layout="default"), semaphore: T.Buffer((M // BLK_M, N // BLK_N), "uint64", layout="default"), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
-        
+    def hgemm(A_ptr: T.handle, B: T.Buffer((N, K), b_type), partial_sum_ptr: T.handle,
+             profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
+        M = T.int32()
+        A = T.match_buffer(A_ptr, [M, K], a_type, layout="default")
+        partial_sum = T.match_buffer(partial_sum_ptr, [TILE_K_NUM, M, N], "float32", layout="default")
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         partial_sum_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         T.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, a_type, 2, A.data,
                       K, M, K * F16_BYTES, BLK_K, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
         T.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, b_type, 2, B.data, 
                       K, N, K * F16_BYTES, BLK_K, BLK_N, 1, 1, 0, SWIZZLE, 0, 0)
         T.call_packed("runtime.cuTensorMapEncodeTiled", partial_sum_tensor_map, "float32", 3, partial_sum.data,
                       N, M, TILE_K_NUM, N * F32_BYTES, N * M * F32_BYTES, MMA_N, EPI_TILE, 1, 1, 1, 1, 0, 0, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", D_tensor_map, d_type, 2, D.data,
-                      N, M, N * F16_BYTES, MMA_N, EPI_TILE, 1, 1, 0, 0, 0, 0)
         with T.kernel():
             # cbx, cby = T.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
             bx = T.cta_id([SM_NUMBER], parent="kernel")
@@ -345,13 +345,12 @@ def test():
                 descI = T.local_cell("uint32")
                 profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
                 profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
-                sem = T.meta_var(Semaphore(cnt=TILE_K_NUM, buffer=semaphore))
                 # initialize
                 tma2mma_bar = T.meta_var(BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True))
                 mma2tma_bar = T.meta_var(BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))
                 mma2ld_bar = T.meta_var(BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True))
                 ld2mma_bar = T.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
-                tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
+                tile_scheduler = T.meta_var(TileScheduler("tile_scheduler", M))
                 tma2mma_bar.init(1)
                 mma2ld_bar.init(1)
                 mma2tma_bar.init(1)
@@ -570,7 +569,6 @@ def test():
                             if lane_id == 0 and warp_id == 0:
                                 T.ptx.cp_async.bulk.wait_group(0)
                             T.ptx.bar.sync(10, 128)
-                            sem.semaphore_notify(tid, m_idx, n_idx)
                             tile_scheduler.next_tile()
                       
                 # dealloc TMEM
@@ -588,14 +586,14 @@ def test():
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def reduce(partial_sum: T.Buffer((TILE_K_NUM, M, N), "float32", layout="default"),
-               D: T.Buffer((M, N), d_type, layout="default"), 
-               semaphore: T.Buffer((M // BLK_M, N // BLK_N), "uint64", layout="default")):
-        
+    def reduce(partial_sum_ptr: T.handle,
+               D_ptr: T.handle):
+        M = T.int32()
+        partial_sum = T.match_buffer(partial_sum_ptr, [TILE_K_NUM, M, N], "float32", layout="default")
+        D = T.match_buffer(D_ptr, [M, N], d_type, layout="default")
         with T.kernel():
             tx, ty = T.thread_id([BDX, BDY], parent="cta")
             bx = T.cta_id([SM_NUMBER], parent="kernel")
-            sem = T.meta_var(Semaphore(cnt=TILE_K_NUM, buffer=semaphore))
 
             with T.thread():
                 idx = T.alloc_local([1], "int32", layout="default")
@@ -608,7 +606,6 @@ def test():
                     real_idx = (idx[0] * NUM_THREADS + ty * BDX + tx) * VEC_SIZE
                     m_idx = T.meta_var(real_idx // N)
                     n_idx = T.meta_var(real_idx % N)
-                    # sem.semaphore_wait(m_idx // BLK_M, n_idx // BLK_N)
                     for kv in T.unroll(VEC_SIZE):
                         vec_32[kv] = 0.0
                     for kt in T.serial(TILE_K_NUM):
@@ -624,16 +621,14 @@ def test():
                     idx[0] += SM_NUMBER
     # fmt: on
 
-    A_bf16, B_bf16, C_bf16 = prepare_data()
+    A_bf16, B_bf16, C_bf16 = prepare_data(batch_size)
 
     def tir_gemm(A_bf16, B_bf16, C_bf16):
         DEV = tvm.cuda(0)
         A_tvm = tvm.nd.array(A_bf16, device=DEV)
         B_tvm = tvm.nd.array(B_bf16, device=DEV)
         C_tvm = tvm.nd.array(C_bf16, device=DEV)
-        partial_sum_tvm = tvm.nd.array(np.zeros((TILE_K_NUM, M, N), dtype=np.float32), device=DEV)
-        semaphore = np.zeros((M // BLK_M, N // BLK_N), dtype=np.uint64)
-        semaphore_tvm = tvm.nd.array(semaphore, DEV)
+        partial_sum_tvm = tvm.nd.array(np.zeros((TILE_K_NUM, batch_size, N), dtype=np.float32), device=DEV)
         profiler_buffer = np.zeros((PROFILER_BUFFER_SIZE,), dtype=np.uint64)
         profiler_buffer_tvm = tvm.nd.array(profiler_buffer, DEV)
         target = tvm.target.Target("cuda")
@@ -642,15 +637,15 @@ def test():
             src_reduce, mod_reduce = get_source(reduce)
 
             def func():
-                mod_hgemm(A_tvm, B_tvm, partial_sum_tvm, C_tvm, semaphore_tvm, profiler_buffer_tvm)
-                mod_reduce(partial_sum_tvm, C_tvm, semaphore_tvm)
+                mod_hgemm(A_tvm, B_tvm, partial_sum_tvm, profiler_buffer_tvm)
+                mod_reduce(partial_sum_tvm, C_tvm)
 
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
-            print(f"TIR flops: {flops(ms) / 1e12} TFLOPS, time: {ms:.3f} ms")
+            print(f"TIR flops: {flops(batch_size, ms) / 1e12} TFLOPS, time: {ms:.3f} ms")
             if PROFILER_ON:
                 export_to_perfetto_trace(
                     profiler_buffer_tvm.numpy(),
-                    f"hgemm-{M}-{N}-{K}-1consumer-1cta.perfetto-trace",
+                    f"hgemm-{batch_size}-{N}-{K}-1consumer-1cta.perfetto-trace",
                     event_type_names,
                 )
 
@@ -665,7 +660,7 @@ def test():
         func = lambda: torch.matmul(A_torch, B_torch.T)
         C_torch = func()
         ms = bench(func, warmup=10, repeat=30, proton_name="cublas")
-        print(f"CUBLAS flops: {flops(ms) / 1e12} TFLOPS, time: {ms:.3f} ms")
+        print(f"CUBLAS flops: {flops(batch_size, ms) / 1e12} TFLOPS, time: {ms:.3f} ms")
         return C_torch.cpu().numpy()
 
     with ProtonContext("blackwell_gemm"):
@@ -679,4 +674,6 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    for batch_size in [1, 2, 4, 8, 16, 32, 64, 128]:
+        test(batch_size)
+
