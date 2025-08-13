@@ -48,6 +48,7 @@ event_type_names = [
     "fetch",
 ]
 
+M, N, K = 8192, 5120, 25600 // 8
 
 M_CLUSTER = 2
 N_CLUSTER = 1
@@ -64,7 +65,6 @@ F32_BYTES = 4
 F128_BYTES = 16
 
 d_type, a_type, b_type = "float16", "float16", "float16"
-M, N, K = 8192, 5120, 25600 // 8
 WORLD_SIZE = 8
 TOTAL_K = K * WORLD_SIZE
 LOCAL_M = M // WORLD_SIZE
@@ -110,18 +110,17 @@ ENABLE_WARP_BROADCAST = False
 C2P_THREAD_COUNT = 12 * 2 if ENABLE_WARP_BROADCAST else NUM_THREADS * 2
 
 # profiling
-WARMUP_ITERS = 10
-BENCH_ITERS = 30
-TOTAL_ITERS = WARMUP_ITERS + BENCH_ITERS
+WARMUP_ITERS = 5
+TOTAL_ITERS = 30
 
 PROFILER_ON = False
 NUM_GROUPS = 13
 PROFILER_BUFFER_SIZE = int(1e7)
 PROFILER_WRITE_STRIDE = SM_NUMBER * NUM_GROUPS
-CUDA_EVENT_PROFILER = False
+CUDA_EVENT_PROFILER = True
 if CUDA_EVENT_PROFILER:
     PROFILER_ON = False
-VALIDATE = False
+VALIDATE = True
 
 
 ld_reduce_8xfp16 = """
@@ -1018,8 +1017,6 @@ def test_hgemm_rs():
     B_np = np.random.uniform(-1, 1, (WORLD_SIZE, N, K)).astype(b_type)
     A_tvm = tvm.nd.array(A_np, device=DEV)
     B_tvm = tvm.nd.array(B_np, device=DEV)
-    semaphore_np = np.zeros((LOCAL_M // TILE_M, N // TILE_N), dtype="uint64")
-    profiler_buffer_np = np.zeros((PROFILER_BUFFER_SIZE,), dtype="uint64")
 
     class MPMCQueueHost:
         def __init__(self, capacity: int):
@@ -1082,17 +1079,11 @@ def test_hgemm_rs():
 
     res_dict = {
         "gemm_out_res": sess.empty((WORLD_SIZE, M, N), d_type, worker0_only=True),
-        "buffer_res": sess.empty(
-            (WORLD_SIZE, M // BLK_M, N // BLK_N, BLK_M, BLK_N), d_type, worker0_only=True
-        ),
         "out_res": sess.empty((WORLD_SIZE, LOCAL_M, N), d_type, worker0_only=True),
         "profiler_buffer_res": sess.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", worker0_only=True
         ),
         "gemm_out_host": tvm.nd.empty((WORLD_SIZE, M, N), d_type, device=DEV),
-        "buffer_host": tvm.nd.empty(
-            (WORLD_SIZE, M // BLK_M, N // BLK_N, BLK_M, BLK_N), d_type, device=DEV
-        ),
         "out_host": tvm.nd.empty((WORLD_SIZE, LOCAL_M, N), d_type, device=DEV),
         "profiler_buffer_host": tvm.nd.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", device=DEV
@@ -1121,13 +1112,21 @@ def test_hgemm_rs():
         print(mod.mod.imported_modules[0].get_source())
         mod.export_library(path)
 
+        print("Begin kernel execution...")
         rt_mod = sess.load_vm_module(path)
         barrier_dfunc = sess.get_global_func("runtime.disco.nvshmem.barrier_all_on_current_stream")
-        print("Begin kernel execution...")
+        if CUDA_EVENT_PROFILER:
+            timer_create_dfunc = sess.get_global_func("profiling.cuda.event.create")
+            timer_start_dfunc = sess.get_global_func("profiling.cuda.event.start")
+            timer_stop_dfunc = sess.get_global_func("profiling.cuda.event.stop")
+            timer_result_dfunc = sess.get_global_func("profiling.cuda.event.elapsed")
+            timer = timer_create_dfunc()
         sess._sync_all()
         barrier_dfunc()
 
         for itr in range(TOTAL_ITERS):
+            if CUDA_EVENT_PROFILER and itr == WARMUP_ITERS:
+                timer_start_dfunc(timer)
             rt_mod["test_mma_ss_tma_2sm_persistent"](
                 args_dict["A_array"],
                 args_dict["B_array"],
@@ -1144,10 +1143,23 @@ def test_hgemm_rs():
                 args_dict[f"rs_head_array_{itr}"],
                 args_dict[f"rs_tail_array_{itr}"],
             )
-            barrier_dfunc()
 
         # get results
+        if CUDA_EVENT_PROFILER:
+            timer_stop_dfunc(timer)
+            timer_res = timer_result_dfunc(timer)
         sess._sync_all()
+
+        if CUDA_EVENT_PROFILER:
+            timer_res_np = np.zeros((WORLD_SIZE,), dtype=np.float64)
+            for rank in range(WORLD_SIZE):
+                timer_res_np[rank] = (
+                    timer_res.debug_get_from_remote(rank) / (TOTAL_ITERS - WARMUP_ITERS) / 1e6
+                )
+            print(f"GEMM RS duration: {timer_res_np.max():.5f} ms")
+            for rank in range(WORLD_SIZE):
+                print(f"rank {rank}: {timer_res_np[rank]:.5f} ms")
+
         sess.gather_to_worker0(args_dict["gemm_out_array"], res_dict["gemm_out_res"])
         sess.copy_from_worker_0(res_dict["gemm_out_host"], res_dict["gemm_out_res"])
         sess.gather_to_worker0(args_dict["out_array"], res_dict["out_res"])

@@ -333,8 +333,12 @@ class CUDATimerNode : public TimerNode {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("profiling.timer.cuda",
-                        [](Device dev) { return Timer(ffi::make_object<CUDATimerNode>()); });
+  refl::GlobalDef()
+      .def("profiling.cuda.event.create", []() { return Timer(ffi::make_object<CUDATimerNode>()); })
+      .def("profiling.cuda.event.start", [](Timer timer) { timer->Start(); })
+      .def("profiling.cuda.event.stop", [](Timer timer) { timer->Stop(); })
+      .def("profiling.cuda.event.elapsed",
+           [](Timer timer) { return timer->SyncAndGetElapsedNanos(); });
 }
 
 TVM_DLL ffi::String GetCudaFreeMemory() {
