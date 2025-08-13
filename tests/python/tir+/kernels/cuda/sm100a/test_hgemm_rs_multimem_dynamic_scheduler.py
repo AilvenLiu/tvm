@@ -106,15 +106,22 @@ RS_N_CLUSTERS = N // (BLK_N * CTA_GROUP)  # gemm tile n: 256
 # dyn scheduling
 CAPACITY = 2048
 TASK_IDX_LEN = 2
-ENABLE_WARP_BROADCAST = True
+ENABLE_WARP_BROADCAST = False
 C2P_THREAD_COUNT = 12 * 2 if ENABLE_WARP_BROADCAST else NUM_THREADS * 2
 
 # profiling
-N_REPEAT = 30
+WARMUP_ITERS = 10
+BENCH_ITERS = 30
+TOTAL_ITERS = WARMUP_ITERS + BENCH_ITERS
+
+PROFILER_ON = False
 NUM_GROUPS = 13
 PROFILER_BUFFER_SIZE = int(1e7)
 PROFILER_WRITE_STRIDE = SM_NUMBER * NUM_GROUPS
-PROFILER_ON = True
+CUDA_EVENT_PROFILER = False
+if CUDA_EVENT_PROFILER:
+    PROFILER_ON = False
+VALIDATE = False
 
 
 ld_reduce_8xfp16 = """
@@ -794,7 +801,6 @@ def test_hgemm_rs():
                 phase[0] = 0
                 phase_tmem[0] = 0
                 sch_pipe.init(c2p_thread_count=C2P_THREAD_COUNT, p2c_thread_count=1)
-                tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)
                 T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
 
                 # alloc TMEM
@@ -806,6 +812,7 @@ def test_hgemm_rs():
                 T.tvm_storage_sync("shared")
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
+                tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)
 
                 with T.cta():
                     while tile_scheduler.valid():
@@ -942,6 +949,7 @@ def test_hgemm_rs():
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
+
     # fmt: on
 
     devices = list(np.arange(WORLD_SIZE))
@@ -1003,20 +1011,25 @@ def test_hgemm_rs():
         "A_array": sess.empty((M, K), a_type),
         "B_array": sess.empty((N, K), b_type),
         "gemm_out_array": nvshmem_malloc_hook(ShapeTuple((M, N)), d_type, None),
-        "semaphore_array": nvshmem_malloc_hook(
-            ShapeTuple((LOCAL_M // TILE_M, N // TILE_N)), "uint64", None
-        ),
         "out_array": sess.empty((LOCAL_M, N), d_type),
-        "profiler_buffer_array": sess.empty((PROFILER_BUFFER_SIZE,), "uint64"),
-        "gemm_task_types_array": sess.empty((CAPACITY,), "int32"),
-        "gemm_task_idxs_array": sess.empty((CAPACITY, 2), "int32"),
-        "gemm_head_array": sess.empty((1,), "int32"),
-        "gemm_tail_array": sess.empty((1,), "int32"),
-        "rs_task_types_array": nvshmem_malloc_hook(ShapeTuple((CAPACITY,)), "int32", None),
-        "rs_task_idxs_array": nvshmem_malloc_hook(ShapeTuple((CAPACITY, 2)), "int32", None),
-        "rs_head_array": nvshmem_malloc_hook(ShapeTuple((1,)), "int32", None),
-        "rs_tail_array": nvshmem_malloc_hook(ShapeTuple((1,)), "int32", None),
     }
+    for i in range(TOTAL_ITERS):
+        args_dict[f"semaphore_array_{i}"] = nvshmem_malloc_hook(
+            ShapeTuple((LOCAL_M // TILE_M, N // TILE_N)), "uint64", None
+        )
+        args_dict[f"gemm_task_types_array_{i}"] = sess.empty((CAPACITY,), "int32")
+        args_dict[f"gemm_task_idxs_array_{i}"] = sess.empty((CAPACITY, 2), "int32")
+        args_dict[f"gemm_head_array_{i}"] = sess.empty((1,), "int32")
+        args_dict[f"gemm_tail_array_{i}"] = sess.empty((1,), "int32")
+        args_dict[f"rs_task_types_array_{i}"] = nvshmem_malloc_hook(
+            ShapeTuple((CAPACITY,)), "int32", None
+        )
+        args_dict[f"rs_task_idxs_array_{i}"] = nvshmem_malloc_hook(
+            ShapeTuple((CAPACITY, 2)), "int32", None
+        )
+        args_dict[f"rs_head_array_{i}"] = nvshmem_malloc_hook(ShapeTuple((1,)), "int32", None)
+        args_dict[f"rs_tail_array_{i}"] = nvshmem_malloc_hook(ShapeTuple((1,)), "int32", None)
+        args_dict[f"profiler_buffer_array_{i}"] = sess.empty((PROFILER_BUFFER_SIZE,), "uint64")
 
     res_dict = {
         "gemm_out_res": sess.empty((WORLD_SIZE, M, N), d_type, worker0_only=True),
@@ -1037,14 +1050,15 @@ def test_hgemm_rs():
         ),
     }
 
-    sess.broadcast(gemm_mpmc_queue.task_types, args_dict["gemm_task_types_array"])
-    sess.broadcast(gemm_mpmc_queue.task_idxs, args_dict["gemm_task_idxs_array"])
-    sess.broadcast(gemm_mpmc_queue.head, args_dict["gemm_head_array"])
-    sess.broadcast(gemm_mpmc_queue.tail, args_dict["gemm_tail_array"])
-    sess.broadcast(rs_mpmc_queue.task_types, args_dict["rs_task_types_array"])
-    sess.broadcast(rs_mpmc_queue.task_idxs, args_dict["rs_task_idxs_array"])
-    sess.broadcast(rs_mpmc_queue.head, args_dict["rs_head_array"])
-    sess.broadcast(rs_mpmc_queue.tail, args_dict["rs_tail_array"])
+    for i in range(TOTAL_ITERS):
+        sess.broadcast(gemm_mpmc_queue.task_types, args_dict[f"gemm_task_types_array_{i}"])
+        sess.broadcast(gemm_mpmc_queue.task_idxs, args_dict[f"gemm_task_idxs_array_{i}"])
+        sess.broadcast(gemm_mpmc_queue.head, args_dict[f"gemm_head_array_{i}"])
+        sess.broadcast(gemm_mpmc_queue.tail, args_dict[f"gemm_tail_array_{i}"])
+        sess.broadcast(rs_mpmc_queue.task_types, args_dict[f"rs_task_types_array_{i}"])
+        sess.broadcast(rs_mpmc_queue.task_idxs, args_dict[f"rs_task_idxs_array_{i}"])
+        sess.broadcast(rs_mpmc_queue.head, args_dict[f"rs_head_array_{i}"])
+        sess.broadcast(rs_mpmc_queue.tail, args_dict[f"rs_tail_array_{i}"])
 
     sess.scatter_from_worker0(A_array_all, args_dict["A_array"])
     sess.scatter_from_worker0(B_array_all, args_dict["B_array"])
@@ -1062,45 +1076,36 @@ def test_hgemm_rs():
         barrier_dfunc = sess.get_global_func("runtime.disco.nvshmem.barrier_all_on_current_stream")
         print("Begin kernel execution...")
         sess._sync_all()
+        barrier_dfunc()
 
-        for itr in range(N_REPEAT):
-            barrier_dfunc()
+        for itr in range(TOTAL_ITERS):
             rt_mod["test_mma_ss_tma_2sm_persistent"](
                 args_dict["A_array"],
                 args_dict["B_array"],
                 args_dict["gemm_out_array"],
-                args_dict["semaphore_array"],
+                args_dict[f"semaphore_array_{itr}"],
                 args_dict["out_array"],
-                args_dict["profiler_buffer_array"],
-                args_dict["gemm_task_types_array"],
-                args_dict["gemm_task_idxs_array"],
-                args_dict["gemm_head_array"],
-                args_dict["gemm_tail_array"],
-                args_dict["rs_task_types_array"],
-                args_dict["rs_task_idxs_array"],
-                args_dict["rs_head_array"],
-                args_dict["rs_tail_array"],
+                args_dict[f"profiler_buffer_array_{itr}"],
+                args_dict[f"gemm_task_types_array_{itr}"],
+                args_dict[f"gemm_task_idxs_array_{itr}"],
+                args_dict[f"gemm_head_array_{itr}"],
+                args_dict[f"gemm_tail_array_{itr}"],
+                args_dict[f"rs_task_types_array_{itr}"],
+                args_dict[f"rs_task_idxs_array_{itr}"],
+                args_dict[f"rs_head_array_{itr}"],
+                args_dict[f"rs_tail_array_{itr}"],
             )
-            sess._sync_all()
-            if itr < N_REPEAT - 1:
-                sess.broadcast(semaphore_np, args_dict["semaphore_array"])
-                sess.broadcast(profiler_buffer_np, args_dict["profiler_buffer_array"])
-                sess.broadcast(gemm_mpmc_queue.task_types, args_dict["gemm_task_types_array"])
-                sess.broadcast(gemm_mpmc_queue.task_idxs, args_dict["gemm_task_idxs_array"])
-                sess.broadcast(gemm_mpmc_queue.head, args_dict["gemm_head_array"])
-                sess.broadcast(gemm_mpmc_queue.tail, args_dict["gemm_tail_array"])
-                sess.broadcast(rs_mpmc_queue.task_types, args_dict["rs_task_types_array"])
-                sess.broadcast(rs_mpmc_queue.task_idxs, args_dict["rs_task_idxs_array"])
-                sess.broadcast(rs_mpmc_queue.head, args_dict["rs_head_array"])
-                sess.broadcast(rs_mpmc_queue.tail, args_dict["rs_tail_array"])
-                sess._sync_all()
+            barrier_dfunc()
 
-        # validate results
+        # get results
+        sess._sync_all()
         sess.gather_to_worker0(args_dict["gemm_out_array"], res_dict["gemm_out_res"])
         sess.copy_from_worker_0(res_dict["gemm_out_host"], res_dict["gemm_out_res"])
         sess.gather_to_worker0(args_dict["out_array"], res_dict["out_res"])
         sess.copy_from_worker_0(res_dict["out_host"], res_dict["out_res"])
-        sess.gather_to_worker0(args_dict["profiler_buffer_array"], res_dict["profiler_buffer_res"])
+        sess.gather_to_worker0(
+            args_dict[f"profiler_buffer_array_{TOTAL_ITERS-1}"], res_dict["profiler_buffer_res"]
+        )
         sess.copy_from_worker_0(res_dict["profiler_buffer_host"], res_dict["profiler_buffer_res"])
 
         # sync all workers to make sure the temporary files are cleaned up after all workers
@@ -1112,38 +1117,37 @@ def test_hgemm_rs():
     finalize_dfunc()
     sess.sync_worker_0()
 
-    # validate results
-    print("Validating results...")
+    if VALIDATE:
+        print("Validating results...")
 
-    import torch
+        import torch
 
-    gemm_out_torch = torch.zeros((WORLD_SIZE, M, N), dtype=torch.float16, device="cuda")
-    gemm_out_torch_sum = torch.zeros((M, N), dtype=torch.float16, device="cuda")
-    for i in range(WORLD_SIZE):
-        print(f"rank {i} validating...")
-        A_torch = torch.tensor(A_np[i], dtype=torch.float16, device="cuda")
-        B_torch = torch.tensor(B_np[i], dtype=torch.float16, device="cuda")
-        gemm_out_torch[i] = torch.matmul(A_torch, B_torch.T)
-        gemm_out_res = res_dict["gemm_out_host"].numpy()[i]
-        np.testing.assert_allclose(
-            gemm_out_res, gemm_out_torch[i].cpu().numpy(), atol=1e-3, rtol=1e-3
-        )
+        gemm_out_torch = torch.zeros((WORLD_SIZE, M, N), dtype=torch.float16, device="cuda")
+        gemm_out_torch_sum = torch.zeros((M, N), dtype=torch.float16, device="cuda")
+        for i in range(WORLD_SIZE):
+            print(f"rank {i} validating...")
+            A_torch = torch.tensor(A_np[i], dtype=torch.float16, device="cuda")
+            B_torch = torch.tensor(B_np[i], dtype=torch.float16, device="cuda")
+            gemm_out_torch[i] = torch.matmul(A_torch, B_torch.T)
+            gemm_out_res = res_dict["gemm_out_host"].numpy()[i]
+            np.testing.assert_allclose(
+                gemm_out_res, gemm_out_torch[i].cpu().numpy(), atol=1e-3, rtol=1e-3
+            )
 
-    gemm_out_torch_sum = torch.sum(gemm_out_torch, dim=0)
-    out_res = res_dict["out_host"].numpy().reshape(-1, N)
-    np.testing.assert_allclose(out_res, gemm_out_torch_sum.cpu().numpy(), atol=1e-3, rtol=1e-3)
+        gemm_out_torch_sum = torch.sum(gemm_out_torch, dim=0)
+        out_res = res_dict["out_host"].numpy().reshape(-1, N)
+        np.testing.assert_allclose(out_res, gemm_out_torch_sum.cpu().numpy(), atol=1e-3, rtol=1e-3)
 
-    print("Results all correct.")
+        print("Results all correct.")
 
     # profiler results
     if PROFILER_ON:
         for rank in range(WORLD_SIZE):
-            if rank == 7:
-                export_to_perfetto_trace(
-                    res_dict["profiler_buffer_host"].numpy()[rank],
-                    f"dyn-schedule-hgemm-RS-rank{rank}.perfetto-trace",
-                    event_type_names,
-                )
+            export_to_perfetto_trace(
+                res_dict["profiler_buffer_host"].numpy()[rank],
+                f"dyn-schedule-hgemm-RS-rank{rank}.perfetto-trace",
+                event_type_names,
+            )
 
 
 if __name__ == "__main__":
