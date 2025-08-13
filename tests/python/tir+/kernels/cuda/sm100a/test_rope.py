@@ -20,8 +20,7 @@ def find_power_of_two(n):
     return n.bit_length() - 1
 
 
-def get_sin_cos_cache(rotary_dim, max_position_embeddings):
-    base = 8000
+def get_sin_cos_cache(rotary_dim, max_position_embeddings, base):
     inv_freq = 1.0 / (
         base ** (torch.arange(0, rotary_dim, 2, dtype=torch.float, device="cuda") / rotary_dim)
     )
@@ -33,7 +32,7 @@ def get_sin_cos_cache(rotary_dim, max_position_embeddings):
     return cos_sin_cache
 
 
-def get_rope_kernel(max_position_embeddings, num_heads, head_dim):
+def get_rope_kernel(max_position_embeddings, head_dim, base):
     rotary_dim = head_dim  # can be different
     vec_size = max(16 // F16_BYTES, rotary_dim // 32)
     bdx = rotary_dim // vec_size
@@ -42,12 +41,11 @@ def get_rope_kernel(max_position_embeddings, num_heads, head_dim):
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def rope_with_cos_sin_cache(q: T.handle, k: T.handle, q_rope: T.handle, k_rope: T.handle, cos_sin_cache: T.handle, pos_ids: T.handle):
+    def rope_with_cos_sin_cache(q: T.handle, cos_sin_cache: T.handle, pos_ids: T.handle, q_rope: T.handle):
         nnz = T.int32()
+        num_heads = T.int32()
         q_global = T.match_buffer(q, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
-        k_global = T.match_buffer(k, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
         q_rope_global = T.match_buffer(q_rope, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
-        k_rope_global = T.match_buffer(k_rope, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
         cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_position_embeddings, rotary_dim], "float32", scope="global", layout="default")
         pos_ids_global = T.match_buffer(pos_ids, [nnz], "int32", scope="global", layout="default")
         half_rotary_dim = rotary_dim // 2
@@ -87,21 +85,18 @@ def get_rope_kernel(max_position_embeddings, num_heads, head_dim):
                     Tp.copy(global_out[pos[0], head[0], stx:stx + vec_size], qk_vec[:])
 
                 idx[0] = bx
-                while idx[0] < nnz * num_heads * 2 // bdy:
-                    pos[0] = (idx[0] * bdy // 2 + ty % (bdy // 2)) % nnz
-                    head[0] = (idx[0] * bdy // 2 + ty % (bdy // 2)) // nnz
+                while idx[0] < nnz * num_heads // bdy:
+                    pos[0] = (idx[0] * bdy + ty) % nnz
+                    head[0] = (idx[0] * bdy + ty) // nnz
                     cache_stx = T.meta_var(stx % half_rotary_dim)
                     Tp.copy(cos[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx:cache_stx + vec_size])
                     Tp.copy(sin[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx + half_rotary_dim:cache_stx + half_rotary_dim + vec_size])
-                    if ty < bdy // 2:
-                        compute_rope(q_global, q_rope_global)
-                    else:
-                        compute_rope(k_global, k_rope_global)
+                    compute_rope(q_global, q_rope_global)
                     idx[0] += SM_COUNT
-    return rope_with_cos_sin_cache, get_sin_cos_cache(rotary_dim, max_position_embeddings)
+    return rope_with_cos_sin_cache, get_sin_cos_cache(rotary_dim, max_position_embeddings, base)
 
 
-def prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size):
+def prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size, base):
     pos_ids = torch.arange(seq_len, device="cuda", dtype=torch.int32).repeat(
         batch_size
     )  # shape: [nnz]
@@ -111,20 +106,21 @@ def prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_d
     key = torch.randn(
         batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda"
     )  # shape: [nnz, num_heads * head_dim]
-    return get_sin_cos_cache(rotary_dim, max_position_embeddings), pos_ids, query, key
+    return get_sin_cos_cache(rotary_dim, max_position_embeddings, base), pos_ids, query, key
 
 
-@pytest.mark.parametrize("num_heads", [1])
+@pytest.mark.parametrize("num_heads", [8])
 @pytest.mark.parametrize("seq_len", [1])
 @pytest.mark.parametrize("head_dim", [128])
-@pytest.mark.parametrize("batch_size_list", [[128]])
+@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64, 128, 256]])
 def test_rope(num_heads, seq_len, head_dim, batch_size_list):
     rotary_dim = head_dim  # can be different
     max_position_embeddings = 4096
+    base = 1000000
 
     def test_dynamic_batch(num_heads, seq_len, head_dim, batch_size, mod):
         cos_sin_cache, pos_ids, query, key = prepare_data(
-            rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size
+            rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size, base
         )
 
         def naive():
@@ -191,11 +187,13 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
             query_out_tvm = tvm.nd.array(query.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
             key_out_tvm = tvm.nd.array(key.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
             cos_sin_cache_tvm = tvm.nd.array(cos_sin_cache.cpu().numpy(), DEV)
-            func = lambda: mod(
-                query_tvm, key_tvm, query_out_tvm, key_out_tvm, cos_sin_cache_tvm, pos_ids_tvm
-            )
+
+            def func():
+                mod(query_tvm, cos_sin_cache_tvm, pos_ids_tvm, query_out_tvm)
+                mod(key_tvm, cos_sin_cache_tvm, pos_ids_tvm, key_out_tvm)
+
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
-            print(f"flashinfer time: {ms:.3f} ms")
+            print(f"tir time: {ms:.3f} ms")
             return query_out_tvm.numpy().reshape(
                 -1, num_heads * head_dim
             ), key_out_tvm.numpy().reshape(-1, num_heads * head_dim)
@@ -212,9 +210,7 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
     # compile tir kernel
     target = tvm.target.Target("cuda")
     with target:
-        mod = tvm.IRModule(
-            {"main": get_rope_kernel(max_position_embeddings, num_heads, head_dim)[0]}
-        )
+        mod = tvm.IRModule({"main": get_rope_kernel(max_position_embeddings, head_dim, base)[0]})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         src = mod.mod.imported_modules[0].get_source()
 
@@ -227,7 +223,7 @@ if __name__ == "__main__":
     num_heads_list = [8]
     seq_len_list = [1]
     head_dim_list = [128]
-    batch_size_list = [128]
+    batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128, 256]
 
     import itertools
 

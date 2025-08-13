@@ -34,8 +34,6 @@ def find_power_of_two(n):
 
 # Paged kv-cache config
 KV_LAYOUT = "HND"
-PAGE_SIZE = 16
-MAX_PAGE_NUM = 32768
 
 # HW config
 SM_COUNT = 148
@@ -46,7 +44,9 @@ F16_BYTE = 2
 F32_BYTE = 4
 
 
-def perpare_data(batch_size, qo_heads, kv_heads, seq_len, head_dim):
+def perpare_data(batch_size, qo_heads, kv_heads, seq_len, head_dim, page_size, max_page_num):
+    PAGE_SIZE = page_size
+    MAX_PAGE_NUM = max_page_num
     import torch
 
     torch.manual_seed(42)
@@ -72,9 +72,9 @@ def perpare_data(batch_size, qo_heads, kv_heads, seq_len, head_dim):
 
 
 class PlanInfo:
-    def __init__(self, qo_heads, kv_heads, head_dim):
+    def __init__(self, qo_heads, kv_heads, head_dim, enforce_no_split_kv=False):
         # static info
-        self.max_blk_per_sm = 8
+        self.max_blk_per_sm = 8 if not enforce_no_split_kv else 0
         self.qo_heads = qo_heads
         self.kv_heads = kv_heads
         assert qo_heads % kv_heads == 0
@@ -113,7 +113,9 @@ class PlanInfo:
         self.tmp_o_tvm = None
         self.tmp_lse_tvm = None
 
-    def plan(self, batch_size, kv_indptr_h):
+    def plan(self, batch_size, kv_indptr_h, page_size, max_page_num):
+        PAGE_SIZE = page_size
+        MAX_PAGE_NUM = max_page_num
 
         DEV = tvm.cuda(0)
         self.batch_size = batch_size
@@ -209,16 +211,10 @@ class PlanInfo:
             )
 
 
-@pytest.mark.parametrize("num_heads", [(64, 8)])
-@pytest.mark.parametrize("seq_len", [512, 1024, 2048])
-@pytest.mark.parametrize("head_dim", [128])
-@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64, 128, 256]])
-def test(num_heads, seq_len, head_dim, batch_size_list):
-    qo_heads, kv_heads = num_heads
-    plan_info = PlanInfo(qo_heads, kv_heads, head_dim)
+def get_decode_kernel(plan_info: PlanInfo, page_size):
+    PAGE_SIZE = page_size
 
     def decode(SPLIT_KV):
-
         QO_HEADS = plan_info.qo_heads
         KV_HEADS = plan_info.kv_heads
         HEAD_DIM = plan_info.head_dim
@@ -232,18 +228,19 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
 
         # fmt: off
         @T.prim_func(tirp=True)
-        def decode_kernel(q_ptr: T.handle, kv_ptr: T.handle, o_ptr: T.handle, lse_ptr: T.handle, kv_indptr: T.handle, kv_last_page_len: T.handle, 
-                          kv_indices: T.handle, request_indices: T.handle, kv_tile_indices: T.handle, max_chunk_size: T.handle):
+        def decode_kernel(q_ptr: T.handle, kv_ptr: T.handle, lse_ptr: T.handle, kv_indptr: T.handle, kv_last_page_len: T.handle, 
+                          kv_indices: T.handle, request_indices: T.handle, kv_tile_indices: T.handle, max_chunk_size: T.handle, o_ptr: T.handle):
             
             batch_size = T.int32()
+            max_page_num = T.int32()
             total_page_num = T.int32()
             new_batch_size = T.int32()
             
             q_global = T.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", scope="global", layout="default")
-            kv_global = T.match_buffer(kv_ptr, [MAX_PAGE_NUM, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16", scope="global", layout="default")
-            kv_indptr_global = T.match_buffer(kv_indptr, [batch_size + 1], "int32", scope="global", layout="default")
-            kv_last_page_len_global = T.match_buffer(kv_last_page_len, [batch_size], "int32", scope="global", layout="default")
-            kv_indices_global = T.match_buffer(kv_indices, [total_page_num], "int32", scope="global", layout="default")
+            kv_global = T.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16", scope="global", layout="default")
+            kv_indptr_global = T.match_buffer(kv_indptr, [batch_size + 1], "int32", scope="global", layout="default", offset_factor=1)
+            kv_last_page_len_global = T.match_buffer(kv_last_page_len, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
+            kv_indices_global = T.match_buffer(kv_indices, [total_page_num], "int32", scope="global", layout="default", offset_factor=1)
             request_indices_global = T.match_buffer(request_indices, [new_batch_size], "int32", scope="global", layout="default")
             kv_tile_indices_global = T.match_buffer(kv_tile_indices, [new_batch_size], "int32", scope="global", layout="default")
             max_chunk_size_global = T.match_buffer(max_chunk_size, [1], "int32", scope="global", layout="default")
@@ -638,27 +635,46 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
         # fmt: on
         return merge_kernel
 
-    def test_dynamic_batch_size(batch_size, mod_decode_no_split_kv, mod_decode_split_kv, mod_merge):
+    return decode(plan_info.split_kv), merge()
+
+
+@pytest.mark.parametrize("num_heads", [(64, 8)])
+@pytest.mark.parametrize("seq_len", [512, 1024, 2048])
+@pytest.mark.parametrize("head_dim", [128])
+@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64, 128, 256]])
+def test(num_heads, seq_len, head_dim, batch_size_list):
+    PAGE_SIZE = 16
+    MAX_PAGE_NUM = 32768
+    qo_heads, kv_heads = num_heads
+    plan_info = PlanInfo(qo_heads, kv_heads, head_dim)
+
+    def test_dynamic_batch_size(batch_size):
         Q, KV_data, KV_indptr, KV_last_page_len, KV_indices = perpare_data(
-            batch_size, qo_heads, kv_heads, seq_len, head_dim
+            batch_size, qo_heads, kv_heads, seq_len, head_dim, PAGE_SIZE, MAX_PAGE_NUM
         )
 
         def tir():
-
             DEV = tvm.cuda(0)
             q_tvm = tvm.nd.array(Q, DEV)
             kv_data_tvm = tvm.nd.array(KV_data, DEV)
             kv_indptr_tvm = tvm.nd.array(KV_indptr, DEV)
             kv_last_page_len_tvm = tvm.nd.array(KV_last_page_len, DEV)
             kv_indices_tvm = tvm.nd.array(KV_indices, DEV)
-            plan_info.plan(batch_size, KV_indptr)
+            plan_info.plan(batch_size, KV_indptr.numpy().tolist(), PAGE_SIZE, MAX_PAGE_NUM)
+
+            decode, merge = get_decode_kernel(plan_info, PAGE_SIZE)
+            mod_decode = tvm.IRModule({"main": decode})
+            mod_merge = tvm.IRModule({"main": merge})
+            target = tvm.target.Target("cuda")
+            with target:
+                mod_decode = tvm.compile(mod_decode, target=target, tir_pipeline="tirp")
+                mod_merge = tvm.compile(mod_merge, target=target, tir_pipeline="tirp")
 
             def func():
                 if plan_info.split_kv:
-                    mod_decode_split_kv(
+                    mod_decode(
                         q_tvm,
                         kv_data_tvm,
-                        plan_info.tmp_o_tvm,
                         plan_info.tmp_lse_tvm,
                         kv_indptr_tvm,
                         kv_last_page_len_tvm,
@@ -666,6 +682,7 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
                         plan_info.request_indices_tvm,
                         plan_info.kv_tile_indices_tvm,
                         plan_info.max_chunk_size,
+                        plan_info.tmp_o_tvm,
                     )
                     mod_merge(
                         plan_info.tmp_o_tvm,
@@ -675,10 +692,9 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
                         plan_info.lse_tvm,
                     )
                 else:
-                    mod_decode_no_split_kv(
+                    mod_decode(
                         q_tvm,
                         kv_data_tvm,
-                        plan_info.o_tvm,
                         plan_info.lse_tvm,
                         kv_indptr_tvm,
                         kv_last_page_len_tvm,
@@ -686,6 +702,7 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
                         plan_info.request_indices_tvm,
                         plan_info.kv_tile_indices_tvm,
                         plan_info.max_chunk_size,
+                        plan_info.o_tvm,
                     )
 
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
@@ -759,24 +776,8 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
             np.testing.assert_allclose(O_tir, O_flashinfer, rtol=1e-3, atol=1e-3)
             np.testing.assert_allclose(lse_tir, lse_flashinfer, rtol=1e-3, atol=1e-3)
 
-    # compile tir kernel
-    target = tvm.target.Target("cuda")
-    with target:
-        mod_decode_no_split_kv = tvm.IRModule({"main": decode(False)})
-        mod_decode_no_split_kv = tvm.compile(
-            mod_decode_no_split_kv, target=target, tir_pipeline="tirp"
-        )
-        # src = mod_decode_no_split_kv.mod.imported_modules[0].get_source()
-        # print(src)
-        mod_decode_split_kv = tvm.IRModule({"main": decode(True)})
-        mod_decode_split_kv = tvm.compile(mod_decode_split_kv, target=target, tir_pipeline="tirp")
-        src = mod_decode_split_kv.mod.imported_modules[0].get_source()
-        print(src)
-        mod_merge = tvm.IRModule({"main": merge()})
-        mod_merge = tvm.compile(mod_merge, target=target, tir_pipeline="tirp")
-
     for batch_size in batch_size_list:
-        test_dynamic_batch_size(batch_size, mod_decode_no_split_kv, mod_decode_split_kv, mod_merge)
+        test_dynamic_batch_size(batch_size)
 
 
 if __name__ == "__main__":
@@ -785,9 +786,9 @@ if __name__ == "__main__":
     num_heads_list = [(64, 8)]
     seq_len_list = [512]
     head_dim_list = [128]
-    batch_size_list = [1]
+    batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128, 256]
 
-    for (qo_heads, kv_heads), seq_len, head_dim in itertools.product(
+    for num_heads, seq_len, head_dim in itertools.product(
         num_heads_list, seq_len_list, head_dim_list
     ):
-        test(qo_heads, kv_heads, seq_len, head_dim, batch_size_list)
+        test(num_heads, seq_len, head_dim, batch_size_list)

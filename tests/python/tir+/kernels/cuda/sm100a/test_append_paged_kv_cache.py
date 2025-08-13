@@ -69,7 +69,7 @@ def get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim):
         cache_global = T.match_buffer(cache_ptr, (max_page_num, 2, NUM_HEADS, page_size, HEAD_DIM), "float16", scope="global", layout="default")
         k_global = T.match_buffer(k_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global", layout="default")
         v_global = T.match_buffer(v_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global", layout="default")
-        pos_map_global = T.match_buffer(pos_map_ptr, (batch_size, NUM_TOKENS), "int32", scope="global", layout="default")
+        pos_map_global = T.match_buffer(pos_map_ptr, (batch_size, NUM_TOKENS), "int32", scope="global", layout="default", offset_factor=1)
 
         with T.kernel():
             tx, ty = T.thread_id([BDX, BDY], parent="cta")

@@ -23,251 +23,7 @@ def ceildiv(a, b):
     return (a + b - 1) // b
 
 
-M_CLUSTER = 1
-N_CLUSTER = 1
-WG_NUMBER = 2
-WARP_NUMBER = 4
-NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER
 SM_NUMBER = 148
-
-SMEM_PIPE_DEPTH = 6
-TMEM_PIPE_DEPTH = 2
-
-
-F16_BYTES = 2
-F32_BYTES = 4
-F128_BYTES = 16
-a_type = tvm.DataType("float16")
-b_type = tvm.DataType("float16")
-d_type = tvm.DataType("float16")
-N, K = 8192, 8192
-TILE_K = 4096
-BLK_M, BLK_N, BLK_K = 128, 128, 64
-MMA_M, MMA_N, MMA_K = 128, 128, 16
-PIPE_CIRCLE_NUM = (TILE_K // BLK_K) // SMEM_PIPE_DEPTH
-PIPE_REMAIN_NUM = (TILE_K // BLK_K) % SMEM_PIPE_DEPTH
-TILE_K_NUM = ceildiv(K, TILE_K)
-EPI_TILE = 32
-TMEM_LD_SIZE = 8
-N_COLS = 512
-CTA_GROUP = M_CLUSTER
-SWIZZLE = 3
-SMEM_SIZE = (
-    SMEM_PIPE_DEPTH * BLK_M * BLK_K * F16_BYTES
-    + SMEM_PIPE_DEPTH * BLK_N * BLK_K * F16_BYTES
-    + TMEM_PIPE_DEPTH * EPI_TILE * MMA_N * F32_BYTES
-    + 1024
-)
-
-assert SMEM_SIZE <= 232448
-assert TMEM_PIPE_DEPTH * MMA_N <= 512
-
-
-def get_source(func: tvm.tir.PrimFunc) -> str:
-    target = tvm.target.Target("cuda")
-    mod = tvm.IRModule({"main": func})
-    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
-    return src, mod
-
-
-def flops(M, ms):
-    return M * N * K * 2 / (ms * 1e-3)
-
-
-TILE_GROUPS_ROW_SIZE = 16
-# assert M % (BLK_M * CTA_GROUP) == 0
-assert N % (BLK_N * CTA_GROUP) == 0
-TILE_N_NUM = ceildiv(N, BLK_N * CTA_GROUP)
-
-
-class TileScheduler:
-
-    def __init__(self, prefix: str, M):
-        self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-        self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-        self.k_idx = T.local_cell("int32", name=prefix + "_k_idx")
-        self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-        self.tile_idx = T.local_cell("int32", name="tile_idx")
-        self.TILE_M_NUM = ceildiv(M, BLK_M * CTA_GROUP)
-
-    @T.macro
-    def update_current_m_n_idx(self, linear_idx):
-        TILE_GROUPS_NUM = self.TILE_M_NUM // TILE_GROUPS_ROW_SIZE
-        TILE_GROUPS_SIZE = TILE_GROUPS_ROW_SIZE * TILE_N_NUM * TILE_K_NUM
-        TILE_FINAL_ROWS = self.TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE)
-        if linear_idx < TILE_GROUPS_NUM * TILE_GROUPS_SIZE and TILE_GROUPS_NUM > 0:
-            self.m_idx = linear_idx // TILE_GROUPS_SIZE * TILE_GROUPS_ROW_SIZE + (
-                linear_idx % TILE_GROUPS_ROW_SIZE
-            )
-            self.n_idx = (linear_idx // TILE_GROUPS_ROW_SIZE) % TILE_N_NUM
-            self.k_idx = (linear_idx % TILE_GROUPS_SIZE) // (TILE_GROUPS_ROW_SIZE * TILE_N_NUM)
-        elif TILE_FINAL_ROWS > 0:
-            remainder_idx = linear_idx - TILE_GROUPS_SIZE * TILE_GROUPS_NUM
-            self.m_idx = TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE + remainder_idx % TILE_FINAL_ROWS
-            self.n_idx = (remainder_idx // TILE_FINAL_ROWS) % TILE_N_NUM
-            self.k_idx = remainder_idx // (TILE_FINAL_ROWS * TILE_N_NUM)
-
-    @T.macro
-    def init(self, linear_init):
-        self.linear_idx = linear_init
-        self.tile_idx = 0
-        self.update_current_m_n_idx(linear_init)
-
-    @T.macro
-    def next_tile(self):
-        self.linear_idx = self.linear_idx + SM_NUMBER
-        self.tile_idx += 1
-        self.update_current_m_n_idx(self.linear_idx)
-
-    def valid(self):
-        return self.linear_idx < self.TILE_M_NUM * TILE_N_NUM * TILE_K_NUM
-
-
-atomic_add_system_uint64 = f"""
-__forceinline__ __device__ void atomic_add_system_uint64(uint64_t* addr, uint64_t value) {{
-    asm volatile("red.async.release.global.gpu.add.u64 [%0], %1;" ::"l"(addr), "l"(value)
-                   : "memory");
-}}
-"""
-
-
-class Semaphore:
-    def __init__(self, cnt, buffer):
-        self.cnt = cnt
-        self.sem = buffer
-        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4)
-        IRBuilder.current().name("semaphore_state", self.state)
-
-    @T.macro
-    def semaphore_wait(self, *coord):
-        with T.thread():
-            while 1:
-                T.ptx.ld_global_acquire(
-                    self.state[0], self.sem.access_ptr("r", offset=self.sem.offset_of_p(coord))
-                )
-                if T.cuda.syncthreads_and(self.state[0] == self.cnt):
-                    break
-                T.cuda.nano_sleep(40)
-
-    @T.macro
-    def semaphore_notify(self, tid, *coord):
-        # wg is synced
-        with T.thread():
-            if tid % 128 == 0:
-                T.cuda.func_call(
-                    "atomic_add_system_uint64",
-                    self.sem.access_ptr("rw", offset=self.sem.offset_of_p(coord)),
-                    T.uint64(1),
-                    source_code=atomic_add_system_uint64,
-                )
-
-
-class Barriers:
-
-    def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
-        self.mbar: tvm.tir.Buffer = T.decl_buffer(
-            (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
-        ).buffer
-        self.init_phase = 0 if is_p2c else 1
-        self.pipe_depth = pipe_depth
-
-    @T.macro
-    def init(self, threads_num_wait):
-        with T.thread()[0:1]:
-            for i in T.serial(self.pipe_depth):
-                T.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
-
-    @T.macro
-    def wait(self, idx, phase):
-        T.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
-
-
-class BarTMA2MMA(Barriers):
-
-    @T.macro
-    def arrive(self, idx, expected_bytes):
-        T.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
-
-    @T.macro
-    def arrive_only(self, idx):
-        T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
-
-
-class BarMMA2LD(Barriers):
-
-    @T.macro
-    def arrive(self, idx):
-        T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
-
-
-class BarMMA2TMA(Barriers):
-
-    @T.macro
-    def arrive(self, idx):
-        T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
-
-
-class BarLD2MMA(Barriers):
-
-    @T.macro
-    def arrive(self, idx):
-        T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
-
-
-@T.macro
-def warp_sync():
-    T.cuda.func_call(
-        "sync_warp",
-        source_code=f"""
-__forceinline__ __device__ void sync_warp() {{
-    __syncwarp();
-}}
-    """,
-    )
-
-
-@T.macro
-def trap_when_assert_failed(cond):
-    T.cuda.func_call(
-        "trap_when_assert_fail",
-        cond,
-        source_code=f"""
-__forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
-    do {{
-        if (not (cond))
-            asm("trap;");
-    }} while (0);
-}}
-    """,
-    )
-
-
-@T.macro
-def float22half2(dst, src):
-    T.cuda.func_call(
-        "float22half2",
-        dst,
-        src,
-        source_code=f"""
-__forceinline__ __device__ void float22half2(void* dst, void* src) {{
-    half2* dst_p = (half2*) dst;
-    float2* src_p = (float2*) src;
-    *dst_p = __float22half2_rn(*src_p);
-}}
-    """,
-    )
-
-
-def prepare_data(M):
-    import torch
-
-    A_bf16 = torch.randn((M, K), dtype=torch.float16)
-    B_bf16 = torch.randn((N, K), dtype=torch.float16)
-    # C_ref = torch.matmul(A_bf16, B_bf16.T)
-    C_empty = torch.zeros((M, N), dtype=torch.float16)
-
-    return A_bf16, B_bf16, C_empty
 
 
 class ProfileEventType(Enum):
@@ -286,9 +42,232 @@ PROFILER_WRITE_STRIDE = SM_NUMBER * NUM_GROUPS
 PROFILER_ON = False
 
 
-@tvm.testing.requires_cuda_compute_version(10, exact=True)
-@pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128])
-def test(batch_size):
+def prepare_data(M, N, K):
+    import torch
+
+    A_bf16 = torch.randn((M, K), dtype=torch.float16)
+    B_bf16 = torch.randn((N, K), dtype=torch.float16)
+    # C_ref = torch.matmul(A_bf16, B_bf16.T)
+    C_empty = torch.zeros((M, N), dtype=torch.float16)
+
+    return A_bf16, B_bf16, C_empty
+
+
+def flops(M, N, K, ms):
+    return M * N * K * 2 / (ms * 1e-3)
+
+
+def get_hgemm_kernel(dim_n, dim_k):
+    M_CLUSTER = 1
+    N_CLUSTER = 1
+    WG_NUMBER = 2
+    WARP_NUMBER = 4
+    NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER
+
+    SMEM_PIPE_DEPTH = 6
+    TMEM_PIPE_DEPTH = 2
+
+    F16_BYTES = 2
+    F32_BYTES = 4
+    F128_BYTES = 16
+    a_type = tvm.DataType("float16")
+    b_type = tvm.DataType("float16")
+    d_type = tvm.DataType("float16")
+    N, K = dim_n, dim_k
+    TILE_K = 4096
+    BLK_M, BLK_N, BLK_K = 128, 128, 64
+    MMA_M, MMA_N, MMA_K = 128, 128, 16
+    PIPE_CIRCLE_NUM = (TILE_K // BLK_K) // SMEM_PIPE_DEPTH
+    PIPE_REMAIN_NUM = (TILE_K // BLK_K) % SMEM_PIPE_DEPTH
+    TILE_K_NUM = ceildiv(K, TILE_K)
+    EPI_TILE = 32
+    TMEM_LD_SIZE = 8
+    N_COLS = 512
+    CTA_GROUP = M_CLUSTER
+    SWIZZLE = 3
+    SMEM_SIZE = (
+        SMEM_PIPE_DEPTH * BLK_M * BLK_K * F16_BYTES
+        + SMEM_PIPE_DEPTH * BLK_N * BLK_K * F16_BYTES
+        + TMEM_PIPE_DEPTH * EPI_TILE * MMA_N * F32_BYTES
+        + 1024
+    )
+
+    assert SMEM_SIZE <= 232448
+    assert TMEM_PIPE_DEPTH * MMA_N <= 512
+
+    TILE_GROUPS_ROW_SIZE = 16
+    # assert M % (BLK_M * CTA_GROUP) == 0
+    assert N % (BLK_N * CTA_GROUP) == 0
+    TILE_N_NUM = ceildiv(N, BLK_N * CTA_GROUP)
+
+    class TileScheduler:
+
+        def __init__(self, prefix: str, M):
+            self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
+            self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
+            self.k_idx = T.local_cell("int32", name=prefix + "_k_idx")
+            self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
+            self.tile_idx = T.local_cell("int32", name="tile_idx")
+            self.TILE_M_NUM = ceildiv(M, BLK_M * CTA_GROUP)
+
+        @T.macro
+        def update_current_m_n_idx(self, linear_idx):
+            TILE_GROUPS_NUM = self.TILE_M_NUM // TILE_GROUPS_ROW_SIZE
+            TILE_GROUPS_SIZE = TILE_GROUPS_ROW_SIZE * TILE_N_NUM * TILE_K_NUM
+            TILE_FINAL_ROWS = self.TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE)
+            if linear_idx < TILE_GROUPS_NUM * TILE_GROUPS_SIZE and TILE_GROUPS_NUM > 0:
+                self.m_idx = linear_idx // TILE_GROUPS_SIZE * TILE_GROUPS_ROW_SIZE + (
+                    linear_idx % TILE_GROUPS_ROW_SIZE
+                )
+                self.n_idx = (linear_idx // TILE_GROUPS_ROW_SIZE) % TILE_N_NUM
+                self.k_idx = (linear_idx % TILE_GROUPS_SIZE) // (TILE_GROUPS_ROW_SIZE * TILE_N_NUM)
+            elif TILE_FINAL_ROWS > 0:
+                remainder_idx = linear_idx - TILE_GROUPS_SIZE * TILE_GROUPS_NUM
+                self.m_idx = (
+                    TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE + remainder_idx % TILE_FINAL_ROWS
+                )
+                self.n_idx = (remainder_idx // TILE_FINAL_ROWS) % TILE_N_NUM
+                self.k_idx = remainder_idx // (TILE_FINAL_ROWS * TILE_N_NUM)
+
+        @T.macro
+        def init(self, linear_init):
+            self.linear_idx = linear_init
+            self.tile_idx = 0
+            self.update_current_m_n_idx(linear_init)
+
+        @T.macro
+        def next_tile(self):
+            self.linear_idx = self.linear_idx + SM_NUMBER
+            self.tile_idx += 1
+            self.update_current_m_n_idx(self.linear_idx)
+
+        def valid(self):
+            return self.linear_idx < self.TILE_M_NUM * TILE_N_NUM * TILE_K_NUM
+
+    atomic_add_system_uint64 = f"""
+    __forceinline__ __device__ void atomic_add_system_uint64(uint64_t* addr, uint64_t value) {{
+        asm volatile("red.async.release.global.gpu.add.u64 [%0], %1;" ::"l"(addr), "l"(value)
+                    : "memory");
+    }}
+    """
+
+    class Semaphore:
+        def __init__(self, cnt, buffer):
+            self.cnt = cnt
+            self.sem = buffer
+            self.state = T.alloc_buffer([1], "uint64", scope="local", align=4)
+            IRBuilder.current().name("semaphore_state", self.state)
+
+        @T.macro
+        def semaphore_wait(self, *coord):
+            with T.thread():
+                while 1:
+                    T.ptx.ld_global_acquire(
+                        self.state[0], self.sem.access_ptr("r", offset=self.sem.offset_of_p(coord))
+                    )
+                    if T.cuda.syncthreads_and(self.state[0] == self.cnt):
+                        break
+                    T.cuda.nano_sleep(40)
+
+        @T.macro
+        def semaphore_notify(self, tid, *coord):
+            # wg is synced
+            with T.thread():
+                if tid % 128 == 0:
+                    T.cuda.func_call(
+                        "atomic_add_system_uint64",
+                        self.sem.access_ptr("rw", offset=self.sem.offset_of_p(coord)),
+                        T.uint64(1),
+                        source_code=atomic_add_system_uint64,
+                    )
+
+    class Barriers:
+
+        def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
+            self.mbar: tvm.tir.Buffer = T.decl_buffer(
+                (pipe_depth,), "uint64", shared_buffer_base, elem_offset=shared_buffer_offs
+            ).buffer
+            self.init_phase = 0 if is_p2c else 1
+            self.pipe_depth = pipe_depth
+
+        @T.macro
+        def init(self, threads_num_wait):
+            with T.thread()[0:1]:
+                for i in T.serial(self.pipe_depth):
+                    T.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
+
+        @T.macro
+        def wait(self, idx, phase):
+            T.ptx.mbarrier.try_wait(self.mbar.ptr_to([idx]), self.init_phase ^ phase)
+
+    class BarTMA2MMA(Barriers):
+
+        @T.macro
+        def arrive(self, idx, expected_bytes):
+            T.ptx.mbarrier.arrive.expect_tx(self.mbar.ptr_to([idx]), expected_bytes)
+
+        @T.macro
+        def arrive_only(self, idx):
+            T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]))
+
+    class BarMMA2LD(Barriers):
+
+        @T.macro
+        def arrive(self, idx):
+            T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
+
+    class BarMMA2TMA(Barriers):
+
+        @T.macro
+        def arrive(self, idx):
+            T.ptx.tcgen05.commit(self.mbar.ptr_to([idx]), cta_group=CTA_GROUP)
+
+    class BarLD2MMA(Barriers):
+
+        @T.macro
+        def arrive(self, idx):
+            T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
+
+    @T.macro
+    def warp_sync():
+        T.cuda.func_call(
+            "sync_warp",
+            source_code=f"""
+    __forceinline__ __device__ void sync_warp() {{
+        __syncwarp();
+    }}
+        """,
+        )
+
+    @T.macro
+    def trap_when_assert_failed(cond):
+        T.cuda.func_call(
+            "trap_when_assert_fail",
+            cond,
+            source_code=f"""
+    __forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
+        do {{
+            if (not (cond))
+                asm("trap;");
+        }} while (0);
+    }}
+        """,
+        )
+
+    @T.macro
+    def float22half2(dst, src):
+        T.cuda.func_call(
+            "float22half2",
+            dst,
+            src,
+            source_code=f"""
+    __forceinline__ __device__ void float22half2(void* dst, void* src) {{
+        half2* dst_p = (half2*) dst;
+        float2* src_p = (float2*) src;
+        *dst_p = __float22half2_rn(*src_p);
+    }}
+        """,
+        )
 
     A_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
@@ -304,8 +283,8 @@ def test(batch_size):
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def hgemm(A_ptr: T.handle, B: T.Buffer((N, K), b_type), partial_sum_ptr: T.handle,
-             profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
+    def hgemm(A_ptr: T.handle, B: T.Buffer((N, K), b_type), partial_sum_ptr: T.handle):
+        # profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
         M = T.int32()
         A = T.match_buffer(A_ptr, [M, K], a_type, layout="default")
         partial_sum = T.match_buffer(partial_sum_ptr, [TILE_K_NUM, M, N], "float32", layout="default")
@@ -620,28 +599,43 @@ def test(batch_size):
                         D[m_idx, n_idx + kv] = vec_16[kv]                    
                     idx[0] += SM_NUMBER
     # fmt: on
+    return hgemm, reduce, TILE_K_NUM
 
-    A_bf16, B_bf16, C_bf16 = prepare_data(batch_size)
+
+@tvm.testing.requires_cuda_compute_version(10, exact=True)
+@pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128])
+def test(batch_size):
+    N, K = 8192, 8192
+    A_bf16, B_bf16, C_bf16 = prepare_data(batch_size, N, K)
 
     def tir_gemm(A_bf16, B_bf16, C_bf16):
+        hgemm, reduce, TILE_K_NUM = get_hgemm_kernel(N, K)
         DEV = tvm.cuda(0)
         A_tvm = tvm.nd.array(A_bf16, device=DEV)
         B_tvm = tvm.nd.array(B_bf16, device=DEV)
         C_tvm = tvm.nd.array(C_bf16, device=DEV)
-        partial_sum_tvm = tvm.nd.array(np.zeros((TILE_K_NUM, batch_size, N), dtype=np.float32), device=DEV)
-        profiler_buffer = np.zeros((PROFILER_BUFFER_SIZE,), dtype=np.uint64)
-        profiler_buffer_tvm = tvm.nd.array(profiler_buffer, DEV)
+        partial_sum_tvm = tvm.nd.array(
+            np.zeros((TILE_K_NUM, batch_size, N), dtype=np.float32), device=DEV
+        )
+        if PROFILER_ON:
+            profiler_buffer = np.zeros((PROFILER_BUFFER_SIZE,), dtype=np.uint64)
+            profiler_buffer_tvm = tvm.nd.array(profiler_buffer, DEV)
         target = tvm.target.Target("cuda")
         with target:
-            src_hgemm, mod_hgemm = get_source(hgemm)
-            src_reduce, mod_reduce = get_source(reduce)
+            mod_hgemm = tvm.ir.IRModule({"main": hgemm})
+            mod_reduce = tvm.ir.IRModule({"main": reduce})
+            mod_hgemm = tvm.compile(mod_hgemm, target=target, tir_pipeline="tirp")
+            mod_reduce = tvm.compile(mod_reduce, target=target, tir_pipeline="tirp")
 
             def func():
-                mod_hgemm(A_tvm, B_tvm, partial_sum_tvm, profiler_buffer_tvm)
+                if PROFILER_ON:
+                    mod_hgemm(A_tvm, B_tvm, partial_sum_tvm, profiler_buffer_tvm)
+                else:
+                    mod_hgemm(A_tvm, B_tvm, partial_sum_tvm)
                 mod_reduce(partial_sum_tvm, C_tvm)
 
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
-            print(f"TIR flops: {flops(batch_size, ms) / 1e12} TFLOPS, time: {ms:.3f} ms")
+            print(f"TIR flops: {flops(batch_size, N, K, ms) / 1e12} TFLOPS, time: {ms:.3f} ms")
             if PROFILER_ON:
                 export_to_perfetto_trace(
                     profiler_buffer_tvm.numpy(),
@@ -660,7 +654,7 @@ def test(batch_size):
         func = lambda: torch.matmul(A_torch, B_torch.T)
         C_torch = func()
         ms = bench(func, warmup=10, repeat=30, proton_name="cublas")
-        print(f"CUBLAS flops: {flops(batch_size, ms) / 1e12} TFLOPS, time: {ms:.3f} ms")
+        print(f"CUBLAS flops: {flops(batch_size, N, K, ms) / 1e12} TFLOPS, time: {ms:.3f} ms")
         return C_torch.cpu().numpy()
 
     with ProtonContext("blackwell_gemm"):
@@ -676,4 +670,3 @@ def test(batch_size):
 if __name__ == "__main__":
     for batch_size in [1, 2, 4, 8, 16, 32, 64, 128]:
         test(batch_size)
-

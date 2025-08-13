@@ -28,18 +28,12 @@ def prepare_data(hidden_size, batch_size):
     return x, weight
 
 
-@pytest.mark.parametrize("hidden_size", [4096])
-@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64, 128]])
-def test_fused_add_rmsnorm(hidden_size, batch_size_list):
-
+def get_rmsnorm_kernel(hidden_size):
     vec_size = math.gcd(16 // F16_BYTES, hidden_size)
     block_size = min(256, hidden_size // vec_size)
     bdx = 32
     bdy = ceildiv(block_size, 32)
     smem_size = (bdy + hidden_size) * F32_BYTES
-    print(
-        f"hidden_size: {hidden_size}, vec_size: {vec_size}, block_size: {block_size}, bdx: {bdx}, bdy: {bdy}, smem_size: {smem_size}"
-    )
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -84,13 +78,12 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
                             if st < hidden_size:
                                 Tp.copy(input_vec[:], input_global[idx[0], st:st + vec_size])
                                 Tp.cast(input_vec_f32[:], input_vec[:])
-                            for kv in T.unroll(vec_size):
-                                x_tmp[0] = input_vec_f32[kv]
-                                sum_sq[0] += x_tmp[0] * x_tmp[0]
-                                x_vec[kv] = x_tmp[0]
-                            if st < hidden_size:
+                                for kv in T.unroll(vec_size):
+                                    x_tmp[0] = input_vec_f32[kv]
+                                    sum_sq[0] += x_tmp[0] * x_tmp[0]
+                                    x_vec[kv] = x_tmp[0]
                                 Tp.copy(x_smem[st:st + vec_size], x_vec[:])
-                        
+
                         # warp reduce sum
                         for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
                             sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
@@ -131,7 +124,12 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
                         T.ptx.bar.sync(1, bdx * bdy)
                         idx[0] += SM_COUNT
     # fmt: on
+    return rmsnorm
 
+
+@pytest.mark.parametrize("hidden_size", [4096])
+@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64, 128]])
+def test_rmsnorm(hidden_size, batch_size_list):
     def test_dynamic_batch(batch_size, mod):
         x, weight = prepare_data(hidden_size, batch_size)
 
@@ -177,7 +175,7 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
     # compile tir kernel
     target = tvm.target.Target("cuda")
     with target:
-        mod = tvm.IRModule({"main": rmsnorm})
+        mod = tvm.IRModule({"main": get_rmsnorm_kernel(hidden_size)})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         # src = mod_decode_no_split_kv.mod.imported_modules[0].get_source()
         # print(src)
@@ -191,4 +189,4 @@ if __name__ == "__main__":
     hidden_size_list = [4096]
     batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128]
     for hidden_size in hidden_size_list:
-        test_fused_add_rmsnorm(hidden_size, batch_size_list)
+        test_rmsnorm(hidden_size, batch_size_list)
