@@ -20,7 +20,7 @@ def find_power_of_two(n):
     return n.bit_length() - 1
 
 
-def prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size):
+def get_sin_cos_cache(rotary_dim, max_position_embeddings):
     base = 8000
     inv_freq = 1.0 / (
         base ** (torch.arange(0, rotary_dim, 2, dtype=torch.float, device="cuda") / rotary_dim)
@@ -30,26 +30,11 @@ def prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_d
     cos = freqs.cos()
     sin = freqs.sin()
     cos_sin_cache = torch.cat((cos, sin), dim=-1)  # shape: [max_position_embeddings, rotary_dim]
-    pos_ids = torch.arange(seq_len, device="cuda", dtype=torch.int32).repeat(
-        batch_size
-    )  # shape: [nnz]
-    query = torch.randn(
-        batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda"
-    )  # shape: [nnz, num_heads * head_dim]
-    key = torch.randn(
-        batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda"
-    )  # shape: [nnz, num_heads * head_dim]
-    return cos_sin_cache, pos_ids, query, key
+    return cos_sin_cache
 
 
-@pytest.mark.parametrize("num_heads", [1])
-@pytest.mark.parametrize("seq_len", [1])
-@pytest.mark.parametrize("head_dim", [128])
-@pytest.mark.parametrize("batch_size_list", [[128]])
-def test_rope(num_heads, seq_len, head_dim, batch_size_list):
-
+def get_rope_kernel(max_position_embeddings, num_heads, head_dim):
     rotary_dim = head_dim  # can be different
-    max_position_embeddings = seq_len  # can be larger
     vec_size = max(16 // F16_BYTES, rotary_dim // 32)
     bdx = rotary_dim // vec_size
     num_threads = max(256, bdx)
@@ -113,7 +98,29 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
                     else:
                         compute_rope(k_global, k_rope_global)
                     idx[0] += SM_COUNT
-    # fmt: on
+    return rope_with_cos_sin_cache, get_sin_cos_cache(rotary_dim, max_position_embeddings)
+
+
+def prepare_data(rotary_dim, max_position_embeddings, num_heads, seq_len, head_dim, batch_size):
+    pos_ids = torch.arange(seq_len, device="cuda", dtype=torch.int32).repeat(
+        batch_size
+    )  # shape: [nnz]
+    query = torch.randn(
+        batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda"
+    )  # shape: [nnz, num_heads * head_dim]
+    key = torch.randn(
+        batch_size * seq_len, num_heads * head_dim, dtype=torch.float16, device="cuda"
+    )  # shape: [nnz, num_heads * head_dim]
+    return get_sin_cos_cache(rotary_dim, max_position_embeddings), pos_ids, query, key
+
+
+@pytest.mark.parametrize("num_heads", [1])
+@pytest.mark.parametrize("seq_len", [1])
+@pytest.mark.parametrize("head_dim", [128])
+@pytest.mark.parametrize("batch_size_list", [[128]])
+def test_rope(num_heads, seq_len, head_dim, batch_size_list):
+    rotary_dim = head_dim  # can be different
+    max_position_embeddings = 4096
 
     def test_dynamic_batch(num_heads, seq_len, head_dim, batch_size, mod):
         cos_sin_cache, pos_ids, query, key = prepare_data(
@@ -205,10 +212,11 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
     # compile tir kernel
     target = tvm.target.Target("cuda")
     with target:
-        mod = tvm.IRModule({"main": rope_with_cos_sin_cache})
+        mod = tvm.IRModule(
+            {"main": get_rope_kernel(max_position_embeddings, num_heads, head_dim)[0]}
+        )
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         src = mod.mod.imported_modules[0].get_source()
-        print(src)
 
     for batch_size in batch_size_list:
         with ProtonContext("rope"):
@@ -216,7 +224,7 @@ def test_rope(num_heads, seq_len, head_dim, batch_size_list):
 
 
 if __name__ == "__main__":
-    num_heads_list = [1]
+    num_heads_list = [8]
     seq_len_list = [1]
     head_dim_list = [128]
     batch_size_list = [128]
