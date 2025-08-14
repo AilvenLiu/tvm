@@ -33,8 +33,13 @@ dev = tvm.cuda()
 target = tvm.target.Target("cuda")
 
 NUM_HIDDEN_LAYERS = 64
-LOAD_WEIGHTS = "/raid/user_data/bohanhou/Qwen3-32B-q0f16-MLC/"
-# LOAD_WEIGHTS = None
+LOAD_WEIGHTS = "/raid/user_data/bohanhou/Qwen3-32B-q0f16-MLC/"  # load weights from real model
+# LOAD_WEIGHTS = None # generate weights
+MAX_BATCH_SIZE = 32
+MAX_SEQ_LEN = 1024
+MAX_TOTAL_SEQ_LEN = MAX_BATCH_SIZE * MAX_SEQ_LEN
+PAGE_SIZE = 16
+ROPE_THETA = 1000000
 
 config = Qwen3Config(
     hidden_act="silu",
@@ -209,14 +214,8 @@ with target:
     ex = tvm.compile(mod, target, relax_pipeline=relax.get_pipeline("opt_llm_1"))
     vm = relax.VirtualMachine(ex, dev)
 
-MAX_BATCH_SIZE = 32
-MAX_SEQ_LEN = 1024
-MAX_TOTAL_SEQ_LEN = MAX_BATCH_SIZE * MAX_SEQ_LEN
-PAGE_SIZE = 16
-ROPE_THETA = 1000000
 
-
-def test_qwen3_layer(batch_decode_func, is_megakernel=False):
+def test_qwen3_model(batch_decode_func, is_megakernel=False):
     func = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_tensor_retrieve")
 
     kv_cache = vm["create_flashinfer_paged_kv_cache"](
@@ -302,7 +301,7 @@ def test_qwen3_layer(batch_decode_func, is_megakernel=False):
     return logits_arr
 
 
-res0 = test_qwen3_layer(vm["batch_decode"])
+res0 = test_qwen3_model(vm["batch_decode"])
 
 
 def attach_attr(func, name):
@@ -705,103 +704,8 @@ def get_qwen3_megakernel_batch_decode_func():
     return vm["batch_decode"]
 
 
-res1 = test_qwen3_layer(get_qwen3_megakernel_batch_decode_func(), is_megakernel=True)
+res1 = test_qwen3_model(get_qwen3_megakernel_batch_decode_func(), is_megakernel=True)
 
-# fmt: off
-@I.ir_module
-class Module2:
-    @R.function
-    def batch_decode(input_embeds: R.Tensor(("batch_size", 1, 5120), dtype="float16"), paged_kv_cache: R.Object, packed_params: R.Tuple(R.Tensor((151936, 5120), dtype="float16"), R.Tensor((10240, 5120), dtype="float16"), R.Tensor((5120, 8192), dtype="float16"), R.Tensor((128,), dtype="float16"), R.Tensor((128,), dtype="float16"), R.Tensor((51200, 5120), dtype="float16"), R.Tensor((5120, 25600), dtype="float16"), R.Tensor((5120,), dtype="float16"), R.Tensor((5120,), dtype="float16"), R.Tensor((10240, 5120), dtype="float16"), R.Tensor((5120, 8192), dtype="float16"), R.Tensor((128,), dtype="float16"), R.Tensor((128,), dtype="float16"), R.Tensor((51200, 5120), dtype="float16"), R.Tensor((5120, 25600), dtype="float16"), R.Tensor((5120,), dtype="float16"), R.Tensor((5120,), dtype="float16"), R.Tensor((5120,), dtype="float16"), R.Tensor((151936, 5120), dtype="float16"))) -> R.Tuple(R.Tensor(("batch_size", 1, 151936), dtype="float32"), R.Object):
-        batch_size = T.int64()
-        R.func_attr({"num_input": 2})
-        with R.dataflow():
-            model_embed_tokens_weight1: R.Tensor((151936, 5120), dtype="float16") = packed_params[0]
-            model_layers_0_self_attn_c_attn_weight1: R.Tensor((10240, 5120), dtype="float16") = packed_params[1]
-            model_layers_0_self_attn_o_proj_weight1: R.Tensor((5120, 8192), dtype="float16") = packed_params[2]
-            model_layers_0_self_attn_q_norm_weight1: R.Tensor((128,), dtype="float16") = packed_params[3]
-            model_layers_0_self_attn_k_norm_weight1: R.Tensor((128,), dtype="float16") = packed_params[4]
-            model_layers_0_mlp_gate_up_proj_weight1: R.Tensor((51200, 5120), dtype="float16") = packed_params[5]
-            model_layers_0_mlp_down_proj_weight1: R.Tensor((5120, 25600), dtype="float16") = packed_params[6]
-            model_layers_0_input_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[7]
-            model_layers_0_post_attention_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[8]
-            model_layers_1_self_attn_c_attn_weight1: R.Tensor((10240, 5120), dtype="float16") = packed_params[9]
-            model_layers_1_self_attn_o_proj_weight1: R.Tensor((5120, 8192), dtype="float16") = packed_params[10]
-            model_layers_1_self_attn_q_norm_weight1: R.Tensor((128,), dtype="float16") = packed_params[11]
-            model_layers_1_self_attn_k_norm_weight1: R.Tensor((128,), dtype="float16") = packed_params[12]
-            model_layers_1_mlp_gate_up_proj_weight1: R.Tensor((51200, 5120), dtype="float16") = packed_params[13]
-            model_layers_1_mlp_down_proj_weight1: R.Tensor((5120, 25600), dtype="float16") = packed_params[14]
-            model_layers_1_input_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[15]
-            model_layers_1_post_attention_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[16]
-            model_norm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[17]
-            lm_head_weight1: R.Tensor((151936, 5120), dtype="float16") = packed_params[18]
-            rms_norm: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.nn.rms_norm(input_embeds, model_layers_0_input_layernorm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
-            permute_dims: R.Tensor((5120, 10240), dtype="float16") = R.permute_dims(model_layers_0_self_attn_c_attn_weight1, axes=None)
-            matmul: R.Tensor((batch_size, 1, 10240), dtype="float16") = R.matmul(rms_norm, permute_dims, out_dtype="void")
-            reshape: R.Tensor((batch_size, 1, 80, 128), dtype="float16") = R.reshape(matmul, R.shape([batch_size, 1, 80, 128]))
-            split: R.Tuple(R.Tensor((batch_size, 1, 64, 128), dtype="float16"), R.Tensor((batch_size, 1, 8, 128), dtype="float16"), R.Tensor((batch_size, 1, 8, 128), dtype="float16")) = R.split(reshape, indices_or_sections=[64, 72], axis=2)
-            split_0: R.Tensor((batch_size, 1, 64, 128), dtype="float16") = split[0]
-            split_1: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = split[1]
-            split_2: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = split[2]
-            rms_norm1: R.Tensor((batch_size, 1, 64, 128), dtype="float16") = R.nn.rms_norm(split_0, model_layers_0_self_attn_q_norm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
-            rms_norm2: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = R.nn.rms_norm(split_1, model_layers_0_self_attn_k_norm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
-            concat: R.Tensor((batch_size, 1, 80, 128), dtype="float16") = R.concat((rms_norm1, rms_norm2, split_2), axis=2)
-            reshape1: R.Tensor((batch_size, 80, 128), dtype="float16") = R.reshape(concat, R.shape([batch_size, 80, 128]))
-            lv = R.call_dps_packed("vm.builtin.attention_kv_cache_attention_with_fused_qkv", (paged_kv_cache, R.prim_value(0), R.prim_value(T.float32(0.088388347648318447)), reshape1), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
-            reshape2: R.Tensor((batch_size, 1, 64, 128), dtype="float16") = R.reshape(lv, R.shape([batch_size, 1, 64, 128]))
-            reshape3: R.Tensor((batch_size, 1, 8192), dtype="float16") = R.reshape(reshape2, R.shape([batch_size, 1, 8192]))
-            permute_dims1: R.Tensor((8192, 5120), dtype="float16") = R.permute_dims(model_layers_0_self_attn_o_proj_weight1, axes=None)
-            matmul1: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.matmul(reshape3, permute_dims1, out_dtype="void")
-            add: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.add(matmul1, input_embeds)
-            rms_norm3: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.nn.rms_norm(add, model_layers_0_post_attention_layernorm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
-            permute_dims2: R.Tensor((5120, 51200), dtype="float16") = R.permute_dims(model_layers_0_mlp_gate_up_proj_weight1, axes=None)
-            matmul2: R.Tensor((batch_size, 1, 51200), dtype="float16") = R.matmul(rms_norm3, permute_dims2, out_dtype="void")
-            split1: R.Tuple(R.Tensor((batch_size, 1, 25600), dtype="float16"), R.Tensor((batch_size, 1, 25600), dtype="float16")) = R.split(matmul2, indices_or_sections=2, axis=-1)
-            split_01: R.Tensor((batch_size, 1, 25600), dtype="float16") = split1[0]
-            split_11: R.Tensor((batch_size, 1, 25600), dtype="float16") = split1[1]
-            silu: R.Tensor((batch_size, 1, 25600), dtype="float16") = R.nn.silu(split_01)
-            mul: R.Tensor((batch_size, 1, 25600), dtype="float16") = R.multiply(silu, split_11)
-            permute_dims3: R.Tensor((25600, 5120), dtype="float16") = R.permute_dims(model_layers_0_mlp_down_proj_weight1, axes=None)
-            matmul3: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.matmul(mul, permute_dims3, out_dtype="void")
-            add1: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.add(matmul3, add)
-            # layer 1
-            rms_norm4: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.nn.rms_norm(add1, model_layers_1_input_layernorm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
-            permute_dims4: R.Tensor((5120, 10240), dtype="float16") = R.permute_dims(model_layers_1_self_attn_c_attn_weight1, axes=None)
-            matmul4: R.Tensor((batch_size, 1, 10240), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
-            reshape4: R.Tensor((batch_size, 1, 80, 128), dtype="float16") = R.reshape(matmul4, R.shape([batch_size, 1, 80, 128]))
-            split2: R.Tuple(R.Tensor((batch_size, 1, 64, 128), dtype="float16"), R.Tensor((batch_size, 1, 8, 128), dtype="float16"), R.Tensor((batch_size, 1, 8, 128), dtype="float16")) = R.split(reshape4, indices_or_sections=[64, 72], axis=2)
-            split_02: R.Tensor((batch_size, 1, 64, 128), dtype="float16") = split2[0]
-            split_12: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = split2[1]
-            split_21: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = split2[2]
-            rms_norm5: R.Tensor((batch_size, 1, 64, 128), dtype="float16") = R.nn.rms_norm(split_02, model_layers_1_self_attn_q_norm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
-            rms_norm6: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = R.nn.rms_norm(split_12, model_layers_1_self_attn_k_norm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
-            concat1: R.Tensor((batch_size, 1, 80, 128), dtype="float16") = R.concat((rms_norm5, rms_norm6, split_21), axis=2)
-            reshape5: R.Tensor((batch_size, 80, 128), dtype="float16") = R.reshape(concat1, R.shape([batch_size, 80, 128]))
-            lv1 = R.call_dps_packed("vm.builtin.attention_kv_cache_attention_with_fused_qkv", (paged_kv_cache, R.prim_value(1), R.prim_value(T.float32(0.088388347648318447)), reshape5), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
-            reshape6: R.Tensor((batch_size, 1, 64, 128), dtype="float16") = R.reshape(lv1, R.shape([batch_size, 1, 64, 128]))
-            reshape7: R.Tensor((batch_size, 1, 8192), dtype="float16") = R.reshape(reshape6, R.shape([batch_size, 1, 8192]))
-            permute_dims5: R.Tensor((8192, 5120), dtype="float16") = R.permute_dims(model_layers_1_self_attn_o_proj_weight1, axes=None)
-            matmul5: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.matmul(reshape7, permute_dims5, out_dtype="void")
-            add2: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.add(matmul5, add1)
-            rms_norm7: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.nn.rms_norm(add2, model_layers_1_post_attention_layernorm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
-            permute_dims6: R.Tensor((5120, 51200), dtype="float16") = R.permute_dims(model_layers_1_mlp_gate_up_proj_weight1, axes=None)
-            matmul6: R.Tensor((batch_size, 1, 51200), dtype="float16") = R.matmul(rms_norm7, permute_dims6, out_dtype="void")
-            split3: R.Tuple(R.Tensor((batch_size, 1, 25600), dtype="float16"), R.Tensor((batch_size, 1, 25600), dtype="float16")) = R.split(matmul6, indices_or_sections=2, axis=-1)
-            split_03: R.Tensor((batch_size, 1, 25600), dtype="float16") = split3[0]
-            split_13: R.Tensor((batch_size, 1, 25600), dtype="float16") = split3[1]
-            silu1: R.Tensor((batch_size, 1, 25600), dtype="float16") = R.nn.silu(split_03)
-            mul1: R.Tensor((batch_size, 1, 25600), dtype="float16") = R.multiply(silu1, split_13)
-            permute_dims7: R.Tensor((25600, 5120), dtype="float16") = R.permute_dims(model_layers_1_mlp_down_proj_weight1, axes=None)
-            matmul7: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.matmul(mul1, permute_dims7, out_dtype="void")
-            add3: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.add(matmul7, add2)
-            # post layer norm
-            rms_norm8: R.Tensor((batch_size, 1, 5120), dtype="float16") = R.nn.rms_norm(add3, model_norm_weight1, axes=[-1], epsilon=9.9999999999999995e-07)
-            permute_dims8: R.Tensor((5120, 151936), dtype="float16") = R.permute_dims(lm_head_weight1, axes=None)
-            matmul8: R.Tensor((batch_size, 1, 151936), dtype="float16") = R.matmul(rms_norm8, permute_dims8, out_dtype="void")
-            astype: R.Tensor((batch_size, 1, 151936), dtype="float32") = R.astype(matmul8, dtype="float32")
-            gv1: R.Tuple(R.Tensor((batch_size, 1, 151936), dtype="float32"), R.Object) = astype, paged_kv_cache
-            R.output(gv1)
-        return gv1
-# fmt: on
 
 import numpy as np
 
