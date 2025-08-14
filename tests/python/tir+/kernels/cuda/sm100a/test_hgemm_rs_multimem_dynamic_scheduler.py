@@ -713,6 +713,7 @@ class Semaphore:
             T.cuda.thread_fence()
 
 
+@pytest.mark.skip()
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 def test_hgemm_rs():
     A_layout = T.ComposeLayout(

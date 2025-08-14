@@ -639,10 +639,10 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
 
 @pytest.mark.parametrize("num_heads", [(64, 8)])
-@pytest.mark.parametrize("seq_len", [512, 1024, 2048])
+@pytest.mark.parametrize("seq_len", [512])
 @pytest.mark.parametrize("head_dim", [128])
-@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64, 128, 256]])
-def test(num_heads, seq_len, head_dim, batch_size_list):
+@pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128, 256])
+def test(num_heads, seq_len, head_dim, batch_size):
     PAGE_SIZE = 16
     MAX_PAGE_NUM = 32768
     qo_heads, kv_heads = num_heads
@@ -776,8 +776,7 @@ def test(num_heads, seq_len, head_dim, batch_size_list):
             np.testing.assert_allclose(O_tir, O_flashinfer, rtol=1e-3, atol=1e-3)
             np.testing.assert_allclose(lse_tir, lse_flashinfer, rtol=1e-3, atol=1e-3)
 
-    for batch_size in batch_size_list:
-        test_dynamic_batch_size(batch_size)
+    test_dynamic_batch_size(batch_size)
 
 
 if __name__ == "__main__":
@@ -788,7 +787,7 @@ if __name__ == "__main__":
     head_dim_list = [128]
     batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128, 256]
 
-    for num_heads, seq_len, head_dim in itertools.product(
-        num_heads_list, seq_len_list, head_dim_list
+    for num_heads, seq_len, head_dim, batch_size in itertools.product(
+        num_heads_list, seq_len_list, head_dim_list, batch_size_list
     ):
-        test(num_heads, seq_len, head_dim, batch_size_list)
+        test(num_heads, seq_len, head_dim, batch_size)

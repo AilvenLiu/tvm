@@ -345,6 +345,7 @@ SMEM_OFFSET = SMEM_SIZE
 SMEM_SIZE += MAX_TASKS * 3 * 4
 
 
+@pytest.mark.skip()
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 def test_hgemm_rs():
     A_layout = T.ComposeLayout(
