@@ -67,6 +67,7 @@ def get_hgemm_kernel(dim_n, dim_k):
     SMEM_PIPE_DEPTH = 6
     TMEM_PIPE_DEPTH = 2
 
+
     F16_BYTES = 2
     F32_BYTES = 4
     F128_BYTES = 16
@@ -580,11 +581,10 @@ def get_hgemm_kernel(dim_n, dim_k):
                 tmp = T.alloc_local([VEC_SIZE], "float32", layout="default")
                 vec_16 = T.alloc_local([VEC_SIZE], "float16", layout="default") 
                 
-                idx[0] = bx
-                while idx[0] < M * N // (NUM_THREADS * VEC_SIZE):
-                    real_idx = (idx[0] * NUM_THREADS + ty * BDX + tx) * VEC_SIZE
-                    m_idx = T.meta_var(real_idx // N)
-                    n_idx = T.meta_var(real_idx % N)
+                idx[0] = bx * NUM_THREADS * VEC_SIZE + (ty * BDX + tx) * VEC_SIZE
+                while idx[0] < M * N:
+                    m_idx = T.meta_var(idx[0] // N)
+                    n_idx = T.meta_var(idx[0] % N)
                     for kv in T.unroll(VEC_SIZE):
                         vec_32[kv] = 0.0
                     for kt in T.serial(TILE_K_NUM):
@@ -597,7 +597,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                         # vec_16[kv] = T.cast(vec_32[kv], "float16")
                     for kv in T.vectorized(VEC_SIZE):
                         D[m_idx, n_idx + kv] = vec_16[kv]                    
-                    idx[0] += SM_NUMBER
+                    idx[0] += SM_NUMBER * NUM_THREADS * VEC_SIZE
     # fmt: on
     return hgemm, reduce, TILE_K_NUM
 
@@ -605,7 +605,7 @@ def get_hgemm_kernel(dim_n, dim_k):
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 @pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128])
 def test(batch_size):
-    N, K = 8192, 8192
+    N, K = 5120, 5120
     A_bf16, B_bf16, C_bf16 = prepare_data(batch_size, N, K)
 
     def tir_gemm(A_bf16, B_bf16, C_bf16):
@@ -668,5 +668,5 @@ def test(batch_size):
 
 
 if __name__ == "__main__":
-    for batch_size in [1, 2, 4, 8, 16, 32, 64, 128]:
+    for batch_size in [1]:
         test(batch_size)
