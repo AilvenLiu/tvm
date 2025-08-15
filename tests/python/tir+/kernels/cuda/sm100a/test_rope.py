@@ -108,15 +108,15 @@ def get_rope_kernel(head_dim):
                     Tp.cast(qk_vec[:], qk_vec32[:])
                     Tp.copy(global_out[pos[0], head[0], stx:stx + vec_size], qk_vec[:])
 
-                idx[0] = bx
-                while idx[0] < nnz * num_heads // bdy:
-                    pos[0] = (idx[0] * bdy + ty) % nnz
-                    head[0] = (idx[0] * bdy + ty) // nnz
+                idx[0] = bx * bdy + ty
+                while idx[0] < nnz * num_heads:
+                    pos[0] = idx[0] % nnz
+                    head[0] = idx[0] // nnz
                     cache_stx = T.meta_var(stx % half_rotary_dim)
                     Tp.copy(cos[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx:cache_stx + vec_size])
                     Tp.copy(sin[:], cos_sin_cache_global[pos_ids_global[pos[0]], cache_stx + half_rotary_dim:cache_stx + half_rotary_dim + vec_size])
                     compute_rope(q_global, q_rope_global)
-                    idx[0] += SM_COUNT
+                    idx[0] += SM_COUNT * bdy
     return rope_with_cos_sin_cache
 
 
