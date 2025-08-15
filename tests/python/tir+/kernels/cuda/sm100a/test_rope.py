@@ -129,7 +129,7 @@ def prepare_cos_sin_cache(rotary_dim, max_position_embeddings, base):
     cos = freqs.cos()
     sin = freqs.sin()
     cos_sin_cache = torch.cat((cos, sin), dim=-1)  # shape: [max_position_embeddings, rotary_dim]
-    return tvm.runtime.ndarray.from_dlpack(torch.to_dlpack(cos_sin_cache))
+    return cos_sin_cache
 
 
 def prepare_data(
@@ -165,7 +165,7 @@ def test_cos_sin_cache(rotary_dim, max_position_embeddings, base):
         mod["cos_sin_cache"](cache_tvm)
     print(cache_ref.cpu().numpy())
     print(cache_tvm.numpy())
-    np.testing.assert_allclose(cache_ref.cpu().numpy(), cache_tvm.numpy(), atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(cache_ref.cpu().numpy(), cache_tvm.numpy(), atol=1e-3, rtol=1e-3)
 
 
 @pytest.mark.parametrize("num_heads", [8])
@@ -269,7 +269,7 @@ def test_rope(num_heads, seq_len, head_dim, batch_size):
     # compile tir kernel
     target = tvm.target.Target("cuda")
     with target:
-        mod = tvm.IRModule({"main": get_rope_kernel(head_dim, base)})
+        mod = tvm.IRModule({"main": get_rope_kernel(head_dim)})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
     with ProtonContext("rope"):

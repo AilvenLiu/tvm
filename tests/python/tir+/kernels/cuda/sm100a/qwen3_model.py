@@ -229,6 +229,7 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
         cos_sin_cache = tvm.nd.array(np.zeros((MAX_SEQ_LEN, 128), dtype="float32"), device=dev)
         cos_sin_cache_func(cos_sin_cache)
         # cos_sin_cache = prepare_cos_sin_cache(128, MAX_SEQ_LEN, ROPE_THETA)
+        # cos_sin_cache = tvm.nd.array.from_dlpack(cos_sin_cache.to_dlpack())
 
     nd_view_func = tvm.get_global_func("vm.builtin.reshape")
 
