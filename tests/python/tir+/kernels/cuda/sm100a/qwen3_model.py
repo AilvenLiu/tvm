@@ -23,9 +23,9 @@ from .test_rmsnorm import get_rmsnorm_kernel
 from .test_fused_add_rms_norm import get_fused_add_rmsnorm_kernel
 from .test_fused_split_silu_multiply import get_fused_split_silu_multiply_kernel
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
-from .test_rope import get_rope_kernel
+from .test_rope import get_rope_kernel, get_cos_sin_cache_kernel, prepare_cos_sin_cache
 from .test_append_paged_kv_cache import get_append_paged_kv_cache_kernel
-from .test_batch_decode import PlanInfo, get_decode_kernel
+from .test_batch_decode import PlanInfo, get_decode_kernel, decode_attn_plan
 
 # pyright: reportInvalidTypeForm=false
 
@@ -34,7 +34,7 @@ target = tvm.target.Target("cuda")
 
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/user_data/bohanhou/Qwen3-32B-q0f16-MLC/"  # load weights from real model
-# LOAD_WEIGHTS = None # generate weights
+# LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
 MAX_TOTAL_SEQ_LEN = MAX_BATCH_SIZE * MAX_SEQ_LEN
@@ -172,6 +172,9 @@ def _pipeline(  # pylint: disable=too-many-arguments
     return _craft_pipeline(ext_mods, "opt_llm_mg")
 
 
+tvm.register_func("megakernel.decode_attn_plan", decode_attn_plan)
+
+
 def get_params(named_params):
     if LOAD_WEIGHTS is None:
         print("Generating weights")
@@ -215,9 +218,7 @@ with target:
     vm = relax.VirtualMachine(ex, dev)
 
 
-def test_qwen3_model(batch_decode_func, is_megakernel=False):
-    func = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_tensor_retrieve")
-
+def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=None):
     kv_cache = vm["create_flashinfer_paged_kv_cache"](
         ShapeTuple([MAX_BATCH_SIZE]),  # max_batch_size
         ShapeTuple([MAX_TOTAL_SEQ_LEN]),  # max_total_seq_len
@@ -227,10 +228,9 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False):
     )
 
     if is_megakernel:
-        _, sin_cos_cache = get_rope_kernel(MAX_SEQ_LEN, 128, ROPE_THETA)
-        sin_cos_cache = tvm.runtime.ndarray.from_dlpack(torch.to_dlpack(sin_cos_cache))
-        plan_info = PlanInfo(qo_heads=64, kv_heads=8, head_dim=128, enforce_no_split_kv=True)
-        assert not plan_info.split_kv
+        cos_sin_cache = tvm.nd.array(np.zeros((MAX_SEQ_LEN, 128), dtype="float32"), device=dev)
+        cos_sin_cache_func(cos_sin_cache)
+        # cos_sin_cache = prepare_cos_sin_cache(128, MAX_SEQ_LEN, ROPE_THETA)
 
     nd_view_func = tvm.get_global_func("vm.builtin.reshape")
 
@@ -259,36 +259,10 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False):
         hidden_states = embed(tokens, params)
         begin_forward_func(kv_cache, ShapeTuple(seq_ids), ShapeTuple([1] * batch_size))
         if is_megakernel:
-            [
-                *kv_data,
-                kv_indptr,
-                kv_indices,
-                kv_last_page_len,
-                append_position_map,
-                q_rope_position_map,
-            ] = func(kv_cache, NUM_HIDDEN_LAYERS)
-            plan_info.plan(batch_size, kv_indptr.numpy().tolist(), PAGE_SIZE, kv_data[0].shape[0])
-            logits = batch_decode_func(
+            logits, kv_cache = batch_decode_func(
                 hidden_states,
-                #########################################################
                 kv_cache,
-                #########################################################
-                kv_data,
-                kv_indptr,
-                kv_indices,
-                kv_last_page_len,
-                # append
-                append_position_map,
-                q_rope_position_map,
-                # rope
-                sin_cos_cache,
-                # attn
-                plan_info.lse_tvm,
-                plan_info.request_indices_tvm,
-                plan_info.kv_tile_indices_tvm,
-                plan_info.max_chunk_size,
-                # #########################################################
-                # params
+                cos_sin_cache,
                 params,
             )
         else:
@@ -322,10 +296,10 @@ def get_qwen3_megakernel_mod():
     hgemm3, reduce3, tile_k_num3 = get_hgemm_kernel(dim_n=51200, dim_k=5120)
     hgemm4, reduce4, tile_k_num4 = get_hgemm_kernel(dim_n=5120, dim_k=25600)
     hgemm5, reduce5, tile_k_num5 = get_hgemm_kernel(dim_n=151936, dim_k=5120)
-    rope, sin_cos_cache = get_rope_kernel(MAX_SEQ_LEN, 128, ROPE_THETA)
+    rope = get_rope_kernel(MAX_SEQ_LEN, 128)
     append_paged_kv_cache = get_append_paged_kv_cache_kernel(8, 1, 128)
     decode, merge = get_decode_kernel(PlanInfo(64, 8, 128, enforce_no_split_kv=True), PAGE_SIZE)
-
+    cos_sin_cache = get_cos_sin_cache_kernel(128, MAX_SEQ_LEN, ROPE_THETA)
     # fmt: off
     @R.macro(hygienic=False)
     def call_qwen3_layer(input0, input1, layer_id, tile_k_num1, tile_k_num2, tile_k_num3, tile_k_num4):
@@ -367,9 +341,9 @@ def get_qwen3_megakernel_mod():
             #########################################################
             # rope
             q_rs = R.reshape(rms_norm1_rs, (batch_size, 64, 128))
-            q_rope = R.call_tir(cls.rope, (q_rs, sin_cos_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
+            q_rope = R.call_tir(cls.rope, (q_rs, cos_sin_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
             k_rs = R.reshape(rms_norm2_rs, (batch_size, 8, 128))
-            k = R.call_tir(cls.rope, (k_rs, sin_cos_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 8, 128), dtype="float16"))
+            k = R.call_tir(cls.rope, (k_rs, cos_sin_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 8, 128), dtype="float16"))
             k_rope = R.reshape(k, (batch_size, 1, 8, 128))
             # append
             append_position_map_rs = R.reshape(append_position_map, (batch_size, 1))
@@ -525,7 +499,7 @@ def get_qwen3_megakernel_mod():
             pass
 
         @T.prim_func(private=True)
-        def rope(q: T.handle, sin_cos_cache: T.handle, pos_ids: T.handle, q_rope: T.handle):
+        def rope(q: T.handle, cos_sin_cache: T.handle, pos_ids: T.handle, q_rope: T.handle):
             pass
 
         @T.prim_func(private=True)
@@ -536,29 +510,24 @@ def get_qwen3_megakernel_mod():
         def decode(q: T.handle, kv: T.handle, lse: T.handle, kv_indptr: T.handle, kv_last_page_len: T.handle, kv_indices: T.handle, request_indices: T.handle, kv_tile_indices: T.handle, max_chunk_size: T.handle, o: T.handle):
             pass
 
+        @T.prim_func(private=True)
+        def cos_sin_cache(cos_sin_cache: T.handle):
+            pass
+        
+        @R.function
+        def cos_sin_cache_func(cache: R.Tensor((MAX_SEQ_LEN, 128), dtype="float32")):
+            cls = Module
+            with R.dataflow():
+                cache: R.Tensor((MAX_SEQ_LEN, 128), dtype="float32") = R.call_tir_inplace(cls.cos_sin_cache, (cache), [0], out_sinfo=R.Tensor((MAX_SEQ_LEN, 128), dtype="float32") )
+                R.output(cache)
+            return cache
+
         @R.function
         def batch_decode(
             input_embeds: R.Tensor(("batch_size", 1, 5120), dtype="float16"),
-            #########################################################
             paged_kv_cache: R.Object,
-            #########################################################
-            kv_data: R.Tuple(
-                [R.Tensor(("max_page_num", 2, 8, "page_size", 128), dtype="float16")] * NUM_HIDDEN_LAYERS
-            ),
-            kv_indptr: R.Tensor(("batch_size + 1",), dtype="int32"),
-            kv_indices: R.Tensor(("total_page_num",), dtype="int32"),
-            kv_last_page_len: R.Tensor(("batch_size",), dtype="int32"),
-            # append
-            append_position_map: R.Tensor(("batch_size",), dtype="int32"),
-            q_rope_position_map: R.Tensor(("batch_size",), dtype="int32"),
             # rope
-            sin_cos_cache: R.Tensor((MAX_SEQ_LEN, 128), dtype="float32"),
-            # attn
-            plan_lse_tvm: R.Tensor(("new_batch_size", 64), dtype="float32"),
-            plan_request_indices: R.Tensor(("new_batch_size",), dtype="int32"),
-            plan_kv_tile_indices: R.Tensor(("new_batch_size",), dtype="int32"),
-            plan_max_chunk_size: R.Tensor((1,), dtype="int32"),
-            #########################################################
+            cos_sin_cache: R.Tensor((MAX_SEQ_LEN, 128), dtype="float32"),
             packed_params: R.Tuple(
                 R.Tensor((151936, 5120), dtype="float16"),
                 #
@@ -576,12 +545,56 @@ def get_qwen3_megakernel_mod():
             ),
         ):
             batch_size = T.int64()
+            new_batch_size = T.int64()
+            total_page_num = T.int64()
             max_page_num = T.int64()
             page_size = T.int64()
 
             cls = Module
             with R.dataflow():
-                # num_hidden_layers=2
+                res0 = R.call_pure_packed(
+                    "vm.builtin.paged_attention_kv_cache_tensor_retrieve",
+                    paged_kv_cache, R.prim_value(1),
+                    sinfo_args=[
+                        R.Tuple([R.Tensor(None, dtype="float16")] * NUM_HIDDEN_LAYERS),
+                        R.Tensor((batch_size + 1,), dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor((batch_size,), dtype="int32"),
+                        R.Tensor((batch_size,), dtype="int32"),
+                        R.Tensor((batch_size,), dtype="int32"),
+                    ],
+                )
+                kv_data_, kv_indptr, kv_indices_, kv_last_page_len, append_position_map, q_rope_position_map = (
+                    res0[0],
+                    res0[1],
+                    res0[2],
+                    res0[3],
+                    res0[4],
+                    res0[5],
+                )
+                kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
+                kv_indices = R.match_cast(kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
+                res1 = R.call_pure_packed(
+                    "megakernel.decode_attn_plan",
+                    R.prim_value(64),
+                    R.prim_value(8),
+                    R.prim_value(128),
+                    R.prim_value(batch_size),
+                    kv_indptr,
+                    R.prim_value(page_size),
+                    R.prim_value(max_page_num),
+                    sinfo_args=[
+                        R.Tensor(None, dtype="float32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor((1,), dtype="int32"),
+                    ],
+                )
+                plan_lse_tvm_, plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size = res1[0], res1[1], res1[2], res1[3]
+                plan_lse_tvm = R.match_cast(plan_lse_tvm_, R.Tensor((new_batch_size, 64), dtype="float32"))
+                plan_request_indices = R.match_cast(plan_request_indices_, R.Tensor((new_batch_size,), dtype="int32"))
+                plan_kv_tile_indices = R.match_cast(plan_kv_tile_indices_, R.Tensor((new_batch_size,), dtype="int32"))
+
                 model_layers_0_input_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[7]
                 lm_head_weight1: R.Tensor((151936, 5120), dtype="float16") = packed_params[NUM_HIDDEN_LAYERS*8+2] # num_hidden_layers*8+2
 
@@ -660,8 +673,10 @@ def get_qwen3_megakernel_mod():
 
                 lv4_rs = R.reshape(lv4, (batch_size, 1, 151936))
                 astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, 151936), dtype="float32"))
-                R.output(astype)
-            return astype
+                
+                gv1 = astype, paged_kv_cache
+                R.output(gv1)
+            return gv1
     # fmt: on
     mod = Module
 
@@ -690,6 +705,9 @@ def get_qwen3_megakernel_mod():
         attach_attr(append_paged_kv_cache, "append_paged_kv_cache"),
     )
     mod.update_func(mod.get_global_var("decode"), attach_attr(decode, "decode"))
+    mod.update_func(
+        mod.get_global_var("cos_sin_cache"), attach_attr(cos_sin_cache, "cos_sin_cache")
+    )
     return mod
 
 
@@ -701,10 +719,13 @@ def get_qwen3_megakernel_batch_decode_func():
             mg_model, target, relax_pipeline=relax.get_pipeline("opt_llm_mg"), tir_pipeline="tirp"
         )
         vm = relax.VirtualMachine(ex, dev)
-    return vm["batch_decode"]
+    return vm["batch_decode"], vm["cos_sin_cache_func"]
 
 
-res1 = test_qwen3_model(get_qwen3_megakernel_batch_decode_func(), is_megakernel=True)
+batch_decode_func, cos_sin_cache_func = get_qwen3_megakernel_batch_decode_func()
+res1 = test_qwen3_model(
+    batch_decode_func, is_megakernel=True, cos_sin_cache_func=cos_sin_cache_func
+)
 
 
 import numpy as np

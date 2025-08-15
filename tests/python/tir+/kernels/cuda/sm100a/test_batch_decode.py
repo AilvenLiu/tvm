@@ -114,6 +114,9 @@ class PlanInfo:
         self.tmp_lse_tvm = None
 
     def plan(self, batch_size, kv_indptr_h, page_size, max_page_num):
+        if isinstance(kv_indptr_h, tvm.nd.NDArray):
+            kv_indptr_h = kv_indptr_h.numpy().tolist()
+
         PAGE_SIZE = page_size
         MAX_PAGE_NUM = max_page_num
 
@@ -209,6 +212,19 @@ class PlanInfo:
             self.tmp_lse_tvm = tvm.nd.array(
                 np.zeros([new_batch_size, self.qo_heads], dtype=np.float32), DEV
             )
+
+
+def decode_attn_plan(
+    qo_heads, kv_heads, head_dim, batch_size, kv_indptr_h, page_size, max_page_num
+):
+    plan_info = PlanInfo(qo_heads, kv_heads, head_dim, enforce_no_split_kv=True)
+    plan_info.plan(batch_size, kv_indptr_h, page_size, max_page_num)
+    return (
+        plan_info.lse_tvm,
+        plan_info.request_indices_tvm,
+        plan_info.kv_tile_indices_tvm,
+        plan_info.max_chunk_size,
+    )
 
 
 def get_decode_kernel(plan_info: PlanInfo, page_size):

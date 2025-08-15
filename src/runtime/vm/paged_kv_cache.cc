@@ -1708,7 +1708,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     TVM_FFI_ICHECK(false) << "DebugSetKV for PageAttentionKVCache not implemented yet.";
   }
 
-  Array<NDArray> RetrieveTensor(size_t num_layers) {
+  Array<ffi::Any> RetrieveTensor(size_t num_layers) {
     TVM_FFI_ICHECK_EQ(num_depths_, 1) << "Only 1 depth is supported for RetrieveTensor";
     TVM_FFI_ICHECK_GT(page_indptr_on_depths_view_.size(), 0)
         << "Only 1 depth is supported for RetrieveTensor";
@@ -1724,10 +1724,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         << "length_info_on_depths_view_[0] is not defined";
     TVM_FFI_ICHECK(append_position_map_view_.defined()) << "append_position_map_view_ is not defined";
     TVM_FFI_ICHECK(q_rope_position_map_view_.defined()) << "q_rope_position_map_view_ is not defined";
-    std::vector<NDArray> ret;
-    for (size_t i = 0; i < num_layers; ++i) {
-      ret.push_back(pages_[i]);
-    }
+    std::vector<ffi::Any> ret;
+    ret.push_back(Array<NDArray>(pages_));
     ret.push_back(page_indptr_on_depths_view_[0]);
     ret.push_back(page_indices_on_depths_view_[0]);
     ret.push_back(length_info_on_depths_view_[0]);
