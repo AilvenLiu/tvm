@@ -1,10 +1,12 @@
-import torch
-import tvm
 import numpy as np
+import pytest
+import torch
+
+import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from ..utils import bench, ProtonContext
-import pytest
+
+from ..utils import ProtonContext, bench
 
 F16_BYTES = 2
 F32_BYTES = 4
@@ -21,13 +23,14 @@ def find_power_of_two(n):
     return n.bit_length() - 1
 
 
-def get_cos_sin_cache_kernel(rotary_dim, max_position_embeddings, base):
+def get_cos_sin_cache_kernel(rotary_dim, base):
     assert rotary_dim % 2 == 0
 
     # fmt: off
     @T.prim_func(tirp=True)
     def cos_sin_cache(cos_sin_cache: T.handle):
-        cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_position_embeddings, rotary_dim], "float32", scope="global", layout="default")
+        max_seq_len = T.int32()
+        cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global", layout="default")
         
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")
@@ -37,7 +40,7 @@ def get_cos_sin_cache_kernel(rotary_dim, max_position_embeddings, base):
                 idx = T.alloc_local([1], "int32", layout="default")
                 
                 idx[0] = bx * 1024 + tx
-                while idx[0] < max_position_embeddings * rotary_dim:
+                while idx[0] < max_seq_len * rotary_dim:
                     row = T.meta_var(idx[0] // rotary_dim)
                     col = T.meta_var(idx[0] % rotary_dim)
 
@@ -52,7 +55,7 @@ def get_cos_sin_cache_kernel(rotary_dim, max_position_embeddings, base):
     return cos_sin_cache
 
 
-def get_rope_kernel(max_position_embeddings, head_dim):
+def get_rope_kernel(head_dim):
     rotary_dim = head_dim  # can be different
     vec_size = max(16 // F16_BYTES, rotary_dim // 32)
     bdx = rotary_dim // vec_size
@@ -64,9 +67,10 @@ def get_rope_kernel(max_position_embeddings, head_dim):
     def rope_with_cos_sin_cache(q: T.handle, cos_sin_cache: T.handle, pos_ids: T.handle, q_rope: T.handle):
         nnz = T.int32()
         num_heads = T.int32()
+        max_seq_len = T.int32()
         q_global = T.match_buffer(q, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
         q_rope_global = T.match_buffer(q_rope, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
-        cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_position_embeddings, rotary_dim], "float32", scope="global", layout="default")
+        cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global", layout="default")
         pos_ids_global = T.match_buffer(pos_ids, [nnz], "int32", scope="global", layout="default")
         half_rotary_dim = rotary_dim // 2
 
@@ -155,7 +159,7 @@ def test_cos_sin_cache(rotary_dim, max_position_embeddings, base):
     target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule(
-            {"main": get_cos_sin_cache_kernel(rotary_dim, max_position_embeddings, base)}
+            {"main": get_cos_sin_cache_kernel(rotary_dim, base)}
         )
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         mod["cos_sin_cache"](cache_tvm)
@@ -265,7 +269,7 @@ def test_rope(num_heads, seq_len, head_dim, batch_size):
     # compile tir kernel
     target = tvm.target.Target("cuda")
     with target:
-        mod = tvm.IRModule({"main": get_rope_kernel(max_position_embeddings, head_dim, base)})
+        mod = tvm.IRModule({"main": get_rope_kernel(head_dim, base)})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
 
     with ProtonContext("rope"):

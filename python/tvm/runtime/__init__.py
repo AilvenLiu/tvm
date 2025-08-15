@@ -30,6 +30,14 @@ from ._tensor import Tensor, tensor, empty
 from .module import Module
 from .profiling import Report
 from .executable import Executable
+from .module import (
+    Module,
+    enabled,
+    load_module,
+    load_static_library,
+    num_threads,
+    system_lib,
+)
 
 # function exposures
 from ._tensor import device, cpu, cuda, opencl, vulkan, metal
@@ -38,12 +46,11 @@ from .module import load_module, enabled, system_lib, load_static_library, num_t
 from .container import String, ShapeTuple
 from .object_generic import const
 from .params import (
-    save_param_dict,
     load_param_dict,
-    save_param_dict_to_file,
     load_param_dict_from_file,
+    save_param_dict,
+    save_param_dict_to_file,
 )
-
-from . import disco
-
+from .profiling import Report
+from .script_printer import Scriptable
 from .support import _regex_match

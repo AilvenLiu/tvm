@@ -279,10 +279,10 @@ def get_qwen3_megakernel_mod():
     hgemm3, reduce3, tile_k_num3 = get_hgemm_kernel(dim_n=51200, dim_k=5120)
     hgemm4, reduce4, tile_k_num4 = get_hgemm_kernel(dim_n=5120, dim_k=25600)
     hgemm5, reduce5, tile_k_num5 = get_hgemm_kernel(dim_n=151936, dim_k=5120)
-    rope = get_rope_kernel(MAX_SEQ_LEN, 128)
+    rope = get_rope_kernel(128)
     append_paged_kv_cache = get_append_paged_kv_cache_kernel(8, 1, 128)
     decode, merge = get_decode_kernel(PlanInfo(64, 8, 128, enforce_no_split_kv=True), PAGE_SIZE)
-    cos_sin_cache = get_cos_sin_cache_kernel(128, MAX_SEQ_LEN, ROPE_THETA)
+    cos_sin_cache = get_cos_sin_cache_kernel(128, ROPE_THETA)
     # fmt: off
     @I.ir_module
     class Module:

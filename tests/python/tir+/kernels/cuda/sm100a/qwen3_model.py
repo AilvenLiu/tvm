@@ -34,6 +34,7 @@ target = tvm.target.Target("cuda")
 
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/user_data/bohanhou/Qwen3-32B-q0f16-MLC/"  # load weights from real model
+MEGA_LIB_PATH = "/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/mega_lib.so"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
@@ -172,9 +173,6 @@ def _pipeline(  # pylint: disable=too-many-arguments
     return _craft_pipeline(ext_mods, "opt_llm_mg")
 
 
-tvm.register_func("megakernel.decode_attn_plan", decode_attn_plan)
-
-
 def get_params(named_params):
     if LOAD_WEIGHTS is None:
         print("Generating weights")
@@ -296,10 +294,10 @@ def get_qwen3_megakernel_mod():
     hgemm3, reduce3, tile_k_num3 = get_hgemm_kernel(dim_n=51200, dim_k=5120)
     hgemm4, reduce4, tile_k_num4 = get_hgemm_kernel(dim_n=5120, dim_k=25600)
     hgemm5, reduce5, tile_k_num5 = get_hgemm_kernel(dim_n=151936, dim_k=5120)
-    rope = get_rope_kernel(MAX_SEQ_LEN, 128)
+    rope = get_rope_kernel(128)
     append_paged_kv_cache = get_append_paged_kv_cache_kernel(8, 1, 128)
     decode, merge = get_decode_kernel(PlanInfo(64, 8, 128, enforce_no_split_kv=True), PAGE_SIZE)
-    cos_sin_cache = get_cos_sin_cache_kernel(128, MAX_SEQ_LEN, ROPE_THETA)
+    cos_sin_cache = get_cos_sin_cache_kernel(128, ROPE_THETA)
     # fmt: off
     @R.macro(hygienic=False)
     def call_qwen3_layer(input0, input1, layer_id, tile_k_num1, tile_k_num2, tile_k_num3, tile_k_num4):
@@ -515,10 +513,11 @@ def get_qwen3_megakernel_mod():
             pass
         
         @R.function
-        def cos_sin_cache_func(cache: R.Tensor((MAX_SEQ_LEN, 128), dtype="float32")):
+        def cos_sin_cache_func(cache: R.Tensor(("max_seq_len", 128), dtype="float32")):
+            max_seq_len = T.int64()
             cls = Module
             with R.dataflow():
-                cache: R.Tensor((MAX_SEQ_LEN, 128), dtype="float32") = R.call_tir_inplace(cls.cos_sin_cache, (cache), [0], out_sinfo=R.Tensor((MAX_SEQ_LEN, 128), dtype="float32") )
+                cache: R.Tensor((max_seq_len, 128), dtype="float32") = R.call_tir_inplace(cls.cos_sin_cache, (cache), [0], out_sinfo=R.Tensor((max_seq_len, 128), dtype="float32") )
                 R.output(cache)
             return cache
 
@@ -527,7 +526,7 @@ def get_qwen3_megakernel_mod():
             input_embeds: R.Tensor(("batch_size", 1, 5120), dtype="float16"),
             paged_kv_cache: R.Object,
             # rope
-            cos_sin_cache: R.Tensor((MAX_SEQ_LEN, 128), dtype="float32"),
+            cos_sin_cache: R.Tensor(("max_seq_len", 128), dtype="float32"),
             packed_params: R.Tuple(
                 R.Tensor((151936, 5120), dtype="float16"),
                 #
@@ -718,6 +717,7 @@ def get_qwen3_megakernel_batch_decode_func():
         ex = tvm.compile(
             mg_model, target, relax_pipeline=relax.get_pipeline("opt_llm_mg"), tir_pipeline="tirp"
         )
+        ex.export_library(MEGA_LIB_PATH)
         vm = relax.VirtualMachine(ex, dev)
     return vm["batch_decode"], vm["cos_sin_cache_func"]
 
