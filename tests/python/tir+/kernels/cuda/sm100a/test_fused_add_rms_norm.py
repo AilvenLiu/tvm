@@ -136,9 +136,9 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
     return fused_add_rmsnorm
 
 
-@pytest.mark.parametrize("hidden_size", [4096])
-@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64, 128]])
-def test_fused_add_rmsnorm(hidden_size, batch_size_list):
+@pytest.mark.parametrize("hidden_size", [5120, 128])
+@pytest.mark.parametrize("batch_size", [4113, 1, 2, 4, 8, 16, 32, 64, 128])
+def test_fused_add_rmsnorm(hidden_size, batch_size):
 
     def test_dynamic_batch(batch_size, mod):
         x, residual, weight = prepare_data(hidden_size, batch_size)
@@ -199,13 +199,14 @@ def test_fused_add_rmsnorm(hidden_size, batch_size_list):
         # src = mod_decode_no_split_kv.mod.imported_modules[0].get_source()
         # print(src)
 
-    for batch_size in batch_size_list:
-        with ProtonContext("rms_norm"):
-            test_dynamic_batch(batch_size, mod)
+    with ProtonContext("rms_norm"):
+        test_dynamic_batch(batch_size, mod)
 
 
 if __name__ == "__main__":
-    hidden_size_list = [5120]
-    batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128]
-    for hidden_size in hidden_size_list:
-        test_fused_add_rmsnorm(hidden_size, batch_size_list)
+    import itertools
+
+    hidden_size_list = [5120, 128]
+    batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128, 4113]
+    for hidden_size, batch_size in itertools.product(hidden_size_list, batch_size_list):
+        test_fused_add_rmsnorm(hidden_size, batch_size)

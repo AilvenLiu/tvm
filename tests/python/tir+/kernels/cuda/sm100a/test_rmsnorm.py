@@ -127,9 +127,9 @@ def get_rmsnorm_kernel(hidden_size):
     return rmsnorm
 
 
-@pytest.mark.parametrize("hidden_size", [4096])
-@pytest.mark.parametrize("batch_size_list", [[1, 2, 4, 8, 16, 32, 64, 128]])
-def test_rmsnorm(hidden_size, batch_size_list):
+@pytest.mark.parametrize("hidden_size", [5120, 128])
+@pytest.mark.parametrize("batch_size", [4113, 1, 2, 4, 8, 16, 32, 64, 128])
+def test_rmsnorm(hidden_size, batch_size):
     def test_dynamic_batch(batch_size, mod):
         x, weight = prepare_data(hidden_size, batch_size)
 
@@ -155,7 +155,7 @@ def test_rmsnorm(hidden_size, batch_size_list):
             DEV = tvm.cuda(0)
             x_tvm = tvm.nd.array(x.cpu().numpy(), DEV)
             weight_tvm = tvm.nd.array(weight.cpu().numpy(), DEV)
-            out_tvm = tvm.nd.array(torch.empty_like(x).cpu().numpy(), DEV)
+            out_tvm = tvm.nd.empty((batch_size, hidden_size), dtype="float16", device=DEV)
             func = lambda: mod(
                 x_tvm,
                 weight_tvm,
@@ -180,13 +180,14 @@ def test_rmsnorm(hidden_size, batch_size_list):
         # src = mod_decode_no_split_kv.mod.imported_modules[0].get_source()
         # print(src)
 
-    for batch_size in batch_size_list:
-        with ProtonContext("rms_norm"):
-            test_dynamic_batch(batch_size, mod)
+    with ProtonContext("rms_norm"):
+        test_dynamic_batch(batch_size, mod)
 
 
 if __name__ == "__main__":
-    hidden_size_list = [4096]
-    batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128]
-    for hidden_size in hidden_size_list:
-        test_rmsnorm(hidden_size, batch_size_list)
+    import itertools
+
+    hidden_size_list = [5120, 128]
+    batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128, 4113]
+    for hidden_size, batch_size in itertools.product(hidden_size_list, batch_size_list):
+        test_rmsnorm(hidden_size, batch_size)

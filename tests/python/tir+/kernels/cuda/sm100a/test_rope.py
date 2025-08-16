@@ -158,9 +158,7 @@ def test_cos_sin_cache(rotary_dim, max_position_embeddings, base):
 
     target = tvm.target.Target("cuda")
     with target:
-        mod = tvm.IRModule(
-            {"main": get_cos_sin_cache_kernel(rotary_dim, base)}
-        )
+        mod = tvm.IRModule({"main": get_cos_sin_cache_kernel(rotary_dim, base)})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         mod["cos_sin_cache"](cache_tvm)
     print(cache_ref.cpu().numpy())
@@ -168,10 +166,10 @@ def test_cos_sin_cache(rotary_dim, max_position_embeddings, base):
     np.testing.assert_allclose(cache_ref.cpu().numpy(), cache_tvm.numpy(), atol=1e-3, rtol=1e-3)
 
 
-@pytest.mark.parametrize("num_heads", [8])
+@pytest.mark.parametrize("num_heads", [8, 64])
 @pytest.mark.parametrize("seq_len", [1])
 @pytest.mark.parametrize("head_dim", [128])
-@pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128, 256])
+@pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128, 256, 1024])
 def test_rope(num_heads, seq_len, head_dim, batch_size):
     rotary_dim = head_dim  # can be different
     max_position_embeddings = 4096
@@ -243,8 +241,12 @@ def test_rope(num_heads, seq_len, head_dim, batch_size):
             pos_ids_tvm = tvm.nd.array(pos_ids.cpu().numpy(), DEV)
             query_tvm = tvm.nd.array(query.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
             key_tvm = tvm.nd.array(key.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
-            query_out_tvm = tvm.nd.array(query.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
-            key_out_tvm = tvm.nd.array(key.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
+            query_out_tvm = tvm.nd.empty(
+                (batch_size, num_heads, head_dim), dtype="float16", device=DEV
+            )
+            key_out_tvm = tvm.nd.empty(
+                (batch_size, num_heads, head_dim), dtype="float16", device=DEV
+            )
             cos_sin_cache_tvm = tvm.nd.array(cos_sin_cache.cpu().numpy(), DEV)
 
             def func():

@@ -71,20 +71,19 @@ def get_fused_split_silu_multiply_kernel(out_dim):
                 vec1 = T.alloc_local([VEC_SIZE], "float16", layout="default")
                 vec2 = T.alloc_local([VEC_SIZE], "float16", layout="default")
                 
-                idx[0] = bx
-                while idx[0] < ceildiv(batch_size * INTERMEDIATE_SIZE , THREAD_NUM * VEC_SIZE):
-                    real_idx = T.meta_var((idx[0] * THREAD_NUM + thread_id) * VEC_SIZE)
-                    token_idx = T.meta_var(real_idx // INTERMEDIATE_SIZE)
-                    offset_imme = T.meta_var((real_idx % INTERMEDIATE_SIZE) % INTERMEDIATE_SIZE)
+                idx[0] = bx * BDX * BDY + thread_id
+                while idx[0] * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
+                    intermediate_idx = T.meta_var((idx[0] * VEC_SIZE) % INTERMEDIATE_SIZE)
+                    batch_idx = T.meta_var((idx[0] * VEC_SIZE) // INTERMEDIATE_SIZE)
                     for kv in T.serial(VEC_SIZE):
-                        vec1[kv] = input_cat_global[token_idx, offset_imme + kv]
+                        vec1[kv] = input_cat_global[batch_idx, intermediate_idx + kv]
                     for kv in T.serial(VEC_SIZE):
-                        vec2[kv] = input_cat_global[token_idx, INTERMEDIATE_SIZE + offset_imme + kv]
+                        vec2[kv] = input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx + kv]
                     for kv in T.serial(VEC_SIZE):
                         vec1[kv] = vec1[kv] * T.sigmoid(vec1[kv]) * vec2[kv]
                     for kv in T.serial(VEC_SIZE):
-                        output_global[token_idx, offset_imme + kv] = vec1[kv]
-                    idx[0] += SM_COUNT
+                        output_global[batch_idx, intermediate_idx + kv] = vec1[kv]
+                    idx[0] += SM_COUNT * BDX * BDY
     # fmt: on
     return fused_split_silu_multiply
 
@@ -113,7 +112,7 @@ def get_fused_split1_silu1_multiply1_kernel(out_dim):
     return fused_split1_silu1_multiply1
 
 
-@pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128])
+@pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128, 4133])
 def test(batch_size):
     out_dim = 25600
     input_cat = perpare_data(batch_size, out_dim)
@@ -136,7 +135,7 @@ def test(batch_size):
     def tir():
         DEV = tvm.cuda(0)
         input_cat_tvm = tvm.nd.array(input_cat.clone(), device=DEV)
-        output_tvm = tvm.nd.array(np.zeros((batch_size, out_dim), dtype=np.float16), device=DEV)
+        output_tvm = tvm.nd.empty((batch_size, out_dim), dtype="float16", device=DEV)
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule({"main": get_fused_split_silu_multiply_kernel(out_dim)})
@@ -152,7 +151,7 @@ def test(batch_size):
         input_cat_tvm = tvm.nd.array(
             input_cat.clone().reshape(1, batch_size, out_dim * 2), device=DEV
         )
-        output_tvm = tvm.nd.array(np.zeros((1, batch_size, out_dim), dtype=np.float16), device=DEV)
+        output_tvm = tvm.nd.empty((1, batch_size, out_dim), dtype="float16", device=DEV)
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule({"main": get_fused_split1_silu1_multiply1_kernel(out_dim)})
@@ -168,10 +167,10 @@ def test(batch_size):
         output_tir = tir()
         output_tir2 = tir2()
 
-    # np.testing.assert_allclose(output_naive, output_tir, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(output_naive, output_tir, rtol=5e-3, atol=5e-3)
     np.testing.assert_allclose(output_tir, output_tir2, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
-    for batch_size in [64, 128]:
+    for batch_size in [64, 128, 4133]:
         test(batch_size)

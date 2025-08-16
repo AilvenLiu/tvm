@@ -84,24 +84,22 @@ def get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim):
                 token_id = T.alloc_local([1], "int32", layout="default")
                 head_id = T.alloc_local([1], "int32", layout="default")
                 pos = T.alloc_local([1], "int32", layout="default")
+                kv_id = T.alloc_local([1], "int32", layout="default")
                 vec = T.alloc_local([VEC_SIZE], "float16", layout="default")
 
-                idx[0] = bx
-                while idx[0] < batch_size * NUM_TOKENS * NUM_HEADS * 2 // BDY:
-                    real_idx[0] = (idx[0] * BDY // 2) + (ty % (BDY // 2))
-                    batch_id[0] = real_idx[0] // (NUM_TOKENS * NUM_HEADS)
-                    token_id[0] = (real_idx[0] % (NUM_TOKENS * NUM_HEADS)) // NUM_HEADS
-                    head_id[0] = (real_idx[0] % (NUM_TOKENS * NUM_HEADS)) % NUM_HEADS
+                idx[0] = bx * BDY + ty
+                while idx[0] < batch_size * NUM_TOKENS * NUM_HEADS * 2:
+                    kv_id[0] = idx[0] % 2
+                    head_id[0] = (idx[0] // 2) % NUM_HEADS
+                    token_id[0] = (idx[0] // (2 * NUM_HEADS)) % NUM_TOKENS
+                    batch_id[0] = (idx[0] // (2 * NUM_HEADS * NUM_TOKENS))
                     pos[0] = pos_map_global[batch_id[0], token_id[0]]
-
-                    if ty < BDY // 2:
+                    if kv_id[0] == 0:
                         Tp.copy(vec[:], k_global[batch_id[0], token_id[0], head_id[0], stx:stx + VEC_SIZE])
-                        Tp.copy(cache_global[pos[0] // page_size, 0, head_id[0], pos[0] % page_size, stx:stx + VEC_SIZE], vec[:])
                     else:
                         Tp.copy(vec[:], v_global[batch_id[0], token_id[0], head_id[0], stx:stx + VEC_SIZE])
-                        Tp.copy(cache_global[pos[0] // page_size, 1, head_id[0], pos[0] % page_size, stx:stx + VEC_SIZE], vec[:])
-                    
-                    idx[0] += SM_COUNT
+                    Tp.copy(cache_global[pos[0] // page_size, kv_id[0], head_id[0], pos[0] % page_size, stx:stx + VEC_SIZE], vec[:])
+                    idx[0] += SM_COUNT * BDY
 
     return append_paged_kv_cache
 

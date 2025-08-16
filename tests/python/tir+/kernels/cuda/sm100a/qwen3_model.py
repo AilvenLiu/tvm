@@ -34,7 +34,7 @@ target = tvm.target.Target("cuda")
 
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/user_data/bohanhou/Qwen3-32B-q0f16-MLC/"  # load weights from real model
-MEGA_LIB_PATH = "/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/mega_lib.so"  # NOTE: update this path
+MEGA_LIB_PATH = "/home/bohanhou/e2e/mega/mega_lib.so"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
