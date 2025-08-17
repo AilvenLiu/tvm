@@ -13,6 +13,7 @@ from mlc_llm.nn.kv_cache import PagedKVCache
 from mlc_llm.compiler_pass.dispatch_kv_cache_creation import DispatchKVCacheCreation
 from mlc_llm.compiler_pass.blas_dispatch import BLASDispatch
 from mlc_llm.compiler_pass.fuse_add_norm import FuseAddRMSNorm
+from mlc_llm.compiler_pass.attach_support_info import AttachVariableBounds, AttachMemoryPlanAttr
 from mlc_llm.compiler_pass.pipeline import _DebugDump
 from tvm.runtime import ShapeTuple
 
@@ -59,7 +60,7 @@ config = Qwen3Config(
     tensor_parallel_shards=1,
     head_dim=128,
     dtype="float32",
-    max_batch_size=128,
+    max_batch_size=256,
     weight_block_size=None,
     kwargs={},
 )
@@ -105,6 +106,8 @@ def _craft_pipeline(ext_mods: List[nn.ExternModule], dump_file_prefix: Path):
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
         seq = tvm.transform.Sequential(
             [
+                AttachVariableBounds({"batch_size": config.max_batch_size, "new_batch_size": config.max_batch_size * 2}),
+                AttachMemoryPlanAttr(),
                 _DebugDump(f"{dump_file_prefix}-phase0.py", debug_dir, show_meta=False),
                 tvm.tir.transform.BindTarget(target),
                 DispatchKVCacheCreation(target, True, dict()),
@@ -350,7 +353,7 @@ def get_qwen3_megakernel_mod():
                                                 out_sinfo=R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16"))
             # attention
             o = R.call_tir(cls.decode, 
-                            (q_rope, new_kv_data, plan_lse_tvm, kv_indptr, kv_last_page_len, kv_indices, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
+                            (q_rope, new_kv_data, lse_tvm, kv_indptr, kv_last_page_len, kv_indices, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
             reshape3 = R.reshape(o, (batch_size, 8192))
             #########################################################
             ######################################################### Attention #########################################################
@@ -558,42 +561,58 @@ def get_qwen3_megakernel_mod():
                     sinfo_args=[
                         R.Tuple([R.Tensor(None, dtype="float16")] * NUM_HIDDEN_LAYERS),
                         R.Tensor((batch_size + 1,), dtype="int32"),
+                        R.Tensor((batch_size + 1,), dtype="int32"),
                         R.Tensor(None, dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
+                        R.Tensor(None, dtype="uint8"),
+                        R.Tensor(None, dtype="uint8"),
+                        R.Tensor(None, dtype="uint8"),
                     ],
                 )
-                kv_data_, kv_indptr, kv_indices_, kv_last_page_len, append_position_map, q_rope_position_map = (
+                kv_data_, kv_indptr, kv_indptr_host, kv_indices_, kv_last_page_len, append_position_map, q_rope_position_map, temp_float_attn_workspace, temp_int_attn_workspace, temp_int_pinned_attn_workspace = (
                     res0[0],
                     res0[1],
                     res0[2],
                     res0[3],
                     res0[4],
                     res0[5],
+                    res0[6],
+                    res0[7],
+                    res0[8],
+                    res0[9],
                 )
                 kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
                 kv_indices = R.match_cast(kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
                 res1 = R.call_pure_packed(
-                    "megakernel.decode_attn_plan",
+                    "flashinfer.batch_decode_with_paged_kv_cache_plan",
+                    temp_float_attn_workspace,
+                    temp_int_attn_workspace,
+                    temp_int_pinned_attn_workspace,
+                    kv_indptr_host,
+                    R.prim_value(batch_size),
                     R.prim_value(64),
                     R.prim_value(8),
-                    R.prim_value(128),
-                    R.prim_value(batch_size),
-                    kv_indptr,
                     R.prim_value(page_size),
-                    R.prim_value(max_page_num),
+                    R.prim_value(False),
+                    R.prim_value(0),
+                    R.prim_value(-1),
+                    R.prim_value(128),
+                    R.prim_value(128),
+                    R.dtype("float16"),
+                    R.dtype("float16"),
+                    R.prim_value(True),
                     sinfo_args=[
-                        R.Tensor(None, dtype="float32"),
                         R.Tensor(None, dtype="int32"),
                         R.Tensor(None, dtype="int32"),
                         R.Tensor((1,), dtype="int32"),
                     ],
                 )
-                plan_lse_tvm_, plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size = res1[0], res1[1], res1[2], res1[3]
-                plan_lse_tvm = R.match_cast(plan_lse_tvm_, R.Tensor((new_batch_size, 64), dtype="float32"))
+                plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size = res1[0], res1[1], res1[2]
                 plan_request_indices = R.match_cast(plan_request_indices_, R.Tensor((new_batch_size,), dtype="int32"))
                 plan_kv_tile_indices = R.match_cast(plan_kv_tile_indices_, R.Tensor((new_batch_size,), dtype="int32"))
+                lse_tvm = R.builtin.alloc_tensor(R.shape([new_batch_size, 64]), dtype="float32", runtime_device_index=0)
 
                 model_layers_0_input_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[7]
                 lm_head_weight1: R.Tensor((151936, 5120), dtype="float16") = packed_params[NUM_HIDDEN_LAYERS*8+2] # num_hidden_layers*8+2

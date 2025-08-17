@@ -1727,10 +1727,14 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     std::vector<ffi::Any> ret;
     ret.push_back(Array<NDArray>(pages_));
     ret.push_back(page_indptr_on_depths_view_[0]);
+    ret.push_back(page_indptr_on_depths_host_[0].as_ndarray());
     ret.push_back(page_indices_on_depths_view_[0]);
     ret.push_back(length_info_on_depths_view_[0]);
     ret.push_back(append_position_map_view_);
     ret.push_back(q_rope_position_map_view_);
+    ret.push_back(temp_float_attn_workspace_);
+    ret.push_back(temp_int_attn_workspace_[0]);
+    ret.push_back(temp_int_pinned_attn_workspace_[0]);
     return ret;
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.vm.PagedAttentionKVCache", PagedAttentionKVCacheObj,

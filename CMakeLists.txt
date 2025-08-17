@@ -452,6 +452,7 @@ include(cmake/modules/contrib/TensorRT.cmake)
 include(cmake/modules/contrib/NNAPI.cmake)
 include(cmake/modules/contrib/ExampleNPU.cmake)
 include(cmake/modules/contrib/vllm.cmake)
+include(cmake/modules/contrib/flashinfer.cmake)
 include(cmake/modules/Git.cmake)
 include(cmake/modules/LibInfo.cmake)
 
