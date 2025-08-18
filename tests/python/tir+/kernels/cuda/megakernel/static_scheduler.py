@@ -1,0 +1,113 @@
+from .common import  KernelConfig, JobType
+
+import tvm
+from tvm.script import tir as T, tirp as Tp
+from tvm.script.ir_builder import IRBuilder
+
+atomic_add_int32 = f"""
+__forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value) {{
+    asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(addr), "r"(value)
+                   : "memory");
+}}
+"""
+
+
+class Semaphore:
+    def __init__(self, cnt, buffer):
+        self.cnt = cnt
+        self.sem = buffer
+        self.state = T.alloc_buffer([1], "int32", scope="local", align=4)
+        IRBuilder.current().name("semaphore_state", self.state)
+
+    @T.macro
+    def semaphore_wait(self, *coord):
+        with T.thread():
+            if self.cnt >= 0:
+                while 1:
+                    T.ptx.ld_global_acquire(
+                        self.state[0], self.sem.access_ptr("r", offset=self.sem.offset_of_p(coord))
+                    )
+                    if T.cuda.syncthreads_and(self.state[0] == self.cnt):
+                        break
+                    T.cuda.nano_sleep(40)
+            else:
+                while 1:
+                    T.ptx.ld_global_acquire(
+                        self.state[0], self.sem.access_ptr("r", offset=self.sem.offset_of_p(coord))
+                    )
+                    if T.cuda.syncthreads_and(self.state[0] == 0):
+                        break
+                    T.cuda.nano_sleep(40)
+
+
+    @T.macro
+    def semaphore_notify(self, *coord):
+        # wg is synced
+        if self.cnt >= 0:
+            T.cuda.func_call(
+                "atomic_add_int32",
+                self.sem.access_ptr("rw", offset=self.sem.offset_of_p(coord)),
+                1,
+                source_code=atomic_add_int32,
+            )
+        else:
+            T.cuda.func_call(
+                "atomic_add_int32",
+                self.sem.access_ptr("rw", offset=self.sem.offset_of_p(coord)),
+                -1,
+                source_code=atomic_add_int32,
+            )
+
+
+lds_v4 = """
+__forceinline__ __device__ void lds_v4(void* addr, int32_t* v1, int32_t* v2, int32_t* v3, int32_t* v4) {
+    asm volatile("ld.shared::cluster.v4.b32 {%0, %1, %2, %3}, [%4];"
+                 : "=r"(*v1), "=r"(*v2), "=r"(*v3), "=r"(*v4)
+                 : "l"(addr)
+                 : "memory");
+
+}
+"""
+
+
+class StaticTileScheduler:
+    MAX_TASKS = 128
+
+    def __init__(self, prefix: str, exec_queue, pool_allocator):
+        self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
+        self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
+        self.k_idx = T.local_cell("int32", name=prefix + "_k_idx")
+        self.task_type = T.local_cell("int32", name=prefix + "_task_type")
+        self.tile_idx = T.local_cell("int32", name=prefix + "_tile_idx")
+        self.queue_smem = pool_allocator.alloc((self.MAX_TASKS, 4), "int32", align=16).buffer
+        self.exec_queue = exec_queue
+
+    @T.macro
+    def update_current_m_n_idx(self):
+        T.cuda.func_call(
+            "lds_v4",
+            T.address_of(self.queue_smem[self.tile_idx, 0]),
+            T.address_of(self.m_idx),
+            T.address_of(self.n_idx),
+            T.address_of(self.k_idx),
+            T.address_of(self.task_type),
+            source_code=lds_v4,
+        )
+
+    @T.macro
+    def init(self, bx, tid):
+        self.tile_idx = 0
+        for k in T.serial(T.ceildiv(self.MAX_TASKS * 4, KernelConfig.NUM_THREADS)):
+            idx = T.meta_var(k * KernelConfig.NUM_THREADS + tid)
+            if idx < self.MAX_TASKS * 4:
+                self.queue_smem[idx // 4, idx % 4] = self.exec_queue[bx, idx // 4, idx % 4]
+        T.tvm_storage_sync("shared")
+        self.update_current_m_n_idx()
+
+    @T.macro
+    def next_tile(self):
+        self.tile_idx += 1
+        self.update_current_m_n_idx()
+
+    def valid(self):
+        return tvm.tir.all(self.tile_idx < self.MAX_TASKS, self.task_type != JobType.END.value)

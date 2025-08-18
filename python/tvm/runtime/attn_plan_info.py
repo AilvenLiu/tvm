@@ -135,7 +135,7 @@ class PlanInfo:
 
         self.split_kv = split_kv
         self.new_batch_size = new_batch_size
-        self.max_chunk_size = tvm.nd.array(
+        self.max_chunk_size_tvm = tvm.nd.array(
             np.array([max_page_num * PAGE_SIZE], dtype=np.int32), device=DEV
         )
 
@@ -165,17 +165,7 @@ class PlanInfo:
         self.request_indices_tvm = tvm.nd.array(np.array(request_indices, dtype=np.int32), DEV)
         self.kv_tile_indices_tvm = tvm.nd.array(np.array(kv_tile_indices, dtype=np.int32), DEV)
         self.o_indptr_tvm = tvm.nd.array(np.array(o_indptr, dtype=np.int32), DEV)
-        self.o_tvm = tvm.nd.array(
-            np.zeros([batch_size, self.qo_heads, self.head_dim], dtype=np.float16), DEV
-        )
-        self.lse_tvm = tvm.nd.array(np.zeros([batch_size, self.qo_heads], dtype=np.float32), DEV)
-        if split_kv:
-            self.tmp_o_tvm = tvm.nd.array(
-                np.zeros([new_batch_size, self.qo_heads, self.head_dim], dtype=np.float32), DEV
-            )
-            self.tmp_lse_tvm = tvm.nd.array(
-                np.zeros([new_batch_size, self.qo_heads], dtype=np.float32), DEV
-            )
+
 
 
 @tvm.register_func("megakernel.decode_attn_plan")
@@ -185,8 +175,8 @@ def decode_attn_plan(
     plan_info = PlanInfo(qo_heads, kv_heads, head_dim, enforce_no_split_kv=True)
     plan_info.plan(batch_size, kv_indptr_h, page_size, max_page_num)
     return (
-        plan_info.lse_tvm,
         plan_info.request_indices_tvm,
         plan_info.kv_tile_indices_tvm,
-        plan_info.max_chunk_size,
+        plan_info.max_chunk_size_tvm,
+        plan_info.o_indptr_tvm
     )

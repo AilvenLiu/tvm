@@ -20,12 +20,12 @@ from tvm.script import relax as R
 from tvm.script import ir as I
 from tvm.script import tir as T
 from .test_rmsnorm import get_rmsnorm_kernel
-from .test_fused_add_rms_norm import get_fused_add_rmsnorm_kernel
-from .test_fused_split_silu_multiply import get_fused_split_silu_multiply_kernel
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
-from .test_rope import get_rope_kernel, get_cos_sin_cache_kernel
-from .test_append_paged_kv_cache import get_append_paged_kv_cache_kernel
-from .test_batch_decode import PlanInfo, get_decode_kernel, decode_attn_plan
+from .test_rope import get_cos_sin_cache_kernel
+from ..megakernel.common import ceildiv
+from ..megakernel.gemm import GemmTile
+from ..megakernel.gemm_splitk_reduce import SplitKReduceTile
+from ..megakernel.test_layer import MegaKernel, generate_exec_queue, generate_event_tensor
 
 dev = tvm.cuda()
 target = tvm.target.Target("cuda")
@@ -51,6 +51,23 @@ config = Qwen3Config(
     weight_block_size=None,
     kwargs={},
 )
+
+problem_config = {
+    "vocab_size": config.vocab_size,
+    "hidden_size": config.hidden_size,
+    "intermediate_size": config.intermediate_size,
+    "num_hidden_layers": config.num_hidden_layers,
+    "num_attention_heads": config.num_attention_heads,
+    "num_key_value_heads": config.num_key_value_heads,
+    "head_dim": config.head_dim,
+    "rms_norm_eps": config.rms_norm_eps,
+    "rope_theta": config.rope_theta,
+    "page_size": 16,
+}
+
+SPLIT_QKV_PROJECT = 3
+SPLIT_O_PROJRCT = 3
+DOWN_PROJ_SPLIT_K_FACTOR = 10
 
 
 def get_default_spec(model):
@@ -161,7 +178,8 @@ def _pipeline(  # pylint: disable=too-many-arguments
     return _craft_pipeline(ext_mods, "opt_llm_mg")
 
 
-tvm.register_func("megakernel.decode_attn_plan", decode_attn_plan, override=True)
+tvm.register_func("megakernel.generate_exec_queue", generate_exec_queue)
+tvm.register_func("megakernel.generate_event_tensor", generate_event_tensor)
 
 
 def get_params(named_params):
@@ -271,80 +289,16 @@ def attach_attr(func, name):
 
 def get_qwen3_megakernel_mod():
     rms_norm = get_rmsnorm_kernel(5120)
-    fused_add_rmsnorm = get_fused_add_rmsnorm_kernel(5120)
-    rms_norm1 = get_rmsnorm_kernel(128)
-    fused_split_silu_multiply = get_fused_split_silu_multiply_kernel(25600)
-    hgemm1, reduce1, tile_k_num1 = get_hgemm_kernel(dim_n=10240, dim_k=5120)
-    hgemm2, reduce2, tile_k_num2 = get_hgemm_kernel(dim_n=5120, dim_k=8192)
-    hgemm3, reduce3, tile_k_num3 = get_hgemm_kernel(dim_n=51200, dim_k=5120)
-    hgemm4, reduce4, tile_k_num4 = get_hgemm_kernel(dim_n=5120, dim_k=25600)
-    hgemm5, reduce5, tile_k_num5 = get_hgemm_kernel(dim_n=151936, dim_k=5120)
-    rope = get_rope_kernel(128)
-    append_paged_kv_cache = get_append_paged_kv_cache_kernel(8, 1, 128)
-    decode, merge = get_decode_kernel(PlanInfo(64, 8, 128, enforce_no_split_kv=True), PAGE_SIZE)
+    layer_kernel = MegaKernel(problem_config).get_func()
+    hgemm, reduce, tile_k_num = get_hgemm_kernel(dim_n=151936, dim_k=5120)
     cos_sin_cache = get_cos_sin_cache_kernel(128, ROPE_THETA)
+
     # fmt: off
     @I.ir_module
     class Module:
         @T.prim_func(private=True)
         def rms_norm(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
             pass
-        
-        @T.prim_func(private=True)
-        def rms_norm1(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def fused_add_rmsnorm(input_ptr: T.handle, residual_ptr: T.handle, weight_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def fused_split_silu_multiply(input_ptr: T.handle, output_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def split(var_reshape: T.handle, var_T_split: T.handle, var_T_split_1: T.handle, var_T_split_2: T.handle):
-            T.func_attr({"tir.noalias": True})
-            batch_size = T.int64()
-            reshape = T.match_buffer(var_reshape, (batch_size, T.int64(1), T.int64(80), T.int64(128)), "float16")
-            T_split = T.match_buffer(var_T_split, (batch_size, T.int64(1), T.int64(64), T.int64(128)), "float16")
-            T_split_1 = T.match_buffer(var_T_split_1, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            T_split_2 = T.match_buffer(var_T_split_2, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            # with T.block("root"):
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(64), T.int64(128)):
-                with T.block("T_split"):
-                    v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
-                    T.reads(reshape[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T.writes(T_split[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T_split[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2, v_ax3]
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8), T.int64(128)):
-                with T.block("T_split_1"):
-                    v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
-                    T.reads(reshape[v_ax0, v_ax1, v_ax2 + T.int64(64), v_ax3])
-                    T.writes(T_split_1[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T_split_1[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2 + T.int64(64), v_ax3]
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8), T.int64(128)):
-                with T.block("T_split_2"):
-                    v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
-                    T.reads(reshape[v_ax0, v_ax1, v_ax2 + T.int64(72), v_ax3])
-                    T.writes(T_split_2[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T_split_2[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2 + T.int64(72), v_ax3]
-
-        @T.prim_func(private=True)
-        def fused_concatenate(p_split_2: T.handle, p_rms_norm1: T.handle, p_rms_norm2: T.handle, p_output0: T.handle):
-            T.func_attr({"tir.noalias": True})
-            batch_size = T.int64()
-            split_2 = T.match_buffer(p_split_2, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            rms_norm1 = T.match_buffer(p_rms_norm1, (batch_size, T.int64(1), T.int64(64), T.int64(128)), "float16")
-            rms_norm2 = T.match_buffer(p_rms_norm2, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            T_concat_intermediate = T.match_buffer(p_output0, (batch_size, T.int64(1), T.int64(80), T.int64(128)), "float16")
-            # with T.block("root"):
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(80), T.int64(128)):
-                with T.block("T_concat"):
-                    v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
-                    T.reads(split_2[v_ax0, v_ax1, v_ax2 - T.int64(72), v_ax3], rms_norm2[v_ax0, v_ax1, v_ax2 - T.int64(64), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T.writes(T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3] = T.if_then_else(T.int64(72) <= v_ax2, split_2[v_ax0, v_ax1, v_ax2 - T.int64(72), v_ax3], T.if_then_else(T.int64(64) <= v_ax2, rms_norm2[v_ax0, v_ax1, v_ax2 - T.int64(64), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3]))
 
         @T.prim_func(private=True)
         def cast(var_lv4: T.handle, var_compute: T.handle):
@@ -361,55 +315,11 @@ def get_qwen3_megakernel_mod():
                     compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
 
         @T.prim_func(private=True)
-        def hgemm1(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
+        def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
             pass
         
         @T.prim_func(private=True)
-        def reduce1(partial_sum_ptr: T.handle, D_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def hgemm2(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def reduce2(partial_sum_ptr: T.handle, D_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def hgemm3(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def reduce3(partial_sum_ptr: T.handle, D_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def hgemm4(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def reduce4(partial_sum_ptr: T.handle, D_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def hgemm5(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def reduce5(partial_sum_ptr: T.handle, D_ptr: T.handle):
-            pass
-        
-        @T.prim_func(private=True)
-        def rope(q: T.handle, cos_sin_cache: T.handle, pos_ids: T.handle, q_rope: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def append_paged_kv_cache(cache_ptr: T.handle, k_ptr: T.handle, v_ptr: T.handle, pos_map_ptr: T.handle):
-            pass
-
-        @T.prim_func(private=True)
-        def decode(q: T.handle, kv: T.handle, lse: T.handle, kv_indptr: T.handle, kv_last_page_len: T.handle, kv_indices: T.handle, request_indices: T.handle, kv_tile_indices: T.handle, max_chunk_size: T.handle, o: T.handle):
+        def reduce(partial_sum_ptr: T.handle, D_ptr: T.handle):
             pass
 
         @T.prim_func(private=True)
@@ -423,6 +333,73 @@ def get_qwen3_megakernel_mod():
                 cache: R.Tensor((MAX_SEQ_LEN, 128), dtype="float32") = R.call_tir_inplace(cls.cos_sin_cache, (cache), [0], out_sinfo=R.Tensor((MAX_SEQ_LEN, 128), dtype="float32") )
                 R.output(cache)
             return cache
+        
+        @T.prim_func(private=True)
+        def layer_kernel(
+                # input and output
+                hidden_state_ptr: T.handle, # input: read-only
+                residual_ptr: T.handle, # input & output: inplace update
+                output_ptr: T.handle, # output
+
+                # weight
+                qkv_proj_weight_ptr: T.handle, # read-only
+                o_proj_weight_ptr: T.handle, # read-only
+                q_rms_weight_ptr: T.handle, # read-only
+                k_rms_weight_ptr: T.handle, # read-only
+                gate_up_weight_ptr: T.handle, # read-only
+                down_weight_ptr: T.handle, # read-only
+                attn_add_rms_weight_ptr: T.handle, # read-only
+                mlp_add_rms_weight_ptr: T.handle, # read-only
+
+                # page cache, cos_sin cache and plan info
+                cos_sin_cache_ptr: T.handle, # read-only
+                rope_pos_ptr: T.handle, # read-only
+                kv_cache_ptr: T.handle, # inplace update
+                kv_indptr_ptr: T.handle, # read-only
+                kv_indices_ptr: T.handle, # read-only
+                kv_last_page_len_ptr: T.handle, # read-only
+                append_pos_ptr: T.handle, # read-only
+                request_indices_ptr: T.handle, # read-only
+                kv_tile_indices_ptr: T.handle, # read-only
+                max_chunk_size_ptr: T.handle, # read-only
+                o_indptr_ptr: T.handle, # read-only
+
+                # intermediate buffer
+                partital_qkv_ptr: T.handle, # intermediate
+                qkv_ptr: T.handle,  # intermediate
+                o_ptr: T.handle, # intermediate
+                lse_ptr: T.handle, # intermediate
+                o_tmp_ptr: T.handle, # intermediate
+                lse_tmp_ptr: T.handle, # intermediate
+                partial_o_ptr: T.handle, # intermediate
+                hidden_state_attn_mlp_ptr: T.handle, # intermediate
+                out_gate_up_proj_ptr: T.handle, # intermediate
+                out_silu_multiply_ptr: T.handle, # intermediate
+                partial_sum_down_proj_ptr: T.handle, # intermediate
+                
+                # event tensor
+                etensor_qkv_partial_ptr: T.handle, 
+                etensor_q_reduce_ptr: T.handle, 
+                etensor_k_reduce_ptr: T.handle, 
+                etensor_v_reduce_ptr: T.handle, 
+                etensor_rms_rope_ptr: T.handle, 
+                etensor_q_rope_decode_ptr: T.handle, 
+                etensor_k_rope_append_ptr: T.handle, 
+                etensor_append_decode_ptr: T.handle, 
+                etensor_decode_merge_ptr: T.handle,
+                etensor_o_proj_ptr: T.handle, 
+                etensor_o_partial_ptr: T.handle, 
+                etensor_attn_add_rms_ptr: T.handle,
+                etensor_attn_mlp_ptr: T.handle,
+                etensor_gate_up_proj_ptr: T.handle,
+                etensor_down_proj_ptr: T.handle,
+                etensor_down_proj_reduce_ptr: T.handle,
+                etensor_mlp_add_rms_ptr: T.handle,
+
+                # execution queue
+                exec_queue_ptr: T.handle,
+        ):
+            pass
 
         @R.function
         def batch_decode(
@@ -458,43 +435,142 @@ def get_qwen3_megakernel_mod():
                     sinfo_args=[
                         R.Tuple([R.Tensor(None, dtype="float16")]),
                         R.Tensor((batch_size + 1,), dtype="int32"),
+                        R.Tensor((batch_size + 1,), dtype="int32"),
                         R.Tensor(None, dtype="int32"),
-                        R.Tensor(None, dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
+                        R.Tensor(None, dtype="uint8"),
+                        R.Tensor(None, dtype="uint8"),
+                        R.Tensor(None, dtype="uint8"),
                     ],
                 )
-                kv_data_, kv_indptr, kv_indices_, kv_last_page_len, append_position_map, q_rope_position_map = (
+                kv_data_, kv_indptr, kv_indptr_host, kv_indices_, kv_last_page_len, append_pos, rope_pos, temp_float_attn_workspace, temp_int_attn_workspace, temp_int_pinned_attn_workspace = (
                     res0[0],
                     res0[1],
+                    res0[2],
                     res0[3],
                     res0[4],
                     res0[5],
                     res0[6],
+                    res0[7],
+                    res0[8],
+                    res0[9],
                 )
                 kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16")]))
                 kv_indices = R.match_cast(kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
                 res1 = R.call_pure_packed(
-                    "megakernel.decode_attn_plan",
+                    "flashinfer.batch_decode_with_paged_kv_cache_plan",
+                    temp_float_attn_workspace,
+                    temp_int_attn_workspace,
+                    temp_int_pinned_attn_workspace,
+                    kv_indptr_host,
+                    R.prim_value(batch_size),
                     R.prim_value(64),
                     R.prim_value(8),
-                    R.prim_value(128),
-                    R.prim_value(batch_size),
-                    kv_indptr,
                     R.prim_value(page_size),
-                    R.prim_value(max_page_num),
+                    R.prim_value(False),
+                    R.prim_value(0),
+                    R.prim_value(-1),
+                    R.prim_value(128),
+                    R.prim_value(128),
+                    R.dtype("float16"),
+                    R.dtype("float16"),
+                    R.prim_value(True), # TODO: remove this flag
                     sinfo_args=[
-                        R.Tensor(None, dtype="float32"),
                         R.Tensor(None, dtype="int32"),
                         R.Tensor(None, dtype="int32"),
                         R.Tensor((1,), dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
                     ],
                 )
-                plan_lse_tvm_, plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size = res1[0], res1[1], res1[2], res1[3]
-                plan_lse_tvm = R.match_cast(plan_lse_tvm_, R.Tensor((new_batch_size, 64), dtype="float32"))
+                plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size, plan_o_indptr_ = res1[0], res1[1], res1[2], res1[3]
                 plan_request_indices = R.match_cast(plan_request_indices_, R.Tensor((new_batch_size,), dtype="int32"))
                 plan_kv_tile_indices = R.match_cast(plan_kv_tile_indices_, R.Tensor((new_batch_size,), dtype="int32"))
+                plan_o_indptr = R.match_cast(plan_o_indptr_, R.Tensor((new_batch_size + 1,), dtype="int32"))
+
+                res2 = R.call_pure_packed(
+                    "megakernel.generate_exec_queue",
+                    R.prim_value(batch_size),
+                    R.prim_value(new_batch_size),
+                    sinfo_args=[
+                        R.Tensor((144, 128, 4), dtype="int32"),
+                    ]
+                )
+                exec_queue = res2
+
+                res3 = R.call_pure_packed(
+                    "megakernel.generate_event_tensor",
+                    R.prim_value(batch_size),
+                    plan_o_indptr,
+                    sinfo_args=[
+                        R.Tensor((ceildiv((config.num_attention_heads + 2 * config.num_key_value_heads) * config.head_dim, SplitKReduceTile.N_UNIT),), dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor((SPLIT_O_PROJRCT,), dtype="int32"),
+                        R.Tensor((ceildiv(config.hidden_size, GemmTile.BLK_N),), dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                        R.Tensor((1,), dtype="int32"),
+                        R.Tensor((config.intermediate_size // GemmTile.BLK_N,), dtype="int32"),
+                        R.Tensor((DOWN_PROJ_SPLIT_K_FACTOR,), dtype="int32"),
+                        R.Tensor((config.hidden_size // GemmTile.BLK_N,), dtype="int32"),
+                        R.Tensor(None, dtype="int32"),
+                    ]
+                )
+                (
+                    etensor_qkv_partial,
+                    etensor_q_reduce_,
+                    etensor_k_reduce_,
+                    etensor_v_reduce_,
+                    etensor_rms_rope_,
+                    etensor_q_rope_decode_,
+                    etensor_k_rope_append_,
+                    etensor_append_decode_,
+                    etensor_decode_merge_,
+                    etensor_o_proj,
+                    etensor_o_partial,
+                    etensor_attn_add_rms_norm_,
+                    etensor_attn_mlp,
+                    etensor_gate_up_proj,
+                    etensor_down_proj,
+                    etensor_down_proj_reduce,
+                    etensor_mlp_add_rms_norm_
+                ) = (
+                    res3[0],
+                    res3[1],
+                    res3[2],
+                    res3[3],
+                    res3[4],
+                    res3[5],
+                    res3[6],
+                    res3[7],
+                    res3[8],
+                    res3[9],
+                    res3[10],
+                    res3[11],
+                    res3[12],
+                    res3[13],
+                    res3[14],
+                    res3[15],
+                    res3[16],
+                )
+
+                etensor_q_reduce = R.match_cast(etensor_q_reduce_, R.Tensor((batch_size, ceildiv(config.num_attention_heads * config.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
+                etensor_k_reduce = R.match_cast(etensor_k_reduce_, R.Tensor((batch_size, ceildiv(config.num_key_value_heads * config.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
+                etensor_v_reduce = R.match_cast(etensor_v_reduce_, R.Tensor((batch_size, ceildiv(config.num_key_value_heads * config.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
+                etensor_rms_rope = R.match_cast(etensor_rms_rope_, R.Tensor((batch_size, config.num_attention_heads + config.num_key_value_heads), dtype="int32"))
+                etensor_q_rope_decode = R.match_cast(etensor_q_rope_decode_, R.Tensor((batch_size, config.num_key_value_heads), dtype="int32"))
+                etensor_k_rope_append = R.match_cast(etensor_k_rope_append_, R.Tensor((batch_size, config.num_key_value_heads), dtype="int32"))
+                etensor_append_decode = R.match_cast(etensor_append_decode_, R.Tensor((batch_size, config.num_key_value_heads), dtype="int32"))
+                etensor_decode_merge = R.match_cast(etensor_decode_merge_, R.Tensor((batch_size, config.num_key_value_heads), dtype="int32"))
+                etensor_attn_add_rms_norm = R.match_cast(etensor_attn_add_rms_norm_, R.Tensor((batch_size,), dtype="int32"))
+                etensor_mlp_add_rms_norm = R.match_cast(etensor_mlp_add_rms_norm_, R.Tensor((batch_size,), dtype="int32"))
 
                 model_layers_0_self_attn_c_attn_weight1: R.Tensor((10240, 5120), dtype="float16") = packed_params[1]
                 model_layers_0_self_attn_o_proj_weight1: R.Tensor((5120, 8192), dtype="float16") = packed_params[2]
@@ -507,112 +583,66 @@ def get_qwen3_megakernel_mod():
                 model_norm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[9]
                 lm_head_weight1: R.Tensor((151936, 5120), dtype="float16") = packed_params[10]
 
+                partital_qkv = R.builtin.alloc_tensor(R.shape([SPLIT_QKV_PROJECT, batch_size, 10240]), dtype="float32", runtime_device_index=0)
+                qkv = R.builtin.alloc_tensor(R.shape([batch_size, 80, 128]), dtype="float16", runtime_device_index=0)
+                o = R.builtin.alloc_tensor(R.shape([batch_size, 64, 128]), dtype="float16", runtime_device_index=0)
+                lse = R.builtin.alloc_tensor(R.shape([batch_size, 64]), dtype="float32", runtime_device_index=0)
+                o_tmp = R.builtin.alloc_tensor(R.shape([batch_size, 64, 128]), dtype="float32", runtime_device_index=0)
+                lse_tmp = R.builtin.alloc_tensor(R.shape([batch_size, 64]), dtype="float32", runtime_device_index=0)
+                partial_o = R.builtin.alloc_tensor(R.shape([SPLIT_O_PROJRCT, batch_size, 5120]), dtype="float32", runtime_device_index=0)
+                hidden_state_attn_mlp = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
+                out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 51200]), dtype="float16", runtime_device_index=0)
+                out_silu_multiply = R.builtin.alloc_tensor(R.shape([batch_size, 25600]), dtype="float16", runtime_device_index=0)
+                partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([DOWN_PROJ_SPLIT_K_FACTOR, batch_size, 5120]), dtype="float32", runtime_device_index=0)
+
+                output_tensor = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
+
                 rs0 = R.reshape(input_embeds, (batch_size, 5120))
                 rms_norm = R.call_tir(cls.rms_norm, (rs0, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, 5120), dtype="float16"))
+                layer_res = R.call_tir_inplace(cls.layer_kernel, (
+                                            # input and output
+                                            rms_norm, rs0, output_tensor,
+                                            # weights
+                                            model_layers_0_self_attn_c_attn_weight1, model_layers_0_self_attn_o_proj_weight1, 
+                                            model_layers_0_self_attn_q_norm_weight1, model_layers_0_self_attn_k_norm_weight1,
+                                            model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,
+                                            model_layers_0_post_attention_layernorm_weight1, model_norm_weight1,
+                                            # page cache, cos_sin cache and plan info
+                                            cos_sin_cache, rope_pos, kv_data[0], kv_indptr, kv_indices, kv_last_page_len, 
+                                            append_pos, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size, plan_o_indptr,
+                                            # intermediate buffer
+                                            partital_qkv, qkv, o, lse, o_tmp, lse_tmp, partial_o, hidden_state_attn_mlp,
+                                            out_gate_up_proj, out_silu_multiply, partial_sum_down_proj,
+                                            # event tensor
+                                            etensor_qkv_partial, etensor_q_reduce, etensor_k_reduce, etensor_v_reduce, etensor_rms_rope,
+                                            etensor_q_rope_decode, etensor_k_rope_append, etensor_append_decode, etensor_decode_merge, etensor_o_proj,
+                                            etensor_o_partial, etensor_attn_add_rms_norm, etensor_attn_mlp, etensor_gate_up_proj, etensor_down_proj,
+                                            etensor_down_proj_reduce, etensor_mlp_add_rms_norm,
+                                            # execution queue
+                                            exec_queue),
+                                            [1, 2, 13],
+                                            out_sinfo=[
+                                                R.Tensor((batch_size, 5120), dtype="float16"), # residual
+                                                R.Tensor((batch_size, 5120), dtype="float16"), # output
+                                                R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16"), # kv_cache
+                                            ]
+                )
+                output: R.Tensor((batch_size, 5120), dtype="float16") = layer_res[1]
 
-                # permute_dims0 = R.permute_dims(model_layers_0_self_attn_c_attn_weight1, axes=None)
-                # lv = R.matmul(rms_norm, permute_dims0, out_dtype="void")
-                ps0 = R.call_tir(cls.hgemm1, (rms_norm, model_layers_0_self_attn_c_attn_weight1), out_sinfo=R.Tensor((tile_k_num1, batch_size, 10240), dtype="float32"))
-                lv = R.call_tir(cls.reduce1, (ps0,), out_sinfo=R.Tensor((batch_size, 10240), dtype="float16"))
+                rs = R.call_tir(cls.hgemm, (output, lm_head_weight1), out_sinfo=R.Tensor((tile_k_num, batch_size, 151936), dtype="float32"))
+                lv = R.call_tir(cls.reduce, (rs,), out_sinfo=R.Tensor((batch_size, 151936), dtype="float16"))
 
-                reshape = R.reshape(lv, (batch_size, 1, 80, 128))
-                split = R.call_tir(cls.split, (reshape,), out_sinfo=[R.Tensor((batch_size, 1, 64, 128), dtype="float16"), R.Tensor((batch_size, 1, 8, 128), dtype="float16"), R.Tensor((batch_size, 1, 8, 128), dtype="float16")])
-                split_0: R.Tensor((batch_size, 1, 64, 128), dtype="float16") = split[0]
-                split_1: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = split[1]
-                rs1 = R.reshape(split_0, (batch_size * 64, 128))
-                rs2 = R.reshape(split_1, (batch_size * 8, 128))
-                rms_norm1 = R.call_tir(cls.rms_norm1, (rs1, model_layers_0_self_attn_q_norm_weight1), out_sinfo=R.Tensor((batch_size * 64, 128), dtype="float16"))
-                rms_norm2 = R.call_tir(cls.rms_norm1, (rs2, model_layers_0_self_attn_k_norm_weight1), out_sinfo=R.Tensor((batch_size * 8, 128), dtype="float16"))
-                rms_norm1_rs = R.reshape(rms_norm1, (batch_size, 1, 64, 128)) # q
-                rms_norm2_rs = R.reshape(rms_norm2, (batch_size, 1, 8, 128)) # k
-                v: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = split[2] # v
-
-                ######################################################### Attention #########################################################
-                #########################################################
-                # lv1 = R.call_tir(cls.fused_concatenate, (v, rms_norm1_rs, rms_norm2_rs), out_sinfo=R.Tensor((batch_size, 1, 80, 128), dtype="float16"))
-                # reshape1 = R.reshape(lv1, (batch_size, 80, 128))
-                # lv_2 = R.call_dps_packed("vm.builtin.attention_kv_cache_attention_with_fused_qkv", (paged_kv_cache, R.prim_value(0), R.prim_value(T.float32(0.088388347648318447)), reshape1), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
-                # reshape2 = R.reshape(lv_2, (batch_size, 1, 64, 128))
-                # reshape3 = R.reshape(reshape2, (batch_size, 8192))
-                #########################################################
-                # rope
-                q_rs = R.reshape(rms_norm1_rs, (batch_size, 64, 128))
-                q_rope = R.call_tir(cls.rope, (q_rs, cos_sin_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
-                k_rs = R.reshape(rms_norm2_rs, (batch_size, 8, 128))
-                k = R.call_tir(cls.rope, (k_rs, cos_sin_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 8, 128), dtype="float16"))
-                k_rope = R.reshape(k, (batch_size, 1, 8, 128))
-                # append
-                append_position_map_rs = R.reshape(append_position_map, (batch_size, 1))
-                new_kv_data = R.call_tir_inplace(cls.append_paged_kv_cache, (kv_data[0], k_rope, v, append_position_map_rs), [0], 
-                                                 out_sinfo=R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16"))
-                # attention
-                o = R.call_tir(cls.decode, 
-                               (q_rope, new_kv_data, plan_lse_tvm, kv_indptr, kv_last_page_len, kv_indices, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
-                reshape3 = R.reshape(o, (batch_size, 8192))
-                #########################################################
-                ######################################################### Attention #########################################################
-
-                # permute_dims1 = R.permute_dims(model_layers_0_self_attn_o_proj_weight1, axes=None)
-                # lv1_1: R.Tensor((batch_size, 5120), dtype="float16") = R.matmul(reshape3, permute_dims1, out_dtype="void")
-                rs1 = R.call_tir(cls.hgemm2, (reshape3, model_layers_0_self_attn_o_proj_weight1), out_sinfo=R.Tensor((tile_k_num2, batch_size, 5120), dtype="float32"))
-                lv1_1 = R.call_tir(cls.reduce2, (rs1,), out_sinfo=R.Tensor((batch_size, 5120), dtype="float16"))
-
-                lv_3 = R.call_tir_inplace(cls.fused_add_rmsnorm, (lv1_1, rs0, model_layers_0_post_attention_layernorm_weight1), [0, 1], out_sinfo=[R.Tensor((batch_size, 5120), dtype="float16"), R.Tensor((batch_size, 5120), dtype="float16")])
-                lv1_2: R.Tensor((batch_size, 5120), dtype="float16") = lv_3[1]
-                rms_norm3: R.Tensor((batch_size, 5120), dtype="float16") = lv_3[0]
-
-                # permute_dims2 = R.permute_dims(model_layers_0_mlp_gate_up_proj_weight1, axes=None)
-                # lv2: R.Tensor((batch_size, 51200), dtype="float16") = R.matmul(rms_norm3, permute_dims2, out_dtype="void")
-                rs2 = R.call_tir(cls.hgemm3, (rms_norm3, model_layers_0_mlp_gate_up_proj_weight1), out_sinfo=R.Tensor((tile_k_num3, batch_size, 51200), dtype="float32"))
-                lv2 = R.call_tir(cls.reduce3, (rs2,), out_sinfo=R.Tensor((batch_size, 51200), dtype="float16"))
-
-                lv2_1 = R.call_tir(cls.fused_split_silu_multiply, (lv2,), out_sinfo=R.Tensor((batch_size, 25600), dtype="float16"))
-
-                # permute_dims3 = R.permute_dims(model_layers_0_mlp_down_proj_weight1, axes=None)
-                # lv3: R.Tensor((batch_size, 5120), dtype="float16") = R.matmul(lv2_1, permute_dims3, out_dtype="void")
-                rs3 = R.call_tir(cls.hgemm4, (lv2_1, model_layers_0_mlp_down_proj_weight1), out_sinfo=R.Tensor((tile_k_num4, batch_size, 5120), dtype="float32"))
-                lv3 = R.call_tir(cls.reduce4, (rs3,), out_sinfo=R.Tensor((batch_size, 5120), dtype="float16"))
-
-                lv2_2 = R.call_tir_inplace(cls.fused_add_rmsnorm, (lv3, lv1_2, model_norm_weight1), [0, 1], out_sinfo=[R.Tensor((batch_size, 5120), dtype="float16"), R.Tensor((batch_size, 5120), dtype="float16")])
-                rms_norm4: R.Tensor((batch_size, 5120), dtype="float16") = lv2_2[0]
-
-                # permute_dims4 = R.permute_dims(lm_head_weight1, axes=None)
-                # lv4: R.Tensor((batch_size, 151936), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
-                rs4 = R.call_tir(cls.hgemm5, (rms_norm4, lm_head_weight1), out_sinfo=R.Tensor((tile_k_num5, batch_size, 151936), dtype="float32"))
-                lv4 = R.call_tir(cls.reduce5, (rs4,), out_sinfo=R.Tensor((batch_size, 151936), dtype="float16"))
-
-                lv4_rs = R.reshape(lv4, (batch_size, 1, 151936))
-                astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, 151936), dtype="float32"))
+                lv_rs = R.reshape(lv, (batch_size, 1, 151936))
+                astype = R.call_tir(cls.cast, (lv_rs,), out_sinfo=R.Tensor((batch_size, 1, 151936), dtype="float32"))
                 R.output(astype)
             return astype
     # fmt: on
     mod = Module
 
     mod.update_func(mod.get_global_var("rms_norm"), attach_attr(rms_norm, "rms_norm"))
-    mod.update_func(
-        mod.get_global_var("fused_add_rmsnorm"), attach_attr(fused_add_rmsnorm, "fused_add_rmsnorm")
-    )
-    mod.update_func(mod.get_global_var("rms_norm1"), attach_attr(rms_norm1, "rms_norm1"))
-    mod.update_func(
-        mod.get_global_var("fused_split_silu_multiply"),
-        attach_attr(fused_split_silu_multiply, "fused_split_silu_multiply"),
-    )
-    mod.update_func(mod.get_global_var("hgemm1"), attach_attr(hgemm1, "hgemm1"))
-    mod.update_func(mod.get_global_var("reduce1"), attach_attr(reduce1, "reduce1"))
-    mod.update_func(mod.get_global_var("hgemm2"), attach_attr(hgemm2, "hgemm2"))
-    mod.update_func(mod.get_global_var("reduce2"), attach_attr(reduce2, "reduce2"))
-    mod.update_func(mod.get_global_var("hgemm3"), attach_attr(hgemm3, "hgemm3"))
-    mod.update_func(mod.get_global_var("reduce3"), attach_attr(reduce3, "reduce3"))
-    mod.update_func(mod.get_global_var("hgemm4"), attach_attr(hgemm4, "hgemm4"))
-    mod.update_func(mod.get_global_var("reduce4"), attach_attr(reduce4, "reduce4"))
-    mod.update_func(mod.get_global_var("hgemm5"), attach_attr(hgemm5, "hgemm5"))
-    mod.update_func(mod.get_global_var("reduce5"), attach_attr(reduce5, "reduce5"))
-    mod.update_func(mod.get_global_var("rope"), attach_attr(rope, "rope"))
-    mod.update_func(
-        mod.get_global_var("append_paged_kv_cache"),
-        attach_attr(append_paged_kv_cache, "append_paged_kv_cache"),
-    )
-    mod.update_func(mod.get_global_var("decode"), attach_attr(decode, "decode"))
+    mod.update_func(mod.get_global_var("layer_kernel"), attach_attr(layer_kernel, "layer_kernel"))
+    mod.update_func(mod.get_global_var("hgemm"), attach_attr(hgemm, "hgemm"))
+    mod.update_func(mod.get_global_var("reduce"), attach_attr(reduce, "reduce"))
     mod.update_func(
         mod.get_global_var("cos_sin_cache"), attach_attr(cos_sin_cache, "cos_sin_cache")
     )

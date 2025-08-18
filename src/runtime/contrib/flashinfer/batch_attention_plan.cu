@@ -170,6 +170,8 @@ Array<NDArray> BatchDecodeWithPagedKVCachePlan(
   int64_t kv_tile_indices_size = padded_batch_size;
   int64_t kv_chunk_size_ptr_offset = plan_info_vec[7];
   int64_t kv_chunk_size_ptr_size = 1;
+  int64_t o_inptr_offset = plan_info_vec[5];
+  int64_t o_indptr_size = padded_batch_size + 1;
 
   DataType dtype = DataType::Int(32);
   NDArray request_indices =
@@ -181,7 +183,10 @@ Array<NDArray> BatchDecodeWithPagedKVCachePlan(
   NDArray kv_chunk_size_ptr =
       int_workspace_buffer.CreateView({kv_chunk_size_ptr_size}, dtype,
                                       /*relative_byte_offset=*/kv_chunk_size_ptr_offset);
-  return {request_indices, kv_tile_indices, kv_chunk_size_ptr};
+  NDArray o_indptr =
+      int_workspace_buffer.CreateView({o_indptr_size}, dtype,
+                                      /*relative_byte_offset=*/o_inptr_offset);
+  return {request_indices, kv_tile_indices, kv_chunk_size_ptr, o_indptr};
 }
 
 Array<Any> BatchPagedAttentionPlan(NDArray float_workspace_buffer, NDArray int_workspace_buffer,

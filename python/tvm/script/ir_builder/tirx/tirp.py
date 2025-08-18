@@ -1088,6 +1088,8 @@ class PoolAllocator:
         logical_scope="",
         layout=None,
     ) -> frame.DeclBufferFrame:
+        if align > 0:
+            self.offset = (self.offset + align - 1) // align * align
         res = decl_buffer(
             shape,
             dtype,
