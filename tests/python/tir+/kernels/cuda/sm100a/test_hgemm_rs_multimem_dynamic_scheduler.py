@@ -28,7 +28,7 @@ from tvm.runtime import ShapeTuple
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 import tvm.testing
-from ..utils import export_to_perfetto_trace
+from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 
 class TaskType(Enum):

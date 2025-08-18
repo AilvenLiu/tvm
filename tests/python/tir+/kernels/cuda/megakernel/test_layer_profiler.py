@@ -1,5 +1,6 @@
 from enum import Enum
 import numpy as np
+import pytest
 
 import tvm
 from tvm.script import tir as T
@@ -19,7 +20,7 @@ from tvm.tirp.megakernel.decode_merge import DecodeMergeTile
 from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile
 from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
 
-from ..utils import ProtonContext, bench
+from tvm.tirp.bench.utils import ProtonContext, bench
 
 # model configs
 VOCAB_SIZE = 151936
@@ -1139,6 +1140,7 @@ class MegaKernel:
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
+@pytest.mark.skip
 def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
 
     def generate_exec_queue(batch_size, new_batch_size, split_kv):

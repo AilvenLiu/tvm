@@ -6,7 +6,7 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
 import tvm.testing
-from ..utils import bench
+from tvm.tirp.bench.utils import bench
 
 # can get 3250 TFLOPs on a single B200 with (m, n, k) = (8192, 8064, 8192), which is aligned to DeepSeek's
 

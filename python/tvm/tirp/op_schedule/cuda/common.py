@@ -323,7 +323,7 @@ def copy_vec_load_impl(
                         fused = T.meta_var((s * tx + tid_x) * vec_len)
                         dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
                         src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
-                        T.evaluate(T.ptx.cp_async(dst.dtype, dst.ptr_to([*dst_indices]), 0, src.ptr_to([*src_indices]), 0, cp_size))
+                        T.evaluate(T.ptx.cp_async(dst.ptr_to([*dst_indices]), src.ptr_to([*src_indices]), cp_size))
             if dst.scope().startswith("shared") and inst_type == CopyInstType.NORMAL:
                 T.tvm_storage_sync("shared")
         # fmt: on
@@ -342,7 +342,7 @@ def copy_vec_load_impl(
                     fused = T.meta_var(s * vec_len)
                     dst_indices = T.meta_var(get_indices(fused, dst_st, dst_extent))
                     src_indices = T.meta_var(get_indices(fused, src_st, src_extent))
-                    T.evaluate(T.ptx.cp_async(dst.dtype, dst.ptr_to([*dst_indices]), 0, src.ptr_to([*src_indices]), 0, cp_size))
+                    T.evaluate(T.ptx.cp_async(dst.ptr_to([*dst_indices]), src.ptr_to([*src_indices]), cp_size))
         # fmt: on
     else:
         return None

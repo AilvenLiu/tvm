@@ -5,7 +5,7 @@ import tvm
 from tvm.ir import PointerType, PrimType
 from tvm.script import tir as T
 import tvm.testing
-from ..utils import ProtonContext, bench
+from tvm.tirp.bench.utils import ProtonContext, bench
 
 # cluster: [2, 1], cta_num = 2
 # warpgroup:

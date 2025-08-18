@@ -26,7 +26,7 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 import tvm.testing
-from ..utils import export_to_perfetto_trace
+from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 
 def _get_source(func: tvm.tir.PrimFunc) -> str:

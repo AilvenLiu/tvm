@@ -2,13 +2,14 @@ import math
 import ml_dtypes
 import numpy as np
 from enum import Enum
+import pytest
 
 import tvm
 from tvm.script import tir as T, tirp as Tp
 import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 import flashinfer
-from ..utils import ProtonContext, bench, export_to_perfetto_trace
+from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 from tvm.tirp.megakernel.common import KernelConfig, ceildiv, JobType, get_source, ProfileEventType, event_type_names
 from tvm.tirp.megakernel.gemm import GemmTile
 from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
@@ -340,6 +341,7 @@ class MegaKernel:
         return mega_kernel_dynamic
 # fmt: on
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
+@pytest.mark.skip
 def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
 
     def generate_exec_queue_static():

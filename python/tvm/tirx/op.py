@@ -3171,116 +3171,6 @@ def tvm_store_matrix_sync(fragment, m, n, k, index, buffer_ptr, stride, layout):
     )
 
 
-def ptx_mma(
-    dtype,
-    shape,
-    A_layout,
-    B_layout,
-    A_dtype,
-    B_dtype,
-    C_dtype,
-    multiplicand_a,
-    a_index,
-    multiplicand_b,
-    b_index,
-    accumulator,
-    c_index,
-    saturate,
-    operator=None,
-):
-    """TVM intrinsic for ptx tensor core mma instructions
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions-for-mma
-
-    Parameters
-    ----------
-    dtype : str
-        The data type of the result.
-
-    shape : str
-        The shape of mma fragment.
-
-    A_layout : Literal["row", "col"]
-        The layout of multiplicand fragment A.
-
-    B_layout : Literal["row", "col"]
-        The layout of multiplicand fragment B.
-
-    A_dtype : str
-        The data type of multiplicand fragment A.
-
-    B_dtype : str
-        The data type of multiplicand fragment B.
-
-    C_dtype : str
-        The data type of accumulator fragment C.
-
-    multiplicand_a : Var
-        The multiplicand fragment A variable.
-
-    a_index : Expr
-        The index of multiplicand fragment A.
-
-    multiplicand_b : Var
-        The multiplicand fragment B variable.
-
-    b_index : Expr
-        The index of multiplicand fragment A.
-
-    accumulator : Var
-        The accumulator fragment C variable.
-
-    c_index : Expr
-        The index of accumulator fragment C.
-
-    saturate : bool
-        The optional saturation at the output.
-
-    operator : Optional[Literal["xor", "and"]]
-        The 1-bit operator.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    if operator is None:
-        return call_intrin(
-            dtype,
-            "tirx.ptx_mma",
-            shape,
-            A_layout,
-            B_layout,
-            A_dtype,
-            B_dtype,
-            C_dtype,
-            multiplicand_a,
-            a_index,
-            multiplicand_b,
-            b_index,
-            accumulator,
-            c_index,
-            saturate,
-        )
-    return call_intrin(
-        dtype,
-        "tirx.ptx_mma",
-        shape,
-        A_layout,
-        B_layout,
-        A_dtype,
-        B_dtype,
-        C_dtype,
-        multiplicand_a,
-        a_index,
-        multiplicand_b,
-        b_index,
-        accumulator,
-        c_index,
-        saturate,
-        operator,
-    )
-
-
 def ptx_mma_sp(
     dtype,
     shape,
@@ -3457,94 +3347,6 @@ def mma_fill(dtype, local_size, local_ptr, offset):
     )
 
 
-def ptx_ldmatrix(dtype, trans, num, type, local_ptr, local_offset, smem_ptr, smem_offset):
-    """TVM intrinsic for ptx load matrix from shared memory
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions-ldmatrix
-
-    Parameters
-    ----------
-    dtype : str
-       The data type of the result.
-
-    trans : bool
-        The matrix is loaded in column-major format.
-
-    num : IntImm
-        The number of matrices.
-
-    type : Literal[".b16"]
-        The data type of the matrices.
-
-    local_ptr : Var
-        The local pointer variable.
-
-    local_offset : Expr
-        The offset of local pointer.
-
-    smem_ptr : Var
-        The shared memory pointer variable.
-
-    smem_offset : Expr
-        The offset of shared memort pointer.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin(
-        dtype,
-        "tirx.ptx_ldmatrix",
-        trans,
-        num,
-        type,
-        local_ptr,
-        local_offset,
-        smem_ptr,
-        smem_offset,
-    )
-
-
-def ptx_cp_async(dtype, shared_ptr, shared_offset, global_ptr, global_offset, bytes):
-    """TVM intrinsic for ptx async copy from global to shared memory using cp.async
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async
-
-    Parameters
-    ----------
-    dtype : str
-       The data type of the result.
-
-    shared_ptr : Var
-        The shared memory pointer variable.
-
-    shared_offset : Expr
-        The offset of shared memory pointer.
-
-    global_ptr : Var
-        The global memory pointer variable.
-
-    global_offset : Expr
-        The offset of global memory pointer.
-
-    bytes : int
-        The data size to copy.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin(
-        dtype,
-        "tirx.ptx_cp_async",
-        shared_ptr,
-        shared_offset,
-        global_ptr,
-        global_offset,
-        bytes,
-    )
-
-
 def ptx_cp_async_bulk(
     dtype, shared_ptr, shared_offset, global_ptr, global_offset, bytes, barrier_id
 ):
@@ -3589,35 +3391,6 @@ def ptx_cp_async_bulk(
         bytes,
         barrier_id,
     )
-
-
-def ptx_cp_async_commit_group():
-    """TVM intrinsic for ptx async copy commit
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-commit-group
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.ptx_cp_async_commit_group")
-
-
-def ptx_cp_async_wait_group(num):
-    """TVM intrinsic for ptx async copy wait
-    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-wait-group
-
-    Parameters
-    ----------
-    num : int
-        The number of the most recent uncommitted pending cp.async groups to wait.
-
-    Returns
-    -------
-    call : PrimExpr
-        The call expression.
-    """
-    return call_intrin("", "tir.ptx_cp_async_wait_group", num)
 
 
 def ptx_cp_async_mbarrier_arrive(barrier_id):
@@ -3786,6 +3559,88 @@ def ptx_bar_sync(name_bar_id, thread_count):
         The call expression.
     """
     return call_intrin("", "tir.ptx_bar_sync", name_bar_id, thread_count)
+
+
+def ptx_cp_async(
+    dst_ptr,
+    src_ptr,
+    cp_size,
+    cache_hint="",
+    prefetch_size=-1,
+    predicate=-1,
+    fill_mode="",
+):
+    """TVM intrinsic for ptx async copy from global to shared memory using cp.async
+    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async
+
+    Parameters
+    ----------
+    shared_ptr : PrimExpr
+        The pointer to the shared memory.
+
+    global_ptr : PrimExpr
+        The pointer to the global memory.
+
+    cp_size : int
+        The data size to copy.
+
+    cache_hint : Optional[str]
+        The cache hint.
+
+    prefetch_size : Optional[int]
+        The prefetch size.
+
+    predicate : Optional[PrimExpr]
+        The predicate to guard the operation.
+
+    fill_mode : Optional[str]
+        The fill mode.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "",
+        "tir.ptx_cp_async",
+        dst_ptr,
+        src_ptr,
+        cp_size,
+        cache_hint,
+        prefetch_size,
+        predicate,
+        fill_mode,
+    )
+
+
+def ptx_cp_async_commit_group():
+    """TVM intrinsic for ptx async copy commit
+    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-commit-group
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.ptx_cp_async_commit_group")
+
+
+def ptx_cp_async_wait_group(num):
+    """TVM intrinsic for ptx async copy wait
+    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-wait-group
+
+    Parameters
+    ----------
+    num : int
+        The number of the most recent uncommitted pending cp.async groups to wait.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.ptx_cp_async_wait_group", num)
 
 
 def ptx_cp_async_bulk_tensor_global_to_cluster(
@@ -3974,6 +3829,165 @@ def ptx_fetch_register(bits, reg_name):
         The call expression.
     """
     return call_intrin("int" + str(bits), "tir.ptx_fetch_register", bits, reg_name)
+
+
+def ptx_mma(
+    shape,
+    a_layout,
+    b_layout,
+    d_type,
+    a_type,
+    b_type,
+    c_type,
+    d_ptr,
+    a_ptr,
+    b_ptr,
+    c_ptr=0,
+    saturate=False,
+    bit_op=None,
+):
+    """TVM intrinsic for ptx tensor core mma instructions
+    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions-for-mma
+
+    Parameters
+    ----------
+    shape : str
+        The shape of mma fragment.
+
+    a_layout : Literal["row", "col"]
+        The layout of multiplicand fragment A.
+
+    b_layout : Literal["row", "col"]
+        The layout of multiplicand fragment B.
+
+    d_type : str
+        The data type of result fragment D.
+
+    a_type : str
+        The data type of multiplicand fragment A.
+
+    b_type : str
+        The data type of multiplicand fragment B.
+
+    c_type : str
+        The data type of accumulator fragment C.
+
+    d_ptr : PrimExpr
+        The pointer to the result fragment D.
+
+    a_ptr : PrimExpr
+        The pointer to the multiplicand fragment A.
+
+    b_ptr : PrimExpr
+        The pointer to the multiplicand fragment B.
+
+    c_ptr : PrimExpr
+        The pointer to the accumulator fragment C.
+        If it's IntImm(0), it means the accumulator is not used.
+
+    saturate : bool
+        The optional saturation at the output.
+
+    bit_op : Optional[Literal["xor", "and"]]
+        The 1-bit operator. If it's None, it means the bit operator is not used.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    if bit_op is None:
+        return call_intrin(
+            "",
+            "tir.ptx_mma",
+            shape,
+            a_layout,
+            b_layout,
+            d_type,
+            a_type,
+            b_type,
+            c_type,
+            d_ptr,
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            saturate,
+        )
+    return call_intrin(
+        "",
+        "tir.ptx_mma",
+        shape,
+        a_layout,
+        b_layout,
+        d_type,
+        a_type,
+        b_type,
+        c_type,
+        d_ptr,
+        a_ptr,
+        b_ptr,
+        c_ptr,
+        saturate,
+        bit_op,
+    )
+
+
+def ptx_ldmatrix(trans, num, dtype, smem_ptr, local_ptr):
+    """TVM intrinsic for ptx load matrix from shared memory
+    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions-ldmatrix
+
+    Parameters
+    ----------
+    trans : bool
+        The matrix is loaded in column-major format.
+
+    num : IntImm
+        The number of matrices.
+
+    dtype : Literal[".b16", ".b8"]
+        The data type of the matrices.
+
+    smem_ptr : PrimExpr
+        The pointer to the shared memory.
+
+    local_ptr : PrimExpr
+        The pointer to the local memory (register)
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "",
+        "tir.ptx_ldmatrix",
+        trans,
+        num,
+        dtype,
+        smem_ptr,
+        local_ptr,
+    )
+
+
+def ptx_stmatrix(num, trans, smem_ptr, local_ptr):
+    """TVM intrinsic to call stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r
+    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions-stmatrix
+
+    Parameters
+    ----------
+    num : int
+        The number of 8x8 matrices to store.
+
+    trans: bool
+        True indicates the matrix is stored in column-major format.
+
+    smem_ptr : PrimExpr
+        The shared memory pointer.
+
+    local_ptr : PrimExpr
+        The pointer to the local memory (register)
+    """
+    return call_intrin("", "tir.ptx_stmatrix", num, trans, smem_ptr, local_ptr)
 
 
 def ptx_wgmma_encode_matrix_descriptor(desc, addr, ldo, sdo, swizzle):
@@ -4178,26 +4192,6 @@ def ptx_wgmma_wait_group(n):
         The call expression.
     """
     return call_intrin("", "tir.ptx_wgmma_wait_group", n)
-
-
-def ptx_stmatrix(num, trans, ptr, *regs):
-    """TVM intrinsic to call stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r
-
-    Parameters
-    ----------
-    num : int
-        The number of 8x8 matrices to store.
-
-    trans: bool
-        True indicates the matrix is stored in column-major format.
-
-    ptr : PrimExpr
-        The shared memory pointer.
-
-    regs : list
-        The registers to store.
-    """
-    return call_intrin("", "tir.ptx_stmatrix", num, trans, ptr, *regs)
 
 
 def ptx_setmaxnreg(inc: bool, reg_count):

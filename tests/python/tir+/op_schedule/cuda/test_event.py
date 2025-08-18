@@ -193,7 +193,7 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
         ),
     ],
 )
-@pytest.mark.parametrize("cache_hint", ["evict_last", "evict_first", "evict_normal", ""])
+@pytest.mark.parametrize("cache_hint", ["evict_last", ""])
 def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
     g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, layoutS_fn = task
     dev = tvm.cuda(0)

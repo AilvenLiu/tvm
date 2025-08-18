@@ -22,7 +22,7 @@ import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
-from ..utils import bench, ProtonContext
+from tvm.tirp.bench.utils import ProtonContext, bench
 
 
 @tvm.testing.requires_cuda_compute_version(8)

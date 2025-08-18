@@ -69,10 +69,7 @@ def test_stmatrix_sync_aligned(trans):
                     reg = T.alloc_buffer((8,), "float16", scope="local")
                     for i in range(8):
                         reg[i] = tx * 8 + i
-                    T.ptx.stmatrix(4, trans,
-                                            A_smem.access_ptr("w", offset=A_smem.offset_of_p([tx % 16, tx // 16 * 8])),
-                                            reg[0], reg[1], reg[2], reg[3],
-                                            reg[4], reg[5], reg[6], reg[7])
+                    T.ptx.stmatrix(4, trans, A_smem.ptr_to([tx % 16, tx // 16 * 8]), reg.ptr_to([0]))
                     if tx == 0:
                         for i, j in T.grid(16, 16):
                             A[i, j] = A_smem[i, j]
@@ -114,6 +111,63 @@ def test_stmatrix_sync_aligned(trans):
                 A_ref[col + 8, row + 8] = tx * 8 + 6
                 A_ref[col + 9, row + 8] = tx * 8 + 7
         np.testing.assert_allclose(A.numpy(), A_ref)
+
+
+@pytest.mark.parametrize("trans", [False, True])
+@pytest.mark.parametrize("num", [1, 2, 4])
+def test_ptx_stmatrix(trans, num):
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def main(A: T.Buffer((16, 16), "float16")):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([32], parent="cta")
+            A_shared = T.alloc_shared([16, 16], "float16")
+            with T.thread()[tx == 0]:
+                for i, j in T.grid(16, 16):
+                    A_shared[i, j] = T.float16(0.0)
+            T.tvm_storage_sync("shared")
+            with T.thread():
+                A_local = T.alloc_local([8], "float16")
+                for i in range(8):
+                    A_local[i] = (i // 2) * 64 + tx * 2 + i % 2
+                T.ptx.stmatrix(num, trans, A_shared.ptr_to([tx % 16, tx // 16 * 8]), A_local.ptr_to([0]))
+            T.tvm_storage_sync("shared")
+            with T.thread()[tx == 0]:
+                for i, j in T.grid(16, 16):
+                    A[i, j] = A_shared[i, j]
+    # fmt: on
+
+    DEV = tvm.cuda(0)
+    target = tvm.target.Target("cuda")
+    mod = tvm.IRModule({"main": main})
+    with target:
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        src = mod.mod.imported_modules[0].get_source()
+    A_np = np.zeros((16, 16), dtype="float16")
+    A_ref = np.zeros((16, 16), dtype="float16")
+    A_full = np.zeros((16, 16), dtype="float16")
+    A_full[0:8, 0:8] = np.arange(8 * 8, dtype="float16").reshape((8, 8))
+    A_full[8:16, 0:8] = np.arange(8 * 8, 16 * 8, dtype="float16").reshape((8, 8))
+    A_full[0:8, 8:16] = np.arange(16 * 8, 24 * 8, dtype="float16").reshape((8, 8))
+    A_full[8:16, 8:16] = np.arange(24 * 8, 32 * 8, dtype="float16").reshape((8, 8))
+    A = tvm.nd.array(A_np, device=DEV)
+
+    mod(A)
+    print(src)
+
+    if num == 1:
+        A_ref[0:8, 0:8] = A_full[0:8, 0:8] if not trans else A_full[0:8, 0:8].T
+    elif num == 2:
+        A_ref[0:8, 0:8] = A_full[0:8, 0:8] if not trans else A_full[0:8, 0:8].T
+        A_ref[8:16, 0:8] = A_full[8:16, 0:8] if not trans else A_full[8:16, 0:8].T
+    elif num == 4:
+        A_ref[0:8, 0:8] = A_full[0:8, 0:8] if not trans else A_full[0:8, 0:8].T
+        A_ref[0:8, 8:16] = A_full[0:8, 8:16] if not trans else A_full[0:8, 8:16].T
+        A_ref[8:16, 0:8] = A_full[8:16, 0:8] if not trans else A_full[8:16, 0:8].T
+        A_ref[8:16, 8:16] = A_full[8:16, 8:16] if not trans else A_full[8:16, 8:16].T
+
+    np.testing.assert_allclose(A.numpy(), A_ref)
 
 
 @tvm.testing.requires_cuda_compute_version(9)

@@ -9,7 +9,7 @@ from tvm.script import tir as T
 import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 
-from ..utils import ProtonContext, bench, export_to_perfetto_trace
+from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 
 # cluster: [2, 1], cta_num = 2
 # warpgroup:

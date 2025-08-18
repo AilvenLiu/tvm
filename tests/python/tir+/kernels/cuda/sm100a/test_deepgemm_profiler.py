@@ -5,7 +5,7 @@ import numpy as np
 import tvm
 from tvm.script import tir as T
 import tvm.testing
-from ..utils import export_to_perfetto_trace
+from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 # can get 3250 TFLOPs on a single B200 with (m, n, k) = (8192, 8064, 8192), which is aligned to DeepSeek's
 

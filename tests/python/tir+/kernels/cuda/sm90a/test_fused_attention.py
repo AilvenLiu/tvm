@@ -21,7 +21,7 @@ import tvm
 import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
-from ..utils import bench, ProtonContext, export_to_perfetto_trace
+from tvm.tirp.bench.utils import bench, ProtonContext, export_to_perfetto_trace
 
 
 class ProfileEventType(Enum):
@@ -411,8 +411,7 @@ def test_fp16_fused_attn():
                 col_noswizzle = T.meta_var(st_tile * 2 + lane_id // 16)
                 col = T.meta_var((lane_id % 8) ^ col_noswizzle)
                 row = T.meta_var(warp_id * 16 + lane_id % 16)
-                T.ptx.stmatrix(4, False, smem_o.ptr_to([n_tile % STAGES_EPI, row, col * 8]),
-                               O_half[0], O_half[1], O_half[2], O_half[3], O_half[4], O_half[5], O_half[6], O_half[7])
+                T.ptx.stmatrix(4, False, smem_o.ptr_to([n_tile % STAGES_EPI, row, col * 8]), O_half.ptr_to([0]))
 
     @T.macro
     def s2G(warp_id, lane_id, smem_o, O_map, q_idx, h_idx, b_idx, n_tile):

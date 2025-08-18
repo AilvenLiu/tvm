@@ -19,7 +19,7 @@ import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
-from ..utils import bench, ProtonContext
+from tvm.tirp.bench.utils import ProtonContext, bench
 import pytest
 
 

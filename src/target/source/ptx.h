@@ -66,51 +66,6 @@ std::string PrintMMAAssembly(const std::string& shape, const std::string& A_layo
                              bool sparse, bool saturate);
 
 /*!
- * \brief Print ldmatrix assembly string given parameters.
- * \param trans: whether the matrix is loaded in column major format or not.
- * \param num: number of matrices to load.
- * \param type: The data type in the matrix, .b16 is the only accepted data type.
- * \param local_ptr: pointer to local buffer.
- * \param local_elem_offset: The offset of the element to store in the local buffer.
- * \param smem_ptr: pointer to the shared memory buffer to load.
- * \param smem_elem_offset: The offset of the start element of the row to load in shared memory.
- */
-std::string PrintLoadMatrixAssembly(bool trans, int num, const std::string& type,
-                                    const std::string& local_ptr,
-                                    const std::string& local_elem_offset,
-                                    const std::string& smem_ptr,
-                                    const std::string& smem_elem_offset);
-
-/*!
- * \brief Print ptx cp.async assembly string given parameters.
- * \param shared_ptr: The pointer to the destination shared memory.
- * \param shared_elem_offset: The offset into the shared memory.
- * \param global_ptr: The pointer to the global memory.
- * \param global_elem_offset: The offset into the global memory.
- * \param bytes: The number of bytes to copy, valid values are 4, 8, and 16.
- */
-std::string PrintCpAsyncAssembly(const std::string& shared_ptr,
-                                 const std::string& shared_elem_offset,
-                                 const std::string& global_ptr,
-                                 const std::string& global_elem_offset, const std::string& bytes);
-
-/*!
- * \brief Print predicated ptx cp.async assembly string given parameters.
- * \param shared_ptr: The pointer to the destination shared memory.
- * \param shared_elem_offset: The offset into the shared memory.
- * \param global_ptr: The pointer to the global memory.
- * \param global_elem_offset: The offset into the global memory.
- * \param bytes: The number of bytes to copy, valid values are 4, 8, and 16.
- * \param predicate_value: The value of predicate `@p`.
- */
-std::string PrintPredicatedCpAsyncAssembly(const std::string& shared_ptr,
-                                           const std::string& shared_elem_offset,
-                                           const std::string& global_ptr,
-                                           const std::string& global_elem_offset,
-                                           const std::string& bytes,
-                                           const std::string& predicate_value);
-
-/*!
  * \brief Print ptx async copy from global to shared memory using cp.async.bulk
  * \param shared_ptr: The pointer to the destination shared memory.
  * \param shared_elem_offset: The offset into the shared memory.
@@ -130,16 +85,6 @@ std::string PrintCpAsyncBulkAsm(const std::string& shared_ptr,
  * \param barrier: The name of the barrier in shared memory.
  */
 std::string PrintCpAsyncBarrierAsm(const std::string& barrier);
-
-/*!
- * \brief Print stmatrix.sync.aligned.m8n8.num{.trans}.shared.b16 [p], r;
- * \param num: The number of 8x8 matrices to store.
- * \param trans: true if the matrix is stored in col-major format.
- * \param ptr: The pointer to the destination shared memory.
- * \param vars: The registers to store.
- */
-std::string PrintStmatrixSyncAlignedAssembly(int num, bool trans, const std::string& ptr,
-                                             const std::vector<std::string>& vars);
 
 }  // namespace codegen
 }  // namespace tvm

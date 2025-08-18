@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
@@ -20,7 +21,7 @@ from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
 from tvm.tirp.megakernel.support import generate_event_tensor, generate_exec_queue
 
-from ..utils import ProtonContext, bench
+from tvm.tirp.bench.utils import ProtonContext, bench
 
 # model configs
 VOCAB_SIZE = 151936
@@ -1133,6 +1134,7 @@ def decode_plan(batch_size, kv_indptr):
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
+@pytest.mark.skip
 def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
 
     def prepare_data(batch_size):

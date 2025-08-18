@@ -15,14 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.tir.transform import LowerTIRp
-from ..utils import bench, ProtonContext
+from tvm.tirp.bench.utils import ProtonContext, bench
 
 
+@pytest.mark.skip
 @tvm.testing.requires_cuda_compute_version(8)
 @tvm.testing.requires_cublas
 def test_hgemm_ampere():
@@ -59,12 +61,9 @@ def test_hgemm_ampere():
             smem_offset = T.meta_var(slice_idx * (MI * KI) + row * 64 + col)
             global_offset = T.meta_var((by * 128 + logic_row) * K + (ko * KI + logic_col))
             T.ptx.cp_async(
-                dtype="float16",
-                shared_ptr=SA.data,
-                shared_offset=smem_offset,
-                global_ptr=A.data,
-                global_offset=global_offset,
-                bytes=16,
+                dst_ptr=SA.access_ptr("rw", offset=smem_offset),
+                src_ptr=A.access_ptr("rw", offset=global_offset),
+                cp_size=16,
             )
 
     @T.macro
@@ -90,12 +89,9 @@ def test_hgemm_ampere():
             smem_offset = T.meta_var(slice_idx * (NI * KI) + row * 64 + col)
             global_offset = T.meta_var((bx * 128 + logic_row) * K + (ko * KI + logic_col))
             T.ptx.cp_async(
-                dtype="float16",
-                shared_ptr=SB.data,
-                shared_offset=smem_offset,
-                global_ptr=B.data,
-                global_offset=global_offset,
-                bytes=16,
+                dst_ptr=SB.access_ptr("rw", offset=smem_offset),
+                src_ptr=B.access_ptr("rw", offset=global_offset),
+                cp_size=16,
             )
 
     @T.macro

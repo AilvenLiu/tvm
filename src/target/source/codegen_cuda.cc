@@ -1020,37 +1020,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
         shape, A_layout, B_layout, A_dtype, B_dtype, C_dtype, a_ref, a_offset, b_ref, b_offset,
         c_ref, c_offset, metadata, metadata_offset, sparse_selector, "", true, saturate);
     this->stream << asm_code;
-  } else if (op->op.same_as(builtin::ptx_ldmatrix())) {
-    // arg 0: whether the matrix is loaded in column major format or not.
-    // arg 1: number of matrices to load.
-    // arg 2: The data type in the matrix, .b16 is the only accepted data type.
-    // arg 3: pointer to local buffer.
-    // arg 4: The offset of the element to store in the local buffer.
-    // arg 5: pointer to the shared memory buffer to load.
-    // arg 6: The offset of the start element of the row to load in shared memory.
-    TVM_FFI_ICHECK_EQ(op->args.size(), 7U);
-    bool trans = Downcast<Bool>(op->args[0])->value;
-    int num = Downcast<Integer>(op->args[1])->value;
-    std::string type = Downcast<StringImm>(op->args[2])->value;
-    std::string local_ptr = this->PrintExpr(op->args[3]);
-    std::string local_elem_offset = this->PrintExpr(op->args[4]);
-    std::string smem_ptr = this->PrintExpr(op->args[5]);
-    if (trans && op->dtype.bits() == 8) {
-      // Since ldmatrix assumes that a matrix element is 16 bit, it cannot properly transpose an
-      // int8 matrix.
-      std::string smem_stride = this->PrintExpr(op->args[6]);
-      TVM_FFI_ICHECK(num == 4);
-      os << "for (int i = 0; i < 16; ++i) {\n";
-      os << local_ptr << "[" + local_elem_offset + " + i] = " << smem_ptr
-         << "[(i % 8) / 4 * " + smem_stride + " * 16 + (threadIdx.x % 4) * 4 * " + smem_stride +
-                "+ (i % 4) * " + smem_stride + " + threadIdx.x / 4 +  (i / 8) * 8];\n";
-      os << "}\n";
-    } else {
-      std::string smem_elem_offset = this->PrintExpr(op->args[6]);
-      codegen_tags_.insert("cast_smem_ptr_to_int");
-      this->stream << PrintLoadMatrixAssembly(trans, num, type, local_ptr, local_elem_offset,
-                                              smem_ptr, smem_elem_offset);
-    }
   } else if (op->op.same_as(builtin::mma_store())) {
     int m = Downcast<Integer>(op->args[0])->value;
     int n = Downcast<Integer>(op->args[1])->value;
@@ -1109,20 +1078,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     os << "for (int i = 0; i < " << num_elem << "; ++i) {\n";
     os << dst << "[" << dst_offset << " + i] = 0.0;";
     os << "}\n";
-  } else if (op->op.same_as(builtin::ptx_cp_async())) {
-    std::string dst = this->PrintExpr(op->args[0]);
-    std::string dst_offset = this->PrintExpr(op->args[1]);
-    std::string src = this->PrintExpr(op->args[2]);
-    std::string src_offset = this->PrintExpr(op->args[3]);
-    std::string size = this->PrintExpr(op->args[4]);
-    codegen_tags_.insert("cast_smem_ptr_to_int");
-    // use size of argument list to indicate whether or not to use predicated cp.async
-    if (op->args.size() == 5) {
-      print(PrintCpAsyncAssembly(dst, dst_offset, src, src_offset, size));
-    } else {
-      print(PrintPredicatedCpAsyncAssembly(dst, dst_offset, src, src_offset, size,
-                                           this->PrintExpr(op->args[5])));
-    }
   } else if (op->op.same_as(builtin::ptx_cp_async_bulk())) {
     codegen_tags_.insert("cast_smem_ptr_to_int");
     std::string dst = this->PrintExpr(op->args[0]);
@@ -1137,13 +1092,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string barrier_arr = barrier_name_ + "_" + std::to_string(barrier_arr_id);
     std::string barrier = barrier_arr + "[" + std::to_string(barrier_id) + "]";
     this->stream << PrintCpAsyncBulkAsm(dst, dst_offset, src, src_offset, size, barrier);
-  } else if (op->op.same_as(builtin::ptx_cp_async_commit_group())) {
-    this->PrintIndent();
-    this->stream << "__asm__ __volatile__(\"cp.async.commit_group;\");\n";
-  } else if (op->op.same_as(builtin::ptx_cp_async_wait_group())) {
-    int n = Downcast<IntImm>(op->args[0])->value;
-    this->PrintIndent();
-    this->stream << "__asm__ __volatile__(\"cp.async.wait_group " << n << ";\");\n";
   } else if (op->op.same_as(builtin::ptx_cp_async_mbarrier_arrive())) {
     codegen_tags_.insert("cast_smem_ptr_to_int");
     int barrier_arr_id = Downcast<IntImm>(op->args[0])->value;
@@ -1402,18 +1350,6 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
 
     os << "}\n"
        << "// print_buffer ends\n";
-  } else if (op->op.same_as(builtin::ptx_stmatrix())) {
-    int num = Downcast<IntImm>(op->args[0])->value;
-    bool trans = Downcast<Bool>(op->args[1])->value;
-    std::string ptr = this->PrintExpr(op->args[2]);
-    TVM_FFI_ICHECK_EQ(op->args.size(), 3 + num * 2) << "The number of arguments for ptx_stmatrix "
-                                               "is incorrect, expected "
-                                            << 3 + num * 2 << ", got " << op->args.size();
-    std::vector<std::string> regs;
-    for (int i = 0; i < 2 * num; ++i) {
-      regs.push_back(this->PrintExpr(op->args[3 + i]));
-    }
-    print(PrintStmatrixSyncAlignedAssembly(num, trans, ptr, regs));
   } else if (op->op.same_as(builtin::cuda_func_call())) {
     print_cuda_func_call(op, os);
   } else if (op->op.same_as(builtin::thread_return())) {

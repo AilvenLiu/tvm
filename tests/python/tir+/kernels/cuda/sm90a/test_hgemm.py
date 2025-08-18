@@ -20,7 +20,7 @@ import tvm
 import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
-from ..utils import bench, ProtonContext
+from tvm.tirp.bench.utils import ProtonContext, bench
 
 
 @tvm.testing.requires_cuda_compute_version(9, exact=True)
@@ -446,9 +446,7 @@ def test_hgemm_hopper_no_ws():
             col_noswizzle = T.meta_var(st_tile * 2 + lane_id // 16)
             col = T.meta_var((lane_id % 8) ^ col_noswizzle)
             row = T.meta_var(warp_id * 16 + lane_id % 16)
-            T.ptx.stmatrix(4, False, C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]),
-                           accum_half[0], accum_half[1], accum_half[2], accum_half[3],
-                           accum_half[4], accum_half[5], accum_half[6], accum_half[7])
+            T.ptx.stmatrix(4, False, C_smem.ptr_to([n_tile % STAGES_EPI, row, col * 8]), accum_half.ptr_to([0]))
 
     @T.macro
     def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):

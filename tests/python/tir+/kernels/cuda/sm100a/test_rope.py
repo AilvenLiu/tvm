@@ -6,7 +6,7 @@ import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 
-from ..utils import ProtonContext, bench
+from tvm.tirp.bench.utils import ProtonContext, bench
 
 F16_BYTES = 2
 F32_BYTES = 4

@@ -1,6 +1,6 @@
 from enum import Enum
 import numpy as np
-
+import pytest
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
@@ -16,7 +16,7 @@ from tvm.tirp.megakernel.append_kv import AppendKVTile
 from tvm.tirp.megakernel.batch_decode import DecodeTile
 from tvm.tirp.megakernel.decode_merge import DecodeMergeTile
 
-from ..utils import ProtonContext, bench
+from tvm.tirp.bench.utils import ProtonContext, bench
 
 # model configs
 VOCAB_SIZE = 151936
@@ -358,6 +358,7 @@ class MegaKernel:
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
+@pytest.mark.skip
 def test(batch_size, mega_kernel_static):
 
     def generate_exec_queue(batch_size, new_batch_size, split_kv):

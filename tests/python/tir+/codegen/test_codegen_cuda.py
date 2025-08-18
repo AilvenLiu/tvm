@@ -15,10 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-function-docstring
+import torch
 import numpy as np
+import pytest
 
 import tvm
 from tvm.script import tir as T
+from tvm.script import tirp as Tp
 import tvm.testing
 
 
@@ -187,8 +190,279 @@ def test_warp_shuffle_xor_sync():
     np.testing.assert_allclose(A.numpy(), A_ref)
 
 
-def test_ptx_cp_async():
-    pass
+@pytest.mark.parametrize("cp_size", [4, 8, 16])
+@pytest.mark.parametrize("cache_hint", ["", "evict_last"])
+@pytest.mark.parametrize("prefetch_size", [-1, 64, 128, 256])
+@pytest.mark.parametrize("predicate", [-1, T.int32(0), T.int32(1)])
+@pytest.mark.parametrize("fill_mode", ["", "zero"])
+def test_ptx_cp_async(cp_size, cache_hint, prefetch_size, predicate, fill_mode):
+    if fill_mode != "" and predicate == -1:
+        return
+
+    N = cp_size // 2
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def main(A: T.Buffer((N), "float16")):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([1], parent="cta")
+            with T.thread():
+                A_shared = T.alloc_shared([N], "float16")
+                for i in T.vectorized(N):
+                    A_shared[i] = 5.0
+                T.ptx.fence.proxy("shared")
+                T.ptx.cp_async(A_shared.ptr_to([0]), A.ptr_to([0]), cp_size, cache_hint, prefetch_size, predicate, fill_mode)
+                T.ptx.cp_async.commit_group()
+                T.ptx.cp_async.wait_group(0)
+                for i in T.serial(N):
+                    A[i] = A_shared[i] + 1.0
+    # fmt: on
+
+    src, mod = _get_source(main)
+    A_np = np.ones(N, dtype="float16")
+    A = tvm.nd.array(A_np, device=DEV)
+    mod(A)
+    A_ref = np.ones(N, dtype="float16") * 2
+    if int(predicate) == 0:
+        if fill_mode == "zero":
+            A_ref = np.ones(N, dtype="float16")
+        else:
+            A_ref = np.ones(N, dtype="float16") * 6
+
+    np.testing.assert_allclose(A.numpy(), A_ref)
+    print(src)
+
+
+@pytest.mark.parametrize("trans", [False, True])
+@pytest.mark.parametrize("num", [1, 2, 4])
+def test_ptx_ldmatrix(trans, num):
+    dtype = ".b16"
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def main(A: T.Buffer((16, 16), "float16"), B: T.Buffer((16, 16), "float16")):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([32], parent="cta")
+            A_shared = T.alloc_shared([16, 16], "float16")
+            with T.thread()[tx == 0]:
+                for i, j in T.grid(16, 16):
+                    A_shared[i, j] = A[i, j]
+            T.tvm_storage_sync("shared")
+            with T.thread():
+                A_local = T.alloc_local([8], "float16")
+                A_local[0] = -1.0
+                T.ptx.ldmatrix(
+                    trans, num, dtype, A_local.ptr_to([0]), A_shared.ptr_to([tx % 16, tx // 16 * 8])
+                )
+                for i in range(8):
+                    row = (i // 2) % 2 * 8
+                    col = (i // 4) * 8
+                    B[row + tx // 4, col + tx % 4 * 2 + i % 2] = A_local[i]
+    # fmt: on
+
+    src, mod = _get_source(main)
+    A_np = np.arange(16 * 16, dtype="float16").reshape((16, 16))
+    A = tvm.nd.array(A_np, device=DEV)
+    B_np = np.zeros((16, 16), dtype="float16")
+    B_ref = np.zeros((16, 16), dtype="float16")
+    B = tvm.nd.array(B_np, device=DEV)
+
+    mod(A, B)
+    if num == 1:
+        B_ref[0:8, 0:8] = A_np[0:8, 0:8] if not trans else A_np[0:8, 0:8].T
+    elif num == 2:
+        B_ref[0:8, 0:8] = A_np[0:8, 0:8] if not trans else A_np[0:8, 0:8].T
+        B_ref[8:16, 0:8] = A_np[8:16, 0:8] if not trans else A_np[8:16, 0:8].T
+    elif num == 4:
+        B_ref[0:8, 0:8] = A_np[0:8, 0:8] if not trans else A_np[0:8, 0:8].T
+        B_ref[0:8, 8:16] = A_np[0:8, 8:16] if not trans else A_np[0:8, 8:16].T
+        B_ref[8:16, 0:8] = A_np[8:16, 0:8] if not trans else A_np[8:16, 0:8].T
+        B_ref[8:16, 8:16] = A_np[8:16, 8:16] if not trans else A_np[8:16, 8:16].T
+
+    np.testing.assert_allclose(B.numpy(), B_ref)
+
+
+@pytest.mark.parametrize("d_type", ["float16", "float32"])
+@pytest.mark.parametrize("no_c_ptr", [False, True])
+def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
+    shape = "m16n8k16"
+    a_type = "float16"
+    b_type = "float16"
+    c_type = d_type
+    a_layout = "row"
+    b_layout = "col"
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def main(
+        D: T.Buffer((16, 8), d_type),
+        A: T.Buffer((16, 16), a_type),
+        B: T.Buffer((16, 8), b_type),
+        C: T.Buffer((16, 8), c_type),
+    ):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([32], parent="cta")
+            with T.thread():
+                D_local = T.alloc_local([4], d_type)
+                A_local = T.alloc_local([8], a_type)
+                B_local = T.alloc_local([4], b_type)
+                C_local = T.alloc_local([4], c_type)
+                
+                @T.macro
+                def G2L(buf_local, buf_global, block_8x8, mode="row"):
+                    if mode == "row":
+                        for i in range(block_8x8):
+                            row = T.meta_var(i % 2 * 8 + tx // 4)
+                            col = T.meta_var(i // 2 * 8 + (tx % 4) * 2)
+                            for j in range(2):
+                                buf_local[i * 2 + j] = buf_global[row, col + j]
+                    elif mode == "col":
+                        for i in range(block_8x8):
+                            row = T.meta_var(i % 2 * 8 + (tx % 4) * 2)
+                            col = T.meta_var(i // 2 * 8 + tx // 4)
+                            for j in range(2):
+                                buf_local[i * 2 + j] = buf_global[row + j, col]
+
+                @T.macro
+                def L2G(buf_local, buf_global, block_8x8):
+                    for i in range(block_8x8):
+                        row = T.meta_var(i % 2 * 8 + tx // 4)
+                        col = T.meta_var(i // 2 * 8 + (tx % 4) * 2)
+                        for j in range(2):
+                            buf_global[row, col + j] = buf_local[i * 2 + j]
+
+                G2L(D_local, D, 2)
+                G2L(A_local, A, 4)
+                G2L(B_local, B, 2, "col")
+                G2L(C_local, C, 2)
+
+                if no_c_ptr:
+                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type, 
+                              D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]))
+                else:
+                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type, 
+                              D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))
+
+                L2G(D_local, D, 2)    
+    # fmt: on
+
+    src, mod = _get_source(main)
+    np.random.seed(0)
+
+    D_np = np.zeros((16, 8), dtype=d_type)
+    A_np = np.random.randn(16, 16).astype(a_type)
+    B_np = np.random.randn(16, 8).astype(b_type)
+    C_np = np.random.randn(16, 8).astype(c_type)
+
+    D = tvm.nd.array(D_np, device=DEV)
+    A = tvm.nd.array(A_np, device=DEV)
+    B = tvm.nd.array(B_np, device=DEV)
+    C = tvm.nd.array(C_np, device=DEV)
+    mod(D, A, B, C)
+
+    D_torch = torch.zeros((16, 8), dtype=torch.float16)
+    A_torch = torch.from_numpy(A_np)
+    B_torch = torch.from_numpy(B_np)
+    C_torch = torch.from_numpy(C_np)
+    if no_c_ptr:
+        D_torch = A_torch @ B_torch
+    else:
+        D_torch = A_torch @ B_torch + C_torch
+
+    np.testing.assert_allclose(D.numpy(), D_torch.numpy(), atol=1e-3, rtol=1e-3)
+
+
+@pytest.mark.parametrize("d_type", ["float16", "float32"])
+@pytest.mark.parametrize("no_c_ptr", [False, True])
+def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
+    shape = "m16n8k8"
+    a_type = "float16"
+    b_type = "float16"
+    c_type = d_type
+    a_layout = "row"
+    b_layout = "col"
+
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def main(
+        D: T.Buffer((16, 8), d_type),
+        A: T.Buffer((16, 8), a_type),
+        B: T.Buffer((8, 8), b_type),
+        C: T.Buffer((16, 8), c_type),
+    ):
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([32], parent="cta")
+            with T.thread():
+                D_local = T.alloc_local([4], d_type)
+                A_local = T.alloc_local([4], a_type)
+                B_local = T.alloc_local([2], b_type)
+                C_local = T.alloc_local([4], c_type)
+
+                @T.macro
+                def G2L(buf_local, buf_global, block_8x8, mode="row"):
+                    if mode == "row":
+                        for i in range(block_8x8):
+                            row = T.meta_var(i % 2 * 8 + tx // 4)
+                            col = T.meta_var(i // 2 * 8 + (tx % 4) * 2)
+                            for j in range(2):
+                                buf_local[i * 2 + j] = buf_global[row, col + j]
+                    elif mode == "col":
+                        for i in range(block_8x8):
+                            row = T.meta_var(i % 2 * 8 + (tx % 4) * 2)
+                            col = T.meta_var(i // 2 * 8 + tx // 4)
+                            for j in range(2):
+                                buf_local[i * 2 + j] = buf_global[row + j, col]
+
+                @T.macro
+                def L2G(buf_local, buf_global, block_8x8):
+                    for i in range(block_8x8):
+                        row = T.meta_var(i % 2 * 8 + tx // 4)
+                        col = T.meta_var(i // 2 * 8 + (tx % 4) * 2)
+                        for j in range(2):
+                            buf_global[row, col + j] = buf_local[i * 2 + j]
+
+                G2L(D_local, D, 2)
+                G2L(A_local, A, 2)  
+                G2L(B_local, B, 1, "col")
+                G2L(C_local, C, 2)
+
+                if no_c_ptr:
+                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type, 
+                              D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]))
+                else:
+                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type, 
+                              D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))
+
+                L2G(D_local, D, 2)    
+    # fmt: on
+
+    src, mod = _get_source(main)
+    np.random.seed(0)
+
+    D_np = np.zeros((16, 8), dtype=d_type)
+    A_np = np.random.randn(16, 8).astype(a_type)
+    B_np = np.random.randn(8, 8).astype(b_type)
+    C_np = np.random.randn(16, 8).astype(c_type)
+
+    D = tvm.nd.array(D_np, device=DEV)
+    A = tvm.nd.array(A_np, device=DEV)
+    B = tvm.nd.array(B_np, device=DEV)
+    C = tvm.nd.array(C_np, device=DEV)
+    mod(D, A, B, C)
+
+    D_torch = torch.zeros((16, 8), dtype=torch.float16)
+    A_torch = torch.from_numpy(A_np)
+    B_torch = torch.from_numpy(B_np)
+    C_torch = torch.from_numpy(C_np)
+    if no_c_ptr:
+        D_torch = A_torch @ B_torch
+    else:
+        D_torch = A_torch @ B_torch + C_torch
+
+    np.testing.assert_allclose(D.numpy(), D_torch.numpy(), atol=1e-3, rtol=1e-3)
 
 
 if __name__ == "__main__":

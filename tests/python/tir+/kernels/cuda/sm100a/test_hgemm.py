@@ -5,7 +5,7 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.script import tir as T
 import tvm.testing
 from tvm.script import ir_builder as IRBuilder
-from ..utils import bench, ProtonContext
+from tvm.tirp.bench.utils import ProtonContext, bench
 
 
 # cluster: [2, 1], cta_num = 2
