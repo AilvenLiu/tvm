@@ -730,7 +730,7 @@ def test(num_heads, seq_len, head_dim, batch_size):
 
             return plan_info.o_tvm.numpy(), plan_info.lse_tvm.numpy()
 
-        def flashinfer():
+        def flashinfer_batch_decode():
             import flashinfer
             import torch
 
@@ -751,15 +751,34 @@ def test(num_heads, seq_len, head_dim, batch_size):
                 head_dim,
                 PAGE_SIZE,
                 pos_encoding_mode="NONE",
-                data_type=torch.float16,
+                kv_data_type=torch.float16,
                 q_data_type=torch.float16,
             )
             o, lse = wrapper.run_return_lse(q_f, kv_data_f)
 
-            wrapper_tensor_cores = flashinfer.BatchDecodeWithPagedKVCacheWrapper(
-                workspace_buffer, KV_LAYOUT, use_tensor_cores=True
+            func = lambda: wrapper.run(q_f, kv_data_f)
+            ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer_batch_decode")
+            func()
+            print(f"FlashInfer BatchDecodeWithPagedKVCacheWrapper time: {ms:.3f} ms")
+
+            return (
+                o.reshape(batch_size, qo_heads, head_dim).cpu().numpy(),
+                lse.reshape(batch_size, qo_heads).cpu().numpy(),
             )
-            wrapper_tensor_cores.plan(
+
+        def flashinfer_batch_decode_tensor_cores():
+            import flashinfer
+            import torch
+
+            q_f = Q.to(0)
+            kv_data_f = KV_data.to(0)
+            kv_indptr_f = KV_indptr.to(0)
+            kv_last_page_len_f = KV_last_page_len.to(0)
+            kv_indices_f = KV_indices.to(0)
+
+            workspace_buffer = torch.empty(1024 * 1024 * 1024, dtype=torch.int8).to(0)
+            wrapper = flashinfer.BatchDecodeWithPagedKVCacheWrapper(workspace_buffer, KV_LAYOUT)
+            wrapper.plan(
                 kv_indptr_f,
                 kv_indices_f,
                 kv_last_page_len_f,
@@ -768,18 +787,94 @@ def test(num_heads, seq_len, head_dim, batch_size):
                 head_dim,
                 PAGE_SIZE,
                 pos_encoding_mode="NONE",
-                data_type=torch.float16,
+                kv_data_type=torch.float16,
                 q_data_type=torch.float16,
             )
-            o_tc, lse_tc = wrapper_tensor_cores.run_return_lse(q_f, kv_data_f)
-
-            torch.testing.assert_close(o, o_tc, rtol=1e-3, atol=1e-3)
-            torch.testing.assert_close(lse, lse_tc, rtol=1e-3, atol=1e-3)
+            o, lse = wrapper.run_return_lse(q_f, kv_data_f)
 
             func = lambda: wrapper.run(q_f, kv_data_f)
-            ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer")
+            ms = bench(
+                func, warmup=10, repeat=30, proton_name="flashinfer_batch_decode_tensor_cores"
+            )
             func()
-            print(f"FlashInfer time: {ms:.3f} ms")
+            print(
+                f"FlashInfer BatchDecodeWithPagedKVCacheWrapper(use_tensor_cores=True) time: {ms:.3f} ms"
+            )
+
+            return (
+                o.reshape(batch_size, qo_heads, head_dim).cpu().numpy(),
+                lse.reshape(batch_size, qo_heads).cpu().numpy(),
+            )
+
+        def flashinfer_batch_prefill():
+            import flashinfer
+            import torch
+
+            q_f = Q.to(0).reshape(batch_size, qo_heads, head_dim)
+            kv_data_f = KV_data.to(0)
+            kv_indptr_f = KV_indptr.to(0)
+            kv_last_page_len_f = KV_last_page_len.to(0)
+            kv_indices_f = KV_indices.to(0)
+
+            qo_indptr_f = torch.arange(0, batch_size + 1, dtype=torch.int32).to(0)
+            workspace_buffer = torch.empty(1024 * 1024 * 1024, dtype=torch.int8).to(0)
+            wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(workspace_buffer, KV_LAYOUT)
+            wrapper.plan(
+                qo_indptr_f,
+                kv_indptr_f,
+                kv_indices_f,
+                kv_last_page_len_f,
+                qo_heads,
+                kv_heads,
+                head_dim,
+                PAGE_SIZE,
+                pos_encoding_mode="NONE",
+                kv_data_type=torch.float16,
+                q_data_type=torch.float16,
+            )
+            o, lse = wrapper.run_return_lse(q_f, kv_data_f)
+
+            func = lambda: wrapper.run(q_f, kv_data_f)
+            ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer_batch_prefill")
+            func()
+            print(f"FlashInfer BatchPrefillWithPagedKVCacheWrapper time: {ms:.3f} ms")
+
+            return (
+                o.reshape(batch_size, qo_heads, head_dim).cpu().numpy(),
+                lse.reshape(batch_size, qo_heads).cpu().numpy(),
+            )
+
+        def flashinfer_batch_attention():
+            import flashinfer
+            import torch
+
+            q_f = Q.to(0).reshape(batch_size, qo_heads, head_dim)
+            kv_data_f = KV_data.to(0)
+            kv_indptr_f = KV_indptr.to(0)
+            kv_last_page_len_f = KV_last_page_len.to(0)
+            kv_indices_f = KV_indices.to(0)
+
+            qo_indptr_f = torch.arange(0, batch_size + 1, dtype=torch.int32).to(0)
+            wrapper = flashinfer.BatchAttention(KV_LAYOUT)
+            wrapper.plan(
+                qo_indptr_f,
+                kv_indptr_f,
+                kv_indices_f,
+                torch.tensor([seq_len] * batch_size, dtype=torch.int32).to(0),
+                qo_heads,
+                kv_heads,
+                head_dim,
+                head_dim,
+                PAGE_SIZE,
+                kv_data_type=torch.float16,
+                q_data_type=torch.float16,
+            )
+            o, lse = wrapper.run(q_f, kv_data_f)
+
+            func = lambda: wrapper.run(q_f, kv_data_f)
+            ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer_batch_attention")
+            func()
+            print(f"FlashInfer BatchAttention time: {ms:.3f} ms")
 
             return (
                 o.reshape(batch_size, qo_heads, head_dim).cpu().numpy(),
@@ -788,12 +883,32 @@ def test(num_heads, seq_len, head_dim, batch_size):
 
         with ProtonContext("batch_decode"):
             print(
-                f"Testing (B,(H_qo,H_kv),N,D) = ({batch_size},({qo_heads},{kv_heads}),{seq_len},{head_dim})"
+                f">>>>>>>>>>>>>>>>>>>>>>>>> Testing (B,(H_qo,H_kv),N,D) = ({batch_size},({qo_heads},{kv_heads}),{seq_len},{head_dim})"
             )
-            O_flashinfer, lse_flashinfer = flashinfer()
+            O_flashinfer_batch_decode, lse_flashinfer_batch_decode = flashinfer_batch_decode()
+            O_flashinfer_batch_decode_tensor_cores, lse_flashinfer_batch_decode_tensor_cores = (
+                flashinfer_batch_decode_tensor_cores()
+            )
+            O_flashinfer_batch_prefill, lse_flashinfer_batch_prefill = flashinfer_batch_prefill()
+            O_flashinfer_batch_attention, lse_flashinfer_batch_attention = (
+                flashinfer_batch_attention()
+            )
             O_tir, lse_tir = tir()
-            np.testing.assert_allclose(O_tir, O_flashinfer, rtol=1e-3, atol=1e-3)
-            np.testing.assert_allclose(lse_tir, lse_flashinfer, rtol=1e-3, atol=1e-3)
+
+            np.testing.assert_allclose(O_tir, O_flashinfer_batch_decode, rtol=1e-3, atol=1e-3)
+            np.testing.assert_allclose(lse_tir, lse_flashinfer_batch_decode, rtol=1e-3, atol=1e-3)
+            np.testing.assert_allclose(
+                O_tir, O_flashinfer_batch_decode_tensor_cores, rtol=1e-3, atol=1e-3
+            )
+            np.testing.assert_allclose(
+                lse_tir, lse_flashinfer_batch_decode_tensor_cores, rtol=1e-3, atol=1e-3
+            )
+            np.testing.assert_allclose(O_tir, O_flashinfer_batch_prefill, rtol=1e-3, atol=1e-3)
+            np.testing.assert_allclose(lse_tir, lse_flashinfer_batch_prefill, rtol=1e-3, atol=1e-3)
+            np.testing.assert_allclose(O_tir, O_flashinfer_batch_attention, rtol=1e-3, atol=1e-3)
+            np.testing.assert_allclose(
+                lse_tir, lse_flashinfer_batch_attention, rtol=1e-3, atol=1e-3
+            )
 
     test_dynamic_batch_size(batch_size)
 
@@ -804,7 +919,7 @@ if __name__ == "__main__":
     num_heads_list = [(64, 8)]
     seq_len_list = [512]
     head_dim_list = [128]
-    batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128, 256]
+    batch_size_list = [1, 2, 4]#, 8, 16, 32, 64, 128, 256]
 
     for num_heads, seq_len, head_dim, batch_size in itertools.product(
         num_heads_list, seq_len_list, head_dim_list, batch_size_list

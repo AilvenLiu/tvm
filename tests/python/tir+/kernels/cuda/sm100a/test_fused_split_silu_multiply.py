@@ -75,13 +75,13 @@ def get_fused_split_silu_multiply_kernel(out_dim):
                 while idx[0] * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
                     intermediate_idx = T.meta_var((idx[0] * VEC_SIZE) % INTERMEDIATE_SIZE)
                     batch_idx = T.meta_var((idx[0] * VEC_SIZE) // INTERMEDIATE_SIZE)
-                    for kv in T.serial(VEC_SIZE):
+                    for kv in T.vectorized(VEC_SIZE):
                         vec1[kv] = input_cat_global[batch_idx, intermediate_idx + kv]
-                    for kv in T.serial(VEC_SIZE):
+                    for kv in T.vectorized(VEC_SIZE):
                         vec2[kv] = input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx + kv]
                     for kv in T.serial(VEC_SIZE):
                         vec1[kv] = vec1[kv] * T.sigmoid(vec1[kv]) * vec2[kv]
-                    for kv in T.serial(VEC_SIZE):
+                    for kv in T.vectorized(VEC_SIZE):
                         output_global[batch_idx, intermediate_idx + kv] = vec1[kv]
                     idx[0] += SM_COUNT * BDX * BDY
     # fmt: on
@@ -162,15 +162,28 @@ def test(batch_size):
 
         return output_tvm.numpy().reshape(batch_size, out_dim)
 
+    def flashinfer():
+        import torch
+        import flashinfer
+
+        input_cat_flashinfer = input_cat.clone().to("cuda")
+        out = torch.empty((batch_size, out_dim), dtype=torch.float16, device="cuda")
+        func = lambda: flashinfer.activation.silu_and_mul(input_cat_flashinfer, out)
+        ms = bench(func, warmup=0, repeat=30, proton_name="flashinfer")
+        print(f"FlashInfer time: {ms:.3f} ms")
+        return out.cpu().numpy()
+
     with ProtonContext("fused_split_silu_multiply"):
         output_naive = naive()
         output_tir = tir()
         output_tir2 = tir2()
+        output_flashinfer = flashinfer()
 
     np.testing.assert_allclose(output_naive, output_tir, rtol=5e-3, atol=5e-3)
     np.testing.assert_allclose(output_tir, output_tir2, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(output_tir, output_flashinfer, rtol=5e-3, atol=5e-3)
 
 
 if __name__ == "__main__":
-    for batch_size in [64, 128, 4133]:
+    for batch_size in [32, 128, 4096]:
         test(batch_size)

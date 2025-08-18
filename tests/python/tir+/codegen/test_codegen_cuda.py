@@ -78,7 +78,8 @@ def test_cuda_nano_sleep():
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_nano_sleep" in src
-    
+
+
 def test_cuda_atomic_cas():
     @T.prim_func(tirp=True)
     def main(A: T.Buffer((16, 16), "int32")):
@@ -90,6 +91,7 @@ def test_cuda_atomic_cas():
 
     src, mod = _get_source(main)
     assert "tvm_builtin_cuda_atomic_cas" in src
+
 
 def test_cuda_func_call():
     def test_add_one():
@@ -183,6 +185,10 @@ def test_warp_shuffle_xor_sync():
     assert "__shfl_xor_sync" in mod.mod.imported_modules[0].get_source()
     A_ref = np.ones(32, dtype="float32") * 496
     np.testing.assert_allclose(A.numpy(), A_ref)
+
+
+def test_ptx_cp_async():
+    pass
 
 
 if __name__ == "__main__":
