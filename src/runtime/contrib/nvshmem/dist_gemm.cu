@@ -45,6 +45,13 @@ void cuStreamWaitValue64Wrapper(TVMStreamHandle strm, void* addr, uint64_t expec
                       CU_STREAM_WAIT_VALUE_EQ);
 }
 
+void cuStreamWriteValue64Wrapper(TVMStreamHandle strm, void* addr, uint64_t value, int dst_device) {
+  int my_rank = nvshmem_my_pe();
+  void* remote_addr = my_rank == dst_device ? addr : nvshmem_ptr(addr, dst_device);
+  cuStreamWriteValue64(CUstream(strm), reinterpret_cast<CUdeviceptr>(remote_addr), value,
+                       CU_STREAM_WRITE_VALUE_DEFAULT);
+}
+
 void copy_to_peer(void* dst, int dst_device, void* src, size_t size, TVMStreamHandle stream) {
   int my_rank = nvshmem_my_pe();
   void* remote_dst = my_rank == dst_device ? dst : nvshmem_ptr(dst, dst_device);
@@ -80,9 +87,9 @@ void set_streaming_policy(TVMStreamHandle stream, void* ptr, size_t size) {
   cudaStreamSetAttribute(strm, cudaStreamAttributeAccessPolicyWindow, &streamAttrValue);
 }
 
-void transfer_to_peers(NDArray semaphore, NDArray gemm_out, NDArray staging_buffer,
-                       TVMStreamHandle stream, int32_t M, int32_t N, int32_t BLK_M, int32_t BLK_N,
-                       int32_t WORLD_SIZE) {
+void transfer_to_peers_reduce_scatter(NDArray semaphore, NDArray gemm_out, NDArray staging_buffer,
+                                      TVMStreamHandle stream, int32_t M, int32_t N, int32_t BLK_M,
+                                      int32_t BLK_N, int32_t WORLD_SIZE) {
   DiscoWorker* worker = ThreadLocalDiscoWorker::Get()->worker;
   if (worker == nullptr) {
     LOG(FATAL) << "NVSHMEM transfer to peer failed: worker is not initialized";
@@ -95,30 +102,50 @@ void transfer_to_peers(NDArray semaphore, NDArray gemm_out, NDArray staging_buff
       cuStreamWaitValue64Wrapper(stream, get_pointer(semaphore, ffi::Shape{to_rank}),
                                  LOCAL_M / BLK_M * N / BLK_N);
       copy_to_peer(get_pointer(staging_buffer, ffi::Shape{my_rank, 0, 0}), to_rank,
-                   get_pointer(gemm_out, ffi::Shape{to_rank * LOCAL_M, 0}),
-                   LOCAL_M * N * 2, stream);
+                   get_pointer(gemm_out, ffi::Shape{to_rank * LOCAL_M, 0}), LOCAL_M * N * 2,
+                   stream);
     } else {
       TVMStreamHandle main_stream =
           static_cast<TVMStreamHandle>(CUDAThreadEntry::ThreadLocal()->stream);
       copy_to_peer(get_pointer(staging_buffer, ffi::Shape{my_rank, 0, 0}), to_rank,
-                   get_pointer(gemm_out, ffi::Shape{to_rank * LOCAL_M, 0}),
-                   LOCAL_M * N * 2, main_stream);
+                   get_pointer(gemm_out, ffi::Shape{to_rank * LOCAL_M, 0}), LOCAL_M * N * 2,
+                   main_stream);
+    }
+  }
+}
+
+void transfer_to_peers_all_gather(NDArray semaphore, NDArray A, NDArray ag_out,
+                                  TVMStreamHandle stream, int32_t M, int32_t K,
+                                  int32_t WORLD_SIZE) {
+  DiscoWorker* worker = ThreadLocalDiscoWorker::Get()->worker;
+  if (worker == nullptr) {
+    LOG(FATAL) << "NVSHMEM transfer to peer failed: worker is not initialized";
+  }
+  int my_rank = worker->worker_id;
+  int LOCAL_M = M / WORLD_SIZE;
+  for (int i = 0; i < WORLD_SIZE; i++) {
+    int to_rank = (my_rank + WORLD_SIZE - i - 1) % WORLD_SIZE;
+    if (to_rank != my_rank) {
+      copy_to_peer(get_pointer(ag_out, ffi::Shape{my_rank * LOCAL_M, 0}), to_rank,
+                   get_pointer(A, ffi::Shape{0, 0}), LOCAL_M * K * 2, stream);
+      cuStreamWriteValue64Wrapper(stream, get_pointer(semaphore, ffi::Shape{my_rank}), 1, to_rank);
     }
   }
 }
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("runtime.disco.copy_to_peer", copy_to_peer)
+  refl::GlobalDef()
+      .def("runtime.disco.copy_to_peer", copy_to_peer)
       .def("runtime.disco.cu_stream_wait_value64", cuStreamWaitValue64Wrapper)
       .def("runtime.disco.stream_create", stream_create)
       .def("runtime.disco.stream_sync", stream_sync)
-      .def("runtime.disco.transfer_to_peers", transfer_to_peers)
-      .def("runtime.disco.set_streaming_policy", [](TVMStreamHandle stream, NDArray ptr, size_t size) {
-        set_streaming_policy(stream, ptr->data, size);
-      });
+      .def("runtime.disco.transfer_to_peers_reduce_scatter", transfer_to_peers_reduce_scatter)
+      .def("runtime.disco.transfer_to_peers_all_gather", transfer_to_peers_all_gather)
+      .def("runtime.disco.set_streaming_policy",
+           [](TVMStreamHandle stream, NDArray ptr, size_t size) {
+             set_streaming_policy(stream, ptr->data, size);
+           });
 });
-
-
 
 }  // namespace runtime
 }  // namespace tvm

@@ -648,7 +648,7 @@ def test_hgemm_rs():
     sess.copy_to_worker_0(A_tvm, A_array_all)
     sess.copy_to_worker_0(B_tvm, B_array_all)
 
-    transfer_to_peers_dfunc = sess.get_global_func("runtime.disco.transfer_to_peers")
+    transfer_to_peers_dfunc = sess.get_global_func("runtime.disco.transfer_to_peers_reduce_scatter")
     stream_create_dfunc = sess.get_global_func("runtime.disco.stream_create")
     d_stream = stream_create_dfunc()
     stream_sync_dfunc = sess.get_global_func("runtime.disco.stream_sync")
