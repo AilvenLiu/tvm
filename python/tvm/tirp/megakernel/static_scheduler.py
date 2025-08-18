@@ -1,8 +1,8 @@
-from .common import  KernelConfig, JobType
-
 import tvm
-from tvm.script import tir as T, tirp as Tp
+from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
+
+from .common import JobType, KernelConfig
 
 atomic_add_int32 = f"""
 __forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value) {{
@@ -38,7 +38,6 @@ class Semaphore:
                     if T.cuda.syncthreads_and(self.state[0] == 0):
                         break
                     T.cuda.nano_sleep(40)
-
 
     @T.macro
     def semaphore_notify(self, *coord):

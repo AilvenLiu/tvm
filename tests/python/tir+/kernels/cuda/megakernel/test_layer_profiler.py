@@ -6,18 +6,18 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 import tvm.testing
-from .common import *
-from .static_scheduler import StaticTileScheduler, JobType
-from .dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
-from .gemm import GemmTile
-from .gemm_splitk_reduce import SplitKReduceTile
-from .rms_norm import RMSnormTile
-from .rope import RopeTile
-from .append_kv import AppendKVTile
-from .batch_decode import DecodeTile
-from .decode_merge import DecodeMergeTile
-from .add_rmsnorm import AddRMSNormTile
-from .split_silu_multiply import SiluMultiplyTile
+from tvm.tirp.megakernel.common import *
+from tvm.tirp.megakernel.static_scheduler import StaticTileScheduler, JobType
+from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
+from tvm.tirp.megakernel.gemm import GemmTile
+from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
+from tvm.tirp.megakernel.rms_norm import RMSnormTile
+from tvm.tirp.megakernel.rope import RopeTile
+from tvm.tirp.megakernel.append_kv import AppendKVTile
+from tvm.tirp.megakernel.batch_decode import DecodeTile
+from tvm.tirp.megakernel.decode_merge import DecodeMergeTile
+from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile
+from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
 
 from ..utils import ProtonContext, bench
 

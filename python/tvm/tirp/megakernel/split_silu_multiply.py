@@ -1,8 +1,9 @@
-from .common import Tile, KernelConfig, F16_BYTES
+from tvm.script import tir as T
+from tvm.script.ir_builder import IRBuilder
+
+from .common import F16_BYTES, KernelConfig, Tile
 from .dynamic_scheduler import DynamicTileScheduler
 
-from tvm.script import tir as T, tirp as Tp
-from tvm.script.ir_builder import IRBuilder
 
 class SiluMultiplyTile(Tile):
 
@@ -23,14 +24,18 @@ class SiluMultiplyTile(Tile):
         IRBuilder.current().name("vec1", self.vec1)
         IRBuilder.current().name("vec2", self.vec2)
         self.idx = T.local_cell("int32", name="idx")
-        self.prefetch_round = (self.seq_len // 64)
+        self.prefetch_round = self.seq_len // 64
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx, tile_scheduler):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             self.idx = tid * self.VEC_SIZE
-            while self.idx < self.seq_len * self.TILE_SIZE -  self.prefetch_round * self.VEC_SIZE * KernelConfig.NUM_THREADS:
+            while (
+                self.idx
+                < self.seq_len * self.TILE_SIZE
+                - self.prefetch_round * self.VEC_SIZE * KernelConfig.NUM_THREADS
+            ):
                 token_idx = T.meta_var(self.idx // self.TILE_SIZE)
                 offset_imme = T.meta_var(m_idx * self.TILE_SIZE + self.idx % self.TILE_SIZE)
                 for kv in T.serial(self.VEC_SIZE):

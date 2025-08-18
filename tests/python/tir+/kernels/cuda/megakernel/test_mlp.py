@@ -9,13 +9,13 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 import flashinfer
 from ..utils import ProtonContext, bench, export_to_perfetto_trace
-from .common import KernelConfig, ceildiv, JobType, get_source, ProfileEventType, event_type_names
-from .gemm import GemmTile
-from .split_silu_multiply import SiluMultiplyTile
-from .gemm_splitk_reduce import SplitKReduceTile
-from .add_rmsnorm import AddRMSNormTile
-from .static_scheduler import StaticTileScheduler
-from .dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost, stg_v4
+from tvm.tirp.megakernel.common import KernelConfig, ceildiv, JobType, get_source, ProfileEventType, event_type_names
+from tvm.tirp.megakernel.gemm import GemmTile
+from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
+from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
+from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile
+from tvm.tirp.megakernel.static_scheduler import StaticTileScheduler
+from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost, stg_v4
 
 INTERMEDIATE_SIZE = 25600
 HIDDEN_SIZE = 5120

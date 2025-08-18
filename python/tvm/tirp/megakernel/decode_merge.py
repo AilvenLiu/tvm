@@ -1,7 +1,12 @@
-from tvm.script.ir_builder import IRBuilder
+from typing import Any, Dict
+
+from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.script.ir_builder import IRBuilder
 from tvm.tir.event import EventImpl
+
 from .common import *
+
 
 class DecodeMergeTile(Tile):
 
@@ -16,8 +21,15 @@ class DecodeMergeTile(Tile):
         cls.bdy = KernelConfig.NUM_THREADS // (cls.bdx * cls.bdz)
         assert cls.bdy > 0
         cls.pipe_depth = 1
-    
-    def __init__(self, o_indptr_tvm: T.handle, o_tmp_tvm: T.handle, o_tvm: T.handle, lse_tmp_tvm: T.handle, lse_tvm: T.handle):
+
+    def __init__(
+        self,
+        o_indptr_tvm: T.handle,
+        o_tmp_tvm: T.handle,
+        o_tvm: T.handle,
+        lse_tmp_tvm: T.handle,
+        lse_tvm: T.handle,
+    ):
         self.o_indptr_global = o_indptr_tvm
         self.o_tmp_global = o_tmp_tvm
         self.o_global = o_tvm
@@ -38,14 +50,27 @@ class DecodeMergeTile(Tile):
     def alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
         # allocate the smem
         offset = pool_allocator.offset
-        self.o_tmp_smem = pool_allocator.alloc([self.bdz, self.pipe_depth, self.bdy, self.head_dim], "float32", layout="default", align=16).buffer
-        self.lse_tmp_smem_load = pool_allocator.alloc([self.bdz, self.bdy, self.bdx], "float32", layout="default").buffer
-        self.lse_tmp_smem_use = Tp.reshape(self.lse_tmp_smem_load, [self.bdz, self.bdx, self.bdy]).buffer
+        self.o_tmp_smem = pool_allocator.alloc(
+            [self.bdz, self.pipe_depth, self.bdy, self.head_dim],
+            "float32",
+            layout="default",
+            align=16,
+        ).buffer
+        self.lse_tmp_smem_load = pool_allocator.alloc(
+            [self.bdz, self.bdy, self.bdx], "float32", layout="default"
+        ).buffer
+        self.lse_tmp_smem_use = Tp.reshape(
+            self.lse_tmp_smem_load, [self.bdz, self.bdx, self.bdy]
+        ).buffer
         pool_allocator.move_base_to(offset)
-        self.o_epi_smem = pool_allocator.alloc([self.bdz, self.bdy, self.head_dim], "float32", layout="default").buffer
-        self.lse_epi_smem = pool_allocator.alloc([self.bdz, self.bdy], "float32", layout="default").buffer
+        self.o_epi_smem = pool_allocator.alloc(
+            [self.bdz, self.bdy, self.head_dim], "float32", layout="default"
+        ).buffer
+        self.lse_epi_smem = pool_allocator.alloc(
+            [self.bdz, self.bdy], "float32", layout="default"
+        ).buffer
 
-        # allocate the reg  
+        # allocate the reg
         self.new_beg_batch_idx = T.alloc_local([1], "int32", layout="default")
         self.num = T.alloc_local([1], "int32", layout="default")
         self.tmp = T.alloc_local([self.vec_size], "float16", layout="default")
@@ -66,7 +91,7 @@ class DecodeMergeTile(Tile):
     @T.macro
     def init(self, pool_allocator: Tp.PoolAllocator):
         self.alloc_buffer(pool_allocator)
-        
+
     @T.macro
     def run(self, m_idx, n_idx, k_idx):
         with T.cta():
@@ -86,21 +111,40 @@ class DecodeMergeTile(Tile):
 
                 if self.num[0] == 1:
                     if ty == 0:
-                        Tp.copy(self.o[:], self.o_tmp_global[self.new_beg_batch_idx[0], head_idx, tx_start:tx_start + self.vec_size])
+                        Tp.copy(
+                            self.o[:],
+                            self.o_tmp_global[
+                                self.new_beg_batch_idx[0],
+                                head_idx,
+                                tx_start : tx_start + self.vec_size,
+                            ],
+                        )
                         Tp.cast(self.tmp[:], self.o[:])
-                        Tp.copy(self.o_global[batch_idx, head_idx, tx_start:tx_start + self.vec_size], self.tmp[:])
-                        self.lse_global[batch_idx, head_idx] = self.lse_tmp_global[self.new_beg_batch_idx[0], head_idx]
+                        Tp.copy(
+                            self.o_global[batch_idx, head_idx, tx_start : tx_start + self.vec_size],
+                            self.tmp[:],
+                        )
+                        self.lse_global[batch_idx, head_idx] = self.lse_tmp_global[
+                            self.new_beg_batch_idx[0], head_idx
+                        ]
 
                 # pipeline
                 for kp in T.unroll(self.pipe_depth):
                     if kp * self.bdy + ty < self.num[0]:
-                        Tp.copy_async(self.o_tmp_smem[tz, kp, ty, tx_start:tx_start + self.vec_size], 
-                                        self.o_tmp_global[self.new_beg_batch_idx[0] + kp * self.bdy + ty, head_idx, tx_start:tx_start + self.vec_size],
-                                        evt, schedule_config={"vec_len": self.vec_size})
+                        Tp.copy_async(
+                            self.o_tmp_smem[tz, kp, ty, tx_start : tx_start + self.vec_size],
+                            self.o_tmp_global[
+                                self.new_beg_batch_idx[0] + kp * self.bdy + ty,
+                                head_idx,
+                                tx_start : tx_start + self.vec_size,
+                            ],
+                            evt,
+                            schedule_config={"vec_len": self.vec_size},
+                        )
                     evt.commit()
-                
+
                 # initialize the value
-                self.m[0] = T.float32('-inf')
+                self.m[0] = T.float32("-inf")
                 self.d[0] = 1.0
                 for kv in T.unroll(self.vec_size):
                     self.o[kv] = 0.0
@@ -109,7 +153,10 @@ class DecodeMergeTile(Tile):
                     if ki % self.bdx == 0:
                         # load lse
                         if ki * self.bdy + ty * self.bdx + tx < self.num[0]:
-                            self.lse_tmp_smem_load[tz, ty, tx] = self.lse_tmp_global[self.new_beg_batch_idx[0] + ki * self.bdy + ty * self.bdx + tx, head_idx]
+                            self.lse_tmp_smem_load[tz, ty, tx] = self.lse_tmp_global[
+                                self.new_beg_batch_idx[0] + ki * self.bdy + ty * self.bdx + tx,
+                                head_idx,
+                            ]
                         else:
                             self.lse_tmp_smem_load[tz, ty, tx] = 0.0
                         T.ptx.bar.sync(2, KernelConfig.NUM_THREADS)
@@ -118,21 +165,33 @@ class DecodeMergeTile(Tile):
                     T.ptx.bar.sync(2, KernelConfig.NUM_THREADS)
 
                     for kv in T.serial(self.vec_size):
-                        self.o_tmp[kv] = self.o_tmp_smem[tz, ki % self.pipe_depth, ty, tx * self.vec_size + kv]
+                        self.o_tmp[kv] = self.o_tmp_smem[
+                            tz, ki % self.pipe_depth, ty, tx * self.vec_size + kv
+                        ]
                     if ki * self.bdy + ty < self.num[0]:
-                        self.m_tmp[0] = self.lse_tmp_smem_use[tz, ki % self.bdx, ty] 
+                        self.m_tmp[0] = self.lse_tmp_smem_use[tz, ki % self.bdx, ty]
                         m1 = self.m[0]
                         d1 = self.d[0]
                         self.m[0] = T.max(m1, self.m_tmp[0])
                         self.d[0] = d1 * T.exp2(m1 - self.m[0]) + T.exp2(self.m_tmp[0] - self.m[0])
                         for kv in T.unroll(self.vec_size):
-                            self.o[kv] = self.o[kv] * T.exp2(m1 - self.m[0]) + self.o_tmp[kv] * T.exp2(self.m_tmp[0] - self.m[0])
+                            self.o[kv] = self.o[kv] * T.exp2(m1 - self.m[0]) + self.o_tmp[
+                                kv
+                            ] * T.exp2(self.m_tmp[0] - self.m[0])
                     T.ptx.bar.sync(2, KernelConfig.NUM_THREADS)
                     if (self.pipe_depth + ki) * self.bdy + ty < self.num[0]:
-                        Tp.copy_async(self.o_tmp_smem[tz, ki % self.pipe_depth, ty, tx_start:tx_start + self.vec_size], 
-                                        self.o_tmp_global[self.new_beg_batch_idx[0] + (ki + self.pipe_depth) * self.bdy + ty, head_idx, 
-                                                          tx_start:tx_start + self.vec_size],
-                                        evt, schedule_config={"vec_len": self.vec_size})
+                        Tp.copy_async(
+                            self.o_tmp_smem[
+                                tz, ki % self.pipe_depth, ty, tx_start : tx_start + self.vec_size
+                            ],
+                            self.o_tmp_global[
+                                self.new_beg_batch_idx[0] + (ki + self.pipe_depth) * self.bdy + ty,
+                                head_idx,
+                                tx_start : tx_start + self.vec_size,
+                            ],
+                            evt,
+                            schedule_config={"vec_len": self.vec_size},
+                        )
                     evt.commit()
                 evt.wait(0)
                 T.ptx.bar.sync(2, KernelConfig.NUM_THREADS)
@@ -144,7 +203,7 @@ class DecodeMergeTile(Tile):
                 for kv in T.serial(self.vec_size):
                     self.o_epi_smem[tz, ty, tx * self.vec_size + kv] = self.o[kv]
                 self.lse_epi_smem[tz, ty] = self.m[0] + T.log2(self.d[0])
-                self.m[0] = T.float32('-inf')
+                self.m[0] = T.float32("-inf")
                 self.d[0] = 1.0
                 for kv in T.serial(self.vec_size):
                     self.o[kv] = 0.0
@@ -157,15 +216,22 @@ class DecodeMergeTile(Tile):
                         self.m[1] = self.m[0]
                         self.d[1] = self.d[0]
                         self.m[0] = T.max(self.m[1], self.m_tmp[0])
-                        self.d[0] = self.d[1] * T.exp2(self.m[1] - self.m[0]) + T.exp2(self.m_tmp[0] - self.m[0])
+                        self.d[0] = self.d[1] * T.exp2(self.m[1] - self.m[0]) + T.exp2(
+                            self.m_tmp[0] - self.m[0]
+                        )
                         for kv in T.unroll(self.vec_size):
-                            self.o[kv] = self.o[kv] * T.exp2(self.m[1] - self.m[0]) + self.o_tmp[kv] * T.exp2(self.m_tmp[0] - self.m[0])
-                                
+                            self.o[kv] = self.o[kv] * T.exp2(self.m[1] - self.m[0]) + self.o_tmp[
+                                kv
+                            ] * T.exp2(self.m_tmp[0] - self.m[0])
+
                     for kv in T.unroll(self.vec_size):
                         self.o[kv] = self.o[kv] / self.d[0]
-                    
+
                     # store to global mem
                     Tp.cast(self.tmp[:], self.o[:])
-                    Tp.copy(self.o_global[batch_idx, head_idx, tx_start:tx_start + self.vec_size], self.tmp[:])
+                    Tp.copy(
+                        self.o_global[batch_idx, head_idx, tx_start : tx_start + self.vec_size],
+                        self.tmp[:],
+                    )
                     if tx == 0:
                         self.lse_global[batch_idx, head_idx] = self.m[0] + T.log2(self.d[0])

@@ -1,7 +1,11 @@
-from tvm.script.ir_builder import IRBuilder
+from typing import Any, Dict
+
 from tvm.script import tirp as Tp
+from tvm.script.ir_builder import IRBuilder
 from tvm.tir.event import EventImpl
+
 from .common import *
+
 
 class DecodeTile(Tile):
 
@@ -34,10 +38,21 @@ class DecodeTile(Tile):
         assert cls.bdz > 0
         cls.sm_scale = (1 / 0.6931471805599453) * (1 / cls.head_dim**0.5)
 
-    def __init__(self, qkv_tvm: T.handle, kv_cache_tvm: T.handle, o_tvm: T.handle, lse_tvm: T.handle,
-                 o_tmp_tvm: T.handle, lse_tmp_tvm: T.handle,
-                kv_indptr_tvm: T.handle, kv_last_page_len_tvm: T.handle, kv_indices_tvm: T.handle, 
-                request_indices_tvm: T.handle, kv_tile_indices_tvm: T.handle, max_chunk_size_tvm: T.handle):
+    def __init__(
+        self,
+        qkv_tvm: T.handle,
+        kv_cache_tvm: T.handle,
+        o_tvm: T.handle,
+        lse_tvm: T.handle,
+        o_tmp_tvm: T.handle,
+        lse_tmp_tvm: T.handle,
+        kv_indptr_tvm: T.handle,
+        kv_last_page_len_tvm: T.handle,
+        kv_indices_tvm: T.handle,
+        request_indices_tvm: T.handle,
+        kv_tile_indices_tvm: T.handle,
+        max_chunk_size_tvm: T.handle,
+    ):
         self.batch_size = qkv_tvm.shape[0]
         self.new_batch_size = request_indices_tvm.shape[0]
         self.qkv_global = qkv_tvm
@@ -76,13 +91,43 @@ class DecodeTile(Tile):
 
     def alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
         # allocate the smem
-        self.k_smem = pool_allocator.alloc([self.pipe_depth, self.loop_inner, self.bdz, self.bdy, self.tile_per_bdx, self.head_dim], 
-                                           "float16", layout="default", align=16).buffer
-        self.v_smem = pool_allocator.alloc([self.pipe_depth, self.loop_inner, self.bdz, self.bdy, self.tile_per_bdx, self.head_dim], 
-                                           "float16", layout="default", align=16).buffer
-        self.kv_offset = pool_allocator.alloc([self.bdz, self.bdx, self.bdy, self.tile_per_bdx], "int32", layout="default").buffer
-        self.epi_o = pool_allocator.alloc([self.bdz, self.bdy, self.bdx, self.loop_inner, self.vec_size], "float32", layout="default").buffer
-        self.epi_md = pool_allocator.alloc([self.bdz, self.bdy, self.loop_inner, 2], "float32", layout="default").buffer
+        self.k_smem = pool_allocator.alloc(
+            [
+                self.pipe_depth,
+                self.loop_inner,
+                self.bdz,
+                self.bdy,
+                self.tile_per_bdx,
+                self.head_dim,
+            ],
+            "float16",
+            layout="default",
+            align=16,
+        ).buffer
+        self.v_smem = pool_allocator.alloc(
+            [
+                self.pipe_depth,
+                self.loop_inner,
+                self.bdz,
+                self.bdy,
+                self.tile_per_bdx,
+                self.head_dim,
+            ],
+            "float16",
+            layout="default",
+            align=16,
+        ).buffer
+        self.kv_offset = pool_allocator.alloc(
+            [self.bdz, self.bdx, self.bdy, self.tile_per_bdx], "int32", layout="default"
+        ).buffer
+        self.epi_o = pool_allocator.alloc(
+            [self.bdz, self.bdy, self.bdx, self.loop_inner, self.vec_size],
+            "float32",
+            layout="default",
+        ).buffer
+        self.epi_md = pool_allocator.alloc(
+            [self.bdz, self.bdy, self.loop_inner, 2], "float32", layout="default"
+        ).buffer
 
         # allocate the reg
         self.idx = T.alloc_local([1], "int32", layout="default")
@@ -90,7 +135,9 @@ class DecodeTile(Tile):
         self.q = T.alloc_local([self.loop_inner, self.vec_size], "float32", layout="default")
         self.k = T.alloc_local([self.loop_inner, self.vec_size], "float32", layout="default")
         self.v = T.alloc_local([self.loop_inner, self.vec_size], "float32", layout="default")
-        self.s = T.alloc_local([self.loop_inner, self.tile_per_bdx * self.bdy], "float32", layout="default")
+        self.s = T.alloc_local(
+            [self.loop_inner, self.tile_per_bdx * self.bdy], "float32", layout="default"
+        )
         self.batch_idx = T.alloc_local([1], "int32", layout="default")
         self.chunk_start_logical = T.alloc_local([1], "int32", layout="default")
         self.chunk_end_logical = T.alloc_local([1], "int32", layout="default")
@@ -122,7 +169,6 @@ class DecodeTile(Tile):
         IRBuilder.current().name("d_tmp", self.d_tmp)
         IRBuilder.current().name("o_tmp", self.o_tmp)
 
-
     @T.macro
     def init(self, pool_allocator):
         self.alloc_buffer(pool_allocator)
@@ -145,8 +191,11 @@ class DecodeTile(Tile):
                     p = T.meta_var(token_id // self.page_size)
                     r = T.meta_var(token_id % self.page_size)
                     self.indices[0] = T.cuda.ldg(self.kv_indices_global.ptr_to([p]), "int32")
-                    self.kv_offset[tz, tx, ty, kt] = (self.indices[0] * 2 * self.kv_heads * self.page_size * self.head_dim 
-                                                        + kv_head_id_beg * self.page_size * self.head_dim + r * self.head_dim)
+                    self.kv_offset[tz, tx, ty, kt] = (
+                        self.indices[0] * 2 * self.kv_heads * self.page_size * self.head_dim
+                        + kv_head_id_beg * self.page_size * self.head_dim
+                        + r * self.head_dim
+                    )
                 else:
                     self.kv_offset[tz, tx, ty, kt] = 0
 
@@ -156,7 +205,7 @@ class DecodeTile(Tile):
                     T.ptx.bar.sync(1 + tz, self.bdx * self.bdy)
                 else:
                     T.ptx.bar.sync(1, KernelConfig.NUM_THREADS)
-            
+
             with T.thread():
                 new_batch_id = T.meta_var(m_idx)
                 kv_head_id_beg = T.meta_var(n_idx)
@@ -164,27 +213,51 @@ class DecodeTile(Tile):
                 # fetch q
                 self.batch_idx[0] = self.request_indices_global[new_batch_id]
                 for kb in T.unroll(self.loop_inner):
-                    Tp.copy(self.tmp[kb, :], self.qkv_global[self.batch_idx[0], (kv_head_id_beg + kb) * self.bdy + ty, tx_start:tx_start + self.vec_size])
+                    Tp.copy(
+                        self.tmp[kb, :],
+                        self.qkv_global[
+                            self.batch_idx[0],
+                            (kv_head_id_beg + kb) * self.bdy + ty,
+                            tx_start : tx_start + self.vec_size,
+                        ],
+                    )
                     Tp.cast(self.q[kb, :], self.tmp[kb, :])
 
                 # get chunk size info
-                self.chunk_start_logical[0] = self.kv_indptr_global[self.batch_idx[0]] * self.page_size
+                self.chunk_start_logical[0] = (
+                    self.kv_indptr_global[self.batch_idx[0]] * self.page_size
+                )
                 self.chunk_end_logical[0] = self.chunk_start_logical[0]
                 if split_kv:
-                    self.chunk_start_logical[0] += self.max_chunk_size_global[0] * self.kv_tile_indices_global[new_batch_id]
-                    self.chunk_end_logical[0] = T.min(self.chunk_start_logical[0] + self.max_chunk_size_global[0], 
-                                                        self.chunk_end_logical[0] + (self.kv_indptr_global[self.batch_idx[0] + 1] 
-                                                        - self.kv_indptr_global[self.batch_idx[0]] - 1) * self.page_size 
-                                                        + self.kv_last_page_len_global[self.batch_idx[0]])
+                    self.chunk_start_logical[0] += (
+                        self.max_chunk_size_global[0] * self.kv_tile_indices_global[new_batch_id]
+                    )
+                    self.chunk_end_logical[0] = T.min(
+                        self.chunk_start_logical[0] + self.max_chunk_size_global[0],
+                        self.chunk_end_logical[0]
+                        + (
+                            self.kv_indptr_global[self.batch_idx[0] + 1]
+                            - self.kv_indptr_global[self.batch_idx[0]]
+                            - 1
+                        )
+                        * self.page_size
+                        + self.kv_last_page_len_global[self.batch_idx[0]],
+                    )
                 else:
-                    self.chunk_end_logical[0] += ((self.kv_indptr_global[self.batch_idx[0] + 1]
-                                                    - self.kv_indptr_global[self.batch_idx[0]] - 1) * self.page_size 
-                                                    + self.kv_last_page_len_global[self.batch_idx[0]])
+                    self.chunk_end_logical[0] += (
+                        self.kv_indptr_global[self.batch_idx[0] + 1]
+                        - self.kv_indptr_global[self.batch_idx[0]]
+                        - 1
+                    ) * self.page_size + self.kv_last_page_len_global[self.batch_idx[0]]
                 self.chunk_size[0] = self.chunk_end_logical[0] - self.chunk_start_logical[0]
-                    
+
                 # fetch kv-offset
                 for kt in T.unroll(self.tile_per_bdx):
-                    _fetch_kv_offset(kt, kv_head_id_beg, ((tx * self.bdz + tz) * self.bdy + ty) * self.tile_per_bdx + kt)
+                    _fetch_kv_offset(
+                        kt,
+                        kv_head_id_beg,
+                        ((tx * self.bdz + tz) * self.bdy + ty) * self.tile_per_bdx + kt,
+                    )
                 T.ptx.fence.proxy("shared")
                 _sync_blk()
 
@@ -195,20 +268,42 @@ class DecodeTile(Tile):
 
                     # fetch K
                     for kt in T.unroll(self.tile_per_bdx):
-                        if ((kp * self.bdz + tz) * self.bdy + ty) * self.tile_per_bdx + kt < self.chunk_size[0]:
+                        if (
+                            (kp * self.bdz + tz) * self.bdy + ty
+                        ) * self.tile_per_bdx + kt < self.chunk_size[0]:
                             for kb in T.unroll(self.loop_inner):
-                                g_st = T.meta_var(self.kv_offset_cp[kt] + kb * self.page_size * self.head_dim)
-                                Tp.copy_async(self.k_smem[kp, kb, tz, ty, kt, tx_start:tx_start + self.vec_size], 
-                                                self.kv_cache_global[g_st:g_st + self.vec_size], evt, schedule_config={"vec_len": self.vec_size})
+                                g_st = T.meta_var(
+                                    self.kv_offset_cp[kt] + kb * self.page_size * self.head_dim
+                                )
+                                Tp.copy_async(
+                                    self.k_smem[
+                                        kp, kb, tz, ty, kt, tx_start : tx_start + self.vec_size
+                                    ],
+                                    self.kv_cache_global[g_st : g_st + self.vec_size],
+                                    evt,
+                                    schedule_config={"vec_len": self.vec_size},
+                                )
                     evt.commit()
 
                     # fetch V
                     for kt in T.unroll(self.tile_per_bdx):
-                        if ((kp * self.bdz + tz) * self.bdy + ty) * self.tile_per_bdx + kt < self.chunk_size[0]:
+                        if (
+                            (kp * self.bdz + tz) * self.bdy + ty
+                        ) * self.tile_per_bdx + kt < self.chunk_size[0]:
                             for kb in T.unroll(self.loop_inner):
-                                g_st = T.meta_var(self.kv_heads * self.page_size * self.head_dim + self.kv_offset_cp[kt] + kb * self.page_size * self.head_dim)
-                                Tp.copy_async(self.v_smem[kp, kb, tz, ty, kt, tx_start:tx_start + self.vec_size], 
-                                                self.kv_cache_global[g_st:g_st + self.vec_size], evt, schedule_config={"vec_len": self.vec_size})
+                                g_st = T.meta_var(
+                                    self.kv_heads * self.page_size * self.head_dim
+                                    + self.kv_offset_cp[kt]
+                                    + kb * self.page_size * self.head_dim
+                                )
+                                Tp.copy_async(
+                                    self.v_smem[
+                                        kp, kb, tz, ty, kt, tx_start : tx_start + self.vec_size
+                                    ],
+                                    self.kv_cache_global[g_st : g_st + self.vec_size],
+                                    evt,
+                                    schedule_config={"vec_len": self.vec_size},
+                                )
                     evt.commit()
 
                     # initilize the value
@@ -219,37 +314,62 @@ class DecodeTile(Tile):
                         self.m[kb, 0] = T.min_value("float32")
                         self.d[kb, 0] = 1.0
                     # pipeline
-                    for ki in T.serial(ceildiv(self.chunk_size[0], (self.tile_per_bdx * self.bdy * self.bdz))):
+                    for ki in T.serial(
+                        ceildiv(self.chunk_size[0], (self.tile_per_bdx * self.bdy * self.bdz))
+                    ):
                         # fetch new kv-offset
-                        if ((ki + self.pipe_depth) % self.bdx == 0):
+                        if (ki + self.pipe_depth) % self.bdx == 0:
                             for kt in T.unroll(self.tile_per_bdx):
-                                _fetch_kv_offset(kt, kv_head_id_beg, ((ki + self.pipe_depth) * self.tile_per_bdx * self.bdy * self.bdz
-                                                                        + ((tx * self.bdz + tz) * self.bdy + ty) * self.tile_per_bdx + kt))
+                                _fetch_kv_offset(
+                                    kt,
+                                    kv_head_id_beg,
+                                    (
+                                        (ki + self.pipe_depth)
+                                        * self.tile_per_bdx
+                                        * self.bdy
+                                        * self.bdz
+                                        + ((tx * self.bdz + tz) * self.bdy + ty) * self.tile_per_bdx
+                                        + kt
+                                    ),
+                                )
                             T.ptx.fence.proxy("shared")
-                    
+
                         # compute qk
-                        evt.wait(2 * self.pipe_depth - 1) # wait for K
+                        evt.wait(2 * self.pipe_depth - 1)  # wait for K
                         _sync_blk()
                         for kb in T.unroll(self.loop_inner):
                             self.m[kb, 1] = self.m[kb, 0]
                         for kt in T.unroll(self.tile_per_bdx * self.bdy):
                             for kb in T.unroll(self.loop_inner):
                                 # cast k to f32
-                                Tp.cast(self.k[kb, :], self.k_smem[self.idx[0], kb, tz, kt // self.tile_per_bdx, 
-                                                                    kt % self.tile_per_bdx, tx_start:tx_start + self.vec_size])
+                                Tp.cast(
+                                    self.k[kb, :],
+                                    self.k_smem[
+                                        self.idx[0],
+                                        kb,
+                                        tz,
+                                        kt // self.tile_per_bdx,
+                                        kt % self.tile_per_bdx,
+                                        tx_start : tx_start + self.vec_size,
+                                    ],
+                                )
                                 self.s[kb, kt] = 0.0
                                 # local gemm
                                 for kv in T.unroll(self.vec_size):
                                     self.s[kb, kt] += self.q[kb, kv] * self.k[kb, kv]
                                 # reduce from other tx's sum
                                 for kr in T.unroll(find_power_of_two(self.bdx // 2) + 1):
-                                    self.s[kb, kt] = self.s[kb, kt] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, self.s[kb, kt], (self.bdx // 2) >> kr, 32, 32)
+                                    self.s[kb, kt] = self.s[kb, kt] + T.tvm_warp_shuffle_xor(
+                                        0xFFFFFFFF, self.s[kb, kt], (self.bdx // 2) >> kr, 32, 32
+                                    )
                                 self.s[kb, kt] *= self.sm_scale
-                                if (ki * self.bdz + tz) * self.bdy * self.tile_per_bdx + kt >= self.chunk_size[0]:
+                                if (
+                                    ki * self.bdz + tz
+                                ) * self.bdy * self.tile_per_bdx + kt >= self.chunk_size[0]:
                                     self.s[kb, kt] = T.min_value("float32")
                                 # update max value
                                 self.m[kb, 0] = T.max(self.m[kb, 0], self.s[kb, kt])
-                                
+
                         # update the sum for softmax
                         if self.tile_per_bdx * self.bdy * tz < self.chunk_size[0]:
                             for kb in T.unroll(self.loop_inner):
@@ -261,39 +381,85 @@ class DecodeTile(Tile):
                                 for kv in T.unroll(self.vec_size):
                                     self.o[kb, kv] = self.o[kb, kv] * o_scale
                         _sync_blk()
-                        
+
                         # get kv-offset used in cp
                         for kt in T.unroll(self.tile_per_bdx):
-                            self.kv_offset_cp[kt] = self.kv_offset[tz, (ki + self.pipe_depth) % self.bdx, ty, kt] + tx * self.vec_size
+                            self.kv_offset_cp[kt] = (
+                                self.kv_offset[tz, (ki + self.pipe_depth) % self.bdx, ty, kt]
+                                + tx * self.vec_size
+                            )
 
                         # fetch K
                         for kt in T.unroll(self.tile_per_bdx):
-                            if (((ki + self.pipe_depth) * self.bdz + tz) * self.bdy + ty) * self.tile_per_bdx + kt < self.chunk_size[0]:
+                            if (
+                                ((ki + self.pipe_depth) * self.bdz + tz) * self.bdy + ty
+                            ) * self.tile_per_bdx + kt < self.chunk_size[0]:
                                 for kb in T.unroll(self.loop_inner):
-                                    g_st = T.meta_var(self.kv_offset_cp[kt] + kb * self.page_size * self.head_dim)
-                                    Tp.copy_async(self.k_smem[self.idx[0], kb, tz, ty, kt, tx_start:tx_start + self.vec_size], 
-                                                    self.kv_cache_global[g_st:g_st + self.vec_size], evt, schedule_config={"vec_len": self.vec_size})
+                                    g_st = T.meta_var(
+                                        self.kv_offset_cp[kt] + kb * self.page_size * self.head_dim
+                                    )
+                                    Tp.copy_async(
+                                        self.k_smem[
+                                            self.idx[0],
+                                            kb,
+                                            tz,
+                                            ty,
+                                            kt,
+                                            tx_start : tx_start + self.vec_size,
+                                        ],
+                                        self.kv_cache_global[g_st : g_st + self.vec_size],
+                                        evt,
+                                        schedule_config={"vec_len": self.vec_size},
+                                    )
                         evt.commit()
 
                         # calculate softmax(qk)v
-                        evt.wait(2 * self.pipe_depth - 1) # wait for V
+                        evt.wait(2 * self.pipe_depth - 1)  # wait for V
                         _sync_blk()
                         for kb in T.unroll(self.loop_inner):
                             for kt in T.unroll(self.tile_per_bdx * self.bdy):
-                                if (ki * self.bdz + tz) * self.bdy * self.tile_per_bdx + kt < self.chunk_size[0]:
-                                    Tp.cast(self.v[kb, :], self.v_smem[self.idx[0], kb, tz, kt // self.tile_per_bdx, 
-                                                                        kt % self.tile_per_bdx, tx_start:tx_start + self.vec_size])
+                                if (
+                                    ki * self.bdz + tz
+                                ) * self.bdy * self.tile_per_bdx + kt < self.chunk_size[0]:
+                                    Tp.cast(
+                                        self.v[kb, :],
+                                        self.v_smem[
+                                            self.idx[0],
+                                            kb,
+                                            tz,
+                                            kt // self.tile_per_bdx,
+                                            kt % self.tile_per_bdx,
+                                            tx_start : tx_start + self.vec_size,
+                                        ],
+                                    )
                                     for kv in T.unroll(self.vec_size):
                                         self.o[kb, kv] += self.s[kb, kt] * self.v[kb, kv]
                         _sync_blk()
 
                         # fetch V
                         for kt in T.unroll(self.tile_per_bdx):
-                            if (((ki + self.pipe_depth) * self.bdz + tz) * self.bdy + ty) * self.tile_per_bdx + kt < self.chunk_size[0]:
+                            if (
+                                ((ki + self.pipe_depth) * self.bdz + tz) * self.bdy + ty
+                            ) * self.tile_per_bdx + kt < self.chunk_size[0]:
                                 for kb in T.unroll(self.loop_inner):
-                                    g_st = T.meta_var(self.kv_heads * self.page_size * self.head_dim + self.kv_offset_cp[kt] + kb * self.page_size * self.head_dim)
-                                    Tp.copy_async(self.v_smem[self.idx[0], kb, tz, ty, kt, tx_start:tx_start + self.vec_size], 
-                                                    self.kv_cache_global[g_st:g_st + self.vec_size], evt, schedule_config={"vec_len": self.vec_size})
+                                    g_st = T.meta_var(
+                                        self.kv_heads * self.page_size * self.head_dim
+                                        + self.kv_offset_cp[kt]
+                                        + kb * self.page_size * self.head_dim
+                                    )
+                                    Tp.copy_async(
+                                        self.v_smem[
+                                            self.idx[0],
+                                            kb,
+                                            tz,
+                                            ty,
+                                            kt,
+                                            tx_start : tx_start + self.vec_size,
+                                        ],
+                                        self.kv_cache_global[g_st : g_st + self.vec_size],
+                                        evt,
+                                        schedule_config={"vec_len": self.vec_size},
+                                    )
                         evt.commit()
                         self.idx[0] = (self.idx[0] + 1) % self.pipe_depth
 
@@ -325,11 +491,17 @@ class DecodeTile(Tile):
                                     self.m[kb, 1] = self.m[kb, 0]
                                     self.d[kb, 1] = self.d[kb, 0]
                                     self.m[kb, 0] = T.max(self.m[kb, 1], self.m_tmp[kb, 0])
-                                    self.d[kb, 0] = (self.d[kb, 1] * T.exp2(self.m[kb, 1] - self.m[kb, 0]) 
-                                                        + self.d_tmp[kb, 0] * T.exp2(self.m_tmp[kb, 0] - self.m[kb, 0]))
+                                    self.d[kb, 0] = self.d[kb, 1] * T.exp2(
+                                        self.m[kb, 1] - self.m[kb, 0]
+                                    ) + self.d_tmp[kb, 0] * T.exp2(
+                                        self.m_tmp[kb, 0] - self.m[kb, 0]
+                                    )
                                     for kv in T.unroll(self.vec_size):
-                                        self.o[kb, kv] = (self.o[kb, kv] * T.exp2(self.m[kb, 1] - self.m[kb, 0]) 
-                                                            + self.o_tmp[kb, kv] * T.exp2(self.m_tmp[kb, 0] - self.m[kb, 0]))
+                                        self.o[kb, kv] = self.o[kb, kv] * T.exp2(
+                                            self.m[kb, 1] - self.m[kb, 0]
+                                        ) + self.o_tmp[kb, kv] * T.exp2(
+                                            self.m_tmp[kb, 0] - self.m[kb, 0]
+                                        )
                             # normalize
                             for kv in T.unroll(self.vec_size):
                                 self.o[kb, kv] = self.o[kb, kv] / self.d[kb, 0]
@@ -337,17 +509,29 @@ class DecodeTile(Tile):
                         for kb in T.unroll(self.loop_inner):
                             qo_head_id = T.meta_var((kv_head_id_beg + kb) * self.bdy + ty)
                             if split_kv:
-                                Tp.copy(self.o_tmp_global[new_batch_id, qo_head_id, tx_start:tx_start + self.vec_size], self.o[kb, :])
+                                Tp.copy(
+                                    self.o_tmp_global[
+                                        new_batch_id,
+                                        qo_head_id,
+                                        tx_start : tx_start + self.vec_size,
+                                    ],
+                                    self.o[kb, :],
+                                )
                                 if tx == 0:
-                                    self.lse_tmp_global[new_batch_id, qo_head_id] = self.m[kb, 0] + T.log2(self.d[kb, 0])
+                                    self.lse_tmp_global[new_batch_id, qo_head_id] = self.m[
+                                        kb, 0
+                                    ] + T.log2(self.d[kb, 0])
                             else:
                                 Tp.cast(self.tmp[kb, :], self.o[kb, :])
-                                Tp.copy(self.o_global[new_batch_id, qo_head_id, tx_start:tx_start + self.vec_size], self.tmp[kb, :])
+                                Tp.copy(
+                                    self.o_global[
+                                        new_batch_id,
+                                        qo_head_id,
+                                        tx_start : tx_start + self.vec_size,
+                                    ],
+                                    self.tmp[kb, :],
+                                )
                                 if tx == 0:
-                                    self.lse_global[new_batch_id, qo_head_id] = self.m[kb, 0] + T.log2(self.d[kb, 0])
-                            
-
-    
-
-
-
+                                    self.lse_global[new_batch_id, qo_head_id] = self.m[
+                                        kb, 0
+                                    ] + T.log2(self.d[kb, 0])

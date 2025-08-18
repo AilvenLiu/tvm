@@ -1,41 +1,61 @@
-from typing import List
+import json
+from argparse import ArgumentParser
 from pathlib import Path
+from typing import List
+
 import numpy as np
 import torch
-import tvm
-from tqdm import tqdm
-
-from tvm import dlight, relax, te, tir, target
-from tvm.relax.frontend import nn
-from tvm.relax import register_pipeline
+from mlc_llm.compiler_pass.attach_support_info import (
+    AttachMemoryPlanAttr,
+    AttachVariableBounds,
+)
+from mlc_llm.compiler_pass.blas_dispatch import BLASDispatch
+from mlc_llm.compiler_pass.dispatch_kv_cache_creation import DispatchKVCacheCreation
+from mlc_llm.compiler_pass.fuse_add_norm import FuseAddRMSNorm
+from mlc_llm.compiler_pass.pipeline import _DebugDump
 from mlc_llm.model.qwen3.qwen3_model import Qwen3Config, Qwen3LMHeadModel
 from mlc_llm.nn.kv_cache import PagedKVCache
-from mlc_llm.compiler_pass.dispatch_kv_cache_creation import DispatchKVCacheCreation
-from mlc_llm.compiler_pass.blas_dispatch import BLASDispatch
-from mlc_llm.compiler_pass.fuse_add_norm import FuseAddRMSNorm
-from mlc_llm.compiler_pass.attach_support_info import AttachVariableBounds, AttachMemoryPlanAttr
-from mlc_llm.compiler_pass.pipeline import _DebugDump
-from tvm.runtime import ShapeTuple
+from tqdm import tqdm
 
-from tvm.script import relax as R
+import tvm
+from tvm import dlight, relax, target
+from tvm.relax import register_pipeline
+from tvm.relax.frontend import nn
+from tvm.runtime import ShapeTuple
+from tvm.runtime import disco as di
 from tvm.script import ir as I
+from tvm.script import relax as R
 from tvm.script import tir as T
-from .test_rmsnorm import get_rmsnorm_kernel
+from tvm.tirp.megakernel.common import ceildiv
+from tvm.tirp.megakernel.gemm import GemmTile
+from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
+
+from ..megakernel.test_layer import (
+    DOWN_PROJ_SPLIT_K_FACTOR,
+    SPLIT_O_PROJRCT,
+    SPLIT_QKV_PROJECT,
+    MegaKernel,
+    generate_event_tensor,
+    generate_exec_queue,
+)
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
+from .test_rmsnorm import get_rmsnorm_kernel
 from .test_rope import get_cos_sin_cache_kernel
-from ..megakernel.common import ceildiv
-from ..megakernel.gemm import GemmTile
-from ..megakernel.gemm_splitk_reduce import SplitKReduceTile
-from ..megakernel.test_layer import MegaKernel, generate_exec_queue, generate_event_tensor, SPLIT_O_PROJRCT, SPLIT_QKV_PROJECT, DOWN_PROJ_SPLIT_K_FACTOR
 
 # pyright: reportInvalidTypeForm=false
+
+parser = ArgumentParser()
+parser.add_argument("--tp-size", type=int, default=1, choices=[1, 2, 4, 8])
+args = parser.parse_args()
 
 dev = tvm.cuda()
 target = tvm.target.Target("cuda")
 
+TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
-LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC/"  # load weights from real model
-MEGA_LIB_PATH = "/home/guanjiew/e2e/mega/mega_lib.so"  # NOTE: update this path
+LOAD_WEIGHTS = "/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16"
+MODEL_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/lib_tp{TP_SIZE}.so"
+MEGA_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/mega_layer_lib_tp{TP_SIZE}.so"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
@@ -43,7 +63,7 @@ MAX_TOTAL_SEQ_LEN = MAX_BATCH_SIZE * MAX_SEQ_LEN
 PAGE_SIZE = 16
 ROPE_THETA = 1000000
 
-config = Qwen3Config(
+config_tp1 = Qwen3Config(
     hidden_act="silu",
     hidden_size=5120,
     intermediate_size=25600,
@@ -67,17 +87,31 @@ config = Qwen3Config(
 
 
 problem_config = {
-    "vocab_size": config.vocab_size,
-    "hidden_size": config.hidden_size,
-    "intermediate_size": config.intermediate_size,
-    "num_hidden_layers": config.num_hidden_layers,
-    "num_attention_heads": config.num_attention_heads,
-    "num_key_value_heads": config.num_key_value_heads,
-    "head_dim": config.head_dim,
-    "rms_norm_eps": config.rms_norm_eps,
-    "rope_theta": config.rope_theta,
+    "vocab_size": config_tp1.vocab_size,
+    "hidden_size": config_tp1.hidden_size,
+    "intermediate_size": config_tp1.intermediate_size,
+    "num_hidden_layers": config_tp1.num_hidden_layers,
+    "num_attention_heads": config_tp1.num_attention_heads,
+    "num_key_value_heads": config_tp1.num_key_value_heads,
+    "head_dim": config_tp1.head_dim,
+    "rms_norm_eps": config_tp1.rms_norm_eps,
+    "rope_theta": config_tp1.rope_theta,
     "page_size": 16,
 }
+
+
+def init_disco_session():
+    if TP_SIZE == 1:
+        return None
+
+    devices = [i for i in range(TP_SIZE)]
+    sess = di.ProcessSession(num_workers=len(devices), entrypoint="mlc_llm.cli.worker")
+    sess.init_ccl("nccl", *devices)
+    return sess
+
+
+disco_sess = init_disco_session()
+
 
 def get_default_spec(model):
     mod_spec = {
@@ -119,7 +153,12 @@ def _craft_pipeline(ext_mods: List[nn.ExternModule], dump_file_prefix: Path):
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
         seq = tvm.transform.Sequential(
             [
-                AttachVariableBounds({"batch_size": config.max_batch_size, "new_batch_size": config.max_batch_size * 2}),
+                AttachVariableBounds(
+                    {
+                        "batch_size": config_tp1.max_batch_size,
+                        "new_batch_size": config_tp1.max_batch_size * 2,
+                    }
+                ),
                 AttachMemoryPlanAttr(),
                 _DebugDump(f"{dump_file_prefix}-phase0.py", debug_dir, show_meta=False),
                 tvm.tir.transform.BindTarget(target),
@@ -188,11 +227,8 @@ def _pipeline(  # pylint: disable=too-many-arguments
 ):
     return _craft_pipeline(ext_mods, "opt_llm_mg")
 
-tvm.register_func("megakernel.generate_exec_queue", generate_exec_queue)
-tvm.register_func("megakernel.generate_event_tensor", generate_event_tensor)
 
-
-def get_params(named_params):
+def get_params(named_params, vm):
     if LOAD_WEIGHTS is None:
         print("Generating weights")
         import torch
@@ -216,9 +252,15 @@ def get_params(named_params):
         from tvm.contrib import tvmjs
 
         print("Loading weights from", LOAD_WEIGHTS)
-        params, _ = tvmjs.load_ndarray_cache(LOAD_WEIGHTS, device=dev)
-        print("Loaded", len(params), "weights")
-        result = [params[k] for k, v in named_params]
+        if TP_SIZE == 1:
+            params, _ = tvmjs.load_ndarray_cache(LOAD_WEIGHTS, device=dev)
+            print("Loaded", len(params), "weights")
+            result = [params[k] for k, v in named_params]
+        else:
+            loader = disco_sess.get_global_func("mlc.multi_gpu.LoadMultiGPU")
+            result = disco_sess.call_packed(
+                loader, LOAD_WEIGHTS, vm, json.dumps({"vocab_size": config_tp1.vocab_size})
+            )
     return result
 
 
@@ -226,13 +268,40 @@ def sample_token(logits):
     return np.argmax(logits, axis=-1)
 
 
-model = Qwen3LMHeadModel(config)
+model = Qwen3LMHeadModel(config_tp1)
 model.to("float16")
 mod, named_params = model.export_tvm(get_default_spec(model))
-params = get_params(named_params)
-with target:
-    ex = tvm.compile(mod, target, relax_pipeline=relax.get_pipeline("opt_llm_1"))
-    vm = relax.VirtualMachine(ex, dev)
+
+get_global_func = (
+    tvm.get_global_func
+    if TP_SIZE == 1
+    else lambda name: (
+        lambda *args: disco_sess.call_packed(disco_sess.get_global_func(name), *args)
+    )
+)
+
+
+def load_reference_model_lib():
+    if TP_SIZE == 1:
+        ex = tvm.runtime.load_module(MODEL_LIB_PATH)
+        vm = relax.VirtualMachine(ex, dev)
+        batch_decode_func = vm["batch_decode"]
+        kv_cache_create_func = vm["create_flashinfer_paged_kv_cache"]
+        embed_func = vm["embed"]
+    else:
+        vm = get_global_func("runtime.disco.load_vm_module")(MODEL_LIB_PATH, None)
+        mod_get_func = get_global_func("runtime.ModuleGetFunction")
+        batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
+        kv_cache_create_func_ = mod_get_func(vm, "create_flashinfer_paged_kv_cache", True)
+        embed_func_ = mod_get_func(vm, "embed", True)
+        batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)
+        kv_cache_create_func = lambda *args: disco_sess.call_packed(kv_cache_create_func_, *args)
+        embed_func = lambda *args: disco_sess.call_packed(embed_func_, *args)
+    return vm, batch_decode_func, kv_cache_create_func, embed_func
+
+
+vm, batch_decode_func, kv_cache_create_func, embed_func = load_reference_model_lib()
+params = get_params(named_params, vm)
 
 
 def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=None):
@@ -329,19 +398,19 @@ def get_qwen3_megakernel_mod():
                 R.prim_value(batch_size),
                 plan_o_indptr,
                 sinfo_args=[
-                    R.Tensor((ceildiv((config.num_attention_heads + 2 * config.num_key_value_heads) * config.head_dim, SplitKReduceTile.N_UNIT),), dtype="int32"),
+                    R.Tensor((ceildiv((config_tp1.num_attention_heads + 2 * config_tp1.num_key_value_heads) * config_tp1.head_dim, SplitKReduceTile.N_UNIT),), dtype="int32"),
                     R.Tensor(None, dtype="int32"),
                     R.Tensor(None, dtype="int32"),
                     R.Tensor(None, dtype="int32"),
                     R.Tensor(None, dtype="int32"),
                     R.Tensor(None, dtype="int32"),
                     R.Tensor((SPLIT_O_PROJRCT,), dtype="int32"),
-                    R.Tensor((ceildiv(config.hidden_size, GemmTile.BLK_N),), dtype="int32"),
+                    R.Tensor((ceildiv(config_tp1.hidden_size, GemmTile.BLK_N),), dtype="int32"),
                     R.Tensor(None, dtype="int32"),
                     R.Tensor((1,), dtype="int32"),
-                    R.Tensor((config.intermediate_size // GemmTile.BLK_N,), dtype="int32"),
+                    R.Tensor((config_tp1.intermediate_size // GemmTile.BLK_N,), dtype="int32"),
                     R.Tensor((DOWN_PROJ_SPLIT_K_FACTOR,), dtype="int32"),
-                    R.Tensor((config.hidden_size // GemmTile.BLK_N,), dtype="int32"),
+                    R.Tensor((config_tp1.hidden_size // GemmTile.BLK_N,), dtype="int32"),
                     R.Tensor(None, dtype="int32"),
                     R.Tensor((1,), dtype="int32"),
                 ]
@@ -381,11 +450,11 @@ def get_qwen3_megakernel_mod():
                 res3[14],
             )
 
-            etensor_q_reduce = R.match_cast(etensor_q_reduce_, R.Tensor((batch_size, ceildiv(config.num_attention_heads * config.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
-            etensor_k_reduce = R.match_cast(etensor_k_reduce_, R.Tensor((batch_size, ceildiv(config.num_key_value_heads * config.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
-            etensor_v_reduce = R.match_cast(etensor_v_reduce_, R.Tensor((batch_size, ceildiv(config.num_key_value_heads * config.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
-            etensor_decode = R.match_cast(etensor_decode_, R.Tensor((batch_size, config.num_key_value_heads), dtype="int32"))
-            etensor_decode_merge = R.match_cast(etensor_decode_merge_, R.Tensor((batch_size, config.num_key_value_heads), dtype="int32"))
+            etensor_q_reduce = R.match_cast(etensor_q_reduce_, R.Tensor((batch_size, ceildiv(config_tp1.num_attention_heads * config_tp1.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
+            etensor_k_reduce = R.match_cast(etensor_k_reduce_, R.Tensor((batch_size, ceildiv(config_tp1.num_key_value_heads * config_tp1.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
+            etensor_v_reduce = R.match_cast(etensor_v_reduce_, R.Tensor((batch_size, ceildiv(config_tp1.num_key_value_heads * config_tp1.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
+            etensor_decode = R.match_cast(etensor_decode_, R.Tensor((batch_size, config_tp1.num_key_value_heads), dtype="int32"))
+            etensor_decode_merge = R.match_cast(etensor_decode_merge_, R.Tensor((batch_size, config_tp1.num_key_value_heads), dtype="int32"))
             etensor_attn_add_rms_norm = R.match_cast(etensor_attn_add_rms_norm_, R.Tensor((batch_size,), dtype="int32"))
             etensor_mlp_add_rms_norm = R.match_cast(etensor_mlp_add_rms_norm_, R.Tensor((batch_size,), dtype="int32"))
             
@@ -772,4 +841,3 @@ for i, (ref, mg) in enumerate(zip(res0, res1)):
         np.testing.assert_allclose(ref_token, mg_token, atol=1e-2, rtol=1e-2)
     except Exception as e:
         print(e)
-

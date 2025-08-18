@@ -1,7 +1,9 @@
-from .common import Tile, KernelConfig, F16_BYTES, ceildiv, find_power_of_two
-
-from tvm.script import tir as T, tirp as Tp
+from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
+
+from .common import F16_BYTES, KernelConfig, Tile, ceildiv, find_power_of_two
+
 
 class AddRMSNormTile(Tile):
     vec_size = 16 // F16_BYTES
@@ -51,7 +53,9 @@ class AddRMSNormTile(Tile):
             # add & sum square
             self.sum_sq[0] = 0.0
             with T.thread():
-                for ki in T.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)):
+                for ki in T.serial(
+                    ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)
+                ):
                     for kv in T.unroll(self.vec_size):
                         self.input_vec[kv] = 0.0
                         self.residual_vec[kv] = 0.0
@@ -96,7 +100,9 @@ class AddRMSNormTile(Tile):
                 self.rms_norm[0] = T.rsqrt(self.sum_sq_smem[0] / self.hidden_size + self.EPS)
 
                 # handle the weight
-                for ki in T.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)):
+                for ki in T.serial(
+                    ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)
+                ):
                     for kv in T.unroll(self.vec_size):
                         self.input_vec[kv] = 0.0
                         self.weight_vec_f32[kv] = 0.0

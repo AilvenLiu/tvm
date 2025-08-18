@@ -1,6 +1,11 @@
-from tvm.script.ir_builder import IRBuilder
+from typing import Any, Dict
+
+from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.script.ir_builder import IRBuilder
+
 from .common import *
+
 
 class AppendKVTile(Tile):
 
@@ -14,7 +19,7 @@ class AppendKVTile(Tile):
     @classmethod
     def class_config_init(cls, problem_config: Dict[str, Any]):
         cls.loop_inner = 1
-        cls.qo_heads = problem_config["num_attention_heads"] 
+        cls.qo_heads = problem_config["num_attention_heads"]
         cls.kv_heads = problem_config["num_key_value_heads"]
         cls.head_dim = problem_config["head_dim"]
         cls.page_size = problem_config["page_size"]
@@ -28,7 +33,9 @@ class AppendKVTile(Tile):
         self.qkv_global = qkv_tvm
         self.pos_map_global = pos_map_tvm
         self.batch_size = qkv_tvm.shape[0]
-        self.m_split = T.min(ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads), self.batch_size)
+        self.m_split = T.min(
+            ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads), self.batch_size
+        )
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.h_tile = 1
         assert kv_cache_tvm.shape[1] == 2
@@ -50,7 +57,7 @@ class AppendKVTile(Tile):
     @T.macro
     def init(self, pool_allocator: Tp.PoolAllocator):
         self.alloc_buffer(pool_allocator)
-    
+
     @T.macro
     def run(self, m_idx, n_idx, k_idx):
         with T.cta():
@@ -61,19 +68,28 @@ class AppendKVTile(Tile):
             with T.thread():
                 self.idx[0] = ty
 
-                while self.idx[0] < self.m_tile * self.h_tile and m_idx * self.m_tile + self.idx[0] // self.h_tile < self.batch_size:
+                while (
+                    self.idx[0] < self.m_tile * self.h_tile
+                    and m_idx * self.m_tile + self.idx[0] // self.h_tile < self.batch_size
+                ):
                     batch_idx = T.meta_var(m_idx * self.m_tile + self.idx[0] // self.h_tile)
                     head_idx = T.meta_var(n_idx * self.h_tile + self.idx[0] % self.h_tile)
                     if batch_idx < self.batch_size and head_idx < self.kv_heads:
 
-                        self.pos[0] = T.cuda.ldg(T.address_of(self.pos_map_global[batch_idx]), "int32")
+                        self.pos[0] = T.cuda.ldg(
+                            T.address_of(self.pos_map_global[batch_idx]), "int32"
+                        )
                         page_id = T.meta_var(self.pos[0] // self.page_size)
                         offset = T.meta_var(self.pos[0] % self.page_size)
                         for vec in T.vectorized(self.vec_size):
-                            self.vec[vec] = self.qkv_global[batch_idx, self.qo_heads + k_idx * self.kv_heads + head_idx, stx + vec]
+                            self.vec[vec] = self.qkv_global[
+                                batch_idx,
+                                self.qo_heads + k_idx * self.kv_heads + head_idx,
+                                stx + vec,
+                            ]
                         for vec in T.vectorized(self.vec_size):
-                            self.kv_cache_global[page_id, k_idx, head_idx, offset, stx + vec] = self.vec[vec]
-                    
-                    self.idx[0] += self.bdy
+                            self.kv_cache_global[page_id, k_idx, head_idx, offset, stx + vec] = (
+                                self.vec[vec]
+                            )
 
-        
+                    self.idx[0] += self.bdy

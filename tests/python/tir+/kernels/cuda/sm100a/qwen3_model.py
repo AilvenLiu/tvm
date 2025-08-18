@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import List
 
 import numpy as np
-import torch
 from mlc_llm.compiler_pass.attach_support_info import (
     AttachMemoryPlanAttr,
     AttachVariableBounds,
@@ -18,7 +17,7 @@ from mlc_llm.nn.kv_cache import PagedKVCache
 from tqdm import tqdm
 
 import tvm
-from tvm import dlight, relax, target, te, tir
+from tvm import dlight, relax, target
 from tvm.relax import register_pipeline
 from tvm.relax.expr_functor import PyExprMutator, mutator
 from tvm.relax.frontend import nn
@@ -29,12 +28,12 @@ from tvm.script import relax as R
 from tvm.script import tir as T
 
 from .test_append_paged_kv_cache import get_append_paged_kv_cache_kernel
-from .test_batch_decode import PlanInfo, decode_attn_plan, get_decode_kernel
+from .test_batch_decode import PlanInfo, get_decode_kernel
 from .test_fused_add_rms_norm import get_fused_add_rmsnorm_kernel
 from .test_fused_split_silu_multiply import get_fused_split_silu_multiply_kernel
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
 from .test_rmsnorm import get_rmsnorm_kernel
-from .test_rope import get_cos_sin_cache_kernel, get_rope_kernel, prepare_cos_sin_cache
+from .test_rope import get_cos_sin_cache_kernel, get_rope_kernel
 
 # pyright: reportInvalidTypeForm=false
 

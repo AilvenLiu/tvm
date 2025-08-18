@@ -1,23 +1,24 @@
-from enum import Enum
+import math
+
 import numpy as np
 
 import tvm
+import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
-import tvm.testing
-from .common import *
-from .static_scheduler import StaticTileScheduler, JobType
-from .dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
-from .gemm import GemmTile
-from .gemm_splitk_reduce import SplitKReduceTile
-from .rms_norm import RMSnormTile
-from .rope import RopeTile
-from .append_kv import AppendKVTile
-from .batch_decode import DecodeTile
-from .decode_merge import DecodeMergeTile
-from .add_rmsnorm import AddRMSNormTile
-from .split_silu_multiply import SiluMultiplyTile
+from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile
+from tvm.tirp.megakernel.append_kv import AppendKVTile
+from tvm.tirp.megakernel.batch_decode import DecodeTile
+from tvm.tirp.megakernel.common import *
+from tvm.tirp.megakernel.decode_merge import DecodeMergeTile
+from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
+from tvm.tirp.megakernel.gemm import GemmTile
+from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
+from tvm.tirp.megakernel.rms_norm import RMSnormTile
+from tvm.tirp.megakernel.rope import RopeTile
+from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
+from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
+from tvm.tirp.megakernel.support import generate_event_tensor, generate_exec_queue
 
 from ..utils import ProtonContext, bench
 
@@ -49,16 +50,26 @@ problem_config = {
     "rope_theta": ROPE_THETA,
     "max_page_num": 128,
     "page_size": 16,
-    "seq_len": SEQ_LEN
+    "seq_len": SEQ_LEN,
 }
 
 SPLIT_QKV_PROJECT = 3
 SPLIT_O_PROJRCT = 3
 DOWN_PROJ_SPLIT_K_FACTOR = 10
 
+
 class MegaKernel:
-    class_list = [GemmTile, SplitKReduceTile, RMSnormTile, RopeTile, AppendKVTile,
-                    DecodeTile, DecodeMergeTile, AddRMSNormTile, SiluMultiplyTile]    
+    class_list = [
+        GemmTile,
+        SplitKReduceTile,
+        RMSnormTile,
+        RopeTile,
+        AppendKVTile,
+        DecodeTile,
+        DecodeMergeTile,
+        AddRMSNormTile,
+        SiluMultiplyTile,
+    ]
 
     def __init__(self, problem_config):
         self.tile_list = []
@@ -90,7 +101,9 @@ class MegaKernel:
         pool_allocator.move_base_to(max_offset)
 
     def get_func_static(self):
-        from .static_scheduler import Semaphore
+        from tvm.tirp.megakernel.static_scheduler import Semaphore
+
+        # fmt: off
         @T.prim_func(tirp=True)
         def mega_kernel(
                 # input and output
@@ -470,12 +483,14 @@ class MegaKernel:
 
                         tile_scheduler.next_tile()
                     self.class_finalize_all()
+        # fmt: on
 
         return mega_kernel
-    
-    def get_func_dynamic(self):
-        from .dynamic_scheduler import Semaphore
 
+    def get_func_dynamic(self):
+        from tvm.tirp.megakernel.dynamic_scheduler import Semaphore
+
+        # fmt: off
         @T.prim_func(tirp=True)
         def mega_kernel(
             # input and output
@@ -1024,219 +1039,35 @@ class MegaKernel:
                             tile_scheduler.push_tasks_along_dim(JobType.END.value, 0, 0, 0, KernelConfig.SM_NUMBER, 0, warp_id, lane_id, evt_end, 0)
                         tile_scheduler.next_tile(warp_id)
                     self.class_finalize_all()
+        # fmt: on
 
         return mega_kernel
 
 
-def generate_exec_queue(batch_size, new_batch_size):
-    split_kv = (batch_size != new_batch_size)
-    exec_queue = np.zeros((KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4), dtype=np.int32)
-    central_queue = []
-
-    # qkv projection
-    for n_idx in range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, GemmTile.BLK_N)):
-        for k_idx in range(SPLIT_QKV_PROJECT):
-            central_queue.append((0, n_idx, k_idx, JobType.GEMM_QKV_PROJ.value))
-
-    # qkv reduction
-    m_split = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, 
-                                                        (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM // SplitKReduceTile.N_UNIT))
-    n_tile_qkv_proj_reduce = ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split)) * SplitKReduceTile.N_UNIT
-    for m_idx in range(m_split):
-        for n_idx in range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, n_tile_qkv_proj_reduce)):
-            central_queue.append((m_idx, n_idx, 0, JobType.GEMM_QKV_REDUCE.value))
-
-    for m_idx in range(m_split):
-        for n_idx in range(NUM_ATTENTION_HEADS):
-            central_queue.append((m_idx, n_idx, -1, JobType.Q_RMSNORM_ROPE.value))
-
-    for m_idx in range(m_split):
-        for n_idx in range(NUM_KEY_VALUE_HEADS):
-            central_queue.append((m_idx, n_idx, -1, JobType.K_RMSNORM_ROPE_APPEND_KV.value))
-
-    for m_idx in range(m_split):
-        for n_idx in range(NUM_KEY_VALUE_HEADS):
-            central_queue.append((m_idx, n_idx, -1, JobType.V_APPEND_KV.value))
-    # decode
-    if split_kv:
-        for n_idx in range(NUM_KEY_VALUE_HEADS):
-            for m_idx in range(new_batch_size):
-                central_queue.append(((m_idx, n_idx, -1, JobType.BATCH_DECODE_SPLIT.value)))
-    else:
-        for n_idx in range(NUM_KEY_VALUE_HEADS):
-            for m_idx in range(batch_size):
-                central_queue.append(((m_idx, n_idx, -1, JobType.BATCH_DECODE_NO_SPLIT.value)))
-
-    # merge of decode
-    if split_kv:
-        for n_idx in range(NUM_KEY_VALUE_HEADS):
-            for m_idx in range(batch_size):
-                central_queue.append(((m_idx, n_idx, -1, JobType.DECODE_MERGE.value)))
-
-    # o projection
-    for n_idx in range(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)):
-        for k_idx in range(SPLIT_O_PROJRCT):
-            central_queue.append((0, n_idx, k_idx, JobType.GEMM_O_PROJ.value))
-
-    # o reduction
-    m_split_o_proj_reduce = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT))
-    n_tile_o_proj_reduce = ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_o_proj_reduce)) * SplitKReduceTile.N_UNIT
-    for n_idx in range(ceildiv(HIDDEN_SIZE, n_tile_o_proj_reduce)):
-        for m_idx in range(m_split_o_proj_reduce):
-            central_queue.append((m_idx, n_idx, 0, JobType.GEMM_O_REDUCE.value))
-
-    # add rmsnorm
-    for m_idx in range(batch_size):
-        central_queue.append((m_idx, -1, -1, JobType.ATTN_ADD_RMS_NORM.value))
-
-    # gate_up_proj
-    for n in range(INTERMEDIATE_SIZE*2 // GemmTile.BLK_N):
-        central_queue.append((0, n, 0, JobType.GEMM_GATE_UP_PROJ.value))
-
-    # split_silu_multiply
-    for n in range(INTERMEDIATE_SIZE // SiluMultiplyTile.TILE_SIZE):
-        central_queue.append((n, 0, 0, JobType.SPLIT_SILU_MULTIPLY.value))
-
-    # gemm_down_proj
-    for n in range(HIDDEN_SIZE // GemmTile.BLK_N):
-        for k in range(DOWN_PROJ_SPLIT_K_FACTOR):
-            central_queue.append((0, n, k, JobType.GEMM_DOWN_PROJ.value))
-
-    # down_proj_reduce
-    M_split_down_proj_reduce = min(
-        ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT), batch_size
-    )
-    N_tile = ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, M_split_down_proj_reduce)) * SplitKReduceTile.N_UNIT
-    for m in range(M_split_down_proj_reduce):
-        for n in range(HIDDEN_SIZE // N_tile):
-            central_queue.append((m, n, 0, JobType.DOWN_PROJ_REDUCE.value))
-
-    # add_rms_norm
-    for m in range(batch_size):
-        central_queue.append((m, 0, 0, JobType.MLP_ADD_RMS_NORM.value))
-
-    tile_idx = 0
-    while len(central_queue) > 0:
-        for bx in range(KernelConfig.SM_NUMBER):
-            if len(central_queue) > 0:
-                m, n, k, c = central_queue.pop(0)
-                exec_queue[bx, tile_idx, 0] = m
-                exec_queue[bx, tile_idx, 1] = n
-                exec_queue[bx, tile_idx, 2] = k
-                exec_queue[bx, tile_idx, 3] = c
-            else:
-                exec_queue[bx, tile_idx, 0] = -1
-                exec_queue[bx, tile_idx, 1] = -1
-                exec_queue[bx, tile_idx, 2] = -1
-                exec_queue[bx, tile_idx, 3] = JobType.END.value
-        tile_idx += 1
-    for bx in range(KernelConfig.SM_NUMBER):
-        exec_queue[bx, tile_idx, 0] = -1
-        exec_queue[bx, tile_idx, 1] = -1
-        exec_queue[bx, tile_idx, 2] = -1
-        exec_queue[bx, tile_idx, 3] = JobType.END.value
-    DEV = tvm.cuda(0)
-    return tvm.nd.array(exec_queue, device=DEV)
-
 def generate_exec_queue_dynamic():
     exec_queue = MPMCQueueHost(DynamicTileScheduler.MAX_TASKS)
-    for n in reversed(range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, GemmTile.BLK_N))):
+    for n in reversed(
+        range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, GemmTile.BLK_N))
+    ):
         for k in range(SPLIT_QKV_PROJECT):
             exec_queue.enqueue(JobType.GEMM_QKV_PROJ.value, 0, n, k)
     return exec_queue
 
-def generate_event_tensor(batch_size, o_indptr):
-    DEV = tvm.cuda(0)
-    qkv_h_d = (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM
-    qk_h_d = (NUM_ATTENTION_HEADS + NUM_KEY_VALUE_HEADS) * HEAD_DIM
-    q_h_d = NUM_ATTENTION_HEADS * HEAD_DIM
-    k_h_d = NUM_KEY_VALUE_HEADS * HEAD_DIM
-    etensor_qkv_partial = tvm.nd.array(
-        np.zeros(ceildiv(qkv_h_d, SplitKReduceTile.N_UNIT), dtype=np.int32), device=DEV
-    )
-    etensor_q_reduce = tvm.nd.array(
-        np.zeros((batch_size, ceildiv(q_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
-    )
-    etensor_k_reduce = tvm.nd.array(
-        np.zeros((batch_size, ceildiv(k_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
-    )
-    etensor_v_reduce = tvm.nd.array(
-        np.zeros((batch_size, ceildiv(k_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
-    )
-    etensor_decode = tvm.nd.array(
-        np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32), device=DEV
-    )
-    etensor_decode_merge = np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32)
-    o_indptr = o_indptr.numpy()
-    for b in range(batch_size):
-        num_merge = o_indptr[b + 1] - o_indptr[b]
-        for j in range(NUM_KEY_VALUE_HEADS):
-            etensor_decode_merge[b, j] = num_merge
-    etensor_decode_merge = tvm.nd.array(etensor_decode_merge, device=DEV)
-    etensor_o_proj = np.zeros(SPLIT_O_PROJRCT, dtype=np.int32)
-    o_proj_tile_k = ceildiv(ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SPLIT_O_PROJRCT), GemmTile.BLK_K) * GemmTile.BLK_K
-    for h in range(NUM_KEY_VALUE_HEADS):
-        range_start = h * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
-        range_end = (h + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
-        if range_end != range_start:
-            etensor_o_proj[range_start] += 1
-            etensor_o_proj[range_end] += 1
-        else:
-            etensor_o_proj[range_start] += 1
-    etensor_o_proj *= batch_size
-    etensor_o_proj = tvm.nd.array(
-        etensor_o_proj, device=DEV
-    )
-    etensor_o_partial = tvm.nd.array(
-        np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV
-    )
-    etensor_attn_add_rms_norm = tvm.nd.array(
-        np.zeros(batch_size, dtype=np.int32), device=DEV
-    )
-    etensor_attn_mlp = tvm.nd.array(
-        np.zeros(1, dtype=np.int32), device=DEV    
-    )
-    etensor_gate_up_proj = tvm.nd.array(
-        np.zeros(INTERMEDIATE_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
-    )
-    etensor_down_proj = tvm.nd.array(
-        np.zeros(DOWN_PROJ_SPLIT_K_FACTOR, dtype=np.int32), device=DEV
-    )
-    etensor_down_proj_reduce = tvm.nd.array(
-        np.zeros(HIDDEN_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
-    )
-    etensor_mlp_add_rms_norm = tvm.nd.array(
-        np.zeros((batch_size, ), dtype=np.int32), device=DEV
-    )
-
-    etensor_end = tvm.nd.array(
-        np.zeros(1, dtype=np.int32), device=DEV
-    )
-    return (
-        etensor_qkv_partial,
-        etensor_q_reduce,
-        etensor_k_reduce,
-        etensor_v_reduce,
-        etensor_decode,
-        etensor_decode_merge,
-        etensor_o_proj,
-        etensor_o_partial,
-        etensor_attn_add_rms_norm,
-        etensor_attn_mlp,
-        etensor_gate_up_proj,
-        etensor_down_proj,
-        etensor_down_proj_reduce,
-        etensor_mlp_add_rms_norm,
-        etensor_end,
-    )
 
 def decode_plan(batch_size, kv_indptr):
     # plan for decoding
-    smem_size_decode = (2 * DecodeTile.pipe_depth * DecodeTile.loop_inner * DecodeTile.bdz 
-                        * DecodeTile.bdy * DecodeTile.tile_per_bdx * DecodeTile.head_dim * F16_BYTES
-                        + KernelConfig.NUM_THREADS * DecodeTile.tile_per_bdx * F32_BYTES
-                        + KernelConfig.NUM_THREADS * DecodeTile.loop_inner * DecodeTile.vec_size * F32_BYTES
-                    )
+    smem_size_decode = (
+        2
+        * DecodeTile.pipe_depth
+        * DecodeTile.loop_inner
+        * DecodeTile.bdz
+        * DecodeTile.bdy
+        * DecodeTile.tile_per_bdx
+        * DecodeTile.head_dim
+        * F16_BYTES
+        + KernelConfig.NUM_THREADS * DecodeTile.tile_per_bdx * F32_BYTES
+        + KernelConfig.NUM_THREADS * DecodeTile.loop_inner * DecodeTile.vec_size * F32_BYTES
+    )
     assert smem_size_decode <= KernelConfig.MAX_SMEM_SIZE
     assert DecodeTile.pipe_depth <= DecodeTile.bdx
 
@@ -1260,7 +1091,10 @@ def decode_plan(batch_size, kv_indptr):
             new_batch_size = 0
             for page_num in page_num_list:
                 new_batch_size += ceildiv(page_num, mid)
-            if new_batch_size * DecodeTile.qo_heads > KernelConfig.SM_NUMBER * DecodeTile.max_blk_per_sm:
+            if (
+                new_batch_size * DecodeTile.qo_heads
+                > KernelConfig.SM_NUMBER * DecodeTile.max_blk_per_sm
+            ):
                 low = mid + 1
             else:
                 high = mid
@@ -1297,11 +1131,13 @@ def decode_plan(batch_size, kv_indptr):
         o_indptr,
     )
 
+
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
 
     def prepare_data(batch_size):
         import torch
+
         torch.manual_seed(42)
         arg_dict = {}
 
@@ -1310,7 +1146,10 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         arg_dict["residual"] = torch.randn((batch_size, HIDDEN_SIZE), dtype=torch.float16)
 
         # qkv projection
-        arg_dict["qkv_proj_weight"] = torch.randn(((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE), dtype=torch.float16)
+        arg_dict["qkv_proj_weight"] = torch.randn(
+            ((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE),
+            dtype=torch.float16,
+        )
         torch.nn.init.xavier_normal_(arg_dict["qkv_proj_weight"], gain=1.0)
 
         # rms
@@ -1318,14 +1157,18 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         arg_dict["k_rms_wight"] = torch.randn((HEAD_DIM), dtype=torch.float16)
 
         # qkv
-        arg_dict["qkv"] = torch.randn((batch_size, NUM_KEY_VALUE_HEADS * 2 + NUM_ATTENTION_HEADS, HEAD_DIM), dtype=torch.float16)
+        arg_dict["qkv"] = torch.randn(
+            (batch_size, NUM_KEY_VALUE_HEADS * 2 + NUM_ATTENTION_HEADS, HEAD_DIM),
+            dtype=torch.float16,
+        )
 
         # rope cos_sin_cache
         inv_freq = 1.0 / (
-            ROPE_THETA ** (torch.arange(0, HEAD_DIM, 2, dtype=torch.float, device="cuda") / HEAD_DIM)
+            ROPE_THETA
+            ** (torch.arange(0, HEAD_DIM, 2, dtype=torch.float, device="cuda") / HEAD_DIM)
         )
         pos = SEQ_LEN
-        assert pos < 4096 # for faster test
+        assert pos < 4096  # for faster test
         arg_dict["rope_pos"] = torch.full((batch_size,), pos, dtype=torch.int32)
         t = torch.arange(4096, dtype=torch.float, device="cuda")
         freqs = torch.einsum("i,j -> ij", t, inv_freq)
@@ -1334,7 +1177,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         arg_dict["cos_sin_cache"] = torch.cat((cos, sin), dim=-1).reshape(-1, HEAD_DIM).cpu()
 
         # paged kv-cache
-        page_last_len = PAGE_SIZE if (SEQ_LEN + 1) % PAGE_SIZE == 0 else (SEQ_LEN + 1) % PAGE_SIZE # +1 since need to append new kv
+        page_last_len = (
+            PAGE_SIZE if (SEQ_LEN + 1) % PAGE_SIZE == 0 else (SEQ_LEN + 1) % PAGE_SIZE
+        )  # +1 since need to append new kv
         page_num = ceildiv(SEQ_LEN + 1, PAGE_SIZE)
         total_page_num = page_num * batch_size
         assert total_page_num <= MAX_PAGE_NUM
@@ -1350,32 +1195,50 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         append_pos = torch.empty(batch_size, dtype=torch.int32).int()
         for i in range(batch_size):
             append_pos[i] = SEQ_LEN
-        arg_dict["kv_cache"] = torch.randn((MAX_PAGE_NUM, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM), dtype=torch.float16).cpu()
-        arg_dict["kv_indptr"] = kv_indptr.cpu() 
+        arg_dict["kv_cache"] = torch.randn(
+            (MAX_PAGE_NUM, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM), dtype=torch.float16
+        ).cpu()
+        arg_dict["kv_indptr"] = kv_indptr.cpu()
         arg_dict["kv_last_page_len"] = kv_last_page_len.cpu()
         arg_dict["kv_indices"] = kv_indices.cpu()
         arg_dict["append_pos"] = append_pos.cpu()
 
         # output
-        arg_dict["o"] = torch.zeros((batch_size, NUM_ATTENTION_HEADS, HEAD_DIM), dtype=torch.float16)
+        arg_dict["o"] = torch.zeros(
+            (batch_size, NUM_ATTENTION_HEADS, HEAD_DIM), dtype=torch.float16
+        )
         arg_dict["lse"] = torch.zeros((batch_size, NUM_ATTENTION_HEADS), dtype=torch.float32)
-        arg_dict["o_proj_weight"] = torch.randn((HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM), dtype=torch.float16)
+        arg_dict["o_proj_weight"] = torch.randn(
+            (HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM), dtype=torch.float16
+        )
         torch.nn.init.xavier_normal_(arg_dict["o_proj_weight"], gain=1.0)
-        arg_dict["hidden_state_attn_mlp"] = torch.zeros((batch_size, HIDDEN_SIZE), dtype=torch.float16)
+        arg_dict["hidden_state_attn_mlp"] = torch.zeros(
+            (batch_size, HIDDEN_SIZE), dtype=torch.float16
+        )
 
         # add rms
         arg_dict["attn_add_rms_weight"] = torch.randn((HIDDEN_SIZE), dtype=torch.float16)
 
         # mlp
-        arg_dict["gate_up_weight"] = torch.zeros((INTERMEDIATE_SIZE * 2, HIDDEN_SIZE), dtype=torch.float16)
+        arg_dict["gate_up_weight"] = torch.zeros(
+            (INTERMEDIATE_SIZE * 2, HIDDEN_SIZE), dtype=torch.float16
+        )
         torch.nn.init.xavier_normal_(arg_dict["gate_up_weight"], gain=1.0)
-        arg_dict["out_gate_up_proj"] = torch.zeros((batch_size, INTERMEDIATE_SIZE * 2), dtype=torch.float16)
-        arg_dict["out_silu_multiply"] = torch.zeros((batch_size, INTERMEDIATE_SIZE), dtype=torch.float16)
-        arg_dict["down_weight"] = torch.zeros((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype=torch.float16) * 0.01
+        arg_dict["out_gate_up_proj"] = torch.zeros(
+            (batch_size, INTERMEDIATE_SIZE * 2), dtype=torch.float16
+        )
+        arg_dict["out_silu_multiply"] = torch.zeros(
+            (batch_size, INTERMEDIATE_SIZE), dtype=torch.float16
+        )
+        arg_dict["down_weight"] = (
+            torch.zeros((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype=torch.float16) * 0.01
+        )
         torch.nn.init.xavier_normal_(arg_dict["down_weight"], gain=1.0)
-        arg_dict["partial_sum_down_proj"] = torch.zeros((DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE), dtype=torch.float32)
+        arg_dict["partial_sum_down_proj"] = torch.zeros(
+            (DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE), dtype=torch.float32
+        )
         arg_dict["output"] = torch.zeros((batch_size, HIDDEN_SIZE), dtype=torch.float16)
-        arg_dict["mlp_add_rms_weight"] = torch.randn((HIDDEN_SIZE, ), dtype=torch.float16) 
+        arg_dict["mlp_add_rms_weight"] = torch.randn((HIDDEN_SIZE,), dtype=torch.float16)
 
         return arg_dict
 
@@ -1395,10 +1258,30 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
             tvm_arg_dict["o_indptr"],
         ) = decode_plan(batch_size, arg_dict["kv_indptr"])
 
-        tvm_arg_dict["o_tmp"] = tvm.nd.array(np.zeros([tvm_arg_dict["new_batch_size"], DecodeTile.qo_heads, DecodeTile.head_dim], dtype=np.float32), DEV)
-        tvm_arg_dict["lse_tmp"] = tvm.nd.array(np.zeros([tvm_arg_dict["new_batch_size"], DecodeTile.qo_heads], dtype=np.float32), DEV)
-        tvm_arg_dict["partial_qkv"] = tvm.nd.array(np.zeros([SPLIT_QKV_PROJECT, batch_size, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM], dtype=np.float32), DEV)
-        tvm_arg_dict["partial_o"] = tvm.nd.array(np.zeros([SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE], dtype=np.float32), DEV)
+        tvm_arg_dict["o_tmp"] = tvm.nd.array(
+            np.zeros(
+                [tvm_arg_dict["new_batch_size"], DecodeTile.qo_heads, DecodeTile.head_dim],
+                dtype=np.float32,
+            ),
+            DEV,
+        )
+        tvm_arg_dict["lse_tmp"] = tvm.nd.array(
+            np.zeros([tvm_arg_dict["new_batch_size"], DecodeTile.qo_heads], dtype=np.float32), DEV
+        )
+        tvm_arg_dict["partial_qkv"] = tvm.nd.array(
+            np.zeros(
+                [
+                    SPLIT_QKV_PROJECT,
+                    batch_size,
+                    (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM,
+                ],
+                dtype=np.float32,
+            ),
+            DEV,
+        )
+        tvm_arg_dict["partial_o"] = tvm.nd.array(
+            np.zeros([SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE], dtype=np.float32), DEV
+        )
 
         # static schedule
         exec_queue = generate_exec_queue(batch_size, tvm_arg_dict["new_batch_size"])
@@ -1406,8 +1289,13 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         # append_pos here is different from flashinfer
         append_pos = arg_dict["append_pos"].clone()
         for b in range(batch_size):
-            append_pos[b] = (arg_dict["kv_indices"][(arg_dict["kv_indptr"][b] * PAGE_SIZE 
-                                                     + append_pos[b]) // PAGE_SIZE] * PAGE_SIZE + append_pos[b] % PAGE_SIZE)
+            append_pos[b] = (
+                arg_dict["kv_indices"][
+                    (arg_dict["kv_indptr"][b] * PAGE_SIZE + append_pos[b]) // PAGE_SIZE
+                ]
+                * PAGE_SIZE
+                + append_pos[b] % PAGE_SIZE
+            )
         for key, value in arg_dict.items():
             tvm_arg_dict[key] = tvm.nd.array(value, device=DEV)
         tvm_arg_dict["append_pos"] = tvm.nd.array(append_pos, device=DEV)
@@ -1423,82 +1311,78 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 tvm_arg_dict[f"etensor_decode_{i}"],
                 tvm_arg_dict[f"etensor_decode_merge_{i}"],
                 tvm_arg_dict[f"etensor_o_proj_{i}"],
-                tvm_arg_dict[f"etensor_o_partial_{i}"], 
+                tvm_arg_dict[f"etensor_o_partial_{i}"],
                 tvm_arg_dict[f"etensor_attn_add_rms_norm_{i}"],
                 tvm_arg_dict[f"etensor_attn_mlp_{i}"],
-                tvm_arg_dict[f"etensor_gate_up_proj_{i}"], 
+                tvm_arg_dict[f"etensor_gate_up_proj_{i}"],
                 tvm_arg_dict[f"etensor_down_proj_{i}"],
-                tvm_arg_dict[f"etensor_down_proj_reduce_{i}"], 
+                tvm_arg_dict[f"etensor_down_proj_reduce_{i}"],
                 tvm_arg_dict[f"etensor_mlp_add_rms_norm_{i}"],
-                _
+                _,
             ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"])
 
         with target:
             iter = 0
+
             def func():
                 nonlocal iter
                 mega_kernel_static(
                     # input and output
-                    tvm_arg_dict["hidden_state"], 
+                    tvm_arg_dict["hidden_state"],
                     tvm_arg_dict[f"residual_{iter}"],
                     tvm_arg_dict["output"],
-
                     # weight
-                    tvm_arg_dict["qkv_proj_weight"], 
-                    tvm_arg_dict["o_proj_weight"], 
+                    tvm_arg_dict["qkv_proj_weight"],
+                    tvm_arg_dict["o_proj_weight"],
                     tvm_arg_dict["q_rms_wight"],
                     tvm_arg_dict["k_rms_wight"],
                     tvm_arg_dict["gate_up_weight"],
                     tvm_arg_dict["down_weight"],
-                    tvm_arg_dict["attn_add_rms_weight"], 
+                    tvm_arg_dict["attn_add_rms_weight"],
                     tvm_arg_dict["mlp_add_rms_weight"],
-
                     # page cache, cos_sin cache and plan info
-                    tvm_arg_dict["cos_sin_cache"], 
+                    tvm_arg_dict["cos_sin_cache"],
                     tvm_arg_dict["rope_pos"],
                     tvm_arg_dict["kv_cache"],
-                    tvm_arg_dict["kv_indptr"], 
-                    tvm_arg_dict["kv_indices"], 
-                    tvm_arg_dict["kv_last_page_len"], 
+                    tvm_arg_dict["kv_indptr"],
+                    tvm_arg_dict["kv_indices"],
+                    tvm_arg_dict["kv_last_page_len"],
                     tvm_arg_dict["append_pos"],
-                    tvm_arg_dict["request_indices"], 
-                    tvm_arg_dict["kv_tile_indices"], 
-                    tvm_arg_dict["max_chunk_size"], 
+                    tvm_arg_dict["request_indices"],
+                    tvm_arg_dict["kv_tile_indices"],
+                    tvm_arg_dict["max_chunk_size"],
                     tvm_arg_dict["o_indptr"],
-
                     # intermediate buffer
                     tvm_arg_dict["partial_qkv"],
-                    tvm_arg_dict["qkv"], 
-                    tvm_arg_dict["o"], 
-                    tvm_arg_dict["lse"], 
-                    tvm_arg_dict["o_tmp"], 
-                    tvm_arg_dict["lse_tmp"], 
-                    tvm_arg_dict["partial_o"], 
+                    tvm_arg_dict["qkv"],
+                    tvm_arg_dict["o"],
+                    tvm_arg_dict["lse"],
+                    tvm_arg_dict["o_tmp"],
+                    tvm_arg_dict["lse_tmp"],
+                    tvm_arg_dict["partial_o"],
                     tvm_arg_dict["hidden_state_attn_mlp"],
                     tvm_arg_dict["out_gate_up_proj"],
                     tvm_arg_dict["out_silu_multiply"],
                     tvm_arg_dict["partial_sum_down_proj"],
-                    
                     # event tensor
-                    tvm_arg_dict[f"etensor_qkv_partial_{iter}"], 
-                    tvm_arg_dict[f"etensor_q_reduce_{iter}"], 
-                    tvm_arg_dict[f"etensor_k_reduce_{iter}"], 
-                    tvm_arg_dict[f"etensor_v_reduce_{iter}"], 
-                    tvm_arg_dict[f"etensor_decode_{iter}"], 
+                    tvm_arg_dict[f"etensor_qkv_partial_{iter}"],
+                    tvm_arg_dict[f"etensor_q_reduce_{iter}"],
+                    tvm_arg_dict[f"etensor_k_reduce_{iter}"],
+                    tvm_arg_dict[f"etensor_v_reduce_{iter}"],
+                    tvm_arg_dict[f"etensor_decode_{iter}"],
                     tvm_arg_dict[f"etensor_decode_merge_{iter}"],
-                    tvm_arg_dict[f"etensor_o_proj_{iter}"], 
-                    tvm_arg_dict[f"etensor_o_partial_{iter}"], 
+                    tvm_arg_dict[f"etensor_o_proj_{iter}"],
+                    tvm_arg_dict[f"etensor_o_partial_{iter}"],
                     tvm_arg_dict[f"etensor_attn_add_rms_norm_{iter}"],
                     tvm_arg_dict[f"etensor_attn_mlp_{iter}"],
                     tvm_arg_dict[f"etensor_gate_up_proj_{iter}"],
                     tvm_arg_dict[f"etensor_down_proj_{iter}"],
                     tvm_arg_dict[f"etensor_down_proj_reduce_{iter}"],
                     tvm_arg_dict[f"etensor_mlp_add_rms_norm_{iter}"],
-                    
                     # exec queue
-                    exec_queue, 
+                    exec_queue,
                 )
-                iter+=1
+                iter += 1
 
             ms = bench(func, warmup=1, repeat=10, proton_name="tir-static")
             print(f"TIR time: {ms:.3f} ms")
@@ -1580,9 +1464,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 tvm_arg_dict[f"etensor_mlp_add_rms_norm_{i}"],
                 tvm_arg_dict[f"etensor_end_{i}"],
             ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"])
-            tvm_arg_dict[f"queue_tasks_{i}"] = tvm.nd.array(exec_queue.tasks, DEV)  
-            tvm_arg_dict[f"queue_head_{i}"] = tvm.nd.array(exec_queue.head, DEV)  
-            tvm_arg_dict[f"queue_tail_{i}"] = tvm.nd.array(exec_queue.tail, DEV)  
+            tvm_arg_dict[f"queue_tasks_{i}"] = tvm.nd.array(exec_queue.tasks, DEV)
+            tvm_arg_dict[f"queue_head_{i}"] = tvm.nd.array(exec_queue.head, DEV)
+            tvm_arg_dict[f"queue_tail_{i}"] = tvm.nd.array(exec_queue.tail, DEV)
         with target:
             iter = 0
 
@@ -1654,8 +1538,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy()
 
     def std(arg_dict):
-        import torch
         import flashinfer
+        import torch
+
         torch_dev = torch.device("cuda")
         std_arg_dict = {}
 
@@ -1669,8 +1554,20 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
             def fused_split_silu_multiply(input_cat_ptr: T.handle, output_ptr: T.handle):
                 batch_size = T.int32()
 
-                input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global", layout="default")    
-                output_global = T.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global", layout="default")
+                input_cat_global = T.match_buffer(
+                    input_cat_ptr,
+                    [batch_size, INTERMEDIATE_SIZE * 2],
+                    "float16",
+                    scope="global",
+                    layout="default",
+                )
+                output_global = T.match_buffer(
+                    output_ptr,
+                    [batch_size, INTERMEDIATE_SIZE],
+                    "float16",
+                    scope="global",
+                    layout="default",
+                )
 
                 with T.kernel():
                     bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
@@ -1697,7 +1594,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                             for kv in T.serial(VEC_SIZE):
                                 output_global[batch_idx, intermediate_idx + kv] = vec1[kv]
                             idx[0] += KernelConfig.SM_NUMBER * BDX * BDY
+
             return fused_split_silu_multiply
+
         _, mod_fused_split_silu_multiply = get_source(get_silu_multiply_std_impl())
 
         def func():
@@ -1719,17 +1618,23 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 q_data_type=torch.float16,
             )
 
-            qkv = torch.matmul(std_arg_dict["hidden_state"], std_arg_dict["qkv_proj_weight"].T).reshape(batch_size, -1, HEAD_DIM)
-            q, k, v = torch.split(qkv, [NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, NUM_KEY_VALUE_HEADS], dim=1)
+            qkv = torch.matmul(
+                std_arg_dict["hidden_state"], std_arg_dict["qkv_proj_weight"].T
+            ).reshape(batch_size, -1, HEAD_DIM)
+            q, k, v = torch.split(
+                qkv, [NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, NUM_KEY_VALUE_HEADS], dim=1
+            )
             q = flashinfer.norm.rmsnorm(
-                input=q.reshape(-1, HEAD_DIM), 
+                input=q.reshape(-1, HEAD_DIM),
                 weight=std_arg_dict["q_rms_wight"],
-                eps=RMS_NORM_EPS, enable_pdl=False
+                eps=RMS_NORM_EPS,
+                enable_pdl=False,
             ).reshape(batch_size, NUM_ATTENTION_HEADS, HEAD_DIM)
             k = flashinfer.norm.rmsnorm(
-                input=k.reshape(-1, HEAD_DIM), 
+                input=k.reshape(-1, HEAD_DIM),
                 weight=std_arg_dict["k_rms_wight"],
-                eps=RMS_NORM_EPS, enable_pdl=False
+                eps=RMS_NORM_EPS,
+                enable_pdl=False,
             ).reshape(batch_size, NUM_KEY_VALUE_HEADS, HEAD_DIM)
             q, k = flashinfer.rope.apply_rope_with_cos_sin_cache(
                 positions=std_arg_dict["rope_pos"],
@@ -1750,27 +1655,35 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 kv_last_page_len=std_arg_dict["kv_last_page_len"],
                 kv_layout="HND",
             )
-            o, lse = wrapper.run_return_lse(q.reshape(batch_size, NUM_ATTENTION_HEADS, HEAD_DIM), std_arg_dict["kv_cache"])
-            hidden_state_attn_mlp = torch.matmul(o.reshape(batch_size, NUM_ATTENTION_HEADS * HEAD_DIM), std_arg_dict["o_proj_weight"].T)
+            o, lse = wrapper.run_return_lse(
+                q.reshape(batch_size, NUM_ATTENTION_HEADS, HEAD_DIM), std_arg_dict["kv_cache"]
+            )
+            hidden_state_attn_mlp = torch.matmul(
+                o.reshape(batch_size, NUM_ATTENTION_HEADS * HEAD_DIM),
+                std_arg_dict["o_proj_weight"].T,
+            )
             flashinfer.norm.fused_add_rmsnorm(
                 input=hidden_state_attn_mlp,
                 residual=std_arg_dict["residual"],
                 weight=std_arg_dict["attn_add_rms_weight"],
                 eps=RMS_NORM_EPS,
-                enable_pdl=False
+                enable_pdl=False,
             )
             out_gate_up_proj = torch.matmul(hidden_state_attn_mlp, std_arg_dict["gate_up_weight"].T)
             out_gate_up_proj_tvm = tvm.nd.array(out_gate_up_proj.cpu(), device=tvm.cuda(0))
-            out_silu_multiply_tvm = tvm.nd.array(torch.zeros((batch_size, INTERMEDIATE_SIZE), dtype=torch.float16), device=tvm.cuda(0))
+            out_silu_multiply_tvm = tvm.nd.array(
+                torch.zeros((batch_size, INTERMEDIATE_SIZE), dtype=torch.float16),
+                device=tvm.cuda(0),
+            )
             mod_fused_split_silu_multiply(out_gate_up_proj_tvm, out_silu_multiply_tvm)
             out_silu_multiply = torch.from_numpy(out_silu_multiply_tvm.numpy()).to(torch_dev)
             output = torch.matmul(out_silu_multiply, std_arg_dict["down_weight"].T)
             flashinfer.norm.fused_add_rmsnorm(
-                input=output, 
-                residual=std_arg_dict["residual"], 
+                input=output,
+                residual=std_arg_dict["residual"],
                 weight=std_arg_dict["mlp_add_rms_weight"],
-                eps=AddRMSNormTile.EPS, 
-                enable_pdl=False
+                eps=AddRMSNormTile.EPS,
+                enable_pdl=False,
             )
             return output.cpu().numpy(), std_arg_dict["residual"].cpu().numpy()
 
@@ -1791,6 +1704,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
     np.testing.assert_allclose(output_tir_dynamic, output_std, rtol=1e-3, atol=1e-2)
     np.testing.assert_allclose(residual_tir_dynamic, residual_std, rtol=1e-3, atol=1e-2)
 
+
 if __name__ == "__main__":
 
     mega_kernel_wrapper_static = MegaKernel(problem_config)
@@ -1799,7 +1713,6 @@ if __name__ == "__main__":
     mega_kernel_dynamic = mega_kernel_wrapper_dynamic.get_func_dynamic()
     src, mod_static = get_source(mega_kernel_static)
     src, mod_dynamic = get_source(mega_kernel_dynamic)
-    
 
     for batch_size in [1, 3, 7, 15, 31, 63, 127]:
 

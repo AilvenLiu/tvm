@@ -15,6 +15,4 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from . import megakernel
-from . import op_schedule
-from . import transform
+from . import support

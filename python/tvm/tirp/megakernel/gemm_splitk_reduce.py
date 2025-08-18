@@ -1,7 +1,8 @@
-from .common import Tile, KernelConfig, F32_BYTES, ceildiv, float22half2
-
-from tvm.script import tir as T, tirp as Tp
+from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
+
+from .common import F32_BYTES, KernelConfig, Tile, ceildiv, float22half2
+
 
 class SplitKReduceTile(Tile):
 
@@ -34,7 +35,10 @@ class SplitKReduceTile(Tile):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             self.idx = tid * self.VEC_SIZE
-            while self.idx < self.M_TILE * self.N_TILE and m_idx * self.M_TILE + self.idx // self.N_TILE < self.M:
+            while (
+                self.idx < self.M_TILE * self.N_TILE
+                and m_idx * self.M_TILE + self.idx // self.N_TILE < self.M
+            ):
                 thread_m_idx = T.meta_var(m_idx * self.M_TILE + self.idx // self.N_TILE)
                 thread_n_idx = T.meta_var(n_idx * self.N_TILE + self.idx % self.N_TILE)
                 for kv in T.unroll(self.VEC_SIZE):

@@ -6,15 +6,15 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 import tvm.testing
-from .common import *
-from .static_scheduler import StaticTileScheduler, JobType, Semaphore
-from .gemm import GemmTile
-from .gemm_splitk_reduce import SplitKReduceTile
-from .rms_norm import RMSnormTile
-from .rope import RopeTile
-from .append_kv import AppendKVTile
-from .batch_decode import DecodeTile
-from .decode_merge import DecodeMergeTile
+from tvm.tirp.megakernel.common import *
+from tvm.tirp.megakernel.static_scheduler import StaticTileScheduler, JobType, Semaphore
+from tvm.tirp.megakernel.gemm import GemmTile
+from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
+from tvm.tirp.megakernel.rms_norm import RMSnormTile
+from tvm.tirp.megakernel.rope import RopeTile
+from tvm.tirp.megakernel.append_kv import AppendKVTile
+from tvm.tirp.megakernel.batch_decode import DecodeTile
+from tvm.tirp.megakernel.decode_merge import DecodeMergeTile
 
 from ..utils import ProtonContext, bench
 

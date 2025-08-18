@@ -1,17 +1,7 @@
-import math
-import ml_dtypes
-import numpy as np
 from enum import Enum
 
 import tvm
-from tvm.ir import PointerType, PrimType
-from tvm.script import tir as T, tirp as Tp
-import tvm.testing
-from tvm.script.ir_builder import IRBuilder
-import flashinfer
-from typing import Dict, Any
-from ..utils import ProtonContext, bench, export_to_perfetto_trace
-from tvm.tir.event import EventImpl
+from tvm.script import tir as T
 
 
 def ceildiv(a, b):
@@ -40,6 +30,7 @@ class JobType(Enum):
     V_APPEND_KV = 18
     END = 99
 
+
 class KernelConfig:
     # global constant
     M_CLUSTER = 1
@@ -51,13 +42,16 @@ class KernelConfig:
     CTA_GROUP = M_CLUSTER
     MAX_SMEM_SIZE = 232448
 
+
 F16_BYTES = 2
 F32_BYTES = 4
 F128_BYTES = 16
 
+
 def find_power_of_two(n):
     assert n > 0 and (n & (n - 1)) == 0
     return n.bit_length() - 1
+
 
 class Tile:
     @classmethod
@@ -115,6 +109,7 @@ __forceinline__ __device__ void float22half2(void* dst, void* src) {{
     """,
     )
 
+
 @T.macro
 def half22float2(dst, src):
     T.cuda.func_call(
@@ -143,12 +138,13 @@ __forceinline__ __device__ void sync_warp() {{
     )
 
 
-def get_source(func: tvm.tir.PrimFunc) -> str:
+def get_source(func: "tvm.tir.PrimFunc") -> str:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
     src = mod.mod.imported_modules[0].get_source()
     return src, mod
+
 
 class ProfileEventType(Enum):
     GEMM_GATE_UP_PROJ = 0
@@ -173,6 +169,7 @@ class ProfileEventType(Enum):
     V_APPEND_KV = 19
     PUSH = 20
 
+
 event_type_names = [
     "GEMM_GATE_UP_PROJ",
     "SPLIT_SILU_MULTIPLY",
@@ -194,5 +191,5 @@ event_type_names = [
     "Q_RMSNORM_ROPE",
     "K_RMSNORM_ROPE_APPEND_KV",
     "V_APPEND_KV",
-    "PUSH"
+    "PUSH",
 ]
