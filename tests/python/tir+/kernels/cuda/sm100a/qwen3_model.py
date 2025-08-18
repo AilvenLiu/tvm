@@ -1,41 +1,55 @@
-from typing import List
+import json
+from argparse import ArgumentParser
 from pathlib import Path
+from typing import List
+
 import numpy as np
 import torch
-import tvm
-from tqdm import tqdm
-
-from tvm import dlight, relax, te, tir, target
-from tvm.relax.frontend import nn
-from tvm.relax import register_pipeline
+from mlc_llm.compiler_pass.attach_support_info import (
+    AttachMemoryPlanAttr,
+    AttachVariableBounds,
+)
+from mlc_llm.compiler_pass.blas_dispatch import BLASDispatch
+from mlc_llm.compiler_pass.dispatch_kv_cache_creation import DispatchKVCacheCreation
+from mlc_llm.compiler_pass.fuse_add_norm import FuseAddRMSNorm
+from mlc_llm.compiler_pass.pipeline import _DebugDump
 from mlc_llm.model.qwen3.qwen3_model import Qwen3Config, Qwen3LMHeadModel
 from mlc_llm.nn.kv_cache import PagedKVCache
-from mlc_llm.compiler_pass.dispatch_kv_cache_creation import DispatchKVCacheCreation
-from mlc_llm.compiler_pass.blas_dispatch import BLASDispatch
-from mlc_llm.compiler_pass.fuse_add_norm import FuseAddRMSNorm
-from mlc_llm.compiler_pass.attach_support_info import AttachVariableBounds, AttachMemoryPlanAttr
-from mlc_llm.compiler_pass.pipeline import _DebugDump
-from tvm.runtime import ShapeTuple
+from tqdm import tqdm
 
-from tvm.script import relax as R
+import tvm
+from tvm import dlight, relax, target, te, tir
+from tvm.relax import register_pipeline
+from tvm.relax.expr_functor import PyExprMutator, mutator
+from tvm.relax.frontend import nn
+from tvm.runtime import ShapeTuple
+from tvm.runtime import disco as di
 from tvm.script import ir as I
+from tvm.script import relax as R
 from tvm.script import tir as T
-from .test_rmsnorm import get_rmsnorm_kernel
+
+from .test_append_paged_kv_cache import get_append_paged_kv_cache_kernel
+from .test_batch_decode import PlanInfo, decode_attn_plan, get_decode_kernel
 from .test_fused_add_rms_norm import get_fused_add_rmsnorm_kernel
 from .test_fused_split_silu_multiply import get_fused_split_silu_multiply_kernel
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
-from .test_rope import get_rope_kernel, get_cos_sin_cache_kernel, prepare_cos_sin_cache
-from .test_append_paged_kv_cache import get_append_paged_kv_cache_kernel
-from .test_batch_decode import PlanInfo, get_decode_kernel, decode_attn_plan
+from .test_rmsnorm import get_rmsnorm_kernel
+from .test_rope import get_cos_sin_cache_kernel, get_rope_kernel, prepare_cos_sin_cache
 
 # pyright: reportInvalidTypeForm=false
+
+parser = ArgumentParser()
+parser.add_argument("--tp-size", type=int, default=1, choices=[1, 2, 4, 8])
+args = parser.parse_args()
 
 dev = tvm.cuda()
 target = tvm.target.Target("cuda")
 
+TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
-LOAD_WEIGHTS = "/raid/user_data/bohanhou/Qwen3-32B-q0f16-MLC/"  # load weights from real model
-MEGA_LIB_PATH = "/home/bohanhou/e2e/mega/mega_lib.so"  # NOTE: update this path
+LOAD_WEIGHTS = "/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16"
+MODEL_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/lib_tp{TP_SIZE}.so"
+MEGA_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/mega_lib_tp{TP_SIZE}.so"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
@@ -43,7 +57,7 @@ MAX_TOTAL_SEQ_LEN = MAX_BATCH_SIZE * MAX_SEQ_LEN
 PAGE_SIZE = 16
 ROPE_THETA = 1000000
 
-config = Qwen3Config(
+config_tp1 = Qwen3Config(
     hidden_act="silu",
     hidden_size=5120,
     intermediate_size=25600,
@@ -64,6 +78,19 @@ config = Qwen3Config(
     weight_block_size=None,
     kwargs={},
 )
+
+
+def init_disco_session():
+    if TP_SIZE == 1:
+        return None
+
+    devices = [i for i in range(TP_SIZE)]
+    sess = di.ProcessSession(num_workers=len(devices), entrypoint="mlc_llm.cli.worker")
+    sess.init_ccl("nccl", *devices)
+    return sess
+
+
+disco_sess = init_disco_session()
 
 
 def get_default_spec(model):
@@ -98,6 +125,43 @@ def get_default_spec(model):
     return nn.spec.ModuleSpec.from_raw(mod_spec, model)
 
 
+@tvm.transform.module_pass(opt_level=0, name="EraseAllreduceIfTP1")
+class EraseAllreduceIfTP1:
+    def __init__(self, tp_size: int) -> None:
+        self.tp_size = tp_size
+
+    def transform_module(self, mod: tvm.IRModule, _ctx: tvm.transform.PassContext) -> tvm.IRModule:
+        @mutator
+        class _EraseAllreduceIfTP1Rewriter(PyExprMutator):  # pylint: disable=abstract-method
+            def __init__(self, mod: tvm.IRModule):
+                super().__init__(mod)
+                self.mod = mod
+
+            def transform(self) -> tvm.IRModule:  # pylint: disable=too-many-locals
+                """Entry point of the transformation"""
+                for g_var, func in self.mod.functions_items():
+                    if not isinstance(func, relax.Function):
+                        continue
+                    new_func = self.visit_expr(func)
+                    self.builder_.update_func(g_var, new_func)
+                return self.builder_.finalize()
+
+            def visit_call_(
+                self, call: relax.Call
+            ) -> relax.Expr:  # pylint: disable=arguments-renamed
+                call = super().visit_call_(call)
+
+                # Match the "rms_norm(add(x1, x2), w)" pattern
+                if call.op != tvm.ir.Op.get("relax.ccl.allreduce"):
+                    return call
+                assert len(call.args) == 1
+                return call.args[0]
+
+        if self.tp_size > 1:
+            return mod
+        return _EraseAllreduceIfTP1Rewriter(mod.clone()).transform()
+
+
 def _craft_pipeline(ext_mods: List[nn.ExternModule], dump_file_prefix: Path):
     ext_mods = ext_mods or []
     debug_dir = Path("/home/bohanhou/qwen3-mg-debug")
@@ -106,13 +170,19 @@ def _craft_pipeline(ext_mods: List[nn.ExternModule], dump_file_prefix: Path):
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
         seq = tvm.transform.Sequential(
             [
-                AttachVariableBounds({"batch_size": config.max_batch_size, "new_batch_size": config.max_batch_size * 2}),
+                AttachVariableBounds(
+                    {
+                        "batch_size": config_tp1.max_batch_size,
+                        "new_batch_size": config_tp1.max_batch_size * 2,
+                    }
+                ),
                 AttachMemoryPlanAttr(),
                 _DebugDump(f"{dump_file_prefix}-phase0.py", debug_dir, show_meta=False),
                 tvm.tir.transform.BindTarget(target),
                 DispatchKVCacheCreation(target, True, dict()),
                 BLASDispatch(target),
                 FuseAddRMSNorm(target=target),
+                EraseAllreduceIfTP1(TP_SIZE),
                 # Phase 1. Passes on high-level operator graph
                 # We can enable cublas for further optimization
                 relax.transform.FuseTransposeMatmul(),
@@ -176,7 +246,7 @@ def _pipeline(  # pylint: disable=too-many-arguments
     return _craft_pipeline(ext_mods, "opt_llm_mg")
 
 
-def get_params(named_params):
+def get_params(named_params, vm):
     if LOAD_WEIGHTS is None:
         print("Generating weights")
         import torch
@@ -200,9 +270,15 @@ def get_params(named_params):
         from tvm.contrib import tvmjs
 
         print("Loading weights from", LOAD_WEIGHTS)
-        params, _ = tvmjs.load_ndarray_cache(LOAD_WEIGHTS, device=dev)
-        print("Loaded", len(params), "weights")
-        result = [params[k] for k, v in named_params]
+        if TP_SIZE == 1:
+            params, _ = tvmjs.load_ndarray_cache(LOAD_WEIGHTS, device=dev)
+            print("Loaded", len(params), "weights")
+            result = [params[k] for k, v in named_params]
+        else:
+            loader = disco_sess.get_global_func("mlc.multi_gpu.LoadMultiGPU")
+            result = disco_sess.call_packed(
+                loader, LOAD_WEIGHTS, vm, json.dumps({"vocab_size": config_tp1.vocab_size})
+            )
     return result
 
 
@@ -210,17 +286,51 @@ def sample_token(logits):
     return np.argmax(logits, axis=-1)
 
 
-model = Qwen3LMHeadModel(config)
+model = Qwen3LMHeadModel(config_tp1)
 model.to("float16")
 mod, named_params = model.export_tvm(get_default_spec(model))
-params = get_params(named_params)
-with target:
-    ex = tvm.compile(mod, target, relax_pipeline=relax.get_pipeline("opt_llm_1"))
-    vm = relax.VirtualMachine(ex, dev)
+
+get_global_func = (
+    tvm.get_global_func
+    if TP_SIZE == 1
+    else lambda name: (
+        lambda *args: disco_sess.call_packed(disco_sess.get_global_func(name), *args)
+    )
+)
 
 
-def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=None):
-    kv_cache = vm["create_flashinfer_paged_kv_cache"](
+def load_reference_model_lib():
+    if TP_SIZE == 1:
+        ex = tvm.runtime.load_module(MODEL_LIB_PATH)
+        vm = relax.VirtualMachine(ex, dev)
+        batch_decode_func = vm["batch_decode"]
+        kv_cache_create_func = vm["create_flashinfer_paged_kv_cache"]
+        embed_func = vm["embed"]
+    else:
+        vm = get_global_func("runtime.disco.load_vm_module")(MODEL_LIB_PATH, None)
+        mod_get_func = get_global_func("runtime.ModuleGetFunction")
+        batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
+        kv_cache_create_func_ = mod_get_func(vm, "create_flashinfer_paged_kv_cache", True)
+        embed_func_ = mod_get_func(vm, "embed", True)
+        batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)
+        kv_cache_create_func = lambda *args: disco_sess.call_packed(kv_cache_create_func_, *args)
+        embed_func = lambda *args: disco_sess.call_packed(embed_func_, *args)
+    return vm, batch_decode_func, kv_cache_create_func, embed_func
+
+
+vm, batch_decode_func, kv_cache_create_func, embed_func = load_reference_model_lib()
+params = get_params(named_params, vm)
+
+
+def test_qwen3_model(
+    get_global_func,
+    batch_decode_func,
+    kv_cache_create_func,
+    embed_func,
+    is_megakernel=False,
+    cos_sin_cache_func=None,
+):
+    kv_cache = kv_cache_create_func(
         ShapeTuple([MAX_BATCH_SIZE]),  # max_batch_size
         ShapeTuple([MAX_TOTAL_SEQ_LEN]),  # max_total_seq_len
         ShapeTuple([MAX_SEQ_LEN]),  # prefill_chunk_size
@@ -229,21 +339,20 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
     )
 
     if is_megakernel:
-        cos_sin_cache = tvm.nd.array(np.zeros((MAX_SEQ_LEN, 128), dtype="float32"), device=dev)
-        cos_sin_cache_func(cos_sin_cache)
+        cos_sin_cache = cos_sin_cache_func(ShapeTuple([MAX_SEQ_LEN]))
         # cos_sin_cache = prepare_cos_sin_cache(128, MAX_SEQ_LEN, ROPE_THETA)
         # cos_sin_cache = tvm.nd.array.from_dlpack(cos_sin_cache.to_dlpack())
 
-    nd_view_func = tvm.get_global_func("vm.builtin.reshape")
+    nd_view_func = get_global_func("vm.builtin.reshape")
 
-    def embed(tokens, params):
-        _embed = vm["embed"](tokens, params)
-        _embed = nd_view_func(_embed, ShapeTuple([_embed.shape[0], 1, _embed.shape[1]]))
+    def embed(tokens, params, batch_size):
+        _embed = embed_func(tokens, params)
+        _embed = nd_view_func(_embed, ShapeTuple([batch_size, 1, config_tp1.hidden_size]))
         return _embed
 
-    add_sequence_func = tvm.get_global_func("vm.builtin.kv_state_add_sequence")
-    begin_forward_func = tvm.get_global_func("vm.builtin.kv_state_begin_forward")
-    end_forward_func = tvm.get_global_func("vm.builtin.kv_state_end_forward")
+    add_sequence_func = get_global_func("vm.builtin.kv_state_add_sequence")
+    begin_forward_func = get_global_func("vm.builtin.kv_state_begin_forward")
+    end_forward_func = get_global_func("vm.builtin.kv_state_end_forward")
 
     batch_size = 32
     seq_len = 16
@@ -258,17 +367,27 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
     last_tokens = np.random.randint(0, 100, size=(batch_size,))
     for i in tqdm(range(seq_len)):
         tokens = tvm.nd.array(last_tokens.astype("int32"), device=dev)
-        hidden_states = embed(tokens, params)
+        if TP_SIZE > 1:
+            tokens_d = get_global_func("runtime.disco.empty")(
+                ShapeTuple(list(last_tokens.shape)), "int32", None, False, False
+            )
+            disco_sess.copy_to_worker_0(tokens, tokens_d)
+            tokens = tokens_d
+        hidden_states = embed(tokens, params, batch_size)
         begin_forward_func(kv_cache, ShapeTuple(seq_ids), ShapeTuple([1] * batch_size))
         if is_megakernel:
-            logits, kv_cache = batch_decode_func(
+            results = batch_decode_func(
                 hidden_states,
                 kv_cache,
                 cos_sin_cache,
                 params,
             )
         else:
-            logits, kv_cache = batch_decode_func(hidden_states, kv_cache, params)
+            results = batch_decode_func(hidden_states, kv_cache, params)
+        if TP_SIZE == 1:
+            logits, _ = results
+        else:
+            logits, _ = list(results.debug_get_from_remote(0))
 
         end_forward_func(kv_cache)
         last_tokens = sample_token(logits.numpy()).flatten()
@@ -277,7 +396,7 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
     return logits_arr
 
 
-res0 = test_qwen3_model(vm["batch_decode"])
+res0 = test_qwen3_model(get_global_func, batch_decode_func, kv_cache_create_func, embed_func)
 
 
 def attach_attr(func, name):
@@ -292,69 +411,71 @@ def get_qwen3_megakernel_mod():
     rms_norm = get_rmsnorm_kernel(5120)
     fused_add_rmsnorm = get_fused_add_rmsnorm_kernel(5120)
     rms_norm1 = get_rmsnorm_kernel(128)
-    fused_split_silu_multiply = get_fused_split_silu_multiply_kernel(25600)
-    hgemm1, reduce1, tile_k_num1 = get_hgemm_kernel(dim_n=10240, dim_k=5120)
-    hgemm2, reduce2, tile_k_num2 = get_hgemm_kernel(dim_n=5120, dim_k=8192)
-    hgemm3, reduce3, tile_k_num3 = get_hgemm_kernel(dim_n=51200, dim_k=5120)
-    hgemm4, reduce4, tile_k_num4 = get_hgemm_kernel(dim_n=5120, dim_k=25600)
+    fused_split_silu_multiply = get_fused_split_silu_multiply_kernel(25600 // TP_SIZE)
+    hgemm1, reduce1, tile_k_num1 = get_hgemm_kernel(dim_n=10240 // TP_SIZE, dim_k=5120)
+    hgemm2, reduce2, tile_k_num2 = get_hgemm_kernel(dim_n=5120, dim_k=8192 // TP_SIZE)
+    hgemm3, reduce3, tile_k_num3 = get_hgemm_kernel(dim_n=51200 // TP_SIZE, dim_k=5120)
+    hgemm4, reduce4, tile_k_num4 = get_hgemm_kernel(dim_n=5120, dim_k=25600 // TP_SIZE)
     hgemm5, reduce5, tile_k_num5 = get_hgemm_kernel(dim_n=151936, dim_k=5120)
     rope = get_rope_kernel(128)
-    append_paged_kv_cache = get_append_paged_kv_cache_kernel(8, 1, 128)
-    decode, merge = get_decode_kernel(PlanInfo(64, 8, 128, enforce_no_split_kv=True), PAGE_SIZE)
+    append_paged_kv_cache = get_append_paged_kv_cache_kernel(8 // TP_SIZE, 1, 128)
+    decode, merge = get_decode_kernel(
+        PlanInfo(64 // TP_SIZE, 8 // TP_SIZE, 128, enforce_no_split_kv=True), PAGE_SIZE
+    )
     cos_sin_cache = get_cos_sin_cache_kernel(128, ROPE_THETA)
     # fmt: off
     @R.macro(hygienic=False)
     def call_qwen3_layer(input0, input1, layer_id, tile_k_num1, tile_k_num2, tile_k_num3, tile_k_num4):
         with R.dataflow():
             # 8i+1, 8i+2, 8i+3, 8i+4, 8i+5, 8i+6, 8i+8, 8i+15 if i<num_hidden_layers-1 else 8i+9
-            model_layers_0_self_attn_c_attn_weight1: R.Tensor((10240, 5120), dtype="float16") = packed_params[8*layer_id+1]
-            model_layers_0_self_attn_o_proj_weight1: R.Tensor((5120, 8192), dtype="float16") = packed_params[8*layer_id+2]
+            model_layers_0_self_attn_c_attn_weight1: R.Tensor((10240 // TP_SIZE, 5120), dtype="float16") = packed_params[8*layer_id+1]
+            model_layers_0_self_attn_o_proj_weight1: R.Tensor((5120, 8192 // TP_SIZE), dtype="float16") = packed_params[8*layer_id+2]
             model_layers_0_self_attn_q_norm_weight1: R.Tensor((128,), dtype="float16") = packed_params[8*layer_id+3]
             model_layers_0_self_attn_k_norm_weight1: R.Tensor((128,), dtype="float16") = packed_params[8*layer_id+4]
-            model_layers_0_mlp_gate_up_proj_weight1: R.Tensor((51200, 5120), dtype="float16") = packed_params[8*layer_id+5]
-            model_layers_0_mlp_down_proj_weight1: R.Tensor((5120, 25600), dtype="float16") = packed_params[8*layer_id+6]
+            model_layers_0_mlp_gate_up_proj_weight1: R.Tensor((51200 // TP_SIZE, 5120), dtype="float16") = packed_params[8*layer_id+5]
+            model_layers_0_mlp_down_proj_weight1: R.Tensor((5120, 25600 // TP_SIZE), dtype="float16") = packed_params[8*layer_id+6]
             model_layers_0_post_attention_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[8*layer_id+8]
             model_norm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[8*layer_id+15 if layer_id < NUM_HIDDEN_LAYERS-1 else 8*layer_id+9]
 
             # permute_dims0 = R.permute_dims(model_layers_0_self_attn_c_attn_weight1, axes=None)
-            # lv = R.matmul(rms_norm, permute_dims0, out_dtype="void")
-            ps0 = R.call_tir(cls.hgemm1, (input0, model_layers_0_self_attn_c_attn_weight1), out_sinfo=R.Tensor((tile_k_num1, batch_size, 10240), dtype="float32"))
-            lv = R.call_tir(cls.reduce1, (ps0,), out_sinfo=R.Tensor((batch_size, 10240), dtype="float16"))
+            # lv = R.matmul(input0, permute_dims0, out_dtype="void")
+            ps0 = R.call_tir(cls.hgemm1, (input0, model_layers_0_self_attn_c_attn_weight1), out_sinfo=R.Tensor((tile_k_num1, batch_size, 10240 // TP_SIZE), dtype="float32"))
+            lv = R.call_tir(cls.reduce1, (ps0,), out_sinfo=R.Tensor((batch_size, 10240 // TP_SIZE), dtype="float16"))
 
-            reshape = R.reshape(lv, (batch_size, 1, 80, 128))
-            split = R.call_tir(cls.split, (reshape,), out_sinfo=[R.Tensor((batch_size, 1, 64, 128), dtype="float16"), R.Tensor((batch_size, 1, 8, 128), dtype="float16"), R.Tensor((batch_size, 1, 8, 128), dtype="float16")])
-            split_0: R.Tensor((batch_size, 1, 64, 128), dtype="float16") = split[0]
-            split_1: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = split[1]
-            rs1 = R.reshape(split_0, (batch_size * 64, 128))
-            rs2 = R.reshape(split_1, (batch_size * 8, 128))
-            rms_norm1 = R.call_tir(cls.rms_norm1, (rs1, model_layers_0_self_attn_q_norm_weight1), out_sinfo=R.Tensor((batch_size * 64, 128), dtype="float16"))
-            rms_norm2 = R.call_tir(cls.rms_norm1, (rs2, model_layers_0_self_attn_k_norm_weight1), out_sinfo=R.Tensor((batch_size * 8, 128), dtype="float16"))
-            rms_norm1_rs = R.reshape(rms_norm1, (batch_size, 1, 64, 128)) # q
-            rms_norm2_rs = R.reshape(rms_norm2, (batch_size, 1, 8, 128)) # k
-            v: R.Tensor((batch_size, 1, 8, 128), dtype="float16") = split[2] # v
+            reshape = R.reshape(lv, (batch_size, 1, 80 // TP_SIZE, 128))
+            split = R.split(reshape, indices_or_sections=[64 // TP_SIZE, 72 // TP_SIZE], axis=2)
+            split_0: R.Tensor((batch_size, 1, 64 // TP_SIZE, 128), dtype="float16") = split[0]
+            split_1: R.Tensor((batch_size, 1, 8 // TP_SIZE, 128), dtype="float16") = split[1]
+            rs1 = R.reshape(split_0, (batch_size * 64 // TP_SIZE, 128))
+            rs2 = R.reshape(split_1, (batch_size * 8 // TP_SIZE, 128))
+            rms_norm1 = R.call_tir(cls.rms_norm1, (rs1, model_layers_0_self_attn_q_norm_weight1), out_sinfo=R.Tensor((batch_size * 64 // TP_SIZE, 128), dtype="float16"))
+            rms_norm2 = R.call_tir(cls.rms_norm1, (rs2, model_layers_0_self_attn_k_norm_weight1), out_sinfo=R.Tensor((batch_size * 8 // TP_SIZE, 128), dtype="float16"))
+            rms_norm1_rs = R.reshape(rms_norm1, (batch_size, 1, 64 // TP_SIZE, 128)) # q
+            rms_norm2_rs = R.reshape(rms_norm2, (batch_size, 1, 8 // TP_SIZE, 128)) # k
+            v: R.Tensor((batch_size, 1, 8 // TP_SIZE, 128), dtype="float16") = split[2] # v
 
             ######################################################### Attention #########################################################
             #########################################################
-            # lv1 = R.call_tir(cls.fused_concatenate, (v, rms_norm1_rs, rms_norm2_rs), out_sinfo=R.Tensor((batch_size, 1, 80, 128), dtype="float16"))
-            # reshape1 = R.reshape(lv1, (batch_size, 80, 128))
-            # lv_2 = R.call_dps_packed("vm.builtin.attention_kv_cache_attention_with_fused_qkv", (paged_kv_cache, R.prim_value(0), R.prim_value(T.float32(0.088388347648318447)), reshape1), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
-            # reshape2 = R.reshape(lv_2, (batch_size, 1, 64, 128))
-            # reshape3 = R.reshape(reshape2, (batch_size, 8192))
+            # lv1 = R.call_tir(cls.fused_concatenate, (v, rms_norm1_rs, rms_norm2_rs), out_sinfo=R.Tensor((batch_size, 1, 80 // TP_SIZE, 128), dtype="float16"))
+            # reshape1 = R.reshape(lv1, (batch_size, 80 // TP_SIZE, 128))
+            # lv_2 = R.call_dps_packed("vm.builtin.attention_kv_cache_attention_with_fused_qkv", (paged_kv_cache, R.prim_value(0), R.prim_value(T.float32(0.088388347648318447)), reshape1), out_sinfo=R.Tensor((batch_size, 64 // TP_SIZE, 128), dtype="float16"))
+            # reshape2 = R.reshape(lv_2, (batch_size, 1, 64 // TP_SIZE, 128))
+            # reshape3 = R.reshape(reshape2, (batch_size, 8192 // TP_SIZE))
             #########################################################
             # rope
-            q_rs = R.reshape(rms_norm1_rs, (batch_size, 64, 128))
-            q_rope = R.call_tir(cls.rope, (q_rs, cos_sin_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
-            k_rs = R.reshape(rms_norm2_rs, (batch_size, 8, 128))
-            k = R.call_tir(cls.rope, (k_rs, cos_sin_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 8, 128), dtype="float16"))
-            k_rope = R.reshape(k, (batch_size, 1, 8, 128))
+            q_rs = R.reshape(rms_norm1_rs, (batch_size, 64 // TP_SIZE, 128))
+            q_rope = R.call_tir(cls.rope, (q_rs, cos_sin_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 64 // TP_SIZE, 128), dtype="float16"))
+            k_rs = R.reshape(rms_norm2_rs, (batch_size, 8 // TP_SIZE, 128))
+            k = R.call_tir(cls.rope, (k_rs, cos_sin_cache, q_rope_position_map), out_sinfo=R.Tensor((batch_size, 8 // TP_SIZE, 128), dtype="float16"))
+            k_rope = R.reshape(k, (batch_size, 1, 8 // TP_SIZE, 128))
             # append
             append_position_map_rs = R.reshape(append_position_map, (batch_size, 1))
             new_kv_data = R.call_tir_inplace(cls.append_paged_kv_cache, (kv_data[layer_id], k_rope, v, append_position_map_rs), [0], 
-                                                out_sinfo=R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16"))
+                                                out_sinfo=R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, 128), dtype="float16"))
             # attention
             o = R.call_tir(cls.decode, 
-                            (q_rope, new_kv_data, lse_tvm, kv_indptr, kv_last_page_len, kv_indices, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
-            reshape3 = R.reshape(o, (batch_size, 8192))
+                            (q_rope, new_kv_data, lse_tvm, kv_indptr, kv_last_page_len, kv_indices, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size), out_sinfo=R.Tensor((batch_size, 64 // TP_SIZE, 128), dtype="float16"))
+            reshape3 = R.reshape(o, (batch_size, 8192 // TP_SIZE))
             #########################################################
             ######################################################### Attention #########################################################
 
@@ -362,24 +483,26 @@ def get_qwen3_megakernel_mod():
             # lv1_1: R.Tensor((batch_size, 5120), dtype="float16") = R.matmul(reshape3, permute_dims1, out_dtype="void")
             rs1 = R.call_tir(cls.hgemm2, (reshape3, model_layers_0_self_attn_o_proj_weight1), out_sinfo=R.Tensor((tile_k_num2, batch_size, 5120), dtype="float32"))
             lv1_1 = R.call_tir(cls.reduce2, (rs1,), out_sinfo=R.Tensor((batch_size, 5120), dtype="float16"))
+            allreduce_1 = R.ccl.allreduce(lv1_1, op_type="sum", in_group=True)
 
-            lv_3 = R.call_tir_inplace(cls.fused_add_rmsnorm, (lv1_1, input1, model_layers_0_post_attention_layernorm_weight1), [0, 1], out_sinfo=[R.Tensor((batch_size, 5120), dtype="float16"), R.Tensor((batch_size, 5120), dtype="float16")])
+            lv_3 = R.call_tir_inplace(cls.fused_add_rmsnorm, (allreduce_1, input1, model_layers_0_post_attention_layernorm_weight1), [0, 1], out_sinfo=[R.Tensor((batch_size, 5120), dtype="float16"), R.Tensor((batch_size, 5120), dtype="float16")])
             lv1_2: R.Tensor((batch_size, 5120), dtype="float16") = lv_3[1]
             rms_norm3: R.Tensor((batch_size, 5120), dtype="float16") = lv_3[0]
 
             # permute_dims2 = R.permute_dims(model_layers_0_mlp_gate_up_proj_weight1, axes=None)
-            # lv2: R.Tensor((batch_size, 51200), dtype="float16") = R.matmul(rms_norm3, permute_dims2, out_dtype="void")
-            rs2 = R.call_tir(cls.hgemm3, (rms_norm3, model_layers_0_mlp_gate_up_proj_weight1), out_sinfo=R.Tensor((tile_k_num3, batch_size, 51200), dtype="float32"))
-            lv2 = R.call_tir(cls.reduce3, (rs2,), out_sinfo=R.Tensor((batch_size, 51200), dtype="float16"))
+            # lv2: R.Tensor((batch_size, 51200 // TP_SIZE), dtype="float16") = R.matmul(rms_norm3, permute_dims2, out_dtype="void")
+            rs2 = R.call_tir(cls.hgemm3, (rms_norm3, model_layers_0_mlp_gate_up_proj_weight1), out_sinfo=R.Tensor((tile_k_num3, batch_size, 51200 // TP_SIZE), dtype="float32"))
+            lv2 = R.call_tir(cls.reduce3, (rs2,), out_sinfo=R.Tensor((batch_size, 51200 // TP_SIZE), dtype="float16"))
 
-            lv2_1 = R.call_tir(cls.fused_split_silu_multiply, (lv2,), out_sinfo=R.Tensor((batch_size, 25600), dtype="float16"))
+            lv2_1 = R.call_tir(cls.fused_split_silu_multiply, (lv2,), out_sinfo=R.Tensor((batch_size, 25600 // TP_SIZE), dtype="float16"))
 
             # permute_dims3 = R.permute_dims(model_layers_0_mlp_down_proj_weight1, axes=None)
             # lv3: R.Tensor((batch_size, 5120), dtype="float16") = R.matmul(lv2_1, permute_dims3, out_dtype="void")
             rs3 = R.call_tir(cls.hgemm4, (lv2_1, model_layers_0_mlp_down_proj_weight1), out_sinfo=R.Tensor((tile_k_num4, batch_size, 5120), dtype="float32"))
             lv3 = R.call_tir(cls.reduce4, (rs3,), out_sinfo=R.Tensor((batch_size, 5120), dtype="float16"))
+            allreduce_2 = R.ccl.allreduce(lv3, op_type="sum", in_group=True)
 
-            lv2_2 = R.call_tir_inplace(cls.fused_add_rmsnorm, (lv3, lv1_2, model_norm_weight1), [0, 1], out_sinfo=[R.Tensor((batch_size, 5120), dtype="float16"), R.Tensor((batch_size, 5120), dtype="float16")])
+            lv2_2 = R.call_tir_inplace(cls.fused_add_rmsnorm, (allreduce_2, lv1_2, model_norm_weight1), [0, 1], out_sinfo=[R.Tensor((batch_size, 5120), dtype="float16"), R.Tensor((batch_size, 5120), dtype="float16")])
             R.output(lv2_2)
         return lv2_2
 
@@ -406,24 +529,24 @@ def get_qwen3_megakernel_mod():
         def split(var_reshape: T.handle, var_T_split: T.handle, var_T_split_1: T.handle, var_T_split_2: T.handle):
             T.func_attr({"tir.noalias": True})
             batch_size = T.int64()
-            reshape = T.match_buffer(var_reshape, (batch_size, T.int64(1), T.int64(80), T.int64(128)), "float16")
-            T_split = T.match_buffer(var_T_split, (batch_size, T.int64(1), T.int64(64), T.int64(128)), "float16")
-            T_split_1 = T.match_buffer(var_T_split_1, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            T_split_2 = T.match_buffer(var_T_split_2, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
+            reshape = T.match_buffer(var_reshape, (batch_size, T.int64(1), T.int64(80 // TP_SIZE), T.int64(128)), "float16")
+            T_split = T.match_buffer(var_T_split, (batch_size, T.int64(1), T.int64(64 // TP_SIZE), T.int64(128)), "float16")
+            T_split_1 = T.match_buffer(var_T_split_1, (batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)), "float16")
+            T_split_2 = T.match_buffer(var_T_split_2, (batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)), "float16")
             # with T.block("root"):
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(64), T.int64(128)):
+            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(64 // TP_SIZE), T.int64(128)):
                 with T.block("T_split"):
                     v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
                     T.reads(reshape[v_ax0, v_ax1, v_ax2, v_ax3])
                     T.writes(T_split[v_ax0, v_ax1, v_ax2, v_ax3])
                     T_split[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2, v_ax3]
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8), T.int64(128)):
+            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)):
                 with T.block("T_split_1"):
                     v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
                     T.reads(reshape[v_ax0, v_ax1, v_ax2 + T.int64(64), v_ax3])
                     T.writes(T_split_1[v_ax0, v_ax1, v_ax2, v_ax3])
                     T_split_1[v_ax0, v_ax1, v_ax2, v_ax3] = reshape[v_ax0, v_ax1, v_ax2 + T.int64(64), v_ax3]
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8), T.int64(128)):
+            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)):
                 with T.block("T_split_2"):
                     v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
                     T.reads(reshape[v_ax0, v_ax1, v_ax2 + T.int64(72), v_ax3])
@@ -434,17 +557,17 @@ def get_qwen3_megakernel_mod():
         def fused_concatenate(p_split_2: T.handle, p_rms_norm1: T.handle, p_rms_norm2: T.handle, p_output0: T.handle):
             T.func_attr({"tir.noalias": True})
             batch_size = T.int64()
-            split_2 = T.match_buffer(p_split_2, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
-            rms_norm1 = T.match_buffer(p_rms_norm1, (batch_size, T.int64(1), T.int64(64), T.int64(128)), "float16")
-            rms_norm2 = T.match_buffer(p_rms_norm2, (batch_size, T.int64(1), T.int64(8), T.int64(128)), "float16")
+            split_2 = T.match_buffer(p_split_2, (batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)), "float16")
+            rms_norm1 = T.match_buffer(p_rms_norm1, (batch_size, T.int64(1), T.int64(64 // TP_SIZE), T.int64(128)), "float16")
+            rms_norm2 = T.match_buffer(p_rms_norm2, (batch_size, T.int64(1), T.int64(8 // TP_SIZE), T.int64(128)), "float16")
             T_concat_intermediate = T.match_buffer(p_output0, (batch_size, T.int64(1), T.int64(80), T.int64(128)), "float16")
             # with T.block("root"):
-            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(80), T.int64(128)):
+            for ax0, ax1, ax2, ax3 in T.grid(batch_size, T.int64(1), T.int64(80 // TP_SIZE), T.int64(128)):
                 with T.block("T_concat"):
                     v_ax0, v_ax1, v_ax2, v_ax3 = T.axis.remap("SSSS", [ax0, ax1, ax2, ax3])
-                    T.reads(split_2[v_ax0, v_ax1, v_ax2 - T.int64(72), v_ax3], rms_norm2[v_ax0, v_ax1, v_ax2 - T.int64(64), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3])
+                    T.reads(split_2[v_ax0, v_ax1, v_ax2 - T.int64(72 // TP_SIZE), v_ax3], rms_norm2[v_ax0, v_ax1, v_ax2 - T.int64(64 // TP_SIZE), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3])
                     T.writes(T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3])
-                    T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3] = T.if_then_else(T.int64(72) <= v_ax2, split_2[v_ax0, v_ax1, v_ax2 - T.int64(72), v_ax3], T.if_then_else(T.int64(64) <= v_ax2, rms_norm2[v_ax0, v_ax1, v_ax2 - T.int64(64), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3]))
+                    T_concat_intermediate[v_ax0, v_ax1, v_ax2, v_ax3] = T.if_then_else(T.int64(72 // TP_SIZE) <= v_ax2, split_2[v_ax0, v_ax1, v_ax2 - T.int64(72 // TP_SIZE), v_ax3], T.if_then_else(T.int64(64 // TP_SIZE) <= v_ax2, rms_norm2[v_ax0, v_ax1, v_ax2 - T.int64(64), v_ax3], rms_norm1[v_ax0, v_ax1, v_ax2, v_ax3]))
 
         @T.prim_func(private=True)
         def cast(var_lv4: T.handle, var_compute: T.handle):
@@ -517,11 +640,11 @@ def get_qwen3_megakernel_mod():
             pass
         
         @R.function
-        def cos_sin_cache_func(cache: R.Tensor(("max_seq_len", 128), dtype="float32")):
+        def cos_sin_cache_func(max_seq_len_: R.Shape(["max_seq_len"])):
             max_seq_len = T.int64()
             cls = Module
             with R.dataflow():
-                cache: R.Tensor((max_seq_len, 128), dtype="float32") = R.call_tir_inplace(cls.cos_sin_cache, (cache), [0], out_sinfo=R.Tensor((max_seq_len, 128), dtype="float32") )
+                cache: R.Tensor((max_seq_len, 128), dtype="float32") = R.call_tir(cls.cos_sin_cache, [], out_sinfo=R.Tensor((max_seq_len, 128), dtype="float32") )
                 R.output(cache)
             return cache
 
@@ -534,12 +657,12 @@ def get_qwen3_megakernel_mod():
             packed_params: R.Tuple(
                 R.Tensor((151936, 5120), dtype="float16"),
                 #
-                *([R.Tensor((10240, 5120), dtype="float16"),
-                R.Tensor((5120, 8192), dtype="float16"),
+                *([R.Tensor((10240 // TP_SIZE, 5120), dtype="float16"),
+                R.Tensor((5120, 8192 // TP_SIZE), dtype="float16"),
                 R.Tensor((128,), dtype="float16"),
                 R.Tensor((128,), dtype="float16"),
-                R.Tensor((51200, 5120), dtype="float16"),
-                R.Tensor((5120, 25600), dtype="float16"),
+                R.Tensor((51200 // TP_SIZE, 5120), dtype="float16"),
+                R.Tensor((5120, 25600 // TP_SIZE), dtype="float16"),
                 R.Tensor((5120,), dtype="float16"),
                 R.Tensor((5120,), dtype="float16"),] * NUM_HIDDEN_LAYERS),
                 #                
@@ -583,7 +706,7 @@ def get_qwen3_megakernel_mod():
                     res0[8],
                     res0[9],
                 )
-                kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
+                kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
                 kv_indices = R.match_cast(kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
                 res1 = R.call_pure_packed(
                     "flashinfer.batch_decode_with_paged_kv_cache_plan",
@@ -592,8 +715,8 @@ def get_qwen3_megakernel_mod():
                     temp_int_pinned_attn_workspace,
                     kv_indptr_host,
                     R.prim_value(batch_size),
-                    R.prim_value(64),
-                    R.prim_value(8),
+                    R.prim_value(64 // TP_SIZE),
+                    R.prim_value(8 // TP_SIZE),
                     R.prim_value(page_size),
                     R.prim_value(False),
                     R.prim_value(0),
@@ -612,7 +735,7 @@ def get_qwen3_megakernel_mod():
                 plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size = res1[0], res1[1], res1[2]
                 plan_request_indices = R.match_cast(plan_request_indices_, R.Tensor((new_batch_size,), dtype="int32"))
                 plan_kv_tile_indices = R.match_cast(plan_kv_tile_indices_, R.Tensor((new_batch_size,), dtype="int32"))
-                lse_tvm = R.builtin.alloc_tensor(R.shape([new_batch_size, 64]), dtype="float32", runtime_device_index=0)
+                lse_tvm = R.builtin.alloc_tensor(R.shape([new_batch_size, 64 // TP_SIZE]), dtype="float32", runtime_device_index=0)
 
                 model_layers_0_input_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[7]
                 lm_head_weight1: R.Tensor((151936, 5120), dtype="float16") = packed_params[NUM_HIDDEN_LAYERS*8+2] # num_hidden_layers*8+2
@@ -686,7 +809,7 @@ def get_qwen3_megakernel_mod():
                 o_layer63 = call_qwen3_layer(o_layer62[0], o_layer62[1], 63, tile_k_num1, tile_k_num2, tile_k_num3, tile_k_num4)
 
                 # permute_dims4 = R.permute_dims(lm_head_weight1, axes=None)
-                # lv4: R.Tensor((batch_size, 151936), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
+                # lv4: R.Tensor((batch_size, 151936), dtype="float16") = R.matmul(o_layer63[0], permute_dims4, out_dtype="void")
                 rs4 = R.call_tir(cls.hgemm5, (o_layer63[0], lm_head_weight1), out_sinfo=R.Tensor((tile_k_num5, batch_size, 151936), dtype="float32"))
                 lv4 = R.call_tir(cls.reduce5, (rs4,), out_sinfo=R.Tensor((batch_size, 151936), dtype="float16"))
 
@@ -738,13 +861,29 @@ def get_qwen3_megakernel_batch_decode_func():
             mg_model, target, relax_pipeline=relax.get_pipeline("opt_llm_mg"), tir_pipeline="tirp"
         )
         ex.export_library(MEGA_LIB_PATH)
+    if TP_SIZE == 1:
         vm = relax.VirtualMachine(ex, dev)
-    return vm["batch_decode"], vm["cos_sin_cache_func"]
+        batch_decode_func = vm["batch_decode"]
+        cos_sin_cache_func = vm["cos_sin_cache_func"]
+    else:
+        vm = get_global_func("runtime.disco.load_vm_module")(MEGA_LIB_PATH, None)
+        mod_get_func = get_global_func("runtime.ModuleGetFunction")
+        batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
+        cos_sin_cache_func_ = mod_get_func(vm, "cos_sin_cache_func", True)
+        batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)
+        cos_sin_cache_func = lambda *args: disco_sess.call_packed(cos_sin_cache_func_, *args)
+
+    return batch_decode_func, cos_sin_cache_func
 
 
 batch_decode_func, cos_sin_cache_func = get_qwen3_megakernel_batch_decode_func()
 res1 = test_qwen3_model(
-    batch_decode_func, is_megakernel=True, cos_sin_cache_func=cos_sin_cache_func
+    get_global_func,
+    batch_decode_func,
+    kv_cache_create_func,
+    embed_func,
+    is_megakernel=True,
+    cos_sin_cache_func=cos_sin_cache_func,
 )
 
 
@@ -758,6 +897,10 @@ for i, (ref, mg) in enumerate(zip(res0, res1)):
     print(ref.flatten()[:10])
     print("--------------------------------")
     try:
-        np.testing.assert_allclose(ref, mg, atol=1e-2, rtol=1e-2)
+        if np.isnan(mg).sum() > 0:
+            print(f"mg contains {np.isnan(mg).sum()} nan")
+        if np.isinf(mg).sum() > 0:
+            print(f"mg contains {np.isinf(mg).sum()} inf")
+        np.testing.assert_allclose(mg, ref, atol=1e-2, rtol=1e-2)
     except Exception as e:
         print(e)

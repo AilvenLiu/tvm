@@ -442,9 +442,10 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 sync_blk()
                                 for kt in T.unroll(TILE_PER_BDX * BDY):
                                     for kb in T.unroll(HEAD_PER_CTA):
-                                        Tp.cast(v[kb, :], v_smem[idx[0], kb, tz, kt // TILE_PER_BDX, kt % TILE_PER_BDX, tx_start:tx_start + VEC_SIZE])
-                                        for kv in T.unroll(VEC_SIZE):
-                                            o[kb, kv] += s[kb, kt] * v[kb, kv]
+                                        if (ki * BDZ + tz) * BDY * TILE_PER_BDX + kt < chunk_size[0]:
+                                            Tp.cast(v[kb, :], v_smem[idx[0], kb, tz, kt // TILE_PER_BDX, kt % TILE_PER_BDX, tx_start:tx_start + VEC_SIZE])
+                                            for kv in T.unroll(VEC_SIZE):
+                                                o[kb, kv] += s[kb, kt] * v[kb, kv]
                                 sync_blk()
 
                                 # fetch V
