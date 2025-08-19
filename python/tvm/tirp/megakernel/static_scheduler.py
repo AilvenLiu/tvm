@@ -5,20 +5,43 @@ from tvm.script.ir_builder import IRBuilder
 from .common import JobType, KernelConfig
 
 atomic_add_int32 = f"""
-__forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value) {{
-    asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(addr), "r"(value)
+__forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, int32_t pe) {{
+    if (pe >= 0) {{
+        void* ptr = nvshmem_ptr(addr, pe);
+        asm volatile("red.async.release.global.sys.add.s32 [%0], %1;" ::"l"(ptr), "r"(value)
+                       : "memory");
+    }} else {{
+        asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(addr), "r"(value)
+                       : "memory");
+    }}
+}}
+"""
+
+atomic_add_int32_local = f"""
+__forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, int32_t pe) {{
+     asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(addr), "r"(value)
                    : "memory");
 }}
 """
 
 
+nvshmem_get_ptr = """
+__forceinline__ __device__ void* nvshmem_get_ptr(void* ptr, int32_t pe) {
+    return nvshmem_ptr(ptr, pe);
+}
+"""
+
+
 class Semaphore:
-    def __init__(self, cnt, buffer):
+    def __init__(self, cnt, buffer, use_nvshmem=False):
         self.cnt = cnt
         self.sem = buffer
         self.state = T.alloc_buffer([1], "int32", scope="local", align=4)
         IRBuilder.current().name("semaphore_state", self.state)
-
+        if use_nvshmem:
+            self.atomic_add_int32 = atomic_add_int32
+        else:
+            self.atomic_add_int32 = atomic_add_int32_local
     @T.macro
     def semaphore_wait(self, *coord):
         with T.thread():
@@ -40,23 +63,24 @@ class Semaphore:
                     T.cuda.nano_sleep(40)
 
     @T.macro
-    def semaphore_notify(self, *coord):
+    def semaphore_notify(self, *coord, rank=-1):
         # wg is synced
-        if self.cnt >= 0:
-            T.cuda.func_call(
-                "atomic_add_int32",
-                self.sem.access_ptr("rw", offset=self.sem.offset_of_p(coord)),
-                1,
-                source_code=atomic_add_int32,
-            )
-        else:
-            T.cuda.func_call(
-                "atomic_add_int32",
-                self.sem.access_ptr("rw", offset=self.sem.offset_of_p(coord)),
-                -1,
-                source_code=atomic_add_int32,
-            )
-
+            if self.cnt >= 0:
+                T.cuda.func_call(
+                    "atomic_add_int32",
+                    self.sem.ptr_to(coord),
+                    1,
+                    rank,
+                    source_code=self.atomic_add_int32,
+                )
+            else:
+                T.cuda.func_call(
+                    "atomic_add_int32",
+                    self.sem.ptr_to(coord),
+                    -1,
+                    rank,
+                    source_code=self.atomic_add_int32,
+                )
 
 lds_v4 = """
 __forceinline__ __device__ void lds_v4(void* addr, int32_t* v1, int32_t* v2, int32_t* v3, int32_t* v4) {

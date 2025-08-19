@@ -19,6 +19,7 @@ import numpy as np
 import torch
 
 import tvm
+from tvm.tirp.megakernel.allreduce import AllreduceTile
 from tvm.tirp.megakernel.common import KernelConfig
 from tvm.tirp.megakernel.gemm import GemmTile
 from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
@@ -187,21 +188,121 @@ def decode_attn_plan(
     )
 
 
-SPLIT_QKV_PROJECT = 3
-SPLIT_O_PROJRCT = 3
-DOWN_PROJ_SPLIT_K_FACTOR = 10
+SPLIT_QKV_PROJECT = {
+    1: 3,
+    8: 4,
+}
+SPLIT_O_PROJRCT = {
+    1: 3,
+    8: 2,
+}
+DOWN_PROJ_SPLIT_K_FACTOR = {
+    1: 10,
+    8: 3,
+}
 
 
 VOCAB_SIZE = 151936
 MAX_POSITION_EMBEDDINGS = 40960
 HIDDEN_SIZE = 5120
-INTERMEDIATE_SIZE = 25600
+FULL_INTERMEDIATE_SIZE = 25600
 NUM_HIDDEN_LAYERS = 64
-NUM_ATTENTION_HEADS = 64
-NUM_KEY_VALUE_HEADS = 8
+FULL_NUM_ATTENTION_HEADS = 64
+FULL_NUM_KEY_VALUE_HEADS = 8
 HEAD_DIM = 128
 RMS_NORM_EPS = 1e-6
 ROPE_THETA = 1000000
 MAX_PAGE_NUM = 8192
 PAGE_SIZE = 16
 
+
+def generate_event_tensor(batch_size, o_indptr, WORLD_SIZE):
+    """The event tensor generation function for layer testing use."""
+    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE // WORLD_SIZE
+    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS // WORLD_SIZE
+    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS // WORLD_SIZE
+    DEV = tvm.cuda(0)
+    qkv_h_d = (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM
+    qk_h_d = (NUM_ATTENTION_HEADS + NUM_KEY_VALUE_HEADS) * HEAD_DIM
+    q_h_d = NUM_ATTENTION_HEADS * HEAD_DIM
+    k_h_d = NUM_KEY_VALUE_HEADS * HEAD_DIM
+    etensor_qkv_partial = tvm.nd.array(
+        np.zeros(ceildiv(qkv_h_d, SplitKReduceTile.N_UNIT), dtype=np.int32), device=DEV
+    )
+    etensor_q_reduce = tvm.nd.array(
+        np.zeros((batch_size, ceildiv(q_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
+    )
+    etensor_k_reduce = tvm.nd.array(
+        np.zeros((batch_size, ceildiv(k_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
+    )
+    etensor_v_reduce = tvm.nd.array(
+        np.zeros((batch_size, ceildiv(k_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
+    )
+    etensor_decode = tvm.nd.array(
+        np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32), device=DEV
+    )
+    etensor_decode_merge = np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32)
+    o_indptr = o_indptr.numpy()
+    for b in range(batch_size):
+        num_merge = o_indptr[b + 1] - o_indptr[b]
+        for j in range(NUM_KEY_VALUE_HEADS):
+            etensor_decode_merge[b, j] = num_merge
+    etensor_decode_merge = tvm.nd.array(etensor_decode_merge, device=DEV)
+    etensor_o_proj = np.zeros(SPLIT_O_PROJRCT[WORLD_SIZE], dtype=np.int32)
+    o_proj_tile_k = (
+        ceildiv(
+            ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SPLIT_O_PROJRCT[WORLD_SIZE]), GemmTile.BLK_K
+        )
+        * GemmTile.BLK_K
+    )
+    for h in range(NUM_KEY_VALUE_HEADS):
+        range_start = h * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
+        range_end = (
+            (h + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1
+        ) // o_proj_tile_k
+        for i in range(range_start, range_end + 1):
+            etensor_o_proj[i] += 1
+    etensor_o_proj *= batch_size
+    etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
+    etensor_o_partial = tvm.nd.array(
+        np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV
+    )
+    etensor_o_allreduce = tvm.nd.array(
+        np.zeros(HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV
+    )
+    etensor_attn_add_rms_norm = tvm.nd.array(np.zeros(batch_size, dtype=np.int32), device=DEV)
+    etensor_attn_mlp = tvm.nd.array(np.zeros(1, dtype=np.int32), device=DEV)
+    etensor_gate_up_proj = tvm.nd.array(
+        np.zeros(INTERMEDIATE_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
+    )
+    etensor_down_proj = tvm.nd.array(
+        np.zeros(DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE], dtype=np.int32), device=DEV
+    )
+    etensor_down_proj_reduce = tvm.nd.array(
+        np.zeros(HIDDEN_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
+    )
+    etensor_down_proj_allreduce = tvm.nd.array(
+        np.zeros(HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV
+    )
+    etensor_mlp_add_rms_norm = tvm.nd.array(np.zeros((batch_size,), dtype=np.int32), device=DEV)
+
+    etensor_end = tvm.nd.array(np.zeros(1, dtype=np.int32), device=DEV)
+    return (
+        etensor_qkv_partial,
+        etensor_q_reduce,
+        etensor_k_reduce,
+        etensor_v_reduce,
+        etensor_decode,
+        etensor_decode_merge,
+        etensor_o_proj,
+        etensor_o_partial,
+        etensor_o_allreduce,
+        etensor_attn_add_rms_norm,
+        etensor_attn_mlp,
+        etensor_gate_up_proj,
+        etensor_down_proj,
+        etensor_down_proj_reduce,
+        etensor_down_proj_allreduce,
+        etensor_mlp_add_rms_norm,
+        etensor_end,
+    )

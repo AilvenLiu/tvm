@@ -28,6 +28,8 @@ class JobType(Enum):
     K_RMSNORM_ROPE_APPEND_KV = 16
     Q_RMSNORM_ROPE = 17
     V_APPEND_KV = 18
+    O_ALLREDUCE = 19
+    DOWN_PROJ_ALLREDUCE = 20
     END = 99
 
 
