@@ -190,7 +190,8 @@ Array<Any> BatchDecodeWithPagedKVCachePlan(
   NDArray o_indptr_host =
       page_locked_int_workspace_buffer.CreateView({o_indptr_size}, dtype,
                                                   /*relative_byte_offset=*/o_inptr_offset);
-  return {request_indices, kv_tile_indices, kv_chunk_size_ptr, o_indptr_device, o_indptr_host, split_kv};
+  return {request_indices, kv_tile_indices, kv_chunk_size_ptr,
+          o_indptr_device, o_indptr_host,   split_kv};
 }
 
 Array<Any> BatchPagedAttentionPlan(NDArray float_workspace_buffer, NDArray int_workspace_buffer,

@@ -308,7 +308,7 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
         ShapeTuple([MAX_TOTAL_SEQ_LEN]),  # max_total_seq_len
         ShapeTuple([MAX_SEQ_LEN]),  # prefill_chunk_size
         ShapeTuple([PAGE_SIZE]),  # page_size
-        ShapeTuple([0]),  # support_sliding_window
+        ShapeTuple([bool(is_megakernel)]),  # may_use_megakernel
     )
 
     if is_megakernel:
@@ -397,7 +397,7 @@ def get_qwen3_megakernel_mod():
                 etensors,
                 R.prim_value(layer_id),
                 sinfo_args=[
-                    R.Tuple([R.Tensor(None, dtype="int32")] * 15),
+                    R.Tuple([R.Tensor(None, dtype="int32")] * 17),
                 ]
             )
             (
@@ -407,11 +407,13 @@ def get_qwen3_megakernel_mod():
                 etensor_v_reduce,
                 etensor_decode,
                 etensor_o_partial,
+                etensor_o_allreduce,
                 etensor_attn_add_rms_norm,
                 etensor_attn_mlp,
                 etensor_gate_up_proj,
                 etensor_down_proj,
                 etensor_down_proj_reduce,
+                etensor_down_proj_allreduce,
                 etensor_mlp_add_rms_norm,
                 etensor_end,
                 etensor_o_proj,
@@ -432,6 +434,8 @@ def get_qwen3_megakernel_mod():
                 etensors_on_layer[12],
                 etensors_on_layer[13],
                 etensors_on_layer[14],
+                etensors_on_layer[15],
+                etensors_on_layer[16],
             )
 
             partital_qkv = R.builtin.alloc_tensor(R.shape([SPLIT_QKV_PROJECT, batch_size, 10240]), dtype="float32", runtime_device_index=0)
@@ -624,8 +628,8 @@ def get_qwen3_megakernel_mod():
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
-+                       R.Tuple([R.Tensor(None, dtype="int32")] * 5 + [R.Prim(dtype="int64")]),
-+                       R.Tuple([R.Tensor(None, dtype="int32")] * 17),
+                        R.Tuple([R.Tensor(None, dtype="int32")] * 5 + [R.Prim("int64")]),
+                        R.Tuple([R.Tensor(None, dtype="int32")] * 17),
                     ],
                 )
                 kv_data_, kv_indptr, kv_indices_, kv_last_page_len, append_pos, rope_pos, attn_plan_results, etensors = (

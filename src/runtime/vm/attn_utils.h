@@ -373,8 +373,7 @@ class HostMemoryVector {
 
   const int32_t& operator[](int64_t idx) const {
     TVM_FFI_ITVM_FFI_ICHECK_GE(idx, 0) << "Index " << idx << " is negative.";
-    TVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_)
-        << "Index " << idx << " out of bounds " << current_size_;
+    TVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_) << "Index " << idx << " out of bounds " << current_size_;
     return static_cast<int32_t*>(data_->data)[idx];
   }
 
@@ -395,8 +394,7 @@ class HostMemoryVector {
 
   void set(int64_t idx, int32_t value) {
     TVM_FFI_ITVM_FFI_ICHECK_GE(idx, 0) << "Index " << idx << " is negative.";
-    TVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_)
-        << "Index " << idx << " out of bounds " << current_size_;
+    TVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_) << "Index " << idx << " out of bounds " << current_size_;
     static_cast<int32_t*>(data_->data)[idx] = value;
   }
 
@@ -811,10 +809,27 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   explicit CachedPagedKVCacheAuxDataManager(int64_t reserved_num_seqs, int64_t num_total_pages,
                                             int64_t prefill_chunk_size, DLDataType dtype_aux,
                                             Device device, Device preferred_host_device,
-                                            TVMStreamHandle copy_stream)
+                                            TVMStreamHandle copy_stream, bool use_nvshmem)
       : PagedKVCacheAuxDataManager(dtype_aux, device, preferred_host_device, copy_stream),
         elem_byte_size_((dtype_aux.bits * dtype_aux.lanes + 7) / 8),
         offset_alignment_(cuda_byte_alignment_ / elem_byte_size_) {
+    std::function<NDArray(ffi::Shape)> f_aux_data_manager_nd_empty;
+    if (!use_nvshmem) {
+      f_aux_data_manager_nd_empty = [dtype_aux, device](ffi::Shape shape) {
+        return NDArray::Empty(shape, dtype_aux, device);
+      };
+    } else {
+      const std::optional<ffi::Function> f_nvshmem_init =
+          tvm::ffi::Function::GetGlobal("runtime.disco.nvshmem.init_nvshmem");
+      TVM_FFI_ICHECK(f_nvshmem_init.has_value())
+          << "NVSHMEM is not enabled. Please make sure NVSHMEM is enabled when compiling TVM.";
+      const ffi::Function f_nvshmem_empty =
+          tvm::ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.empty");
+      f_aux_data_manager_nd_empty = [f_nvshmem_empty, dtype_aux, device](ffi::Shape shape) {
+        return f_nvshmem_empty(shape, dtype_aux, device).cast<NDArray>();
+      };
+    }
+
     // - Calculate cache size of all the attention auxiliary arrays in
     // local cache and the large on-device array.
     // int64_t attn_aux_data_cache_size =
@@ -824,7 +839,7 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     merged_attn_aux_data_host_ =
         HostMemoryVector(attn_aux_data_cache_size, dtype_aux, preferred_host_device);
     // - Initialize the device auxiliary data buffer.
-    merged_attn_aux_data_device_ = Tensor::Empty({attn_aux_data_cache_size}, dtype_aux, device);
+    merged_attn_aux_data_device_ = f_aux_data_manager_nd_empty({attn_aux_data_cache_size});
 
     // - Calculate cache size of all the compact KV auxiliary arrays in
     // local cache and the large on-device array.
@@ -834,7 +849,7 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     merged_compact_kv_aux_data_host_ =
         HostMemoryVector(compact_kv_aux_data_cache_size, dtype_aux, preferred_host_device);
     merged_compact_kv_aux_data_device_ =
-        Tensor::Empty({compact_kv_aux_data_cache_size}, dtype_aux, device);
+        f_aux_data_manager_nd_empty({compact_kv_aux_data_cache_size});
   }
 
   void ResetAttnAuxDataCopy() final { attn_aux_data_copy_offset_ = 0; }
@@ -959,8 +974,8 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
                             std::vector<NDArray*> etensor_data_views, int num_layers,
                             int cur_batch_size, int num_qo_heads, int num_kv_heads, int qk_head_dim,
                             int tp_size) final {
-    TVM_FFI_ICHECK_EQ(etensor_data.size(), 15)
-        << "Event tensor size mismatch, expected 15, got " << etensor_data.size();
+    TVM_FFI_ICHECK_EQ(etensor_data.size(), 17)
+        << "Event tensor size mismatch, expected 17, got " << etensor_data.size();
     TVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
     std::vector<NDArray> etensor_data_views_raw;
     etensor_data_views_raw.reserve(etensor_data.size());
@@ -973,6 +988,10 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     int qkv_h_d = (num_qo_heads + 2 * num_kv_heads) * qk_head_dim;
     int q_h_d = num_qo_heads * qk_head_dim;
     int k_h_d = num_kv_heads * qk_head_dim;
+    int split_o_project = megakernel::kSplitOProject[tp_size];
+    int down_proj_split_k_factor = megakernel::kDownProjSplitKFactor[tp_size];
+    TVM_FFI_ITVM_FFI_ICHECK_NE(split_o_project, -1);
+    TVM_FFI_ITVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
     *etensor_data_views[0] = etensor_data_views_raw[0].CreateView(
         {num_layers, ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit)}, dtype_aux_);
     *etensor_data_views[1] = etensor_data_views_raw[1].CreateView(
@@ -988,23 +1007,29 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
         {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
     *etensor_data_views[5] = etensor_data_views_raw[5].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
-    *etensor_data_views[6] =
-        etensor_data_views_raw[6].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-    *etensor_data_views[7] = etensor_data_views_raw[7].CreateView({num_layers, 1}, dtype_aux_);
-    *etensor_data_views[8] = etensor_data_views_raw[8].CreateView(
+    *etensor_data_views[6] = etensor_data_views_raw[6].CreateView(
+        {num_layers, ceildiv(megakernel::kHiddenSize / tp_size, megakernel::kAllReduceTileNTile)},
+        dtype_aux_);
+    *etensor_data_views[7] =
+        etensor_data_views_raw[7].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+    *etensor_data_views[8] = etensor_data_views_raw[8].CreateView({num_layers, 1}, dtype_aux_);
+    *etensor_data_views[9] = etensor_data_views_raw[9].CreateView(
         {num_layers,
          ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN)},
         dtype_aux_);
-    *etensor_data_views[9] = etensor_data_views_raw[9].CreateView(
-        {num_layers, megakernel::kDownProjSplitKFactor}, dtype_aux_);
-    *etensor_data_views[10] = etensor_data_views_raw[10].CreateView(
+    *etensor_data_views[10] =
+        etensor_data_views_raw[10].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
+    *etensor_data_views[11] = etensor_data_views_raw[11].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
-    *etensor_data_views[11] =
-        etensor_data_views_raw[11].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-    *etensor_data_views[12] = etensor_data_views_raw[12].CreateView({num_layers, 1}, dtype_aux_);
+    *etensor_data_views[12] = etensor_data_views_raw[12].CreateView(
+        {num_layers, ceildiv(megakernel::kHiddenSize / tp_size, megakernel::kAllReduceTileNTile)},
+        dtype_aux_);
     *etensor_data_views[13] =
-        etensor_data_views_raw[13].CreateView({num_layers, megakernel::kSplitOProject}, dtype_aux_);
-    *etensor_data_views[14] = etensor_data_views_raw[14].CreateView(
+        etensor_data_views_raw[13].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+    *etensor_data_views[14] = etensor_data_views_raw[14].CreateView({num_layers, 1}, dtype_aux_);
+    *etensor_data_views[15] =
+        etensor_data_views_raw[15].CreateView({num_layers, split_o_project}, dtype_aux_);
+    *etensor_data_views[16] = etensor_data_views_raw[16].CreateView(
         {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
   }
 

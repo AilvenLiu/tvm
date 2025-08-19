@@ -39,7 +39,7 @@ using runtime::NDArray;
 
 Array<NDArray> GetEventTensorsOnLayer(Array<NDArray> etensors, int layer_id) {
   TVM_FFI_ICHECK_GE(layer_id, 0) << "Layer id must be non-negative, but got " << layer_id;
-  TVM_FFI_ICHECK_EQ(etensors.size(), 15) << "Event tensors size must be 15";
+  TVM_FFI_ICHECK_EQ(etensors.size(), 17) << "Event tensors size must be 17";
   std::vector<NDArray> etensors_on_layer;
   etensors_on_layer.reserve(etensors.size());
   for (int i = 0; i < static_cast<int>(etensors.size()); i++) {
@@ -72,6 +72,13 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   std::vector<int32_t> task_counts(kNumSM, 0);
   int cur_sm = 0;
 
+  int split_qkv_project = kSplitQKVProject[tp_size];
+  int split_o_project = kSplitOProject[tp_size];
+  int down_proj_split_k_factor = kDownProjSplitKFactor[tp_size];
+  TVM_FFI_ITVM_FFI_ICHECK_NE(split_qkv_project, -1);
+  TVM_FFI_ITVM_FFI_ICHECK_NE(split_o_project, -1);
+  TVM_FFI_ITVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
+
   auto f_push_task = [&exec_queue_host_data, &task_counts, &cur_sm](int m_idx, int n_idx, int k_idx,
                                                                     JobType job_type) {
     int task_id = task_counts[cur_sm]++;
@@ -86,7 +93,7 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
 
   for (int n_idx = 0; n_idx < ceildiv((num_qo_heads + 2 * num_kv_heads) * head_dim, kGemmTileBlkN);
        ++n_idx) {
-    for (int k_idx = 0; k_idx < kSplitQKVProject; ++k_idx) {
+    for (int k_idx = 0; k_idx < split_qkv_project; ++k_idx) {
       f_push_task(0, n_idx, k_idx, JobType::kGemmQKVProj);
     }
   }
@@ -144,7 +151,7 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   }
 
   for (int n_idx = 0; n_idx < ceildiv(kHiddenSize, kGemmTileBlkN); ++n_idx) {
-    for (int k_idx = 0; k_idx < kSplitOProject; ++k_idx) {
+    for (int k_idx = 0; k_idx < split_o_project; ++k_idx) {
       f_push_task(0, n_idx, k_idx, JobType::kGemmOProj);
     }
   }
@@ -157,6 +164,14 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   for (int n_idx = 0; n_idx < ceildiv(kHiddenSize, n_tile_o_proj_reduce); ++n_idx) {
     for (int m_idx = 0; m_idx < m_split_o_proj_reduce; ++m_idx) {
       f_push_task(m_idx, n_idx, 0, JobType::kGemmOReduce);
+    }
+  }
+
+  if (tp_size > 1) {
+    for (int m_idx = 0; m_idx < ceildiv(batch_size, kAllReduceTileMTile); ++m_idx) {
+      for (int n_idx = 0; n_idx < ceildiv(kHiddenSize / tp_size, kAllReduceTileNTile); ++n_idx) {
+        f_push_task(m_idx, n_idx, 0, JobType::kOAllReduce);
+      }
     }
   }
 
@@ -174,7 +189,7 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   }
 
   for (int n_idx = 0; n_idx < ceildiv(kHiddenSize, kGemmTileBlkN); ++n_idx) {
-    for (int k_idx = 0; k_idx < kDownProjSplitKFactor; ++k_idx) {
+    for (int k_idx = 0; k_idx < down_proj_split_k_factor; ++k_idx) {
       f_push_task(0, n_idx, k_idx, JobType::kGemmDownProj);
     }
   }
@@ -187,6 +202,14 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   for (int m_idx = 0; m_idx < m_split_down_proj_reduce; ++m_idx) {
     for (int n_idx = 0; n_idx < ceildiv(kHiddenSize, n_tile_down_proj_reduce); ++n_idx) {
       f_push_task(m_idx, n_idx, 0, JobType::kDownProjReduce);
+    }
+  }
+
+  if (tp_size > 1) {
+    for (int m_idx = 0; m_idx < ceildiv(batch_size, kAllReduceTileMTile); ++m_idx) {
+      for (int n_idx = 0; n_idx < ceildiv(kHiddenSize / tp_size, kAllReduceTileNTile); ++n_idx) {
+        f_push_task(m_idx, n_idx, 0, JobType::kDownProjAllReduce);
+      }
     }
   }
 

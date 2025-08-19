@@ -38,10 +38,12 @@ constexpr const int kSplitKReduceTileNUnit = 128;
 constexpr const int kSplitKReduceTileNRepeat = 1;
 constexpr const int kGemmTileBlkN = 128;
 constexpr const int kGemmTileBlkK = 64;
-constexpr const int kDownProjSplitKFactor = 10;
-constexpr const int kSplitQKVProject = 3;
-constexpr const int kSplitOProject = 3;
+constexpr const int kSplitQKVProject[] = {-1, 3, -1, -1, -1, -1, -1, -1, 4};
+constexpr const int kSplitOProject[] = {-1, 3, -1, -1, -1, -1, -1, -1, 2};
+constexpr const int kDownProjSplitKFactor[] = {-1, 10, -1, -1, -1, -1, -1, -1, 3};
 constexpr const int kSiluMultiplyTileTileSize = 128;
+constexpr const int kAllReduceTileMTile = 16;
+constexpr const int kAllReduceTileNTile = 128;
 constexpr const int kHiddenSize = 5120;
 constexpr const int kNumAttentionHeadsTP1 = 64;
 constexpr const int kIntermediateSizeTP1 = 25600;
@@ -71,6 +73,8 @@ enum class JobType : int32_t {
   kKRMSNormRopeAppendKV = 16,
   kQRMSNormRope = 17,
   kVAppendKV = 18,
+  kOAllReduce = 19,
+  kDownProjAllReduce = 20,
   kEnd = 99,
 };
 

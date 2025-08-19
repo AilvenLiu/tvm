@@ -334,7 +334,7 @@ def test_qwen3_model(
         ShapeTuple([MAX_TOTAL_SEQ_LEN]),  # max_total_seq_len
         ShapeTuple([MAX_SEQ_LEN]),  # prefill_chunk_size
         ShapeTuple([PAGE_SIZE]),  # page_size
-        ShapeTuple([0]),  # support_sliding_window
+        ShapeTuple([False]),  # may_use_megakernel
     )
 
     if is_megakernel:
@@ -373,7 +373,9 @@ def test_qwen3_model(
             disco_sess.copy_to_worker_0(tokens, tokens_d)
             tokens = tokens_d
         hidden_states = embed(tokens, params, batch_size)
-        begin_forward_func(kv_cache, ShapeTuple(seq_ids), ShapeTuple([1] * batch_size))
+        begin_forward_func(
+            kv_cache, ShapeTuple(seq_ids), ShapeTuple([1] * batch_size), None, is_megakernel
+        )
         if is_megakernel:
             results = batch_decode_func(
                 hidden_states,
@@ -683,17 +685,15 @@ def get_qwen3_megakernel_mod():
                     sinfo_args=[
                         R.Tuple([R.Tensor(None, dtype="float16")] * NUM_HIDDEN_LAYERS),
                         R.Tensor((batch_size + 1,), dtype="int32"),
-                        R.Tensor((batch_size + 1,), dtype="int32"),
                         R.Tensor(None, dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
-                        R.Tensor(None, dtype="uint8"),
-                        R.Tensor(None, dtype="uint8"),
-                        R.Tensor(None, dtype="uint8"),
+                        R.Tuple([R.Tensor(None, dtype="int32")] * 5 + [R.Prim("int64")]),
+                        R.Tuple([R.Tensor(None, dtype="int32")] * 17),
                     ],
                 )
-                kv_data_, kv_indptr, kv_indptr_host, kv_indices_, kv_last_page_len, append_position_map, q_rope_position_map, temp_float_attn_workspace, temp_int_attn_workspace, temp_int_pinned_attn_workspace = (
+                kv_data_, kv_indptr, kv_indices_, kv_last_page_len, append_pos, rope_pos, attn_plan_results, etensors = (
                     res0[0],
                     res0[1],
                     res0[2],
@@ -702,39 +702,14 @@ def get_qwen3_megakernel_mod():
                     res0[5],
                     res0[6],
                     res0[7],
-                    res0[8],
-                    res0[9],
                 )
-                kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
+                kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
                 kv_indices = R.match_cast(kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
-                res1 = R.call_pure_packed(
-                    "flashinfer.batch_decode_with_paged_kv_cache_plan",
-                    temp_float_attn_workspace,
-                    temp_int_attn_workspace,
-                    temp_int_pinned_attn_workspace,
-                    kv_indptr_host,
-                    R.prim_value(batch_size),
-                    R.prim_value(64 // TP_SIZE),
-                    R.prim_value(8 // TP_SIZE),
-                    R.prim_value(page_size),
-                    R.prim_value(False),
-                    R.prim_value(0),
-                    R.prim_value(-1),
-                    R.prim_value(128),
-                    R.prim_value(128),
-                    R.dtype("float16"),
-                    R.dtype("float16"),
-                    R.prim_value(True),
-                    sinfo_args=[
-                        R.Tensor(None, dtype="int32"),
-                        R.Tensor(None, dtype="int32"),
-                        R.Tensor((1,), dtype="int32"),
-                    ],
-                )
-                plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size = res1[0], res1[1], res1[2]
+                plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size_, plan_o_indptr_ = attn_plan_results[0], attn_plan_results[1], attn_plan_results[2], attn_plan_results[3]
                 plan_request_indices = R.match_cast(plan_request_indices_, R.Tensor((new_batch_size,), dtype="int32"))
                 plan_kv_tile_indices = R.match_cast(plan_kv_tile_indices_, R.Tensor((new_batch_size,), dtype="int32"))
-                lse_tvm = R.builtin.alloc_tensor(R.shape([new_batch_size, 64 // TP_SIZE]), dtype="float32", runtime_device_index=0)
+                plan_max_chunk_size = R.match_cast(plan_max_chunk_size_, R.Tensor((1,), dtype="int32"))
+                plan_o_indptr = R.match_cast(plan_o_indptr_, R.Tensor((batch_size + 1,), dtype="int32"))
 
                 model_layers_0_input_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[7]
                 lm_head_weight1: R.Tensor((151936, 5120), dtype="float16") = packed_params[NUM_HIDDEN_LAYERS*8+2] # num_hidden_layers*8+2
