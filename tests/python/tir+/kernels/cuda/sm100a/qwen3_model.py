@@ -46,8 +46,8 @@ target = tvm.target.Target("cuda")
 
 TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
-LOAD_WEIGHTS = "/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16"
-MODEL_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/lib_tp{TP_SIZE}.so"
+LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
+MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/qwen3-32b-mlc/lib_tp{TP_SIZE}.so"
 MEGA_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/mega_lib_tp{TP_SIZE}.so"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32

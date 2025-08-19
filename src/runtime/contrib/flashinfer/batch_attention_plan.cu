@@ -123,7 +123,7 @@ Array<NDArray> BatchDecodeWithPagedKVCachePlan(
     NDArray page_locked_int_workspace_buffer, NDArray indptr, int64_t batch_size,
     int64_t num_qo_heads, int64_t num_kv_heads, int64_t page_size, bool enable_cuda_graph,
     int64_t pos_encoding_mode_code, int64_t window_left, int64_t head_dim_qk, int64_t head_dim_vo,
-    DataType q_scalar_type, DataType kv_scalar_type, bool enforce_no_split_kv) {
+    DataType q_scalar_type, DataType kv_scalar_type) {
   size_t float_workspace_size_in_bytes =
       float_workspace_buffer->shape[0] * DataType(float_workspace_buffer->dtype).bytes();
   size_t int_workspace_size_in_bytes =
@@ -157,7 +157,7 @@ Array<NDArray> BatchDecodeWithPagedKVCachePlan(
       int_workspace_size_in_bytes, plan_info,
       static_cast<IdType*>(indptr->data) + indptr->byte_offset / sizeof(IdType), batch_size,
       num_qo_heads, page_size, enable_cuda_graph,
-      /*stream=*/stream, work_estimation_func, enforce_no_split_kv);
+      /*stream=*/stream, work_estimation_func);
 
   CHECK(status == cudaSuccess) << "BatchDecodeWithPagedKVCache failed with error "
                                << cudaGetErrorString(status);
@@ -171,7 +171,7 @@ Array<NDArray> BatchDecodeWithPagedKVCachePlan(
   int64_t kv_chunk_size_ptr_offset = plan_info_vec[7];
   int64_t kv_chunk_size_ptr_size = 1;
   int64_t o_inptr_offset = plan_info_vec[5];
-  int64_t o_indptr_size = padded_batch_size + 1;
+  int64_t o_indptr_size = batch_size + 1;
 
   DataType dtype = DataType::Int(32);
   NDArray request_indices =
@@ -183,10 +183,13 @@ Array<NDArray> BatchDecodeWithPagedKVCachePlan(
   NDArray kv_chunk_size_ptr =
       int_workspace_buffer.CreateView({kv_chunk_size_ptr_size}, dtype,
                                       /*relative_byte_offset=*/kv_chunk_size_ptr_offset);
-  NDArray o_indptr =
+  NDArray o_indptr_device =
       int_workspace_buffer.CreateView({o_indptr_size}, dtype,
                                       /*relative_byte_offset=*/o_inptr_offset);
-  return {request_indices, kv_tile_indices, kv_chunk_size_ptr, o_indptr};
+  NDArray o_indptr_host =
+      page_locked_int_workspace_buffer.CreateView({o_indptr_size}, dtype,
+                                                  /*relative_byte_offset=*/o_inptr_offset);
+  return {request_indices, kv_tile_indices, kv_chunk_size_ptr, o_indptr_device, o_indptr_host};
 }
 
 Array<Any> BatchPagedAttentionPlan(NDArray float_workspace_buffer, NDArray int_workspace_buffer,

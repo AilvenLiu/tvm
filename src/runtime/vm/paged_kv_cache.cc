@@ -26,6 +26,7 @@
 #include <tvm/runtime/disco/disco_worker.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/memory/memory_manager.h>
+#include <tvm/runtime/nvtx.h>
 #include <tvm/runtime/tensor.h>
 
 #include <algorithm>
@@ -37,6 +38,7 @@
 #include "attn_backend.h"
 #include "attn_utils.h"
 #include "kv_state.h"
+#include "megakernel_utils.h"
 
 namespace tvm {
 namespace runtime {
@@ -177,6 +179,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
              todo: support multiple recver. */
   bool transfer_kv_;
   bool page_to_page_transfer_kv_;
+  bool use_mega_kernel_;
   /*! \brief The auxiliary data manager for attention. */
   std::unique_ptr<PagedKVCacheAuxDataManager> aux_data_manager_;
 
@@ -190,6 +193,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   std::vector<Tensor> temp_int_attn_workspace_;
   std::vector<Tensor> temp_int_pinned_attn_workspace_;
   Tensor temp_float_attn_workspace_;
+  Array<Any> attn_plan_results_;
 
   //-------------------------------------------
   // Below are the auxiliary data structure on CPU.
@@ -219,6 +223,24 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   HostMemoryVector kv_transfer_page_to_page_local_position_map_host_;
   HostMemoryVector kv_transfer_page_to_page_remote_position_map_host_;
   HostMemoryVector kv_transfer_page_to_page_recver_id_host_;
+  // Event Tensor host memory vector
+  // static zero etensors
+  HostMemoryVector etensor_qkv_partial_host_;
+  HostMemoryVector etensor_q_reduce_host_;
+  HostMemoryVector etensor_k_reduce_host_;
+  HostMemoryVector etensor_v_reduce_host_;
+  HostMemoryVector etensor_decode_host_;
+  HostMemoryVector etensor_o_partial_host_;
+  HostMemoryVector etensor_attn_add_rms_host_;
+  HostMemoryVector etensor_attn_mlp_host_;
+  HostMemoryVector etensor_gate_up_proj_host_;
+  HostMemoryVector etensor_down_proj_host_;
+  HostMemoryVector etensor_down_proj_reduce_host_;
+  HostMemoryVector etensor_mlp_add_rms_host_;
+  HostMemoryVector etensor_end_host_;
+  // dynamic etensors
+  HostMemoryVector etensor_o_proj_host_;
+  HostMemoryVector etensor_decode_merge_host_;
 
   //-------------------------------------------
   // For efficient memory management, the actual sizes of the arrays
@@ -250,6 +272,24 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   std::vector<Tensor> k_rope_pos_offset_sliding_window_view_;
   std::vector<Tensor> tree_attn_mask_view_;
   std::vector<Tensor> tree_attn_mn_indptr_view_;
+  // Event Tensor device views
+  // static zero etensors
+  NDArray etensor_qkv_partial_view_;
+  NDArray etensor_q_reduce_view_;
+  NDArray etensor_k_reduce_view_;
+  NDArray etensor_v_reduce_view_;
+  NDArray etensor_decode_view_;
+  NDArray etensor_o_partial_view_;
+  NDArray etensor_attn_add_rms_view_;
+  NDArray etensor_attn_mlp_view_;
+  NDArray etensor_gate_up_proj_view_;
+  NDArray etensor_down_proj_view_;
+  NDArray etensor_down_proj_reduce_view_;
+  NDArray etensor_mlp_add_rms_view_;
+  NDArray etensor_end_view_;
+  // dynamic etensors
+  NDArray etensor_o_proj_view_;
+  NDArray etensor_decode_merge_view_;
 
   ffi::Optional<ffi::Function> f_transpose_append_mha_;
   ffi::Optional<ffi::Function> f_transpose_append_mla_;
@@ -438,6 +478,47 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     commit_copy_dst_pos_in_page_table_host_ =
         HostMemoryVector(std::min(kTreeAttnMaxTreeSize * reserved_num_seqs, prefill_chunk_size),
                          dtype_aux_, preferred_host_device);
+
+    // Event tensor allocation
+    int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads;
+    int qkv_h_d = (num_qo_heads + 2 * num_kv_heads) * qk_head_dim;
+    int q_h_d = num_qo_heads * qk_head_dim;
+    int k_h_d = num_kv_heads * qk_head_dim;
+    etensor_qkv_partial_host_ =
+        HostMemoryVector(num_layers * ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit),
+                         dtype_aux_, preferred_host_device);
+    etensor_q_reduce_host_ = HostMemoryVector(
+        num_layers * reserved_num_seqs * ceildiv(q_h_d, megakernel::kSplitKReduceTileNUnit),
+        dtype_aux_, preferred_host_device);
+    etensor_k_reduce_host_ = HostMemoryVector(
+        num_layers * reserved_num_seqs * ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit),
+        dtype_aux_, preferred_host_device);
+    etensor_v_reduce_host_ = HostMemoryVector(
+        num_layers * reserved_num_seqs * ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit),
+        dtype_aux_, preferred_host_device);
+    etensor_decode_host_ = HostMemoryVector(num_layers * reserved_num_seqs * num_kv_heads,
+                                            dtype_aux_, preferred_host_device);
+    etensor_o_partial_host_ =
+        HostMemoryVector(num_layers * ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN),
+                         dtype_aux_, preferred_host_device);
+    etensor_attn_add_rms_host_ =
+        HostMemoryVector(num_layers * reserved_num_seqs, dtype_aux_, preferred_host_device);
+    etensor_attn_mlp_host_ = HostMemoryVector(num_layers, dtype_aux_, preferred_host_device);
+    etensor_gate_up_proj_host_ = HostMemoryVector(
+        num_layers * ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN),
+        dtype_aux_, preferred_host_device);
+    etensor_down_proj_host_ = HostMemoryVector(num_layers * megakernel::kDownProjSplitKFactor,
+                                               dtype_aux_, preferred_host_device);
+    etensor_down_proj_reduce_host_ =
+        HostMemoryVector(num_layers * ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN),
+                         dtype_aux_, preferred_host_device);
+    etensor_mlp_add_rms_host_ =
+        HostMemoryVector(num_layers * reserved_num_seqs, dtype_aux_, preferred_host_device);
+    etensor_end_host_ = HostMemoryVector(num_layers, dtype_aux_, preferred_host_device);
+    etensor_o_proj_host_ = HostMemoryVector(num_layers * megakernel::kSplitOProject, dtype_aux_,
+                                            preferred_host_device);
+    etensor_decode_merge_host_ = HostMemoryVector(num_layers * reserved_num_seqs * num_kv_heads,
+                                                  dtype_aux_, preferred_host_device);
 
     for (int d = 0; d < kPagedKVCacheMaxBlockDepth; ++d) {
       if (NeedKernelBeginForward()) {
@@ -853,7 +934,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   /************** Attention **************/
 
   void BeginForward(const ffi::Shape& seq_ids, const ffi::Shape& append_lengths,
-                    const ffi::Optional<ffi::Shape>& opt_token_tree_parent_ptr) final {
+                    const ffi::Optional<ffi::Shape>& opt_token_tree_parent_ptr,
+                    bool use_megakernel) final {
     // Note: MLA does not supported tree attention for now.
     if (attn_kinds_[0] == AttnKind::kMLA) {
       TVM_FFI_ICHECK(!opt_token_tree_parent_ptr.defined())
@@ -866,6 +948,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     cur_batch_size_ = seq_ids.size();
     cur_seq_ids_ = seq_ids;
     cur_append_lengths_ = append_lengths;
+    use_mega_kernel_ = use_megakernel;
 
     // - Collect sequence/block/page information for attention.
     std::vector<Sequence*> sequences;
@@ -1187,6 +1270,111 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         sequences[i]->kv_transfer_metadata.local_position_map.clear();
       }
     }
+
+    if (!use_megakernel) {
+      return;
+    }
+    {
+      NVTXScopedRange range("Init event tensors on host");
+      TVM_FFI_ICHECK_EQ(num_depths_, 1) << "Megakernel only supports depth 1 for now.";
+
+      // 1. Run attention plan to get required tensors for attention.
+      // Some of which are needed for event tensor initialization,
+      // so we need to run the plan before initializing the event tensors
+      // and transferring the event tensors to device.
+      ffi::Function f_attn_plan =
+          ffi::Function::GetGlobalRequired("flashinfer.batch_decode_with_paged_kv_cache_plan");
+      attn_plan_results_ =
+          f_attn_plan(temp_float_attn_workspace_, temp_int_attn_workspace_[0],
+                      temp_int_pinned_attn_workspace_[0],
+                      page_indptr_on_depths_host_[0].as_ndarray(), cur_batch_size_, num_qo_heads_,
+                      num_kv_heads_, page_size_,
+                      /*enable_cuda_graph=*/false,
+                      /*pos_encoding_mode_code=*/0,
+                      /*window_left=*/-1, qk_head_dim_, v_head_dim_, kv_dtype_, kv_dtype_)
+              .cast<Array<Any>>();
+
+      // 2. Initialize event tensors
+      int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
+      int qkv_h_d = (num_qo_heads_ + 2 * num_kv_heads_) * qk_head_dim_;
+      int q_h_d = num_qo_heads_ * qk_head_dim_;
+      int k_h_d = num_kv_heads_ * qk_head_dim_;
+      // static zero etensors
+      etensor_qkv_partial_host_.fill(0);
+      etensor_q_reduce_host_.fill(0);
+      etensor_k_reduce_host_.fill(0);
+      etensor_v_reduce_host_.fill(0);
+      etensor_decode_host_.fill(0);
+      etensor_o_partial_host_.fill(0);
+      etensor_attn_add_rms_host_.fill(0);
+      etensor_attn_mlp_host_.fill(0);
+      etensor_gate_up_proj_host_.fill(0);
+      etensor_down_proj_host_.fill(0);
+      etensor_down_proj_reduce_host_.fill(0);
+      etensor_mlp_add_rms_host_.fill(0);
+      etensor_end_host_.fill(0);
+      etensor_o_proj_host_.fill(0);
+      etensor_decode_merge_host_.fill(0);
+      etensor_qkv_partial_host_.resize(num_layers_ *
+                                       ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit));
+      etensor_q_reduce_host_.resize(num_layers_ * cur_batch_size_ *
+                                    ceildiv(q_h_d, megakernel::kSplitKReduceTileNUnit));
+      etensor_k_reduce_host_.resize(num_layers_ * cur_batch_size_ *
+                                    ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit));
+      etensor_v_reduce_host_.resize(num_layers_ * cur_batch_size_ *
+                                    ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit));
+      etensor_decode_host_.resize(num_layers_ * cur_batch_size_ * num_kv_heads_);
+      etensor_o_partial_host_.resize(num_layers_ *
+                                     ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN));
+      etensor_attn_add_rms_host_.resize(num_layers_ * cur_batch_size_);
+      etensor_attn_mlp_host_.resize(num_layers_);
+      etensor_gate_up_proj_host_.resize(
+          num_layers_ *
+          ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN));
+      etensor_down_proj_host_.resize(num_layers_ * megakernel::kDownProjSplitKFactor);
+      etensor_down_proj_reduce_host_.resize(
+          num_layers_ * ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN));
+      etensor_mlp_add_rms_host_.resize(num_layers_ * cur_batch_size_);
+      etensor_end_host_.resize(num_layers_);
+      // dynamic etensors
+      etensor_o_proj_host_.resize(num_layers_ * megakernel::kSplitOProject);
+      int o_proj_tile_k = (ceildiv(ceildiv(num_qo_heads_ * v_head_dim_, megakernel::kSplitOProject),
+                                   megakernel::kGemmTileBlkK) *
+                           megakernel::kGemmTileBlkK);
+      for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+        for (int h = 0; h < num_kv_heads_; ++h) {
+          int range_start = (h * (num_qo_heads_ / num_kv_heads_) * v_head_dim_) / o_proj_tile_k;
+          int range_end =
+              ((h + 1) * (num_qo_heads_ / num_kv_heads_) * v_head_dim_ - 1) / o_proj_tile_k;
+          for (int i = range_start; i <= range_end; ++i) {
+            TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
+            TVM_FFI_ICHECK_LT(i, megakernel::kSplitOProject)
+                << "Index " << i << " out of bounds " << megakernel::kSplitOProject;
+            etensor_o_proj_host_.set(
+                layer_id * megakernel::kSplitOProject + i,
+                etensor_o_proj_host_[layer_id * megakernel::kSplitOProject + i] + cur_batch_size_);
+          }
+        }
+      }
+
+      NDArray o_indptr_host = attn_plan_results_[4].cast<NDArray>();
+      const int32_t* o_indptr_data =
+          static_cast<int32_t*>(o_indptr_host->data) + o_indptr_host->byte_offset / sizeof(int32_t);
+      etensor_decode_merge_host_.resize(num_layers_ * cur_batch_size_ * num_kv_heads_);
+      for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+        for (int b = 0; b < cur_batch_size_; ++b) {
+          int num_merge = o_indptr_data[b + 1] - o_indptr_data[b];
+          TVM_FFI_ICHECK_GE(num_merge, 0);
+          for (int h = 0; h < num_kv_heads_; ++h) {
+            etensor_decode_merge_host_.set(
+                layer_id * cur_batch_size_ * num_kv_heads_ + b * num_kv_heads_ + h, num_merge);
+          }
+        }
+      }
+    }
+
+    // 3. Sync the copy stream and the compute stream.
+    // Host-side tensors are synced to device.
     ComputeStreamWaitForCopyStream();
   }
 
@@ -1200,7 +1388,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // No CPU to GPU copy is needed.
     // Essentially we
     // (step 1.) redirect the preparation to BeginForward.
-    BeginForward({seq_id}, {append_length}, /*opt_token_tree_parent_ptr=*/std::nullopt);
+    BeginForward({seq_id}, {append_length}, /*opt_token_tree_parent_ptr=*/std::nullopt,
+                 /*use_megakernel=*/false);
     // (step 2.) fetch the append_position_map, compress and return.
     // Compression format: [n, begin_1, length_1, begin_2, length_2, ..., begin_n, length_n]
     // The compressed format will be decompressed to:
@@ -1722,19 +1911,24 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         << "page_indices_on_depths_view_[0] is not defined";
     TVM_FFI_ICHECK(length_info_on_depths_view_[0].defined())
         << "length_info_on_depths_view_[0] is not defined";
-    TVM_FFI_ICHECK(append_position_map_view_.defined()) << "append_position_map_view_ is not defined";
-    TVM_FFI_ICHECK(q_rope_position_map_view_.defined()) << "q_rope_position_map_view_ is not defined";
+    TVM_FFI_ICHECK(append_position_map_view_.defined())
+        << "append_position_map_view_ is not defined";
+    TVM_FFI_ICHECK(q_rope_position_map_view_.defined())
+        << "q_rope_position_map_view_ is not defined";
     std::vector<ffi::Any> ret;
     ret.push_back(Array<NDArray>(pages_));
     ret.push_back(page_indptr_on_depths_view_[0]);
-    ret.push_back(page_indptr_on_depths_host_[0].as_ndarray());
     ret.push_back(page_indices_on_depths_view_[0]);
     ret.push_back(length_info_on_depths_view_[0]);
     ret.push_back(append_position_map_view_);
     ret.push_back(q_rope_position_map_view_);
-    ret.push_back(temp_float_attn_workspace_);
-    ret.push_back(temp_int_attn_workspace_[0]);
-    ret.push_back(temp_int_pinned_attn_workspace_[0]);
+    ret.push_back(attn_plan_results_);
+    ret.push_back(Array<NDArray>{
+        etensor_qkv_partial_view_, etensor_q_reduce_view_, etensor_k_reduce_view_,
+        etensor_v_reduce_view_, etensor_decode_view_, etensor_o_partial_view_,
+        etensor_attn_add_rms_view_, etensor_attn_mlp_view_, etensor_gate_up_proj_view_,
+        etensor_down_proj_view_, etensor_down_proj_reduce_view_, etensor_mlp_add_rms_view_,
+        etensor_end_view_, etensor_o_proj_view_, etensor_decode_merge_view_});
     return ret;
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.vm.PagedAttentionKVCache", PagedAttentionKVCacheObj,
@@ -2031,7 +2225,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
 
   /*! \brief Invoke the "begin forward" functions of underlying kernels. */
   void KernelBeginForward() {
-    if (!NeedKernelBeginForward()) {
+    if (!NeedKernelBeginForward() || use_mega_kernel_) {
       return;
     }
 
@@ -2326,6 +2520,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
    * invoked before running attention computation on device.
    */
   void SyncAuxArrayToDevice() {
+    NVTXScopedRange range("SyncAuxArrayToDevice");
     TVM_FFI_ICHECK(dtype_aux_.bits == 32 && dtype_aux_.code == kDLInt);
     int64_t total_append_length = 0;
     int num_sequences = cur_append_lengths_.size();
@@ -2471,6 +2666,44 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                                            temp_attn_lse_device_->dtype);
     merged_attn_lse_view_ = merged_attn_lse_device_.CreateView({total_append_length, num_qo_heads_},
                                                                merged_attn_lse_device_->dtype);
+
+    // Event tensor transfer.
+    if (use_mega_kernel_) {
+      int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
+      std::vector<HostMemoryVector*> etensor_data = {&etensor_qkv_partial_host_,
+                                                     &etensor_q_reduce_host_,
+                                                     &etensor_k_reduce_host_,
+                                                     &etensor_v_reduce_host_,
+                                                     &etensor_decode_host_,
+                                                     &etensor_o_partial_host_,
+                                                     &etensor_attn_add_rms_host_,
+                                                     &etensor_attn_mlp_host_,
+                                                     &etensor_gate_up_proj_host_,
+                                                     &etensor_down_proj_host_,
+                                                     &etensor_down_proj_reduce_host_,
+                                                     &etensor_mlp_add_rms_host_,
+                                                     &etensor_end_host_,
+                                                     &etensor_o_proj_host_,
+                                                     &etensor_decode_merge_host_};
+      std::vector<NDArray*> etensor_data_views = {&etensor_qkv_partial_view_,
+                                                  &etensor_q_reduce_view_,
+                                                  &etensor_k_reduce_view_,
+                                                  &etensor_v_reduce_view_,
+                                                  &etensor_decode_view_,
+                                                  &etensor_o_partial_view_,
+                                                  &etensor_attn_add_rms_view_,
+                                                  &etensor_attn_mlp_view_,
+                                                  &etensor_gate_up_proj_view_,
+                                                  &etensor_down_proj_view_,
+                                                  &etensor_down_proj_reduce_view_,
+                                                  &etensor_mlp_add_rms_view_,
+                                                  &etensor_end_view_,
+                                                  &etensor_o_proj_view_,
+                                                  &etensor_decode_merge_view_};
+      aux_data_manager_->CopyEventTensorAsync(etensor_data, etensor_data_views, num_layers_,
+                                              cur_batch_size_, num_qo_heads_, num_kv_heads_,
+                                              qk_head_dim_, tp_size);
+    }
 
     // - Commit the copy.
     aux_data_manager_->CommitAttnAuxDataCopy();

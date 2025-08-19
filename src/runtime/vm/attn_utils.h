@@ -30,6 +30,8 @@
 #include <limits>
 #include <utility>
 #include <vector>
+
+#include "megakernel_utils.h"
 #if defined(OPENCL_ENABLE_HOST_PTR)
 #include "../opencl/opencl_common.h"
 #endif
@@ -77,7 +79,7 @@ inline ffi::Shape GetKVCacheShape(AttnKind attn_kind, int64_t num_total_pages, i
   } else if (attn_kind == AttnKind::kLinearAttn) {
     return {num_sequence, num_kv_heads, qk_head_dim, v_head_dim};
   }
-  TVM_FFI_ICHECK(false);
+  TVM_FFI_ITVM_FFI_ICHECK(false);
   return ffi::Shape();
 }
 
@@ -354,12 +356,12 @@ class HostMemoryVector {
 
   explicit HostMemoryVector(int64_t reserved_size, DLDataType dtype, Device device)
       : reserved_size_(reserved_size) {
-    TVM_FFI_ICHECK(DataType(dtype) == DataType::Int(32));
+    TVM_FFI_ITVM_FFI_ICHECK(DataType(dtype) == DataType::Int(32));
     data_ = Tensor::Empty({reserved_size}, dtype, device);
   }
 
   void push_back(int32_t value) {
-    TVM_FFI_ICHECK_LE(current_size_, reserved_size_);
+    TVM_FFI_ITVM_FFI_ICHECK_LE(current_size_, reserved_size_);
     if (current_size_ == reserved_size_) {
       reserved_size_ *= 2;
       Tensor new_data = Tensor::Empty({reserved_size_}, data_->dtype, data_->device);
@@ -370,14 +372,32 @@ class HostMemoryVector {
   }
 
   const int32_t& operator[](int64_t idx) const {
-    TVM_FFI_ICHECK_GE(idx, 0) << "Index " << idx << " is negative.";
-    TVM_FFI_ICHECK_LT(idx, current_size_) << "Index " << idx << " out of bounds " << current_size_;
+    TVM_FFI_ITVM_FFI_ICHECK_GE(idx, 0) << "Index " << idx << " is negative.";
+    TVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_)
+        << "Index " << idx << " out of bounds " << current_size_;
     return static_cast<int32_t*>(data_->data)[idx];
   }
 
   int32_t back() const {
-    TVM_FFI_ICHECK_GT(current_size_, 0) << "Vector is empty";
+    TVM_FFI_ITVM_FFI_ICHECK_GT(current_size_, 0) << "Vector is empty";
     return static_cast<int32_t*>(data_->data)[current_size_ - 1];
+  }
+
+  void fill(int32_t value) {
+    std::fill(static_cast<int32_t*>(data_->data),
+              static_cast<int32_t*>(data_->data) + reserved_size_, value);
+  }
+
+  void resize(size_t new_size) {
+    TVM_FFI_ITVM_FFI_ICHECK_LE(new_size, reserved_size_);
+    current_size_ = new_size;
+  }
+
+  void set(int64_t idx, int32_t value) {
+    TVM_FFI_ITVM_FFI_ICHECK_GE(idx, 0) << "Index " << idx << " is negative.";
+    TVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_)
+        << "Index " << idx << " out of bounds " << current_size_;
+    static_cast<int32_t*>(data_->data)[idx] = value;
   }
 
   size_t size() const { return static_cast<size_t>(current_size_); }
@@ -429,7 +449,7 @@ class PagedKVCacheAuxDataManager {
         device_(device),
         preferred_host_device_(preferred_host_device),
         copy_stream_(copy_stream) {
-    TVM_FFI_ICHECK(DataType(dtype_aux) == DataType::Int(32));
+    TVM_FFI_ITVM_FFI_ICHECK(DataType(dtype_aux) == DataType::Int(32));
   }
 
   virtual ~PagedKVCacheAuxDataManager() = default;
@@ -500,6 +520,12 @@ class PagedKVCacheAuxDataManager {
                                                      HostMemoryVector* dst_data) = 0;
   /*! \brief Commit all the compact KV auxiliary data copy operations since the last commit. */
   virtual void CommitCompactKVAuxDataCopy() = 0;
+
+  // Event tensor transfer.
+  virtual void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
+                                    std::vector<NDArray*> etensor_data_views, int num_layers,
+                                    int cur_batch_size, int num_qo_heads, int num_kv_heads,
+                                    int qk_head_dim, int tp_size) = 0;
 
  protected:
   /*! \brief The dtype of the auxiliary data. It is expected to be int32. */
@@ -661,7 +687,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
                                     HostMemoryVector* sliding_window_offset,
                                     HostMemoryVector* sink_size, int depth) final {
     int n_elem = last_page_len->size();
-    TVM_FFI_ICHECK_GT(n_elem, 0);
+    TVM_FFI_ITVM_FFI_ICHECK_GT(n_elem, 0);
     Tensor view = length_info_on_depths_device_[depth].CreateView({3, n_elem}, dtype_aux_);
     ffi::Shape copy_shape{n_elem};
     CopyVecDataToArray(view, last_page_len->data(), copy_shape);
@@ -687,7 +713,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   Tensor CopyCommitSrcDstPosInPageTableAsync(HostMemoryVector* src_data,
                                              HostMemoryVector* dst_data) final {
     int n_elem = src_data->size();
-    TVM_FFI_ICHECK_GT(n_elem, 0);
+    TVM_FFI_ITVM_FFI_ICHECK_GT(n_elem, 0);
     Tensor view = commit_copy_src_dst_pos_in_page_table_device_.CreateView({2, n_elem}, dtype_aux_);
     ffi::Shape copy_shape{n_elem};
     CopyVecDataToArray(view, src_data->data(), copy_shape);
@@ -698,6 +724,14 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
 
   // The commit of the plain auxiliary data manager is no-op.
   void CommitCompactKVAuxDataCopy() final {}
+
+  void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
+                            std::vector<NDArray*> etensor_data_views, int num_layers,
+                            int cur_batch_size, int num_qo_heads, int num_kv_heads, int qk_head_dim,
+                            int tp_size) final {
+    LOG(FATAL) << "Event tensor transfer is not supported for plain auxiliary data manager.";
+    throw;
+  }
 
  private:
   /*!
@@ -717,7 +751,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
       void* nptr = workspace->GetNativePtr(array);
       uint64_t copy_size;
       if (shape.defined()) {
-        TVM_FFI_ICHECK_EQ(shape.value().size(), 1);
+        TVM_FFI_ITVM_FFI_ICHECK_EQ(shape.value().size(), 1);
         copy_size = shape.value()->data[0] * sizeof(int32_t);
       } else {
         copy_size = DeviceAPI::Get(array->device)->GetDataSize(*array.operator->());
@@ -728,7 +762,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
 #endif
 
     if (shape.defined()) {
-      TVM_FFI_ICHECK_EQ(shape.value().size(), 1);
+      TVM_FFI_ITVM_FFI_ICHECK_EQ(shape.value().size(), 1);
       copy_dst.ndim = 1;
       copy_dst.shape = const_cast<int64_t*>(shape.value()->data);
     }
@@ -783,8 +817,9 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
         offset_alignment_(cuda_byte_alignment_ / elem_byte_size_) {
     // - Calculate cache size of all the attention auxiliary arrays in
     // local cache and the large on-device array.
-    int64_t attn_aux_data_cache_size =
-        CalculateAttnAuxDataCacheSize(reserved_num_seqs, num_total_pages, prefill_chunk_size);
+    // int64_t attn_aux_data_cache_size =
+    //     CalculateAttnAuxDataCacheSize(reserved_num_seqs, num_total_pages, prefill_chunk_size);
+    int64_t attn_aux_data_cache_size = 32 * 1024 * 1024;
     // - Initialize the host auxiliary data buffer.
     merged_attn_aux_data_host_ =
         HostMemoryVector(attn_aux_data_cache_size, dtype_aux, preferred_host_device);
@@ -918,6 +953,59 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     copy_src.data = merged_compact_kv_aux_data_host_.data();
     copy_src.device = Device{kDLCPU, 0};
     Tensor::CopyFromTo(&copy_src, &copy_dst, copy_stream_);
+  }
+
+  void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
+                            std::vector<NDArray*> etensor_data_views, int num_layers,
+                            int cur_batch_size, int num_qo_heads, int num_kv_heads, int qk_head_dim,
+                            int tp_size) final {
+    TVM_FFI_ICHECK_EQ(etensor_data.size(), 15)
+        << "Event tensor size mismatch, expected 15, got " << etensor_data.size();
+    TVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
+    std::vector<NDArray> etensor_data_views_raw;
+    etensor_data_views_raw.reserve(etensor_data.size());
+    for (int i = 0; i < static_cast<int>(etensor_data.size()); i++) {
+      HostMemoryVector* etensor_data_item = etensor_data[i];
+      etensor_data_views_raw.push_back(CopyAttnAuxVecToCache(etensor_data_item));
+      TVM_FFI_ICHECK(etensor_data_views[i] != nullptr) << "Event tensor view is nullptr";
+    }
+
+    int qkv_h_d = (num_qo_heads + 2 * num_kv_heads) * qk_head_dim;
+    int q_h_d = num_qo_heads * qk_head_dim;
+    int k_h_d = num_kv_heads * qk_head_dim;
+    *etensor_data_views[0] = etensor_data_views_raw[0].CreateView(
+        {num_layers, ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit)}, dtype_aux_);
+    *etensor_data_views[1] = etensor_data_views_raw[1].CreateView(
+        {num_layers, cur_batch_size, ceildiv(q_h_d, megakernel::kSplitKReduceTileNUnit)},
+        dtype_aux_);
+    *etensor_data_views[2] = etensor_data_views_raw[2].CreateView(
+        {num_layers, cur_batch_size, ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit)},
+        dtype_aux_);
+    *etensor_data_views[3] = etensor_data_views_raw[3].CreateView(
+        {num_layers, cur_batch_size, ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit)},
+        dtype_aux_);
+    *etensor_data_views[4] = etensor_data_views_raw[4].CreateView(
+        {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
+    *etensor_data_views[5] = etensor_data_views_raw[5].CreateView(
+        {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
+    *etensor_data_views[6] =
+        etensor_data_views_raw[6].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+    *etensor_data_views[7] = etensor_data_views_raw[7].CreateView({num_layers, 1}, dtype_aux_);
+    *etensor_data_views[8] = etensor_data_views_raw[8].CreateView(
+        {num_layers,
+         ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN)},
+        dtype_aux_);
+    *etensor_data_views[9] = etensor_data_views_raw[9].CreateView(
+        {num_layers, megakernel::kDownProjSplitKFactor}, dtype_aux_);
+    *etensor_data_views[10] = etensor_data_views_raw[10].CreateView(
+        {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
+    *etensor_data_views[11] =
+        etensor_data_views_raw[11].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+    *etensor_data_views[12] = etensor_data_views_raw[12].CreateView({num_layers, 1}, dtype_aux_);
+    *etensor_data_views[13] =
+        etensor_data_views_raw[13].CreateView({num_layers, megakernel::kSplitOProject}, dtype_aux_);
+    *etensor_data_views[14] = etensor_data_views_raw[14].CreateView(
+        {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
   }
 
  private:

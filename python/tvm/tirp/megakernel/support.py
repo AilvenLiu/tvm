@@ -16,6 +16,7 @@
 # under the License.
 """Plan info for attention kernel."""
 import numpy as np
+import torch
 
 import tvm
 from tvm.tirp.megakernel.common import KernelConfig
@@ -207,6 +208,7 @@ PAGE_SIZE = 16
 
 @tvm.register_func("megakernel.generate_exec_queue")
 def generate_exec_queue(batch_size, new_batch_size):
+    torch.cuda.nvtx.range_push("generate_exec_queue")
     split_kv = batch_size != new_batch_size
     exec_queue = np.zeros(
         (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4), dtype=np.int32
@@ -337,16 +339,21 @@ def generate_exec_queue(batch_size, new_batch_size):
         exec_queue[bx, tile_idx, 2] = -1
         exec_queue[bx, tile_idx, 3] = JobType.END.value
     DEV = tvm.cuda(0)
-    return tvm.nd.array(exec_queue, device=DEV)
+    ret = tvm.nd.array(exec_queue, device=DEV)
+    torch.cuda.nvtx.range_pop()
+    return ret
 
 
 @tvm.register_func("megakernel.generate_event_tensor")
 def generate_event_tensor(batch_size, o_indptr):
+    torch.cuda.nvtx.range_push("generate_event_tensor")
     DEV = tvm.cuda(0)
     qkv_h_d = (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM
     qk_h_d = (NUM_ATTENTION_HEADS + NUM_KEY_VALUE_HEADS) * HEAD_DIM
     q_h_d = NUM_ATTENTION_HEADS * HEAD_DIM
     k_h_d = NUM_KEY_VALUE_HEADS * HEAD_DIM
+
+    # Static zeros
     etensor_qkv_partial = tvm.nd.array(
         np.zeros(ceildiv(qkv_h_d, SplitKReduceTile.N_UNIT), dtype=np.int32), device=DEV
     )
@@ -362,13 +369,22 @@ def generate_event_tensor(batch_size, o_indptr):
     etensor_decode = tvm.nd.array(
         np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32), device=DEV
     )
-    etensor_decode_merge = np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32)
-    o_indptr = o_indptr.numpy()
-    for b in range(batch_size):
-        num_merge = o_indptr[b + 1] - o_indptr[b]
-        for j in range(NUM_KEY_VALUE_HEADS):
-            etensor_decode_merge[b, j] = num_merge
-    etensor_decode_merge = tvm.nd.array(etensor_decode_merge, device=DEV)
+    etensor_o_partial = tvm.nd.array(
+        np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV
+    )
+    etensor_attn_add_rms_norm = tvm.nd.array(np.zeros(batch_size, dtype=np.int32), device=DEV)
+    etensor_attn_mlp = tvm.nd.array(np.zeros(1, dtype=np.int32), device=DEV)
+    etensor_gate_up_proj = tvm.nd.array(
+        np.zeros(ceildiv(INTERMEDIATE_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV
+    )
+    etensor_down_proj = tvm.nd.array(np.zeros(DOWN_PROJ_SPLIT_K_FACTOR, dtype=np.int32), device=DEV)
+    etensor_down_proj_reduce = tvm.nd.array(
+        np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV
+    )
+    etensor_mlp_add_rms_norm = tvm.nd.array(np.zeros((batch_size,), dtype=np.int32), device=DEV)
+    etensor_end = tvm.nd.array(np.zeros(1, dtype=np.int32), device=DEV)
+
+    # Dynamic etensors
     etensor_o_proj = np.zeros(SPLIT_O_PROJRCT, dtype=np.int32)
     o_proj_tile_k = (
         ceildiv(ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SPLIT_O_PROJRCT), GemmTile.BLK_K)
@@ -377,30 +393,21 @@ def generate_event_tensor(batch_size, o_indptr):
     for h in range(NUM_KEY_VALUE_HEADS):
         range_start = h * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
         range_end = (
-            (h + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
-        )
-        if range_end != range_start:
-            etensor_o_proj[range_start] += 1
-            etensor_o_proj[range_end] += 1
-        else:
-            etensor_o_proj[range_start] += 1
-    etensor_o_proj *= batch_size
+            (h + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1
+        ) // o_proj_tile_k
+        for i in range(range_start, range_end + 1):
+            etensor_o_proj[i] += batch_size
     etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
-    etensor_o_partial = tvm.nd.array(
-        np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV
-    )
-    etensor_attn_add_rms_norm = tvm.nd.array(np.zeros(batch_size, dtype=np.int32), device=DEV)
-    etensor_attn_mlp = tvm.nd.array(np.zeros(1, dtype=np.int32), device=DEV)
-    etensor_gate_up_proj = tvm.nd.array(
-        np.zeros(INTERMEDIATE_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
-    )
-    etensor_down_proj = tvm.nd.array(np.zeros(DOWN_PROJ_SPLIT_K_FACTOR, dtype=np.int32), device=DEV)
-    etensor_down_proj_reduce = tvm.nd.array(
-        np.zeros(HIDDEN_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
-    )
-    etensor_mlp_add_rms_norm = tvm.nd.array(np.zeros((batch_size,), dtype=np.int32), device=DEV)
 
-    etensor_end = tvm.nd.array(np.zeros(1, dtype=np.int32), device=DEV)
+    etensor_decode_merge = np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32)
+    o_indptr = o_indptr.numpy()
+    for b in range(batch_size):
+        num_merge = o_indptr[b + 1] - o_indptr[b]
+        for j in range(NUM_KEY_VALUE_HEADS):
+            etensor_decode_merge[b, j] = num_merge
+    etensor_decode_merge = tvm.nd.array(etensor_decode_merge, device=DEV)
+
+    torch.cuda.nvtx.range_pop()
     return (
         etensor_qkv_partial,
         etensor_q_reduce,

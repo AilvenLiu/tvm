@@ -45,7 +45,7 @@ from .test_rope import get_cos_sin_cache_kernel
 # pyright: reportInvalidTypeForm=false
 
 parser = ArgumentParser()
-parser.add_argument("--tp-size", type=int, default=1, choices=[1, 2, 4, 8])
+parser.add_argument("--tp-size", type=int, default=1, choices=[1])
 args = parser.parse_args()
 
 dev = tvm.cuda()
@@ -53,8 +53,8 @@ target = tvm.target.Target("cuda")
 
 TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
-LOAD_WEIGHTS = "/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16"
-MODEL_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/lib_tp{TP_SIZE}.so"
+LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
+MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/qwen3-32b-mlc/lib_tp{TP_SIZE}.so"
 MEGA_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/mega_layer_lib_tp{TP_SIZE}.so"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
@@ -314,8 +314,7 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
     )
 
     if is_megakernel:
-        cos_sin_cache = tvm.nd.array(np.zeros((MAX_SEQ_LEN, 128), dtype="float32"), device=dev)
-        cos_sin_cache_func(cos_sin_cache)
+        cos_sin_cache = cos_sin_cache_func(ShapeTuple([MAX_SEQ_LEN]))
         # cos_sin_cache = prepare_cos_sin_cache(128, MAX_SEQ_LEN, ROPE_THETA)
         # cos_sin_cache = tvm.nd.array.from_dlpack(cos_sin_cache.to_dlpack())
 
@@ -344,7 +343,9 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
     for i in tqdm(range(seq_len)):
         tokens = tvm.nd.array(last_tokens.astype("int32"), device=dev)
         hidden_states = embed(tokens, params)
-        begin_forward_func(kv_cache, ShapeTuple(seq_ids), ShapeTuple([1] * batch_size))
+        begin_forward_func(
+            kv_cache, ShapeTuple(seq_ids), ShapeTuple([1] * batch_size), None, is_megakernel
+        )
         if is_megakernel:
             logits, kv_cache = batch_decode_func(
                 hidden_states,
@@ -392,78 +393,55 @@ def get_qwen3_megakernel_mod():
             model_layers_0_mlp_down_proj_weight1: R.Tensor((5120, 25600), dtype="float16") = packed_params[8*layer_id+6]
             model_layers_0_post_attention_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[8*layer_id+8]
             model_norm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[8*layer_id+15 if layer_id < NUM_HIDDEN_LAYERS-1 else 8*layer_id+9]
-            
-            res3 = R.call_pure_packed(
-                "megakernel.generate_event_tensor",
-                R.prim_value(batch_size),
-                plan_o_indptr,
+
+            etensors_on_layer = R.call_pure_packed(
+                "megakernel.get_event_tensors_on_layer",
+                etensors,
+                R.prim_value(layer_id),
                 sinfo_args=[
-                    R.Tensor((ceildiv((config_tp1.num_attention_heads + 2 * config_tp1.num_key_value_heads) * config_tp1.head_dim, SplitKReduceTile.N_UNIT),), dtype="int32"),
-                    R.Tensor(None, dtype="int32"),
-                    R.Tensor(None, dtype="int32"),
-                    R.Tensor(None, dtype="int32"),
-                    R.Tensor(None, dtype="int32"),
-                    R.Tensor(None, dtype="int32"),
-                    R.Tensor((SPLIT_O_PROJRCT,), dtype="int32"),
-                    R.Tensor((ceildiv(config_tp1.hidden_size, GemmTile.BLK_N),), dtype="int32"),
-                    R.Tensor(None, dtype="int32"),
-                    R.Tensor((1,), dtype="int32"),
-                    R.Tensor((config_tp1.intermediate_size // GemmTile.BLK_N,), dtype="int32"),
-                    R.Tensor((DOWN_PROJ_SPLIT_K_FACTOR,), dtype="int32"),
-                    R.Tensor((config_tp1.hidden_size // GemmTile.BLK_N,), dtype="int32"),
-                    R.Tensor(None, dtype="int32"),
-                    R.Tensor((1,), dtype="int32"),
+                    R.Tuple([R.Tensor(None, dtype="int32")] * 15),
                 ]
             )
-
             (
                 etensor_qkv_partial,
-                etensor_q_reduce_,
-                etensor_k_reduce_,
-                etensor_v_reduce_,
-                etensor_decode_,
-                etensor_decode_merge_,
-                etensor_o_proj,
+                etensor_q_reduce,
+                etensor_k_reduce,
+                etensor_v_reduce,
+                etensor_decode,
                 etensor_o_partial,
-                etensor_attn_add_rms_norm_,
+                etensor_attn_add_rms_norm,
                 etensor_attn_mlp,
                 etensor_gate_up_proj,
                 etensor_down_proj,
                 etensor_down_proj_reduce,
-                etensor_mlp_add_rms_norm_,
+                etensor_mlp_add_rms_norm,
                 etensor_end,
+                etensor_o_proj,
+                etensor_decode_merge,
             ) = (
-                res3[0],
-                res3[1],
-                res3[2],
-                res3[3],
-                res3[4],
-                res3[5],
-                res3[6],
-                res3[7],
-                res3[8],
-                res3[9],
-                res3[10],
-                res3[11],
-                res3[12],
-                res3[13],
-                res3[14],
+                etensors_on_layer[0],
+                etensors_on_layer[1],
+                etensors_on_layer[2],
+                etensors_on_layer[3],
+                etensors_on_layer[4],
+                etensors_on_layer[5],
+                etensors_on_layer[6],
+                etensors_on_layer[7],
+                etensors_on_layer[8],
+                etensors_on_layer[9],
+                etensors_on_layer[10],
+                etensors_on_layer[11],
+                etensors_on_layer[12],
+                etensors_on_layer[13],
+                etensors_on_layer[14],
             )
 
-            etensor_q_reduce = R.match_cast(etensor_q_reduce_, R.Tensor((batch_size, ceildiv(config_tp1.num_attention_heads * config_tp1.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
-            etensor_k_reduce = R.match_cast(etensor_k_reduce_, R.Tensor((batch_size, ceildiv(config_tp1.num_key_value_heads * config_tp1.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
-            etensor_v_reduce = R.match_cast(etensor_v_reduce_, R.Tensor((batch_size, ceildiv(config_tp1.num_key_value_heads * config_tp1.head_dim, SplitKReduceTile.N_UNIT)), dtype="int32"))
-            etensor_decode = R.match_cast(etensor_decode_, R.Tensor((batch_size, config_tp1.num_key_value_heads), dtype="int32"))
-            etensor_decode_merge = R.match_cast(etensor_decode_merge_, R.Tensor((batch_size, config_tp1.num_key_value_heads), dtype="int32"))
-            etensor_attn_add_rms_norm = R.match_cast(etensor_attn_add_rms_norm_, R.Tensor((batch_size,), dtype="int32"))
-            etensor_mlp_add_rms_norm = R.match_cast(etensor_mlp_add_rms_norm_, R.Tensor((batch_size,), dtype="int32"))
-            
             partital_qkv = R.builtin.alloc_tensor(R.shape([SPLIT_QKV_PROJECT, batch_size, 10240]), dtype="float32", runtime_device_index=0)
             qkv = R.builtin.alloc_tensor(R.shape([batch_size, 80, 128]), dtype="float16", runtime_device_index=0)
             o = R.builtin.alloc_tensor(R.shape([batch_size, 64, 128]), dtype="float16", runtime_device_index=0)
             lse = R.builtin.alloc_tensor(R.shape([batch_size, 64]), dtype="float32", runtime_device_index=0)
-            o_tmp = R.builtin.alloc_tensor(R.shape([batch_size, 64, 128]), dtype="float32", runtime_device_index=0)
-            lse_tmp = R.builtin.alloc_tensor(R.shape([batch_size, 64]), dtype="float32", runtime_device_index=0)
+            o_tmp = R.builtin.alloc_tensor(R.shape([new_batch_size, 64, 128]), dtype="float32", runtime_device_index=0)
+            lse_tmp = R.builtin.alloc_tensor(R.shape([new_batch_size, 64]), dtype="float32", runtime_device_index=0)
             partial_o = R.builtin.alloc_tensor(R.shape([SPLIT_O_PROJRCT, batch_size, 5120]), dtype="float32", runtime_device_index=0)
             hidden_state_attn_mlp = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
             out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 51200]), dtype="float16", runtime_device_index=0)
@@ -472,24 +450,24 @@ def get_qwen3_megakernel_mod():
 
             output_tensor = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
 
-        
+
             layer_res = R.call_tir_inplace(cls.layer_kernel, (
                                         # input and output
                                         input0, input1, output_tensor,
                                         # weights
-                                        model_layers_0_self_attn_c_attn_weight1, model_layers_0_self_attn_o_proj_weight1, 
+                                        model_layers_0_self_attn_c_attn_weight1, model_layers_0_self_attn_o_proj_weight1,
                                         model_layers_0_self_attn_q_norm_weight1, model_layers_0_self_attn_k_norm_weight1,
                                         model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,
                                         model_layers_0_post_attention_layernorm_weight1, model_norm_weight1,
                                         # page cache, cos_sin cache and plan info
-                                        cos_sin_cache, rope_pos, kv_data[layer_id], kv_indptr, kv_indices, kv_last_page_len, 
+                                        cos_sin_cache, rope_pos, kv_data[layer_id], kv_indptr, kv_indices, kv_last_page_len,
                                         append_pos, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size, plan_o_indptr,
                                         # intermediate buffer
                                         partital_qkv, qkv, o, lse, o_tmp, lse_tmp, partial_o, hidden_state_attn_mlp,
                                         out_gate_up_proj, out_silu_multiply, partial_sum_down_proj,
                                         # event tensor
-                                        etensor_qkv_partial, etensor_q_reduce, etensor_k_reduce, etensor_v_reduce, etensor_decode, 
-                                        etensor_decode_merge, etensor_o_proj, etensor_o_partial, etensor_attn_add_rms_norm, etensor_attn_mlp, 
+                                        etensor_qkv_partial, etensor_q_reduce, etensor_k_reduce, etensor_v_reduce, etensor_decode,
+                                        etensor_decode_merge, etensor_o_proj, etensor_o_partial, etensor_attn_add_rms_norm, etensor_attn_mlp,
                                         etensor_gate_up_proj, etensor_down_proj, etensor_down_proj_reduce, etensor_mlp_add_rms_norm,
                                         # execution queue
                                         exec_queue),
@@ -534,16 +512,16 @@ def get_qwen3_megakernel_mod():
         @T.prim_func(private=True)
         def cos_sin_cache(cos_sin_cache: T.handle):
             pass
-        
+
         @R.function
-        def cos_sin_cache_func(cache: R.Tensor(("max_seq_len", 128), dtype="float32")):
+        def cos_sin_cache_func(max_seq_len_: R.Shape(["max_seq_len"])):
             max_seq_len = T.int64()
             cls = Module
             with R.dataflow():
-                cache: R.Tensor((max_seq_len, 128), dtype="float32") = R.call_tir_inplace(cls.cos_sin_cache, (cache), [0], out_sinfo=R.Tensor((max_seq_len, 128), dtype="float32") )
+                cache: R.Tensor((max_seq_len, 128), dtype="float32") = R.call_tir(cls.cos_sin_cache, [], out_sinfo=R.Tensor((max_seq_len, 128), dtype="float32") )
                 R.output(cache)
             return cache
-        
+
         @T.prim_func(private=True)
         def layer_kernel(
                 # input and output
@@ -586,16 +564,16 @@ def get_qwen3_megakernel_mod():
                 out_gate_up_proj_ptr: T.handle, # intermediate
                 out_silu_multiply_ptr: T.handle, # intermediate
                 partial_sum_down_proj_ptr: T.handle, # intermediate
-                
+
                 # event tensor
-                etensor_qkv_partial_ptr: T.handle, 
-                etensor_q_reduce_ptr: T.handle, 
-                etensor_k_reduce_ptr: T.handle, 
-                etensor_v_reduce_ptr: T.handle, 
-                etensor_decode_ptr: T.handle, 
+                etensor_qkv_partial_ptr: T.handle,
+                etensor_q_reduce_ptr: T.handle,
+                etensor_k_reduce_ptr: T.handle,
+                etensor_v_reduce_ptr: T.handle,
+                etensor_decode_ptr: T.handle,
                 etensor_decode_merge_ptr: T.handle,
-                etensor_o_proj_ptr: T.handle, 
-                etensor_o_partial_ptr: T.handle, 
+                etensor_o_proj_ptr: T.handle,
+                etensor_o_partial_ptr: T.handle,
                 etensor_attn_add_rms_ptr: T.handle,
                 etensor_attn_mlp_ptr: T.handle,
                 etensor_gate_up_proj_ptr: T.handle,
@@ -626,7 +604,6 @@ def get_qwen3_megakernel_mod():
                 R.Tensor((5120, 25600), dtype="float16"),
                 R.Tensor((5120,), dtype="float16"),
                 R.Tensor((5120,), dtype="float16"),] * NUM_HIDDEN_LAYERS),
-                #                
                 R.Tensor((5120,), dtype="float16"),
                 R.Tensor((151936, 5120), dtype="float16"),
             ),
@@ -645,17 +622,15 @@ def get_qwen3_megakernel_mod():
                     sinfo_args=[
                         R.Tuple([R.Tensor(None, dtype="float16")] * NUM_HIDDEN_LAYERS),
                         R.Tensor((batch_size + 1,), dtype="int32"),
-                        R.Tensor((batch_size + 1,), dtype="int32"),
                         R.Tensor(None, dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
-                        R.Tensor(None, dtype="uint8"),
-                        R.Tensor(None, dtype="uint8"),
-                        R.Tensor(None, dtype="uint8"),
+                        R.Tuple([R.Tensor(None, dtype="int32")] * 5),
+                        R.Tuple([R.Tensor(None, dtype="int32")] * 15),
                     ],
                 )
-                kv_data_, kv_indptr, kv_indptr_host, kv_indices_, kv_last_page_len, append_pos, rope_pos, temp_float_attn_workspace, temp_int_attn_workspace, temp_int_pinned_attn_workspace = (
+                kv_data_, kv_indptr, kv_indices_, kv_last_page_len, append_pos, rope_pos, attn_plan_results, etensors = (
                     res0[0],
                     res0[1],
                     res0[2],
@@ -664,47 +639,21 @@ def get_qwen3_megakernel_mod():
                     res0[5],
                     res0[6],
                     res0[7],
-                    res0[8],
-                    res0[9],
                 )
                 kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
                 kv_indices = R.match_cast(kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
-                res1 = R.call_pure_packed(
-                    "flashinfer.batch_decode_with_paged_kv_cache_plan",
-                    temp_float_attn_workspace,
-                    temp_int_attn_workspace,
-                    temp_int_pinned_attn_workspace,
-                    kv_indptr_host,
-                    R.prim_value(batch_size),
-                    R.prim_value(64),
-                    R.prim_value(8),
-                    R.prim_value(page_size),
-                    R.prim_value(False),
-                    R.prim_value(0),
-                    R.prim_value(-1),
-                    R.prim_value(128),
-                    R.prim_value(128),
-                    R.dtype("float16"),
-                    R.dtype("float16"),
-                    R.prim_value(True), # TODO: remove this flag
-                    sinfo_args=[
-                        R.Tensor(None, dtype="int32"),
-                        R.Tensor(None, dtype="int32"),
-                        R.Tensor((1,), dtype="int32"),
-                        R.Tensor(None, dtype="int32"),
-                    ],
-                )
-                plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size, plan_o_indptr_ = res1[0], res1[1], res1[2], res1[3]
+                plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size_, plan_o_indptr_ = attn_plan_results[0], attn_plan_results[1], attn_plan_results[2], attn_plan_results[3]
                 plan_request_indices = R.match_cast(plan_request_indices_, R.Tensor((new_batch_size,), dtype="int32"))
                 plan_kv_tile_indices = R.match_cast(plan_kv_tile_indices_, R.Tensor((new_batch_size,), dtype="int32"))
-                plan_o_indptr = R.match_cast(plan_o_indptr_, R.Tensor((new_batch_size + 1,), dtype="int32"))
+                plan_max_chunk_size = R.match_cast(plan_max_chunk_size_, R.Tensor((1,), dtype="int32"))
+                plan_o_indptr = R.match_cast(plan_o_indptr_, R.Tensor((batch_size + 1,), dtype="int32"))
 
                 res2 = R.call_pure_packed(
                     "megakernel.generate_exec_queue",
                     R.prim_value(batch_size),
                     R.prim_value(new_batch_size),
                     sinfo_args=[
-                        R.Tensor((144, 128, 4), dtype="int32"),
+                        R.Tensor((148, 128, 4), dtype="int32"),
                     ]
                 )
                 exec_queue = res2
@@ -787,7 +736,7 @@ def get_qwen3_megakernel_mod():
 
                 lv4_rs = R.reshape(lv4, (batch_size, 1, 151936))
                 astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, 151936), dtype="float32"))
-                
+
                 gv1 = astype, paged_kv_cache
                 R.output(gv1)
             return gv1
