@@ -1316,44 +1316,43 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       int q_h_d = num_qo_heads_ * qk_head_dim_;
       int k_h_d = num_kv_heads_ * qk_head_dim_;
       // static zero etensors
-      etensor_qkv_partial_host_.fill(0);
-      etensor_q_reduce_host_.fill(0);
-      etensor_k_reduce_host_.fill(0);
-      etensor_v_reduce_host_.fill(0);
-      etensor_decode_host_.fill(0);
-      etensor_o_partial_host_.fill(0);
-      etensor_attn_add_rms_host_.fill(0);
-      etensor_attn_mlp_host_.fill(0);
-      etensor_gate_up_proj_host_.fill(0);
-      etensor_down_proj_host_.fill(0);
-      etensor_down_proj_reduce_host_.fill(0);
-      etensor_mlp_add_rms_host_.fill(0);
-      etensor_end_host_.fill(0);
-      etensor_o_proj_host_.fill(0);
-      etensor_decode_merge_host_.fill(0);
       etensor_qkv_partial_host_.resize(num_layers_ *
                                        ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit));
+      etensor_qkv_partial_host_.fill(0);
       etensor_q_reduce_host_.resize(num_layers_ * cur_batch_size_ *
                                     ceildiv(q_h_d, megakernel::kSplitKReduceTileNUnit));
+      etensor_q_reduce_host_.fill(0);
       etensor_k_reduce_host_.resize(num_layers_ * cur_batch_size_ *
                                     ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit));
+      etensor_k_reduce_host_.fill(0);
       etensor_v_reduce_host_.resize(num_layers_ * cur_batch_size_ *
                                     ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit));
+      etensor_v_reduce_host_.fill(0);
       etensor_decode_host_.resize(num_layers_ * cur_batch_size_ * num_kv_heads_);
+      etensor_decode_host_.fill(0);
       etensor_o_partial_host_.resize(num_layers_ *
                                      ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN));
+      etensor_o_partial_host_.fill(0);
       etensor_attn_add_rms_host_.resize(num_layers_ * cur_batch_size_);
+      etensor_attn_add_rms_host_.fill(0);
       etensor_attn_mlp_host_.resize(num_layers_);
+      etensor_attn_mlp_host_.fill(0);
       etensor_gate_up_proj_host_.resize(
           num_layers_ *
           ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN));
+      etensor_gate_up_proj_host_.fill(0);
       etensor_down_proj_host_.resize(num_layers_ * megakernel::kDownProjSplitKFactor);
+      etensor_down_proj_host_.fill(0);
       etensor_down_proj_reduce_host_.resize(
           num_layers_ * ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN));
+      etensor_down_proj_reduce_host_.fill(0);
       etensor_mlp_add_rms_host_.resize(num_layers_ * cur_batch_size_);
+      etensor_mlp_add_rms_host_.fill(0);
       etensor_end_host_.resize(num_layers_);
+      etensor_end_host_.fill(0);
       // dynamic etensors
       etensor_o_proj_host_.resize(num_layers_ * megakernel::kSplitOProject);
+      etensor_o_proj_host_.fill(0);
       int o_proj_tile_k = (ceildiv(ceildiv(num_qo_heads_ * v_head_dim_, megakernel::kSplitOProject),
                                    megakernel::kGemmTileBlkK) *
                            megakernel::kGemmTileBlkK);

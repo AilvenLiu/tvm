@@ -385,7 +385,7 @@ class HostMemoryVector {
 
   void fill(int32_t value) {
     std::fill(static_cast<int32_t*>(data_->data),
-              static_cast<int32_t*>(data_->data) + reserved_size_, value);
+              static_cast<int32_t*>(data_->data) + current_size_, value);
   }
 
   void resize(size_t new_size) {
