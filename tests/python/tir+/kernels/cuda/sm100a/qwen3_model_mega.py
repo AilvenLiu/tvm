@@ -649,7 +649,8 @@ def get_qwen3_megakernel_mod():
                 plan_o_indptr = R.match_cast(plan_o_indptr_, R.Tensor((batch_size + 1,), dtype="int32"))
 
                 res2 = R.call_pure_packed(
-                    "megakernel.generate_exec_queue",
+                    "vm.builtin.paged_attention_kv_cache_get_exec_queue",
+                    paged_kv_cache,
                     R.prim_value(batch_size),
                     R.prim_value(new_batch_size),
                     sinfo_args=[

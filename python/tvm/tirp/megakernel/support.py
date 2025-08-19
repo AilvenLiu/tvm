@@ -290,28 +290,28 @@ def generate_exec_queue(batch_size, new_batch_size):
         central_queue.append((m_idx, -1, -1, JobType.ATTN_ADD_RMS_NORM.value))
 
     # gate_up_proj
-    for n in range(INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N):
+    for n in range(ceildiv(INTERMEDIATE_SIZE * 2, GemmTile.BLK_N)):
         central_queue.append((0, n, 0, JobType.GEMM_GATE_UP_PROJ.value))
 
     # split_silu_multiply
-    for n in range(INTERMEDIATE_SIZE // SiluMultiplyTile.TILE_SIZE):
+    for n in range(ceildiv(INTERMEDIATE_SIZE, SiluMultiplyTile.TILE_SIZE)):
         central_queue.append((n, 0, 0, JobType.SPLIT_SILU_MULTIPLY.value))
 
     # gemm_down_proj
-    for n in range(HIDDEN_SIZE // GemmTile.BLK_N):
+    for n in range(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)):
         for k in range(DOWN_PROJ_SPLIT_K_FACTOR):
             central_queue.append((0, n, k, JobType.GEMM_DOWN_PROJ.value))
 
     # down_proj_reduce
     M_split_down_proj_reduce = min(
-        ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT), batch_size
+        ceildiv(KernelConfig.SM_NUMBER, ceildiv(HIDDEN_SIZE, SplitKReduceTile.N_UNIT)), batch_size
     )
     N_tile = (
         ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, M_split_down_proj_reduce))
         * SplitKReduceTile.N_UNIT
     )
     for m in range(M_split_down_proj_reduce):
-        for n in range(HIDDEN_SIZE // N_tile):
+        for n in range(ceildiv(HIDDEN_SIZE, N_tile)):
             central_queue.append((m, n, 0, JobType.DOWN_PROJ_REDUCE.value))
 
     # add_rms_norm

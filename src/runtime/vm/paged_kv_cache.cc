@@ -195,6 +195,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   Tensor temp_float_attn_workspace_;
   Array<Any> attn_plan_results_;
 
+  // Megakernel execution queue cache
+  std::vector<std::unordered_map<int, NDArray>> exec_queue_cache_;
+
   //-------------------------------------------
   // Below are the auxiliary data structure on CPU.
   // We make them class members to avoid repetitive allocation time in BeginForward.
@@ -519,6 +522,16 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                             preferred_host_device);
     etensor_decode_merge_host_ = HostMemoryVector(num_layers * reserved_num_seqs * num_kv_heads,
                                                   dtype_aux_, preferred_host_device);
+    // Cache static execution queue
+    int max_exec_queue_init_size = 128;
+    exec_queue_cache_.resize(max_exec_queue_init_size + 1);
+    for (int bsz = 1; bsz <= max_exec_queue_init_size; ++bsz) {
+      for (int new_bsz = bsz; new_bsz <= bsz * 4; ++new_bsz) {
+        exec_queue_cache_[bsz][new_bsz] =
+            megakernel::GenerateExecQueue(bsz, new_bsz, tp_size, num_qo_heads, num_kv_heads,
+                                          qk_head_dim, device, preferred_host_device);
+      }
+    }
 
     for (int d = 0; d < kPagedKVCacheMaxBlockDepth; ++d) {
       if (NeedKernelBeginForward()) {
@@ -1284,15 +1297,18 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       // and transferring the event tensors to device.
       ffi::Function f_attn_plan =
           ffi::Function::GetGlobalRequired("flashinfer.batch_decode_with_paged_kv_cache_plan");
-      attn_plan_results_ =
-          f_attn_plan(temp_float_attn_workspace_, temp_int_attn_workspace_[0],
-                      temp_int_pinned_attn_workspace_[0],
-                      page_indptr_on_depths_host_[0].as_ndarray(), cur_batch_size_, num_qo_heads_,
-                      num_kv_heads_, page_size_,
-                      /*enable_cuda_graph=*/false,
-                      /*pos_encoding_mode_code=*/0,
-                      /*window_left=*/-1, qk_head_dim_, v_head_dim_, kv_dtype_, kv_dtype_)
-              .cast<Array<Any>>();
+      {
+        NVTXScopedRange range("Run attention plan");
+        attn_plan_results_ =
+            f_attn_plan(temp_float_attn_workspace_, temp_int_attn_workspace_[0],
+                        temp_int_pinned_attn_workspace_[0],
+                        page_indptr_on_depths_host_[0].as_ndarray(), cur_batch_size_, num_qo_heads_,
+                        num_kv_heads_, page_size_,
+                        /*enable_cuda_graph=*/false,
+                        /*pos_encoding_mode_code=*/0,
+                        /*window_left=*/-1, qk_head_dim_, v_head_dim_, kv_dtype_, kv_dtype_)
+                .cast<Array<Any>>();
+      }
 
       // 2. Initialize event tensors
       int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
@@ -1930,6 +1946,27 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         etensor_down_proj_view_, etensor_down_proj_reduce_view_, etensor_mlp_add_rms_view_,
         etensor_end_view_, etensor_o_proj_view_, etensor_decode_merge_view_});
     return ret;
+  }
+
+  NDArray GetExecQueue(int batch_size, int new_batch_size) {
+    NVTXScopedRange range("GetExecQueue");
+    // Try to get the execution queue from the cache.
+    if (batch_size < static_cast<int>(exec_queue_cache_.size())) {
+      auto it = exec_queue_cache_[batch_size].find(new_batch_size);
+      if (it != exec_queue_cache_[batch_size].end()) {
+        return it->second;
+      }
+    } else {
+      exec_queue_cache_.resize(batch_size + 1);
+    }
+    // Generate the execution queue.
+    int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
+    Device preferred_host_device = GetPreferredHostDevice(device_);
+    NDArray exec_queue =
+        megakernel::GenerateExecQueue(batch_size, new_batch_size, tp_size, num_qo_heads_,
+                                      num_kv_heads_, qk_head_dim_, device_, preferred_host_device);
+    exec_queue_cache_[batch_size][new_batch_size] = exec_queue;
+    return exec_queue;
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.vm.PagedAttentionKVCache", PagedAttentionKVCacheObj,
                                     AttentionKVCacheObj);
@@ -2826,7 +2863,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
             *rv = AttentionKVCache(std::move(n));
           })
       .def_method("vm.builtin.paged_attention_kv_cache_tensor_retrieve",
-                  &PagedAttentionKVCacheObj::RetrieveTensor);
+                  &PagedAttentionKVCacheObj::RetrieveTensor)
+      .def_method("vm.builtin.paged_attention_kv_cache_get_exec_queue",
+                  &PagedAttentionKVCacheObj::GetExecQueue);
 }
 
 }  // namespace vm
