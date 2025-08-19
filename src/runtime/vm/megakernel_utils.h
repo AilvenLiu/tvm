@@ -45,6 +45,7 @@ constexpr const int kSiluMultiplyTileTileSize = 128;
 constexpr const int kHiddenSize = 5120;
 constexpr const int kNumAttentionHeadsTP1 = 64;
 constexpr const int kIntermediateSizeTP1 = 25600;
+constexpr const int kDecodeMergeHeadsPerTile = 1;
 
 constexpr const int kNumSM = 148;
 constexpr const int kStaticTileSchedulerMaxTasks = 128;

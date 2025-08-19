@@ -35,8 +35,6 @@ from ..megakernel.test_layer import (
     SPLIT_O_PROJRCT,
     SPLIT_QKV_PROJECT,
     MegaKernel,
-    generate_event_tensor,
-    generate_exec_queue,
 )
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
 from .test_rmsnorm import get_rmsnorm_kernel
@@ -55,7 +53,7 @@ TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
 MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/qwen3-32b-mlc/lib_tp{TP_SIZE}.so"
-MEGA_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/mega_layer_lib_tp{TP_SIZE}.so"  # NOTE: update this path
+MEGA_LIB_PATH = f"/home/guanjiew/qwen3-mg-debug/mega_layer_lib_tp{TP_SIZE}.so"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
@@ -626,8 +624,8 @@ def get_qwen3_megakernel_mod():
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
-                        R.Tuple([R.Tensor(None, dtype="int32")] * 5),
-                        R.Tuple([R.Tensor(None, dtype="int32")] * 15),
++                       R.Tuple([R.Tensor(None, dtype="int32")] * 5 + [R.Prim(dtype="int64")]),
++                       R.Tuple([R.Tensor(None, dtype="int32")] * 17),
                     ],
                 )
                 kv_data_, kv_indptr, kv_indices_, kv_last_page_len, append_pos, rope_pos, attn_plan_results, etensors = (

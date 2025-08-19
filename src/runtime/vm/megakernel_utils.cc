@@ -136,7 +136,7 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   }
 
   if (split_kv) {
-    for (int n_idx = 0; n_idx < num_kv_heads; ++n_idx) {
+    for (int n_idx = 0; n_idx < num_qo_heads / kDecodeMergeHeadsPerTile; ++n_idx) {
       for (int m_idx = 0; m_idx < batch_size; ++m_idx) {
         f_push_task(m_idx, n_idx, -1, JobType::kDecodeMerge);
       }
@@ -215,7 +215,8 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
 // RNN State methods
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("megakernel.get_event_tensors_on_layer", GetEventTensorsOnLayer);
+  refl::GlobalDef().def("megakernel.get_event_tensors_on_layer", GetEventTensorsOnLayer)
+                   .def("megakernel.generate_exec_queue", GenerateExecQueue);
 });
 
 }  // namespace megakernel

@@ -19,7 +19,6 @@ from tvm.tirp.megakernel.rms_norm import RMSnormTile
 from tvm.tirp.megakernel.rope import RopeTile
 from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
-from tvm.tirp.megakernel.support import generate_event_tensor, generate_exec_queue
 
 from tvm.tirp.bench.utils import ProtonContext, bench
 
@@ -330,6 +329,7 @@ class MegaKernel:
                     pool = T.meta_var(Tp.PoolAllocator(buf.data))
                     self.device_init_all(pool)
                     self.class_init_all(pool)
+                    tmp = T.alloc_local([1], "int32", layout="default")
 
                     # initialize event tensors
                     evt_qkv_partial = T.meta_var(Semaphore(SPLIT_QKV_PROJECT * (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 
@@ -393,25 +393,15 @@ class MegaKernel:
                                 evt_decode.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
                         elif tile_scheduler.task_type == JobType.BATCH_DECODE_NO_SPLIT.value:
                             evt_decode.semaphore_wait(tile_scheduler.m_idx // rope_tile.m_tile, tile_scheduler.n_idx // rope_tile.h_tile) # wait for q rope
-                            evt_decode.semaphore_wait(tile_scheduler.m_idx // append_kv_tile.m_tile, tile_scheduler.n_idx // append_kv_tile.h_tile) # wait for append kv
                             decode_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, split_kv=False)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
-                                range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                                range_end = T.meta_var((tile_scheduler.n_idx+1) * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                                evt_o_proj.semaphore_notify(range_start)
-                                if range_end != range_start:
-                                    evt_o_proj.semaphore_notify(range_end)
-                        elif tile_scheduler.task_type == JobType.BATCH_DECODE_NO_SPLIT.value:
-                            evt_decode.semaphore_wait(tile_scheduler.m_idx // rope_tile.m_tile, tile_scheduler.n_idx // rope_tile.h_tile) # wait for q rope
-                            decode_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, split_kv=False)
-                            T.tvm_storage_sync("shared")
-                            if tid == 0:
-                                range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                                range_end = T.meta_var((tile_scheduler.n_idx+1) * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                                evt_o_proj.semaphore_notify(range_start)
-                                if range_end != range_start:
-                                    evt_o_proj.semaphore_notify(range_end)
+                                range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
+                                range_end = T.meta_var(((tile_scheduler.n_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1)// o_proj_tile.TILE_K)
+                                tmp[0] = range_start
+                                while tmp[0] <= range_end:
+                                    evt_o_proj.semaphore_notify(tmp[0])
+                                    tmp[0] += 1
                         elif tile_scheduler.task_type == JobType.BATCH_DECODE_SPLIT.value:
                             batch_idx = T.meta_var(request_indices_global[tile_scheduler.m_idx]) # original batch_idx
                             evt_decode.semaphore_wait(batch_idx // rope_tile.m_tile, tile_scheduler.n_idx // rope_tile.h_tile) # wait for q rope
@@ -420,15 +410,16 @@ class MegaKernel:
                             if tid == 0:
                                 evt_decode_merge.semaphore_notify(batch_idx, tile_scheduler.n_idx)
                         elif tile_scheduler.task_type == JobType.DECODE_MERGE.value:
-                            evt_decode_merge.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
+                            evt_decode_merge.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx * DecodeMergeTile.bdz // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
                             decode_merge_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
-                                range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                                range_end = T.meta_var((tile_scheduler.n_idx+1) * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                                evt_o_proj.semaphore_notify(range_start)
-                                if range_end != range_start:
-                                    evt_o_proj.semaphore_notify(range_end)
+                                range_start = T.meta_var(tile_scheduler.n_idx * DecodeMergeTile.bdz * HEAD_DIM // o_proj_tile.TILE_K)
+                                range_end = T.meta_var(((tile_scheduler.n_idx + 1) * DecodeMergeTile.bdz * HEAD_DIM - 1) // o_proj_tile.TILE_K)
+                                tmp[0] = range_start
+                                while tmp[0] <= range_end:
+                                    evt_o_proj.semaphore_notify(tmp[0])
+                                    tmp[0] += 1
                         elif tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
                             evt_o_proj.semaphore_wait(tile_scheduler.k_idx)
                             o_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
@@ -1286,6 +1277,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         )
 
         # static schedule
+        generate_exec_queue = tvm.get_global_func("megakernel.generate_exec_queue")
         exec_queue = generate_exec_queue(batch_size, tvm_arg_dict["new_batch_size"])
 
         # append_pos here is different from flashinfer
@@ -1321,7 +1313,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 tvm_arg_dict[f"etensor_down_proj_reduce_{i}"],
                 tvm_arg_dict[f"etensor_mlp_add_rms_norm_{i}"],
                 _,
-            ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"])
+            ) = tvm.get_global_func("megakernel.get_event_tensors_on_layer")(batch_size, tvm_arg_dict["o_indptr"])
 
         with target:
             iter = 0

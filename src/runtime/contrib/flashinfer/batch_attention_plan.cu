@@ -118,7 +118,7 @@ IntTuple BatchPrefillWithKVCachePlan(
   return IntTuple{plan_info_vec.begin(), plan_info_vec.end()};
 }
 
-Array<NDArray> BatchDecodeWithPagedKVCachePlan(
+Array<Any> BatchDecodeWithPagedKVCachePlan(
     NDArray float_workspace_buffer, NDArray int_workspace_buffer,
     NDArray page_locked_int_workspace_buffer, NDArray indptr, int64_t batch_size,
     int64_t num_qo_heads, int64_t num_kv_heads, int64_t page_size, bool enable_cuda_graph,
@@ -164,6 +164,7 @@ Array<NDArray> BatchDecodeWithPagedKVCachePlan(
 
   std::vector<int64_t> plan_info_vec = plan_info.ToVector();
   int64_t padded_batch_size = plan_info_vec[0];
+  int64_t split_kv = plan_info_vec[9];
   int64_t request_indices_offset = plan_info_vec[3];
   int64_t request_indices_size = padded_batch_size;
   int64_t kv_tile_indices_offset = plan_info_vec[4];
@@ -189,7 +190,7 @@ Array<NDArray> BatchDecodeWithPagedKVCachePlan(
   NDArray o_indptr_host =
       page_locked_int_workspace_buffer.CreateView({o_indptr_size}, dtype,
                                                   /*relative_byte_offset=*/o_inptr_offset);
-  return {request_indices, kv_tile_indices, kv_chunk_size_ptr, o_indptr_device, o_indptr_host};
+  return {request_indices, kv_tile_indices, kv_chunk_size_ptr, o_indptr_device, o_indptr_host, split_kv};
 }
 
 Array<Any> BatchPagedAttentionPlan(NDArray float_workspace_buffer, NDArray int_workspace_buffer,

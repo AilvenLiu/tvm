@@ -35,7 +35,7 @@ class KernelConfig:
     # global constant
     M_CLUSTER = 1
     N_CLUSTER = 1
-    WG_NUMBER = 4
+    WG_NUMBER = 2
     WARP_NUMBER = 4
     NUM_THREADS = (32 * WARP_NUMBER) * WG_NUMBER
     SM_NUMBER = 148
@@ -135,6 +135,37 @@ __forceinline__ __device__ void sync_warp() {{
     __syncwarp();
 }}
     """,
+    )
+
+def rsqrt(x):
+    return T.cuda.func_call(
+        "_rsqrt", x, source_code=f"""
+__forceinline__ __device__ float _rsqrt(float x) {{
+  float y;
+  asm volatile("rsqrt.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
+  return y;
+}}
+""", return_type="float32"
+    )
+
+def exp2(x):
+    return T.cuda.func_call(
+        "ptx_exp2", x, source_code=f"""
+    __forceinline__ __device__ float ptx_exp2(float x) {{
+  float y;
+  asm volatile("ex2.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
+  return y;
+}}
+""", return_type="float32"
+    )
+
+def silu(x):
+    return T.cuda.func_call(
+        "silu", x, source_code=f"""
+    __forceinline__ __device__ float silu(float x) {{
+  return x / (1.0f + __expf(-x));
+}}
+""", return_type="float32"
     )
 
 

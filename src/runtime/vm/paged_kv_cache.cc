@@ -1356,18 +1356,39 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       int o_proj_tile_k = (ceildiv(ceildiv(num_qo_heads_ * v_head_dim_, megakernel::kSplitOProject),
                                    megakernel::kGemmTileBlkK) *
                            megakernel::kGemmTileBlkK);
-      for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
-        for (int h = 0; h < num_kv_heads_; ++h) {
-          int range_start = (h * (num_qo_heads_ / num_kv_heads_) * v_head_dim_) / o_proj_tile_k;
-          int range_end =
-              ((h + 1) * (num_qo_heads_ / num_kv_heads_) * v_head_dim_ - 1) / o_proj_tile_k;
-          for (int i = range_start; i <= range_end; ++i) {
-            TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
-            TVM_FFI_ICHECK_LT(i, megakernel::kSplitOProject)
-                << "Index " << i << " out of bounds " << megakernel::kSplitOProject;
-            etensor_o_proj_host_.set(
-                layer_id * megakernel::kSplitOProject + i,
-                etensor_o_proj_host_[layer_id * megakernel::kSplitOProject + i] + cur_batch_size_);
+      int64_t split_kv = attn_plan_results_[5].cast<int64_t>();
+      if (split_kv) {
+        for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+          for (int h = 0; h < num_qo_heads_ / megakernel::kDecodeMergeHeadsPerTile; ++h) {
+            int range_start =
+                (h * megakernel::kDecodeMergeHeadsPerTile * v_head_dim_) / o_proj_tile_k;
+            int range_end =
+                ((h + 1) * megakernel::kDecodeMergeHeadsPerTile * v_head_dim_ - 1) / o_proj_tile_k;
+            for (int i = range_start; i <= range_end; ++i) {
+              TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
+              TVM_FFI_ICHECK_LT(i, megakernel::kSplitOProject)
+                  << "Index " << i << " out of bounds " << megakernel::kSplitOProject;
+              etensor_o_proj_host_.set(
+                  layer_id * megakernel::kSplitOProject + i,
+                  etensor_o_proj_host_[layer_id * megakernel::kSplitOProject + i] + cur_batch_size_);
+            }
+          }
+        }
+      } else {
+        for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+          for (int h = 0; h < num_kv_heads_; ++h) {
+            int range_start =
+                (h * (num_qo_heads_ / num_kv_heads_) * v_head_dim_) / o_proj_tile_k;
+            int range_end =
+                ((h + 1) * (num_qo_heads_ / num_kv_heads_) * v_head_dim_ - 1) / o_proj_tile_k;
+            for (int i = range_start; i <= range_end; ++i) {
+              TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
+              TVM_FFI_ICHECK_LT(i, megakernel::kSplitOProject)
+                  << "Index " << i << " out of bounds " << megakernel::kSplitOProject;
+              etensor_o_proj_host_.set(
+                  layer_id * megakernel::kSplitOProject + i,
+                  etensor_o_proj_host_[layer_id * megakernel::kSplitOProject + i] + cur_batch_size_);
+            }
           }
         }
       }
