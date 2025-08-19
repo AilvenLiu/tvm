@@ -290,7 +290,7 @@ class MPMCQueue:
             self.head.access_ptr("rw", offset=self.head.offset_of_p([T.int32(0)])), 1
         )
         self.masked_pos = self.head_r & self.mask
-        T.ptx.cp_async("int32", shared_ptr, 0, self.tasks.ptr_to([self.masked_pos, 0]), 0, 16)
+        T.ptx.cp_async(shared_ptr, self.tasks.ptr_to([self.masked_pos, 0]), 16)
         T.ptx.cp_async.commit_group()
 
 

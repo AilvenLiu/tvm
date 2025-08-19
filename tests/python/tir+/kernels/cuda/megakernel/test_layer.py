@@ -329,7 +329,6 @@ class MegaKernel:
                     pool = T.meta_var(Tp.PoolAllocator(buf.data))
                     self.device_init_all(pool)
                     self.class_init_all(pool)
-                    tmp = T.alloc_local([1], "int32", layout="default")
 
                     # initialize event tensors
                     evt_qkv_partial = T.meta_var(Semaphore(SPLIT_QKV_PROJECT * (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 
@@ -398,10 +397,8 @@ class MegaKernel:
                             if tid == 0:
                                 range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
                                 range_end = T.meta_var(((tile_scheduler.n_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1)// o_proj_tile.TILE_K)
-                                tmp[0] = range_start
-                                while tmp[0] <= range_end:
-                                    evt_o_proj.semaphore_notify(tmp[0])
-                                    tmp[0] += 1
+                                for kr in T.serial(range_end - range_start + 1):
+                                    evt_o_proj.semaphore_notify(range_start + kr)
                         elif tile_scheduler.task_type == JobType.BATCH_DECODE_SPLIT.value:
                             batch_idx = T.meta_var(request_indices_global[tile_scheduler.m_idx]) # original batch_idx
                             evt_decode.semaphore_wait(batch_idx // rope_tile.m_tile, tile_scheduler.n_idx // rope_tile.h_tile) # wait for q rope
@@ -416,10 +413,8 @@ class MegaKernel:
                             if tid == 0:
                                 range_start = T.meta_var(tile_scheduler.n_idx * DecodeMergeTile.bdz * HEAD_DIM // o_proj_tile.TILE_K)
                                 range_end = T.meta_var(((tile_scheduler.n_idx + 1) * DecodeMergeTile.bdz * HEAD_DIM - 1) // o_proj_tile.TILE_K)
-                                tmp[0] = range_start
-                                while tmp[0] <= range_end:
-                                    evt_o_proj.semaphore_notify(tmp[0])
-                                    tmp[0] += 1
+                                for kr in T.serial(range_end - range_start + 1):
+                                    evt_o_proj.semaphore_notify(range_start + kr)
                         elif tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
                             evt_o_proj.semaphore_wait(tile_scheduler.k_idx)
                             o_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
@@ -707,7 +702,7 @@ class MegaKernel:
                 lane_id = T.thread_id([32], parent="warp")
                 profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
                 profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
-                rank = T.nvshmem.my_pe()
+
                 with T.cta():
                     wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
                     tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
@@ -738,6 +733,7 @@ class MegaKernel:
                     # initialize tile scheduler
                     tile_scheduler = T.meta_var(DynamicTileScheduler(queue_tasks, queue_head, queue_tail, pool_allocator=pool))
                     tile_scheduler.init(warp_id)
+                    
                     while tile_scheduler.valid():
                         if tile_scheduler.task_type == JobType.GEMM_QKV_PROJ.value:
                             qkv_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
@@ -891,8 +887,8 @@ class MegaKernel:
                         elif tile_scheduler.task_type == JobType.BATCH_DECODE_NO_SPLIT.value:
                             T.tvm_storage_sync("shared")
                             decode_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, split_kv=False)
-                            range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                            range_end = T.meta_var((tile_scheduler.n_idx+1) * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_end = T.meta_var(((tile_scheduler.n_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                             tile_scheduler.push_tasks_along_dim(
                                 JobType.GEMM_O_PROJ.value,
                                 0,
@@ -903,32 +899,35 @@ class MegaKernel:
                                 warp_id,
                                 lane_id,
                                 evt_o_proj,
-                                range_start
+                                range_start,
                             )
-                            if range_end != range_start:
+                            for kr in T.serial(range_end - range_start):
                                 tile_scheduler.push_tasks_along_dim(
                                     JobType.GEMM_O_PROJ.value,
                                     0,
                                     0,
-                                    range_end,
+                                    range_start + 1 + kr,
                                     ceildiv(HIDDEN_SIZE, GemmTile.BLK_N),
                                     1,
                                     warp_id,
                                     lane_id,
                                     evt_o_proj,
-                                    range_end,
-                                    use_barrier=False,
+                                    range_start + 1 + kr,
+                                    use_barrier=False
                                 )
                         elif tile_scheduler.task_type == JobType.BATCH_DECODE_SPLIT.value:
                             T.tvm_storage_sync("shared")
                             batch_idx = T.meta_var(request_indices_global[tile_scheduler.m_idx]) # original batch_idx
                             decode_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, split_kv=True)
-                            tile_scheduler.push_task(
+                            tile_scheduler.push_tasks_along_dim(
                                 JobType.DECODE_MERGE.value,
                                 batch_idx, 
-                                tile_scheduler.n_idx,
+                                tile_scheduler.n_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) // DecodeMergeTile.bdz,
                                 0,
+                                (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) // DecodeMergeTile.bdz,
+                                1,
                                 warp_id,
+                                lane_id,
                                 evt_decode_merge,
                                 batch_idx,
                                 tile_scheduler.n_idx,
@@ -936,8 +935,8 @@ class MegaKernel:
                         elif tile_scheduler.task_type == JobType.DECODE_MERGE.value:
                             T.tvm_storage_sync("shared")
                             decode_merge_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                            range_end = T.meta_var((tile_scheduler.n_idx+1) * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_start = T.meta_var(tile_scheduler.n_idx * DecodeMergeTile.bdz * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_end = T.meta_var(((tile_scheduler.n_idx + 1) * DecodeMergeTile.bdz * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                             tile_scheduler.push_tasks_along_dim(
                                 JobType.GEMM_O_PROJ.value,
                                 0,
@@ -950,18 +949,18 @@ class MegaKernel:
                                 evt_o_proj,
                                 range_start,
                             )
-                            if range_end != range_start:
+                            for kr in T.serial(range_end - range_start):
                                 tile_scheduler.push_tasks_along_dim(
                                     JobType.GEMM_O_PROJ.value,
                                     0,
                                     0,
-                                    range_end,
+                                    range_start + 1 + kr,
                                     ceildiv(HIDDEN_SIZE, GemmTile.BLK_N),
                                     1,
                                     warp_id,
                                     lane_id,
                                     evt_o_proj,
-                                    range_end,
+                                    range_start + 1 + kr,
                                     use_barrier=False,
                                 )
                         elif tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
@@ -1325,7 +1324,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 _,
                 tvm_arg_dict[f"etensor_mlp_add_rms_norm_{i}"],
                 _,
-            ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"], 1)
+            ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"], batch_size != tvm_arg_dict["new_batch_size"], 1)
 
         with target:
             iter = 0
@@ -1471,7 +1470,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 _,
                 tvm_arg_dict[f"etensor_mlp_add_rms_norm_{i}"],
                 tvm_arg_dict[f"etensor_end_{i}"],
-            ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"], 1)
+            ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"], batch_size != tvm_arg_dict["new_batch_size"], 1)
             tvm_arg_dict[f"queue_tasks_{i}"] = tvm.nd.array(exec_queue.tasks, DEV)
             tvm_arg_dict[f"queue_head_{i}"] = tvm.nd.array(exec_queue.head, DEV)
             tvm_arg_dict[f"queue_tail_{i}"] = tvm.nd.array(exec_queue.tail, DEV)

@@ -25,6 +25,7 @@ from tvm.tirp.megakernel.gemm import GemmTile
 from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
 from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
+from tvm.tirp.megakernel.decode_merge import DecodeMergeTile
 
 # Paged kv-cache config
 KV_LAYOUT = "HND"
@@ -216,7 +217,7 @@ MAX_PAGE_NUM = 8192
 PAGE_SIZE = 16
 
 
-def generate_event_tensor(batch_size, o_indptr, WORLD_SIZE):
+def generate_event_tensor(batch_size, o_indptr, split_kv, WORLD_SIZE):
     """The event tensor generation function for layer testing use."""
     INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE // WORLD_SIZE
     NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS // WORLD_SIZE
@@ -255,15 +256,24 @@ def generate_event_tensor(batch_size, o_indptr, WORLD_SIZE):
         )
         * GemmTile.BLK_K
     )
-    for h in range(NUM_KEY_VALUE_HEADS):
-        range_start = h * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
-        range_end = (
-            (h + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1
-        ) // o_proj_tile_k
-        for i in range(range_start, range_end + 1):
-            etensor_o_proj[i] += 1
-    etensor_o_proj *= batch_size
-    etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
+    if split_kv:
+        for h in range(NUM_ATTENTION_HEADS // DecodeMergeTile.bdz):
+            range_start = h * DecodeMergeTile.bdz * HEAD_DIM // o_proj_tile_k
+            range_end = ((h + 1) * DecodeMergeTile.bdz * HEAD_DIM - 1) // o_proj_tile_k
+            for i in range(range_start, range_end + 1):
+                etensor_o_proj[i] += 1
+        etensor_o_proj *= batch_size
+        etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
+    else:
+        for h in range(NUM_KEY_VALUE_HEADS):
+            range_start = h * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
+            range_end = (
+                (h + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1
+            ) // o_proj_tile_k
+            for i in range(range_start, range_end + 1):
+                etensor_o_proj[i] += 1
+        etensor_o_proj *= batch_size
+        etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
     etensor_o_partial = tvm.nd.array(
         np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV
     )
