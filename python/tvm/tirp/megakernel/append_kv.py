@@ -37,6 +37,7 @@ class AppendKVTile(Tile):
             ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads), self.batch_size
         )
         self.m_tile = ceildiv(self.batch_size, self.m_split)
+        self.m_split = ceildiv(self.batch_size, self.m_tile)
         self.h_tile = 1
         assert kv_cache_tvm.shape[1] == 2
         assert kv_cache_tvm.shape[2] == self.kv_heads

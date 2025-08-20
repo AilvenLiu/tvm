@@ -1726,7 +1726,7 @@ if __name__ == "__main__":
     src, mod_static = get_source(mega_kernel_static)
     src, mod_dynamic = get_source(mega_kernel_dynamic)
 
-    for batch_size in [1]:
+    for batch_size in [1, 3, 5, 7, 15, 31, 63, 127]:
 
         print(f"batch_size: {batch_size}", flush=True)
         test(batch_size, mod_static, mod_dynamic)

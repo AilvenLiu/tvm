@@ -101,6 +101,9 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
 
   int32_t m_split = std::min(batch_size, ceildiv(kNumSM, (num_qo_heads + 2 * num_kv_heads) *
                                                              head_dim / kSplitKReduceTileNUnit));
+  int32_t m_tile = ceildiv(batch_size, m_split);
+  m_split = ceildiv(batch_size, m_tile);
+
   int32_t n_tile_qkv_proj_reduce =
       (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split)) * kSplitKReduceTileNUnit);
   for (int m_idx = 0; m_idx < m_split; ++m_idx) {
@@ -162,6 +165,8 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   int32_t n_tile_o_proj_reduce =
       (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split_o_proj_reduce)) *
        kSplitKReduceTileNUnit);
+  int32_t m_tile_o_reduce = ceildiv(batch_size, m_split_o_proj_reduce);
+  m_split_o_proj_reduce = ceildiv(batch_size, m_tile_o_reduce);
   for (int n_idx = 0; n_idx < ceildiv(kHiddenSize, n_tile_o_proj_reduce); ++n_idx) {
     for (int m_idx = 0; m_idx < m_split_o_proj_reduce; ++m_idx) {
       f_push_task(m_idx, n_idx, 0, JobType::kGemmOReduce);
@@ -200,6 +205,8 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   int32_t n_tile_down_proj_reduce =
       (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split_down_proj_reduce)) *
        kSplitKReduceTileNUnit);
+  int32_t m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce);
+  m_split_down_proj_reduce = ceildiv(batch_size, m_tile_down_proj_reduce);
   for (int m_idx = 0; m_idx < m_split_down_proj_reduce; ++m_idx) {
     for (int n_idx = 0; n_idx < ceildiv(kHiddenSize, n_tile_down_proj_reduce); ++n_idx) {
       f_push_task(m_idx, n_idx, 0, JobType::kDownProjReduce);

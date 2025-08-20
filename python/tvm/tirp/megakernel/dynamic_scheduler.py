@@ -24,13 +24,31 @@ __forceinline__ __device__ void sts_v4(int32_t v1, int32_t v2, int32_t v3, int32
 """
 
 stg_v4 = """
-__forceinline__ __device__ void stg_v4(int32_t v1, int32_t v2, int32_t v3, int32_t v4, void* dst_addr) {
+__forceinline__ __device__ void stg_v4(int32_t v1, int32_t v2, int32_t v3, int32_t v4, void* dst_addr, int32_t pe) {
+    if (pe >= 0) {
+        void* ptr = nvshmem_ptr(dst_addr, pe);
+        asm volatile("st.global.release.sys.v4.b32 [%0], {%1, %2, %3, %4};"
+                     :
+                     : "l"(ptr), "r"(v1), "r"(v2), "r"(v3), "r"(v4)
+                     : "memory");
+    } else {
+        asm volatile("st.global.release.gpu.v4.b32 [%0], {%1, %2, %3, %4};"
+                     :
+                     : "l"(dst_addr), "r"(v1), "r"(v2), "r"(v3), "r"(v4)
+                     : "memory");
+    }
+}
+"""
+
+stg_v4_local = """
+__forceinline__ __device__ void stg_v4(int32_t v1, int32_t v2, int32_t v3, int32_t v4, void* dst_addr, int32_t pe) {
     asm volatile("st.global.release.gpu.v4.b32 [%0], {%1, %2, %3, %4};"
                  :
                  : "l"(dst_addr), "r"(v1), "r"(v2), "r"(v3), "r"(v4)
                  : "memory");
 }
 """
+
 
 lds_v4 = """
 __forceinline__ __device__ void lds_v4(void* src_addr, int32_t* v1, int32_t* v2, int32_t* v3, int32_t* v4) {
@@ -48,20 +66,58 @@ __forceinline__ __device__ int32_t shfl_sync(int32_t val, int32_t src_lane) {
 }
 """
 
+atomic_add_system = """
+__forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t value, int32_t pe) {
+    if (pe >= 0) {
+        void* ptr = nvshmem_ptr(addr, pe);
+        return atomicAdd_system((int32_t*)ptr, value);
+    }
+    else {
+        return atomicAdd(addr, value);
+    }
+}
+"""
+
+atomic_add = """
+__forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t value, int32_t pe) {
+    return atomicAdd(addr, value);
+}
+"""
+
 
 class Semaphore:
-    def __init__(self, cnt, buffer, decrement=False):
+    def __init__(self, cnt, buffer, decrement=False, use_nvshmem=False):
         self.cnt = cnt
         self.sem = buffer
         self.state = T.local_cell("int32", name="semaphore_state")
         self.decrement = decrement
+        if use_nvshmem:
+            self.stg_v4 = stg_v4
+            self.atomic_add = atomic_add_system
+        else:
+            self.stg_v4 = stg_v4_local
+            self.atomic_add = atomic_add
 
     @T.macro
-    def semaphore_notify(self, *coord):
+    def semaphore_notify(self, *coord, rank=-1):
         if not self.decrement:
-            self.state = T.cuda.atomic_add(self.sem.ptr_to(coord), 1) + 1
+            self.state = T.cuda.func_call(
+                "atomic_add_system",
+                self.sem.ptr_to(coord),
+                1,
+                rank,
+                source_code=self.atomic_add,
+                return_type="int32",
+            ) + 1
         else:
-            self.state = T.cuda.atomic_add(self.sem.ptr_to(coord), -1) - 1
+            self.state = T.cuda.func_call(
+                "atomic_add_system",
+                self.sem.ptr_to(coord),
+                -1,
+                rank,
+                source_code=self.atomic_add,
+                return_type="int32",
+            ) - 1
 
     def is_triggered(self):
         if not self.decrement:
@@ -88,6 +144,7 @@ class MPMCQueue:
         head: T.Buffer,
         tail: T.Buffer,
         pool_allocator,
+        use_nvshmem=False,
     ):
         # TODO: we currently assume that the queue is infinitely large.
         if capacity & (capacity - 1):
@@ -102,12 +159,23 @@ class MPMCQueue:
         self.tail_smem = pool_allocator.alloc((1,), "int32").buffer
         self.masked_pos = T.local_cell(dtype="int32", name="masked_pos")
         self.idx = T.local_cell(dtype="int32", name="idx")
+        if use_nvshmem:
+            self.stg_v4 = stg_v4
+            self.atomic_add = atomic_add_system
+        else:
+            self.stg_v4 = stg_v4_local
+            self.atomic_add = atomic_add
 
     @T.macro
-    def enqueue(self, task_type, m_idx, n_idx, k_idx):
+    def enqueue(self, task_type, m_idx, n_idx, k_idx, rank):
 
-        self.tail_r = T.cuda.atomic_add(
-            self.tail.access_ptr("rw", offset=self.tail.offset_of_p([T.int32(0)])), 1
+        self.tail_r = T.cuda.func_call(
+            "atomic_add_system",
+            self.tail.access_ptr("rw", offset=self.tail.offset_of_p([T.int32(0)])),
+            1,
+            rank,
+            source_code=self.atomic_add,
+            return_type="int32",
         )
         self.masked_pos = self.tail_r & self.mask
         T.cuda.func_call(
@@ -117,17 +185,23 @@ class MPMCQueue:
             n_idx,
             k_idx,
             self.tasks.access_ptr("rw", offset=self.tasks.offset_of_p([self.masked_pos, 0])),
-            source_code=stg_v4,
+            rank,
+            source_code=self.stg_v4,
         )
 
     @T.macro
     def batch_enqueue_along_dim_warp(
-        self, task_type, m_idx, n_idx, k_idx, enqueue_num, extend_dim, lane_id
+        self, task_type, m_idx, n_idx, k_idx, enqueue_num, extend_dim, lane_id, rank
     ):
 
         if lane_id == 0:
-            self.tail_r = T.cuda.atomic_add(
-                self.tail.access_ptr("rw", offset=self.tail.offset_of_p([T.int32(0)])), enqueue_num
+            self.tail_r = T.cuda.func_call(
+                "atomic_add_system",
+                self.tail.access_ptr("rw", offset=self.tail.offset_of_p([T.int32(0)])),
+                enqueue_num,
+                rank,
+                source_code=self.atomic_add,
+                return_type="int32",
             )
         self.tail_r = T.cuda.func_call(
             "shfl_sync",
@@ -150,7 +224,8 @@ class MPMCQueue:
                     self.tasks.access_ptr(
                         "rw", offset=self.tasks.offset_of_p([self.masked_pos, 0])
                     ),
-                    source_code=stg_v4,
+                    rank,
+                    source_code=self.stg_v4,
                 )
             elif extend_dim == 1:
                 T.cuda.func_call(
@@ -162,7 +237,8 @@ class MPMCQueue:
                     self.tasks.access_ptr(
                         "rw", offset=self.tasks.offset_of_p([self.masked_pos, 0])
                     ),
-                    source_code=stg_v4,
+                    rank,
+                    source_code=self.stg_v4,
                 )
             elif extend_dim == 2:
                 T.cuda.func_call(
@@ -174,18 +250,24 @@ class MPMCQueue:
                     self.tasks.access_ptr(
                         "rw", offset=self.tasks.offset_of_p([self.masked_pos, 0])
                     ),
-                    source_code=stg_v4,
+                    rank,
+                    source_code=self.stg_v4,
                 )
             self.idx += 32
 
     @T.macro
     def batch_enqueue_along_dim_wg(
-        self, task_type, m_idx, n_idx, k_idx, enqueue_num, extend_dim, thread_id_in_wg
+        self, task_type, m_idx, n_idx, k_idx, enqueue_num, extend_dim, thread_id_in_wg, rank
     ):
 
         if thread_id_in_wg == 0:
-            self.tail_smem[0] = T.cuda.atomic_add(
-                self.tail.access_ptr("rw", offset=self.tail.offset_of_p([T.int32(0)])), enqueue_num
+            self.tail_smem[0] = T.cuda.func_call(
+                "atomic_add_system",
+                self.tail.access_ptr("rw", offset=self.tail.offset_of_p([T.int32(0)])),
+                enqueue_num,
+                rank,
+                source_code=self.atomic_add,
+                return_type="int32",
             )
         T.ptx.bar.sync(13, 128)
         self.tail_r = self.tail_smem[0]
@@ -202,7 +284,8 @@ class MPMCQueue:
                     self.tasks.access_ptr(
                         "rw", offset=self.tasks.offset_of_p([self.masked_pos, 0])
                     ),
-                    source_code=stg_v4,
+                    rank,
+                    source_code=self.stg_v4,
                 )
             elif extend_dim == 1:
                 T.cuda.func_call(
@@ -214,7 +297,8 @@ class MPMCQueue:
                     self.tasks.access_ptr(
                         "rw", offset=self.tasks.offset_of_p([self.masked_pos, 0])
                     ),
-                    source_code=stg_v4,
+                    rank,
+                    source_code=self.stg_v4,
                 )
             elif extend_dim == 2:
                 T.cuda.func_call(
@@ -226,16 +310,22 @@ class MPMCQueue:
                     self.tasks.access_ptr(
                         "rw", offset=self.tasks.offset_of_p([self.masked_pos, 0])
                     ),
-                    source_code=stg_v4,
+                    rank,
+                    source_code=self.stg_v4,
                 )
             self.idx += 128
 
     @T.macro
-    def batch_enqueue_warp(self, task_type, m_idx, n_idx, k_idx, enqueue_num, lane_id):
+    def batch_enqueue_warp(self, task_type, m_idx, n_idx, k_idx, enqueue_num, lane_id, rank):
 
         if lane_id == 0:
-            self.tail_r = T.cuda.atomic_add(
-                self.tail.access_ptr("rw", offset=self.tail.offset_of_p([T.int32(0)])), enqueue_num
+            self.head_r = T.cuda.func_call(
+                "atomic_add_system",
+                self.head.access_ptr("rw", offset=self.head.offset_of_p([T.int32(0)])),
+                enqueue_num,
+                rank,
+                source_code=self.atomic_add,
+                return_type="int32",
             )
         self.tail_r = T.cuda.func_call(
             "shfl_sync",
@@ -252,7 +342,8 @@ class MPMCQueue:
             n_idx,
             k_idx,
             self.tasks.access_ptr("rw", offset=self.tasks.offset_of_p([self.masked_pos, 0])),
-            source_code=stg_v4,
+            rank,
+            source_code=self.stg_v4,
         )
 
     @T.macro
@@ -307,6 +398,7 @@ class DynamicTileScheduler:
         head: T.Buffer,
         tail: T.Buffer,
         pool_allocator,
+        use_nvshmem=False,
     ):
         self.queue = MPMCQueue(
             capacity=self.MAX_TASKS,
@@ -314,6 +406,7 @@ class DynamicTileScheduler:
             head=head,
             tail=tail,
             pool_allocator=pool_allocator,
+            use_nvshmem=use_nvshmem,
         )
         self.task_type = T.local_cell(dtype="int32", name="task_type")
         self.m_idx = T.local_cell(dtype="int32", name="m_idx")
@@ -327,7 +420,7 @@ class DynamicTileScheduler:
         self.p2c_enqueue_barrier = SchedulerBarrier(pool_allocator, is_p2c=True)
         self.c2p_enqueue_barrier = SchedulerBarrier(pool_allocator, is_p2c=False)
         self.has_prefetched = T.local_cell(dtype="bool", name="has_prefetched")
-        self.semaphore_state = pool_allocator.alloc((1,), "int32").buffer
+        self.semaphore_state = pool_allocator.alloc((16,), "int32").buffer
 
     @T.macro
     def _dequeue_and_store_packed(self):
@@ -392,16 +485,16 @@ class DynamicTileScheduler:
     # block-level operation
     @T.macro
     def push_task(
-        self, task_type, m_idx, n_idx, k_idx, warp_id, semaphore, *coord, use_barrier=True
+        self, task_type, m_idx, n_idx, k_idx, warp_id, semaphore, *coord, use_barrier=True, rank=-1
     ):
         if warp_id == self.enqueue_warp:
             if T.ptx.elect_sync():
                 if use_barrier:
                     self.p2c_enqueue_barrier.wait(0, self.enqueue_phase)
                     self.c2p_enqueue_barrier.arrive()
-                semaphore.semaphore_notify(*coord)
+                semaphore.semaphore_notify(*coord, rank=rank)
                 if semaphore.is_triggered():
-                    self.queue.enqueue(task_type, m_idx, n_idx, k_idx)
+                    self.queue.enqueue(task_type, m_idx, n_idx, k_idx, rank)
         elif use_barrier:
             self.c2p_enqueue_barrier.wait(0, self.enqueue_phase)
             self.p2c_enqueue_barrier.arrive()
@@ -423,6 +516,7 @@ class DynamicTileScheduler:
         semaphore,
         *coord,
         use_barrier=True,
+        rank=-1,
     ):
         # theoretically we can define lane_id here to avoid passing it as an argument
         # but this has bug now
@@ -431,7 +525,7 @@ class DynamicTileScheduler:
                 if use_barrier:
                     self.p2c_enqueue_barrier.wait(0, self.enqueue_phase)
                     self.c2p_enqueue_barrier.arrive()
-                semaphore.semaphore_notify(*coord)
+                semaphore.semaphore_notify(*coord, rank=rank)
             semaphore.state = T.cuda.func_call(
                 "shfl_sync",
                 semaphore.state,
@@ -440,7 +534,7 @@ class DynamicTileScheduler:
                 return_type="int32",
             )
             if semaphore.is_triggered():
-                self.queue.batch_enqueue_warp(task_type, m_idx, n_idx, k_idx, enqueue_num, lane_id)
+                self.queue.batch_enqueue_warp(task_type, m_idx, n_idx, k_idx, enqueue_num, lane_id, rank)
         elif use_barrier:
             self.c2p_enqueue_barrier.wait(0, self.enqueue_phase)
             self.p2c_enqueue_barrier.arrive()
@@ -463,13 +557,14 @@ class DynamicTileScheduler:
         semaphore,
         *coord,
         use_barrier=True,
+        rank=-1,
     ):
         if warp_id == self.enqueue_warp:
             if T.ptx.elect_sync():
                 if use_barrier:
                     self.p2c_enqueue_barrier.wait(0, self.enqueue_phase)
                     self.c2p_enqueue_barrier.arrive()
-                semaphore.semaphore_notify(*coord)
+                semaphore.semaphore_notify(*coord, rank=rank)
             semaphore.state = T.cuda.func_call(
                 "shfl_sync",
                 semaphore.state,
@@ -479,7 +574,7 @@ class DynamicTileScheduler:
             )
             if semaphore.is_triggered():
                 self.queue.batch_enqueue_along_dim_warp(
-                    task_type, m_idx, n_idx, k_idx, enqueue_num, extend_dim, lane_id
+                    task_type, m_idx, n_idx, k_idx, enqueue_num, extend_dim, lane_id, rank
                 )
         elif use_barrier:
             self.c2p_enqueue_barrier.wait(0, self.enqueue_phase)
@@ -501,13 +596,14 @@ class DynamicTileScheduler:
         semaphore,
         *coord,
         use_barrier=True,
+        rank=-1,
     ):
         if warp_id == self.enqueue_warp:
             if T.ptx.elect_sync():
                 if use_barrier:
                     self.p2c_enqueue_barrier.wait(0, self.enqueue_phase)
                     self.c2p_enqueue_barrier.arrive()
-                semaphore.semaphore_notify(*coord)
+                semaphore.semaphore_notify(*coord, rank=rank)
                 self.semaphore_state[0] = semaphore.state
         elif use_barrier:
             self.c2p_enqueue_barrier.wait(0, self.enqueue_phase)
@@ -517,10 +613,51 @@ class DynamicTileScheduler:
             semaphore.state = self.semaphore_state[0]
             if semaphore.is_triggered():
                 self.queue.batch_enqueue_along_dim_wg(
-                    task_type, m_idx, n_idx, k_idx, enqueue_num, extend_dim, warp_id * 32 + lane_id
+                    task_type, m_idx, n_idx, k_idx, enqueue_num, extend_dim, warp_id * 32 + lane_id, rank
                 )
         if use_barrier:
             self.enqueue_phase = self.enqueue_phase ^ 1
+
+
+    @T.macro
+    def push_tasks_along_dim_wg_with_extend_rank(
+        self,
+        task_type,
+        m_idx,
+        n_idx,
+        k_idx,
+        enqueue_num,
+        extend_dim,
+        warp_id,
+        lane_id,
+        semaphore,
+        get_rank_map,
+        rank_range,
+        *coord,
+        use_barrier=True,
+    ):
+        if warp_id == self.enqueue_warp:
+            if use_barrier:
+                if T.ptx.elect_sync():
+                    self.p2c_enqueue_barrier.wait(0, self.enqueue_phase)
+                    self.c2p_enqueue_barrier.arrive()
+            if lane_id < rank_range:
+                semaphore.semaphore_notify(*coord, rank=get_rank_map(lane_id))
+                self.semaphore_state[lane_id] = semaphore.state
+        elif use_barrier:
+            self.c2p_enqueue_barrier.wait(0, self.enqueue_phase)
+            self.p2c_enqueue_barrier.arrive()
+        if warp_id < 8: # here only supports TP <= 8
+            T.ptx.bar.sync(13, 256)
+            if warp_id < rank_range:
+                semaphore.state = self.semaphore_state[get_rank_map(warp_id)]
+                if semaphore.is_triggered():
+                    self.queue.batch_enqueue_along_dim_warp(
+                        task_type, m_idx, n_idx, k_idx, enqueue_num, extend_dim, lane_id, get_rank_map(warp_id)
+                    )
+        if use_barrier:
+            self.enqueue_phase = self.enqueue_phase ^ 1
+
 
     @T.macro
     def push_tasks_along_dim(
@@ -536,6 +673,7 @@ class DynamicTileScheduler:
         semaphore,
         *coord,
         use_barrier=True,
+        rank=-1,
     ):
         if enqueue_num <= 32:
             self.push_tasks_along_dim_warp(
@@ -550,6 +688,7 @@ class DynamicTileScheduler:
                 semaphore,
                 *coord,
                 use_barrier=use_barrier,
+                rank=rank,
             )
         else:
             self.push_tasks_along_dim_wg(
@@ -564,6 +703,7 @@ class DynamicTileScheduler:
                 semaphore,
                 *coord,
                 use_barrier=use_barrier,
+                rank=rank,
             )
 
     def valid(self):

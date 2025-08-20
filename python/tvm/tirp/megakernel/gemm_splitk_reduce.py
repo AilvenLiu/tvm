@@ -19,6 +19,7 @@ class SplitKReduceTile(Tile):
         self.dtype = output.dtype
         self.M_split = T.min(ceildiv(KernelConfig.SM_NUMBER, self.N // self.N_UNIT), self.M)
         self.M_TILE = ceildiv(self.M, self.M_split)
+        self.M_split = ceildiv(self.M, self.M_TILE)
         self.N_TILE = self.N_UNIT
 
     def init(self, pool_allocator):

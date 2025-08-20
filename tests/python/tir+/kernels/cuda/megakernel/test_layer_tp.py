@@ -512,6 +512,9 @@ class MegaKernel:
     def get_func_dynamic(self):
         from tvm.tirp.megakernel.dynamic_scheduler import Semaphore
 
+        def get_rank_map(idx):
+            return idx
+
         # fmt: off
         @T.prim_func(tirp=True)
         def mega_kernel(
@@ -551,10 +554,12 @@ class MegaKernel:
             o_tmp_ptr: T.handle, # intermediate
             lse_tmp_ptr: T.handle, # intermediate
             partial_o_ptr: T.handle, # intermediate
+            before_o_allreduce_ptr: T.handle, # intermediate
             hidden_state_attn_mlp_ptr: T.handle, # intermediate
             out_gate_up_proj_ptr: T.handle, # intermediate
             out_silu_multiply_ptr: T.handle, # intermediate
             partial_sum_down_proj_ptr: T.handle, # intermediate
+            before_down_proj_allreduce_ptr: T.handle, # intermediate
             
             # event tensor
             etensor_qkv_partial_ptr: T.handle, 
@@ -565,11 +570,13 @@ class MegaKernel:
             etensor_decode_merge_ptr: T.handle,
             etensor_o_proj_ptr: T.handle, 
             etensor_o_partial_ptr: T.handle, 
+            etensor_o_allreduce_ptr: T.handle,
             etensor_attn_add_rms_ptr: T.handle,
             etensor_attn_mlp_ptr: T.handle,
             etensor_gate_up_proj_ptr: T.handle,
             etensor_down_proj_ptr: T.handle,
             etensor_down_proj_reduce_ptr: T.handle,
+            etensor_down_proj_allreduce_ptr: T.handle,
             etensor_mlp_add_rms_ptr: T.handle,
             etensor_end: T.Buffer((1, ), "int32", offset_factor=1),
 
@@ -637,6 +644,8 @@ class MegaKernel:
                                     "float32", scope="global", layout="default")
             partial_o_global = T.match_buffer(partial_o_ptr, [SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE], 
                                     "float32", scope="global", layout="default")
+            before_o_allreduce_global = T.match_buffer(before_o_allreduce_ptr, [batch_size, HIDDEN_SIZE], 
+                                    "float16", scope="global", layout="default")
             hidden_state_attn_mlp_global = T.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, HIDDEN_SIZE], 
                                     "float16", scope="global", layout="default")
             out_gate_up_proj_global = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE * 2], 
@@ -645,6 +654,8 @@ class MegaKernel:
                                   "float16", scope="global", layout="default")
             partial_sum_down_proj_global = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE], 
                                   "float32", layout="default")
+            before_down_proj_allreduce_global = T.match_buffer(before_down_proj_allreduce_ptr, [batch_size, HIDDEN_SIZE], 
+                                  "float16", scope="global", layout="default")
 
             # event tensor
             etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
@@ -662,6 +673,8 @@ class MegaKernel:
             etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [SPLIT_O_PROJRCT], "int32", scope="global", layout="default", offset_factor=1)
             etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)], 
                                     "int32", scope="global", layout="default", offset_factor=1)
+            etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], 
+                                                        "int32", scope="global", layout="default", offset_factor=1)
             etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
             etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", layout="default", offset_factor=1)
             etensor_gate_up_proj_global = T.match_buffer(etensor_gate_up_proj_ptr, [INTERMEDIATE_SIZE // GemmTile.BLK_N], 
@@ -670,6 +683,8 @@ class MegaKernel:
                                     "int32", scope="global", layout="default", offset_factor=1)
             etensor_down_proj_reduce_global = T.match_buffer(etensor_down_proj_reduce_ptr, [HIDDEN_SIZE // GemmTile.BLK_N],
                                     "int32", scope="global", layout="default", offset_factor=1)
+            etensor_down_proj_allreduce_global = T.match_buffer(etensor_down_proj_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], 
+                                                                "int32", scope="global", layout="default", offset_factor=1)
             etensor_mlp_add_rms_global = T.match_buffer(etensor_mlp_add_rms_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
 
 
@@ -699,13 +714,15 @@ class MegaKernel:
             decode_merge_tile = T.meta_var(DecodeMergeTile(o_indptr_global, o_tmp_global, o_global, lse_tmp_global, lse_global))
             o_proj_tile = T.meta_var(GemmTile(Tp.reshape(o_global, [-1, NUM_ATTENTION_HEADS * HEAD_DIM]).buffer, o_proj_weight_global, 
                                               partial_o_global, split_k_factor=SPLIT_O_PROJRCT))
-            o_reduce_tile = T.meta_var(SplitKReduceTile(partial_o_global, hidden_state_attn_mlp_global))
+            o_reduce_tile = T.meta_var(SplitKReduceTile(partial_o_global, before_o_allreduce_global))
+            o_allreduce_tile = T.meta_var(AllreduceTile(before_o_allreduce_global, hidden_state_attn_mlp_global, WORLD_SIZE))
             attn_add_rms_tile = T.meta_var(AddRMSNormTile(hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global))
 
             gemm_gate_up_proj_tile = T.meta_var(GemmTile(hidden_state_attn_mlp_global, gate_up_weight_global, out_gate_up_proj_global, split_k_factor=1))
             silu_multiply_tile = T.meta_var(SiluMultiplyTile(out_gate_up_proj_global, out_silu_multiply_global))
             gemm_down_proj_tile = T.meta_var(GemmTile(out_silu_multiply_global, down_weight_global, partial_sum_down_proj_global, split_k_factor=DOWN_PROJ_SPLIT_K_FACTOR))
-            down_proj_reduce_tile = T.meta_var(SplitKReduceTile(partial_sum_down_proj_global, output_global))
+            down_proj_reduce_tile = T.meta_var(SplitKReduceTile(partial_sum_down_proj_global, before_down_proj_allreduce_global))
+            down_proj_allreduce_tile = T.meta_var(AllreduceTile(before_down_proj_allreduce_global, output_global, WORLD_SIZE))
             mlp_add_rms_norm_tile = T.meta_var(AddRMSNormTile(output_global, residual_global, mlp_add_rms_weight_global))
 
             self.tile_list.append(qkv_proj_tile)
@@ -717,11 +734,13 @@ class MegaKernel:
             self.tile_list.append(decode_merge_tile)
             self.tile_list.append(o_proj_tile)
             self.tile_list.append(o_reduce_tile)
+            self.tile_list.append(o_allreduce_tile)
             self.tile_list.append(attn_add_rms_tile)
             self.tile_list.append(gemm_gate_up_proj_tile)
             self.tile_list.append(silu_multiply_tile)
             self.tile_list.append(gemm_down_proj_tile)
             self.tile_list.append(down_proj_reduce_tile)
+            self.tile_list.append(down_proj_allreduce_tile)
             self.tile_list.append(mlp_add_rms_norm_tile)
 
             qkv_proj_tile.set_tensor_map(A_tensor_map_qkv_proj, B_tensor_map_qkv_proj, D_tensor_map_qkv_proj)
@@ -737,6 +756,8 @@ class MegaKernel:
                 lane_id = T.thread_id([32], parent="warp")
                 profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
                 profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
+                rank = T.nvshmem.my_pe()
+
                 with T.cta():
                     wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
                     tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
@@ -747,26 +768,29 @@ class MegaKernel:
 
                     # initialize event tensors
                     evt_qkv_partial = T.meta_var(Semaphore(SPLIT_QKV_PROJECT * (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 
-                                                             etensor_qkv_partial_global))
-                    evt_q_reduce = T.meta_var(Semaphore(1, etensor_q_reduce_global))
-                    evt_k_reduce = T.meta_var(Semaphore(1, etensor_k_reduce_global))
-                    evt_v_reduce = T.meta_var(Semaphore(1, etensor_v_reduce_global))
-                    evt_decode = T.meta_var(Semaphore(NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS + 2, etensor_decode_global))
-                    evt_decode_merge = T.meta_var(Semaphore(-1, etensor_decode_merge_global, decrement=True))
-                    evt_o_proj = T.meta_var(Semaphore(-1, etensor_o_proj_global, decrement=True))
-                    evt_o_partial = T.meta_var(Semaphore(SPLIT_O_PROJRCT * (o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), etensor_o_partial_global))
-                    evt_attn_add_rms = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, o_reduce_tile.N_TILE), etensor_attn_add_rms_global))
-                    evt_attn_mlp = T.meta_var(Semaphore(batch_size, etensor_attn_mlp_global))
-                    evt_gate_up_proj = T.meta_var(Semaphore(2, etensor_gate_up_proj_global))
-                    evt_down_proj = T.meta_var(Semaphore(INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR, etensor_down_proj_global))
+                                                             etensor_qkv_partial_global, use_nvshmem=True))
+                    evt_q_reduce = T.meta_var(Semaphore(1, etensor_q_reduce_global, use_nvshmem=True))
+                    evt_k_reduce = T.meta_var(Semaphore(1, etensor_k_reduce_global, use_nvshmem=True))
+                    evt_v_reduce = T.meta_var(Semaphore(1, etensor_v_reduce_global, use_nvshmem=True))
+                    evt_decode = T.meta_var(Semaphore(NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS + 2, etensor_decode_global, use_nvshmem=True))
+                    evt_decode_merge = T.meta_var(Semaphore(-1, etensor_decode_merge_global, decrement=True, use_nvshmem=True))
+                    evt_o_proj = T.meta_var(Semaphore(-1, etensor_o_proj_global, decrement=True, use_nvshmem=True))
+                    evt_o_partial = T.meta_var(Semaphore(SPLIT_O_PROJRCT * (o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), etensor_o_partial_global, use_nvshmem=True))
+                    evt_o_allreduce = T.meta_var(Semaphore(WORLD_SIZE * o_reduce_tile.M_split, etensor_o_allreduce_global, use_nvshmem=True))
+                    evt_attn_add_rms = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, o_allreduce_tile.N_TILE), etensor_attn_add_rms_global, use_nvshmem=True))
+                    evt_attn_mlp = T.meta_var(Semaphore(batch_size, etensor_attn_mlp_global, use_nvshmem=True))
+                    evt_gate_up_proj = T.meta_var(Semaphore(2, etensor_gate_up_proj_global, use_nvshmem=True))
+                    evt_down_proj = T.meta_var(Semaphore(-1, etensor_down_proj_global, decrement=True, use_nvshmem=True))
                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
-                                                                etensor_down_proj_reduce_global))
-                    evt_add_rms_norm = T.meta_var(Semaphore(HIDDEN_SIZE // down_proj_reduce_tile.N_TILE, etensor_mlp_add_rms_global))
-                    evt_end = T.meta_var(Semaphore(batch_size, etensor_end))
+                                                                etensor_down_proj_reduce_global, use_nvshmem=True))
+                    evt_down_proj_allreduce = T.meta_var(Semaphore(WORLD_SIZE * down_proj_reduce_tile.M_split, etensor_down_proj_allreduce_global, use_nvshmem=True))
+                    evt_add_rms_norm = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, down_proj_allreduce_tile.N_TILE), etensor_mlp_add_rms_global, use_nvshmem=True))
+                    evt_end = T.meta_var(Semaphore(batch_size, etensor_end, use_nvshmem=True))
 
                     # initialize tile scheduler
-                    tile_scheduler = T.meta_var(DynamicTileScheduler(queue_tasks, queue_head, queue_tail, pool_allocator=pool))
+                    tile_scheduler = T.meta_var(DynamicTileScheduler(queue_tasks, queue_head, queue_tail, pool_allocator=pool, use_nvshmem=True))
                     tile_scheduler.init(warp_id)
+                    
                     while tile_scheduler.valid():
                         if tile_scheduler.task_type == JobType.GEMM_QKV_PROJ.value:
                             qkv_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
@@ -837,7 +861,7 @@ class MegaKernel:
                                 )
                             else:
                                 range_start = T.meta_var(o_indptr_global[tile_scheduler.m_idx * append_kv_tile.m_tile])
-                                range_end = T.meta_var(o_indptr_global[T.min((tile_scheduler.m_idx+1) * append_kv_tile.m_tile, batch_size)])
+                                range_end = T.meta_var(o_indptr_global[T.min((tile_scheduler.m_idx + 1) * append_kv_tile.m_tile, batch_size)])
                                 tile_scheduler.push_tasks_along_dim(
                                     JobType.BATCH_DECODE_SPLIT.value,
                                     range_start,
@@ -920,8 +944,8 @@ class MegaKernel:
                         elif tile_scheduler.task_type == JobType.BATCH_DECODE_NO_SPLIT.value:
                             T.tvm_storage_sync("shared")
                             decode_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, split_kv=False)
-                            range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                            range_end = T.meta_var((tile_scheduler.n_idx+1) * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_end = T.meta_var(((tile_scheduler.n_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                             tile_scheduler.push_tasks_along_dim(
                                 JobType.GEMM_O_PROJ.value,
                                 0,
@@ -932,32 +956,35 @@ class MegaKernel:
                                 warp_id,
                                 lane_id,
                                 evt_o_proj,
-                                range_start
+                                range_start,
                             )
-                            if range_end != range_start:
+                            for kr in T.serial(range_end - range_start):
                                 tile_scheduler.push_tasks_along_dim(
                                     JobType.GEMM_O_PROJ.value,
                                     0,
                                     0,
-                                    range_end,
+                                    range_start + 1 + kr,
                                     ceildiv(HIDDEN_SIZE, GemmTile.BLK_N),
                                     1,
                                     warp_id,
                                     lane_id,
                                     evt_o_proj,
-                                    range_end,
-                                    use_barrier=False,
+                                    range_start + 1 + kr,
+                                    use_barrier=False
                                 )
                         elif tile_scheduler.task_type == JobType.BATCH_DECODE_SPLIT.value:
                             T.tvm_storage_sync("shared")
                             batch_idx = T.meta_var(request_indices_global[tile_scheduler.m_idx]) # original batch_idx
                             decode_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, split_kv=True)
-                            tile_scheduler.push_task(
+                            tile_scheduler.push_tasks_along_dim(
                                 JobType.DECODE_MERGE.value,
                                 batch_idx, 
-                                tile_scheduler.n_idx,
+                                tile_scheduler.n_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) // DecodeMergeTile.bdz,
                                 0,
+                                (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) // DecodeMergeTile.bdz,
+                                1,
                                 warp_id,
+                                lane_id,
                                 evt_decode_merge,
                                 batch_idx,
                                 tile_scheduler.n_idx,
@@ -965,8 +992,8 @@ class MegaKernel:
                         elif tile_scheduler.task_type == JobType.DECODE_MERGE.value:
                             T.tvm_storage_sync("shared")
                             decode_merge_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                            range_end = T.meta_var((tile_scheduler.n_idx+1) * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_start = T.meta_var(tile_scheduler.n_idx * DecodeMergeTile.bdz * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_end = T.meta_var(((tile_scheduler.n_idx + 1) * DecodeMergeTile.bdz * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                             tile_scheduler.push_tasks_along_dim(
                                 JobType.GEMM_O_PROJ.value,
                                 0,
@@ -979,18 +1006,18 @@ class MegaKernel:
                                 evt_o_proj,
                                 range_start,
                             )
-                            if range_end != range_start:
+                            for kr in T.serial(range_end - range_start):
                                 tile_scheduler.push_tasks_along_dim(
                                     JobType.GEMM_O_PROJ.value,
                                     0,
                                     0,
-                                    range_end,
+                                    range_start + 1 + kr,
                                     ceildiv(HIDDEN_SIZE, GemmTile.BLK_N),
                                     1,
                                     warp_id,
                                     lane_id,
                                     evt_o_proj,
-                                    range_end,
+                                    range_start + 1 + kr,
                                     use_barrier=False,
                                 )
                         elif tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
@@ -1006,25 +1033,41 @@ class MegaKernel:
                                 lane_id,
                                 evt_o_partial,
                                 tile_scheduler.n_idx // (o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),
-                                use_barrier=False
+                                use_barrier=False,
                             )
                         elif tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
                             o_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-
                             tile_scheduler.push_tasks_along_dim(
+                                JobType.O_ALLREDUCE.value,
+                                0,
+                                tile_scheduler.n_idx // WORLD_SIZE,
+                                0,
+                                ceildiv(batch_size, o_allreduce_tile.M_TILE),
+                                0,
+                                warp_id,
+                                lane_id,
+                                evt_o_allreduce,
+                                tile_scheduler.n_idx // WORLD_SIZE,
+                                rank=tile_scheduler.n_idx % WORLD_SIZE
+                            )
+                        elif tile_scheduler.task_type == JobType.O_ALLREDUCE.value:
+                            o_allreduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+
+                            tile_scheduler.push_tasks_along_dim_wg_with_extend_rank(
                                 JobType.ATTN_ADD_RMS_NORM.value,
-                                tile_scheduler.m_idx * o_reduce_tile.M_TILE,
+                                tile_scheduler.m_idx * o_allreduce_tile.M_TILE,
                                 0,
                                 0,
-                                T.min(o_reduce_tile.M_TILE, batch_size-tile_scheduler.m_idx*o_reduce_tile.M_TILE),
+                                T.min(o_allreduce_tile.M_TILE, batch_size - tile_scheduler.m_idx * o_allreduce_tile.M_TILE),
                                 0,
                                 warp_id,
                                 lane_id,
                                 evt_attn_add_rms,
+                                get_rank_map,
+                                WORLD_SIZE,
                                 tile_scheduler.m_idx,
-                            )                            
+                            )
                         elif tile_scheduler.task_type == JobType.ATTN_ADD_RMS_NORM.value:
-                            T.tvm_storage_sync("shared")
                             attn_add_rms_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             tile_scheduler.push_tasks_along_dim(
                                 JobType.GEMM_GATE_UP_PROJ.value,
@@ -1042,23 +1085,110 @@ class MegaKernel:
                             gemm_gate_up_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
                                 offset = T.meta_var(tile_scheduler.n_idx-INTERMEDIATE_SIZE//GemmTile.BLK_N)
-                                tile_scheduler.push_task(JobType.SPLIT_SILU_MULTIPLY.value, offset, 0, 0, warp_id, evt_gate_up_proj, offset, use_barrier=False)
+                                tile_scheduler.push_task(
+                                    JobType.SPLIT_SILU_MULTIPLY.value, 
+                                    offset, 
+                                    0, 
+                                    0, 
+                                    warp_id, 
+                                    evt_gate_up_proj, 
+                                    offset, 
+                                    use_barrier=False
+                                )
                             else:
                                 tile_scheduler.push_task(JobType.SPLIT_SILU_MULTIPLY.value, tile_scheduler.n_idx, 0, 0, warp_id, evt_gate_up_proj, tile_scheduler.n_idx, use_barrier=False)
                         elif tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
-                            offset = T.meta_var(tile_scheduler.m_idx // (INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR))
-                            tile_scheduler.push_tasks_along_dim(JobType.GEMM_DOWN_PROJ.value, 0, 0, offset, HIDDEN_SIZE // GemmTile.BLK_N, 1, warp_id, lane_id, evt_down_proj, offset)
+                            range_start = T.meta_var(tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // gemm_down_proj_tile.TILE_K)
+                            range_end = T.meta_var(((tile_scheduler.m_idx + 1) * SiluMultiplyTile.TILE_SIZE - 1) // gemm_down_proj_tile.TILE_K)
+                            tile_scheduler.push_tasks_along_dim(
+                                JobType.GEMM_DOWN_PROJ.value, 
+                                0, 
+                                0, 
+                                range_start, 
+                                HIDDEN_SIZE // GemmTile.BLK_N, 
+                                1, 
+                                warp_id, 
+                                lane_id, 
+                                evt_down_proj, 
+                                range_start
+                            )
+                            for kr in T.serial(range_end - range_start):
+                                tile_scheduler.push_tasks_along_dim(
+                                    JobType.GEMM_DOWN_PROJ.value, 
+                                    0, 
+                                    0, 
+                                    range_start + kr + 1, 
+                                    HIDDEN_SIZE // GemmTile.BLK_N, 
+                                    1, 
+                                    warp_id, 
+                                    lane_id, 
+                                    evt_down_proj, 
+                                    range_start + kr + 1,
+                                    use_barrier=False
+                                )
                         elif tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
                             gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            tile_scheduler.push_tasks_along_dim(JobType.DOWN_PROJ_REDUCE.value, 0, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0, down_proj_reduce_tile.M_split, 0, warp_id, lane_id, evt_down_proj_reduce, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), use_barrier=False)
+                            tile_scheduler.push_tasks_along_dim(
+                                JobType.DOWN_PROJ_REDUCE.value, 
+                                0, 
+                                tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
+                                0, 
+                                down_proj_reduce_tile.M_split, 
+                                0, 
+                                warp_id, 
+                                lane_id, 
+                                evt_down_proj_reduce, 
+                                tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
+                                use_barrier=False
+                            )
                         elif tile_scheduler.task_type == JobType.DOWN_PROJ_REDUCE.value:
                             down_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            tile_scheduler.push_tasks_along_dim(JobType.MLP_ADD_RMS_NORM.value, tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE, 0, 0, T.min(down_proj_reduce_tile.M_TILE, batch_size-tile_scheduler.m_idx*down_proj_reduce_tile.M_TILE), 0, warp_id, lane_id, evt_add_rms_norm, tile_scheduler.m_idx)
+                            tile_scheduler.push_tasks_along_dim(
+                                JobType.DOWN_PROJ_ALLREDUCE.value,
+                                0,
+                                tile_scheduler.n_idx // WORLD_SIZE,
+                                0,
+                                ceildiv(batch_size, down_proj_allreduce_tile.M_TILE),
+                                0,
+                                warp_id,
+                                lane_id,
+                                evt_down_proj_allreduce,
+                                tile_scheduler.n_idx // WORLD_SIZE,
+                                rank=tile_scheduler.n_idx % WORLD_SIZE
+                            )
+                        elif tile_scheduler.task_type == JobType.DOWN_PROJ_ALLREDUCE.value:
+                            down_proj_allreduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                        
+                            tile_scheduler.push_tasks_along_dim_wg_with_extend_rank(
+                                JobType.MLP_ADD_RMS_NORM.value, 
+                                tile_scheduler.m_idx * down_proj_allreduce_tile.M_TILE, 
+                                0, 
+                                0,
+                                T.min(down_proj_allreduce_tile.M_TILE, batch_size - tile_scheduler.m_idx * down_proj_allreduce_tile.M_TILE), 
+                                0, 
+                                warp_id, 
+                                lane_id, 
+                                evt_add_rms_norm, 
+                                get_rank_map, 
+                                WORLD_SIZE,
+                                tile_scheduler.m_idx
+                            )
                         elif tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
                             T.tvm_storage_sync("shared")
                             mlp_add_rms_norm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            tile_scheduler.push_tasks_along_dim(JobType.END.value, 0, 0, 0, KernelConfig.SM_NUMBER, 0, warp_id, lane_id, evt_end, 0)
+                            tile_scheduler.push_tasks_along_dim(
+                                JobType.END.value, 
+                                0, 
+                                0, 
+                                0, 
+                                KernelConfig.SM_NUMBER, 
+                                0, 
+                                warp_id, 
+                                lane_id, 
+                                evt_end, 
+                                0
+                            )
                         tile_scheduler.next_tile(warp_id)
                     self.class_finalize_all()
         # fmt: on
@@ -1559,7 +1689,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         for key, value in arg_dict.items():
             tvm_arg_dict[key] = tvm.nd.array(value, device=DEV)
         tvm_arg_dict["append_pos"] = tvm.nd.array(append_pos, device=DEV)
-        REPEAT = 100
+        REPEAT = 1
         for i in range(REPEAT):
             tvm_arg_dict[f"residual_{i}"] = tvm.nd.array(arg_dict["residual"], device=DEV)
             # generate event tensor
@@ -1572,86 +1702,169 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                 tvm_arg_dict[f"etensor_decode_merge_{i}"],
                 tvm_arg_dict[f"etensor_o_proj_{i}"],
                 tvm_arg_dict[f"etensor_o_partial_{i}"],
+                tvm_arg_dict[f"etensor_o_allreduce_{i}"],
                 tvm_arg_dict[f"etensor_attn_add_rms_norm_{i}"],
                 tvm_arg_dict[f"etensor_attn_mlp_{i}"],
                 tvm_arg_dict[f"etensor_gate_up_proj_{i}"],
                 tvm_arg_dict[f"etensor_down_proj_{i}"],
                 tvm_arg_dict[f"etensor_down_proj_reduce_{i}"],
+                tvm_arg_dict[f"etensor_down_proj_allreduce_{i}"],
                 tvm_arg_dict[f"etensor_mlp_add_rms_norm_{i}"],
                 tvm_arg_dict[f"etensor_end_{i}"],
-            ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"])
+            ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"], batch_size != tvm_arg_dict["new_batch_size"], WORLD_SIZE)
             tvm_arg_dict[f"queue_tasks_{i}"] = tvm.nd.array(exec_queue.tasks, DEV)
             tvm_arg_dict[f"queue_head_{i}"] = tvm.nd.array(exec_queue.head, DEV)
             tvm_arg_dict[f"queue_tail_{i}"] = tvm.nd.array(exec_queue.tail, DEV)
+
+        nvshmem_malloc_hook = sess.get_global_func("runtime.disco.nvshmem.empty")
+
+        # prepare test data
+        print(f"begin preparing test data ...")
+        np.random.seed(42)
+        # prepare disco args
+        tensor_to_gather = [
+            "qkv_proj_weight",
+            "o_proj_weight",
+            "gate_up_weight",
+            "down_weight",
+            "kv_cache",
+        ]
+        disco_arg_dict = {}
+        for key, value in tvm_arg_dict.items():
+            if not isinstance(value, tvm.nd.NDArray):
+                continue
+            if key in tensor_to_gather:
+                disco_arg_dict[key] = sess.empty(value.shape[1:], value.dtype)
+            elif "etensor" in key or "queue" in key:
+                disco_arg_dict[key] = nvshmem_malloc_hook(
+                    ShapeTuple([*value.shape]), str(value.dtype), None
+                )
+            else:
+                disco_arg_dict[key] = sess.empty(value.shape, value.dtype)
+        disco_arg_dict["before_o_allreduce"] = nvshmem_malloc_hook(
+            ShapeTuple((batch_size, HIDDEN_SIZE)), "float16", None
+        )
+        disco_arg_dict["hidden_state_attn_mlp"] = nvshmem_malloc_hook(
+            ShapeTuple((batch_size, HIDDEN_SIZE)), "float16", None
+        )
+        disco_arg_dict["before_down_proj_allreduce"] = nvshmem_malloc_hook(
+            ShapeTuple((batch_size, HIDDEN_SIZE)), "float16", None
+        )
+        disco_arg_dict["output"] = nvshmem_malloc_hook(
+            ShapeTuple((batch_size, HIDDEN_SIZE)), "float16", None
+        )
+
+        res_dict = {
+            "output_host": tvm.nd.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
+            "residual_host": tvm.nd.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
+            "hidden_state_attn_mlp_host": tvm.nd.empty(
+                (WORLD_SIZE, batch_size, HIDDEN_SIZE), "float16", device=DEV
+            ),
+            "hidden_state_attn_mlp_res": sess.empty(
+                (WORLD_SIZE, batch_size, HIDDEN_SIZE), "float16", worker0_only=True
+            ),
+        }
+        # init disco weight/input args
+        gathered_arg_dict = {}
+        for key, value in tvm_arg_dict.items():
+            if key in tensor_to_gather:
+                gathered_arg_dict[key] = sess.empty(value.shape, value.dtype, worker0_only=True)
+                sess.copy_to_worker_0(value, gathered_arg_dict[key])
+                sess.scatter_from_worker0(gathered_arg_dict[key], disco_arg_dict[key])
+            elif key in disco_arg_dict:
+                sess.broadcast(value, disco_arg_dict[key])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = tmpdir + "/test.so"
+            mega_kernel_dynamic.export_library(path)
+            rt_mod = sess.load_vm_module(path)
+            sess._sync_all()
+
         with target:
             iter = 0
 
             def func():
                 nonlocal iter
-                mega_kernel_dynamic(
+                rt_mod["mega_kernel"](
                     # input and output
-                    tvm_arg_dict["hidden_state"],
-                    tvm_arg_dict[f"residual_{iter}"],
-                    tvm_arg_dict["output"],
+                    disco_arg_dict["hidden_state"],
+                    disco_arg_dict[f"residual_{iter}"],
+                    disco_arg_dict["output"],
                     # weight
-                    tvm_arg_dict["qkv_proj_weight"],
-                    tvm_arg_dict["o_proj_weight"],
-                    tvm_arg_dict["q_rms_wight"],
-                    tvm_arg_dict["k_rms_wight"],
-                    tvm_arg_dict["gate_up_weight"],
-                    tvm_arg_dict["down_weight"],
-                    tvm_arg_dict["attn_add_rms_weight"],
-                    tvm_arg_dict["mlp_add_rms_weight"],
+                    disco_arg_dict["qkv_proj_weight"],
+                    disco_arg_dict["o_proj_weight"],
+                    disco_arg_dict["q_rms_wight"],
+                    disco_arg_dict["k_rms_wight"],
+                    disco_arg_dict["gate_up_weight"],
+                    disco_arg_dict["down_weight"],
+                    disco_arg_dict["attn_add_rms_weight"],
+                    disco_arg_dict["mlp_add_rms_weight"],
                     # page cache, cos_sin cache and plan info
-                    tvm_arg_dict["cos_sin_cache"],
-                    tvm_arg_dict["rope_pos"],
-                    tvm_arg_dict["kv_cache"],
-                    tvm_arg_dict["kv_indptr"],
-                    tvm_arg_dict["kv_indices"],
-                    tvm_arg_dict["kv_last_page_len"],
-                    tvm_arg_dict["append_pos"],
-                    tvm_arg_dict["request_indices"],
-                    tvm_arg_dict["kv_tile_indices"],
-                    tvm_arg_dict["max_chunk_size"],
-                    tvm_arg_dict["o_indptr"],
+                    disco_arg_dict["cos_sin_cache"],
+                    disco_arg_dict["rope_pos"],
+                    disco_arg_dict["kv_cache"],
+                    disco_arg_dict["kv_indptr"],
+                    disco_arg_dict["kv_indices"],
+                    disco_arg_dict["kv_last_page_len"],
+                    disco_arg_dict["append_pos"],
+                    disco_arg_dict["request_indices"],
+                    disco_arg_dict["kv_tile_indices"],
+                    disco_arg_dict["max_chunk_size"],
+                    disco_arg_dict["o_indptr"],
                     # intermediate buffer
-                    tvm_arg_dict["partial_qkv"],
-                    tvm_arg_dict["qkv"],
-                    tvm_arg_dict["o"],
-                    tvm_arg_dict["lse"],
-                    tvm_arg_dict["o_tmp"],
-                    tvm_arg_dict["lse_tmp"],
-                    tvm_arg_dict["partial_o"],
-                    tvm_arg_dict["hidden_state_attn_mlp"],
-                    tvm_arg_dict["out_gate_up_proj"],
-                    tvm_arg_dict["out_silu_multiply"],
-                    tvm_arg_dict["partial_sum_down_proj"],
+                    disco_arg_dict["partial_qkv"],
+                    disco_arg_dict["qkv"],
+                    disco_arg_dict["o"],
+                    disco_arg_dict["lse"],
+                    disco_arg_dict["o_tmp"],
+                    disco_arg_dict["lse_tmp"],
+                    disco_arg_dict["partial_o"],
+                    disco_arg_dict["before_o_allreduce"],
+                    disco_arg_dict["hidden_state_attn_mlp"],
+                    disco_arg_dict["out_gate_up_proj"],
+                    disco_arg_dict["out_silu_multiply"],
+                    disco_arg_dict["partial_sum_down_proj"],
+                    disco_arg_dict["before_down_proj_allreduce"],
                     # event tensor
-                    tvm_arg_dict[f"etensor_qkv_partial_{iter}"],
-                    tvm_arg_dict[f"etensor_q_reduce_{iter}"],
-                    tvm_arg_dict[f"etensor_k_reduce_{iter}"],
-                    tvm_arg_dict[f"etensor_v_reduce_{iter}"],
-                    tvm_arg_dict[f"etensor_decode_{iter}"],
-                    tvm_arg_dict[f"etensor_decode_merge_{iter}"],
-                    tvm_arg_dict[f"etensor_o_proj_{iter}"],
-                    tvm_arg_dict[f"etensor_o_partial_{iter}"],
-                    tvm_arg_dict[f"etensor_attn_add_rms_norm_{iter}"],
-                    tvm_arg_dict[f"etensor_attn_mlp_{iter}"],
-                    tvm_arg_dict[f"etensor_gate_up_proj_{iter}"],
-                    tvm_arg_dict[f"etensor_down_proj_{iter}"],
-                    tvm_arg_dict[f"etensor_down_proj_reduce_{iter}"],
-                    tvm_arg_dict[f"etensor_mlp_add_rms_norm_{iter}"],
-                    tvm_arg_dict[f"etensor_end_{iter}"],
+                    disco_arg_dict[f"etensor_qkv_partial_{iter}"],
+                    disco_arg_dict[f"etensor_q_reduce_{iter}"],
+                    disco_arg_dict[f"etensor_k_reduce_{iter}"],
+                    disco_arg_dict[f"etensor_v_reduce_{iter}"],
+                    disco_arg_dict[f"etensor_decode_{iter}"],
+                    disco_arg_dict[f"etensor_decode_merge_{iter}"],
+                    disco_arg_dict[f"etensor_o_proj_{iter}"],
+                    disco_arg_dict[f"etensor_o_partial_{iter}"],
+                    disco_arg_dict[f"etensor_o_allreduce_{iter}"],
+                    disco_arg_dict[f"etensor_attn_add_rms_norm_{iter}"],
+                    disco_arg_dict[f"etensor_attn_mlp_{iter}"],
+                    disco_arg_dict[f"etensor_gate_up_proj_{iter}"],
+                    disco_arg_dict[f"etensor_down_proj_{iter}"],
+                    disco_arg_dict[f"etensor_down_proj_reduce_{iter}"],
+                    disco_arg_dict[f"etensor_down_proj_allreduce_{iter}"],
+                    disco_arg_dict[f"etensor_mlp_add_rms_norm_{iter}"],
+                    disco_arg_dict[f"etensor_end_{iter}"],
                     # exec queue
-                    tvm_arg_dict[f"queue_tasks_{iter}"],
-                    tvm_arg_dict[f"queue_head_{iter}"],
-                    tvm_arg_dict[f"queue_tail_{iter}"],
+                    disco_arg_dict[f"queue_tasks_{iter}"],
+                    disco_arg_dict[f"queue_head_{iter}"],
+                    disco_arg_dict[f"queue_tail_{iter}"],
                 )
                 iter += 1
 
-            ms = bench(func, warmup=1, repeat=10, proton_name="tir-dynamic")
-            print(f"TIR time: {ms:.3f} ms")
-        return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy()
+            # ms = bench(func, warmup=1, repeat=10, proton_name="tir-dynamic")
+            # print(f"TIR time: {ms:.3f} ms")
+            func()
+            sess._sync_all()
+            sess.copy_from_worker_0(res_dict["output_host"], disco_arg_dict["output"])
+            sess.copy_from_worker_0(res_dict["residual_host"], disco_arg_dict[f"residual_0"])
+            # sess.copy_from_worker_0(res_dict["hidden_state_attn_mlp_host"], disco_arg_dict["hidden_state_attn_mlp"])
+            sess.gather_to_worker0(
+                disco_arg_dict["hidden_state_attn_mlp"], res_dict["hidden_state_attn_mlp_res"]
+            )
+            sess.copy_from_worker_0(
+                res_dict["hidden_state_attn_mlp_host"], res_dict["hidden_state_attn_mlp_res"]
+            )
+            sess._sync_all()
+        return res_dict["output_host"].numpy(), res_dict["residual_host"].numpy()
+        # return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy()
 
     def std(arg_dict):
         import flashinfer
@@ -1774,29 +1987,31 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         return output
 
     # with ProtonContext("blackwell_attn"):
-    output_tir_static = tir_static(arg_dict)
+    output_tir_static, residual_tir_static = tir_static(arg_dict)
     print("static tir pass", flush=True)
-    # output_tir_dynamic, residual_tir_dynamic = tir_dynamic(arg_dict)
-    # print("dynamic tir pass", flush=True)
-    output_std = std(arg_dict)
+    output_tir_dynamic, residual_tir_dynamic = tir_dynamic(arg_dict)
+    print("dynamic tir pass", flush=True)
+    output_std, residual_std = std(arg_dict)
 
     try:
-        np.testing.assert_allclose(output_tir_static, output_std, rtol=1e-3, atol=1e-2)
+        np.testing.assert_allclose(output_tir_dynamic, output_std, rtol=1e-3, atol=1e-2)
+        np.testing.assert_allclose(residual_tir_static, residual_std, rtol=1e-3, atol=1e-2)
+        np.testing.assert_allclose(output_tir_dynamic, output_std, rtol=1e-3, atol=1e-2)
+        np.testing.assert_allclose(residual_tir_dynamic, residual_std, rtol=1e-3, atol=1e-2)
+
     except Exception as e:
         print(e)
-    # np.testing.assert_allclose(residual_tir_static, residual_std, rtol=1e-3, atol=1e-2)
-    # # np.testing.assert_allclose(output_tir_dynamic, output_std, rtol=1e-3, atol=1e-2)
-    # np.testing.assert_allclose(residual_tir_dynamic, residual_std, rtol=1e-3, atol=1e-2)
+
 
 
 if __name__ == "__main__":
 
     mega_kernel_wrapper_static = MegaKernel(problem_config)
-    # mega_kernel_wrapper_dynamic = MegaKernel(problem_config)
+    mega_kernel_wrapper_dynamic = MegaKernel(problem_config)
     mega_kernel_static = mega_kernel_wrapper_static.get_func_static()
-    # mega_kernel_dynamic = mega_kernel_wrapper_dynamic.get_func_dynamic()
+    mega_kernel_dynamic = mega_kernel_wrapper_dynamic.get_func_dynamic()
     src, mod_static = get_source(mega_kernel_static)
-    # src, mod_dynamic = get_source(mega_kernel_dynamic)
+    src, mod_dynamic = get_source(mega_kernel_dynamic)
     devices = list(np.arange(WORLD_SIZE))
     sess = di.ProcessSession(num_workers=WORLD_SIZE)
     sess.init_ccl(tvm.get_global_func("runtime.disco.compiled_ccl")(), *devices)
@@ -1809,4 +2024,4 @@ if __name__ == "__main__":
     for batch_size in [1, 3, 7, 15, 31, 63, 127]:
 
         print(f"batch_size: {batch_size}", flush=True)
-        test(batch_size, mod_static, None, sess)
+        test(batch_size, mod_static, mod_dynamic, sess)

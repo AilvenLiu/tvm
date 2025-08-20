@@ -16,12 +16,20 @@ from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
 from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
 from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile
 from tvm.tirp.megakernel.static_scheduler import StaticTileScheduler
-from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost, stg_v4
+from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
+
 
 INTERMEDIATE_SIZE = 25600
 HIDDEN_SIZE = 5120
+RMS_NORM_EPS = 1e-6
 dtype = "float16"
 DOWN_PROJ_SPLIT_K_FACTOR = 10
+
+problem_config = {
+    "hidden_size": HIDDEN_SIZE,
+    "intermediate_size": INTERMEDIATE_SIZE,
+    "rms_norm_eps": RMS_NORM_EPS,
+}
 
 # profiling
 NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
@@ -30,9 +38,20 @@ PROFILER_WRITE_STRIDE = KernelConfig.SM_NUMBER * NUM_GROUPS
 PROFILER_ON = False
 # fmt: off
 class MegaKernel:
-    def __init__(self):
+    class_list = [
+        GemmTile,
+        SplitKReduceTile,
+        AddRMSNormTile,
+        SiluMultiplyTile,
+    ]
+
+    def __init__(self, problem_config):
         self.tile_list = []
-        self.class_list = set()
+        self.class_config_init(problem_config)
+
+    def class_config_init(self, config):
+        for cls in self.class_list:
+            cls.class_config_init(config)
 
     def host_init_all(self):
         for tile in self.tile_list:
@@ -55,12 +74,8 @@ class MegaKernel:
             max_offset = max(max_offset, pool_allocator.offset)
         pool_allocator.move_base_to(max_offset)
 
-    def add_tile(self, tile):
-        self.tile_list.append(tile)
-        self.class_list.add(tile.__class__)
-
     def get_static_scheduler_func(self):
-        from .static_scheduler import Semaphore
+        from tvm.tirp.megakernel.static_scheduler import Semaphore
 
         @T.prim_func(tirp=True)
         def mega_kernel_static(
@@ -100,11 +115,11 @@ class MegaKernel:
             gemm_down_proj_tile = T.meta_var(GemmTile(out_silu_multiply, W_down_proj, partial_sum_down_proj, split_k_factor=DOWN_PROJ_SPLIT_K_FACTOR))
             down_proj_reduce_tile = T.meta_var(SplitKReduceTile(partial_sum_down_proj, out_down_proj))
             add_rms_norm_tile = T.meta_var(AddRMSNormTile(out_down_proj, residual, rmsnorm_weight))
-            self.add_tile(gemm_gate_up_proj_tile)
-            self.add_tile(silu_multiply_tile)
-            self.add_tile(gemm_down_proj_tile)
-            self.add_tile(down_proj_reduce_tile)
-            self.add_tile(add_rms_norm_tile)
+            self.tile_list.append(gemm_gate_up_proj_tile)
+            self.tile_list.append(silu_multiply_tile)
+            self.tile_list.append(gemm_down_proj_tile)
+            self.tile_list.append(down_proj_reduce_tile)
+            self.tile_list.append(add_rms_norm_tile)
             gemm_gate_up_proj_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj)
             gemm_down_proj_tile.set_tensor_map(A_tensor_map_down_proj, B_tensor_map_down_proj, D_tensor_map_down_proj)
             self.host_init_all()
@@ -122,8 +137,8 @@ class MegaKernel:
                     pool = T.meta_var(Tp.PoolAllocator(buf.data))
                     if PROFILER_ON:
                         T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, warp_id)
-                    self.class_init_all(pool)
                     self.device_init_all(pool)
+                    self.class_init_all(pool)
                     # initialize event tensors
                     evt_gate_up_proj = T.meta_var(Semaphore(2, etensor_gate_up_proj))
                     evt_down_proj = T.meta_var(Semaphore(INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR, etensor_down_proj))
@@ -179,19 +194,19 @@ class MegaKernel:
                                 evt_add_rms_norm.semaphore_notify(tile_scheduler.m_idx)
                             if PROFILER_ON:
                                 T.timer_end_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
-                        elif tile_scheduler.task_type == JobType.ADD_RMS_NORM.value:
-                            evt_add_rms_norm.semaphore_wait(tile_scheduler.m_idx//(batch_size//down_proj_reduce_tile.M_split))
+                        elif tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
+                            evt_add_rms_norm.semaphore_wait(tile_scheduler.m_idx // down_proj_reduce_tile.M_TILE)
                             if PROFILER_ON:
-                                T.timer_start_cuda(ProfileEventType.ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                                T.timer_start_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             add_rms_norm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             if PROFILER_ON:
-                                T.timer_end_cuda(ProfileEventType.ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                                T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         tile_scheduler.next_tile()
                     self.class_finalize_all()
         return mega_kernel_static
 
     def get_dynamic_scheduler_func(self):
-        from .dynamic_scheduler import Semaphore
+        from tvm.tirp.megakernel.dynamic_scheduler import Semaphore
 
         @T.prim_func(tirp=True)
         def mega_kernel_dynamic(
@@ -235,11 +250,11 @@ class MegaKernel:
             gemm_down_proj_tile = T.meta_var(GemmTile(out_silu_multiply, W_down_proj, partial_sum_down_proj, split_k_factor=DOWN_PROJ_SPLIT_K_FACTOR))
             down_proj_reduce_tile = T.meta_var(SplitKReduceTile(partial_sum_down_proj, out_down_proj))
             add_rms_norm_tile = T.meta_var(AddRMSNormTile(out_down_proj, residual, rmsnorm_weight))
-            self.add_tile(gemm_gate_up_proj_tile)
-            self.add_tile(silu_multiply_tile)
-            self.add_tile(gemm_down_proj_tile)
-            self.add_tile(down_proj_reduce_tile)
-            self.add_tile(add_rms_norm_tile)
+            self.tile_list.append(gemm_gate_up_proj_tile)
+            self.tile_list.append(silu_multiply_tile)
+            self.tile_list.append(gemm_down_proj_tile)
+            self.tile_list.append(down_proj_reduce_tile)
+            self.tile_list.append(add_rms_norm_tile)
             gemm_gate_up_proj_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj)
             gemm_down_proj_tile.set_tensor_map(A_tensor_map_down_proj, B_tensor_map_down_proj, D_tensor_map_down_proj)
             self.host_init_all()
@@ -256,8 +271,8 @@ class MegaKernel:
                     pool = T.meta_var(Tp.PoolAllocator(buf.data))
                     if PROFILER_ON:
                         T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, warp_id)
-                    self.class_init_all(pool)
                     self.device_init_all(pool)
+                    self.class_init_all(pool)
                     # initialize event tensors
                     evt_gate_up_proj = T.meta_var(Semaphore(2, etensor_gate_up_proj))
                     evt_down_proj = T.meta_var(Semaphore(INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR, etensor_down_proj))
@@ -271,11 +286,7 @@ class MegaKernel:
                     # initialize tile scheduler
                     tile_scheduler = T.meta_var(DynamicTileScheduler(queue_tasks, queue_head, queue_tail, pool_allocator=pool))
                     tile_scheduler.init(warp_id)
-                    # tile_idx = T.alloc_local([1], "int32")
                     while tile_scheduler.valid():
-                        # if tid == 0:
-                        #     T.cuda.func_call("stg_v4", tile_scheduler.task_type, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, T.address_of(actual_order[bx, tile_idx[0], 0]), source_code=stg_v4)
-                        #     tile_idx[0] += 1
                         if tile_scheduler.task_type == JobType.GEMM_GATE_UP_PROJ.value:
                             if PROFILER_ON:
                                 T.timer_start_cuda(ProfileEventType.GEMM_GATE_UP_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
@@ -321,16 +332,16 @@ class MegaKernel:
                             if PROFILER_ON:
                                 T.timer_start_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                             down_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            tile_scheduler.push_tasks_along_dim(JobType.ADD_RMS_NORM.value, tile_scheduler.m_idx * (batch_size //down_proj_reduce_tile.M_split), 0, 0, batch_size //down_proj_reduce_tile.M_split, 0, warp_id, lane_id, evt_add_rms_norm, tile_scheduler.m_idx)
+                            tile_scheduler.push_tasks_along_dim(JobType.MLP_ADD_RMS_NORM.value, tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE, 0, 0, down_proj_reduce_tile.M_TILE, 0, warp_id, lane_id, evt_add_rms_norm, tile_scheduler.m_idx)
                             if PROFILER_ON:
                                 T.timer_end_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                        elif tile_scheduler.task_type == JobType.ADD_RMS_NORM.value:
+                        elif tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
                             if PROFILER_ON:
-                                T.timer_start_cuda(ProfileEventType.ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                             add_rms_norm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             tile_scheduler.push_tasks_along_dim(JobType.END.value, 0, 0, 0, KernelConfig.SM_NUMBER, 0, warp_id, lane_id, evt_end, 0)
                             if PROFILER_ON:
-                                T.timer_end_cuda(ProfileEventType.ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                         if PROFILER_ON:
                             T.timer_start_cuda(ProfileEventType.FETCH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         tile_scheduler.next_tile(warp_id)
@@ -361,13 +372,15 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
         M_split_down_proj_reduce = min(
             ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT), batch_size
         )
+        M_tile_down_proj_reduce = ceildiv(batch_size, M_split_down_proj_reduce)
+        M_split_down_proj_reduce = ceildiv(batch_size, M_tile_down_proj_reduce)
         N_tile = ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, M_split_down_proj_reduce)) * SplitKReduceTile.N_UNIT
         for m in range(M_split_down_proj_reduce):
             for n in range(HIDDEN_SIZE // N_tile):
                 central_queue.append((m, n, 0, JobType.DOWN_PROJ_REDUCE.value))
         # add_rms_norm
         for m in range(batch_size):
-            central_queue.append((m, 0, 0, JobType.ADD_RMS_NORM.value))
+            central_queue.append((m, 0, 0, JobType.MLP_ADD_RMS_NORM.value))
         tile_idx = 0
         while len(central_queue) > 0:
             for bx in range(KernelConfig.SM_NUMBER):
@@ -615,11 +628,11 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
     np.testing.assert_allclose(residual_tir_dynamic, residual_std, rtol=1e-3, atol=1e-2)
 
 if __name__ == "__main__":
-    mega_kernel_static = MegaKernel().get_static_scheduler_func()
-    mega_kernel_dynamic = MegaKernel().get_dynamic_scheduler_func()
+    mega_kernel_static = MegaKernel(problem_config).get_static_scheduler_func()
+    mega_kernel_dynamic = MegaKernel(problem_config).get_dynamic_scheduler_func()
     src_mlp_static, mod_mlp_static = get_source(mega_kernel_static)
     src_mlp_dynamic, mod_mlp_dynamic = get_source(mega_kernel_dynamic)
     
-    for batch_size in [128, 64, 32, 16, 8, 4, 2, 1]:
+    for batch_size in [127, 63, 31, 15, 7, 3, 1]:
         print("testing batch size: ", batch_size, flush=True)
         test(batch_size, mod_mlp_static, mod_mlp_dynamic)
