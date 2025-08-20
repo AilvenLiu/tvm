@@ -285,9 +285,14 @@ def generate_event_tensor(batch_size, o_indptr, split_kv, WORLD_SIZE):
     etensor_gate_up_proj = tvm.nd.array(
         np.zeros(INTERMEDIATE_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
     )
-    etensor_down_proj = tvm.nd.array(
-        np.zeros(DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE], dtype=np.int32), device=DEV
-    )
+    etensor_down_proj = np.zeros(DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE], dtype=np.int32)
+    down_proj_tile_k = ceildiv(ceildiv(INTERMEDIATE_SIZE, DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE]), GemmTile.BLK_K) * GemmTile.BLK_K
+    for m in range(INTERMEDIATE_SIZE // SiluMultiplyTile.TILE_SIZE):
+        range_start = m * SiluMultiplyTile.TILE_SIZE // down_proj_tile_k
+        range_end = ((m + 1) * SiluMultiplyTile.TILE_SIZE - 1) // down_proj_tile_k
+        for i in range(range_start, range_end + 1):
+            etensor_down_proj[i] += 1
+    etensor_down_proj = tvm.nd.array(etensor_down_proj, device=DEV)
     etensor_down_proj_reduce = tvm.nd.array(
         np.zeros(HIDDEN_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
     )

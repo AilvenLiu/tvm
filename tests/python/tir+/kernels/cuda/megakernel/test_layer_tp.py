@@ -428,14 +428,14 @@ class MegaKernel:
                             if tid == 0:
                                 evt_decode_merge.semaphore_notify(batch_idx, tile_scheduler.n_idx)
                         elif tile_scheduler.task_type == JobType.DECODE_MERGE.value:
-                            evt_decode_merge.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
+                            evt_decode_merge.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx * DecodeMergeTile.bdz // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
                             decode_merge_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
-                                range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                                range_end = T.meta_var(((tile_scheduler.n_idx+1) * (NUM_ATTENTION_HEADS //NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
-                                for i in T.serial(0, range_end + 1 - range_start):
-                                    evt_o_proj.semaphore_notify(i + range_start)
+                                range_start = T.meta_var(tile_scheduler.n_idx * DecodeMergeTile.bdz * HEAD_DIM // o_proj_tile.TILE_K)
+                                range_end = T.meta_var(((tile_scheduler.n_idx + 1) * DecodeMergeTile.bdz * HEAD_DIM - 1) // o_proj_tile.TILE_K)
+                                for kr in T.serial(range_end - range_start + 1):
+                                    evt_o_proj.semaphore_notify(range_start + kr)
                         elif tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
                             evt_o_proj.semaphore_wait(tile_scheduler.k_idx)
                             o_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
@@ -1356,7 +1356,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                 tvm_arg_dict[f"etensor_down_proj_allreduce_{i}"],
                 tvm_arg_dict[f"etensor_mlp_add_rms_norm_{i}"],
                 _,
-            ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"], WORLD_SIZE)
+            ) = generate_event_tensor(batch_size, tvm_arg_dict["o_indptr"], batch_size != tvm_arg_dict["new_batch_size"], WORLD_SIZE)
 
         nvshmem_malloc_hook = sess.get_global_func("runtime.disco.nvshmem.empty")
 
