@@ -197,6 +197,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
 
   // Megakernel execution queue cache
   std::vector<std::unordered_map<int, NDArray>> exec_queue_cache_;
+  NDArray exec_queue_device_buf_;
+  NDArray exec_queue_host_buf_;
+  Array<Array<NDArray>> exec_queue_dynamic_;
 
   //-------------------------------------------
   // Below are the auxiliary data structure on CPU.
@@ -548,6 +551,12 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                           qk_head_dim, device, preferred_host_device);
       }
     }
+    exec_queue_device_buf_ = NDArray::Empty(
+        {num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 4)},
+        DataType::Int(32), device);
+    exec_queue_host_buf_ = NDArray::Empty(
+        {num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 4)},
+        DataType::Int(32), preferred_host_device);
 
     for (int d = 0; d < kPagedKVCacheMaxBlockDepth; ++d) {
       if (NeedKernelBeginForward()) {
@@ -1461,6 +1470,11 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
 
     // 3. Sync the copy stream and the compute stream.
     // Host-side tensors are synced to device.
+    int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
+    Device preferred_host_device = GetPreferredHostDevice(device_);
+    exec_queue_dynamic_ = megakernel::GenerateExecQueueDyn(
+        exec_queue_device_buf_, exec_queue_host_buf_, tp_size, num_qo_heads_, num_kv_heads_,
+        qk_head_dim_, num_layers_, copy_stream_);
     ComputeStreamWaitForCopyStream();
   }
 
@@ -2019,8 +2033,13 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     return ret;
   }
 
-  NDArray GetExecQueue(int batch_size, int new_batch_size) {
+  ffi::Any GetExecQueue(int batch_size, int new_batch_size, int dynamic_layer_id) {
     NVTXScopedRange range("GetExecQueue");
+    if (dynamic_layer_id >= 0) {
+      Array<NDArray> exec_queue = exec_queue_dynamic_[dynamic_layer_id];
+      return exec_queue;
+    }
+
     // Try to get the execution queue from the cache.
     if (batch_size < static_cast<int>(exec_queue_cache_.size())) {
       auto it = exec_queue_cache_[batch_size].find(new_batch_size);

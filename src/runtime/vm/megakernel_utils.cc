@@ -23,6 +23,7 @@
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/runtime/device_api.h>
 #include <tvm/runtime/ndarray.h>
 #include <tvm/runtime/nvtx.h>
 
@@ -235,12 +236,85 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   return exec_queue_device;
 }
 
+Array<Array<NDArray>> GenerateExecQueueDyn(NDArray exec_queue_device_buf,
+                                           NDArray exec_queue_host_buf, int tp_size,
+                                           int num_qo_heads, int num_kv_heads, int head_dim,
+                                           int num_layers, TVMStreamHandle copy_stream) {
+  NVTXScopedRange range("Generate execution queue");
+  int elem_per_layer = kDyanmicTileSchedulerMaxTasks * kTaskSize + 4;
+  TVM_FFI_ICHECK(exec_queue_device_buf.dtype() == DataType::Int(32));
+  TVM_FFI_ICHECK(exec_queue_host_buf.dtype() == DataType::Int(32));
+  TVM_FFI_ICHECK(exec_queue_device_buf.Shape().Product() >= num_layers * elem_per_layer);
+  TVM_FFI_ICHECK(exec_queue_host_buf.Shape().Product() >= num_layers * elem_per_layer);
+  int32_t* exec_queue_host_data = static_cast<int32_t*>(exec_queue_host_buf->data);
+  int num_tasks = 0;
+
+  // fill the exec queue with -1
+  for (int i = 0; i < num_layers * elem_per_layer; ++i) {
+    exec_queue_host_data[i] = -1;
+  }
+
+  auto f_push_task = [&exec_queue_host_data, &num_tasks, &elem_per_layer](
+                         int m_idx, int n_idx, int k_idx, JobType job_type, int layer_id) {
+    exec_queue_host_data[layer_id * elem_per_layer + num_tasks * kTaskSize + 0] =
+        static_cast<int32_t>(job_type);
+    exec_queue_host_data[layer_id * elem_per_layer + num_tasks * kTaskSize + 1] = m_idx;
+    exec_queue_host_data[layer_id * elem_per_layer + num_tasks * kTaskSize + 2] = n_idx;
+    exec_queue_host_data[layer_id * elem_per_layer + num_tasks * kTaskSize + 3] = k_idx;
+    num_tasks++;
+  };
+
+  int split_qkv_project = kSplitQKVProject[tp_size];
+  for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+    num_tasks = 0;
+    // Push initial tasks.
+    for (int n_idx = ceildiv((num_qo_heads + 2 * num_kv_heads) * head_dim, kGemmTileBlkN) - 1;
+         n_idx >= 0; --n_idx) {
+      for (int k_idx = 0; k_idx < split_qkv_project; ++k_idx) {
+        f_push_task(0, n_idx, k_idx, JobType::kGemmQKVProj, layer_id);
+      }
+    }
+    // Set head & tail.
+    exec_queue_host_data[layer_id * elem_per_layer + kDyanmicTileSchedulerMaxTasks * kTaskSize] = 0;
+    exec_queue_host_data[layer_id * elem_per_layer + kDyanmicTileSchedulerMaxTasks * kTaskSize +
+                         1] = num_tasks;
+  }
+
+  // Transfer to device
+  DLTensor exec_queue_device_dl = *exec_queue_device_buf.operator->();
+  NDArray::CopyFromTo(exec_queue_host_buf.operator->(), &exec_queue_device_dl, copy_stream);
+
+  // Slice the execution queue to get the dynamic execution queue.
+  std::vector<Array<NDArray>> queue_by_layer;
+  queue_by_layer.reserve(num_layers);
+  for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+    NDArray exec_queue = exec_queue_device_buf.CreateView(
+        {elem_per_layer}, DataType::Int(32),
+        /*relative_byte_offset=*/layer_id * elem_per_layer * DataType::Int(32).bytes());
+    NDArray queue_tasks = exec_queue.CreateView(
+        {megakernel::kDyanmicTileSchedulerMaxTasks, megakernel::kTaskSize}, DataType::Int(32));
+    NDArray queue_head =
+        exec_queue.CreateView({1}, DataType::Int(32),
+                              /*relative_byte_offset=*/megakernel::kDyanmicTileSchedulerMaxTasks *
+                                  megakernel::kTaskSize * DataType::Int(32).bytes());
+    NDArray queue_tail = exec_queue.CreateView(
+        {1}, DataType::Int(32),
+        /*relative_byte_offset=*/
+        (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 1) *
+            DataType::Int(32).bytes());
+
+    queue_by_layer.push_back(Array<NDArray>({queue_tasks, queue_head, queue_tail}));
+  }
+  return queue_by_layer;
+}
+
 // RNN State methods
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("megakernel.get_event_tensors_on_layer", GetEventTensorsOnLayer)
-      .def("megakernel.generate_exec_queue", GenerateExecQueue);
+      .def("megakernel.generate_exec_queue", GenerateExecQueue)
+      .def("megakernel.generate_exec_queue_dyn", GenerateExecQueueDyn);
 });
 
 }  // namespace megakernel

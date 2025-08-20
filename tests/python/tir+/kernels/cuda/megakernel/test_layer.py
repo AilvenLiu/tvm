@@ -542,9 +542,9 @@ class MegaKernel:
             etensor_end: T.Buffer((1, ), "int32", offset_factor=1),
 
             # execution queue
-            queue_tasks: T.Buffer((DynamicTileScheduler.MAX_TASKS, 4), "int32"),
-            queue_head: T.Buffer((1,), "int32"),
-            queue_tail: T.Buffer((1,), "int32"),
+            queue_tasks: T.Buffer((DynamicTileScheduler.MAX_TASKS, 4), "int32", offset_factor=1),
+            queue_head: T.Buffer((1,), "int32", offset_factor=1),
+            queue_tail: T.Buffer((1,), "int32", offset_factor=1),
         ):
 
             # match buffer

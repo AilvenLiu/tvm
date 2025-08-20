@@ -660,6 +660,7 @@ def get_qwen3_megakernel_mod():
                     paged_kv_cache,
                     R.prim_value(batch_size),
                     R.prim_value(new_batch_size),
+                    R.prim_value(-1),
                     sinfo_args=[
                         R.Tensor((148, 128, 4), dtype="int32"),
                     ]

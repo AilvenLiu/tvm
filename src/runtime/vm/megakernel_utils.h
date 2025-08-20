@@ -51,6 +51,7 @@ constexpr const int kDecodeMergeHeadsPerTile = 1;
 
 constexpr const int kNumSM = 148;
 constexpr const int kStaticTileSchedulerMaxTasks = 128;
+constexpr const int kDyanmicTileSchedulerMaxTasks = 8192;
 constexpr const int kTaskSize = 4;
 
 enum class JobType : int32_t {
@@ -83,6 +84,11 @@ Array<NDArray> GetEventTensorsOnLayer(Array<NDArray> etensors, int layer_id);
 NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int num_qo_heads,
                           int num_kv_heads, int head_dim, Device device,
                           Device preferred_host_device);
+
+Array<Array<NDArray>> GenerateExecQueueDyn(NDArray exec_queue_device_buf,
+                                           NDArray exec_queue_host_buf, int tp_size,
+                                           int num_qo_heads, int num_kv_heads, int head_dim,
+                                           int num_layers, TVMStreamHandle copy_stream);
 
 }  // namespace megakernel
 }  // namespace vm
