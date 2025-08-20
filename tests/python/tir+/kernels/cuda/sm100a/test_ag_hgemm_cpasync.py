@@ -895,10 +895,10 @@ def test_ag_hgemm():
     args_dict = {
         "A_array": sess.empty((LOCAL_M, K), a_type),
         "B_array": sess.empty((LOCAL_N, K), b_type),
-        "ag_out_array": nvshmem_malloc_hook(ShapeTuple((M, K)), a_type, None),
         "out_array": sess.empty((M, LOCAL_N), d_type),
     }
     for i in range(TOTAL_ITERS):
+        args_dict[f"ag_out_array_{i}"] = nvshmem_malloc_hook(ShapeTuple((M, K)), a_type, None)
         args_dict[f"semaphore_array_{i}"] = nvshmem_malloc_hook(
             ShapeTuple((WORLD_SIZE,)), "uint64", None
         )
@@ -1002,7 +1002,7 @@ def test_ag_hgemm():
             transfer_to_peers_dfunc(
                 args_dict[f"semaphore_array_{itr}"],
                 args_dict["A_array"],
-                args_dict["ag_out_array"],
+                args_dict[f"ag_out_array_{itr}"],
                 d_stream,
                 M,
                 K,
@@ -1011,7 +1011,7 @@ def test_ag_hgemm():
             rt_mod["test_mma_ss_tma_2sm_persistent"](
                 args_dict["A_array"],
                 args_dict["B_array"],
-                args_dict["ag_out_array"],
+                args_dict[f"ag_out_array_{itr}"],
                 args_dict[f"semaphore_array_{itr}"],
                 args_dict["out_array"],
                 args_dict[f"profiler_buffer_array_{itr}"],
@@ -1037,7 +1037,7 @@ def test_ag_hgemm():
             for rank in range(WORLD_SIZE):
                 print(f"rank {rank}: {timer_res_np[rank]:.5f} ms")
 
-        sess.gather_to_worker0(args_dict["ag_out_array"], res_dict["ag_out_res"])
+        sess.gather_to_worker0(args_dict[f"ag_out_array_{TOTAL_ITERS-1}"], res_dict["ag_out_res"])
         sess.copy_from_worker_0(res_dict["ag_out_host"], res_dict["ag_out_res"])
         sess.gather_to_worker0(args_dict["out_array"], res_dict["out_res"])
         sess.copy_from_worker_0(res_dict["out_host"], res_dict["out_res"])
