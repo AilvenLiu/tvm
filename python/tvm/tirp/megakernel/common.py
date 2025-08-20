@@ -30,7 +30,6 @@ class JobType(Enum):
     V_APPEND_KV = 18
     O_ALLREDUCE = 19
     DOWN_PROJ_ALLREDUCE = 20
-    GATE_UP_PROJ_REDUCE = 21
     END = 99
 
 
@@ -202,8 +201,6 @@ class ProfileEventType(Enum):
     K_RMSNORM_ROPE_APPEND_KV = 18
     V_APPEND_KV = 19
     PUSH = 20
-    O_ALLREDUCE = 21
-    DOWN_PROJ_ALLREDUCE = 22
 
 
 event_type_names = [
@@ -228,6 +225,4 @@ event_type_names = [
     "K_RMSNORM_ROPE_APPEND_KV",
     "V_APPEND_KV",
     "PUSH",
-    "O_ALLREDUCE",
-    "DOWN_PROJ_ALLREDUCE",
 ]

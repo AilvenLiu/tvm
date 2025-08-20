@@ -8,9 +8,8 @@ atomic_add_int32 = f"""
 __forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, int32_t pe) {{
     if (pe >= 0) {{
         void* ptr = nvshmem_ptr(addr, pe);
-         asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(ptr), "r"(value)
+        asm volatile("red.async.release.global.sys.add.s32 [%0], %1;" ::"l"(ptr), "r"(value)
                        : "memory");
-        //atomicAdd_system(ptr, value);
     }} else {{
         asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(addr), "r"(value)
                        : "memory");
