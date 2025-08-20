@@ -666,7 +666,6 @@ def get_qwen3_megakernel_mod():
                 R.Tensor((5120, 25600 // TP_SIZE), dtype="float16"),
                 R.Tensor((5120,), dtype="float16"),
                 R.Tensor((5120,), dtype="float16"),] * NUM_HIDDEN_LAYERS),
-                #                
                 R.Tensor((5120,), dtype="float16"),
                 R.Tensor((151936, 5120), dtype="float16"),
             ),
@@ -703,7 +702,7 @@ def get_qwen3_megakernel_mod():
                     res0[6],
                     res0[7],
                 )
-                kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
+                kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
                 kv_indices = R.match_cast(kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
                 plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size_, plan_o_indptr_ = attn_plan_results[0], attn_plan_results[1], attn_plan_results[2], attn_plan_results[3]
                 plan_request_indices = R.match_cast(plan_request_indices_, R.Tensor((new_batch_size,), dtype="int32"))

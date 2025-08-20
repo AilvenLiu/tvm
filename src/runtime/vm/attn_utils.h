@@ -1017,18 +1017,18 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
         {num_layers,
          ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN)},
         dtype_aux_);
-    *etensor_data_views[10] =
-        etensor_data_views_raw[10].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
-    *etensor_data_views[11] = etensor_data_views_raw[11].CreateView(
+    *etensor_data_views[10] = etensor_data_views_raw[10].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
-    *etensor_data_views[12] = etensor_data_views_raw[12].CreateView(
+    *etensor_data_views[11] = etensor_data_views_raw[11].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize / tp_size, megakernel::kAllReduceTileNTile)},
         dtype_aux_);
-    *etensor_data_views[13] =
-        etensor_data_views_raw[13].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-    *etensor_data_views[14] = etensor_data_views_raw[14].CreateView({num_layers, 1}, dtype_aux_);
+    *etensor_data_views[12] =
+        etensor_data_views_raw[12].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+    *etensor_data_views[13] = etensor_data_views_raw[13].CreateView({num_layers, 1}, dtype_aux_);
+    *etensor_data_views[14] =
+        etensor_data_views_raw[14].CreateView({num_layers, split_o_project}, dtype_aux_);
     *etensor_data_views[15] =
-        etensor_data_views_raw[15].CreateView({num_layers, split_o_project}, dtype_aux_);
+        etensor_data_views_raw[15].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
     *etensor_data_views[16] = etensor_data_views_raw[16].CreateView(
         {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
   }

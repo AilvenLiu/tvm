@@ -238,8 +238,9 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
 // RNN State methods
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("megakernel.get_event_tensors_on_layer", GetEventTensorsOnLayer)
-                   .def("megakernel.generate_exec_queue", GenerateExecQueue);
+  refl::GlobalDef()
+      .def("megakernel.get_event_tensors_on_layer", GetEventTensorsOnLayer)
+      .def("megakernel.generate_exec_queue", GenerateExecQueue);
 });
 
 }  // namespace megakernel

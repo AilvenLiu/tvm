@@ -212,10 +212,10 @@ class MegaKernel:
             kv_indices_global = T.match_buffer(kv_indices_ptr, [total_page_num], "int32", scope="global", layout="default", offset_factor=1)
             kv_last_page_len_global = T.match_buffer(kv_last_page_len_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
             append_pos_global = T.match_buffer(append_pos_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
-            request_indices_global = T.match_buffer(request_indices_ptr, [new_batch_size], "int32", scope="global", layout="default", elem_offset=request_indices_global_elem_offset)
-            kv_tile_indices_global = T.match_buffer(kv_tile_indices_ptr, [new_batch_size], "int32", scope="global", layout="default", elem_offset=kv_tile_indices_global_elem_offset)
-            max_chunk_size_global = T.match_buffer(max_chunk_size_ptr, [1], "int32", scope="global", layout="default", elem_offset=max_chunk_size_global_elem_offset)
-            o_indptr_global = T.match_buffer(o_indptr_ptr, [batch_size + 1], "int32", scope="global", layout="default", elem_offset=o_indptr_global_elem_offset)
+            request_indices_global = T.match_buffer(request_indices_ptr, [new_batch_size], "int32", scope="global", layout="default", offset_factor=1)
+            kv_tile_indices_global = T.match_buffer(kv_tile_indices_ptr, [new_batch_size], "int32", scope="global", layout="default", offset_factor=1)
+            max_chunk_size_global = T.match_buffer(max_chunk_size_ptr, [1], "int32", scope="global", layout="default", offset_factor=1)
+            o_indptr_global = T.match_buffer(o_indptr_ptr, [batch_size + 1], "int32", scope="global", layout="default", offset_factor=1)
 
             # intermediate buffer
             partital_qkv_global = T.match_buffer(partital_qkv_ptr, [SPLIT_QKV_PROJECT, batch_size, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM], 
@@ -247,31 +247,31 @@ class MegaKernel:
 
             # event tensor
             etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_q_reduce_global = T.match_buffer(etensor_q_reduce_ptr, [batch_size, ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_k_reduce_global = T.match_buffer(etensor_k_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_v_reduce_global = T.match_buffer(etensor_v_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_decode_global = T.match_buffer(etensor_decode_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_decode_merge_global = T.match_buffer(etensor_decode_merge_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
-                                    "int32", scope="global", layout="default")
-            etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [SPLIT_O_PROJRCT], "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
+            etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [SPLIT_O_PROJRCT], "int32", scope="global", layout="default", offset_factor=1)
             etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)], 
-                                    "int32", scope="global", layout="default") 
-            etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], "int32", scope="global", layout="default")
-            etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", layout="default")
-            etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
+            etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], "int32", scope="global", layout="default", offset_factor=1)
+            etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
+            etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", layout="default", offset_factor=1)
             etensor_gate_up_proj_global = T.match_buffer(etensor_gate_up_proj_ptr, [INTERMEDIATE_SIZE // GemmTile.BLK_N], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_down_proj_global = T.match_buffer(etensor_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR],
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_down_proj_reduce_global = T.match_buffer(etensor_down_proj_reduce_ptr, [HIDDEN_SIZE // GemmTile.BLK_N],
-                                    "int32", scope="global", layout="default")
-            etensor_down_proj_allreduce_global = T.match_buffer(etensor_down_proj_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], "int32", scope="global", layout="default")
-            etensor_mlp_add_rms_global = T.match_buffer(etensor_mlp_add_rms_ptr, [batch_size], "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
+            etensor_down_proj_allreduce_global = T.match_buffer(etensor_down_proj_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], "int32", scope="global", layout="default", offset_factor=1)
+            etensor_mlp_add_rms_global = T.match_buffer(etensor_mlp_add_rms_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
 
             exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4], 
                         "int32", scope="global", layout="default")
@@ -362,7 +362,7 @@ class MegaKernel:
                     evt_attn_add_rms = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, o_allreduce_tile.N_TILE), etensor_attn_add_rms_global, use_nvshmem=True))
                     evt_attn_mlp = T.meta_var(Semaphore(batch_size, etensor_attn_mlp_global, use_nvshmem=True))
                     evt_gate_up_proj = T.meta_var(Semaphore(2, etensor_gate_up_proj_global, use_nvshmem=True))
-                    evt_down_proj = T.meta_var(Semaphore(INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR, etensor_down_proj_global, use_nvshmem=True))
+                    evt_down_proj = T.meta_var(Semaphore(-1, etensor_down_proj_global, use_nvshmem=True))
                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
                                                                 etensor_down_proj_reduce_global, use_nvshmem=True))
                     evt_down_proj_allreduce = T.meta_var(Semaphore(WORLD_SIZE * down_proj_reduce_tile.M_split, etensor_down_proj_allreduce_global, use_nvshmem=True))
@@ -477,7 +477,10 @@ class MegaKernel:
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
-                                evt_down_proj.semaphore_notify(tile_scheduler.m_idx // (INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR))
+                                range_start = T.meta_var(tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // gemm_down_proj_tile.TILE_K)
+                                range_end = T.meta_var(((tile_scheduler.m_idx + 1) * SiluMultiplyTile.TILE_SIZE - 1) // gemm_down_proj_tile.TILE_K)
+                                for i in T.serial(0, range_end + 1 - range_start):
+                                    evt_down_proj.semaphore_notify(i + range_start)
                         elif tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
                             evt_down_proj.semaphore_wait(tile_scheduler.k_idx)
                             gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
@@ -569,7 +572,7 @@ class MegaKernel:
             etensor_down_proj_ptr: T.handle,
             etensor_down_proj_reduce_ptr: T.handle,
             etensor_mlp_add_rms_ptr: T.handle,
-            etensor_end: T.Buffer((1, ), "int32"),
+            etensor_end: T.Buffer((1, ), "int32", offset_factor=1),
 
             # execution queue
             queue_tasks: T.Buffer((DynamicTileScheduler.MAX_TASKS, 4), "int32"),
@@ -646,29 +649,29 @@ class MegaKernel:
 
             # event tensor
             etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_q_reduce_global = T.match_buffer(etensor_q_reduce_ptr, [batch_size, ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1  )
             etensor_k_reduce_global = T.match_buffer(etensor_k_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_v_reduce_global = T.match_buffer(etensor_v_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_decode_global = T.match_buffer(etensor_decode_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_decode_merge_global = T.match_buffer(etensor_decode_merge_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
-                                    "int32", scope="global", layout="default")
-            etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [SPLIT_O_PROJRCT], "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
+            etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [SPLIT_O_PROJRCT], "int32", scope="global", layout="default", offset_factor=1)
             etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)], 
-                                    "int32", scope="global", layout="default") 
-            etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", layout="default")
-            etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
+            etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
+            etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", layout="default", offset_factor=1)
             etensor_gate_up_proj_global = T.match_buffer(etensor_gate_up_proj_ptr, [INTERMEDIATE_SIZE // GemmTile.BLK_N], 
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_down_proj_global = T.match_buffer(etensor_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR],
-                                    "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_down_proj_reduce_global = T.match_buffer(etensor_down_proj_reduce_ptr, [HIDDEN_SIZE // GemmTile.BLK_N],
-                                    "int32", scope="global", layout="default")
-            etensor_mlp_add_rms_global = T.match_buffer(etensor_mlp_add_rms_ptr, [batch_size], "int32", scope="global", layout="default")
+                                    "int32", scope="global", layout="default", offset_factor=1)
+            etensor_mlp_add_rms_global = T.match_buffer(etensor_mlp_add_rms_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
 
 
             A_tensor_map_qkv_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

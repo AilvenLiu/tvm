@@ -238,13 +238,13 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   HostMemoryVector etensor_attn_add_rms_host_;
   HostMemoryVector etensor_attn_mlp_host_;
   HostMemoryVector etensor_gate_up_proj_host_;
-  HostMemoryVector etensor_down_proj_host_;
   HostMemoryVector etensor_down_proj_reduce_host_;
   HostMemoryVector etensor_down_proj_allreduce_host_;
   HostMemoryVector etensor_mlp_add_rms_host_;
   HostMemoryVector etensor_end_host_;
   // dynamic etensors
   HostMemoryVector etensor_o_proj_host_;
+  HostMemoryVector etensor_down_proj_host_;
   HostMemoryVector etensor_decode_merge_host_;
 
   //-------------------------------------------
@@ -289,13 +289,13 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   NDArray etensor_attn_add_rms_view_;
   NDArray etensor_attn_mlp_view_;
   NDArray etensor_gate_up_proj_view_;
-  NDArray etensor_down_proj_view_;
   NDArray etensor_down_proj_reduce_view_;
   NDArray etensor_down_proj_allreduce_view_;
   NDArray etensor_mlp_add_rms_view_;
   NDArray etensor_end_view_;
   // dynamic etensors
   NDArray etensor_o_proj_view_;
+  NDArray etensor_down_proj_view_;
   NDArray etensor_decode_merge_view_;
 
   ffi::Optional<ffi::Function> f_transpose_append_mha_;
@@ -523,8 +523,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     etensor_gate_up_proj_host_ = HostMemoryVector(
         num_layers * ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN),
         dtype_aux_, preferred_host_device);
-    etensor_down_proj_host_ =
-        HostMemoryVector(num_layers * down_proj_split_k_factor, dtype_aux_, preferred_host_device);
     etensor_down_proj_reduce_host_ =
         HostMemoryVector(num_layers * ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN),
                          dtype_aux_, preferred_host_device);
@@ -536,6 +534,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     etensor_end_host_ = HostMemoryVector(num_layers, dtype_aux_, preferred_host_device);
     etensor_o_proj_host_ =
         HostMemoryVector(num_layers * split_o_project, dtype_aux_, preferred_host_device);
+    etensor_down_proj_host_ =
+        HostMemoryVector(num_layers * down_proj_split_k_factor, dtype_aux_, preferred_host_device);
     etensor_decode_merge_host_ = HostMemoryVector(num_layers * reserved_num_seqs * num_kv_heads,
                                                   dtype_aux_, preferred_host_device);
     // Cache static execution queue
@@ -1366,8 +1366,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
           num_layers_ *
           ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN));
       etensor_gate_up_proj_host_.fill(0);
-      etensor_down_proj_host_.resize(num_layers_ * down_proj_split_k_factor);
-      etensor_down_proj_host_.fill(0);
       etensor_down_proj_reduce_host_.resize(
           num_layers_ * ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN));
       etensor_down_proj_reduce_host_.fill(0);
@@ -1418,6 +1416,29 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                   layer_id * split_o_project + i,
                   etensor_o_proj_host_[layer_id * split_o_project + i] + cur_batch_size_);
             }
+          }
+        }
+      }
+
+      etensor_down_proj_host_.resize(num_layers_ * down_proj_split_k_factor);
+      etensor_down_proj_host_.fill(0);
+      int down_proj_tile_k =
+          (ceildiv(ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, down_proj_split_k_factor),
+                   megakernel::kGemmTileBlkK) *
+           megakernel::kGemmTileBlkK);
+      for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+        for (int m = 0;
+             m < megakernel::kIntermediateSizeTP1 / tp_size / megakernel::kSiluMultiplyTileTileSize;
+             ++m) {
+          int range_start = m * megakernel::kSiluMultiplyTileTileSize / down_proj_tile_k;
+          int range_end = ((m + 1) * megakernel::kSiluMultiplyTileTileSize - 1) / down_proj_tile_k;
+          for (int i = range_start; i <= range_end; ++i) {
+            CHECK_GE(i, 0) << "Index " << i << " is negative.";
+            CHECK_LT(i, down_proj_split_k_factor)
+                << "Index " << i << " out of bounds " << down_proj_split_k_factor;
+            etensor_down_proj_host_.set(
+                layer_id * down_proj_split_k_factor + i,
+                etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] + 1);
           }
         }
       }
@@ -1992,9 +2013,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         etensor_qkv_partial_view_, etensor_q_reduce_view_, etensor_k_reduce_view_,
         etensor_v_reduce_view_, etensor_decode_view_, etensor_o_partial_view_,
         etensor_o_allreduce_view_, etensor_attn_add_rms_view_, etensor_attn_mlp_view_,
-        etensor_gate_up_proj_view_, etensor_down_proj_view_, etensor_down_proj_reduce_view_,
+        etensor_gate_up_proj_view_, etensor_down_proj_reduce_view_,
         etensor_down_proj_allreduce_view_, etensor_mlp_add_rms_view_, etensor_end_view_,
-        etensor_o_proj_view_, etensor_decode_merge_view_});
+        etensor_o_proj_view_, etensor_down_proj_view_, etensor_decode_merge_view_});
     return ret;
   }
 
@@ -2757,47 +2778,45 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // Event tensor transfer.
     if (use_mega_kernel_) {
       int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
-      std::vector<HostMemoryVector*> etensor_data = {&etensor_qkv_partial_host_,
-                                                     &etensor_q_reduce_host_,
-                                                     &etensor_k_reduce_host_,
-                                                     &etensor_v_reduce_host_,
-                                                     &etensor_decode_host_,
-                                                     &etensor_o_partial_host_,
-                                                     &etensor_o_allreduce_host_,
-                                                     &etensor_attn_add_rms_host_,
-                                                     &etensor_attn_mlp_host_,
-                                                     &etensor_gate_up_proj_host_,
-                                                     &etensor_down_proj_host_,
-                                                     &etensor_down_proj_reduce_host_,
-                                                     &etensor_down_proj_allreduce_host_,
-                                                     &etensor_mlp_add_rms_host_,
-                                                     &etensor_end_host_,
-                                                     &etensor_o_proj_host_,
-                                                     &etensor_decode_merge_host_};
-      std::vector<NDArray*> etensor_data_views = {&etensor_qkv_partial_view_,
-                                                  &etensor_q_reduce_view_,
-                                                  &etensor_k_reduce_view_,
-                                                  &etensor_v_reduce_view_,
-                                                  &etensor_decode_view_,
-                                                  &etensor_o_partial_view_,
-                                                  &etensor_o_allreduce_view_,
-                                                  &etensor_attn_add_rms_view_,
-                                                  &etensor_attn_mlp_view_,
-                                                  &etensor_gate_up_proj_view_,
-                                                  &etensor_down_proj_view_,
-                                                  &etensor_down_proj_reduce_view_,
-                                                  &etensor_down_proj_allreduce_view_,
-                                                  &etensor_mlp_add_rms_view_,
-                                                  &etensor_end_view_,
-                                                  &etensor_o_proj_view_,
-                                                  &etensor_decode_merge_view_};
+      std::vector<HostMemoryVector*> etensor_data = {
+          &etensor_qkv_partial_host_,      &etensor_q_reduce_host_,
+          &etensor_k_reduce_host_,         &etensor_v_reduce_host_,
+          &etensor_decode_host_,           &etensor_o_partial_host_,
+          &etensor_o_allreduce_host_,      &etensor_attn_add_rms_host_,
+          &etensor_attn_mlp_host_,         &etensor_gate_up_proj_host_,
+          &etensor_down_proj_reduce_host_, &etensor_down_proj_allreduce_host_,
+          &etensor_mlp_add_rms_host_,      &etensor_end_host_,
+          &etensor_o_proj_host_,           &etensor_down_proj_host_,
+          &etensor_decode_merge_host_};
+      std::vector<NDArray*> etensor_data_views = {
+          &etensor_qkv_partial_view_,      &etensor_q_reduce_view_,
+          &etensor_k_reduce_view_,         &etensor_v_reduce_view_,
+          &etensor_decode_view_,           &etensor_o_partial_view_,
+          &etensor_o_allreduce_view_,      &etensor_attn_add_rms_view_,
+          &etensor_attn_mlp_view_,         &etensor_gate_up_proj_view_,
+          &etensor_down_proj_reduce_view_, &etensor_down_proj_allreduce_view_,
+          &etensor_mlp_add_rms_view_,      &etensor_end_view_,
+          &etensor_o_proj_view_,           &etensor_down_proj_view_,
+          &etensor_decode_merge_view_};
       aux_data_manager_->CopyEventTensorAsync(etensor_data, etensor_data_views, num_layers_,
                                               cur_batch_size_, num_qo_heads_, num_kv_heads_,
                                               qk_head_dim_, tp_size);
     }
 
     // - Commit the copy.
+    if (use_mega_kernel_) {
+      // NVSHMEM is used
+      ffi::Function f_nvshmem_barrier =
+          ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.barrier_all_on_stream");
+      f_nvshmem_barrier(copy_stream_);
+    }
     aux_data_manager_->CommitAttnAuxDataCopy();
+    if (use_mega_kernel_) {
+      // NVSHMEM is used
+      ffi::Function f_nvshmem_barrier =
+          ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.barrier_all_on_stream");
+      f_nvshmem_barrier(copy_stream_);
+    }
     // - Reset the dirty flag to false.
     dirty_aux_data_device_ = false;
   }

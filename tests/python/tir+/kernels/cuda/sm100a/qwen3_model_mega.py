@@ -30,11 +30,12 @@ from tvm.tirp.megakernel.common import ceildiv
 from tvm.tirp.megakernel.gemm import GemmTile
 from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
 
-from ..megakernel.test_layer import (
+from ..megakernel.test_layer_tp import (
     DOWN_PROJ_SPLIT_K_FACTOR,
     SPLIT_O_PROJRCT,
     SPLIT_QKV_PROJECT,
     MegaKernel,
+    problem_config,
 )
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
 from .test_rmsnorm import get_rmsnorm_kernel
@@ -43,7 +44,7 @@ from .test_rope import get_cos_sin_cache_kernel
 # pyright: reportInvalidTypeForm=false
 
 parser = ArgumentParser()
-parser.add_argument("--tp-size", type=int, default=1, choices=[1])
+parser.add_argument("--tp-size", type=int, required=True, choices=[8])
 args = parser.parse_args()
 
 dev = tvm.cuda()
@@ -60,6 +61,8 @@ MAX_SEQ_LEN = 1024
 MAX_TOTAL_SEQ_LEN = MAX_BATCH_SIZE * MAX_SEQ_LEN
 PAGE_SIZE = 16
 ROPE_THETA = 1000000
+
+nvshmem_initialized = False
 
 config_tp1 = Qwen3Config(
     hidden_act="silu",
@@ -82,20 +85,6 @@ config_tp1 = Qwen3Config(
     weight_block_size=None,
     kwargs={},
 )
-
-
-problem_config = {
-    "vocab_size": config_tp1.vocab_size,
-    "hidden_size": config_tp1.hidden_size,
-    "intermediate_size": config_tp1.intermediate_size,
-    "num_hidden_layers": config_tp1.num_hidden_layers,
-    "num_attention_heads": config_tp1.num_attention_heads,
-    "num_key_value_heads": config_tp1.num_key_value_heads,
-    "head_dim": config_tp1.head_dim,
-    "rms_norm_eps": config_tp1.rms_norm_eps,
-    "rope_theta": config_tp1.rope_theta,
-    "page_size": 16,
-}
 
 
 def init_disco_session():
@@ -302,8 +291,25 @@ vm, batch_decode_func, kv_cache_create_func, embed_func = load_reference_model_l
 params = get_params(named_params, vm)
 
 
-def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=None):
-    kv_cache = vm["create_flashinfer_paged_kv_cache"](
+def test_qwen3_model(
+    get_global_func,
+    batch_decode_func,
+    kv_cache_create_func,
+    embed_func,
+    is_megakernel=False,
+    cos_sin_cache_func=None,
+):
+    global nvshmem_initialized
+    if is_megakernel and not nvshmem_initialized:
+        print(f"start to initialize nvshmem")
+        f_init_nvshmem_uid = tvm.get_global_func("runtime.disco.nvshmem.init_nvshmem_uid")
+        uid = f_init_nvshmem_uid()
+        f_init_nvshmem = get_global_func("runtime.disco.nvshmem.init_nvshmem")
+        f_init_nvshmem(uid, TP_SIZE, 0)
+        nvshmem_initialized = True
+        print(f"nvshmem initialized")
+
+    kv_cache = kv_cache_create_func(
         ShapeTuple([MAX_BATCH_SIZE]),  # max_batch_size
         ShapeTuple([MAX_TOTAL_SEQ_LEN]),  # max_total_seq_len
         ShapeTuple([MAX_SEQ_LEN]),  # prefill_chunk_size
@@ -316,16 +322,16 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
         # cos_sin_cache = prepare_cos_sin_cache(128, MAX_SEQ_LEN, ROPE_THETA)
         # cos_sin_cache = tvm.nd.array.from_dlpack(cos_sin_cache.to_dlpack())
 
-    nd_view_func = tvm.get_global_func("vm.builtin.reshape")
+    nd_view_func = get_global_func("vm.builtin.reshape")
 
-    def embed(tokens, params):
-        _embed = vm["embed"](tokens, params)
-        _embed = nd_view_func(_embed, ShapeTuple([_embed.shape[0], 1, _embed.shape[1]]))
+    def embed(tokens, params, batch_size):
+        _embed = embed_func(tokens, params)
+        _embed = nd_view_func(_embed, ShapeTuple([batch_size, 1, config_tp1.hidden_size]))
         return _embed
 
-    add_sequence_func = tvm.get_global_func("vm.builtin.kv_state_add_sequence")
-    begin_forward_func = tvm.get_global_func("vm.builtin.kv_state_begin_forward")
-    end_forward_func = tvm.get_global_func("vm.builtin.kv_state_end_forward")
+    add_sequence_func = get_global_func("vm.builtin.kv_state_add_sequence")
+    begin_forward_func = get_global_func("vm.builtin.kv_state_begin_forward")
+    end_forward_func = get_global_func("vm.builtin.kv_state_end_forward")
 
     batch_size = 32
     seq_len = 16
@@ -340,19 +346,29 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
     last_tokens = np.random.randint(0, 100, size=(batch_size,))
     for i in tqdm(range(seq_len)):
         tokens = tvm.nd.array(last_tokens.astype("int32"), device=dev)
-        hidden_states = embed(tokens, params)
+        if TP_SIZE > 1:
+            tokens_d = get_global_func("runtime.disco.empty")(
+                ShapeTuple(list(last_tokens.shape)), "int32", None, False, False
+            )
+            disco_sess.copy_to_worker_0(tokens, tokens_d)
+            tokens = tokens_d
+        hidden_states = embed(tokens, params, batch_size)
         begin_forward_func(
             kv_cache, ShapeTuple(seq_ids), ShapeTuple([1] * batch_size), None, is_megakernel
         )
         if is_megakernel:
-            logits, kv_cache = batch_decode_func(
+            results = batch_decode_func(
                 hidden_states,
                 kv_cache,
                 cos_sin_cache,
                 params,
             )
         else:
-            logits, kv_cache = batch_decode_func(hidden_states, kv_cache, params)
+            results = batch_decode_func(hidden_states, kv_cache, params)
+        if TP_SIZE == 1:
+            logits, _ = results
+        else:
+            logits, _ = list(results.debug_get_from_remote(0))
 
         end_forward_func(kv_cache)
         last_tokens = sample_token(logits.numpy()).flatten()
@@ -361,7 +377,7 @@ def test_qwen3_model(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
     return logits_arr
 
 
-res0 = test_qwen3_model(vm["batch_decode"])
+res0 = test_qwen3_model(get_global_func, batch_decode_func, kv_cache_create_func, embed_func)
 
 
 def attach_attr(func, name):
@@ -383,12 +399,12 @@ def get_qwen3_megakernel_mod():
     def call_qwen3_layer(input0, input1, layer_id):
         with R.dataflow():
             # 8i+1, 8i+2, 8i+3, 8i+4, 8i+5, 8i+6, 8i+8, 8i+15 if i<num_hidden_layers-1 else 8i+9
-            model_layers_0_self_attn_c_attn_weight1: R.Tensor((10240, 5120), dtype="float16") = packed_params[8*layer_id+1]
-            model_layers_0_self_attn_o_proj_weight1: R.Tensor((5120, 8192), dtype="float16") = packed_params[8*layer_id+2]
+            model_layers_0_self_attn_c_attn_weight1: R.Tensor((10240 // TP_SIZE, 5120), dtype="float16") = packed_params[8*layer_id+1]
+            model_layers_0_self_attn_o_proj_weight1: R.Tensor((5120, 8192 // TP_SIZE), dtype="float16") = packed_params[8*layer_id+2]
             model_layers_0_self_attn_q_norm_weight1: R.Tensor((128,), dtype="float16") = packed_params[8*layer_id+3]
             model_layers_0_self_attn_k_norm_weight1: R.Tensor((128,), dtype="float16") = packed_params[8*layer_id+4]
-            model_layers_0_mlp_gate_up_proj_weight1: R.Tensor((51200, 5120), dtype="float16") = packed_params[8*layer_id+5]
-            model_layers_0_mlp_down_proj_weight1: R.Tensor((5120, 25600), dtype="float16") = packed_params[8*layer_id+6]
+            model_layers_0_mlp_gate_up_proj_weight1: R.Tensor((51200 // TP_SIZE, 5120), dtype="float16") = packed_params[8*layer_id+5]
+            model_layers_0_mlp_down_proj_weight1: R.Tensor((5120, 25600 // TP_SIZE), dtype="float16") = packed_params[8*layer_id+6]
             model_layers_0_post_attention_layernorm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[8*layer_id+8]
             model_norm_weight1: R.Tensor((5120,), dtype="float16") = packed_params[8*layer_id+15 if layer_id < NUM_HIDDEN_LAYERS-1 else 8*layer_id+9]
 
@@ -411,12 +427,12 @@ def get_qwen3_megakernel_mod():
                 etensor_attn_add_rms_norm,
                 etensor_attn_mlp,
                 etensor_gate_up_proj,
-                etensor_down_proj,
                 etensor_down_proj_reduce,
                 etensor_down_proj_allreduce,
                 etensor_mlp_add_rms_norm,
                 etensor_end,
                 etensor_o_proj,
+                etensor_down_proj,
                 etensor_decode_merge,
             ) = (
                 etensors_on_layer[0],
@@ -438,19 +454,22 @@ def get_qwen3_megakernel_mod():
                 etensors_on_layer[16],
             )
 
-            partital_qkv = R.builtin.alloc_tensor(R.shape([SPLIT_QKV_PROJECT, batch_size, 10240]), dtype="float32", runtime_device_index=0)
-            qkv = R.builtin.alloc_tensor(R.shape([batch_size, 80, 128]), dtype="float16", runtime_device_index=0)
-            o = R.builtin.alloc_tensor(R.shape([batch_size, 64, 128]), dtype="float16", runtime_device_index=0)
-            lse = R.builtin.alloc_tensor(R.shape([batch_size, 64]), dtype="float32", runtime_device_index=0)
-            o_tmp = R.builtin.alloc_tensor(R.shape([new_batch_size, 64, 128]), dtype="float32", runtime_device_index=0)
-            lse_tmp = R.builtin.alloc_tensor(R.shape([new_batch_size, 64]), dtype="float32", runtime_device_index=0)
+            default_device = R.call_pure_packed("runtime.disco.device", sinfo_args=[R.Object])
+            partital_qkv = R.builtin.alloc_tensor(R.shape([SPLIT_QKV_PROJECT, batch_size, 10240 // TP_SIZE]), dtype="float32", runtime_device_index=0)
+            qkv = R.builtin.alloc_tensor(R.shape([batch_size, 80 // TP_SIZE, 128]), dtype="float16", runtime_device_index=0)
+            o = R.builtin.alloc_tensor(R.shape([batch_size, 64 // TP_SIZE, 128]), dtype="float16", runtime_device_index=0)
+            lse = R.builtin.alloc_tensor(R.shape([batch_size, 64 // TP_SIZE]), dtype="float32", runtime_device_index=0)
+            o_tmp = R.builtin.alloc_tensor(R.shape([new_batch_size, 64 // TP_SIZE, 128]), dtype="float32", runtime_device_index=0)
+            lse_tmp = R.builtin.alloc_tensor(R.shape([new_batch_size, 64 // TP_SIZE]), dtype="float32", runtime_device_index=0)
             partial_o = R.builtin.alloc_tensor(R.shape([SPLIT_O_PROJRCT, batch_size, 5120]), dtype="float32", runtime_device_index=0)
-            hidden_state_attn_mlp = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
-            out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 51200]), dtype="float16", runtime_device_index=0)
-            out_silu_multiply = R.builtin.alloc_tensor(R.shape([batch_size, 25600]), dtype="float16", runtime_device_index=0)
+            before_o_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, 5120]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, 5120), "float16")])
+            hidden_state_attn_mlp = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, 5120]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, 5120), "float16")])
+            out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 51200 // TP_SIZE]), dtype="float16", runtime_device_index=0)
+            out_silu_multiply = R.builtin.alloc_tensor(R.shape([batch_size, 25600 // TP_SIZE]), dtype="float16", runtime_device_index=0)
             partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([DOWN_PROJ_SPLIT_K_FACTOR, batch_size, 5120]), dtype="float32", runtime_device_index=0)
+            before_down_proj_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, 5120]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, 5120), "float16")])
 
-            output_tensor = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
+            output_tensor = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, 5120]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, 5120), "float16")])
 
 
             layer_res = R.call_tir_inplace(cls.layer_kernel, (
@@ -465,12 +484,12 @@ def get_qwen3_megakernel_mod():
                                         cos_sin_cache, rope_pos, kv_data[layer_id], kv_indptr, kv_indices, kv_last_page_len,
                                         append_pos, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size, plan_o_indptr,
                                         # intermediate buffer
-                                        partital_qkv, qkv, o, lse, o_tmp, lse_tmp, partial_o, hidden_state_attn_mlp,
-                                        out_gate_up_proj, out_silu_multiply, partial_sum_down_proj,
+                                        partital_qkv, qkv, o, lse, o_tmp, lse_tmp, partial_o, before_o_allreduce, hidden_state_attn_mlp,
+                                        out_gate_up_proj, out_silu_multiply, partial_sum_down_proj, before_down_proj_allreduce,
                                         # event tensor
                                         etensor_qkv_partial, etensor_q_reduce, etensor_k_reduce, etensor_v_reduce, etensor_decode,
-                                        etensor_decode_merge, etensor_o_proj, etensor_o_partial, etensor_attn_add_rms_norm, etensor_attn_mlp,
-                                        etensor_gate_up_proj, etensor_down_proj, etensor_down_proj_reduce, etensor_mlp_add_rms_norm,
+                                        etensor_decode_merge, etensor_o_proj, etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm, etensor_attn_mlp,
+                                        etensor_gate_up_proj, etensor_down_proj, etensor_down_proj_reduce, etensor_down_proj_allreduce, etensor_mlp_add_rms_norm,
                                         # execution queue
                                         exec_queue),
                                         [2, 1],
@@ -562,10 +581,12 @@ def get_qwen3_megakernel_mod():
                 o_tmp_ptr: T.handle, # intermediate
                 lse_tmp_ptr: T.handle, # intermediate
                 partial_o_ptr: T.handle, # intermediate
+                before_o_allreduce_ptr: T.handle, # intermediate
                 hidden_state_attn_mlp_ptr: T.handle, # intermediate
                 out_gate_up_proj_ptr: T.handle, # intermediate
                 out_silu_multiply_ptr: T.handle, # intermediate
                 partial_sum_down_proj_ptr: T.handle, # intermediate
+                before_down_proj_allreduce_ptr: T.handle, # intermediate
 
                 # event tensor
                 etensor_qkv_partial_ptr: T.handle,
@@ -576,11 +597,13 @@ def get_qwen3_megakernel_mod():
                 etensor_decode_merge_ptr: T.handle,
                 etensor_o_proj_ptr: T.handle,
                 etensor_o_partial_ptr: T.handle,
+                etensor_o_allreduce_ptr: T.handle,
                 etensor_attn_add_rms_ptr: T.handle,
                 etensor_attn_mlp_ptr: T.handle,
                 etensor_gate_up_proj_ptr: T.handle,
                 etensor_down_proj_ptr: T.handle,
                 etensor_down_proj_reduce_ptr: T.handle,
+                etensor_down_proj_allreduce_ptr: T.handle,
                 etensor_mlp_add_rms_ptr: T.handle,
 
                 # execution queue
@@ -598,12 +621,12 @@ def get_qwen3_megakernel_mod():
             packed_params: R.Tuple(
                 R.Tensor((151936, 5120), dtype="float16"),
                 #
-                *([R.Tensor((10240, 5120), dtype="float16"),
-                R.Tensor((5120, 8192), dtype="float16"),
+                *([R.Tensor((10240 // TP_SIZE, 5120), dtype="float16"),
+                R.Tensor((5120, 8192 // TP_SIZE), dtype="float16"),
                 R.Tensor((128,), dtype="float16"),
                 R.Tensor((128,), dtype="float16"),
-                R.Tensor((51200, 5120), dtype="float16"),
-                R.Tensor((5120, 25600), dtype="float16"),
+                R.Tensor((51200 // TP_SIZE, 5120), dtype="float16"),
+                R.Tensor((5120, 25600 // TP_SIZE), dtype="float16"),
                 R.Tensor((5120,), dtype="float16"),
                 R.Tensor((5120,), dtype="float16"),] * NUM_HIDDEN_LAYERS),
                 R.Tensor((5120,), dtype="float16"),
@@ -642,7 +665,7 @@ def get_qwen3_megakernel_mod():
                     res0[6],
                     res0[7],
                 )
-                kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
+                kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
                 kv_indices = R.match_cast(kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
                 plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size_, plan_o_indptr_ = attn_plan_results[0], attn_plan_results[1], attn_plan_results[2], attn_plan_results[3]
                 plan_request_indices = R.match_cast(plan_request_indices_, R.Tensor((new_batch_size,), dtype="int32"))
@@ -764,13 +787,29 @@ def get_qwen3_megakernel_batch_decode_func():
             mg_model, target, relax_pipeline=relax.get_pipeline("opt_llm_mg"), tir_pipeline="tirp"
         )
         ex.export_library(MEGA_LIB_PATH)
+    if TP_SIZE == 1:
         vm = relax.VirtualMachine(ex, dev)
-    return vm["batch_decode"], vm["cos_sin_cache_func"]
+        batch_decode_func = vm["batch_decode"]
+        cos_sin_cache_func = vm["cos_sin_cache_func"]
+    else:
+        vm = get_global_func("runtime.disco.load_vm_module")(MEGA_LIB_PATH, None)
+        mod_get_func = get_global_func("runtime.ModuleGetFunction")
+        batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
+        cos_sin_cache_func_ = mod_get_func(vm, "cos_sin_cache_func", True)
+        batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)
+        cos_sin_cache_func = lambda *args: disco_sess.call_packed(cos_sin_cache_func_, *args)
+
+    return batch_decode_func, cos_sin_cache_func
 
 
 batch_decode_func, cos_sin_cache_func = get_qwen3_megakernel_batch_decode_func()
 res1 = test_qwen3_model(
-    batch_decode_func, is_megakernel=True, cos_sin_cache_func=cos_sin_cache_func
+    get_global_func,
+    batch_decode_func,
+    kv_cache_create_func,
+    embed_func,
+    is_megakernel=True,
+    cos_sin_cache_func=cos_sin_cache_func,
 )
 
 

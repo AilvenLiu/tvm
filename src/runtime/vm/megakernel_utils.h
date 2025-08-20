@@ -78,6 +78,8 @@ enum class JobType : int32_t {
   kEnd = 99,
 };
 
+Array<NDArray> GetEventTensorsOnLayer(Array<NDArray> etensors, int layer_id);
+
 NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int num_qo_heads,
                           int num_kv_heads, int head_dim, Device device,
                           Device preferred_host_device);
