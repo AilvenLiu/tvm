@@ -2776,8 +2776,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                                                merged_attn_lse_device_->dtype);
 
     // Event tensor transfer.
+    int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
     if (use_mega_kernel_) {
-      int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
       std::vector<HostMemoryVector*> etensor_data = {
           &etensor_qkv_partial_host_,      &etensor_q_reduce_host_,
           &etensor_k_reduce_host_,         &etensor_v_reduce_host_,
@@ -2804,14 +2804,14 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     }
 
     // - Commit the copy.
-    if (use_mega_kernel_) {
+    if (use_mega_kernel_ && tp_size > 1) {
       // NVSHMEM is used
       ffi::Function f_nvshmem_barrier =
           ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.barrier_all_on_stream");
       f_nvshmem_barrier(copy_stream_);
     }
     aux_data_manager_->CommitAttnAuxDataCopy();
-    if (use_mega_kernel_) {
+    if (use_mega_kernel_ && tp_size > 1) {
       // NVSHMEM is used
       ffi::Function f_nvshmem_barrier =
           ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.barrier_all_on_stream");

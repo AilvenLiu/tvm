@@ -371,7 +371,6 @@ class MegaKernel:
                     # initialize tile scheduler
                     tile_scheduler = T.meta_var(StaticTileScheduler(prefix="attn", exec_queue=exec_queue, pool_allocator=pool))
                     tile_scheduler.init(bx, tid)
-                    rank = T.nvshmem.my_pe()
                     while tile_scheduler.valid():
                         if tile_scheduler.task_type == JobType.GEMM_QKV_PROJ.value:
                             qkv_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)

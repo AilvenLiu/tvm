@@ -343,7 +343,7 @@ class MegaKernel:
                     evt_attn_add_rms = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, o_reduce_tile.N_TILE), etensor_attn_add_rms_global))
                     evt_attn_mlp = T.meta_var(Semaphore(batch_size, etensor_attn_mlp_global))
                     evt_gate_up_proj = T.meta_var(Semaphore(2, etensor_gate_up_proj_global))
-                    evt_down_proj = T.meta_var(Semaphore(INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR, etensor_down_proj_global))
+                    evt_down_proj = T.meta_var(Semaphore(-1, etensor_down_proj_global))
                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
                                                                 etensor_down_proj_reduce_global))
                     evt_add_rms_norm = T.meta_var(Semaphore(HIDDEN_SIZE // down_proj_reduce_tile.N_TILE, etensor_mlp_add_rms_global))
@@ -450,7 +450,10 @@ class MegaKernel:
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
-                                evt_down_proj.semaphore_notify(tile_scheduler.m_idx // (INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR))
+                                range_start = T.meta_var(tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // gemm_down_proj_tile.TILE_K)
+                                range_end = T.meta_var(((tile_scheduler.m_idx + 1) * SiluMultiplyTile.TILE_SIZE - 1) // gemm_down_proj_tile.TILE_K)
+                                for i in T.serial(0, range_end + 1 - range_start):
+                                    evt_down_proj.semaphore_notify(i + range_start)
                         elif tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
                             evt_down_proj.semaphore_wait(tile_scheduler.k_idx)
                             gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
@@ -724,7 +727,7 @@ class MegaKernel:
                     evt_attn_add_rms = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, o_reduce_tile.N_TILE), etensor_attn_add_rms_global))
                     evt_attn_mlp = T.meta_var(Semaphore(batch_size, etensor_attn_mlp_global))
                     evt_gate_up_proj = T.meta_var(Semaphore(2, etensor_gate_up_proj_global))
-                    evt_down_proj = T.meta_var(Semaphore(INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR, etensor_down_proj_global))
+                    evt_down_proj = T.meta_var(Semaphore(-1, etensor_down_proj_global, decrement=True))
                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
                                                                 etensor_down_proj_reduce_global))
                     evt_add_rms_norm = T.meta_var(Semaphore(HIDDEN_SIZE // down_proj_reduce_tile.N_TILE, etensor_mlp_add_rms_global))
@@ -1017,8 +1020,10 @@ class MegaKernel:
                                 tile_scheduler.push_task(JobType.SPLIT_SILU_MULTIPLY.value, tile_scheduler.n_idx, 0, 0, warp_id, evt_gate_up_proj, tile_scheduler.n_idx, use_barrier=False)
                         elif tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
-                            offset = T.meta_var(tile_scheduler.m_idx // (INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR))
-                            tile_scheduler.push_tasks_along_dim(JobType.GEMM_DOWN_PROJ.value, 0, 0, offset, HIDDEN_SIZE // GemmTile.BLK_N, 1, warp_id, lane_id, evt_down_proj, offset)
+                            range_start = T.meta_var(tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // gemm_down_proj_tile.TILE_K)
+                            range_end = T.meta_var(((tile_scheduler.m_idx + 1) * SiluMultiplyTile.TILE_SIZE - 1) // gemm_down_proj_tile.TILE_K)
+                            for i in T.serial(0, range_end + 1 - range_start):
+                                tile_scheduler.push_tasks_along_dim(JobType.GEMM_DOWN_PROJ.value, 0, 0, range_start + i, HIDDEN_SIZE // GemmTile.BLK_N, 1, warp_id, lane_id, evt_down_proj, range_start + i)
                         elif tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
                             gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             tile_scheduler.push_tasks_along_dim(JobType.DOWN_PROJ_REDUCE.value, 0, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0, down_proj_reduce_tile.M_split, 0, warp_id, lane_id, evt_down_proj_reduce, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), use_barrier=False)
