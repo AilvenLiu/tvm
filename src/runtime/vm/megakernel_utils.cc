@@ -75,6 +75,7 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   int split_qkv_project = kSplitQKVProject[tp_size];
   int split_o_project = kSplitOProject[tp_size];
   int down_proj_split_k_factor = kDownProjSplitKFactor[tp_size];
+  int gate_up_proj_split_k_factor = kGateUpProjSplitKFactor[tp_size];
   TVM_FFI_ITVM_FFI_ICHECK_NE(split_qkv_project, -1);
   TVM_FFI_ITVM_FFI_ICHECK_NE(split_o_project, -1);
   TVM_FFI_ITVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
@@ -180,7 +181,18 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
   }
 
   for (int n_idx = 0; n_idx < ceildiv(kIntermediateSizeTP1 / tp_size * 2, kGemmTileBlkN); ++n_idx) {
-    f_push_task(0, n_idx, 0, JobType::kGemmGateUpProj);
+    for (int k_idx = 0; k_idx < gate_up_proj_split_k_factor; ++k_idx) {
+      f_push_task(0, n_idx, k_idx, JobType::kGemmGateUpProj);
+    }
+  }
+  if (gate_up_proj_split_k_factor > 1) {
+    int32_t m_split_gate_up_proj_reduce =
+        std::min(batch_size, ceildiv(kNumSM, kIntermediateSizeTP1 / tp_size * 2 / kSplitKReduceTileNUnit));
+    for (int m_idx = 0; m_idx < m_split_gate_up_proj_reduce; ++m_idx) {
+      for (int n_idx = 0; n_idx < ceildiv(kIntermediateSizeTP1 / tp_size * 2, kGemmTileBlkN); ++n_idx) {
+        f_push_task(m_idx, n_idx, 0, JobType::kGateUpProjReduce);
+      }
+    }
   }
 
   for (int n_idx = 0; n_idx < ceildiv(kIntermediateSizeTP1 / tp_size, kSiluMultiplyTileTileSize);

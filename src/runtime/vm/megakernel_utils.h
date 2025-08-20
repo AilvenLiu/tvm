@@ -40,6 +40,7 @@ constexpr const int kGemmTileBlkN = 128;
 constexpr const int kGemmTileBlkK = 64;
 constexpr const int kSplitQKVProject[] = {-1, 3, -1, -1, -1, -1, -1, -1, 4};
 constexpr const int kSplitOProject[] = {-1, 3, -1, -1, -1, -1, -1, -1, 2};
+constexpr const int kGateUpProjSplitKFactor[] = {-1, 1, -1, -1, -1, -1, -1, -1, 2};
 constexpr const int kDownProjSplitKFactor[] = {-1, 10, -1, -1, -1, -1, -1, -1, 3};
 constexpr const int kSiluMultiplyTileTileSize = 128;
 constexpr const int kAllReduceTileMTile = 16;
@@ -75,6 +76,7 @@ enum class JobType : int32_t {
   kVAppendKV = 18,
   kOAllReduce = 19,
   kDownProjAllReduce = 20,
+  kGateUpProjReduce = 21,
   kEnd = 99,
 };
 
