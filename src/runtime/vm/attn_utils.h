@@ -974,8 +974,8 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
                             std::vector<NDArray*> etensor_data_views, int num_layers,
                             int cur_batch_size, int num_qo_heads, int num_kv_heads, int qk_head_dim,
                             int tp_size) final {
-    TVM_FFI_ICHECK_EQ(etensor_data.size(), 17)
-        << "Event tensor size mismatch, expected 17, got " << etensor_data.size();
+    TVM_FFI_ICHECK_EQ(etensor_data.size(), 18)
+        << "Event tensor size mismatch, expected 18, got " << etensor_data.size();
     TVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
     std::vector<NDArray> etensor_data_views_raw;
     etensor_data_views_raw.reserve(etensor_data.size());
@@ -1015,21 +1015,25 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     *etensor_data_views[8] = etensor_data_views_raw[8].CreateView({num_layers, 1}, dtype_aux_);
     *etensor_data_views[9] = etensor_data_views_raw[9].CreateView(
         {num_layers,
-         ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN)},
+         ceildiv(megakernel::kIntermediateSizeTP1 / tp_size * 2, megakernel::kGemmTileBlkN)},
         dtype_aux_);
     *etensor_data_views[10] = etensor_data_views_raw[10].CreateView(
-        {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
+        {num_layers,
+         ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN)},
+        dtype_aux_);
     *etensor_data_views[11] = etensor_data_views_raw[11].CreateView(
+        {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
+    *etensor_data_views[12] = etensor_data_views_raw[12].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize / tp_size, megakernel::kAllReduceTileNTile)},
         dtype_aux_);
-    *etensor_data_views[12] =
-        etensor_data_views_raw[12].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-    *etensor_data_views[13] = etensor_data_views_raw[13].CreateView({num_layers, 1}, dtype_aux_);
-    *etensor_data_views[14] =
-        etensor_data_views_raw[14].CreateView({num_layers, split_o_project}, dtype_aux_);
+    *etensor_data_views[13] =
+        etensor_data_views_raw[13].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+    *etensor_data_views[14] = etensor_data_views_raw[14].CreateView({num_layers, 1}, dtype_aux_);
     *etensor_data_views[15] =
-        etensor_data_views_raw[15].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
-    *etensor_data_views[16] = etensor_data_views_raw[16].CreateView(
+        etensor_data_views_raw[15].CreateView({num_layers, split_o_project}, dtype_aux_);
+    *etensor_data_views[16] =
+        etensor_data_views_raw[16].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
+    *etensor_data_views[17] = etensor_data_views_raw[17].CreateView(
         {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
   }
 

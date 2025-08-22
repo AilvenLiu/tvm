@@ -282,6 +282,9 @@ def generate_event_tensor(batch_size, o_indptr, split_kv, WORLD_SIZE):
     )
     etensor_attn_add_rms_norm = tvm.nd.array(np.zeros(batch_size, dtype=np.int32), device=DEV)
     etensor_attn_mlp = tvm.nd.array(np.zeros(1, dtype=np.int32), device=DEV)
+    etensor_gate_up_proj_reduce = tvm.nd.array(
+        np.zeros(INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N, dtype=np.int32), device=DEV
+    )
     etensor_gate_up_proj = tvm.nd.array(
         np.zeros(INTERMEDIATE_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
     )
@@ -314,6 +317,7 @@ def generate_event_tensor(batch_size, o_indptr, split_kv, WORLD_SIZE):
         etensor_o_allreduce,
         etensor_attn_add_rms_norm,
         etensor_attn_mlp,
+        etensor_gate_up_proj_reduce,
         etensor_gate_up_proj,
         etensor_down_proj,
         etensor_down_proj_reduce,

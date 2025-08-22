@@ -240,6 +240,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   HostMemoryVector etensor_o_allreduce_host_;
   HostMemoryVector etensor_attn_add_rms_host_;
   HostMemoryVector etensor_attn_mlp_host_;
+  HostMemoryVector etensor_gate_up_proj_reduce_host_;
   HostMemoryVector etensor_gate_up_proj_host_;
   HostMemoryVector etensor_down_proj_reduce_host_;
   HostMemoryVector etensor_down_proj_allreduce_host_;
@@ -291,6 +292,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   NDArray etensor_o_allreduce_view_;
   NDArray etensor_attn_add_rms_view_;
   NDArray etensor_attn_mlp_view_;
+  NDArray etensor_gate_up_proj_reduce_view_;
   NDArray etensor_gate_up_proj_view_;
   NDArray etensor_down_proj_reduce_view_;
   NDArray etensor_down_proj_allreduce_view_;
@@ -523,6 +525,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     etensor_attn_add_rms_host_ =
         HostMemoryVector(num_layers * reserved_num_seqs, dtype_aux_, preferred_host_device);
     etensor_attn_mlp_host_ = HostMemoryVector(num_layers, dtype_aux_, preferred_host_device);
+    etensor_gate_up_proj_reduce_host_ = HostMemoryVector(
+        num_layers * ceildiv(megakernel::kIntermediateSizeTP1 / tp_size * 2, megakernel::kGemmTileBlkN),
+        dtype_aux_, preferred_host_device);
     etensor_gate_up_proj_host_ = HostMemoryVector(
         num_layers * ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN),
         dtype_aux_, preferred_host_device);
@@ -1371,6 +1376,10 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       etensor_attn_add_rms_host_.fill(0);
       etensor_attn_mlp_host_.resize(num_layers_);
       etensor_attn_mlp_host_.fill(0);
+      etensor_gate_up_proj_reduce_host_.resize(
+          num_layers_ *
+          ceildiv(megakernel::kIntermediateSizeTP1 / tp_size * 2, megakernel::kGemmTileBlkN));
+      etensor_gate_up_proj_reduce_host_.fill(0);
       etensor_gate_up_proj_host_.resize(
           num_layers_ *
           ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN));
@@ -2027,7 +2036,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         etensor_qkv_partial_view_, etensor_q_reduce_view_, etensor_k_reduce_view_,
         etensor_v_reduce_view_, etensor_decode_view_, etensor_o_partial_view_,
         etensor_o_allreduce_view_, etensor_attn_add_rms_view_, etensor_attn_mlp_view_,
-        etensor_gate_up_proj_view_, etensor_down_proj_reduce_view_,
+        etensor_gate_up_proj_reduce_view_, etensor_gate_up_proj_view_, etensor_down_proj_reduce_view_,
         etensor_down_proj_allreduce_view_, etensor_mlp_add_rms_view_, etensor_end_view_,
         etensor_o_proj_view_, etensor_down_proj_view_, etensor_decode_merge_view_});
     return ret;
@@ -2802,7 +2811,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
           &etensor_k_reduce_host_,         &etensor_v_reduce_host_,
           &etensor_decode_host_,           &etensor_o_partial_host_,
           &etensor_o_allreduce_host_,      &etensor_attn_add_rms_host_,
-          &etensor_attn_mlp_host_,         &etensor_gate_up_proj_host_,
+          &etensor_attn_mlp_host_,         &etensor_gate_up_proj_reduce_host_,
+          &etensor_gate_up_proj_host_,
           &etensor_down_proj_reduce_host_, &etensor_down_proj_allreduce_host_,
           &etensor_mlp_add_rms_host_,      &etensor_end_host_,
           &etensor_o_proj_host_,           &etensor_down_proj_host_,
@@ -2812,7 +2822,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
           &etensor_k_reduce_view_,         &etensor_v_reduce_view_,
           &etensor_decode_view_,           &etensor_o_partial_view_,
           &etensor_o_allreduce_view_,      &etensor_attn_add_rms_view_,
-          &etensor_attn_mlp_view_,         &etensor_gate_up_proj_view_,
+          &etensor_attn_mlp_view_,         &etensor_gate_up_proj_reduce_view_,
+          &etensor_gate_up_proj_view_,
           &etensor_down_proj_reduce_view_, &etensor_down_proj_allreduce_view_,
           &etensor_mlp_add_rms_view_,      &etensor_end_view_,
           &etensor_o_proj_view_,           &etensor_down_proj_view_,

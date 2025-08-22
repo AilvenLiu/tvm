@@ -54,7 +54,7 @@ TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
 MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/qwen3-32b-mlc/lib_tp{TP_SIZE}.so"
-MEGA_LIB_PATH = f"/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/mega_layer_lib_dyn_tp{TP_SIZE}.so"  # NOTE: update this path
+MEGA_LIB_PATH = f"/home/hongyij/mlc-llm/dist/qwen3-32b-f16/mega_layer_lib_dyn_tp{TP_SIZE}.so"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
@@ -132,7 +132,7 @@ def get_default_spec(model):
 
 def _craft_pipeline(ext_mods: List[nn.ExternModule], dump_file_prefix: Path):
     ext_mods = ext_mods or []
-    debug_dir = Path("/home/ruihangl/Workspace/mlc-llm/dist/qwen3-32b-f16/debug-mega-layer")
+    debug_dir = Path("/home/hongyij/mlc-llm/dist/qwen3-32b-f16/debug-mega-layer")
 
     @tvm.transform.module_pass(opt_level=0)
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
@@ -401,7 +401,7 @@ def get_qwen3_megakernel_mod():
                 etensors,
                 R.prim_value(layer_id),
                 sinfo_args=[
-                    R.Tuple([R.Tensor(None, dtype="int32")] * 17),
+                    R.Tuple([R.Tensor(None, dtype="int32")] * 18),
                 ]
             )
             (
@@ -414,6 +414,7 @@ def get_qwen3_megakernel_mod():
                 etensor_o_allreduce,
                 etensor_attn_add_rms_norm,
                 etensor_attn_mlp,
+                etensor_gate_up_proj_reduce,
                 etensor_gate_up_proj,
                 etensor_down_proj_reduce,
                 etensor_down_proj_allreduce,
@@ -440,6 +441,7 @@ def get_qwen3_megakernel_mod():
                 etensors_on_layer[14],
                 etensors_on_layer[15],
                 etensors_on_layer[16],
+                etensors_on_layer[17],
             )
             exec_queue = R.call_pure_packed(
                 "vm.builtin.paged_attention_kv_cache_get_exec_queue",
@@ -651,7 +653,7 @@ def get_qwen3_megakernel_mod():
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tuple([R.Tensor(None, dtype="int32")] * 5 + [R.Prim("int64")]),
-                        R.Tuple([R.Tensor(None, dtype="int32")] * 17),
+                        R.Tuple([R.Tensor(None, dtype="int32")] * 18),
                     ],
                 )
                 kv_data_, kv_indptr, kv_indices_, kv_last_page_len, append_pos, rope_pos, attn_plan_results, etensors = (

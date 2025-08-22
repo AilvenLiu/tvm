@@ -58,6 +58,7 @@ problem_config = {
 
 SPLIT_QKV_PROJECT = 4
 SPLIT_O_PROJRCT = 2
+GATE_UP_PROJ_SPLIT_K_FACTOR = 2
 DOWN_PROJ_SPLIT_K_FACTOR = 3
 
 
@@ -148,6 +149,7 @@ class MegaKernel:
                 partial_o_ptr: T.handle, # intermediate
                 before_o_allreduce_ptr: T.handle, # intermediate
                 hidden_state_attn_mlp_ptr: T.handle, # intermediate
+                partial_out_gate_up_proj_ptr: T.handle, # intermediate
                 out_gate_up_proj_ptr: T.handle, # intermediate
                 out_silu_multiply_ptr: T.handle, # intermediate
                 partial_sum_down_proj_ptr: T.handle, # intermediate
@@ -165,6 +167,7 @@ class MegaKernel:
                 etensor_o_allreduce_ptr: T.handle,
                 etensor_attn_add_rms_ptr: T.handle,
                 etensor_attn_mlp_ptr: T.handle,
+                etensor_gate_up_proj_reduce_ptr: T.handle,
                 etensor_gate_up_proj_ptr: T.handle,
                 etensor_down_proj_ptr: T.handle,
                 etensor_down_proj_reduce_ptr: T.handle,
@@ -236,6 +239,8 @@ class MegaKernel:
                                     "float16", scope="global", layout="default")
             hidden_state_attn_mlp_global = T.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, HIDDEN_SIZE], 
                                     "float16", scope="global", layout="default")
+            partial_out_gate_up_proj_global = T.match_buffer(partial_out_gate_up_proj_ptr, [GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, INTERMEDIATE_SIZE * 2], 
+                                    "float32", scope="global", layout="default")
             out_gate_up_proj_global = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE * 2], 
                                  "float16", scope="global", layout="default")
             out_silu_multiply_global = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE], 
@@ -264,6 +269,8 @@ class MegaKernel:
             etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], "int32", scope="global", layout="default", offset_factor=1)
             etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
             etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", layout="default", offset_factor=1)
+            etensor_gate_up_proj_reduce_global = T.match_buffer(etensor_gate_up_proj_reduce_ptr, [INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N], 
+                                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_gate_up_proj_global = T.match_buffer(etensor_gate_up_proj_ptr, [INTERMEDIATE_SIZE // GemmTile.BLK_N], 
                                     "int32", scope="global", layout="default", offset_factor=1)
             etensor_down_proj_global = T.match_buffer(etensor_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR],
@@ -306,7 +313,8 @@ class MegaKernel:
             o_allreduce_tile = T.meta_var(AllreduceTile(before_o_allreduce_global, hidden_state_attn_mlp_global, WORLD_SIZE))
             attn_add_rms_tile = T.meta_var(AddRMSNormTile(hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global))
 
-            gemm_gate_up_proj_tile = T.meta_var(GemmTile(hidden_state_attn_mlp_global, gate_up_weight_global, out_gate_up_proj_global, split_k_factor=1))
+            gemm_gate_up_proj_tile = T.meta_var(GemmTile(hidden_state_attn_mlp_global, gate_up_weight_global, partial_out_gate_up_proj_global, split_k_factor=GATE_UP_PROJ_SPLIT_K_FACTOR))
+            gemm_gate_up_proj_reduce_tile = T.meta_var(SplitKReduceTile(partial_out_gate_up_proj_global, out_gate_up_proj_global))
             silu_multiply_tile = T.meta_var(SiluMultiplyTile(out_gate_up_proj_global, out_silu_multiply_global))
             gemm_down_proj_tile = T.meta_var(GemmTile(out_silu_multiply_global, down_weight_global, partial_sum_down_proj_global, split_k_factor=DOWN_PROJ_SPLIT_K_FACTOR))
             down_proj_reduce_tile = T.meta_var(SplitKReduceTile(partial_sum_down_proj_global, before_down_proj_allreduce_global))
@@ -325,6 +333,7 @@ class MegaKernel:
             self.tile_list.append(o_allreduce_tile)
             self.tile_list.append(attn_add_rms_tile)
             self.tile_list.append(gemm_gate_up_proj_tile)
+            self.tile_list.append(gemm_gate_up_proj_reduce_tile)
             self.tile_list.append(silu_multiply_tile)
             self.tile_list.append(gemm_down_proj_tile)
             self.tile_list.append(down_proj_reduce_tile)
@@ -361,7 +370,8 @@ class MegaKernel:
                     evt_o_allreduce = T.meta_var(Semaphore(WORLD_SIZE * o_reduce_tile.M_split, etensor_o_allreduce_global, use_nvshmem=True))
                     evt_attn_add_rms = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, o_allreduce_tile.N_TILE), etensor_attn_add_rms_global, use_nvshmem=True))
                     evt_attn_mlp = T.meta_var(Semaphore(batch_size, etensor_attn_mlp_global, use_nvshmem=True))
-                    evt_gate_up_proj = T.meta_var(Semaphore(2, etensor_gate_up_proj_global, use_nvshmem=True))
+                    evt_gate_up_proj_reduce = T.meta_var(Semaphore(GATE_UP_PROJ_SPLIT_K_FACTOR, etensor_gate_up_proj_reduce_global, use_nvshmem=True))
+                    evt_gate_up_proj = T.meta_var(Semaphore(2 * gemm_gate_up_proj_reduce_tile.M_split, etensor_gate_up_proj_global, use_nvshmem=True))
                     evt_down_proj = T.meta_var(Semaphore(-1, etensor_down_proj_global, use_nvshmem=True))
                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
                                                                 etensor_down_proj_reduce_global, use_nvshmem=True))
@@ -467,10 +477,16 @@ class MegaKernel:
                             if wg_id == 0:
                                 T.ptx.bar.sync(1, 128)
                                 if tid == 0:
-                                    if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
-                                        evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx - INTERMEDIATE_SIZE // GemmTile.BLK_N)
-                                    else:
-                                        evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx)
+                                    evt_gate_up_proj_reduce.semaphore_notify(tile_scheduler.n_idx)
+                        elif tile_scheduler.task_type == JobType.GATE_UP_PROJ_REDUCE.value:
+                            evt_gate_up_proj_reduce.semaphore_wait(tile_scheduler.n_idx)
+                            gemm_gate_up_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            T.tvm_storage_sync("shared")
+                            if tid == 0:
+                                if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
+                                    evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx - INTERMEDIATE_SIZE // GemmTile.BLK_N)
+                                else:
+                                    evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx)
                         elif tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
                             evt_gate_up_proj.semaphore_wait(tile_scheduler.m_idx)
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
@@ -556,6 +572,7 @@ class MegaKernel:
             partial_o_ptr: T.handle, # intermediate
             before_o_allreduce_ptr: T.handle, # intermediate
             hidden_state_attn_mlp_ptr: T.handle, # intermediate
+            partial_out_gate_up_proj_ptr: T.handle, # intermediate
             out_gate_up_proj_ptr: T.handle, # intermediate
             out_silu_multiply_ptr: T.handle, # intermediate
             partial_sum_down_proj_ptr: T.handle, # intermediate
@@ -573,6 +590,7 @@ class MegaKernel:
             etensor_o_allreduce_ptr: T.handle,
             etensor_attn_add_rms_ptr: T.handle,
             etensor_attn_mlp_ptr: T.handle,
+            etensor_gate_up_proj_reduce_ptr: T.handle,
             etensor_gate_up_proj_ptr: T.handle,
             etensor_down_proj_ptr: T.handle,
             etensor_down_proj_reduce_ptr: T.handle,
@@ -648,6 +666,8 @@ class MegaKernel:
                                     "float16", scope="global", layout="default")
             hidden_state_attn_mlp_global = T.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, HIDDEN_SIZE], 
                                     "float16", scope="global", layout="default")
+            partial_out_gate_up_proj_global = T.match_buffer(partial_out_gate_up_proj_ptr, [GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, INTERMEDIATE_SIZE * 2], 
+                                    "float32", scope="global", layout="default")
             out_gate_up_proj_global = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE * 2], 
                                  "float16", scope="global", layout="default")
             out_silu_multiply_global = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE], 
@@ -677,6 +697,8 @@ class MegaKernel:
                                                         "int32", scope="global", layout="default", offset_factor=1)
             etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", layout="default", offset_factor=1)
             etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", layout="default", offset_factor=1)
+            etensor_gate_up_proj_reduce_global = T.match_buffer(etensor_gate_up_proj_reduce_ptr, [INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N], 
+                                                    "int32", scope="global", layout="default", offset_factor=1)
             etensor_gate_up_proj_global = T.match_buffer(etensor_gate_up_proj_ptr, [INTERMEDIATE_SIZE // GemmTile.BLK_N], 
                                     "int32", scope="global", layout="default", offset_factor=1)
             etensor_down_proj_global = T.match_buffer(etensor_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR],
@@ -718,7 +740,8 @@ class MegaKernel:
             o_allreduce_tile = T.meta_var(AllreduceTile(before_o_allreduce_global, hidden_state_attn_mlp_global, WORLD_SIZE))
             attn_add_rms_tile = T.meta_var(AddRMSNormTile(hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global))
 
-            gemm_gate_up_proj_tile = T.meta_var(GemmTile(hidden_state_attn_mlp_global, gate_up_weight_global, out_gate_up_proj_global, split_k_factor=1))
+            gemm_gate_up_proj_tile = T.meta_var(GemmTile(hidden_state_attn_mlp_global, gate_up_weight_global, partial_out_gate_up_proj_global, split_k_factor=GATE_UP_PROJ_SPLIT_K_FACTOR))
+            gemm_gate_up_proj_reduce_tile = T.meta_var(SplitKReduceTile(partial_out_gate_up_proj_global, out_gate_up_proj_global))
             silu_multiply_tile = T.meta_var(SiluMultiplyTile(out_gate_up_proj_global, out_silu_multiply_global))
             gemm_down_proj_tile = T.meta_var(GemmTile(out_silu_multiply_global, down_weight_global, partial_sum_down_proj_global, split_k_factor=DOWN_PROJ_SPLIT_K_FACTOR))
             down_proj_reduce_tile = T.meta_var(SplitKReduceTile(partial_sum_down_proj_global, before_down_proj_allreduce_global))
@@ -737,6 +760,7 @@ class MegaKernel:
             self.tile_list.append(o_allreduce_tile)
             self.tile_list.append(attn_add_rms_tile)
             self.tile_list.append(gemm_gate_up_proj_tile)
+            self.tile_list.append(gemm_gate_up_proj_reduce_tile)
             self.tile_list.append(silu_multiply_tile)
             self.tile_list.append(gemm_down_proj_tile)
             self.tile_list.append(down_proj_reduce_tile)
@@ -779,7 +803,8 @@ class MegaKernel:
                     evt_o_allreduce = T.meta_var(Semaphore(WORLD_SIZE * o_reduce_tile.M_split, etensor_o_allreduce_global, use_nvshmem=True))
                     evt_attn_add_rms = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, o_allreduce_tile.N_TILE), etensor_attn_add_rms_global, use_nvshmem=True))
                     evt_attn_mlp = T.meta_var(Semaphore(batch_size, etensor_attn_mlp_global, use_nvshmem=True))
-                    evt_gate_up_proj = T.meta_var(Semaphore(2, etensor_gate_up_proj_global, use_nvshmem=True))
+                    evt_gate_up_proj_reduce = T.meta_var(Semaphore(GATE_UP_PROJ_SPLIT_K_FACTOR, etensor_gate_up_proj_reduce_global, use_nvshmem=True))
+                    evt_gate_up_proj = T.meta_var(Semaphore(2 * gemm_gate_up_proj_reduce_tile.M_split, etensor_gate_up_proj_global, use_nvshmem=True))
                     evt_down_proj = T.meta_var(Semaphore(-1, etensor_down_proj_global, decrement=True, use_nvshmem=True))
                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
                                                                 etensor_down_proj_reduce_global, use_nvshmem=True))
@@ -1069,20 +1094,32 @@ class MegaKernel:
                             )
                         elif tile_scheduler.task_type == JobType.ATTN_ADD_RMS_NORM.value:
                             attn_add_rms_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            tile_scheduler.push_tasks_along_dim(
-                                JobType.GEMM_GATE_UP_PROJ.value,
-                                0,
-                                0,
-                                0,
-                                ceildiv(INTERMEDIATE_SIZE *2 , GemmTile.BLK_N),
-                                1,
+                            tile_scheduler.push_tasks(
+                                lambda idx: (JobType.GEMM_GATE_UP_PROJ.value, 0, idx // GATE_UP_PROJ_SPLIT_K_FACTOR, idx % GATE_UP_PROJ_SPLIT_K_FACTOR),
+                                ceildiv(INTERMEDIATE_SIZE *2 , GemmTile.BLK_N) * GATE_UP_PROJ_SPLIT_K_FACTOR,
                                 warp_id,
                                 lane_id,
                                 evt_attn_mlp,
                                 0,
                             )
+                                
                         elif tile_scheduler.task_type == JobType.GEMM_GATE_UP_PROJ.value:
                             gemm_gate_up_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            tile_scheduler.push_tasks_along_dim(
+                                JobType.GATE_UP_PROJ_REDUCE.value,
+                                0,
+                                tile_scheduler.n_idx,
+                                0,
+                                gemm_gate_up_proj_reduce_tile.M_split,
+                                0,
+                                warp_id,
+                                lane_id,
+                                evt_gate_up_proj_reduce,
+                                tile_scheduler.n_idx,
+                                use_barrier=False,
+                            )
+                        elif tile_scheduler.task_type == JobType.GATE_UP_PROJ_REDUCE.value:
+                            gemm_gate_up_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
                                 offset = T.meta_var(tile_scheduler.n_idx-INTERMEDIATE_SIZE//GemmTile.BLK_N)
                                 tile_scheduler.push_task(
@@ -1093,10 +1130,9 @@ class MegaKernel:
                                     warp_id, 
                                     evt_gate_up_proj, 
                                     offset, 
-                                    use_barrier=False
                                 )
                             else:
-                                tile_scheduler.push_task(JobType.SPLIT_SILU_MULTIPLY.value, tile_scheduler.n_idx, 0, 0, warp_id, evt_gate_up_proj, tile_scheduler.n_idx, use_barrier=False)
+                                tile_scheduler.push_task(JobType.SPLIT_SILU_MULTIPLY.value, tile_scheduler.n_idx, 0, 0, warp_id, evt_gate_up_proj, tile_scheduler.n_idx)
                         elif tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
                             range_start = T.meta_var(tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // gemm_down_proj_tile.TILE_K)
@@ -1380,6 +1416,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         arg_dict["out_gate_up_proj"] = torch.zeros(
             (batch_size, INTERMEDIATE_SIZE * 2), dtype=torch.float16
         )
+        arg_dict["partial_out_gate_up_proj"] = torch.zeros(
+            (GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, INTERMEDIATE_SIZE * 2), dtype=torch.float32
+        )
         arg_dict["out_silu_multiply"] = torch.zeros(
             (batch_size, INTERMEDIATE_SIZE), dtype=torch.float16
         )
@@ -1479,6 +1518,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                 tvm_arg_dict[f"etensor_o_allreduce_{i}"],
                 tvm_arg_dict[f"etensor_attn_add_rms_norm_{i}"],
                 tvm_arg_dict[f"etensor_attn_mlp_{i}"],
+                tvm_arg_dict[f"etensor_gate_up_proj_reduce_{i}"],
                 tvm_arg_dict[f"etensor_gate_up_proj_{i}"],
                 tvm_arg_dict[f"etensor_down_proj_{i}"],
                 tvm_arg_dict[f"etensor_down_proj_reduce_{i}"],
@@ -1591,6 +1631,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                     disco_arg_dict["partial_o"],
                     disco_arg_dict["before_o_allreduce"],
                     disco_arg_dict["hidden_state_attn_mlp"],
+                    disco_arg_dict["partial_out_gate_up_proj"],
                     disco_arg_dict["out_gate_up_proj"],
                     disco_arg_dict["out_silu_multiply"],
                     disco_arg_dict["partial_sum_down_proj"],
@@ -1607,6 +1648,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                     disco_arg_dict[f"etensor_o_allreduce_{iter}"],
                     disco_arg_dict[f"etensor_attn_add_rms_norm_{iter}"],
                     disco_arg_dict[f"etensor_attn_mlp_{iter}"],
+                    disco_arg_dict[f"etensor_gate_up_proj_reduce_{iter}"],
                     disco_arg_dict[f"etensor_gate_up_proj_{iter}"],
                     disco_arg_dict[f"etensor_down_proj_{iter}"],
                     disco_arg_dict[f"etensor_down_proj_reduce_{iter}"],
@@ -1705,6 +1747,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                 tvm_arg_dict[f"etensor_o_allreduce_{i}"],
                 tvm_arg_dict[f"etensor_attn_add_rms_norm_{i}"],
                 tvm_arg_dict[f"etensor_attn_mlp_{i}"],
+                tvm_arg_dict[f"etensor_gate_up_proj_reduce_{i}"],
                 tvm_arg_dict[f"etensor_gate_up_proj_{i}"],
                 tvm_arg_dict[f"etensor_down_proj_{i}"],
                 tvm_arg_dict[f"etensor_down_proj_reduce_{i}"],
@@ -1820,6 +1863,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                     disco_arg_dict["partial_o"],
                     disco_arg_dict["before_o_allreduce"],
                     disco_arg_dict["hidden_state_attn_mlp"],
+                    disco_arg_dict["partial_out_gate_up_proj"],
                     disco_arg_dict["out_gate_up_proj"],
                     disco_arg_dict["out_silu_multiply"],
                     disco_arg_dict["partial_sum_down_proj"],
@@ -1836,6 +1880,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                     disco_arg_dict[f"etensor_o_allreduce_{iter}"],
                     disco_arg_dict[f"etensor_attn_add_rms_norm_{iter}"],
                     disco_arg_dict[f"etensor_attn_mlp_{iter}"],
+                    disco_arg_dict[f"etensor_gate_up_proj_reduce_{iter}"],
                     disco_arg_dict[f"etensor_gate_up_proj_{iter}"],
                     disco_arg_dict[f"etensor_down_proj_{iter}"],
                     disco_arg_dict[f"etensor_down_proj_reduce_{iter}"],
@@ -1994,11 +2039,10 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
     output_std, residual_std = std(arg_dict)
 
     try:
-        np.testing.assert_allclose(output_tir_dynamic, output_std, rtol=1e-3, atol=1e-2)
+        np.testing.assert_allclose(output_tir_static, output_std, rtol=1e-3, atol=1e-2)
         np.testing.assert_allclose(residual_tir_static, residual_std, rtol=1e-3, atol=1e-2)
         np.testing.assert_allclose(output_tir_dynamic, output_std, rtol=1e-3, atol=1e-2)
         np.testing.assert_allclose(residual_tir_dynamic, residual_std, rtol=1e-3, atol=1e-2)
-
     except Exception as e:
         print(e)
 
