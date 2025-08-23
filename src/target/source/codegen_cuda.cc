@@ -1420,7 +1420,9 @@ void CodeGenCUDA::VisitStmt_(const AllocBufferNode* op) {
       auto it = op->annotations.find(tvm::tir::attr::buffer_data_alignment);
       if (it != op->annotations.end()) {
         int align = Downcast<IntImm>((*it).second)->value;
-        stream << "alignas(" << align << ") ";
+        if (align > 0) {
+          stream << "alignas(" << align << ") ";
+        }
       }
     }
     PrintType(dtype, stream);

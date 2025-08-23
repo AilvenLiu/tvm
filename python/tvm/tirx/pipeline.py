@@ -171,11 +171,11 @@ def tirp_pipeline():
             passes.append(tir.transform.LowerAsyncDMA())
         passes.extend(
             [
-                tir.transform.HoistIfThenElse(),
+                # tir.transform.HoistIfThenElse(),
                 tir.transform.UnrollLoop(),
                 tir.transform.RenormalizeSplitPattern(),
                 tir.transform.Simplify(),
-                tir.transform.RemoveNoOp(),
+                # tir.transform.RemoveNoOp(),
                 tir.transform.RewriteUnsafeSelect(),
             ]
         )

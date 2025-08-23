@@ -21,11 +21,11 @@ import functools
 import operator
 from typing import Optional
 
-from tvm.script import tir as T
 from tvm.arith import Analyzer
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.script import tir as T
+from tvm.tir import Buffer, BufferRegion, PrimFunc
 from tvm.tir.stmt import OpCall
-from tvm.tir import PrimFunc, BufferRegion, Buffer
+from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
 from .common import get_indices, get_st_extent, get_vec_len, target_cuda
 

@@ -3584,16 +3584,16 @@ def ptx_cp_async(
     cp_size : int
         The data size to copy.
 
-    cache_hint : Optional[str]
+    cache_hint : str["evict_last", "evict_first", "evict_normal", ""]
         The cache hint.
 
-    prefetch_size : Optional[int]
+    prefetch_size : int[-1, 64, 127, 256]
         The prefetch size.
 
-    predicate : Optional[PrimExpr]
+    predicate : PrimExpr
         The predicate to guard the operation.
 
-    fill_mode : Optional[str]
+    fill_mode : str["zero", ""]
         The fill mode.
 
     Returns
@@ -3932,7 +3932,7 @@ def ptx_mma(
     )
 
 
-def ptx_ldmatrix(trans, num, dtype, smem_ptr, local_ptr):
+def ptx_ldmatrix(trans, num, dtype, local_ptr, smem_ptr):
     """TVM intrinsic for ptx load matrix from shared memory
     https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions-ldmatrix
 
@@ -3947,11 +3947,11 @@ def ptx_ldmatrix(trans, num, dtype, smem_ptr, local_ptr):
     dtype : Literal[".b16", ".b8"]
         The data type of the matrices.
 
-    smem_ptr : PrimExpr
-        The pointer to the shared memory.
-
     local_ptr : PrimExpr
         The pointer to the local memory (register)
+
+    smem_ptr : PrimExpr
+        The pointer to the shared memory.
 
     Returns
     -------
@@ -3964,8 +3964,8 @@ def ptx_ldmatrix(trans, num, dtype, smem_ptr, local_ptr):
         trans,
         num,
         dtype,
-        smem_ptr,
         local_ptr,
+        smem_ptr,
     )
 
 

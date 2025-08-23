@@ -20,16 +20,16 @@ from typing import Optional
 
 import tvm
 from tvm.script import tir as T
-from tvm.tir import PrimFunc, BufferRegion, Buffer
+from tvm.tir import Buffer, BufferRegion, PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext, register_schedule
 
 from .common import (
     CopyInstType,
     copy_vec_load_impl,
+    get_st_extent,
     target_cuda,
     validate_copy_op,
-    get_st_extent,
 )
 
 

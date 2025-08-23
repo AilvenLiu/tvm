@@ -16,16 +16,16 @@
 # under the License.
 # pylint: disable=redefined-builtin, invalid-name, too-many-arguments
 """HW level ops for CUDA, along with its codegen ruls"""
+import enum
+
 # pylint: disable=missing-function-docstring
 import functools
-from dataclasses import dataclass
-import enum
 import re
+from dataclasses import dataclass
 
 import tvm.ffi
 from tvm import DataType
 from tvm.tir.op import cuda_func_call
-
 
 #########################
 # HEADER GENERATOR FOR CUDA CODEGEN

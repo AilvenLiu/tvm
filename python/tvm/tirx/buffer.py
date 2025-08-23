@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Abstraction for array data structures."""
-
+from enum import IntEnum
 from numbers import Integral
 
 import tvm_ffi
@@ -23,7 +23,7 @@ import tvm_ffi
 import tvm
 from tvm.ir import PointerType, PrimExpr, PrimType, Range
 from tvm.runtime import Object, Scriptable, convert
-from enum import IntEnum
+
 from . import _ffi_api
 
 
@@ -100,12 +100,7 @@ class Buffer(Object, Scriptable):
         offset = convert(offset)
         extent = convert(extent)
         return _ffi_api.BufferAccessPtr(
-            self,
-            access_mask,
-            ptr_type,
-            content_lanes,
-            offset,
-            extent,  # type: ignore
+            self, access_mask, ptr_type, content_lanes, offset, extent  # type: ignore
         )
 
     def vload(self, begin, dtype=None, predicate=None):

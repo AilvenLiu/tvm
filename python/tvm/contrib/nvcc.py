@@ -165,6 +165,7 @@ def _compile_cuda_nvcc(
     if kernels_output_dir is not None:
         cmd += ["-lineinfo"]
         cmd += ["-g"]
+        cmd += ["-G"]
     if isinstance(arch, list):
         cmd += arch
     elif isinstance(arch, str):

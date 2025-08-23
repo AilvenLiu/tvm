@@ -15,12 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 import numpy as np
+import pytest
+
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
 from tvm.tirp.bench.utils import ProtonContext, bench
-import pytest
 
 
 def ceildiv(a, b):
@@ -917,10 +918,10 @@ def test(num_heads, seq_len, head_dim, batch_size):
 if __name__ == "__main__":
     import itertools
 
-    num_heads_list = [(64, 8)]
-    seq_len_list = [512]
+    num_heads_list = [(32, 8)]
+    seq_len_list = [512, 3456]
     head_dim_list = [128]
-    batch_size_list = [1, 2, 4]#, 8, 16, 32, 64, 128, 256]
+    batch_size_list = [1, 128]
 
     for num_heads, seq_len, head_dim, batch_size in itertools.product(
         num_heads_list, seq_len_list, head_dim_list, batch_size_list

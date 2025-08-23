@@ -17,18 +17,19 @@
 
 """Common utilities for operator scheduling."""
 
-from enum import Enum
-from typing import Optional, Callable, List
 import functools
 import operator
+from enum import Enum
 from functools import wraps
-from tvm.script import tir as T
-from tvm.tirp.op_schedule import ScheduleContext
-from tvm.runtime import DataType
+from typing import Callable, List, Optional
+
 from tvm.arith.analyzer import Analyzer
-from tvm.tir import BufferRegion, PrimFunc, Buffer, PrimExpr
+from tvm.runtime import DataType
+from tvm.script import tir as T
+from tvm.tir import Buffer, BufferRegion, PrimExpr, PrimFunc
 from tvm.tir.exec_scope import ExecScopeSlice
 from tvm.tir.stmt import OpCall
+from tvm.tirp.op_schedule import ScheduleContext
 
 
 def get_st_extent(buffer_region: BufferRegion):
@@ -263,7 +264,6 @@ def copy_vec_load_impl(
     The implementation tries to vectorize the copy operation and parallelize over
     threads in a CTA/using a single thread.
     """
-
     dst_buffer_region, src_buffer_region = op_call.args[:2]
     src: Buffer = src_buffer_region.buffer
     dst: Buffer = dst_buffer_region.buffer
@@ -272,6 +272,8 @@ def copy_vec_load_impl(
         or (src.scope().startswith("shared") and dst.scope() == "global")
         or (src.scope() == "global" and dst.scope() == "local")
         or (src.scope() == "local" and dst.scope() == "global")
+        or (src.scope().startswith("shared") and dst.scope() == "local")
+        or (dst.scope().startswith("shared") and src.scope() == "local")
     ):
         return None
 
