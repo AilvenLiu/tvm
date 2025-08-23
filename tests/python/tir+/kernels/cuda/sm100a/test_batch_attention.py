@@ -1228,9 +1228,10 @@ __device__ __forceinline__ void {func_name}() {{
 
 
 @pytest.mark.parametrize("num_heads", [(64, 8)])
-@pytest.mark.parametrize("seq_len", [512])
+@pytest.mark.parametrize("seq_len", [512, 2077, 4033])
 @pytest.mark.parametrize("head_dim", [128])
-@pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128, 256])
+@pytest.mark.parametrize("batch_size", [1, 11, 25, 128])
+@pytest.mark.parametrize("seed", [42])
 def test(num_heads, seq_len, head_dim, batch_size, seed):
     PAGE_SIZE = 16
     MAX_PAGE_NUM = 32768
