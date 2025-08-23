@@ -70,7 +70,7 @@ atomic_add_system = """
 __forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t value, int32_t pe) {
     if (pe >= 0) {
         void* ptr = nvshmem_ptr(addr, pe);
-        return atomicAdd_system((int32_t*)ptr, value);
+        return atomicAdd((int32_t*)ptr, value);
     }
     else {
         return atomicAdd(addr, value);

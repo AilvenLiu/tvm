@@ -204,6 +204,7 @@ class ProfileEventType(Enum):
     PUSH = 20
     O_ALLREDUCE = 21
     DOWN_PROJ_ALLREDUCE = 22
+    GATE_UP_PROJ_REDUCE = 23
 
 
 event_type_names = [
@@ -230,4 +231,5 @@ event_type_names = [
     "PUSH",
     "O_ALLREDUCE",
     "DOWN_PROJ_ALLREDUCE",
+    "GATE_UP_PROJ_REDUCE",
 ]

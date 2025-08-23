@@ -35,7 +35,7 @@ problem_config = {
 NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
 PROFILER_BUFFER_SIZE = int(1e6)
 PROFILER_WRITE_STRIDE = KernelConfig.SM_NUMBER * NUM_GROUPS
-PROFILER_ON = False
+PROFILER_ON = True
 # fmt: off
 class MegaKernel:
     class_list = [
@@ -291,57 +291,76 @@ class MegaKernel:
                             if PROFILER_ON:
                                 T.timer_start_cuda(ProfileEventType.GEMM_GATE_UP_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             gemm_gate_up_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
-                                offset = T.meta_var(tile_scheduler.n_idx-INTERMEDIATE_SIZE//GemmTile.BLK_N)
-                                tile_scheduler.push_task(JobType.SPLIT_SILU_MULTIPLY.value, offset, 0, 0, warp_id, evt_gate_up_proj, offset, use_barrier=False)
-                            else:
-                                tile_scheduler.push_task(JobType.SPLIT_SILU_MULTIPLY.value, tile_scheduler.n_idx, 0, 0, warp_id, evt_gate_up_proj, tile_scheduler.n_idx, use_barrier=False)
                             if PROFILER_ON:
                                 T.timer_end_cuda(ProfileEventType.GEMM_GATE_UP_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                                T.timer_start_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
+                                offset = T.meta_var(tile_scheduler.n_idx-INTERMEDIATE_SIZE//GemmTile.BLK_N)
+                                tile_scheduler.push_task(
+                                    JobType.SPLIT_SILU_MULTIPLY.value, offset, 0, 0, 
+                                    warp_id, evt_gate_up_proj, offset, use_barrier=False
+                                )
+                            else:
+                                tile_scheduler.push_task(
+                                    JobType.SPLIT_SILU_MULTIPLY.value, tile_scheduler.n_idx, 0, 0, 
+                                    warp_id, evt_gate_up_proj, tile_scheduler.n_idx, use_barrier=False
+                                )
+                            if PROFILER_ON:
+                                T.timer_end_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
                             if PROFILER_ON:
                                 T.timer_start_cuda(ProfileEventType.SPLIT_SILU_MULTIPLY, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
                             if PROFILER_ON:
                                 T.timer_end_cuda(ProfileEventType.SPLIT_SILU_MULTIPLY, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                                T.timer_start_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             offset = T.meta_var(tile_scheduler.m_idx // (INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR))
-                            tile_scheduler.push_tasks_along_dim(JobType.GEMM_DOWN_PROJ.value, 0, 0, offset, HIDDEN_SIZE // GemmTile.BLK_N, 1, warp_id, lane_id, evt_down_proj, offset)
-                            
+                            tile_scheduler.push_tasks_along_dim(
+                                JobType.GEMM_DOWN_PROJ.value, 0, 0, offset, HIDDEN_SIZE // GemmTile.BLK_N, 1, 
+                                warp_id, lane_id, evt_down_proj, offset
+                            )
+                            if PROFILER_ON:
+                                T.timer_end_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
                             if PROFILER_ON:
-                                T.timer_start_cuda(
-                                    ProfileEventType.GEMM_DOWN_PROJ,
-                                    profiler_buffer.data,
-                                    profiler_tag.data,
-                                    profiler_write_offset.data,
-                                    PROFILER_WRITE_STRIDE,
-                                    lane_id == 0,
-                                )
+                                T.timer_start_cuda(ProfileEventType.GEMM_DOWN_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            tile_scheduler.push_tasks_along_dim(JobType.DOWN_PROJ_REDUCE.value, 0, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0, down_proj_reduce_tile.M_split, 0, warp_id, lane_id, evt_down_proj_reduce, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), use_barrier=False)
                             if PROFILER_ON:
-                                T.timer_end_cuda(
-                                    ProfileEventType.GEMM_DOWN_PROJ,
-                                    profiler_buffer.data,
-                                    profiler_tag.data,
-                                    profiler_write_offset.data,
-                                    PROFILER_WRITE_STRIDE,
-                                    lane_id == 0,
-                                )
+                                T.timer_end_cuda(ProfileEventType.GEMM_DOWN_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                                T.timer_start_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            tile_scheduler.push_tasks_along_dim(
+                                JobType.DOWN_PROJ_REDUCE.value, 0, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0, down_proj_reduce_tile.M_split, 0, 
+                                warp_id, lane_id, evt_down_proj_reduce, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), use_barrier=False
+                            )
+                            if PROFILER_ON:
+                                T.timer_end_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.DOWN_PROJ_REDUCE.value:
                             if PROFILER_ON:
                                 T.timer_start_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                             down_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            tile_scheduler.push_tasks_along_dim(JobType.MLP_ADD_RMS_NORM.value, tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE, 0, 0, down_proj_reduce_tile.M_TILE, 0, warp_id, lane_id, evt_add_rms_norm, tile_scheduler.m_idx)
                             if PROFILER_ON:
                                 T.timer_end_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            tile_scheduler.push_tasks_along_dim(
+                                JobType.MLP_ADD_RMS_NORM.value, tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE, 0, 0, 
+                                T.min(down_proj_reduce_tile.M_TILE, batch_size - tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE), 0, 
+                                warp_id, lane_id, evt_add_rms_norm, tile_scheduler.m_idx
+                            )
+                            if PROFILER_ON:
+                                T.timer_end_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                         elif tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
                             if PROFILER_ON:
                                 T.timer_start_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                             add_rms_norm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            tile_scheduler.push_tasks_along_dim(JobType.END.value, 0, 0, 0, KernelConfig.SM_NUMBER, 0, warp_id, lane_id, evt_end, 0)
                             if PROFILER_ON:
                                 T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            tile_scheduler.push_tasks_along_dim(
+                                JobType.END.value, 0, 0, 0, KernelConfig.SM_NUMBER, 0, 
+                                warp_id, lane_id, evt_end, 0
+                            )
+                            if PROFILER_ON:
+                                T.timer_end_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                         if PROFILER_ON:
                             T.timer_start_cuda(ProfileEventType.FETCH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         tile_scheduler.next_tile(warp_id)
@@ -550,8 +569,6 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
         for key, value in arg_dict.items():
             std_arg_dict[key] = value.to(torch_dev)
         def get_silu_multiply_std_impl():
-            BDX = 32
-            BDY = KernelConfig.NUM_THREADS // BDX
             VEC_SIZE = 8
             SEQ_LEN = batch_size
 
@@ -570,19 +587,17 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
 
                 with T.kernel():
                     bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                    tx, ty = T.thread_id([BDX, BDY], parent="cta")
-                    thread_id = T.meta_var(ty * BDX + tx)
+                    tx = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
 
                     with T.thread():
                         idx = T.alloc_local([1], "int32", layout="default")
                         vec1 = T.alloc_local([VEC_SIZE], "float16", layout="default")
                         vec2 = T.alloc_local([VEC_SIZE], "float16", layout="default")
 
-                        idx[0] = bx
-                        while idx[0] < ceildiv(SEQ_LEN * INTERMEDIATE_SIZE, KernelConfig.NUM_THREADS * VEC_SIZE):
-                            real_idx = T.meta_var((idx[0] * KernelConfig.NUM_THREADS + thread_id) * VEC_SIZE)
-                            token_idx = T.meta_var(real_idx // INTERMEDIATE_SIZE)
-                            offset_imme = T.meta_var((real_idx % INTERMEDIATE_SIZE) % INTERMEDIATE_SIZE)
+                        idx[0] = bx * KernelConfig.NUM_THREADS + tx
+                        while idx[0] * VEC_SIZE < SEQ_LEN * INTERMEDIATE_SIZE:
+                            token_idx = T.meta_var((idx[0] * VEC_SIZE) // INTERMEDIATE_SIZE)
+                            offset_imme = T.meta_var((idx[0] * VEC_SIZE) % INTERMEDIATE_SIZE)
                             for kv in T.serial(VEC_SIZE):
                                 vec1[kv] = input_cat_global[token_idx, offset_imme + kv]
                             for kv in T.serial(VEC_SIZE):
@@ -591,7 +606,7 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                                 vec1[kv] = vec1[kv] * T.sigmoid(vec1[kv]) * vec2[kv]
                             for kv in T.serial(VEC_SIZE):
                                 output_global[token_idx, offset_imme + kv] = vec1[kv]
-                            idx[0] += KernelConfig.SM_NUMBER
+                            idx[0] += KernelConfig.SM_NUMBER * KernelConfig.NUM_THREADS
             return fused_split_silu_multiply
         _, mod_fused_split_silu_multiply = get_source(get_silu_multiply_std_impl())
         def func():
@@ -633,6 +648,7 @@ if __name__ == "__main__":
     src_mlp_static, mod_mlp_static = get_source(mega_kernel_static)
     src_mlp_dynamic, mod_mlp_dynamic = get_source(mega_kernel_dynamic)
     
-    for batch_size in [127, 63, 31, 15, 7, 3, 1]:
+    for batch_size in [127, 63, 31, 15 ,7, 3, 1]:
         print("testing batch size: ", batch_size, flush=True)
         test(batch_size, mod_mlp_static, mod_mlp_dynamic)
+        

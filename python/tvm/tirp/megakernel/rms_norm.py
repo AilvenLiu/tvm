@@ -87,7 +87,7 @@ class RMSnormTile(Tile):
                         
                         # warp reduce sum
                         if ty % 2 == 0 and (batch_idx + 1 == self.batch_size or self.idx[0] // self.h_tile + 1 == self.m_tile):
-                            self.mask[0] =  0xFFFF
+                            self.mask[0] = 0xFFFF
                         else:
                             self.mask[0] = 0xFFFFFFFF
                         for kr in T.unroll(find_power_of_two(self.bdx // 2) + 1):

@@ -26,14 +26,12 @@ from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
-from tvm.tirp.megakernel.common import ceildiv
-from tvm.tirp.megakernel.gemm import GemmTile
-from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
 
 from ..megakernel.test_layer import (
     DOWN_PROJ_SPLIT_K_FACTOR,
     SPLIT_O_PROJRCT,
     SPLIT_QKV_PROJECT,
+    PROFILER_BUFFER_SIZE,
     MegaKernel,
     problem_config,
 )
@@ -54,7 +52,8 @@ TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
 MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/qwen3-32b-mlc/lib_tp{TP_SIZE}.so"
-MEGA_LIB_PATH = f"/home/hongyij/mlc-llm/dist/qwen3-32b-f16/mega_layer_lib_dyn_tp{TP_SIZE}.so"  # NOTE: update this path
+MEGA_LIB_PATH = f"/home/guanjiew/qwen3-mg-debug/mega_layer_lib_dyn_tp{TP_SIZE}.so"  # NOTE: update this path
+DEBUG_PATH = "/home/guanjiew/qwen3-mg-debug" # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
@@ -132,7 +131,7 @@ def get_default_spec(model):
 
 def _craft_pipeline(ext_mods: List[nn.ExternModule], dump_file_prefix: Path):
     ext_mods = ext_mods or []
-    debug_dir = Path("/home/hongyij/mlc-llm/dist/qwen3-32b-f16/debug-mega-layer")
+    debug_dir = Path(DEBUG_PATH)
 
     @tvm.transform.module_pass(opt_level=0)
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
@@ -378,7 +377,7 @@ def attach_attr(func, name):
 
 def get_qwen3_megakernel_mod():
     rms_norm = get_rmsnorm_kernel(5120)
-    layer_kernel = MegaKernel(problem_config).get_func_dynamic()
+    layer_kernel = MegaKernel(problem_config, profiler_on=False).get_func_dynamic()
     hgemm, reduce, tile_k_num = get_hgemm_kernel(dim_n=151936, dim_k=5120)
     cos_sin_cache = get_cos_sin_cache_kernel(128, ROPE_THETA)
 
@@ -470,8 +469,8 @@ def get_qwen3_megakernel_mod():
             out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 51200 // TP_SIZE]), dtype="float16", runtime_device_index=0)
             out_silu_multiply = R.builtin.alloc_tensor(R.shape([batch_size, 25600 // TP_SIZE]), dtype="float16", runtime_device_index=0)
             partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([DOWN_PROJ_SPLIT_K_FACTOR, batch_size, 5120]), dtype="float32", runtime_device_index=0)
-
             output_tensor = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
+            profiler_buffer = R.builtin.alloc_tensor(R.shape([PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)
 
 
             layer_res = R.call_tir_inplace(cls.layer_kernel, (
@@ -493,7 +492,7 @@ def get_qwen3_megakernel_mod():
                                         etensor_decode_merge, etensor_o_proj, etensor_o_partial, etensor_attn_add_rms_norm, etensor_attn_mlp,
                                         etensor_gate_up_proj, etensor_down_proj, etensor_down_proj_reduce, etensor_mlp_add_rms_norm, etensor_end,
                                         # execution queue
-                                        queue_tasks, queue_head, queue_tail),
+                                        queue_tasks, queue_head, queue_tail, profiler_buffer),
                                         [2, 1],
                                         out_sinfo=[
                                             R.Tensor((batch_size, 5120), dtype="float16"), # residual
@@ -609,6 +608,7 @@ def get_qwen3_megakernel_mod():
                 queue_tasks: T.handle,
                 queue_head: T.handle,
                 queue_tail: T.handle,
+                profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
         ):
             pass
 
