@@ -269,8 +269,10 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
         CTA_TILE_KV = 128
         KV_THR_LAYOUT_COL = 8
         KV_THR_LAYOUT_ROW = 4
-        SMEM_SIZE = 69632
         NUM_STAGES = 1
+        WG_COUNT = 2
+        # SMEM_SIZE = 69632 * WG_COUNT
+        SMEM_SIZE = 214016
         assert NUM_WARPS == 4  # total warps in a cta
         assert NUM_MMA_KV * 4 % NUM_WARPS_Q == 0
         assert (
@@ -317,8 +319,9 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
                 return offset + step_size * row_stride
             return (offset ^ 0x4) + step_size * row_stride
 
-        def scope_sync():
-            return T.tvm_storage_sync("shared")
+        def scope_sync(wg_id):
+            return T.ptx.bar.sync(wg_id, 128)
+            # return T.tvm_storage_sync("shared")
 
         def m16k16_row_sum_f16f16f32(C_ptr, A_ptr):
             func_name = "m16k16_rowsum_f16f16f32"
@@ -405,20 +408,22 @@ __device__ __forceinline__ float {func_name}() {{
             partial_lse_buf = T.match_buffer(partial_lse_ptr, [2 * MAX_TOTAL_NUM_WORKERS], "float32", layout="default", offset_factor=1)
             
             with T.kernel():
-                bx = T.cta_id([SM_COUNT * 2], parent="kernel")
-                warp_id = T.warp_id([NUM_WARPS_Q * NUM_WARPS_KV], parent="cta")
+                bx = T.cta_id([SM_COUNT * 2 // WG_COUNT], parent="kernel")
+                wg_id = T.warpgroup_id([WG_COUNT], parent="cta")
+                warp_id = T.warp_id([NUM_WARPS_Q * NUM_WARPS_KV], parent="warpgroup")
                 lane_id = T.thread_id([32], parent="warp")
 
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 pool = T.meta_var(Tp.PoolAllocator(buf.data))
-                q_smem = pool.alloc([CTA_TILE_Q * HEAD_DIM], "float16", layout="default", align=16)
-                k_smem = pool.alloc([CTA_TILE_KV * HEAD_DIM], "float16", layout="default", align=16)
-                v_smem = pool.alloc([CTA_TILE_KV * HEAD_DIM], "float16", layout="default", align=16)
-                pool.move_base_to(0)
-                cta_sync_o_smem = pool.alloc([1] if NUM_WARPS_KV == 1 else [NUM_WARPS, NUM_MMA_Q, NUM_MMA_D_VO, 32, 8], "float32", layout="default", align=16)
-                cta_sync_md_smem = pool.alloc([1] if NUM_WARPS_KV == 1 else [NUM_WARPS, NUM_MMA_Q, 16, 2], "float32", layout="default", align=16)
-                pool.move_base_to(0)
-                smem_o = pool.alloc([CTA_TILE_Q * HEAD_DIM], "float16", layout="default", align=16)
+                q_smem = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", layout="default", align=16)
+                k_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", layout="default", align=16)
+                v_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", layout="default", align=16)
+                # pool.move_base_to(0)
+                cta_sync_o_smem = pool.alloc([WG_COUNT, 1] if NUM_WARPS_KV == 1 else [WG_COUNT, NUM_WARPS, NUM_MMA_Q, NUM_MMA_D_VO, 32, 8], "float32", layout="default", align=16)
+                cta_sync_md_smem = pool.alloc([WG_COUNT, 1] if NUM_WARPS_KV == 1 else [WG_COUNT, NUM_WARPS, NUM_MMA_Q, 16, 2], "float32", layout="default", align=16)
+                # pool.move_base_to(0)
+                smem_o = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", layout="default", align=16)
+                print(pool.offset)
 
                 with T.thread():
                     s_frag = T.alloc_local([NUM_MMA_Q, NUM_MMA_KV, 8], "float32", align=0, layout="default")
@@ -426,11 +431,11 @@ __device__ __forceinline__ float {func_name}() {{
                     m = T.alloc_local([NUM_MMA_Q, 2], "float32")
                     d = T.alloc_local([NUM_MMA_Q, 2], "float32")
                     tid = T.alloc_local([3], "int32")
-                            
+
                     @T.macro
                     def debug_print_q(kv_tile_idx):
                         if DEBUG_PRINT:
-                            scope_sync()
+                            scope_sync(wg_id)
                             if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
                                 T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR Q: kv_tile_idx = %d\n", kv_tile_idx[0])
                                 for i in range(CTA_TILE_Q):
@@ -438,11 +443,11 @@ __device__ __forceinline__ float {func_name}() {{
                                     for j in range(HEAD_DIM):
                                         T.cuda.printf("%f ", half_to_float(q_smem[i * HEAD_DIM + j]))
                                     T.cuda.printf("\n")
-                            scope_sync()
+                            scope_sync(wg_id)
                     @T.macro
                     def debug_print_k(kv_tile_idx):
                         if DEBUG_PRINT:
-                            scope_sync()
+                            scope_sync(wg_id)
                             if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
                                 T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR K: kv_tile_idx = %d\n", kv_tile_idx[0])
                                 for i in range(CTA_TILE_KV):
@@ -450,11 +455,11 @@ __device__ __forceinline__ float {func_name}() {{
                                     for j in range(HEAD_DIM):
                                         T.cuda.printf("%f ", half_to_float(k_smem[i * HEAD_DIM + j]))
                                     T.cuda.printf("\n")
-                            scope_sync()
+                            scope_sync(wg_id)
                     @T.macro
                     def debug_print_v(kv_tile_idx):
                         if DEBUG_PRINT:
-                            scope_sync()
+                            scope_sync(wg_id)
                             if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
                                 T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR V: kv_tile_idx = %d\n", kv_tile_idx[0])
                                 for i in range(CTA_TILE_KV):
@@ -462,17 +467,17 @@ __device__ __forceinline__ float {func_name}() {{
                                     for j in range(HEAD_DIM):
                                         T.cuda.printf("%f ", half_to_float(v_smem[i * HEAD_DIM + j]))
                                     T.cuda.printf("\n")
-                            scope_sync()
+                            scope_sync(wg_id)
                     @T.macro
                     def debug_print_somd_frag(kv_tile_idx, msg):
                         if DEBUG_PRINT:
-                            scope_sync()
+                            scope_sync(wg_id)
                             if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
                                 T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR SOMD_FRAG: kv_tile_idx = %d, msg = %s\n", kv_tile_idx[0], msg)
-                            scope_sync()
+                            scope_sync(wg_id)
                             for warp_id_ in range(NUM_WARPS):
                                 for lane_id_ in range(32):
-                                    scope_sync()
+                                    scope_sync(wg_id)
                                     if bx == DEBUG_BX_EXPECTED and warp_id == warp_id_ and lane_id == lane_id_:
                                         T.cuda.printf("warp_id = %d, lane_id = %d\n", warp_id_, lane_id_)
                                         T.cuda.printf("s: ")
@@ -497,41 +502,41 @@ __device__ __forceinline__ float {func_name}() {{
                                             for j in range(2):
                                                 T.cuda.printf("%f ", d[mma_q, j])
                                         T.cuda.printf("\n")
-                                    scope_sync()
-                            scope_sync()
+                                    scope_sync(wg_id)
+                            scope_sync(wg_id)
 
                     tid[0] = lane_id
                     tid[1] = warp_id % NUM_WARPS_Q
                     tid[2] = warp_id // NUM_WARPS_Q
 
-                    q_smem_offset_r = int_var(get_permuted_offset(UPCAST_STRIDE_Q, get_warp_idx_q(tid) * NUM_MMA_Q * 16 + lane_id % 16, lane_id // 16))
-                    k_smem_offset_r = int_var(get_permuted_offset(UPCAST_STRIDE_K, get_warp_idx_kv(tid) * NUM_MMA_KV * 16 + 8 * (lane_id // 16) + lane_id % 8, (lane_id % 16 // 8)))
-                    v_smem_offset_r = int_var(get_permuted_offset(UPCAST_STRIDE_V, get_warp_idx_kv(tid) * NUM_MMA_KV * 16 + lane_id % 16, lane_id // 16))
-                    k_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_K, warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL, lane_id % KV_THR_LAYOUT_COL))
-                    v_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_V, warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL, lane_id % KV_THR_LAYOUT_COL))
+                    q_smem_offset_r = int_var(get_permuted_offset(UPCAST_STRIDE_Q, wg_id * CTA_TILE_Q + get_warp_idx_q(tid) * NUM_MMA_Q * 16 + lane_id % 16, lane_id // 16))
+                    k_smem_offset_r = int_var(get_permuted_offset(UPCAST_STRIDE_K, wg_id * CTA_TILE_KV + get_warp_idx_kv(tid) * NUM_MMA_KV * 16 + 8 * (lane_id // 16) + lane_id % 8, (lane_id % 16 // 8)))
+                    v_smem_offset_r = int_var(get_permuted_offset(UPCAST_STRIDE_V, wg_id * CTA_TILE_KV + get_warp_idx_kv(tid) * NUM_MMA_KV * 16 + lane_id % 16, lane_id // 16))
+                    k_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_K, wg_id * CTA_TILE_KV + warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL, lane_id % KV_THR_LAYOUT_COL))
+                    v_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_V, wg_id * CTA_TILE_KV + warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL, lane_id % KV_THR_LAYOUT_COL))
                     thr_local_kv_offset = T.alloc_local([NUM_MMA_KV * KV_THR_LAYOUT_COL // 2 // NUM_WARPS_Q], "int64")
 
                     @T.macro
                     def debug_print_thr_local_kv_offset(kv_tile_idx):
                         if DEBUG_PRINT:
-                            scope_sync()
+                            scope_sync(wg_id)
                             if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
                                 T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR THR_LOCAL_KV_OFFSET: kv_tile_idx = %d\n", kv_tile_idx[0])
-                            scope_sync()
+                            scope_sync(wg_id)
                             for warp_id_ in range(NUM_WARPS):
                                 for lane_id_ in range(32):
-                                    scope_sync()
+                                    scope_sync(wg_id)
                                     if bx == DEBUG_BX_EXPECTED and warp_id == warp_id_ and lane_id == lane_id_:
                                         T.cuda.printf("warp_id = %d, lane_id = %d\n", warp_id_, lane_id_)
                                         for i in range(NUM_MMA_KV * KV_THR_LAYOUT_COL // 2 // NUM_WARPS_Q):
                                             T.cuda.printf("%d ", thr_local_kv_offset[i])
                                         T.cuda.printf("\n")
-                                    scope_sync()
-                            scope_sync()
+                                    scope_sync(wg_id)
+                            scope_sync(wg_id)
 
                     work_idx = int_var()
-                    work_idx[0] = work_indptr_buf[bx]
-                    while work_idx[0] < work_indptr_buf[bx + 1]:
+                    work_idx[0] = work_indptr_buf[bx * WG_COUNT + wg_id]
+                    while work_idx[0] < work_indptr_buf[bx * WG_COUNT + wg_id + 1]:
                         with T.thread():
                             # get_block_coord
                             q_indptr = int_var(q_indptr_buf[work_idx[0]])
@@ -563,7 +568,7 @@ __device__ __forceinline__ float {func_name}() {{
                             @T.macro
                             def load_q_global_smem():
                                 if get_warp_idx_kv(tid) == 0:
-                                    q_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_Q, get_warp_idx_q(tid) * NUM_MMA_Q * 16 + lane_id // 8, lane_id % 8))
+                                    q_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_Q, wg_id * CTA_TILE_Q + get_warp_idx_q(tid) * NUM_MMA_Q * 16 + lane_id // 8, lane_id % 8))
                                     # unroll
                                     for mma_q in T.unroll(NUM_MMA_Q):
                                         for j in T.unroll(4):
@@ -585,14 +590,14 @@ __device__ __forceinline__ float {func_name}() {{
                             mast_tile_idx = int_var(kv_end[0] // CTA_TILE_KV - (kv_start[0] // CTA_TILE_KV))
                             
                             block_iter_base = int_var(kv_indptr[0] * PAGE_SIZE + kv_start[0])
-                            scope_sync()
+                            scope_sync(wg_id)
                             packed_kv_bound = int_var(kv_indptr[0] * PAGE_SIZE + kv_len[0])
 
                             #########################################################
                             @T.macro
                             def debug_print_work():
                                 if DEBUG_PRINT:
-                                    scope_sync()
+                                    scope_sync(wg_id)
                                     if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
                                         T.cuda.printf("q_indptr: %d\n", q_indptr[0])
                                         T.cuda.printf("kv_indptr: %d\n", kv_indptr[0])
@@ -611,7 +616,7 @@ __device__ __forceinline__ float {func_name}() {{
                                         T.cuda.printf("packed_kv_bound: %d\n", packed_kv_bound[0])
                                         T.cuda.printf("kv_tile_idx: %d\n", kv_tile_idx[0])
                                         T.cuda.printf("mast_tile_idx: %d\n", mast_tile_idx[0])
-                                    scope_sync()
+                                    scope_sync(wg_id)
 
                             debug_print_work()
                             #########################################################
@@ -796,21 +801,21 @@ __device__ __forceinline__ float {func_name}() {{
                             def loop_body(WITH_MASK: bool):
                                 prefetch_offset(block_iter_base[0] + (kv_tile_idx[0] - 1) * CTA_TILE_KV)
                                 T.ptx.cp_async.wait_group(1)
-                                scope_sync()
+                                scope_sync(wg_id)
                                 
                                 compute_qk()
                                 if WITH_MASK:
                                     logits_mask()
                                 update_mdo_states()
 
-                                scope_sync()
+                                scope_sync(wg_id)
                                 page_produce_kv(False, kv_start[0] + (kv_tile_idx[0] - 1) * CTA_TILE_KV, k_smem_offset_w, k_smem)
                                 T.ptx.cp_async.commit_group()
                                 T.ptx.cp_async.wait_group(1)
                                 
-                                scope_sync()
+                                scope_sync(wg_id)
                                 compute_sfm_v()
-                                scope_sync()
+                                scope_sync(wg_id)
 
                                 page_produce_kv(True, kv_start[0] + (kv_tile_idx[0] - 1) * CTA_TILE_KV, v_smem_offset_w, v_smem)
                                 T.ptx.cp_async.commit_group()
@@ -831,7 +836,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 kv_tile_idx[0] -= 1
                             
                             T.ptx.cp_async.wait_group(0)
-                            scope_sync()
+                            scope_sync(wg_id)
 
 
                             #########################################################
@@ -869,7 +874,7 @@ __device__ __forceinline__ float {func_name}() {{
 
                                 kv_tile_idx[0] -= 1
                             
-                            scope_sync()
+                            scope_sync(wg_id)
 
                             @T.macro
                             def finalize_m():
@@ -884,7 +889,7 @@ __device__ __forceinline__ float {func_name}() {{
                             def threadblock_sync_mdo_states():
                                 for mma_q in T.unroll(NUM_MMA_Q):
                                     for mma_d in T.unroll(NUM_MMA_D_VO):
-                                        Tp.copy(cta_sync_o_smem[warp_id, mma_q, mma_d, lane_id, :], o_frag[mma_q, mma_d, :])
+                                        Tp.copy(cta_sync_o_smem[wg_id, warp_id, mma_q, mma_d, lane_id, :], o_frag[mma_q, mma_d, :])
 
                                 for mma_q in T.unroll(NUM_MMA_Q):
                                     for j in T.unroll(2):
@@ -892,8 +897,8 @@ __device__ __forceinline__ float {func_name}() {{
                                             md = T.alloc_local([2], "float32", layout="default")
                                             md[0] = m[mma_q, j]
                                             md[1] = d[mma_q, j]
-                                            Tp.copy(cta_sync_md_smem[warp_id, mma_q, j * 8 + lane_id // 4, :], md[:])
-                                scope_sync()
+                                            Tp.copy(cta_sync_md_smem[wg_id, warp_id, mma_q, j * 8 + lane_id // 4, :], md[:])
+                                scope_sync(wg_id)
 
                                 for mma_q in T.unroll(NUM_MMA_Q):
                                     with T.thread():
@@ -905,7 +910,7 @@ __device__ __forceinline__ float {func_name}() {{
                                                 for i in T.unroll(NUM_WARPS_KV):
                                                     with T.thread():
                                                         md = T.alloc_local([2], "float32", layout="default") 
-                                                        Tp.copy(md[:], cta_sync_md_smem[i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, j * 8 + lane_id // 4, :])
+                                                        Tp.copy(md[:], cta_sync_md_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, j * 8 + lane_id // 4, :])
                                                         m_prev = float_var(m_new[0])
                                                         d_prev = float_var(d_new[0])
                                                         m_new[0] = T.max(m_new[0], md[0])
@@ -913,7 +918,7 @@ __device__ __forceinline__ float {func_name}() {{
                                                 for i in T.unroll(NUM_WARPS_KV):
                                                     with T.thread():
                                                         md = T.alloc_local([2], "float32", layout="default")
-                                                        Tp.copy(md[:], cta_sync_md_smem[i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, j * 8 + lane_id // 4, :])
+                                                        Tp.copy(md[:], cta_sync_md_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, j * 8 + lane_id // 4, :])
                                                         o_scale[j, i] = ptx_exp2(md[0] - m_new[0])
                                                 m[mma_q, j] = m_new[0]
                                                 d[mma_q, j] = d_new[0]
@@ -925,7 +930,7 @@ __device__ __forceinline__ float {func_name}() {{
                                                 for i in T.unroll(NUM_WARPS_KV):
                                                     with T.thread():
                                                         o_i = T.alloc_local([8], "float32", layout="default")
-                                                        Tp.copy(o_i[:], cta_sync_o_smem[i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, mma_d, lane_id, :])
+                                                        Tp.copy(o_i[:], cta_sync_o_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, mma_d, lane_id, :])
                                                         for reg_id in T.unroll(8):
                                                             o_new[reg_id] += o_i[reg_id] * o_scale[(reg_id % 4) // 2, i]
                                                 Tp.copy(o_frag[mma_q, mma_d, :], o_new[:])
@@ -949,7 +954,7 @@ __device__ __forceinline__ float {func_name}() {{
                                         with T.thread():
                                             o_frag_f16 = T.alloc_local([8], "float16", layout="default")
                                             Tp.cast(o_frag_f16[:], o_frag[mma_q, mma_d, :])
-                                            o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, (get_warp_idx_q(tid) * NUM_MMA_Q + mma_q) * 16 + lane_id % 16, mma_d * 2 + lane_id // 16))
+                                            o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, wg_id * CTA_TILE_Q + (get_warp_idx_q(tid) * NUM_MMA_Q + mma_q) * 16 + lane_id % 16, mma_d * 2 + lane_id // 16))
                                             T.ptx.stmatrix(4, False, o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]), o_frag_f16.ptr_to([0]))
 
                             @T.macro
@@ -963,7 +968,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 if warp_id_z[0] == 0:
                                     with T.thread():
                                         store_o_to_smem(o_smem)
-                                        o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, warp_id_x[0] * NUM_MMA_Q * 16 + lane_id // 8, lane_id % 8))
+                                        o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, wg_id * CTA_TILE_Q + warp_id_x[0] * NUM_MMA_Q * 16 + lane_id // 8, lane_id % 8))
                                         for mma_q in T.unroll(NUM_MMA_Q):
                                             for j in T.unroll(4):
                                                 with T.thread():
@@ -988,7 +993,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 if warp_id_z[0] == 0:
                                     with T.thread():
                                         store_o_to_smem(o_smem)
-                                        o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, warp_id_x[0] * NUM_MMA_Q * 16 + lane_id // 8, lane_id % 8))
+                                        o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, wg_id * CTA_TILE_Q + warp_id_x[0] * NUM_MMA_Q * 16 + lane_id // 8, lane_id % 8))
                                         for mma_q in T.unroll(NUM_MMA_Q):
                                             for j in T.unroll(4):
                                                 with T.thread():
@@ -1036,15 +1041,17 @@ __device__ __forceinline__ float {func_name}() {{
                                     write_final_o(o_ptr_base_offset[0])
 
                             write_partial_lse()
+                            scope_sync(wg_id)
+                            # T.tvm_storage_sync("shared")
 
                             work_idx[0] += 1
         # fmt: on
         return batch_attention
 
     def craft_batch_attention_merge_kernel():
-        NUM_THREADS = 128
+        NUM_THREADS = 256
         NUM_WARPS = NUM_THREADS // 32
-        NUM_SMEM_STAGES = 4
+        NUM_SMEM_STAGES = 1
         VEC_SIZE = max(16 // size_of("float16"), HEAD_DIM // 32)
         BDX = HEAD_DIM // VEC_SIZE
         assert NUM_THREADS % BDX == 0
@@ -1052,7 +1059,7 @@ __device__ __forceinline__ float {func_name}() {{
         SMEM_SIZE = NUM_WARPS * NUM_SMEM_STAGES * BDY * HEAD_DIM * size_of(
             "float16"
         ) + NUM_THREADS * size_of("float32")
-        NUM_WORKERS = SM_COUNT * 2 * NUM_WARPS
+        NUM_WORKERS = SM_COUNT * NUM_WARPS
 
         class State:
             def __init__(self, vec_size):
@@ -1123,7 +1130,7 @@ __device__ __forceinline__ void {func_name}() {{
             merge_indptr_buf = T.match_buffer(merge_indptr_ptr, [MAX_NUM_KV_SPLITS], "int32", layout="default", offset_factor=1)
             merge_o_indices_buf = T.match_buffer(merge_o_indices_ptr, [MAX_NUM_KV_SPLITS], "int32", layout="default", offset_factor=1)
             with T.kernel():
-                bx = T.cta_id([SM_COUNT * 2], parent="kernel")
+                bx = T.cta_id([SM_COUNT], parent="kernel")
                 warp_id = T.warp_id([NUM_THREADS // 32], parent="cta")
                 lane_id = T.thread_id([32], parent="warp")
 
@@ -1138,7 +1145,7 @@ __device__ __forceinline__ void {func_name}() {{
                     s_smem = pool.alloc([NUM_WARPS, 32], "float32", layout="default")
 
                     num_qo_len_local = int_var(num_qo_len_buf[0])
-                    
+
                     i = int_var(worker_id[0])
                     while i[0] < num_qo_len_local[0] * KV_HEADS:
                         with T.thread():
@@ -1434,6 +1441,11 @@ if __name__ == "__main__":
     head_dim_list = [128]
     batch_size_list = [1, 11, 25, 128]
     seed_list = [42]
+    # num_heads_list = [(16, 16)]
+    # seq_len_list = [512]
+    # head_dim_list = [128]
+    # batch_size_list = [8]
+    # seed_list = [42]
 
     for num_heads, seq_len, head_dim, batch_size, seed in itertools.product(
         num_heads_list, seq_len_list, head_dim_list, batch_size_list, seed_list
