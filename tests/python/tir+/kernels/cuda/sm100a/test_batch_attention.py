@@ -48,9 +48,6 @@ F32_BYTE = 4
 MAX_TOTAL_NUM_WORKERS = 65536
 MAX_NUM_KV_SPLITS = 4 * SM_COUNT * 2 * (128 + 16)
 
-DEBUG_PRINT = False
-DEBUG_BX_EXPECTED = 2
-
 
 def perpare_data(batch_size, qo_heads, kv_heads, seq_len, head_dim, page_size, max_page_num):
     PAGE_SIZE = page_size
@@ -85,67 +82,6 @@ def perpare_data(batch_size, qo_heads, kv_heads, seq_len, head_dim, page_size, m
     # kv_data[:, :, :, ::2, ::2] = 1
 
     return q, kv_data, kv_indptr, kv_last_page_len, kv_indices
-
-
-# void flashinfer::PersistentKernelTemplate<
-#     flashinfer::BlockBatchPagedAttentionPersistent<
-#         flashinfer::KernelTraits<(flashinfer::MaskMode)0, 128u, 2u, 4u, 8u, 8u, 4u, 1u,
-#                                  (flashinfer::PosEncodingMode)0, __half, __half, __half, float, int,
-#                                  StandardAttention<false> >,
-#         PersistentParams>,
-#     flashinfer::BlockBatchPagedAttentionPersistent<
-#         flashinfer::KernelTraits<(flashinfer::MaskMode)0, 16u, 1u, 2u, 8u, 8u, 1u, 4u,
-#                                  (flashinfer::PosEncodingMode)0, __half, __half, __half, float, int,
-#                                  StandardAttention<false> >,
-#         PersistentParams>,
-#     flashinfer::BlockBatchReductionPersistent<
-#         flashinfer::StateReductionKernelTraits<128u, 4u, 128u, __half, __half, int> > >(
-#     flashinfer::BlockBatchPagedAttentionPersistent<
-#         flashinfer::KernelTraits<(flashinfer::MaskMode)0, 128u, 2u, 4u, 8u, 8u, 4u, 1u,
-#                                  (flashinfer::PosEncodingMode)0, __half, __half, __half, float, int,
-#                                  StandardAttention<false> >,
-#         PersistentParams>::Params,
-#     flashinfer::BlockBatchPagedAttentionPersistent<
-#         flashinfer::KernelTraits<(flashinfer::MaskMode)0, 16u, 1u, 2u, 8u, 8u, 1u, 4u,
-#                                  (flashinfer::PosEncodingMode)0, __half, __half, __half, float, int,
-#                                  StandardAttention<false> >,
-#         PersistentParams>::Params)
-
-# CTA_TILE_Q_1: 128
-# CTA_TILE_Q_2: 16
-# HEAD_DIM_QK: 128
-# HEAD_DIM_VO: 128
-# MASK_MODE: 0
-# >>>>>
-# NUM_WARPS_Q_1: 4
-# NUM_WARPS_KV_1: 1
-# NUM_MMA_Q_1: 2
-# NUM_MMA_KV_1: 4
-# NUM_MMA_D_QK: 8
-# NUM_MMA_D_VO: 8
-# NUM_MMA_KV_1 * KTraits1::KV_THR_LAYOUT_COL / 2 / KTraits1::NUM_WARPS_Q_1: 4
-# KernelTraits1::CTA_TILE_KV: 64
-# >>>>>
-# NUM_WARPS_Q_2: 1
-# NUM_WARPS_KV_2: 4
-# NUM_MMA_Q_2: 1
-# NUM_MMA_KV_2: 2
-# NUM_MMA_D_QK: 8
-# NUM_MMA_D_VO: 8
-# NUM_MMA_KV_2 * KTraits2::KV_THR_LAYOUT_COL / 2 / KTraits2::NUM_WARPS_Q_2: 8
-# KernelTraits2::CTA_TILE_KV: 128
-# NUM_THREADS: 128
-# smem_size: 69632
-# num_blks_x: 1
-# num_blks_y: 296
-# ReductionKTraits::SMEM_SIZE: 8704
-# ReductionKTraits::NUM_THREADS: 128
-# ReductionKTraits::NUM_WARPS: 4
-# ReductionKTraits::NUM_SMEM_STAGES: 4
-# ReductionKTraits::bdx: 16
-# ReductionKTraits::bdy: 2
-# ReductionKTraits::vec_size: 8
-# ReductionKTraits::head_dim: 128
 
 
 def upcast_size(dtype):
@@ -402,11 +338,11 @@ __device__ __forceinline__ float {func_name}() {{
             kv_end_buf = T.match_buffer(kv_end_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
             kv_head_idx_buf = T.match_buffer(kv_head_idx_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
             work_indptr_buf = T.match_buffer(work_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            len_kv_chunk_buf = T.match_buffer(len_kv_chunk_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
+            len_kv_chunk_buf = T.match_buffer(len_kv_chunk_ptr, [2], "int32", layout="default", offset_factor=1)
             o_buf = T.match_buffer(o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", layout="default")
-            partial_o_buf = T.match_buffer(partial_o_ptr, [2 * MAX_NUM_KV_SPLITS * head_dim], "float16", layout="default", offset_factor=1)
-            partial_lse_buf = T.match_buffer(partial_lse_ptr, [2 * MAX_TOTAL_NUM_WORKERS], "float32", layout="default", offset_factor=1)
-            
+            partial_o_buf = T.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", layout="default", offset_factor=1)
+            partial_lse_buf = T.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", layout="default", offset_factor=1)
+
             with T.kernel():
                 bx = T.cta_id([SM_COUNT * 2 // WG_COUNT], parent="kernel")
                 wg_id = T.warpgroup_id([WG_COUNT], parent="cta")
@@ -432,79 +368,6 @@ __device__ __forceinline__ float {func_name}() {{
                     d = T.alloc_local([NUM_MMA_Q, 2], "float32")
                     tid = T.alloc_local([3], "int32")
 
-                    @T.macro
-                    def debug_print_q(kv_tile_idx):
-                        if DEBUG_PRINT:
-                            scope_sync(wg_id)
-                            if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
-                                T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR Q: kv_tile_idx = %d\n", kv_tile_idx[0])
-                                for i in range(CTA_TILE_Q):
-                                    T.cuda.printf("i = %d\n", i)
-                                    for j in range(HEAD_DIM):
-                                        T.cuda.printf("%f ", half_to_float(q_smem[i * HEAD_DIM + j]))
-                                    T.cuda.printf("\n")
-                            scope_sync(wg_id)
-                    @T.macro
-                    def debug_print_k(kv_tile_idx):
-                        if DEBUG_PRINT:
-                            scope_sync(wg_id)
-                            if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
-                                T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR K: kv_tile_idx = %d\n", kv_tile_idx[0])
-                                for i in range(CTA_TILE_KV):
-                                    T.cuda.printf("i = %d\n", i)
-                                    for j in range(HEAD_DIM):
-                                        T.cuda.printf("%f ", half_to_float(k_smem[i * HEAD_DIM + j]))
-                                    T.cuda.printf("\n")
-                            scope_sync(wg_id)
-                    @T.macro
-                    def debug_print_v(kv_tile_idx):
-                        if DEBUG_PRINT:
-                            scope_sync(wg_id)
-                            if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
-                                T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR V: kv_tile_idx = %d\n", kv_tile_idx[0])
-                                for i in range(CTA_TILE_KV):
-                                    T.cuda.printf("i = %d\n", i)
-                                    for j in range(HEAD_DIM):
-                                        T.cuda.printf("%f ", half_to_float(v_smem[i * HEAD_DIM + j]))
-                                    T.cuda.printf("\n")
-                            scope_sync(wg_id)
-                    @T.macro
-                    def debug_print_somd_frag(kv_tile_idx, msg):
-                        if DEBUG_PRINT:
-                            scope_sync(wg_id)
-                            if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
-                                T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR SOMD_FRAG: kv_tile_idx = %d, msg = %s\n", kv_tile_idx[0], msg)
-                            scope_sync(wg_id)
-                            for warp_id_ in range(NUM_WARPS):
-                                for lane_id_ in range(32):
-                                    scope_sync(wg_id)
-                                    if bx == DEBUG_BX_EXPECTED and warp_id == warp_id_ and lane_id == lane_id_:
-                                        T.cuda.printf("warp_id = %d, lane_id = %d\n", warp_id_, lane_id_)
-                                        T.cuda.printf("s: ")
-                                        for mma_q in range(NUM_MMA_Q):
-                                            for mma_kv in range(NUM_MMA_KV):
-                                                for j in range(8):
-                                                    T.cuda.printf("%f ", s_frag[mma_q, mma_kv, j])
-                                        T.cuda.printf("\n")
-                                        T.cuda.printf("o: ")
-                                        for mma_q in range(NUM_MMA_Q):
-                                            for mma_d in range(NUM_MMA_D_VO):
-                                                for j in range(8):
-                                                    T.cuda.printf("%f ", o_frag[mma_q, mma_d, j])
-                                        T.cuda.printf("\n")
-                                        T.cuda.printf("m: ")
-                                        for mma_q in range(NUM_MMA_Q):
-                                            for j in range(2):
-                                                T.cuda.printf("%f ", m[mma_q, j])
-                                        T.cuda.printf("\n")
-                                        T.cuda.printf("d: ")
-                                        for mma_q in range(NUM_MMA_Q):
-                                            for j in range(2):
-                                                T.cuda.printf("%f ", d[mma_q, j])
-                                        T.cuda.printf("\n")
-                                    scope_sync(wg_id)
-                            scope_sync(wg_id)
-
                     tid[0] = lane_id
                     tid[1] = warp_id % NUM_WARPS_Q
                     tid[2] = warp_id // NUM_WARPS_Q
@@ -515,24 +378,6 @@ __device__ __forceinline__ float {func_name}() {{
                     k_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_K, wg_id * CTA_TILE_KV + warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL, lane_id % KV_THR_LAYOUT_COL))
                     v_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_V, wg_id * CTA_TILE_KV + warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL, lane_id % KV_THR_LAYOUT_COL))
                     thr_local_kv_offset = T.alloc_local([NUM_MMA_KV * KV_THR_LAYOUT_COL // 2 // NUM_WARPS_Q], "int64")
-
-                    @T.macro
-                    def debug_print_thr_local_kv_offset(kv_tile_idx):
-                        if DEBUG_PRINT:
-                            scope_sync(wg_id)
-                            if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
-                                T.cuda.printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR THR_LOCAL_KV_OFFSET: kv_tile_idx = %d\n", kv_tile_idx[0])
-                            scope_sync(wg_id)
-                            for warp_id_ in range(NUM_WARPS):
-                                for lane_id_ in range(32):
-                                    scope_sync(wg_id)
-                                    if bx == DEBUG_BX_EXPECTED and warp_id == warp_id_ and lane_id == lane_id_:
-                                        T.cuda.printf("warp_id = %d, lane_id = %d\n", warp_id_, lane_id_)
-                                        for i in range(NUM_MMA_KV * KV_THR_LAYOUT_COL // 2 // NUM_WARPS_Q):
-                                            T.cuda.printf("%d ", thr_local_kv_offset[i])
-                                        T.cuda.printf("\n")
-                                    scope_sync(wg_id)
-                            scope_sync(wg_id)
 
                     work_idx = int_var()
                     work_idx[0] = work_indptr_buf[bx * WG_COUNT + wg_id]
@@ -548,7 +393,7 @@ __device__ __forceinline__ float {func_name}() {{
                             kv_start = int_var(kv_start_buf[work_idx[0]])
                             kv_end = int_var(kv_end_buf[work_idx[0]])
                             kv_head_idx = int_var(kv_head_idx_buf[work_idx[0]])
-                            len_kv_chunk = int_var(len_kv_chunk_buf[work_idx[0]])
+                            len_kv_chunk = int_var(len_kv_chunk_buf[1])
                             
                             kv_chunk_idx = int_var(ceildiv(kv_start[0], len_kv_chunk[0]))
                             num_kv_chunks = int_var(ceildiv(kv_len[0], len_kv_chunk[0]))
@@ -593,34 +438,6 @@ __device__ __forceinline__ float {func_name}() {{
                             scope_sync(wg_id)
                             packed_kv_bound = int_var(kv_indptr[0] * PAGE_SIZE + kv_len[0])
 
-                            #########################################################
-                            @T.macro
-                            def debug_print_work():
-                                if DEBUG_PRINT:
-                                    scope_sync(wg_id)
-                                    if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
-                                        T.cuda.printf("q_indptr: %d\n", q_indptr[0])
-                                        T.cuda.printf("kv_indptr: %d\n", kv_indptr[0])
-                                        T.cuda.printf("q_len: %d\n", q_len[0])
-                                        T.cuda.printf("kv_len: %d\n", kv_len[0])
-                                        T.cuda.printf("packed_qo_start: %d\n", packed_qo_start[0])
-                                        T.cuda.printf("kv_start: %d\n", kv_start[0])
-                                        T.cuda.printf("kv_end: %d\n", kv_end[0])
-                                        T.cuda.printf("kv_head_idx: %d\n", kv_head_idx[0])
-                                        T.cuda.printf("len_kv_chunk: %d\n", len_kv_chunk[0])
-                                        T.cuda.printf("kv_chunk_idx: %d\n", kv_chunk_idx[0])
-                                        T.cuda.printf("num_kv_chunks: %d\n", num_kv_chunks[0])
-                                        T.cuda.printf("qo_packed_idx_base: %d\n", qo_packed_idx_base[0])
-                                        T.cuda.printf("qo_upperbound: %d\n", qo_upperbound[0])
-                                        T.cuda.printf("block_iter_base: %d\n", block_iter_base[0])
-                                        T.cuda.printf("packed_kv_bound: %d\n", packed_kv_bound[0])
-                                        T.cuda.printf("kv_tile_idx: %d\n", kv_tile_idx[0])
-                                        T.cuda.printf("mast_tile_idx: %d\n", mast_tile_idx[0])
-                                    scope_sync(wg_id)
-
-                            debug_print_work()
-                            #########################################################
-                            
                             @T.macro
                             def prefetch_offset(packed_block_iter_base_in):
                                 with T.thread():
@@ -646,9 +463,6 @@ __device__ __forceinline__ float {func_name}() {{
                                     # unroll
                                     for i in T.unroll(NUM_MMA_KV * 4 // NUM_WARPS_Q):
                                         for j in T.unroll(NUM_MMA_D // (8 // size_of("float16"))):
-                                            if DEBUG_PRINT:
-                                                if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
-                                                    T.cuda.printf("i, j, gptr - kv_ptr, smem_offset: %d, %d, %p, %d, thr_local_kv_offset: %d\n", i, j, kv_buf_1d.ptr_to([v_offset + thr_local_kv_offset[i] + 8 * j * upcast_size("float16")]) - kv_buf_1d.ptr_to([v_offset]), smem_offset[0], thr_local_kv_offset[i])
                                             T.ptx.cp_async(
                                                 smem.ptr_to([smem_offset[0] * upcast_size("float16")]),
                                                 # TODO: optimize the addr computation here
@@ -723,9 +537,6 @@ __device__ __forceinline__ float {func_name}() {{
                                 WARP_MASK = T.meta_var(0xFFFFFFFF)
                                 with T.thread():
                                     sm_scale = float_var(get_sm_scale())
-                                    if DEBUG_PRINT:
-                                        if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
-                                            T.cuda.printf("sm_scale: %f\n", sm_scale[0])
                                     for mma_q in T.unroll(NUM_MMA_Q):
                                         for j in T.unroll(2):
                                             m_prev = float_var(m[mma_q, j])
@@ -767,27 +578,6 @@ __device__ __forceinline__ float {func_name}() {{
                                                 for mma_q in T.unroll(NUM_MMA_Q):
                                                     s_frag_f16x2 = T.decl_buffer([NUM_MMA_Q, NUM_MMA_KV, 4], "uint32", data=s_frag_f16.data)
                                                     b_frag_f16 = T.decl_buffer([8], "float16", data=b_frag.data)
-                                                    if DEBUG_PRINT:
-                                                        if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == 0:
-                                                            T.cuda.printf("mma_q = %d, mma_d = %d, mma_kv = %d\n", mma_q, mma_d, mma_kv)
-                                                        for lane_id_ in range(32):
-                                                            if bx == DEBUG_BX_EXPECTED and warp_id == 0 and lane_id == lane_id_:
-                                                                T.cuda.printf("lane_id = %d\n", lane_id_)
-                                                                for reg_id in range(8):
-                                                                    T.cuda.printf("%f ", o_frag[mma_q, mma_d, reg_id])
-                                                                T.cuda.printf("\n")
-                                                                for reg_id in range(4):
-                                                                    T.cuda.printf("%d ", b_frag[reg_id])
-                                                                T.cuda.printf("\n")
-                                                                for reg_id in range(8):
-                                                                    T.cuda.printf("%f ", s_frag[mma_q, mma_kv, reg_id])
-                                                                T.cuda.printf("\n")
-                                                                for reg_id in range(8):
-                                                                    T.cuda.printf("%f|%A ", half_to_float(s_frag_f16[mma_q, mma_kv, reg_id]), s_frag_f16[mma_q, mma_kv, reg_id])
-                                                                T.cuda.printf("\n")
-                                                                for reg_id in range(8):
-                                                                    T.cuda.printf("%f ", half_to_float(b_frag_f16[reg_id]))
-                                                                T.cuda.printf("\n")
                                                     mma_sync_m16n16k16_row_col_f16f16f32(
                                                         o_frag, o_frag.offset_of_p([mma_q, mma_d, 0]),
                                                         s_frag_f16x2, s_frag_f16x2.offset_of_p([mma_q, mma_kv, 0]),
@@ -821,7 +611,6 @@ __device__ __forceinline__ float {func_name}() {{
                                 T.ptx.cp_async.commit_group()
                             
                             prefetch_offset(block_iter_base[0] + kv_tile_idx[0] * CTA_TILE_KV)
-                            debug_print_thr_local_kv_offset(kv_tile_idx)
                             page_produce_kv(False, kv_start[0] + kv_tile_idx[0] * CTA_TILE_KV, k_smem_offset_w, k_smem)
                             T.ptx.cp_async.commit_group()
                             page_produce_kv(True, kv_start[0] + kv_tile_idx[0] * CTA_TILE_KV, v_smem_offset_w, v_smem)
@@ -838,40 +627,11 @@ __device__ __forceinline__ float {func_name}() {{
                             T.ptx.cp_async.wait_group(0)
                             scope_sync(wg_id)
 
-
-                            #########################################################
-                            debug_print_q(kv_tile_idx)
-                            #########################################################
-                            debug_print_k(kv_tile_idx)
-                            #########################################################
-                            debug_print_v(kv_tile_idx)
-                            #########################################################
-
                             while kv_tile_idx[0] >= 0:
                                 compute_qk()
-                                
-                                #########################################################
-                                debug_print_somd_frag(kv_tile_idx, "after compute_qk")
-                                #########################################################
-
                                 logits_mask()
-
-                                #########################################################
-                                debug_print_somd_frag(kv_tile_idx, "after logits_mask")
-                                #########################################################
-
                                 update_mdo_states()
-
-                                #########################################################
-                                debug_print_somd_frag(kv_tile_idx, "after update_mdo_states")
-                                #########################################################
-
                                 compute_sfm_v()
-
-                                #########################################################
-                                debug_print_somd_frag(kv_tile_idx, "after compute_sfm_v")
-                                #########################################################
-
                                 kv_tile_idx[0] -= 1
                             
                             scope_sync(wg_id)
@@ -1024,11 +784,8 @@ __device__ __forceinline__ float {func_name}() {{
                                                         partial_lse_buf[partial_lse_buf_offset] = ptx_log2(d[mma_q, j]) + T.cast(m[mma_q, j], "float32")
 
                             finalize_m()
-                            debug_print_somd_frag(kv_tile_idx, "after finalize_m")
                             threadblock_sync_mdo_states()
-                            debug_print_somd_frag(kv_tile_idx, "after threadblock_sync_mdo_states")
                             normalize_d()
-                            debug_print_somd_frag(kv_tile_idx, "after normalize_d")
 
                             if num_kv_chunks[0] > 1:
                                 # reuse q, k, v's smem
@@ -1042,7 +799,6 @@ __device__ __forceinline__ float {func_name}() {{
 
                             write_partial_lse()
                             scope_sync(wg_id)
-                            # T.tvm_storage_sync("shared")
 
                             work_idx[0] += 1
         # fmt: on
@@ -1123,9 +879,9 @@ __device__ __forceinline__ void {func_name}() {{
         ):
             batch_size = T.int32()
 
-            partial_o_buf = T.match_buffer(partial_o_ptr, [2 * MAX_NUM_KV_SPLITS * head_dim], "float16", layout="default", offset_factor=1)
+            partial_o_buf = T.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", layout="default", offset_factor=1)
             final_o_buf = T.match_buffer(final_o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", layout="default")
-            partial_lse_buf = T.match_buffer(partial_lse_ptr, [2 * MAX_TOTAL_NUM_WORKERS], "float32", layout="default", offset_factor=1)
+            partial_lse_buf = T.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", layout="default", offset_factor=1)
             num_qo_len_buf = T.match_buffer(num_qo_len_ptr, [1], "int32", layout="default", offset_factor=1)
             merge_indptr_buf = T.match_buffer(merge_indptr_ptr, [MAX_NUM_KV_SPLITS], "int32", layout="default", offset_factor=1)
             merge_o_indices_buf = T.match_buffer(merge_o_indices_ptr, [MAX_NUM_KV_SPLITS], "int32", layout="default", offset_factor=1)
@@ -1296,23 +1052,33 @@ def test(num_heads, seq_len, head_dim, batch_size, seed):
         else:
             raise ValueError(f"Unsupported data type: {data_type}")
 
-    for i in range(0, 2):
-        q_indptr = get_tensor(get_id(i * 11 + 2), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        kv_indptr = get_tensor(get_id(i * 11 + 3), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        partial_indptr = get_tensor(get_id(i * 11 + 4), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        q_len = get_tensor(get_id(i * 11 + 5), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        kv_len = get_tensor(get_id(i * 11 + 6), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        q_start = get_tensor(get_id(i * 11 + 7), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        kv_start = get_tensor(get_id(i * 11 + 8), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        kv_end = get_tensor(get_id(i * 11 + 9), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        kv_head_idx = get_tensor(get_id(i * 11 + 10), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        work_indptr = get_tensor(get_id(i * 11 + 11), MAX_TOTAL_NUM_WORKERS, torch.int32)
-        len_kv_chunk = get_tensor(get_id(i * 11 + 12), MAX_TOTAL_NUM_WORKERS, torch.int32)
-    partial_o = get_tensor(get_id(1 * 11 + 13), 2 * MAX_NUM_KV_SPLITS * head_dim, torch.float16)
-    partial_lse = get_tensor(get_id(1 * 11 + 14), 2 * MAX_TOTAL_NUM_WORKERS, torch.float32)
-    merge_indptr = get_tensor(get_id(1 * 11 + 15), MAX_NUM_KV_SPLITS, torch.int32)
-    merge_o_indices = get_tensor(get_id(1 * 11 + 16), MAX_NUM_KV_SPLITS, torch.int32)
-    num_qo_len = get_tensor(get_id(1 * 11 + 17), 1, torch.int32)
+    NUM_TASK_ARGS = 10
+    NUM_TASKS = 2
+    print(f"MAX_TOTAL_NUM_WORKERS: {MAX_TOTAL_NUM_WORKERS}")
+    for i in range(0, NUM_TASKS):
+        q_indptr = get_tensor(get_id(i * NUM_TASK_ARGS + 2), MAX_TOTAL_NUM_WORKERS, torch.int32)
+        kv_indptr = get_tensor(get_id(i * NUM_TASK_ARGS + 3), MAX_TOTAL_NUM_WORKERS, torch.int32)
+        partial_indptr = get_tensor(
+            get_id(i * NUM_TASK_ARGS + 4), MAX_TOTAL_NUM_WORKERS, torch.int32
+        )
+        q_len = get_tensor(get_id(i * NUM_TASK_ARGS + 5), MAX_TOTAL_NUM_WORKERS, torch.int32)
+        kv_len = get_tensor(get_id(i * NUM_TASK_ARGS + 6), MAX_TOTAL_NUM_WORKERS, torch.int32)
+        q_start = get_tensor(get_id(i * NUM_TASK_ARGS + 7), MAX_TOTAL_NUM_WORKERS, torch.int32)
+        kv_start = get_tensor(get_id(i * NUM_TASK_ARGS + 8), MAX_TOTAL_NUM_WORKERS, torch.int32)
+        kv_end = get_tensor(get_id(i * NUM_TASK_ARGS + 9), MAX_TOTAL_NUM_WORKERS, torch.int32)
+        kv_head_idx = get_tensor(get_id(i * NUM_TASK_ARGS + 10), MAX_TOTAL_NUM_WORKERS, torch.int32)
+        work_indptr = get_tensor(get_id(i * NUM_TASK_ARGS + 11), MAX_TOTAL_NUM_WORKERS, torch.int32)
+
+    len_kv_chunk = get_tensor(get_id(1 * NUM_TASK_ARGS + 12), NUM_TASKS, torch.int32)
+    partial_o = get_tensor(
+        get_id(1 * NUM_TASK_ARGS + 13), MAX_NUM_KV_SPLITS * head_dim * kv_heads, torch.float16
+    )
+    partial_lse = get_tensor(
+        get_id(1 * NUM_TASK_ARGS + 14), MAX_NUM_KV_SPLITS * kv_heads, torch.float32
+    )
+    merge_indptr = get_tensor(get_id(1 * NUM_TASK_ARGS + 15), MAX_NUM_KV_SPLITS, torch.int32)
+    merge_o_indices = get_tensor(get_id(1 * NUM_TASK_ARGS + 16), MAX_NUM_KV_SPLITS, torch.int32)
+    num_qo_len = get_tensor(get_id(1 * NUM_TASK_ARGS + 17), 1, torch.int32)
 
     out_f = torch.zeros(batch_size, qo_heads, head_dim, dtype=torch.float16, device="cuda")
     lse_f = torch.zeros(batch_size, qo_heads, dtype=torch.float32, device="cuda")
@@ -1337,7 +1103,40 @@ def test(num_heads, seq_len, head_dim, batch_size, seed):
         func()
         print(f"FlashInfer BatchAttention time: {ms:.3f} ms")
 
-        return partial_o.cpu().numpy(), partial_lse.cpu().numpy(), out_f.cpu().numpy()
+        # return partial_o.cpu().numpy(), partial_lse.cpu().numpy(), out_f.cpu().numpy()
+        return out_f.cpu().numpy()
+
+    def flashinfer_batch_prefill():
+        q_f = Q.to(0).reshape(batch_size, qo_heads, head_dim)
+        kv_data_f = KV_data.to(0)
+        kv_indptr_f = KV_indptr.to(0)
+        kv_last_page_len_f = KV_last_page_len.to(0)
+        kv_indices_f = KV_indices.to(0)
+
+        qo_indptr_f = torch.arange(0, batch_size + 1, dtype=torch.int32).to(0)
+        workspace_buffer = torch.empty(1024 * 1024 * 1024, dtype=torch.int8).to(0)
+        wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(workspace_buffer, KV_LAYOUT)
+        wrapper.plan(
+            qo_indptr_f,
+            kv_indptr_f,
+            kv_indices_f,
+            kv_last_page_len_f,
+            qo_heads,
+            kv_heads,
+            head_dim,
+            PAGE_SIZE,
+            pos_encoding_mode="NONE",
+            kv_data_type=torch.float16,
+            q_data_type=torch.float16,
+        )
+        o, lse = wrapper.run_return_lse(q_f, kv_data_f)
+
+        func = lambda: wrapper.run(q_f, kv_data_f)
+        ms = bench(func, warmup=10, repeat=30, proton_name="flashinfer_batch_prefill")
+        func()
+        print(f"FlashInfer BatchPrefillWithPagedKVCacheWrapper time: {ms:.3f} ms")
+
+        return o.reshape(batch_size, qo_heads, head_dim).cpu().numpy()
 
     def tir():
         def torch_to_tvm(tensor):
@@ -1360,9 +1159,6 @@ def test(num_heads, seq_len, head_dim, batch_size, seed):
         len_kv_chunk_tvm = torch_to_tvm(len_kv_chunk)
         o_tvm = torch_to_tvm(
             torch.zeros(batch_size, qo_heads, head_dim, dtype=torch.float16, device="cuda")
-        )
-        lse_tvm = torch_to_tvm(
-            torch.zeros(batch_size, qo_heads, dtype=torch.float32, device="cuda")
         )
         partial_o_tvm = torch_to_tvm(partial_o)
         partial_lse_tvm = torch_to_tvm(partial_lse)
@@ -1411,26 +1207,22 @@ def test(num_heads, seq_len, head_dim, batch_size, seed):
         func()
         print(f"TIR time: {ms:.3f} ms")
 
-        return partial_o_tvm.numpy(), partial_lse_tvm.numpy(), o_tvm.numpy()
+        # return partial_o_tvm.numpy(), partial_lse_tvm.numpy(), o_tvm.numpy()
+        return o_tvm.numpy()
 
     with ProtonContext("batch_attention"):
         print(
             f"qo_heads: {qo_heads}, kv_heads: {kv_heads}, seq_len: {seq_len}, head_dim: {head_dim}, batch_size: {batch_size}, seed: {seed}"
         )
-        print(
-            ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Flashinfer Kernel Start",
-            flush=True,
-        )
-        partial_o_flashinfer, partial_lse_flashinfer, O_flashinfer = flashinfer_batch_attention()
-        print(
-            ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TIR Kernel Start",
-            flush=True,
-        )
-        partial_o_tir, partial_lse_tir, O_tir = tir()
+        print("Flashinfer BatchAttention Start", flush=True)
+        O_flashinfer_attention = flashinfer_batch_attention()
+        print("Flashinfer BatchPrefill Start", flush=True)
+        O_flashinfer_prefill = flashinfer_batch_prefill()
+        print("TIR BatchAttention Start", flush=True)
+        O_tir = tir()
 
-    np.testing.assert_allclose(partial_o_tir, partial_o_flashinfer, rtol=1e-3, atol=1e-3)
-    np.testing.assert_allclose(partial_lse_tir, partial_lse_flashinfer, rtol=1e-3, atol=1e-3)
-    np.testing.assert_allclose(O_tir, O_flashinfer, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(O_flashinfer_prefill, O_flashinfer_attention, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(O_tir, O_flashinfer_attention, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
@@ -1441,11 +1233,6 @@ if __name__ == "__main__":
     head_dim_list = [128]
     batch_size_list = [1, 11, 25, 128]
     seed_list = [42]
-    # num_heads_list = [(16, 16)]
-    # seq_len_list = [512]
-    # head_dim_list = [128]
-    # batch_size_list = [8]
-    # seed_list = [42]
 
     for num_heads, seq_len, head_dim, batch_size, seed in itertools.product(
         num_heads_list, seq_len_list, head_dim_list, batch_size_list, seed_list
