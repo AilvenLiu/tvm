@@ -15,24 +15,24 @@
 # specific language governing permissions and limitations
 # under the License.
 """Basic tests for a Disco nvshmem support"""
+import subprocess
+import sys
+
 # pylint: disable=missing-docstring
 import tempfile
-
-import numpy as np
-import pytest
-import subprocess
 import threading
-import sys
 from multiprocessing import Process
 from typing import Any, Callable, List
 
-from tvm.script import tir as T
-from tvm.runtime import ShapeTuple
+import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
-from tvm.runtime import disco as di
 from tvm.exec import disco_worker as _  # pylint: disable=unused-import
+from tvm.runtime import ShapeTuple
+from tvm.runtime import disco as di
+from tvm.script import tir as T
 
 NUM_WORKERS = 4
 
@@ -43,7 +43,7 @@ def run_prim_func(sess, prim_func, *args):
     with tempfile.TemporaryDirectory() as tmpdir:
         path = f"{tmpdir}/test.so"
         mod = tvm.compile(prim_func, target=target, tir_pipeline="tirp")
-        print(mod.mod.imported_modules[0].get_source())
+        print(mod.mod.imports[0].inspect_source())
         mod.export_library(path)
         rt_mod = sess.load_vm_module(path)
         rt_mod["main"](*args)

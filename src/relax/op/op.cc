@@ -830,8 +830,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 // call_tir_device
 
-TVM_REGISTER_NODE_TYPE(CallTIRDeviceAttrs);
-
 TVM_REGISTER_OP("relax.call_tir_device")
     .set_num_inputs(6)
     .set_attrs_type<CallTIRDeviceAttrs>()

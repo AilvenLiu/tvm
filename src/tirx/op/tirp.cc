@@ -50,8 +50,6 @@ TVM_FFI_STATIC_INIT_BLOCK({ ScheduleContextNode::RegisterReflection(); });
       .set_attr<Bool>("TIsTIRpOp", Bool(true))
 
 /********************* ScheduleContext **********************/
-TVM_REGISTER_NODE_TYPE(ScheduleContextNode);
-
 template <typename Key, typename Value>
 Value getOrSetDefault(Map<String, ObjectRef>& m, const Key& key, const Value& defaultValue) {
   // try_emplace inserts the defaultValue only if key does not exist.

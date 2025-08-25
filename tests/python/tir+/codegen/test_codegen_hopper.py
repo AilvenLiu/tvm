@@ -15,21 +15,22 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-function-docstring
-import pytest
 import math
+
 import numpy as np
+import pytest
 
 import tvm
-from tvm.tir import Buffer
-from tvm.script import tir as T
 import tvm.testing
+from tvm.script import tir as T
+from tvm.tir import Buffer
 
 
 def _get_source(func: tvm.tir.PrimFunc) -> tuple[str, tvm.IRModule]:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     return src, mod
 
 
@@ -80,7 +81,7 @@ def test_stmatrix_sync_aligned(trans):
     mod = tvm.IRModule({"main": func})
     with target:
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        src = mod.mod.imported_modules[0].get_source()
+        src = mod.mod.imports[0].inspect_source()
         if not trans:
             assert "stmatrix.sync.aligned.m8n8.x4.shared.b16" in src
         else:
@@ -143,7 +144,7 @@ def test_ptx_stmatrix(trans, num):
     mod = tvm.IRModule({"main": main})
     with target:
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        src = mod.mod.imported_modules[0].get_source()
+        src = mod.mod.imports[0].inspect_source()
     A_np = np.zeros((16, 16), dtype="float16")
     A_ref = np.zeros((16, 16), dtype="float16")
     A_full = np.zeros((16, 16), dtype="float16")
@@ -341,7 +342,7 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = np.random.randn(math.prod(shape))
@@ -431,7 +432,7 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
     func, shape = get_ir(swizzle, dtype)
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     total_elems = math.prod(shape)
@@ -521,7 +522,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = [i for i in range(math.prod(shape))]
@@ -613,7 +614,7 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = [i for i in range(math.prod(shape))]
@@ -674,7 +675,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
     shape, tma_args = inputs
     mod = tvm.IRModule({"main": get_ir(shape, tma_args)})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = np.zeros(shape, dtype="float32")

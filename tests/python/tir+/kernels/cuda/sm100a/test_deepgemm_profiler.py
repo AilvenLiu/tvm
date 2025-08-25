@@ -1,10 +1,11 @@
 from enum import Enum
+
 import ml_dtypes
 import numpy as np
 
 import tvm
-from tvm.script import tir as T
 import tvm.testing
+from tvm.script import tir as T
 from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 # can get 3250 TFLOPs on a single B200 with (m, n, k) = (8192, 8064, 8192), which is aligned to DeepSeek's
@@ -92,7 +93,7 @@ def get_source(func: tvm.tir.PrimFunc) -> str:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     return src, mod
 
 

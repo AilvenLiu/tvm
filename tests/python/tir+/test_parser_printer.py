@@ -19,9 +19,9 @@ import pytest
 import tvm
 import tvm.script
 import tvm.testing
+from tvm.ir import assert_structural_equal
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.ir import assert_structural_equal
 from tvm.tir.event import EventImpl
 
 

@@ -82,7 +82,7 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
       !n->op.same_as(call_tir_inplace_op) && !n->op.same_as(call_tir_device_op)) {
     return std::nullopt;
   }
-  if(n->op.same_as(call_tir_device_op)){
+  if (n->op.same_as(call_tir_device_op)) {
     TVM_FFI_ICHECK(n->args.size() == 5 || n->args.size() == 6);
   } else {
     TVM_FFI_ICHECK(n->args.size() == 2 || n->args.size() == 3);
@@ -149,20 +149,22 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
   // start of specially handling call_tir_device
   if (n->op.same_as(call_tir_device_op)) {
     kwargs_keys.push_back("tile_num");
-    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[2], n_p->Attr("args")->ArrayIndex(2)));
+    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[2], n_p->Attr("args")->ArrayItem(2)));
     kwargs_keys.push_back("in_events");
-    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[3], n_p->Attr("args")->ArrayIndex(3)));
+    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[3], n_p->Attr("args")->ArrayItem(3)));
     kwargs_keys.push_back("out_events");
-    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[4], n_p->Attr("args")->ArrayIndex(4)));
-    if(const auto* call_tir_device_attrs = n->attrs.as<relax::CallTIRDeviceAttrs>()) {
+    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[4], n_p->Attr("args")->ArrayItem(4)));
+    if (const auto* call_tir_device_attrs = n->attrs.as<relax::CallTIRDeviceAttrs>()) {
       kwargs_keys.push_back("in_deps");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->in_deps, n_p->Attr("attrs")->Attr("in_deps")));
+      kwargs_values.push_back(
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_deps, n_p->Attr("attrs")->Attr("in_deps")));
       kwargs_keys.push_back("out_deps");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->out_deps, n_p->Attr("attrs")->Attr("out_deps")));
+      kwargs_values.push_back(
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_deps, n_p->Attr("attrs")->Attr("out_deps")));
     }
-    if(n->args.size() == 6){
+    if (n->args.size() == 6) {
       kwargs_keys.push_back("tir_vars");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[5], n_p->Attr("args")->ArrayIndex(5)));
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[5], n_p->Attr("args")->ArrayItem(5)));
     }
     return Relax(d, "call_tir_device")->Call(args, kwargs_keys, kwargs_values);
   }

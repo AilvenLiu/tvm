@@ -31,8 +31,6 @@ ComposeLayout::ComposeLayout(SwizzleLayout layout_A, TileLayout layout_B) {
   data_ = std::move(n);
 }
 
-TVM_REGISTER_NODE_TYPE(ComposeLayoutNode);
-
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.ComposeLayout", [](SwizzleLayout layout_A, TileLayout layout_B) {

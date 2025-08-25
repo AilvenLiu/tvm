@@ -58,8 +58,6 @@ bool ExecScopeNode::Higher(const String& other) const {
 
 bool ExecScopeNode::Higher(const ExecScope& other) const { return Higher(other->name); }
 
-TVM_REGISTER_NODE_TYPE(ExecScopeNode);
-
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ExecScope", [](String name) { return ExecScope(name); });
@@ -98,8 +96,6 @@ bool ExecScopeSliceNode::Is(const ExecScope& other) const {
   return ExecScopeNode::Is(other) && StructuralEqual()(this->slices, other_slice->slices);
 }
 
-TVM_REGISTER_NODE_TYPE(ExecScopeSliceNode);
-
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(
@@ -116,8 +112,6 @@ ScopePair::ScopePair(String parent, String cur) {
   n->cur = cur;
   data_ = std::move(n);
 }
-
-TVM_REGISTER_NODE_TYPE(ScopePairNode);
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
@@ -144,8 +138,6 @@ PrimExpr ScopeIdDef::fused_extent() const {
   }
   return ret;
 }
-
-TVM_REGISTER_NODE_TYPE(ScopeIdDefNode);
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;

@@ -79,7 +79,7 @@ void CodeGenTrainium::AddFunction(const GlobalVar& gvar, const PrimFunc& func) {
 
   // add to alloc buffer type.
   auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
-  ICHECK(global_symbol.defined())
+  ICHECK(global_symbol.has_value())
       << "CodeGenC: Expect PrimFunc to have the global_symbol attribute";
 
   // Function header.
@@ -87,7 +87,7 @@ void CodeGenTrainium::AddFunction(const GlobalVar& gvar, const PrimFunc& func) {
 
   // Buffer arguments
   auto num_inputs = func->GetAttr<Integer>(tvm::attr::kNumInputs);
-  ICHECK(num_inputs.defined());
+  ICHECK(num_inputs.has_value());
   std::vector<std::string> output_vids;
   size_t num_buffer = 0;
   for (size_t i = 0; i < func->params.size(); ++i, ++num_buffer) {
@@ -562,7 +562,7 @@ void CodeGenTrainium::VisitStmt_(const DeclBufferNode* op) {
   PrintStmt(op->body);
 }
 
-runtime::Module BuildTrainium(IRModule mod, Target target) {
+ffi::Module BuildTrainium(IRModule mod, Target target) {
   bool output_ssa = false;
 
   std::ostringstream source_maker;

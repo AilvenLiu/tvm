@@ -2,9 +2,9 @@ import ml_dtypes
 import numpy as np
 
 import tvm
+import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.script import tir as T
-import tvm.testing
 from tvm.tirp.bench.utils import ProtonContext, bench
 
 # cluster: [2, 1], cta_num = 2
@@ -56,7 +56,7 @@ def get_source(func: tvm.tir.PrimFunc) -> str:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     return src, mod
 
 

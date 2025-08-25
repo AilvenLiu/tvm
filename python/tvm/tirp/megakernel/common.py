@@ -140,35 +140,47 @@ __forceinline__ __device__ void sync_warp() {{
     """,
     )
 
+
 def rsqrt(x):
     return T.cuda.func_call(
-        "_rsqrt", x, source_code=f"""
+        "_rsqrt",
+        x,
+        source_code=f"""
 __forceinline__ __device__ float _rsqrt(float x) {{
   float y;
   asm volatile("rsqrt.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
   return y;
 }}
-""", return_type="float32"
+""",
+        return_type="float32",
     )
+
 
 def exp2(x):
     return T.cuda.func_call(
-        "ptx_exp2", x, source_code=f"""
+        "ptx_exp2",
+        x,
+        source_code=f"""
     __forceinline__ __device__ float ptx_exp2(float x) {{
   float y;
   asm volatile("ex2.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
   return y;
 }}
-""", return_type="float32"
+""",
+        return_type="float32",
     )
+
 
 def silu(x):
     return T.cuda.func_call(
-        "silu", x, source_code=f"""
+        "silu",
+        x,
+        source_code=f"""
     __forceinline__ __device__ float silu(float x) {{
   return x / (1.0f + __expf(-x));
 }}
-""", return_type="float32"
+""",
+        return_type="float32",
     )
 
 
@@ -176,7 +188,7 @@ def get_source(func: "tvm.tir.PrimFunc") -> str:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     return src, mod
 
 

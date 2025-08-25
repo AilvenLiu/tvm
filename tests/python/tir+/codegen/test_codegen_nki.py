@@ -14,14 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import pytest
 import math
+
 import numpy as np
+import pytest
 
 import tvm
-from tvm.script import tir as T, ir as I
 import tvm.testing
-
+from tvm.script import ir as I
+from tvm.script import tir as T
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -30,7 +31,7 @@ def lower_and_get_source(func):
     with target:
         mod = tvm.IRModule({"main": func})
         mod = tvm.compile(mod, tir_pipeline="trn")
-        src = mod.mod.imported_modules[0].get_source()
+        src = mod.mod.imports[0].inspect_source()
         return src
 
 
@@ -182,7 +183,9 @@ def test_nki_matmul_1():
                 "float32",
                 scope="trn.sbuf",
             )
-            rhs_tiles = T.alloc_buffer((TILE_K, TILES_IN_BLOCK_K, BLOCK_N), "float16", scope="trn.sbuf")
+            rhs_tiles = T.alloc_buffer(
+                (TILE_K, TILES_IN_BLOCK_K, BLOCK_N), "float16", scope="trn.sbuf"
+            )
             lhsT_tiles = T.alloc_buffer(
                 (TILE_K, TILES_IN_BLOCK_K, BLOCK_M), "float16", scope="trn.sbuf"
             )
@@ -207,7 +210,8 @@ def test_nki_matmul_1():
                                     T.nki.load(
                                         rhs_tiles[i, bk_r, j],
                                         rhs[
-                                            (TILES_IN_BLOCK_K * k + bk_r) * TILE_K + i, n * BLOCK_N + j
+                                            (TILES_IN_BLOCK_K * k + bk_r) * TILE_K + i,
+                                            n * BLOCK_N + j,
                                         ],
                                     )
                     for m in range(NUM_BLOCK_M):

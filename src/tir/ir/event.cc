@@ -40,8 +40,6 @@ BulkGroupEvent::BulkGroupEvent(kEventImpl impl, const Array<ffi::Any>& state, co
   data_ = std::move(n);
 }
 
-TVM_REGISTER_NODE_TYPE(BulkGroupEventNode);
-
 SemaphoreEventTensor::SemaphoreEventTensor(const kEventImpl& impl, const Array<ffi::Any>& state,
                                            const Array<PrimExpr>& shape, const String& name) {
   ObjectPtr<SemaphoreEventTensorNode> n = make_object<SemaphoreEventTensorNode>();
@@ -62,9 +60,6 @@ SemaphoreEventTensorItem::SemaphoreEventTensorItem(const SemaphoreEventTensor& t
   n->indices = std::move(indices);
   data_ = std::move(n);
 }
-
-TVM_REGISTER_NODE_TYPE(SemaphoreEventTensorNode);
-TVM_REGISTER_NODE_TYPE(SemaphoreEventTensorItemNode);
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;

@@ -38,12 +38,6 @@ ObjectPtr<Object> CreateAxis(const std::string& name) {
   return ffi::details::ObjectUnsafe::ObjectPtrFromObjectRef<Object>(axis);
 }
 
-TVM_REGISTER_NODE_TYPE(AxisNode)
-    .set_creator(CreateAxis)
-    .set_repr_bytes([](const Object* n) -> std::string {
-      return static_cast<const AxisNode*>(n)->name;
-    });
-
 bool AxisNode::IsThreadAxis() const {
   static const auto& thread_attr_map = Axis::GetAttrMap<bool>("thread");
   return thread_attr_map[GetRef<Axis>(this)];
@@ -344,8 +338,6 @@ TVM_FFI_STATIC_INIT_BLOCK({
 });
 
 /**************** Iter ****************/
-TVM_REGISTER_NODE_TYPE(IterNode);
-
 Iter::Iter(PrimExpr extent, PrimExpr stride, Axis axis) {
   auto n = make_object<IterNode>();
   n->extent = extent;
@@ -362,8 +354,6 @@ TVM_FFI_STATIC_INIT_BLOCK({
 });
 
 /**************** TileLayout ****************/
-
-TVM_REGISTER_NODE_TYPE(TileLayoutNode);
 
 TileLayout::TileLayout(Array<Iter> shard, Array<Iter> replicate, Map<Axis, PrimExpr> exclude) {
   auto n = make_object<TileLayoutNode>();
@@ -1061,7 +1051,7 @@ Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
     String subscope = subscope_opt.value()->name;
     String scope = scope_opt.value()->name;
 
-    if (!inner_most.defined() ||
+    if (!inner_most.has_value() ||
         ExecScope::Create(inner_most.value())->Higher(ExecScope::Create(subscope)))
       inner_most = subscope;
 

@@ -15,17 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from enum import Enum
+
 # Mostly the same schedule as Thunderkitten's kernel
 # 6% slower than that
 # maybe due to more register spills
 import numpy as np
 import pytest
-from enum import Enum
+
 import tvm
+import tvm.testing
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-import tvm.testing
 from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 
@@ -33,7 +35,7 @@ def _get_source(func: tvm.tir.PrimFunc) -> str:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     return src, mod
 
 

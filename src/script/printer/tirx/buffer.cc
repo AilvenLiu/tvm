@@ -178,7 +178,7 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
   // Step 11. Handle `buffer.logical_scope`
   {
     String scope = buffer.logical_scope();
-    if (scope != "" && scope != tvm::tir::StorageToLogicalScope(buffer.scope())) {
+    if (scope != "" && scope != tvm::tirx::StorageToLogicalScope(buffer.scope())) {
       kwargs.Set(
           "logical_scope",
           LiteralDoc::Str(scope,
@@ -411,19 +411,19 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::Axis>("", [](tirx::Axis axis, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::Axis>("", [](tirx::Axis axis, AccessPath p, IRDocsifier d) -> Doc {
       return LiteralDoc::Str(axis->name, p->Attr("name"));
     });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::Iter>("", [](tirx::Iter iter, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::Iter>("", [](tirx::Iter iter, AccessPath p, IRDocsifier d) -> Doc {
       return TIR(d, "Iter")->Call({d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")),
                                    d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
                                    d->AsDoc<ExprDoc>(iter->axis->name, p->Attr("axis"))},
                                   {}, {});
     });
 
-Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
+Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, AccessPath p) {
   Array<String> keys;
   Array<ExprDoc> values;
 
@@ -463,13 +463,13 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, ObjectPath p) {
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::TileLayout>("",
-                                   [](tirx::TileLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
+                                   [](tirx::TileLayout layout, AccessPath p, IRDocsifier d) -> Doc {
                                      return PrintTileLayout(layout, d, p);
                                    });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::ComposeLayout>(
-        "", [](tirx::ComposeLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
+        "", [](tirx::ComposeLayout layout, AccessPath p, IRDocsifier d) -> Doc {
           auto layoutA = d->AsDoc<ExprDoc>(layout->layout_A, p);
           auto layoutB = d->AsDoc<ExprDoc>(layout->layout_B, p);
           return TIR(d, "ComposeLayout")->Call({layoutA, layoutB}, {}, {});
@@ -477,7 +477,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::SwizzleLayout>(
-        "", [](tirx::SwizzleLayout layout, ObjectPath p, IRDocsifier d) -> Doc {
+        "", [](tirx::SwizzleLayout layout, AccessPath p, IRDocsifier d) -> Doc {
           return TIR(d, "SwizzleLayout")
               ->Call(
                   {

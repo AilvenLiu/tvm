@@ -18,19 +18,20 @@
 # 1.84us
 # gemm perf can be optimized
 
-from enum import Enum
 import math
+import tempfile
+from enum import Enum
+
 import numpy as np
 import pytest
-import tempfile
 
 import tvm
+import tvm.testing
 from tvm.ir.type import PointerType, PrimType
-from tvm.runtime import disco as di
 from tvm.runtime import ShapeTuple
+from tvm.runtime import disco as di
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
-import tvm.testing
 from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 
@@ -621,7 +622,7 @@ def test_hgemm_rs():
         target = tvm.target.Target("cuda")
         path = tmpdir + "/test.so"
         mod = tvm.compile(test_mma_ss_tma_2sm_persistent, target=target, tir_pipeline="tirp")
-        print(mod.mod.imported_modules[0].get_source())
+        print(mod.mod.imports[0].inspect_source())
         mod.export_library(path)
 
         rt_mod = sess.load_vm_module(path)

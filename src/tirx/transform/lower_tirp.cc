@@ -150,7 +150,7 @@ class NoOpCallVerifier : public Verifier<NoOpCallVerifier> {
  private:
   using Verifier::Visit;
 
-  void VisitStmt_(const tirp::OpCallNode* obj, ObjectPath path) final {
+  void VisitStmt_(const tirp::OpCallNode* obj, ffi::reflection::AccessPath path) final {
     Verify(false) << "TIRpError: OpCall at " << path << " is not allowed in TIRp before lowering";
   }
 };
@@ -234,8 +234,6 @@ class TIRpOpScheduler : public StmtExprMutator {
       bool is_first_thread_attr = false;
       std::swap(is_first_thread_attr, is_first_thread_attr_);
       auto thread_extent = Downcast<IterVar>(op->node);
-      ICHECK(thread_extent->thread_tag.defined())
-          << "Internal Error: thread_extent without thread_tag";
       launch_params_[thread_extent->thread_tag] = thread_extent;
       Stmt res = StmtExprMutator::VisitStmt_(op);
       if (is_first_thread_attr && is_first_block_) {

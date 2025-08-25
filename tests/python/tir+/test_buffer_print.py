@@ -1,10 +1,12 @@
+import re
+from difflib import unified_diff
+
 import numpy as np
+
 import tvm
 import tvm.testing
 from tvm import te
 from tvm.script import tir as T
-from difflib import unified_diff
-import re
 
 
 def generate_random_data(shape, dtype):
@@ -35,7 +37,7 @@ def verify_tir_code(code):
 
 
 def verify_cuda_code_array(func, dim_num, dtype, *dims):
-    generated_code = func.mod.imported_modules[0].get_source()
+    generated_code = func.mod.imports[0].inspect_source()
 
     match = re.search(r"// print_buffer starts(.*?)// print_buffer ends", generated_code, re.DOTALL)
     if not match:
@@ -60,12 +62,20 @@ def verify_cuda_code_array(func, dim_num, dtype, *dims):
     if dtype == "float16":
         # Look for `printf("%f", static_cast<float>(C[...]))`
         printf_pattern = re.compile(
-            r'printf\s*\(\s*"' + re.escape(expected_printf_specifier) + r'"\s*,\s*static_cast<float>\(' + variable_access_pattern + r'\)\s*\)'
+            r'printf\s*\(\s*"'
+            + re.escape(expected_printf_specifier)
+            + r'"\s*,\s*static_cast<float>\('
+            + variable_access_pattern
+            + r"\)\s*\)"
         )
     else:
         # Look for `printf("%f", C[...])`
         printf_pattern = re.compile(
-            r'printf\s*\(\s*"' + re.escape(expected_printf_specifier) + r'"\s*,\s*' + variable_access_pattern + r'\s*\)'
+            r'printf\s*\(\s*"'
+            + re.escape(expected_printf_specifier)
+            + r'"\s*,\s*'
+            + variable_access_pattern
+            + r"\s*\)"
         )
 
     if not printf_pattern.search(print_buffer_section):
@@ -73,10 +83,13 @@ def verify_cuda_code_array(func, dim_num, dtype, *dims):
             f'Expected element printf statement with format "{expected_printf_specifier}" and a buffer access, but not found'
         )
 
-def verify_cuda_code_scalar(func, dtype, expected_value_or_varname):
-    generated_code = func.mod.imported_modules[0].get_source()
 
-    all_print_blocks = re.findall(r"// print_buffer starts(.*?)// print_buffer ends", generated_code, re.DOTALL)
+def verify_cuda_code_scalar(func, dtype, expected_value_or_varname):
+    generated_code = func.mod.imports[0].inspect_source()
+
+    all_print_blocks = re.findall(
+        r"// print_buffer starts(.*?)// print_buffer ends", generated_code, re.DOTALL
+    )
     if not all_print_blocks:
         raise AssertionError("No print_buffer sections found in generated code")
 
@@ -84,7 +97,7 @@ def verify_cuda_code_scalar(func, dtype, expected_value_or_varname):
     expected_printf = dtype_to_printf.get(dtype)
     if not expected_printf:
         raise AssertionError(f"Unsupported dtype for scalar verification: {dtype}")
-        
+
     value_pattern = ""
     if isinstance(expected_value_or_varname, (int, float)):
         if "float" in dtype:
@@ -100,11 +113,19 @@ def verify_cuda_code_scalar(func, dtype, expected_value_or_varname):
 
     if dtype == "float16":
         printf_pattern = re.compile(
-            r'printf\s*\(\s*".*?' + re.escape(expected_printf) + r'.*?",\s*static_cast<float>\(\s*' + value_pattern + r'\s*\)\s*\)'
+            r'printf\s*\(\s*".*?'
+            + re.escape(expected_printf)
+            + r'.*?",\s*static_cast<float>\(\s*'
+            + value_pattern
+            + r"\s*\)\s*\)"
         )
     else:
         printf_pattern = re.compile(
-            r'printf\s*\(\s*".*?' + re.escape(expected_printf) + r'.*?",\s*' + value_pattern + r'\s*\)'
+            r'printf\s*\(\s*".*?'
+            + re.escape(expected_printf)
+            + r'.*?",\s*'
+            + value_pattern
+            + r"\s*\)"
         )
 
     for block in all_print_blocks:
@@ -116,25 +137,29 @@ def verify_cuda_code_scalar(func, dtype, expected_value_or_varname):
         f'"{expected_value_or_varname}" in any print_buffer block.'
     )
 
-def verify_cuda_code_string(func, expected_var_name):
-    generated_code = func.mod.imported_modules[0].get_source()
 
-    all_print_blocks = re.findall(r"// print_buffer starts(.*?)// print_buffer ends", generated_code, re.DOTALL)
+def verify_cuda_code_string(func, expected_var_name):
+    generated_code = func.mod.imports[0].inspect_source()
+
+    all_print_blocks = re.findall(
+        r"// print_buffer starts(.*?)// print_buffer ends", generated_code, re.DOTALL
+    )
     if not all_print_blocks:
         raise AssertionError("No print_buffer sections found in generated code")
-    
+
     string_printf_pattern = re.compile(
-        r'printf\s*\(\s*".*?%s.*?",\s*\(char\*\)' + re.escape(expected_var_name) + r'\s*\)'
+        r'printf\s*\(\s*".*?%s.*?",\s*\(char\*\)' + re.escape(expected_var_name) + r"\s*\)"
     )
 
     for block in all_print_blocks:
         if string_printf_pattern.search(block):
             return
-            
+
     raise AssertionError(
         f'Could not find a string printf with variable "{expected_var_name}" '
         f'in the format `printf("...%s...", (char*){expected_var_name})` in any print_buffer block.'
     )
+
 
 def test_print():
     DEV = tvm.cuda()
@@ -296,7 +321,7 @@ def test_print():
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
-        verify_cuda_code_scalar(func, dtype_str, 10)        
+        verify_cuda_code_scalar(func, dtype_str, 10)
 
     def test_string(dtype, dtype_str, test_string):
         M = 6
@@ -334,7 +359,6 @@ def test_print():
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
         verify_cuda_code_string(func, "string_var")
-        
 
     test_vector_add_1D(np.float32, "float32")
     test_vector_add_2D(np.int32, "int32")

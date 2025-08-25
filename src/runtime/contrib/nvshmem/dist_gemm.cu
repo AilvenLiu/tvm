@@ -19,6 +19,7 @@
 #include <nvshmem.h>
 #include <nvshmemx.h>
 #include <picojson.h>
+#include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/disco/disco_worker.h>
@@ -105,8 +106,9 @@ void transfer_to_peers_reduce_scatter(NDArray semaphore, NDArray gemm_out, NDArr
                    get_pointer(gemm_out, ffi::Shape{to_rank * LOCAL_M, 0}), LOCAL_M * N * 2,
                    stream);
     } else {
-      TVMStreamHandle main_stream =
-          static_cast<TVMStreamHandle>(CUDAThreadEntry::ThreadLocal()->stream);
+      int device_id;
+      CUDA_CALL(cudaGetDevice(&device_id));
+      TVMStreamHandle main_stream = TVMFFIEnvGetCurrentStream(kDLCUDA, device_id);
       copy_to_peer(get_pointer(staging_buffer, ffi::Shape{my_rank, 0, 0}), to_rank,
                    get_pointer(gemm_out, ffi::Shape{to_rank * LOCAL_M, 0}), LOCAL_M * N * 2,
                    main_stream);

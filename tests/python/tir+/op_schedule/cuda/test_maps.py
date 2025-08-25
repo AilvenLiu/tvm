@@ -14,14 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import pytest
 import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
-from tvm.tir.layout import TileLayout
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.tir.layout import TileLayout
 
 
 @pytest.mark.parametrize(
@@ -96,7 +96,7 @@ def test_unary_op_shared(input, op_type, dtype):
 
         mod = tvm.IRModule({"main": unary_op})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        print(f"compiled source code: {mod.mod.imported_modules[0].get_source()}")
+        print(f"compiled source code: {mod.mod.imports[0].inspect_source()}")
         mod(A)
 
         A_ref = get_ref(A_np)
@@ -267,7 +267,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
 
         mod = tvm.IRModule({"main": get_prim_func(operands_type)})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        print(f"compiled source code: {mod.mod.imported_modules[0].get_source()}")
+        print(f"compiled source code: {mod.mod.imports[0].inspect_source()}")
         mod(A, B)
 
         A_ref = get_ref(A_np, B_np)
@@ -582,7 +582,7 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
         mod = tvm.IRModule({"main": test_cast})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         mod(A, B)
-        print(mod.mod.imported_modules[0].get_source())
+        print(mod.mod.imports[0].inspect_source())
         tvm.testing.assert_allclose(B.numpy(), B_ref, atol=1e-2)
 
 

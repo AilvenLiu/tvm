@@ -1,6 +1,8 @@
 import math
+
 import pytest
 import torch
+
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
@@ -196,7 +198,7 @@ def test_fused_add_rmsnorm(hidden_size, batch_size):
     with target:
         mod = tvm.IRModule({"main": get_fused_add_rmsnorm_kernel(hidden_size)})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        # src = mod_decode_no_split_kv.mod.imported_modules[0].get_source()
+        # src = mod_decode_no_split_kv.mod.imports[0].inspect_source()
         # print(src)
 
     with ProtonContext("rms_norm"):

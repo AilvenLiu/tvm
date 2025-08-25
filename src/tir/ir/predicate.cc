@@ -48,8 +48,6 @@ Predicate::Predicate(Array<Var> vars, PrimExpr pred) {
   data_ = std::move(n);
 }
 
-TVM_REGISTER_NODE_TYPE(PredicateNode);
-
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.Predicate",

@@ -15,15 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-function-docstring
-import torch
 import numpy as np
 import pytest
+import torch
 
 import tvm
+import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-import tvm.testing
-
 
 DEV = tvm.device("cuda")
 
@@ -32,7 +31,7 @@ def _get_source(func: tvm.tir.PrimFunc) -> str:
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     return src, mod
 
 
@@ -185,7 +184,7 @@ def test_warp_shuffle_xor_sync():
     A_np = np.zeros(32, dtype="float32")
     A = tvm.nd.array(A_np, device=DEV)
     mod(A)
-    assert "__shfl_xor_sync" in mod.mod.imported_modules[0].get_source()
+    assert "__shfl_xor_sync" in mod.mod.imports[0].inspect_source()
     A_ref = np.ones(32, dtype="float32") * 496
     np.testing.assert_allclose(A.numpy(), A_ref)
 

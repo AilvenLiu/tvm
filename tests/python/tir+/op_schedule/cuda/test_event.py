@@ -26,11 +26,10 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
 from tvm.tir.layout import TileLayout
-
 from tvm.tirp.op_schedule.cuda.copy_async import (
-    tma_shared_layout,
     tma_atom_layout,
     tma_atom_shape,
+    tma_shared_layout,
 )
 
 
@@ -248,7 +247,7 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
     with target:
         mod = tvm.IRModule({"main": copy_async})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        print(mod.mod.imported_modules[0].get_source())
+        print(mod.mod.imports[0].inspect_source())
 
         np.random.seed(0)
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
@@ -467,7 +466,7 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len):
     with target:
         mod = tvm.IRModule({"main": copy_async})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        print(mod.mod.imported_modules[0].get_source())
+        print(mod.mod.imports[0].inspect_source())
 
         np.random.seed(0)
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
@@ -506,7 +505,7 @@ def test_kernel_sempaphore():
     with target:
         mod = tvm.IRModule({"main": gpu_semaphore_wait})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        print(mod.mod.imported_modules[0].get_source())
+        print(mod.mod.imports[0].inspect_source())
         semaphore = tvm.nd.array(np.full((64,), 2, dtype=np.int32), device=tvm.cuda(0))
         mod(semaphore)
         np.testing.assert_equal(semaphore.numpy(), np.full((64,), 0, dtype=np.int32))

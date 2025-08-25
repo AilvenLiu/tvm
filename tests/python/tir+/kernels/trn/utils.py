@@ -14,19 +14,23 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import pytest
-import subprocess
-import paramiko
 import os
-import numpy as np
+import subprocess
 import sys
 from typing import Callable
 
-import tvm
+import numpy as np
+import paramiko
+import pytest
 import torch
-from tvm.script import tir as T, ir as I
+
+import tvm
+from tvm.script import ir as I
+from tvm.script import tir as T
 from tvm.tir import PrimFunc
+
 from .claude_rewrite import rewrite_program
+
 HOST_IP = ""
 USERNAME = "ubuntu"
 
@@ -49,7 +53,11 @@ def generate_std_output(func: PrimFunc, std_f_output: Callable):
     for i in range(num_inputs):
         int_shape = [int(x) for x in func.buffer_map[func.params[i]].shape]
         inputs.append(
-            torch.from_numpy(((np.random.rand(*int_shape) - 0.5) * 2 ).astype(np_dtype_map[func.buffer_map[func.params[i]].dtype]))
+            torch.from_numpy(
+                ((np.random.rand(*int_shape) - 0.5) * 2).astype(
+                    np_dtype_map[func.buffer_map[func.params[i]].dtype]
+                )
+            )
         )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     inputs = [x.to(device) for x in inputs]
@@ -60,7 +68,7 @@ def generate_std_output(func: PrimFunc, std_f_output: Callable):
 def generate_test_function(func: PrimFunc, target: tvm.target.Target):
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="trn")
-    src = mod.mod.imported_modules[0].get_source()
+    src = mod.mod.imports[0].inspect_source()
     func_str = src
     func_name = func.attrs["global_symbol"]
     func_str += "def test_func():\n"
@@ -71,9 +79,7 @@ def generate_test_function(func: PrimFunc, target: tvm.target.Target):
             continue
         buffer = func.buffer_map[param]
         assert buffer.dtype in dtype_map, f"Unsupported dtype {buffer.dtype}"
-        func_str += (
-            f"  param_{cnt} = ((np.random.rand(*{buffer.shape}) - 0.5) * 2).astype({dtype_map[buffer.dtype]})\n"
-        )
+        func_str += f"  param_{cnt} = ((np.random.rand(*{buffer.shape}) - 0.5) * 2).astype({dtype_map[buffer.dtype]})\n"
         cnt += 1
     func_str += f"  {func_name}_kernel({', '.join([f'param_{i}' for i in range(cnt)])})\n"
     num_inputs = int(func.attrs["num_inputs"])

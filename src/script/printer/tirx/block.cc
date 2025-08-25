@@ -230,7 +230,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   // event
   for (size_t i = 0; i < block->bulk_events.size(); ++i) {
     tir::BulkGroupEvent event = block->bulk_events[i];
-    ObjectPath event_p = block_p->Attr("bulk_events")->ArrayIndex(i);
+    AccessPath event_p = block_p->Attr("bulk_events")->ArrayItem(i);
     IdDoc lhs = DefineEvent(event, *frame, d);
     std::string method;
     method = "alloc_bulk_group_event";
@@ -240,7 +240,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   // event_tensor
   for (size_t i = 0; i < block->sem_event_tensors.size(); ++i) {
     tir::SemaphoreEventTensor event_tensor = block->sem_event_tensors[i];
-    ObjectPath event_tensor_p = block_p->Attr("sem_event_tensors")->ArrayIndex(i);
+    AccessPath event_tensor_p = block_p->Attr("sem_event_tensors")->ArrayItem(i);
     IdDoc lhs = DefineEventTensor(event_tensor, *frame, d);
     std::string method;
     method = "alloc_semaphore_event_tensor";
@@ -250,7 +250,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   // buffer_view
   for (size_t i = 0; i < block->buffer_views.size(); ++i) {
     tir::BufferView buffer_view = block->buffer_views[i];
-    ObjectPath buffer_view_p = block_p->Attr("buffer_views")->ArrayIndex(i);
+    AccessPath buffer_view_p = block_p->Attr("buffer_views")->ArrayItem(i);
     IdDoc lhs = DefineBuffer(buffer_view->dst_buffer, *frame, d);
     ExprDoc rhs = d->AsDoc<ExprDoc>(buffer_view, buffer_view_p);
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
@@ -258,7 +258,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
   // buffer_get
   for (size_t i = 0; i < block->buffer_gets.size(); ++i) {
     tir::BufferGet buffer_get = block->buffer_gets[i];
-    ObjectPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayIndex(i);
+    AccessPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayItem(i);
     IdDoc lhs = DefineBuffer(buffer_get->dst_buffer, *frame, d);
     ExprDoc rhs = d->AsDoc<ExprDoc>(buffer_get, buffer_get_p);
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
@@ -295,7 +295,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
         // slices
         Array<Doc> slices_doc;
         for (size_t i = 0; i < slices.size(); ++i) {
-          auto path = block_p->Attr("exec_scope")->Attr("slices")->ArrayIndex(i);
+          auto path = block_p->Attr("exec_scope")->Attr("slices")->ArrayItem(i);
           auto start = d->AsDoc<ExprDoc>(slices[i]->min, path->Attr("min"));
           auto stop = d->AsDoc<ExprDoc>(slices[i]->min + slices[i]->extent, path->Attr("extent"));
           slices_doc.push_back(SliceDoc(start, stop, std::nullopt));
@@ -339,7 +339,7 @@ TVM_SCRIPT_REPR(tirx::SBlockRealizeNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tir::BufferGet>(
-        "", [](tir::BufferGet buffer_get, ObjectPath p, IRDocsifier d) -> Doc {
+        "", [](tir::BufferGet buffer_get, AccessPath p, IRDocsifier d) -> Doc {
           Doc doc =
               TIR(d, "get")->Call({d->AsDoc<ExprDoc>(buffer_get->src_buffer, p->Attr("src_buffer")),
                                    d->AsDoc<ExprDoc>(buffer_get->dst_buffer->shape,
@@ -349,7 +349,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tir::BufferView>(
-        "", [](tir::BufferView buffer_view, ObjectPath p, IRDocsifier d) -> Doc {
+        "", [](tir::BufferView buffer_view, AccessPath p, IRDocsifier d) -> Doc {
           Doc doc = TIR(d, "view")->Call(
               {d->AsDoc<ExprDoc>(buffer_view->src_buffer, p->Attr("src_buffer")),
                d->AsDoc<ExprDoc>(buffer_view->layout, p->Attr("layout")),
@@ -362,14 +362,14 @@ TVM_SCRIPT_REPR(tir::BufferViewNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tir::ExecScope>(
-        "", [](tir::ExecScope exec_scope, ObjectPath p, IRDocsifier d) -> Doc {
+        "", [](tir::ExecScope exec_scope, AccessPath p, IRDocsifier d) -> Doc {
           Doc doc = TIR(d, "ExecScope")->Call({LiteralDoc::Str(exec_scope->name, p->Attr("name"))});
           return doc;
         });
 TVM_SCRIPT_REPR(tir::ExecScopeNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::ScopeIdDef>("", [](tir::ScopeIdDef def, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tir::ScopeIdDef>("", [](tir::ScopeIdDef def, AccessPath p, IRDocsifier d) -> Doc {
       Doc doc = TIR(d, "ScopeIdDef")
                     ->Call({d->AsDoc<ExprDoc>(def->def_ids, p->Attr("def_ids")),
                             d->AsDoc<ExprDoc>(def->extents, p->Attr("extents")),
@@ -380,7 +380,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 TVM_SCRIPT_REPR(tir::ScopeIdDefNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::ScopePair>("", [](tir::ScopePair pair, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tir::ScopePair>("", [](tir::ScopePair pair, AccessPath p, IRDocsifier d) -> Doc {
       Doc doc = TIR(d, "ScopePair")
                     ->Call({d->AsDoc<ExprDoc>(pair->parent, p->Attr("parent")),
                             d->AsDoc<ExprDoc>(pair->cur, p->Attr("cur"))});

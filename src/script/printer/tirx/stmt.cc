@@ -79,13 +79,13 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
   return call->args[0];
 }
 
-ExprDoc EventDecl(const tirx::BulkGroupEvent& event, const String& method, const ObjectPath& p,
+ExprDoc EventDecl(const tirx::BulkGroupEvent& event, const String& method, const AccessPath& p,
                   const IRDocsifier& d) {
   return TIRp(d, method)->Call({LiteralDoc::Int(static_cast<int64_t>(event->impl), p->Attr("impl")),
                                 d->AsDoc<ExprDoc>(event->state, p->Attr("state"))});
 }
 
-ExprDoc HandleEvent(const tirx::BulkGroupEvent& event, const String& method, const ObjectPath& p,
+ExprDoc HandleEvent(const tirx::BulkGroupEvent& event, const String& method, const AccessPath& p,
                     const IRDocsifier& d) {
   if (!d->IsVarDefined(event)) {
     if (Optional<Frame> opt_f = FindLowestVarDef(event, d)) {
@@ -101,7 +101,7 @@ ExprDoc HandleEvent(const tirx::BulkGroupEvent& event, const String& method, con
 }
 
 ExprDoc EventTensorDecl(const tirx::SemaphoreEventTensor& event_tensor, const String& method,
-                        const ObjectPath& p, const IRDocsifier& d) {
+                        const AccessPath& p, const IRDocsifier& d) {
   return TIRp(d, method)->Call({
       LiteralDoc::Int(static_cast<int64_t>(event_tensor->impl), p->Attr("impl")),
       d->AsDoc<ExprDoc>(event_tensor->state, p->Attr("state")),
@@ -110,7 +110,7 @@ ExprDoc EventTensorDecl(const tirx::SemaphoreEventTensor& event_tensor, const St
 }
 
 ExprDoc HandleEventTensor(const tirx::SemaphoreEventTensor& event_tensor, const String& method,
-                          const ObjectPath& p, const IRDocsifier& d) {
+                          const AccessPath& p, const IRDocsifier& d) {
   if (!d->IsVarDefined(event_tensor)) {
     if (Optional<Frame> opt_f = FindLowestVarDef(event_tensor, d)) {
       ExprDoc lhs = DefineEventTensor(event_tensor, opt_f.value(), d);
@@ -126,25 +126,25 @@ ExprDoc HandleEventTensor(const tirx::SemaphoreEventTensor& event_tensor, const 
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::BulkGroupEvent>("",
-                                       [](tirx::BulkGroupEvent event, ObjectPath p,
+                                       [](tirx::BulkGroupEvent event, AccessPath p,
                                           IRDocsifier d) -> Doc {
                                          return HandleEvent(event, "BulkGroupEvent", p, d);
                                        });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::SemaphoreEventTensor>(
-        "", [](tirx::SemaphoreEventTensor event_tensor, ObjectPath p, IRDocsifier d) -> Doc {
+        "", [](tirx::SemaphoreEventTensor event_tensor, AccessPath p, IRDocsifier d) -> Doc {
           return HandleEventTensor(event_tensor, "SemaphoreEventTensor", p, d);
         });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::SemaphoreEventTensorItem>(
-        "", [](tirx::SemaphoreEventTensorItem item, ObjectPath p, IRDocsifier d) -> Doc {
+        "", [](tirx::SemaphoreEventTensorItem item, AccessPath p, IRDocsifier d) -> Doc {
           const auto& e_tensor_doc = d->AsDoc<ExprDoc>(item->tensor, p->Attr("tensor"));
           Array<Doc> indices_doc;
           for (size_t i = 0, n = item->indices.size(); i < n; ++i) {
             indices_doc.push_back(
-                d->AsDoc<Doc>(item->indices[i], p->Attr("indices")->ArrayIndex(i)));
+                d->AsDoc<Doc>(item->indices[i], p->Attr("indices")->ArrayItem(i)));
           }
           return e_tensor_doc->operator[](indices_doc);
         });
@@ -162,10 +162,10 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           auto print_member_function_call = [&](std::string method) {
             Array<Doc> args;
             for (size_t i = 1, n = op_call->args.size(); i < n; ++i) {
-              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayIndex(i)));
+              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
             return OpCallDoc(
-                AttrAccessDoc(d->AsDoc<ExprDoc>(op_call->args[0], p->Attr("args")->ArrayIndex(0)),
+                AttrAccessDoc(d->AsDoc<ExprDoc>(op_call->args[0], p->Attr("args")->ArrayItem(0)),
                               method),
                 args, {}, {});
           };
@@ -216,7 +216,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             // Misc ops
             Array<Doc> args;
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
-              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayIndex(i)));
+              args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
             return OpCallDoc(TIRp(d, name), args, {}, {});
           }
@@ -288,12 +288,12 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::Break>("", [](tirx::Break stmt, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::Break>("", [](tirx::Break stmt, AccessPath p, IRDocsifier d) -> Doc {
       return BreakDoc();
     });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::Continue>("", [](tirx::Continue stmt, ObjectPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::Continue>("", [](tirx::Continue stmt, AccessPath p, IRDocsifier d) -> Doc {
       return ContinueDoc();
     });
 

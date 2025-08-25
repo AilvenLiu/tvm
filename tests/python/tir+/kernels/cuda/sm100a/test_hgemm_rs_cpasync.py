@@ -15,18 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import tempfile
 from enum import Enum
+
 import numpy as np
 import pytest
-import tempfile
 
 import tvm
-from tvm.ir.type import PointerType, PrimType
-from tvm.runtime import disco as di
-from tvm.runtime import ShapeTuple
-from tvm.script import tir as T, ir as I
-from tvm.script.ir_builder import IRBuilder
 import tvm.testing
+from tvm.ir.type import PointerType, PrimType
+from tvm.runtime import ShapeTuple
+from tvm.runtime import disco as di
+from tvm.script import ir as I
+from tvm.script import tir as T
+from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 
@@ -700,7 +702,7 @@ def test_hgemm_rs():
         target = tvm.target.Target("cuda")
         path = tmpdir + "/test.so"
         mod = tvm.compile(ReduceScatter, target=target, tir_pipeline="tirp")
-        print(mod.mod.imported_modules[0].get_source())
+        print(mod.mod.imports[0].inspect_source())
         mod.export_library(path)
 
         rt_mod = sess.load_vm_module(path)
@@ -813,7 +815,7 @@ def test_reduce():
     with target:
         mod = ReduceScatter
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        print(mod.mod.imported_modules[0].get_source())
+        print(mod.mod.imports[0].inspect_source())
         mod["reduce_sum"](input_tvm, out_tvm)
         out_std = torch.sum(input_torch, dim=0)
         np.testing.assert_allclose(out_tvm.numpy(), out_std.cpu().numpy(), atol=6e-2, rtol=6e-2)

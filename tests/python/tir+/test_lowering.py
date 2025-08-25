@@ -329,12 +329,12 @@ def test_lower_scope_id():
     @T.prim_func(private=True, tirp=True)
     def after2() -> None:
         clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
+        blockIdx_z = T.launch_thread("blockIdx.z", 8)
         clusterCtaIdx_y = T.launch_thread("clusterCtaIdx.y", 2)
         clusterCtaIdx_z = T.launch_thread("clusterCtaIdx.z", 2)
         blockIdx_x = T.launch_thread("blockIdx.x", 8)
         threadIdx_x = T.launch_thread("threadIdx.x", 128)
         blockIdx_y = T.launch_thread("blockIdx.y", 8)
-        blockIdx_z = T.launch_thread("blockIdx.z", 8)
         with T.kernel():
             with T.thread():
                 T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x // 32 + threadIdx_x % 32 + clusterCtaIdx_x + clusterCtaIdx_y + clusterCtaIdx_z)
@@ -364,12 +364,12 @@ def test_lower_scope_id():
     @T.prim_func(private=True, tirp=True)   
     def after3() -> None:
         clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
+        blockIdx_z = T.launch_thread("blockIdx.z", 12)
         clusterCtaIdx_y = T.launch_thread("clusterCtaIdx.y", 2)
         clusterCtaIdx_z = T.launch_thread("clusterCtaIdx.z", 1)
         blockIdx_x = T.launch_thread("blockIdx.x", 8)
         threadIdx_x = T.launch_thread("threadIdx.x", 384)
         blockIdx_y = T.launch_thread("blockIdx.y", 10)
-        blockIdx_z = T.launch_thread("blockIdx.z", 12)
         with T.kernel():
             with T.cta():
                 with T.warpgroup():

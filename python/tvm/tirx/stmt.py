@@ -43,6 +43,7 @@ from .exec_scope import ExecScope
 from .layout import TLayout
 
 
+@tvm_ffi.register_object("tir.Stmt")
 class Stmt(Object, Scriptable):
     """Base class of all the statements."""
 
@@ -687,7 +688,7 @@ class SBlockRealize(Stmt):
         )  # type: ignore
 
 
-@tvm.ffi.register_object("tir.Break")
+@tvm_ffi.register_object("tir.Break")
 class Break(Stmt):
     """Break node.
 
@@ -699,7 +700,7 @@ class Break(Stmt):
         self.__init_handle_by_constructor__(_ffi_api.Break, span)  # type: ignore
 
 
-@tvm.ffi.register_object("tir.Continue")
+@tvm_ffi.register_object("tir.Continue")
 class Continue(Stmt):
     """Continue node.
 
@@ -760,7 +761,7 @@ def normalize_const_arg(arg) -> PrimExpr:
     return arg
 
 
-@tvm.ffi.register_object("tir.OpCall")
+@tvm_ffi.register_object("tir.OpCall")
 class OpCall(Stmt):
     """OpCall node.
 
