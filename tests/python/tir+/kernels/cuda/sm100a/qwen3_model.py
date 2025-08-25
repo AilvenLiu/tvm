@@ -30,7 +30,7 @@ from tvm.script import tir as T
 from .test_append_paged_kv_cache import get_append_paged_kv_cache_kernel
 from .test_batch_decode import PlanInfo, get_decode_kernel
 from .test_fused_add_rms_norm import get_fused_add_rmsnorm_kernel
-from .test_fused_split_silu_multiply import get_fused_split_silu_multiply_kernel
+from .test_fused_split_silu_multiply import get_fused_split_silu_multiply_kernel_cp_async
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
 from .test_rmsnorm import get_rmsnorm_kernel
 from .test_rope import get_cos_sin_cache_kernel, get_rope_kernel
@@ -412,7 +412,7 @@ def get_qwen3_megakernel_mod():
     rms_norm = get_rmsnorm_kernel(5120)
     fused_add_rmsnorm = get_fused_add_rmsnorm_kernel(5120)
     rms_norm1 = get_rmsnorm_kernel(128)
-    fused_split_silu_multiply = get_fused_split_silu_multiply_kernel(25600 // TP_SIZE)
+    fused_split_silu_multiply = get_fused_split_silu_multiply_kernel_cp_async(25600 // TP_SIZE)
     hgemm1, reduce1, tile_k_num1 = get_hgemm_kernel(dim_n=10240 // TP_SIZE, dim_k=5120)
     hgemm2, reduce2, tile_k_num2 = get_hgemm_kernel(dim_n=5120, dim_k=8192 // TP_SIZE)
     hgemm3, reduce3, tile_k_num3 = get_hgemm_kernel(dim_n=51200 // TP_SIZE, dim_k=5120)

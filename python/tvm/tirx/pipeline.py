@@ -150,6 +150,10 @@ def tirp_pipeline():
             tir.transform.NarrowDataType(32),
             tir.transform.VectorizeLoop(not bool(config.get("tir.disable_vectorize", False))),
             tir.transform.UnrollLoop(),
+            tir.transform.CommonSubexprElimTIR(
+                not bool(config.get("tir.disable_cse_tir", False)),
+                bool(config.get("tir.enable_equiv_terms_in_cse_tir", False)),
+            ),
             tir.transform.Simplify(),
             # Bind the target first so that target-specific attributes are available.
             tir.transform.FP8ComputeLegalize(),
