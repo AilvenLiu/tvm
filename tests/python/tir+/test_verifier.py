@@ -16,7 +16,8 @@
 # under the License.
 import pytest
 
-from tvm.script import tir as T, tirp as Tp
+from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.tir.analysis import verify_tirp_well_formed as verify
 
 
@@ -394,7 +395,7 @@ def test_host():
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def test1(A_ptr: T.handle):
-        A = T.match_buffer(A_ptr, (16, 16), dtype="float32", align=16, logical_scope="kernel")
+        A = T.match_buffer(A_ptr, (16, 16), dtype="float32", align=16)
 
         A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", 2, A.data, 16, 16, 64, 16, 16, 1, 1, 0, 0, 0, 0)
@@ -403,9 +404,9 @@ def test_host():
             for blockIdx in T.thread_binding(1, thread="blockIdx.x"):
                 for threadIdx in T.thread_binding(128, thread="threadIdx.x"):
                     with T.thread():
-                        bar = T.alloc_buffer((1,), "uint64", scope="shared", logical_scope="cta", align=8)
-                        phase = T.alloc_buffer((1,), "int32", scope="local", logical_scope="thread")
-                        A_smem = T.alloc_buffer((16, 16), "float32", scope="shared", logical_scope="cta", align=128)
+                        bar = T.alloc_buffer((1,), "uint64", scope="shared", align=8)
+                        phase = T.alloc_buffer((1,), "int32", scope="local")
+                        A_smem = T.alloc_buffer((16, 16), "float32", scope="shared", align=128)
 
                         phase[0] = 0
                         if threadIdx == 0:

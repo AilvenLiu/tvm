@@ -17,19 +17,18 @@
 
 """Implementation of reduce operator schedules."""
 
-from typing import Any, Dict, Optional
 import functools
 import operator
+from typing import Any, Dict, Optional
 
+from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext
-from tvm.arith.analyzer import Analyzer
 
 from ..common import ReduceOpType, register_unary_binary_schedule
 from .common import target_cuda
-
 
 reduce_op_table = {
     ReduceOpType.SUM: lambda a, b: a + b,
@@ -202,8 +201,6 @@ def reduction_cuda_warp_logical_view_impl(
             dst.scope() == "local",
             src.layout is not None,
             dst.layout is not None,
-            src.logical_scope() == "warp",
-            dst.logical_scope() == "warp",
             src.dtype == dst.dtype,
             sctx.is_cuda(),
             sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"],
@@ -336,10 +333,7 @@ def reduction_cuda_impl(
         return reduction_cuda_shared_nd_sync_cta_impl(
             dst_buffer_region, src_buffer_region, accum, reduce_op, sctx
         )
-    elif (
-        src_buffer_region.buffer.scope() == "local"
-        and src_buffer_region.buffer.logical_scope() == "warp"
-    ):
+    elif src_buffer_region.buffer.scope() == "local":
         return reduction_cuda_warp_logical_view_impl(
             dst_buffer_region, src_buffer_region, accum, reduce_op, schedule_config, sctx
         )

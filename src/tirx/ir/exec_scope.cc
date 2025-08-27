@@ -199,21 +199,6 @@ Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
   return std::nullopt;
 }
 
-/******** Helper functions ********/
-bool IsStorageBuffer(const String& storage, const String& logical) {
-  return StorageToLogical.count(storage) && StorageToLogical.at(storage) == logical;
-}
-
-String StorageToLogicalScope(const String& storage) {
-  for (const auto& pair : StorageToLogical) {
-    if (std::string(storage).rfind(pair.first, 0) == 0) {  // C++ equivalent of startswith
-      return pair.second;
-    }
-  }
-  LOG(FATAL) << "Unknown storage type: " << storage;
-  return "";
-}
-
 /******** ScopeIdResolve related functions ********/
 ScopeIdResolveTable::Registry& ScopeIdResolveTable::Register(String parent, String cur,
                                                              String target_kind) {

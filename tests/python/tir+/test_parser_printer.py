@@ -43,7 +43,7 @@ def test_roundtrip_scopeid1():
                 with T.warp():
                     with T.thread():
                         A_local = T.alloc_buffer([1], dtype="float16",
-                                                 scope="local", logical_scope="thread")
+                                                 scope="local")
                         for i in T.serial(2):
                             A_local[0] = A[lane_id * 2 + i]
     # fmt: on
@@ -168,7 +168,7 @@ def test_roundtrip_buffer_view_get1():
     def test() -> None:
         with T.kernel():
             with T.cta():
-                A = T.alloc_buffer([2], dtype="float16", scope="local", logical_scope="thread")
+                A = T.alloc_buffer([2], dtype="float16", scope="local")
                 A_layout = T.TileLayout(shard=([1, 2], [2, 1]))
                 A_warp_layout = A_layout.tile(L_LANE, (8, 4), (1, 2))
                 A_warp = T.view(A, layout=A_warp_layout, shape=(8, 8))
@@ -196,7 +196,7 @@ def test_roundtrip_buffer_view_get2():
             lane_id = T.thread_id([32], parent="warp")
 
             with T.cta():
-                A = T.alloc_buffer([2,], dtype="float16", scope="local", logical_scope="thread")
+                A = T.alloc_buffer([2,], dtype="float16", scope="local")
                 A_layout = T.TileLayout(shard=([1, 2], [2, 1]))
                 B_layout = A_layout.tile(L_LANE, (8, 4), (1, 2))
                 B = T.view(A, layout=B_layout, shape=(8, 8))
@@ -208,33 +208,6 @@ def test_roundtrip_buffer_view_get2():
     code = test.script()
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
-
-
-def test_alloc_buffer_default_logical_scope():
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def test() -> None:
-        with T.kernel():
-            bx, by, bz = T.cta_id([1, 1, 1], parent="kernel")
-            warp_id = T.warp_id([1], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            with T.cta():
-                A = T.alloc_buffer([1], dtype="float16", scope="local")
-                B = T.alloc_buffer([1], dtype="float16", scope="shared")
-                C = T.alloc_buffer([1], dtype="float16", scope="global")
-                with T.warp():
-                    with T.thread():
-                        pass
-    # fmt: on
-
-    body = test.body.block.body.block
-    A = body.alloc_buffers[0]
-    B = body.alloc_buffers[1]
-    C = body.alloc_buffers[2]
-
-    assert A.logical_scope() == "thread"
-    assert B.logical_scope() == "cta"
-    assert C.logical_scope() == "kernel"
 
 
 def test_roundtrip_op1():
@@ -880,8 +853,8 @@ def test_buffer():
     def test(
         A: T.Buffer((10, 11), "float32", layout=None),
         B: T.Buffer((10, 11), "float32", scope="global"),
-        C: T.Buffer((10, 11), "float32", logical_scope="kernel", layout="default"),
-        D: T.Buffer((10, 11), "float32", logical_scope="kernel", layout=T.TileLayout(([10, 11], [1, 10]))),
+        C: T.Buffer((10, 11), "float32", layout="default"),
+        D: T.Buffer((10, 11), "float32", layout=T.TileLayout(([10, 11], [1, 10]))),
         E_ptr: T.handle,
         F_ptr: T.handle,
         G_ptr: T.handle,
@@ -889,19 +862,19 @@ def test_buffer():
     ):
         E = T.match_buffer(E_ptr, [10, 11], "float16", layout=None)
         F = T.match_buffer(F_ptr, [10, 11], "float16", scope="global")
-        G = T.match_buffer(G_ptr, [10, 11], "float16", logical_scope="kernel", layout="default")
-        H = T.match_buffer(H_ptr, [10, 11], "float16", logical_scope="kernel", layout=T.TileLayout(([10, 11], [1, 10])))
+        G = T.match_buffer(G_ptr, [10, 11], "float16", layout="default")
+        H = T.match_buffer(H_ptr, [10, 11], "float16", layout=T.TileLayout(([10, 11], [1, 10])))
 
         A0 = T.decl_buffer((10, 11), "float32", data=A.data, layout=None)
         B0 = T.decl_buffer((10, 11), "float32", data=B.data, scope="global")
-        C0 = T.decl_buffer((10, 11), "float32", data=C.data, logical_scope="kernel", layout="default")
-        D0 = T.decl_buffer((10, 11), "float32", data=D.data, logical_scope="kernel", layout=T.TileLayout(([10, 11], [1, 10])))
+        C0 = T.decl_buffer((10, 11), "float32", data=C.data, layout="default")
+        D0 = T.decl_buffer((10, 11), "float32", data=D.data, layout=T.TileLayout(([10, 11], [1, 10])))
 
         with T.kernel():
             A1 = T.alloc_buffer((10, 11), "float32", layout=None)
             B1 = T.alloc_buffer((10, 11), "float32", scope="global")
-            C1 = T.alloc_buffer((10, 11), "float32", logical_scope="kernel", layout="default")
-            D1 = T.alloc_buffer((10, 11), "float32", logical_scope="kernel", layout=T.TileLayout(([10, 11], [1, 10])))
+            C1 = T.alloc_buffer((10, 11), "float32", layout="default")
+            D1 = T.alloc_buffer((10, 11), "float32", layout=T.TileLayout(([10, 11], [1, 10])))
 
             pass
     # fmt: on

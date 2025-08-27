@@ -157,7 +157,6 @@ def buffer(
     offset_factor: int = 0,
     buffer_type: str = "",
     axis_separators: list[int] | None = None,
-    logical_scope: str = "",
     layout: str | TLayout | None = "default",
     allocated_addr: int | tuple[int, ...] | None = None,
     buffer_name: str = "",
@@ -225,7 +224,6 @@ def buffer(
         offset_factor,
         buffer_type,
         axis_separators,
-        logical_scope,
         _get_layout(layout, shape, scope),
         allocated_addr,
     )
@@ -326,7 +324,6 @@ def match_buffer(
     offset_factor: int = 0,
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
-    logical_scope: str = "",
     layout: str | TLayout | None = "default",
 ) -> Buffer:
     """The buffer match function.
@@ -382,9 +379,6 @@ def match_buffer(
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
 
-    logical_scope : str
-        The logical scope of the buffer.
-
     layout: Optional[Union[str, TLayout]]
         The layout of the buffer.
 
@@ -417,7 +411,6 @@ def match_buffer(
         offset_factor,
         buffer_type,
         axis_separators,
-        logical_scope,
         _get_layout(layout, shape, scope),
     )
 
@@ -787,7 +780,6 @@ def sblock_alloc_buffer(
     offset_factor: int = 0,
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
-    logical_scope: str = "",
     layout: str | TLayout | None = "default",
     allocated_addr: int | tuple[int, ...] | None = None,
 ) -> Buffer:
@@ -817,9 +809,6 @@ def sblock_alloc_buffer(
         The buffer type.
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
-
-    logical_scope : str
-        The logical scope of the buffer.
 
     layout: Optional[Union[str, TLayout]]
         The layout of the buffer.
@@ -857,7 +846,6 @@ def sblock_alloc_buffer(
         offset_factor,
         buffer_type,
         axis_separators,
-        logical_scope,
         _get_layout(layout, shape, scope),
         allocated_addr,
     )
@@ -1473,7 +1461,6 @@ def decl_buffer(
     offset_factor=0,
     buffer_type="",
     axis_separators=None,
-    logical_scope="",
     layout="default",
 ) -> Buffer:
     """Create a buffer declaration node.
@@ -1515,9 +1502,6 @@ def decl_buffer(
     axis_separators : List[int]
         The separators between input axes when generating flattened output axes.
 
-    logical_scope : str
-        The logical scope of the buffer.
-
     layout : TLayout
         The layout of the buffer.
 
@@ -1543,7 +1527,6 @@ def decl_buffer(
         offset_factor,
         buffer_type,
         axis_separators,
-        logical_scope,
         _get_layout(layout, shape, scope),
     )
 
@@ -1582,7 +1565,6 @@ def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) 
         align=-1,
         buffer_type="default",
         axis_separators=None,
-        logical_scope="",
         layout=TileLayout(),
         allocated_addr=None,
     )
@@ -1605,7 +1587,6 @@ def decl_cell(dtype, data, scope, elem_offset, name=None) -> BufferLoad:
         offset_factor=0,
         buffer_type="default",
         axis_separators=None,
-        logical_scope="",
         layout=TileLayout(),
     )
     decl_frame.add_callback(partial(decl_frame.__exit__, None, None, None))

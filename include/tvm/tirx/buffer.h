@@ -249,11 +249,6 @@ class Buffer : public ObjectRef {
   TVM_DLL ffi::String scope() const;
 
   /*!
-   * \brief Return the logical scope associated with this buffer.
-   */
-  TVM_DLL ffi::String logical_scope() const;
-
-  /*!
    * \brief Return a new buffer with the allocated address.
    */
   TVM_DLL Buffer with_allocated_addr(ffi::Array<Integer> allocated_addr) const;
@@ -270,7 +265,7 @@ class Buffer : public ObjectRef {
    */
   TVM_DLL Buffer with_dtype(DataType dtype) const;
 
-  /*!   
+  /*!
    * \brief Return a new buffer with the data.
    */
   TVM_DLL Buffer with_data(Var data) const;

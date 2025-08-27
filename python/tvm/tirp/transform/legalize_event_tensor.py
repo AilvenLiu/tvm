@@ -17,12 +17,13 @@
 
 from typing import Dict, Tuple
 
+from tvm import DataTypeCode
 from tvm.ir import PointerType, PrimType
 from tvm.tir import Block, Var
 from tvm.tir.buffer import Buffer
-from tvm.tir.transform.function_pass import prim_func_pass
-from tvm import DataTypeCode
 from tvm.tir.function import PrimFunc
+from tvm.tir.transform.function_pass import prim_func_pass
+
 from .common import BufferReplacer
 
 
@@ -70,7 +71,6 @@ def convert_event_tensor(buffer: Buffer) -> Tuple[Buffer, Var]:
         PointerType(
             PrimType(new_dtype),
             storage_scope=old_type.storage_scope,
-            logical_scope=old_type.logical_scope,
         ),
         data.span,
     )

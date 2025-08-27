@@ -1086,7 +1086,6 @@ class PoolAllocator:
         align=0,
         buffer_type="",
         axis_separators=None,
-        logical_scope="",
         layout="default",
     ) -> frame.DeclBufferFrame:
         if align > 0:
@@ -1102,7 +1101,6 @@ class PoolAllocator:
             0,
             buffer_type,
             axis_separators,
-            logical_scope,
             layout,
         )
         self.offset += functools.reduce(lambda x, y: x * y, shape) * (DataType(dtype).bits // 8)
@@ -1143,7 +1141,6 @@ def reshape(buffer: Buffer, shape: List[PrimExpr]):
         buffer.offset_factor,
         "",
         buffer.axis_separators,
-        buffer.logical_scope(),
         buffer.layout,
     )
 

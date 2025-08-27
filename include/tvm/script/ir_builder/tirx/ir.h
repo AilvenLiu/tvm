@@ -54,7 +54,6 @@ using tvm::tirx::Var;
  * \param offset_factor The factor of elem_offset field.
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
- * \param logical_scope The logical scope of the buffer.
  * \param layout The layout of the buffer.
  * \param allocated_addr The allocated address of the buffer. Might be multi-dimensional.
  * \return The declared buffer.
@@ -63,8 +62,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::String logical_scope = "",
-
+                  ffi::Optional<ffi::Array<IntImm>> axis_separators,
                   ffi::Optional<TLayout> layout = std::nullopt,
                   ffi::Array<Integer> allocated_addr = {});
 
@@ -131,7 +129,7 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape,
                    ffi::String storage_scope = "global", int align = -1, int offset_factor = 0,
                    ffi::String buffer_type = "default",
                    ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
-                   ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt);
+                   ffi::Optional<TLayout> layout = std::nullopt);
 
 /*!
  * \brief The buffer view statement.
@@ -228,7 +226,6 @@ void BlockAttrs(ffi::Map<ffi::String, ffi::Any> attrs);
  * \param align The alignment requirement of data pointer in bytes.
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
- * \param logical_scope The logical scope of the buffer.
  * \param layout The layout of the buffer.
  * \param allocated_addr The allocated address of the buffer. Might be multi-dimensional.
  * \return The allocated buffer.
@@ -238,8 +235,8 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::
                          PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "",
                          int align = -1, int offset_factor = 0, ffi::String buffer_type = "default",
                          ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
-                         ffi::String logical_scope = "", ffi::Optional<TLayout> layout = std::nullopt,
-                         ffi::Array<Integer> allocated_addr = {});
+                   ffi::Optional<TLayout> layout = std::nullopt,
+                   ffi::Array<Integer> allocated_addr = {});
 
 namespace axis {
 /*!
@@ -434,7 +431,6 @@ ElseFrame Else();
  * \param offset_factor The factor of elem_offset field.
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
- * \param logical_scope The logical scope of the buffer.
  * \param layout The layout of the buffer.
  * \return The declared buffer.
  */
@@ -443,7 +439,6 @@ Buffer DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
                   ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                  ffi::String logical_scope = "",
                   ffi::Optional<TLayout> layout = std::nullopt);
 
 /*!

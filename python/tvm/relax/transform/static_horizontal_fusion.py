@@ -274,7 +274,6 @@ class _Rewriter(PyExprMutator):
                 shape,
                 event.struct_info.dtype,
                 scope="global",
-                logical_scope="kernel",
                 buffer_name="event",
             )
         return self.event_buffers[event]

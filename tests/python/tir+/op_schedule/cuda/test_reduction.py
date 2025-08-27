@@ -14,15 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import numpy as np
 import pytest
 
 import tvm
-from tvm.tir.layout import TileLayout
-import numpy as np
 import tvm.testing
 from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.tir.layout import TileLayout
 
 
 @pytest.mark.parametrize(
@@ -197,7 +197,6 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                     [2, NUM_COL // 4],
                     dtype=dtype,
                     scope="local",
-                    logical_scope="thread",
                     layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
                 )
 
@@ -212,7 +211,6 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                     ],
                     dtype=dtype,
                     scope="local",
-                    logical_scope="thread",
                     layout=red_atom.tile(red_tile, (2, 1), (1, 1)),
                 )
 

@@ -175,19 +175,9 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
     kwargs.Set("axis_separators",
                d->AsDoc<ExprDoc>(buffer->axis_separators, buffer_p->Attr("axis_separators")));
   }
-  // Step 11. Handle `buffer.logical_scope`
-  {
-    String scope = buffer.logical_scope();
-    if (scope != "" && scope != tvm::tirx::StorageToLogicalScope(buffer.scope())) {
-      kwargs.Set(
-          "logical_scope",
-          LiteralDoc::Str(scope,
-                          buffer_p->Attr("data")->Attr("type_annotation")->Attr("logical_scope")));
-    }
-  }
   // Step 12. Handle `buffer.layout`
   if (buffer->layout.defined()) {
-    if (!StructuralEqual()(buffer->layout, tir::TileLayoutNode::DefaultLayout(buffer->shape))) {
+    if (!StructuralEqual()(buffer->layout, tirx::TileLayoutNode::DefaultLayout(buffer->shape))) {
       kwargs.Set("layout", d->AsDoc<ExprDoc>(buffer->layout, buffer_p->Attr("layout")));
     }
   } else {
@@ -216,9 +206,8 @@ ExprDoc BufferCall(const ExprDoc& prefix, const ffi::Map<ffi::String, ExprDoc>& 
       args.push_back(doc.value());
     }
   }
-  for (ffi::String s :
-       {"data", "strides", "elem_offset", "scope", "align", "offset_factor", "buffer_type",
-        "axis_separators", "logical_scope", "layout", "allocated_addr"}) {
+  for (ffi::String s : {"data", "strides", "elem_offset", "scope", "align", "offset_factor",
+                        "buffer_type", "axis_separators", "layout", "allocated_addr"}) {
     if (ffi::Optional<ExprDoc> doc = attrs.Get(s)) {
       kwargs_keys.push_back(s);
       kwargs_values.push_back(doc.value());

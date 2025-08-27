@@ -22,7 +22,6 @@
  * \brief Common type system AST nodes throughout the IR.
  */
 #include <tvm/ffi/function.h>
-#include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ir/type.h>
 namespace tvm {
@@ -48,23 +47,21 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("ir.PrimType", [](runtime::DataType dtype) { return PrimType(dtype); });
 }
 
-PointerType::PointerType(Type element_type, ffi::String storage_scope, ffi::String logical_scope) {
-  ObjectPtr<PointerTypeNode> n = ffi::make_object<PointerTypeNode>();
+PointerType::PointerType(Type element_type, ffi::String storage_scope) {
+  ObjectPtr<PointerTypeNode> n = make_object<PointerTypeNode>();
   if (storage_scope.empty()) {
     n->storage_scope = "global";
   } else {
     n->storage_scope = std::move(storage_scope);
   }
   n->element_type = std::move(element_type);
-  n->logical_scope = std::move(logical_scope);
   data_ = std::move(n);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("ir.PointerType", [](Type element_type, ffi::String storage_scope = "",
-                                             ffi::String logical_scope = "") {
-    return PointerType(element_type, storage_scope, logical_scope);
+  refl::GlobalDef().def("ir.PointerType", [](Type element_type, ffi::String storage_scope = "") {
+    return PointerType(element_type, storage_scope);
   });
 }
 

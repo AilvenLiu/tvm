@@ -44,10 +44,10 @@ def test_simple_copy():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (128, 512), logical_scope="kernel", layout=None)
+        A = T.match_buffer(A_ptr, (128, 512), layout=None)
         A_1 = T.decl_buffer((65536,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
             for b_loop in T.serial(0, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -77,10 +77,10 @@ def test_simple_copy_2():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (128, 512), logical_scope="kernel", layout=None)
+        A = T.match_buffer(A_ptr, (128, 512), layout=None)
         A_1 = T.decl_buffer((65536,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
             for b_loop in T.serial(0, 512):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -110,10 +110,10 @@ def test_copy_in_a_loop():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=None)
+        A = T.match_buffer(A_ptr, (512, 512), layout=None)
         A_1 = T.decl_buffer((262144,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -147,10 +147,10 @@ def test_copy_in_a_loop_2():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=None)
+        A = T.match_buffer(A_ptr, (512, 512), layout=None)
         A_1 = T.decl_buffer((262144,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -183,10 +183,10 @@ def test_copy_transpose():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
-            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            identity = T.alloc_buffer((128, 128), scope="trn.sbuf")
+            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
@@ -230,10 +230,10 @@ def test_copy_transpose_2():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
-            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            identity = T.alloc_buffer((128, 128), scope="trn.sbuf")
+            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
@@ -280,8 +280,8 @@ def test_copy_different_f():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf")
             for b_loop in T.serial(0, 64):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -320,8 +320,8 @@ def test_copy_different_shape():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 16), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 16), scope="trn.sbuf")
             for b_loop in T.serial(0, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -357,12 +357,11 @@ def test_copy_irregular_shape():
         A = T.match_buffer(
             A_ptr,
             (128, 10000),
-            logical_scope="kernel",
             layout=None,
         )
         A_1 = T.decl_buffer((1280000,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
             for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -392,10 +391,10 @@ def test_copy_different_shape_dim():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (32, 128, 512), logical_scope="kernel", layout=None)
+        A = T.match_buffer(A_ptr, (32, 128, 512), layout=None)
         A_1 = T.decl_buffer((2097152,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
             for i, b_loop in T.grid(32, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -428,12 +427,11 @@ def test_copy_with_offset():
         A = T.match_buffer(
             A_ptr,
             (256, 512),
-            logical_scope="kernel",
             layout=None,
         )
         A_1 = T.decl_buffer((131072,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             for i, b_loop in T.grid(2, 2):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -469,12 +467,11 @@ def test_large_dma_copy():
         A = T.match_buffer(
             A_ptr,
             (512, 4096),
-            logical_scope="kernel",
             layout=None,
         )
         A_1 = T.decl_buffer((2097152,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
             for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -508,8 +505,8 @@ def test_copy_with_inst_size_limit():
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            B_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            B_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
             for i, b_loop in T.grid(4, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
@@ -544,10 +541,10 @@ def test_copy_with_complex_index():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (4096, 4096), logical_scope="kernel", layout=None)
+        A = T.match_buffer(A_ptr, (4096, 4096), layout=None)
         A_1 = T.decl_buffer((16777216,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 32768), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 32768), scope="trn.sbuf")
             for b_loop in T.serial(0, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -577,10 +574,10 @@ def test_copy_with_complex_index_2():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (2, 2048, 1024), logical_scope="kernel", layout=None)
+        A = T.match_buffer(A_ptr, (2, 2048, 1024), layout=None)
         A_1 = T.decl_buffer((4194304,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 131072), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 131072), scope="trn.sbuf")
             for b_loop in T.serial(0, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -618,10 +615,10 @@ def test_copy_transpose_with_workspace():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
-            acc_psum = T.alloc_buffer((1, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            identity = T.alloc_buffer((128, 128), scope="trn.sbuf")
+            acc_psum = T.alloc_buffer((1, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
@@ -663,10 +660,10 @@ def test_copy_with_guard():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=None)
+        A = T.match_buffer(A_ptr, (512, 512), layout=None)
         A_1 = T.decl_buffer((262144,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             for j, i, b_loop in T.grid(4, 4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -700,10 +697,10 @@ def test_copy_with_guard_2():
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
-        A = T.match_buffer(A_ptr, (512, 512), logical_scope="kernel", layout=None)
+        A = T.match_buffer(A_ptr, (512, 512), layout=None)
         A_1 = T.decl_buffer((262144,), data=A.data, layout=None)
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             for j, i, b_loop in T.grid(4, 4, 3):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -738,10 +735,10 @@ def test_copy_transpose_with_guard():
     def expected():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
-            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            identity = T.alloc_buffer((128, 128), scope="trn.sbuf")
+            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):
@@ -785,8 +782,8 @@ def test_copy_with_specified_max_inst_size():
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel", layout=None)
-            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel", layout=None)
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", layout=None)
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", layout=None)
             for b_loop in T.serial(0, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
@@ -812,10 +809,10 @@ def test_copy_transpose_with_extended_f():
     def expected(A_ptr: T.handle):
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
-            identity = T.alloc_buffer((128, 128), scope="trn.sbuf", logical_scope="kernel")
-            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", logical_scope="kernel", allocated_addr=[0, 0])
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            identity = T.alloc_buffer((128, 128), scope="trn.sbuf")
+            acc_psum = T.alloc_buffer((8, 128, 512), scope="trn.psum", allocated_addr=[0, 0])
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for rhs_f_loop in T.serial(128, annotations={"nki_dim": "F"}):

@@ -17,20 +17,19 @@
 
 """Implementation of binary operator schedules."""
 
-from typing import Optional, Union
 import functools
 import operator
+from typing import Optional, Union
 
+from tvm.arith.analyzer import Analyzer
 from tvm.error import InternalError
 from tvm.script import tir as T
-from tvm.tirp.op_schedule import ScheduleContext
-from tvm.tir import BufferRegion, PrimFunc, OpCall
+from tvm.tir import BufferRegion, OpCall, PrimFunc
 from tvm.tir.expr import FloatImm
-from tvm.arith.analyzer import Analyzer
+from tvm.tirp.op_schedule import ScheduleContext
 
 from ..common import MapOpType
 from .common import get_indices
-
 
 binary_op_table = {
     MapOpType.ADD: lambda a, b: a + b,
@@ -261,9 +260,6 @@ def binary_map_cuda_warp_logical_view_nd_impl(
             src1.layout is not None,
             src2.layout is not None if src2 else True,
             dst.layout is not None,
-            src1.logical_scope() == "warp",
-            src2.logical_scope() == "warp" if src2 else True,
-            dst.logical_scope() == "warp",
             src1.dtype == dtype,
             src2.dtype == dtype if src2 else CONST.dtype == dtype,
             sctx.is_cuda(),
@@ -458,10 +454,7 @@ def binary_cuda_impl(
     dst_buffer_region = op.args[0]
     if dst_buffer_region.buffer.scope().startswith("shared"):
         return binary_map_cuda_shared_nd_sync_cta_impl(op, binary_op, sctx)
-    elif (
-        dst_buffer_region.buffer.scope() == "local"
-        and dst_buffer_region.buffer.logical_scope() == "warp"
-    ):
+    elif dst_buffer_region.buffer.scope() == "local":
         return binary_map_cuda_warp_logical_view_nd_impl(op, binary_op, sctx)
 
     return None

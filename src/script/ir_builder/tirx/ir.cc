@@ -47,11 +47,8 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::String logical_scope,
-                  ffi::Optional<TLayout> layout, ffi::Array<Integer> allocated_addr) {
-  if (logical_scope == "" && storage_scope != "") {
-    logical_scope = tvm::tirx::StorageToLogicalScope(storage_scope);
-  }
+                  ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::Optional<TLayout> layout,
+                  ffi::Array<Integer> allocated_addr) {
   TVM_FFI_CHECK(buffer_type == "auto" || buffer_type == "default" || buffer_type.empty())
       << "ValueError: `buffer_type` must be `auto` or `default` or empty";
   if (!allocated_addr.empty()) {
@@ -65,8 +62,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
     if (storage_dtype == DataType::Bool()) {
       storage_dtype = DataType::Int(8);
     }
-    buffer_data = tvm::tirx::Var(buffer_name,
-                                PointerType(PrimType(storage_dtype), storage_scope, logical_scope));
+    buffer_data = tvm::tirx::Var(buffer_name, PointerType(PrimType(storage_dtype), storage_scope));
   } else {
     buffer_data = data.value();
   }
@@ -153,9 +149,9 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
                    ffi::Optional<Var> data, ffi::Array<PrimExpr> strides, PrimExpr elem_offset,
                    ffi::String storage_scope, int align, int offset_factor,
                    ffi::String buffer_type_str, ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                   ffi::String logical_scope, ffi::Optional<TLayout> layout) {
+                   ffi::Optional<TLayout> layout) {
   Buffer buffer = BufferDecl(shape, dtype, "", data, strides, elem_offset, storage_scope, align,
-                             offset_factor, buffer_type_str, axis_separators, "kernel", layout, {});
+                             offset_factor, buffer_type_str, axis_separators, layout, {});
   if (const auto* var = param.as<tvm::tirx::VarNode>()) {
     PrimFuncFrame frame = FindPrimFuncFrame("T.match_buffer");
     Var v = ffi::GetRef<Var>(var);
@@ -183,32 +179,19 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
 Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Array<PrimExpr> shape) {
   SBlockFrame frame = FindSBlockFrame("T.View");
 
-  String logical_scope = buffer.logical_scope();
-  if (auto tile_layout = layout.as<tvm::tirx::TileLayoutNode>()) {
-    if (auto scope = tile_layout->GetScope()) {
-      TVM_FFI_ICHECK(tvm::tirx::ExecScope::Create(logical_scope)->Is(scope.value().get<0>()->name))
-          << "ValueError: The logical scope of the buffer must match the from scope of the layout.";
-      logical_scope = scope.value().get<1>()->name;
-    }
-  }
   Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", std::nullopt, std::nullopt, std::nullopt,
-                                 buffer.scope(), 1, 1, "auto", std::nullopt, logical_scope, layout);
+                                 buffer.scope(), 1, 1, "auto", std::nullopt, layout);
 
   frame->buffer_views.push_back(tvm::tirx::BufferView(buffer, layout, dst_buffer));
-
   return dst_buffer;
 }
 
 Buffer BufferGet(tvm::tirx::Buffer buffer, Array<PrimExpr> shape) {
   SBlockFrame frame = FindSBlockFrame("T.Get");
 
-  String logical_scope = tvm::tirx::StorageToLogicalScope(buffer.scope());
-  Buffer dst_buffer =
-      BufferDecl(shape, buffer->dtype, "", std::nullopt, std::nullopt, std::nullopt, buffer.scope(),
-                 1, 1, "auto", std::nullopt, logical_scope, std::nullopt);
+  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", std::nullopt, std::nullopt, std::nullopt,
+                                 buffer.scope(), 1, 1, "auto", std::nullopt, std::nullopt);
   // Check if the buffer is a storage buffer
-  TVM_FFI_ICHECK(tvm::tirx::IsStorageBuffer(dst_buffer.scope(), dst_buffer.logical_scope()));
-
   // Copy the dst buffer
   auto n = dst_buffer.CopyOnWrite();
   n->data = buffer->data.copy_with_suffix("");
@@ -444,11 +427,9 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                          ffi::String storage_scope, int align, int offset_factor,
                          ffi::String buffer_type_str,
                          ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                         ffi::String logical_scope, ffi::Optional<TLayout> layout,
-                         ffi::Array<Integer> allocated_addr) {
-  Buffer buffer =
-      BufferDecl(shape, dtype, "", std::nullopt, strides, std::nullopt, storage_scope, align, 0,
-                 buffer_type_str, axis_separators, logical_scope, layout, allocated_addr);
+                         ffi::Optional<TLayout> layout, ffi::Array<Integer> allocated_addr) {
+  Buffer buffer = BufferDecl(shape, dtype, "", std::nullopt, strides, std::nullopt, storage_scope,
+                             align, 0, buffer_type_str, axis_separators, layout, allocated_addr);
   IRBuilder builder = IRBuilder::Current();
   auto opt_func_frame = builder->FindFrame<PrimFuncFrame>();
   TVM_FFI_ICHECK(opt_func_frame.has_value()) << "ValueError: PrimFunc frame not find. Please ensure "
@@ -863,11 +844,9 @@ Buffer DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
                   ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                  ffi::String logical_scope,
                   Optional<TLayout> layout) {
   Buffer buffer = BufferDecl(shape, dtype, buffer_name, data, strides, elem_offset, storage_scope,
-                             align, offset_factor, buffer_type, axis_separators, logical_scope,
-                             layout);
+                             align, offset_factor, buffer_type, axis_separators, layout);
   if (data.defined()) {
     // Alias an existing buffer: emit DeclBuffer statement
     AddToParent(tvm::tirx::DeclBuffer(buffer));
@@ -1185,7 +1164,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 });
 
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

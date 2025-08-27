@@ -46,8 +46,8 @@ def test_select():
     def expected():
         T.func_attr({"global_symbol": "select"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
             for b_loop in T.serial(0, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -81,8 +81,8 @@ def test_select_in_loop():
     def expected():
         T.func_attr({"global_symbol": "select"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
             for i, b_loop in T.grid(2, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -114,8 +114,8 @@ def test_select_expr_affine():
     def expected():
         T.func_attr({"global_symbol": "select"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             for b_loop in T.serial(0, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -148,8 +148,8 @@ def test_select_with_guard():
     def expected():
         T.func_attr({"global_symbol": "select"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             for i, j, b_loop in T.grid(4, 4, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):

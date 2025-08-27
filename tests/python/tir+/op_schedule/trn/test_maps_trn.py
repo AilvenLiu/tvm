@@ -14,16 +14,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import numpy as np
 import pytest
 
 import tvm
-from tvm.tir.layout import TileLayout
-import numpy as np
 import tvm.testing
+from tvm.ir import assert_structural_equal
 from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.ir import assert_structural_equal
+from tvm.tir.layout import TileLayout
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
 
@@ -63,8 +63,8 @@ def test_simple_unary(op_type):
     def expected():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
             for b_loop in T.serial(0, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -108,8 +108,8 @@ def test_unary_in_a_loop(op_type):
     def expected():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -164,9 +164,9 @@ def test_simple_binary(op_type, operands_type):
     def expected():
         T.func_attr({"global_symbol": "binary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer(src1_shape, scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer(src2_shape, scope="trn.sbuf", logical_scope="kernel")
-            C_sbuf = T.alloc_buffer(dst_shape, scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer(src1_shape, scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer(src2_shape, scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer(dst_shape, scope="trn.sbuf")
             for b_loop in T.serial(0, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -249,9 +249,9 @@ def test_binary_complex(op_type, operands_type):
     def expected():
         T.func_attr({"global_symbol": "binary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer(src1_layout_data_iter, scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer(src2_layout_data_iter, scope="trn.sbuf", logical_scope="kernel")
-            C_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer(src1_layout_data_iter, scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer(src2_layout_data_iter, scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
             for i, b_loop in T.grid(4, b_extent):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -298,9 +298,9 @@ def test_binary_broadcast1():
     def expected():
         T.func_attr({"global_symbol": "binary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
             for b_loop in T.serial(0, 512):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -337,9 +337,9 @@ def test_binary_broadcast2():
     def expected():
         T.func_attr({"global_symbol": "binary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
             for b_loop in T.serial(0, 128):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -367,7 +367,7 @@ def test_unary_complex1():
     def expected():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf")
             for b_loop in T.serial(0, 16):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -403,9 +403,9 @@ def test_binary_broadcast3():
     def expected():
         T.func_attr({"global_symbol": "binary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            C_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
             for b_loop in T.serial(0, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -442,9 +442,9 @@ def test_unary_with_bias_scale(op_type):
     def expected():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
-            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
             for b_loop in T.serial(0, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -479,9 +479,9 @@ def test_unary_with_bias_scale_2(op_type):
     def expected():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
-            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
-            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf")
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
@@ -523,9 +523,9 @@ def test_binary_with_guard():
     def expected():
         T.func_attr({"global_symbol": "binary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer((128, 16384), scope="trn.sbuf")
             for j, b_loop in T.grid(4, 96):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -565,9 +565,9 @@ def test_unary_with_guard():
     def expected():
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
-            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
             for i, j, b_loop in T.grid(4, 4, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):

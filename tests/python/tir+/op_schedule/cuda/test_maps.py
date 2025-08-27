@@ -335,14 +335,12 @@ def test_unary_op_local(input, op_type, dtype):
                     [2, NUM_COL // 4],
                     dtype=dtype,
                     scope="local",
-                    logical_scope="thread",
                     layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
                 )
                 res = T.alloc_buffer(
                     [2, NUM_COL // 4],
                     dtype=dtype,
                     scope="local",
-                    logical_scope="thread",
                     layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
                 )
 
@@ -461,7 +459,6 @@ def test_binary_op_local(input, op_type, dtype):
                     [2, NUM_COL // 4],
                     dtype=dtype,
                     scope="local",
-                    logical_scope="thread",
                     layout=atom.tile(tile, (2, NUM_COL // 8), (1, 2)),
                 )
 
@@ -476,7 +473,6 @@ def test_binary_op_local(input, op_type, dtype):
                     ],
                     dtype=dtype,
                     scope="local",
-                    logical_scope="thread",
                     layout=B_atom.tile(B_tile, (2, 1), (1, 1)),
                 )
 

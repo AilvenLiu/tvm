@@ -17,19 +17,18 @@
 
 """Implementation of unary operator schedules."""
 
-from typing import Optional, Union
 import functools
 import operator
+from typing import Optional, Union
 
-from tvm.script import tir as T
-from tvm.tirp.op_schedule import ScheduleContext
-from tvm.tir import BufferRegion, PrimFunc, OpCall
-from tvm.tir.expr import FloatImm
 from tvm.arith.analyzer import Analyzer
+from tvm.script import tir as T
+from tvm.tir import BufferRegion, OpCall, PrimFunc
+from tvm.tir.expr import FloatImm
+from tvm.tirp.op_schedule import ScheduleContext
 
 from ..common import MapOpType
 from .common import get_indices
-
 
 unary_op_table = {
     MapOpType.ZERO: lambda x: 0.0,
@@ -152,8 +151,6 @@ def unary_map_cuda_warp_logical_view_nd_impl(
             dst.scope() == "local",
             src.layout is not None,
             dst.layout is not None,
-            src.logical_scope() == "warp",
-            dst.logical_scope() == "warp",
             src.dtype == dst.dtype,
             sctx.is_cuda(),
             sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"],
@@ -237,10 +234,7 @@ def unary_cuda_impl(
         if unary_op in {MapOpType.SQRT, MapOpType.EXP}:
             return unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(op, unary_op, sctx)
         return unary_map_cuda_shared_nd_sync_cta_impl(op, unary_op, sctx)
-    elif (
-        dst_buffer_region.buffer.scope() == "local"
-        and dst_buffer_region.buffer.logical_scope() == "warp"
-    ):
+    elif dst_buffer_region.buffer.scope() == "local":
         if unary_op in {MapOpType.SQRT, MapOpType.EXP}:
             return unary_map_cuda_warp_logical_view_nd_impl_with_bias_scale(op, unary_op, sctx)
         return unary_map_cuda_warp_logical_view_nd_impl(op, unary_op, sctx)

@@ -248,18 +248,7 @@ static const std::unordered_map<String, int> ScopeOrder = {
     {"world", 0},     {"kernel", 1}, {"cluster", 2}, {"cta", 3},
     {"warpgroup", 4}, {"warp", 5},   {"thread", 6}};
 
-/*! \brief Map from storage scope to its belonging logical scope */
-static const std::unordered_map<String, String> StorageToLogical = {
-    {"local", "thread"},  {"shared", "cta"},      {"shared.dyn", "cta"},
-    {"global", "kernel"}, {"trn.sbuf", "kernel"}, {"trn.psum", "kernel"}};
-
-/*! \brief Whether the storage scope belongs to the logical scope*/
-bool IsStorageBuffer(const String& storage, const String& logical);
-
-/*! \brief Return the belonging logical scope of some storage scope */
-String StorageToLogicalScope(const String& storage);
-
-}  // namespace tirxxxxxx
+}  // namespace tirx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_EXEC_SCOPE_H_

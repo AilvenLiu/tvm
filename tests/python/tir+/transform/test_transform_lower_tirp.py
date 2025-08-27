@@ -639,7 +639,7 @@ def test_lower_layout():
         blockIdx_z = T.launch_thread("blockIdx.z", 1)
         with T.kernel():
             with T.cta():
-                A_smem = T.alloc_buffer((4096,), "float16", scope="shared", logical_scope="cta", layout=None)
+                A_smem = T.alloc_buffer((4096,), "float16", scope="shared", layout=None)
                 with T.thread():
                     for tile in range(4):
                         for vec in T.vectorized(8):
@@ -693,7 +693,7 @@ def test_lower_decl_buffer_access_ptr():
         threadIdx_x = T.launch_thread("threadIdx.x", 128)
         with T.kernel():
             with T.cta():
-                buf = T.alloc_buffer((1024,), "uint8", scope="shared.dyn", logical_scope="cta", layout=None)
+                buf = T.alloc_buffer((1024,), "uint8", scope="shared.dyn", layout=None)
                 A = T.decl_buffer((128,), "float16", data=buf.data, elem_offset=32, scope="shared.dyn", layout=None)
                 with T.thread():
                     T.tvm_access_ptr(T.type_annotation("float16"), buf.data, T.Add(32, 64), T.Sub(128, 64), 3)

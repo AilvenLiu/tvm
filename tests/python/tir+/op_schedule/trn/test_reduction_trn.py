@@ -61,8 +61,8 @@ def test_simple_reduction(op_type):
     def expected():
         T.func_attr({"global_symbol": "reduction"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 512), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 1), scope="trn.sbuf")
             for b_loop in range(1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -94,8 +94,8 @@ def test_reduction_with_multiple_axes():
     def expected():
         T.func_attr({"global_symbol": "reduction"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 1), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 1), scope="trn.sbuf")
             for b_loop in range(1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -128,8 +128,8 @@ def test_reduction_in_loop():
     def expected():
         T.func_attr({"global_symbol": "reduction"})
         with T.kernel():
-            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf")
             for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
@@ -160,9 +160,9 @@ def test_reduction_two_stage():
     def expected():
         T.func_attr({"global_symbol": "reduction"})
         with T.kernel():
-            intermediate_buffer = T.alloc_buffer((128, 32), logical_scope="kernel", scope="trn.sbuf")
-            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            intermediate_buffer = T.alloc_buffer((128, 32), scope="trn.sbuf")
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf")
             for b_loop in range(4):
                 for reduction_b_loop in range(32):
                     T.attr(0, "tensorized_nki_instruction", 1)
@@ -202,9 +202,9 @@ def test_reduction_with_guard():
     def expected():
         T.func_attr({"global_symbol": "reduction"})
         with T.kernel():
-            intermediate_buffer = T.alloc_buffer((128, 2), scope="trn.sbuf", logical_scope="kernel")
-            A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            intermediate_buffer = T.alloc_buffer((128, 2), scope="trn.sbuf")
+            A_sbuf = T.alloc_buffer((128, 8192), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf")
             for i, j in T.grid(4, 4):
                 for b_loop in range(4):
                     for reduction_b_loop in range(2):
@@ -237,7 +237,7 @@ def test_reduction_two_stage_workspace():
     @T.prim_func(tirp=True)
     def reduction():
         with T.kernel():
-            intermediate_buffer = T.alloc_buffer((128, 64), logical_scope="kernel", scope="trn.sbuf")
+            intermediate_buffer = T.alloc_buffer((128, 64), scope="trn.sbuf")
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             Tp.sum(B_sbuf, A_sbuf, axes=(1, 3), workspace={"partial_reduce": intermediate_buffer})
@@ -246,9 +246,9 @@ def test_reduction_two_stage_workspace():
     def expected():
         T.func_attr({"global_symbol": "reduction"})
         with T.kernel():
-            intermediate_buffer = T.alloc_buffer((128, 64), logical_scope="kernel", scope="trn.sbuf")
-            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf", logical_scope="kernel")
-            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf", logical_scope="kernel")
+            intermediate_buffer = T.alloc_buffer((128, 64), scope="trn.sbuf")
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
+            B_sbuf = T.alloc_buffer((128, 4), scope="trn.sbuf")
             for b_loop in range(4):
                 for reduction_b_loop in range(32):
                     T.attr(0, "tensorized_nki_instruction", 1)
