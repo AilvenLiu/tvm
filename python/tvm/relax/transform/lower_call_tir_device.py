@@ -23,11 +23,12 @@ from tvm import relax
 from tvm.ir.module import IRModule
 from tvm.relax.expr import Expr
 from tvm.relax.expr_functor import PyExprMutator, mutator
-from tvm.tir.stmt_functor import StmtExprVisitor
+from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.tir import Block, PrimFunc
-from tvm.script import tir as T, tirp as Tp
-from tvm.tirp.transform.common import seek_kernel_replace_point, BufferReplacer
 from tvm.tir.analysis import verify_tirp_well_formed
+from tvm.tir.stmt_functor import StmtExprVisitor
+from tvm.tirp.transform.common import BufferReplacer, seek_kernel_replace_point
 
 
 @tvm.transform.module_pass(opt_level=0, name="LowerCallTIRDevice")

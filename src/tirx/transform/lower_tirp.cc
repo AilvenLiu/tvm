@@ -37,6 +37,51 @@
 namespace tvm {
 namespace tirx {
 
+class ScopeIdDefGather : public StmtExprVisitor {
+ public:
+  static std::vector<ScopeIdDef> Gather(const Stmt& stmt) {
+    ScopeIdDefGather gather;
+    gather(stmt);
+    return gather.scope_id_def;
+  }
+
+  void VisitStmt_(const BlockNode* op) override {
+    StmtExprVisitor::VisitStmt_(op);
+    if (!op->exec_scope.has_value()) return;
+    for (const auto& def : op->exec_scope.value()->scope_id_def) {
+      scope_id_def.push_back(def);
+    }
+  }
+
+  std::vector<ScopeIdDef> scope_id_def;
+};
+
+class ScopeIdDefRemover : public StmtExprMutator {
+ public:
+  static Stmt Remove(const Stmt& stmt) { return ScopeIdDefRemover()(stmt); }
+
+  Stmt VisitStmt_(const BlockNode* op) override {
+    Block block = GetRef<Block>(op);
+    auto* n = block.CopyOnWrite();
+    Stmt body = StmtExprMutator::VisitStmt(op->body);
+    if (op->exec_scope.defined()) {
+      if (const auto* slice = op->exec_scope.value().as<ExecScopeSliceNode>()) {
+        auto n_scope = make_object<ExecScopeSliceNode>(*slice);
+        n_scope->scope_id_def = {};
+        n->exec_scope = ExecScopeSlice(n_scope);
+      } else if (const auto* scope = op->exec_scope.value().as<ExecScopeNode>()) {
+        auto n_scope = make_object<ExecScopeNode>(*scope);
+        n_scope->scope_id_def = {};
+        n->exec_scope = ExecScope(n_scope);
+      } else {
+        LOG(FATAL) << "Internal Error: unknown exec_scope type: " << op->exec_scope.value();
+      }
+    }
+    n->body = body;
+    return block;
+  }
+};
+
 class ScopeIdDefResolver : public StmtExprMutator {
  public:
   ScopeIdDefResolver(const Target& target) : target_(target) {}
@@ -49,35 +94,39 @@ class ScopeIdDefResolver : public StmtExprMutator {
   using LaunchParams = ScopeIdResolveTable::LaunchParams;
 
   Stmt VisitStmt_(const BlockRealizeNode* op) override {
-    Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(op->block.get()));
     auto n_realize = CopyOnWrite(op);
-    if (!block->exec_scope.defined()) {
-      n_realize->block = block;
+    if (!op->block->exec_scope.defined()) {
+      // No exec_scope, return the block as is
+      n_realize->block = Downcast<Block>(StmtExprMutator::VisitStmt_(op->block.get()));
       return Stmt(n_realize);
     }
-    const auto& scope = block->exec_scope.value();
-    ICHECK(!scope->Is("world")) << "Internal Error: world scope is not supported at the moment";
-    if (scope->scope_id_def.empty()) {
-      // No ScopeIdDef to resolve, return the block as is
-      n_realize->block = block;
-      return Stmt(n_realize);
-    }
+    const auto& scope = op->block->exec_scope.value();
+    ICHECK(!scope->Is("world")) << "TIRp Error: world scope is not supported at the moment";
+    ICHECK(scope->Is("kernel") && !kernel_launch_params_.has_value())
+        << "TIRp Error: a scope is not wrapped in a kernel scope";
+
+    // Step 0: Gather the scope id defs from all the scope
+    Array<ScopeIdDef> scope_id_def = std::move(ScopeIdDefGather::Gather(op->block));
+
     // Step 1: Verify the ScopeIdDef is well-formed
     ScopeIdDefVerifier verifier;
-    CHECK(verifier.Verify(scope->scope_id_def)) << "Inconsistent ScopeIdDef";
+    CHECK(verifier.Verify(scope_id_def)) << "Inconsistent ScopeIdDef";
 
     // Step 2: Extract kernel launch parameters
     LaunchParams launch_params;
     ExtractKernelLaunchParams(verifier.id_set, target_, &launch_params);
+    kernel_launch_params_ = launch_params;
 
-    // Step 3: Resolve the ScopeIdDef and replace them
+    // Step 3: Visit the block and resolve the scope ids, replace them with kernel launch params
+    auto block = op->block;
     auto* n = block.CopyOnWrite();
 
     std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> id_map;
-    for (const auto& def : scope->scope_id_def) {
+    for (const auto& def : scope_id_def) {
       // Resolve the scope ids defined in the scope
-      auto resolved = ScopeIdResolveTable::Resolve(def->scope, def->extents, def->extents.size(),
-                                                   target_->kind->name, launch_params);
+      auto resolved =
+          ScopeIdResolveTable::Resolve(def->scope, def->extents, def->extents.size(),
+                                       target_->kind->name, kernel_launch_params_.value());
       ICHECK_EQ(resolved.size(), def->extents.size())
           << "Internal Error: Inconsistent resolved size " << resolved.size() << " vs "
           << def->extents.size();
@@ -85,22 +134,18 @@ class ScopeIdDefResolver : public StmtExprMutator {
         id_map[def->def_ids[i]] = resolved[i];
       }
     }
-    Stmt body = Substitute(n->body, id_map);
-
-    // Clear the scope_id_def
-    auto n_scope = make_object<ExecScopeNode>(*scope.get());
-    n_scope->scope_id_def = {};
-
-    // set the resolved exec_scope and body
-    n->exec_scope = ExecScope(n_scope);
-    n->body = body;
-
+    n->body = Substitute(n->body, id_map);
     n_realize->block = block;
-    Stmt ret = Stmt(n_realize);
-    // Step 4. Wrap the block with thread_extent attributes
-    for (const auto& [tag, iv] : launch_params) {
+
+    // Step 4: Remove the scope_id_def inside the scope
+    Stmt ret = ScopeIdDefRemover::Remove(Stmt(n_realize));
+
+    // Step 5: Wrap the block with thread_extent attributes
+    for (const auto& [tag, iv] : kernel_launch_params_.value()) {
       ret = AttrStmt(iv, tirx::attr::thread_extent, iv->dom->extent, ret);
     }
+    // Clear the kernel launch params after the kernel scope is resolved
+    kernel_launch_params_ = std::nullopt;
     return ret;
   }
 
@@ -138,6 +183,8 @@ class ScopeIdDefResolver : public StmtExprMutator {
     add_launch_param(ScopePair("cta", "thread"), "threadIdx.");
   }
 
+  /*! \brief The launch params of current kernel scope */
+  Optional<LaunchParams> kernel_launch_params_{std::nullopt};
   /*! \brief The arithmetic analyzer */
   arith::Analyzer ana_;
   const Target& target_;
@@ -768,5 +815,5 @@ TVM_FFI_STATIC_INIT_BLOCK({
 });
 
 }  // namespace transform
-}  // namespace tirxxxxxxxx
+}  // namespace tirxxxxxxxxx
 }  // namespace tvm

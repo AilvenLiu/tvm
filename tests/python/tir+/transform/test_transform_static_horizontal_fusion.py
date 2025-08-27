@@ -17,15 +17,17 @@
 
 import functools
 from typing import Tuple
+
 import numpy as np
 
 import tvm
 import tvm.testing
 from tvm import relax
+from tvm.relax.transform import TileScheduler
 from tvm.script import ir as I
 from tvm.script import relax as R
-from tvm.script import tir as T, tirp as Tp
-from tvm.relax.transform import TileScheduler
+from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 
 
@@ -137,7 +139,6 @@ def test_two_stage_reduction():
     mod = relax.transform.StaticHorizontalFusion(SM_CNT, {"mega_kernel": SpatialTileScheduler})(
         Before
     )
-    mod.show()
     mod_std = relax.transform.LowerCallTIRDevice()(Before)
 
     # testing correctness

@@ -383,6 +383,87 @@ def test_lower_scope_id():
     compare(before3, after3, LowerTIRp)
 
 
+def test_lower_scope_id2():
+    # fmt: off
+    @T.macro
+    def func(warp_id, tx):
+        with T.cta():
+            wg_id = T.warpgroup_id([2], parent="cta")
+            with T.thread():
+                T.evaluate(wg_id + warp_id + tx)
+
+    @T.prim_func(private=True, tirp=True)
+    def before():
+        with T.kernel():
+            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
+            warp_id = T.warp_id([8], parent="cta")
+            tx = T.thread_id([256], parent="cta")
+            
+            func(warp_id, tx)
+    # fmt: on
+
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def after():
+        blockIdx_x = T.launch_thread("blockIdx.x", 3)
+        threadIdx_x = T.launch_thread("threadIdx.x", 256)
+        blockIdx_y = T.launch_thread("blockIdx.y", 4)
+        blockIdx_z = T.launch_thread("blockIdx.z", 5)
+        with T.kernel():
+            with T.cta():
+                with T.thread():
+                    T.evaluate(threadIdx_x // 128 + threadIdx_x // 32 + threadIdx_x)
+    # fmt: on
+
+    compare(before, after, LowerTIRp)
+
+
+def test_lower_scope_id3():
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before():
+        with T.kernel():
+            bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
+            warp_id = T.warp_id([4], parent="cta")
+            tx = T.thread_id([128], parent="cta")
+
+            with T.cta():
+                with T.thread():
+                    T.evaluate(bx + by + bz + warp_id + tx)
+        with T.kernel():
+            bx, by, bz = T.cta_id([6, 7, 8], parent="kernel")
+            warp_id = T.warp_id([8], parent="cta")
+            tx = T.thread_id([256], parent="cta")
+
+            with T.cta():
+                with T.thread():
+                    T.evaluate(bx + by + bz + warp_id + tx)
+    # fmt: on
+
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def after():
+        with T.launch_thread("blockIdx.x", 3) as blockIdx_x:
+            threadIdx_x = T.launch_thread("threadIdx.x", 128)
+            blockIdx_y = T.launch_thread("blockIdx.y", 4)
+            blockIdx_z = T.launch_thread("blockIdx.z", 5)
+            with T.kernel():
+                with T.cta():
+                    with T.thread():
+                        T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x // 32 + threadIdx_x)
+        blockIdx_x = T.launch_thread("blockIdx.x", 6)
+        threadIdx_x = T.launch_thread("threadIdx.x", 256)
+        blockIdx_y = T.launch_thread("blockIdx.y", 7)
+        blockIdx_z = T.launch_thread("blockIdx.z", 8)
+        with T.kernel():
+            with T.cta():
+                with T.thread():
+                    T.evaluate(blockIdx_x + blockIdx_y + blockIdx_z + threadIdx_x // 32 + threadIdx_x)
+    # fmt: on
+
+    compare(before, after, LowerTIRp)
+
+
 def test_lower_scope_slice():
     # fmt: off
     @T.prim_func(private=True, tirp=True)
@@ -630,16 +711,18 @@ def test_lower_separate_scope_id_def():
             bx = T.cta_id([1], parent="kernel")
             with T.cta():
                 tx = T.thread_id([128], parent="cta")
-                with T.thread():
+                with T.thread()[tx == 0]:
                     T.evaluate(tx)
+
     @T.prim_func(private=True, tirp=True)
     def after():
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
+        threadIdx_x = T.launch_thread("threadIdx.x", 128)
         with T.kernel():
-            threadIdx_x = T.launch_thread("threadIdx.x", 128)
             with T.cta():
-                with T.thread():
-                    T.evaluate(threadIdx_x)
+                if threadIdx_x == 0:
+                    with T.thread():
+                        T.evaluate(threadIdx_x)
     # fmt: on
 
     compare(before, after, LowerTIRp)

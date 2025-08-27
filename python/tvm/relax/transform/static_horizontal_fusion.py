@@ -18,24 +18,36 @@
 The pass is written in Python for experiment, fast development.
 """
 
-from dataclasses import dataclass
 from collections import defaultdict
-from tvm.ir import DictAttrs
-from typing import Dict, List, Type, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Type
+
 import tvm
 from tvm import relax
+from tvm.ir import DictAttrs
 from tvm.ir.module import IRModule
-from tvm.relax.struct_info import TensorStructInfo, TupleStructInfo, StructInfo
 from tvm.relax.expr import Expr
 from tvm.relax.expr_functor import PyExprMutator, mutator
-from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
-from tvm.tir import Block, PrimFunc, PrimExpr, Buffer, IndexMap, BufferLoad, SeqStmt, Stmt, Var
-from tvm.tirp.operator import EventWait, EventCommit
-from tvm.tir.event import SemaphoreEventTensor, SemaphoreEventTensorItem, EventImpl
-from tvm.script import tir as T, tirp as Tp
-from tvm.tirp.transform.common import seek_kernel_replace_point, BufferReplacer
-from tvm.tir.analysis import verify_tirp_well_formed
+from tvm.relax.struct_info import StructInfo, TensorStructInfo, TupleStructInfo
+from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
+from tvm.tir import (
+    Block,
+    Buffer,
+    BufferLoad,
+    IndexMap,
+    PrimExpr,
+    PrimFunc,
+    SeqStmt,
+    Stmt,
+    Var,
+)
+from tvm.tir.analysis import verify_tirp_well_formed
+from tvm.tir.event import EventImpl, SemaphoreEventTensor, SemaphoreEventTensorItem
+from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
+from tvm.tirp.operator import EventCommit, EventWait
+from tvm.tirp.transform.common import BufferReplacer, seek_kernel_replace_point
 
 
 class TileScheduler:
@@ -63,10 +75,14 @@ class StaticHorizontalFusion:
             tile_schedulers = {}
         self.tile_schedulers = tile_schedulers
         self.sm_count = sm_count
+        self.gvar_to_remove = []
 
     def transform_module(self, mod: IRModule, _ctx: tvm.transform.PassContext) -> IRModule:
         """IRModule-level transformation"""
-        mod = _Rewriter(mod, self.sm_count, self.tile_schedulers).transform()
+        rewriter = _Rewriter(mod, self.sm_count, self.tile_schedulers)
+        mod = rewriter.transform()
+        for gvar in rewriter.gvar_to_remove:
+            del mod[gvar]
         return mod
 
 
@@ -215,6 +231,7 @@ class _Rewriter(PyExprMutator):
         self.ret_value_entries: Dict[relax.Call, List[int]] = defaultdict(list)
         self.new_ret_index = []
         self.var_entry_mapping = DisjointSet()
+        self.gvar_to_remove = list()
 
     def clear_state(self):
         self.device_func_exec_scope = None
@@ -271,6 +288,7 @@ class _Rewriter(PyExprMutator):
             in_deps = call.attrs.in_deps
             out_deps = call.attrs.out_deps
             prim_func = self.mod[tir_gvar]
+            self.gvar_to_remove.append(tir_gvar)
             # check if this device function is well-formed and has consistent exec scope
             verify_tirp_well_formed(prim_func, device_func=True)
             exec_scope = prim_func.body.block.exec_scope
