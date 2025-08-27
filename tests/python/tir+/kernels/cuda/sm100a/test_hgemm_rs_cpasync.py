@@ -331,9 +331,9 @@ D_layout = T.ComposeLayout(
 @I.ir_module(tirp=True)
 class ReduceScatter:
     @T.prim_func(tirp=True)
-    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type, layout="default"), B: T.Buffer((N, K), b_type, layout="default"), gemm_out: T.Buffer((M, N), d_type, layout="default"),
-                                    semaphore: T.Buffer((WORLD_SIZE, ), "uint64", layout="default"),
-                                    out: T.Buffer((LOCAL_M, N), d_type, layout="default"), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
+    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), gemm_out: T.Buffer((M, N), d_type),
+                                    semaphore: T.Buffer((WORLD_SIZE, ), "uint64"),
+                                    out: T.Buffer((LOCAL_M, N), d_type), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         C_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
@@ -477,7 +477,7 @@ class ReduceScatter:
     @T.prim_func(tirp=True)
     def reduce_sum(
         staging_buffer: T.Buffer((WORLD_SIZE, LOCAL_M, N), "float16"),
-        out: T.Buffer((LOCAL_M, N), d_type, layout="default"),
+        out: T.Buffer((LOCAL_M, N), d_type),
     ):
         src_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         dst_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

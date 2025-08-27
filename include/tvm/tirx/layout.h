@@ -331,6 +331,9 @@ class TileLayoutNode : public TLayoutNode {
   /*! \brief Get the scope pair of the layout */
   Optional<Tuple<ExecScope, ExecScope>> GetScope() const;
 
+  /*! \brief Get the default layout for the shape */
+  static TileLayout DefaultLayout(Array<PrimExpr> shape);
+
   static constexpr const char* _type_key = "tirx.TileLayout";
   TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, TLayoutNode);
 };
@@ -469,7 +472,7 @@ class ComposeLayout : public TLayout {
 constexpr int kPSUMMaxElemPerBank = 512;
 constexpr int kPSUMBankNum = 8;
 
-}  // namespace tirxxxx
+}  // namespace tirxxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

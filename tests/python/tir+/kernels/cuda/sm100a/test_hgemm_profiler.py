@@ -247,7 +247,7 @@ def test_tcgen05_mma_ss_tma():
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type, layout="default"), B: T.Buffer((N, K), b_type, layout="default"), C: T.Buffer((M, N), d_type, layout="default"), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
+    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), C: T.Buffer((M, N), d_type), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         C_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

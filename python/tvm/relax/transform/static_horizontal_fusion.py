@@ -269,8 +269,9 @@ class _Rewriter(PyExprMutator):
     def _get_event_buffer(self, event: Expr) -> Buffer:
         if event not in self.event_buffers:
             assert isinstance(event.struct_info, TensorStructInfo), f"event {event} is not a tensor"
+            shape = [int(s) for s in event.struct_info.shape.values]
             self.event_buffers[event] = T.buffer(
-                event.struct_info.shape.values,
+                shape,
                 event.struct_info.dtype,
                 scope="global",
                 logical_scope="kernel",

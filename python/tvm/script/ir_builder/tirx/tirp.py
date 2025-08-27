@@ -16,15 +16,16 @@
 # under the License.
 """Builtin ops in TIR+"""
 import functools
-from typing import Union, Optional, Dict, Any, Tuple, Callable, List
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+import tvm.tirp.operator as tirp_op
 from tvm import DataType
-from tvm.tirx import BufferRegion, Buffer, PrimExpr, Var
 from tvm.ir import Op
+from tvm.tirx import Buffer, BufferRegion, PrimExpr, Var, event
 from tvm.tirx.event import BaseEvent
 from tvm.tirx.expr import FloatImm
-from tvm.tirx import event
-import tvm.tirp.operator as tirp_op
 from tvm.tirx.predicate import Predicate
+
 from . import _ffi_api, frame
 from .ir import decl_buffer
 
@@ -1086,7 +1087,7 @@ class PoolAllocator:
         buffer_type="",
         axis_separators=None,
         logical_scope="",
-        layout=None,
+        layout="default",
     ) -> frame.DeclBufferFrame:
         if align > 0:
             self.offset = (self.offset + align - 1) // align * align

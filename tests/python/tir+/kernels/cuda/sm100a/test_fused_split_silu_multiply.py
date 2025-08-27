@@ -15,13 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 import math
+
 import numpy as np
+import pytest
+
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tirp.op_schedule import EventImpl
 from tvm.tirp.bench.utils import ProtonContext, bench
-import pytest
+from tvm.tirp.op_schedule import EventImpl
 
 
 def ceildiv(a, b):
@@ -59,8 +61,8 @@ def get_fused_split_silu_multiply_kernel_cp_sync(out_dim):
     def fused_split_silu_multiply(input_cat_ptr: T.handle, output_ptr: T.handle):
         batch_size = T.int32()
 
-        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global", layout="default")    
-        output_global = T.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global", layout="default")
+        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")    
+        output_global = T.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
 
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")
@@ -68,9 +70,9 @@ def get_fused_split_silu_multiply_kernel_cp_sync(out_dim):
             thread_id = T.meta_var(ty * BDX + tx)
             
             with T.thread():
-                idx = T.alloc_local([1], "int32", layout="default")
-                vec1 = T.alloc_local([VEC_SIZE], "float16", layout="default")
-                vec2 = T.alloc_local([VEC_SIZE], "float16", layout="default")
+                idx = T.alloc_local([1], "int32")
+                vec1 = T.alloc_local([VEC_SIZE], "float16")
+                vec2 = T.alloc_local([VEC_SIZE], "float16")
                 
                 idx[0] = bx * BDX * BDY + thread_id
                 while idx[0] * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
@@ -103,18 +105,18 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
     def fused_split_silu_multiply(input_cat_ptr: T.handle, output_ptr: T.handle):
         batch_size = T.int32()
 
-        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global", layout="default")    
-        output_global = T.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global", layout="default")
+        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")    
+        output_global = T.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
 
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")
             tx = T.thread_id([THREAD_NUM], parent="cta")
             
             with T.thread():
-                idx = T.alloc_local([1], "int32", layout="default")
-                shared_buf = T.alloc_buffer([PIPE_DEPTH, 2, THREAD_NUM, VEC_SIZE], "float16", layout="default", scope="shared.dyn")
-                vec1 = T.alloc_local([VEC_SIZE], "float16", layout="default")
-                vec2 = T.alloc_local([VEC_SIZE], "float16", layout="default")
+                idx = T.alloc_local([1], "int32")
+                shared_buf = T.alloc_buffer([PIPE_DEPTH, 2, THREAD_NUM, VEC_SIZE], "float16", scope="shared.dyn")
+                vec1 = T.alloc_local([VEC_SIZE], "float16")
+                vec2 = T.alloc_local([VEC_SIZE], "float16")
                 evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
                 idx[0] = 0
                 real_idx = T.meta_var(idx[0] * SM_COUNT * THREAD_NUM + bx * THREAD_NUM + tx)
@@ -210,7 +212,7 @@ def test(batch_size):
             print(f"TIR time: {ms:.3f} ms")
 
         return output_tvm.numpy()
-    
+
     def tir_cp_sync():
         DEV = tvm.cuda(0)
         input_cat_tvm = tvm.nd.array(input_cat.clone(), device=DEV)
@@ -241,8 +243,8 @@ def test(batch_size):
         return output_tvm.numpy().reshape(batch_size, out_dim)
 
     def flashinfer():
-        import torch
         import flashinfer
+        import torch
 
         input_cat_flashinfer = input_cat.clone().to("cuda")
         out = torch.empty((batch_size, out_dim), dtype=torch.float16, device="cuda")

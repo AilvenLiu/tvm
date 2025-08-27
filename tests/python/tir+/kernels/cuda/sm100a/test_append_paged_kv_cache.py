@@ -15,12 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 import random
+
 import numpy as np
+import pytest
+
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tirp.bench.utils import ProtonContext, bench
-import pytest
 
 
 def perpare_data(batch_size, max_page_num, page_size, num_heads, num_tokens, head_dim):
@@ -66,10 +68,10 @@ def get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim):
         max_page_num = T.int32()
         page_size = T.int32()
 
-        cache_global = T.match_buffer(cache_ptr, (max_page_num, 2, NUM_HEADS, page_size, HEAD_DIM), "float16", scope="global", layout="default")
-        k_global = T.match_buffer(k_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global", layout="default")
-        v_global = T.match_buffer(v_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global", layout="default")
-        pos_map_global = T.match_buffer(pos_map_ptr, (batch_size, NUM_TOKENS), "int32", scope="global", layout="default", offset_factor=1)
+        cache_global = T.match_buffer(cache_ptr, (max_page_num, 2, NUM_HEADS, page_size, HEAD_DIM), "float16", scope="global")
+        k_global = T.match_buffer(k_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")
+        v_global = T.match_buffer(v_ptr, (batch_size, NUM_TOKENS, NUM_HEADS, HEAD_DIM), "float16", scope="global")
+        pos_map_global = T.match_buffer(pos_map_ptr, (batch_size, NUM_TOKENS), "int32", scope="global", offset_factor=1)
 
         with T.kernel():
             tx, ty = T.thread_id([BDX, BDY], parent="cta")
@@ -78,14 +80,14 @@ def get_append_paged_kv_cache_kernel(num_heads, num_tokens, head_dim):
             stx = T.meta_var(tx * VEC_SIZE)
 
             with T.thread():
-                idx = T.alloc_local([1], "int32", layout="default")
-                real_idx = T.alloc_local([1], "int32", layout="default")
-                batch_id = T.alloc_local([1], "int32", layout="default")
-                token_id = T.alloc_local([1], "int32", layout="default")
-                head_id = T.alloc_local([1], "int32", layout="default")
-                pos = T.alloc_local([1], "int32", layout="default")
-                kv_id = T.alloc_local([1], "int32", layout="default")
-                vec = T.alloc_local([VEC_SIZE], "float16", layout="default")
+                idx = T.alloc_local([1], "int32")
+                real_idx = T.alloc_local([1], "int32")
+                batch_id = T.alloc_local([1], "int32")
+                token_id = T.alloc_local([1], "int32")
+                head_id = T.alloc_local([1], "int32")
+                pos = T.alloc_local([1], "int32")
+                kv_id = T.alloc_local([1], "int32")
+                vec = T.alloc_local([VEC_SIZE], "float16")
 
                 idx[0] = bx * BDY + ty
                 while idx[0] < batch_size * NUM_TOKENS * NUM_HEADS * 2:

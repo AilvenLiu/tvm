@@ -105,13 +105,15 @@ def _get_layout(
     if isinstance(layout, TLayout):
         return layout
     assert isinstance(layout, str)
+    if layout == "default":
+        if scope in ["trn.sbuf", "trn.psum"]:
+            return None
+        return TileLayout(shape)
+    shape = tuple(shape)
     if scope == "trn.sbuf":
         layout = TileLayout.trainium(layout, shape)
     elif scope == "trn.psum":
         layout = TileLayout.trainium(layout, shape).to_psum()
-    else:
-        assert layout == "default"
-        layout = TileLayout(shape)#.normalize()
     return layout
 
 
@@ -156,7 +158,7 @@ def buffer(
     buffer_type: str = "",
     axis_separators: list[int] | None = None,
     logical_scope: str = "",
-    layout: TLayout | None = None,
+    layout: str | TLayout | None = "default",
     allocated_addr: int | tuple[int, ...] | None = None,
     buffer_name: str = "",
 ) -> Buffer:
@@ -325,7 +327,7 @@ def match_buffer(
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
     logical_scope: str = "",
-    layout: str | TLayout | None = None,
+    layout: str | TLayout | None = "default",
 ) -> Buffer:
     """The buffer match function.
 
@@ -786,7 +788,7 @@ def sblock_alloc_buffer(
     buffer_type: str = "default",
     axis_separators: list[int] | None = None,
     logical_scope: str = "",
-    layout: str | TLayout | None = None,
+    layout: str | TLayout | None = "default",
     allocated_addr: int | tuple[int, ...] | None = None,
 ) -> Buffer:
     """SBlock-level buffer allocation function.
@@ -1472,7 +1474,7 @@ def decl_buffer(
     buffer_type="",
     axis_separators=None,
     logical_scope="",
-    layout=None,
+    layout="default",
 ) -> Buffer:
     """Create a buffer declaration node.
 

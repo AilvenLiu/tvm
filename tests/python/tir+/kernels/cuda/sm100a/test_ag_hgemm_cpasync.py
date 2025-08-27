@@ -606,9 +606,9 @@ def test_ag_hgemm():
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((LOCAL_M, K), a_type, layout="default"), B: T.Buffer((LOCAL_N, K), b_type, layout="default"), ag_out: T.Buffer((M, K), a_type, layout="default"),
-                                       semaphore: T.Buffer((WORLD_SIZE,), "uint64", layout="default"), out: T.Buffer((M, LOCAL_N), d_type, layout="default"), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
-                                       gemm_task_types: T.Buffer((CAPACITY,), "int32", layout="default"), gemm_task_idxs: T.Buffer((CAPACITY, 2), "int32", layout="default"), gemm_head: T.Buffer((1,), "int32", layout="default"), gemm_tail: T.Buffer((1,), "int32", layout="default")):
+    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((LOCAL_M, K), a_type), B: T.Buffer((LOCAL_N, K), b_type), ag_out: T.Buffer((M, K), a_type),
+                                       semaphore: T.Buffer((WORLD_SIZE,), "uint64"), out: T.Buffer((M, LOCAL_N), d_type), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
+                                       gemm_task_types: T.Buffer((CAPACITY,), "int32"), gemm_task_idxs: T.Buffer((CAPACITY, 2), "int32"), gemm_head: T.Buffer((1,), "int32"), gemm_tail: T.Buffer((1,), "int32")):
         A_local_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

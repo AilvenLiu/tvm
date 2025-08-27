@@ -24,9 +24,9 @@ class SplitKReduceTile(Tile):
 
     def init(self, pool_allocator):
         self.idx = T.local_cell("int32", name="idx")
-        self.vec_32 = T.alloc_local([self.VEC_SIZE], "float32", layout="default")
-        self.tmp = T.alloc_local([self.VEC_SIZE], "float32", layout="default")
-        self.vec_16 = T.alloc_local([self.VEC_SIZE], "float16", layout="default")
+        self.vec_32 = T.alloc_local([self.VEC_SIZE], "float32")
+        self.tmp = T.alloc_local([self.VEC_SIZE], "float32")
+        self.vec_16 = T.alloc_local([self.VEC_SIZE], "float16")
         IRBuilder.current().name("vec_32", self.vec_32)
         IRBuilder.current().name("tmp", self.tmp)
         IRBuilder.current().name("vec_16", self.vec_16)

@@ -46,7 +46,8 @@ bool IsSimpleBuffer(const tirx::Buffer& buf) {
       return false;
     }
   }
-  if (buf->layout.defined()) {
+  if (!buf->layout.defined() ||
+      !StructuralEqual()(buf->layout, tir::TileLayoutNode::DefaultLayout(buf->shape))) {
     return false;
   }
   if (!buf->allocated_addr.empty()) {

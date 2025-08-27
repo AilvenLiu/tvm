@@ -43,9 +43,9 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
     @T.prim_func(tirp=True)
     def fused_add_rmsnorm(input_ptr: T.handle, residual_ptr: T.handle, weight_ptr: T.handle):
         batch_size = T.int32()
-        input_global = T.match_buffer(input_ptr, [batch_size, hidden_size], "float16", scope="global", layout="default")
-        residual_global = T.match_buffer(residual_ptr, [batch_size, hidden_size], "float16", scope="global", layout="default")
-        weight_global = T.match_buffer(weight_ptr, [hidden_size], "float16", scope="global", layout="default")
+        input_global = T.match_buffer(input_ptr, [batch_size, hidden_size], "float16", scope="global")
+        residual_global = T.match_buffer(residual_ptr, [batch_size, hidden_size], "float16", scope="global")
+        weight_global = T.match_buffer(weight_ptr, [hidden_size], "float16", scope="global")
 
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")
@@ -56,21 +56,21 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 pool = T.meta_var(Tp.PoolAllocator(buf.data))
 
-                x_smem = pool.alloc([hidden_size], "float32", layout="default")
-                sum_sq_smem = pool.alloc([bdy], "float32", layout="default")
+                x_smem = pool.alloc([hidden_size], "float32")
+                sum_sq_smem = pool.alloc([bdy], "float32")
 
                 with T.thread():
-                    input_vec = T.alloc_local([vec_size], "float16", layout="default")
-                    residual_vec = T.alloc_local([vec_size], "float16", layout="default")
-                    weight_vec = T.alloc_local([vec_size], "float16", layout="default")
-                    input_vec_f32 = T.alloc_local([vec_size], "float32", layout="default")
-                    residual_vec_f32 = T.alloc_local([vec_size], "float32", layout="default")
-                    weight_vec_f32 = T.alloc_local([vec_size], "float32", layout="default")
-                    x_vec = T.alloc_local([vec_size], "float32", layout="default")
-                    x_tmp = T.alloc_local([1], "float32", layout="default")
-                    sum_sq = T.alloc_local([1], "float32", layout="default")
-                    rms_norm = T.alloc_local([1], "float32", layout="default")
-                    idx = T.alloc_local([1], "int32", layout="default")
+                    input_vec = T.alloc_local([vec_size], "float16")
+                    residual_vec = T.alloc_local([vec_size], "float16")
+                    weight_vec = T.alloc_local([vec_size], "float16")
+                    input_vec_f32 = T.alloc_local([vec_size], "float32")
+                    residual_vec_f32 = T.alloc_local([vec_size], "float32")
+                    weight_vec_f32 = T.alloc_local([vec_size], "float32")
+                    x_vec = T.alloc_local([vec_size], "float32")
+                    x_tmp = T.alloc_local([1], "float32")
+                    sum_sq = T.alloc_local([1], "float32")
+                    rms_norm = T.alloc_local([1], "float32")
+                    idx = T.alloc_local([1], "int32")
 
                     idx[0] = bx
                     while idx[0] < batch_size:

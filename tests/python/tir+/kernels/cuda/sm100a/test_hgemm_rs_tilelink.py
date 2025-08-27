@@ -390,9 +390,9 @@ def test_hgemm_rs():
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type, layout="default"), B: T.Buffer((N, K), b_type, layout="default"), gemm_out: T.Buffer((M, N), d_type, layout="default"),
-                                       semaphore: T.Buffer((M // BLK_M, N // BLK_N), "int32", layout="default"), buffer: T.Buffer((M // RS_BLK_M, N // RS_BLK_N, RS_BLK_M, RS_BLK_N), d_type, layout="default"),
-                                       sig_addr: T.Buffer((WORLD_SIZE, SM_COUNT), "uint32", layout="default"), out: T.Buffer((LOCAL_M, N), d_type, layout="default"), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
+    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), gemm_out: T.Buffer((M, N), d_type),
+                                       semaphore: T.Buffer((M // BLK_M, N // BLK_N), "int32"), buffer: T.Buffer((M // RS_BLK_M, N // RS_BLK_N, RS_BLK_M, RS_BLK_N), d_type),
+                                       sig_addr: T.Buffer((WORLD_SIZE, SM_COUNT), "uint32"), out: T.Buffer((LOCAL_M, N), d_type), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         C_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

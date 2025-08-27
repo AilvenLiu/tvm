@@ -371,8 +371,8 @@ def test_hgemm_rs():
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type, layout="default"), B: T.Buffer((N, K), b_type, layout="default"), gemm_out: T.Buffer((M // TILE_M, N // TILE_N, TILE_M, TILE_N), d_type, layout="default"),
-                                       semaphore: T.Buffer((LOCAL_M // TILE_M, N // TILE_N), "uint64", layout="default"), out: T.Buffer((LOCAL_M, N), d_type, layout="default"),
+    def test_mma_ss_tma_2sm_persistent(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), gemm_out: T.Buffer((M // TILE_M, N // TILE_N, TILE_M, TILE_N), d_type),
+                                       semaphore: T.Buffer((LOCAL_M // TILE_M, N // TILE_N), "uint64"), out: T.Buffer((LOCAL_M, N), d_type),
                                        exec_queue: T.Buffer((SM_COUNT, MAX_TASKS, 3), "int32"), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

@@ -16,17 +16,18 @@
 # under the License.
 
 import math
-import numpy as np
-import pytest
 import tempfile
 from multiprocessing import Process
 
+import numpy as np
+import pytest
+
 import tvm
-from tvm.runtime import disco as di
+import tvm.testing
 from tvm.runtime import ShapeTuple
+from tvm.runtime import disco as di
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
-import tvm.testing
 
 
 @pytest.mark.skip(reason="nvshmem doesn't work with pytest")
@@ -416,21 +417,21 @@ def test_dispatch_combine(world_size=8):
 
         # fmt: off
         @T.prim_func(tirp=True)
-        def dispatch_kernel(send_tokens: T.Buffer((M, HIDDEN_DIM), dtype, layout="default"), # input tokens to dispatch
-                            send_experts: T.Buffer((M, K), "uint32", layout="default"), # input tokens route to topk experts
-                            recv_tokens: T.Buffer((N_LOCAL_EXPERTS, N_GROUP * M, HIDDEN_DIM), dtype, layout="default"), # received tokens
-                            recv_num_per_expert: T.Buffer((N_LOCAL_EXPERTS), "uint32", layout="default"), # number of tokens to receive per local expert
-                            recv_num_total: T.Buffer((1,), "uint32", layout="default"), # total number of tokens to receive
-                            buf_target_wait: T.Buffer((N_LOCAL_EXPERTS, N_GROUP), "uint64", layout="default"), # the number expect to wait on per expert per group
-                            buf_actual_wait: T.Buffer((N_LOCAL_EXPERTS, N_GROUP), "uint64", layout="default"), # the number actually wait on per expert per group
-                            buf_send: T.Buffer((M, HIDDEN_DIM + 1), dtype, layout="default"), # send buffer for (token data, token index)
-                            buf_recv: T.Buffer((N_LOCAL_EXPERTS, N_GROUP, M, HIDDEN_DIM + 1), dtype, layout="default"), # receive buffer for (token data, token index)
-                            buf_meta_index: T.Buffer((MAX_RECV_TOKENS,), "uint32", layout="default"), # index in the source send_tokens buffer
-                            buf_meta_expert: T.Buffer((MAX_RECV_TOKENS,), "uint32", layout="default"), # local expert index
-                            buf_meta_offset: T.Buffer((MAX_RECV_TOKENS,), "uint32", layout="default"), # token index in its local expert
-                            buf_meta_group: T.Buffer((MAX_RECV_TOKENS,), "uint32", layout="default"), # dp group index
-                            buf_meta_token: T.Buffer((MAX_RECV_TOKENS,), "uint32", layout="default"), # token index in its local expert and data group
-                            sem_bar: T.Buffer((1,), "int32", layout="default"), # semaphore for grid-level barrier
+        def dispatch_kernel(send_tokens: T.Buffer((M, HIDDEN_DIM), dtype), # input tokens to dispatch
+                            send_experts: T.Buffer((M, K), "uint32"), # input tokens route to topk experts
+                            recv_tokens: T.Buffer((N_LOCAL_EXPERTS, N_GROUP * M, HIDDEN_DIM), dtype), # received tokens
+                            recv_num_per_expert: T.Buffer((N_LOCAL_EXPERTS), "uint32"), # number of tokens to receive per local expert
+                            recv_num_total: T.Buffer((1,), "uint32"), # total number of tokens to receive
+                            buf_target_wait: T.Buffer((N_LOCAL_EXPERTS, N_GROUP), "uint64"), # the number expect to wait on per expert per group
+                            buf_actual_wait: T.Buffer((N_LOCAL_EXPERTS, N_GROUP), "uint64"), # the number actually wait on per expert per group
+                            buf_send: T.Buffer((M, HIDDEN_DIM + 1), dtype), # send buffer for (token data, token index)
+                            buf_recv: T.Buffer((N_LOCAL_EXPERTS, N_GROUP, M, HIDDEN_DIM + 1), dtype), # receive buffer for (token data, token index)
+                            buf_meta_index: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # index in the source send_tokens buffer
+                            buf_meta_expert: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # local expert index
+                            buf_meta_offset: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # token index in its local expert
+                            buf_meta_group: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # dp group index
+                            buf_meta_token: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # token index in its local expert and data group
+                            sem_bar: T.Buffer((1,), "int32"), # semaphore for grid-level barrier
                             ):
             with T.kernel():
                 bx = T.cta_id([N_BLOCKS_DISPATCH], parent="kernel")
@@ -474,18 +475,18 @@ def test_dispatch_combine(world_size=8):
 
         # fmt: off
         @T.prim_func(tirp=True)
-        def combine_kernel(send_tokens: T.Buffer((N_LOCAL_EXPERTS, N_GROUP * M, HIDDEN_DIM), dtype, layout="default"), # send tokens
-                        send_num_total: T.Buffer((1,), "uint32", layout="default"), # total number of tokens to send back
-                        send_experts: T.Buffer((M, K), "uint32", layout="default"), # input tokens route to topk experts
-                        send_weights: T.Buffer((M, K), dtype, layout="default"), # input tokens weight for topk experts
-                        recv_tokens_new: T.Buffer((M, HIDDEN_DIM), dtype, layout="default"), # final output tokens after weighted sum
-                        buf_send_new: T.Buffer((MAX_SEND_TOKENS, HIDDEN_DIM), dtype, layout="default"), # send buffer
-                        buf_recv_new: T.Buffer((N_EXPERTS, M, HIDDEN_DIM), dtype, layout="default"), # recv buffer
-                        buf_actual_wait_new: T.Buffer((M,), "uint64", layout="default"), # the number to wait on
-                        buf_meta_index: T.Buffer((MAX_RECV_TOKENS,), "uint32", layout="default"), # index in the source send_tokens buffer
-                        buf_meta_expert: T.Buffer((MAX_RECV_TOKENS,), "uint32", layout="default"), # local expert index
-                        buf_meta_offset: T.Buffer((MAX_RECV_TOKENS,), "uint32", layout="default"), # token index in its local expert
-                        buf_meta_group: T.Buffer((MAX_RECV_TOKENS,), "uint32", layout="default"), # dp group index
+        def combine_kernel(send_tokens: T.Buffer((N_LOCAL_EXPERTS, N_GROUP * M, HIDDEN_DIM), dtype), # send tokens
+                        send_num_total: T.Buffer((1,), "uint32"), # total number of tokens to send back
+                        send_experts: T.Buffer((M, K), "uint32"), # input tokens route to topk experts
+                        send_weights: T.Buffer((M, K), dtype), # input tokens weight for topk experts
+                        recv_tokens_new: T.Buffer((M, HIDDEN_DIM), dtype), # final output tokens after weighted sum
+                        buf_send_new: T.Buffer((MAX_SEND_TOKENS, HIDDEN_DIM), dtype), # send buffer
+                        buf_recv_new: T.Buffer((N_EXPERTS, M, HIDDEN_DIM), dtype), # recv buffer
+                        buf_actual_wait_new: T.Buffer((M,), "uint64"), # the number to wait on
+                        buf_meta_index: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # index in the source send_tokens buffer
+                        buf_meta_expert: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # local expert index
+                        buf_meta_offset: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # token index in its local expert
+                        buf_meta_group: T.Buffer((MAX_RECV_TOKENS,), "uint32"), # dp group index
                         ):
             with T.kernel():
                 bx = T.cta_id([N_BLOCKS_COMBINE], parent="kernel")

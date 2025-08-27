@@ -319,11 +319,11 @@ def test():
 
     @T.prim_func(tirp=True)
     def deepgemm(
-        A: T.Buffer((M, K), a_type, layout="default"),
-        B: T.Buffer((N, K), b_type, layout="default"),
-        D: T.Buffer((M, N), d_type, layout="default"),
-        SFA: T.Buffer((ceildiv(K, QUANT_SIZE) // 4, M), "uint32", layout="default"),
-        SFB: T.Buffer((ceildiv(K, QUANT_SIZE) // 4, N), "uint32", layout="default"),
+        A: T.Buffer((M, K), a_type),
+        B: T.Buffer((N, K), b_type),
+        D: T.Buffer((M, N), d_type),
+        SFA: T.Buffer((ceildiv(K, QUANT_SIZE) // 4, M), "uint32"),
+        SFB: T.Buffer((ceildiv(K, QUANT_SIZE) // 4, N), "uint32"),
     ):
         # fmt: off
         T.func_attr({"global_symbol": "main"})

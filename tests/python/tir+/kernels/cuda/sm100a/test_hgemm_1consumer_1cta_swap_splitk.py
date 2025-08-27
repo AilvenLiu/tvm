@@ -1,14 +1,15 @@
 import math
+from enum import Enum
+
 import ml_dtypes
 import numpy as np
-from enum import Enum
 import pytest
+
 import tvm
+import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.script import tir as T
-import tvm.testing
 from tvm.script.ir_builder import IRBuilder
-
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 
 # cluster: [2, 1], cta_num = 2
@@ -66,7 +67,6 @@ def get_hgemm_kernel(dim_n, dim_k):
 
     SMEM_PIPE_DEPTH = 6
     TMEM_PIPE_DEPTH = 2
-
 
     F16_BYTES = 2
     F32_BYTES = 4
@@ -287,8 +287,8 @@ def get_hgemm_kernel(dim_n, dim_k):
     def hgemm(A_ptr: T.handle, B: T.Buffer((N, K), b_type), partial_sum_ptr: T.handle):
         # profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
         M = T.int32()
-        A = T.match_buffer(A_ptr, [M, K], a_type, layout="default")
-        partial_sum = T.match_buffer(partial_sum_ptr, [TILE_K_NUM, M, N], "float32", layout="default")
+        A = T.match_buffer(A_ptr, [M, K], a_type)
+        partial_sum = T.match_buffer(partial_sum_ptr, [TILE_K_NUM, M, N], "float32")
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         partial_sum_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
@@ -569,17 +569,17 @@ def get_hgemm_kernel(dim_n, dim_k):
     def reduce(partial_sum_ptr: T.handle,
                D_ptr: T.handle):
         M = T.int32()
-        partial_sum = T.match_buffer(partial_sum_ptr, [TILE_K_NUM, M, N], "float32", layout="default")
-        D = T.match_buffer(D_ptr, [M, N], d_type, layout="default")
+        partial_sum = T.match_buffer(partial_sum_ptr, [TILE_K_NUM, M, N], "float32")
+        D = T.match_buffer(D_ptr, [M, N], d_type)
         with T.kernel():
             tx, ty = T.thread_id([BDX, BDY], parent="cta")
             bx = T.cta_id([SM_NUMBER], parent="kernel")
 
             with T.thread():
-                idx = T.alloc_local([1], "int32", layout="default")
-                vec_32 = T.alloc_local([VEC_SIZE], "float32", layout="default")
-                tmp = T.alloc_local([VEC_SIZE], "float32", layout="default")
-                vec_16 = T.alloc_local([VEC_SIZE], "float16", layout="default") 
+                idx = T.alloc_local([1], "int32")
+                vec_32 = T.alloc_local([VEC_SIZE], "float32")
+                tmp = T.alloc_local([VEC_SIZE], "float32")
+                vec_16 = T.alloc_local([VEC_SIZE], "float16") 
                 
                 idx[0] = bx * NUM_THREADS * VEC_SIZE + (ty * BDX + tx) * VEC_SIZE
                 while idx[0] < M * N:

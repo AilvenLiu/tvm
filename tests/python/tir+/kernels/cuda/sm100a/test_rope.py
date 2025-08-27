@@ -5,7 +5,6 @@ import torch
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-
 from tvm.tirp.bench.utils import ProtonContext, bench
 
 F16_BYTES = 2
@@ -30,14 +29,14 @@ def get_cos_sin_cache_kernel(rotary_dim, base):
     @T.prim_func(tirp=True)
     def cos_sin_cache(cos_sin_cache: T.handle):
         max_seq_len = T.int32()
-        cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global", layout="default")
+        cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global")
         
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")
             tx = T.thread_id([1024], parent="cta")
             
             with T.thread():
-                idx = T.alloc_local([1], "int32", layout="default")
+                idx = T.alloc_local([1], "int32")
                 
                 idx[0] = bx * 1024 + tx
                 while idx[0] < max_seq_len * rotary_dim:
@@ -68,10 +67,10 @@ def get_rope_kernel(head_dim):
         nnz = T.int32()
         num_heads = T.int32()
         max_seq_len = T.int32()
-        q_global = T.match_buffer(q, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
-        q_rope_global = T.match_buffer(q_rope, [nnz, num_heads, head_dim], "float16", scope="global", layout="default")
-        cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global", layout="default")
-        pos_ids_global = T.match_buffer(pos_ids, [nnz], "int32", scope="global", layout="default")
+        q_global = T.match_buffer(q, [nnz, num_heads, head_dim], "float16", scope="global")
+        q_rope_global = T.match_buffer(q_rope, [nnz, num_heads, head_dim], "float16", scope="global")
+        cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global")
+        pos_ids_global = T.match_buffer(pos_ids, [nnz], "int32", scope="global")
         half_rotary_dim = rotary_dim // 2
 
         with T.kernel():
@@ -81,14 +80,14 @@ def get_rope_kernel(head_dim):
             stx = T.meta_var(tx * vec_size)
 
             with T.thread():
-                cos = T.alloc_local([vec_size], "float32", layout="default")
-                sin = T.alloc_local([vec_size], "float32", layout="default")
-                qk_vec = T.alloc_local([vec_size], "float16", layout="default")
-                qk_vec32 = T.alloc_local([vec_size], "float32", layout="default")
-                qk_vec32_other = T.alloc_local([vec_size], "float32", layout="default")
-                idx = T.alloc_local([1], "int32", layout="default")
-                pos = T.alloc_local([1], "int32", layout="default")
-                head = T.alloc_local([1], "int32", layout="default")
+                cos = T.alloc_local([vec_size], "float32")
+                sin = T.alloc_local([vec_size], "float32")
+                qk_vec = T.alloc_local([vec_size], "float16")
+                qk_vec32 = T.alloc_local([vec_size], "float32")
+                qk_vec32_other = T.alloc_local([vec_size], "float32")
+                idx = T.alloc_local([1], "int32")
+                pos = T.alloc_local([1], "int32")
+                head = T.alloc_local([1], "int32")
 
                 @T.macro
                 def compute_rope(global_in, global_out):

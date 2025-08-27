@@ -49,12 +49,12 @@ def test_two_stage_reduction():
     class Before:
         @T.prim_func(tirp=True, private=True)
         def stage_1(A: T.handle, B: T.handle, m: T.int32, n: T.int32):
-            A_ptr = T.match_buffer(A, (M, N), "float32", layout="default")
-            B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32", layout="default")
+            A_ptr = T.match_buffer(A, (M, N), "float32")
+            B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
             with T.cta():
                 tx = T.thread_id([1024], parent="cta")
-                A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared", layout="default")
-                B_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared", layout="default")
+                A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
+                B_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
                 Tp.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])                
                 Tp.sum(B_smem, A_smem)
 
@@ -62,14 +62,14 @@ def test_two_stage_reduction():
 
         @T.prim_func(tirp=True, private=True)
         def stage_2(B: T.handle, C: T.handle, m: T.int32):
-            B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32", layout="default")
-            C_ptr = T.match_buffer(C, (M, 1), "float32", layout="default")
+            B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
+            C_ptr = T.match_buffer(C, (M, 1), "float32")
             with T.cta():
                 tx = T.thread_id([1024], parent="cta")
                 B_smem = T.alloc_buffer(
-                    [BLOCK_M, NUM_BLOCK_N], "float32", scope="shared", layout="default"
+                    [BLOCK_M, NUM_BLOCK_N], "float32", scope="shared"
                 )
-                C_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared", layout="default")
+                C_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
                 Tp.copy(B_smem, B_ptr[m * BLOCK_M : (m + 1) * BLOCK_M, :])
                 Tp.sum(C_smem, B_smem)
                 Tp.copy(C_ptr[m * BLOCK_M : (m + 1) * BLOCK_M, 0], C_smem)

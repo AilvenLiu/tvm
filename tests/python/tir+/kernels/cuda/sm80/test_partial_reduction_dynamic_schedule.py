@@ -14,15 +14,17 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import enum
+import functools
+from typing import Tuple
+
 import numpy as np
+
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
-from typing import Tuple
-import functools
-import enum
 
 
 @tvm.testing.requires_cuda_compute_version(8)
@@ -93,7 +95,7 @@ def test_partial_reduction():
         def __init__(self, queue: MPMCQueue):
             self.queue = queue
             self.fetched_task_type = int_var("fetched_task_type", scope="shared")
-            self.fetched_task_idx = T.alloc_buffer([2], "int32", scope="shared", layout="default")
+            self.fetched_task_idx = T.alloc_buffer([2], "int32", scope="shared")
             IRBuilder.current().name("fetched_task_idx", self.fetched_task_idx)
             
         @T.macro
@@ -134,16 +136,16 @@ def test_partial_reduction():
     # reduction on N
     @T.prim_func(tirp=True)
     def partial_reduction_ref_stage1(A: T.handle, B: T.handle):
-        A_ptr = T.match_buffer(A, (M, N), "float32", layout="default")
-        B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32", layout="default")
+        A_ptr = T.match_buffer(A, (M, N), "float32")
+        B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
         
         with T.kernel():
             bx, by = T.cta_id([NUM_BLOCK_M, NUM_BLOCK_N], parent="kernel")
             tx = T.thread_id([1024], parent="cta")
             
             with T.cta():
-                A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared", layout="default")
-                B_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared", layout="default")
+                A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
+                B_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
                 Tp.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])                
                 Tp.sum(B_smem, A_smem)
                 Tp.copy(B_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by], B_smem)
@@ -151,15 +153,15 @@ def test_partial_reduction():
 
     @T.prim_func(tirp=True)
     def partial_reduction_ref_stage2(B: T.handle, C: T.handle):
-        B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32", layout="default")
-        C_ptr = T.match_buffer(C, (M, 1), "float32", layout="default")
+        B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
+        C_ptr = T.match_buffer(C, (M, 1), "float32")
         
         with T.kernel():
             bx = T.cta_id([NUM_BLOCK_M], parent="kernel")
             tx = T.thread_id([1024], parent="cta")
             with T.cta():
-                B_smem = T.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared", layout="default")
-                C_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared", layout="default")
+                B_smem = T.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
+                C_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
                 Tp.copy(B_smem, B_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, :])
                 Tp.sum(C_smem, B_smem)
                 Tp.copy(C_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, 0], C_smem)
@@ -170,24 +172,24 @@ def test_partial_reduction():
                 
     @T.prim_func(tirp=True)
     def partial_reduction_fused(A: T.handle, B: T.handle, C: T.handle, semaphore: T.handle, task_types: T.handle, task_idxs: T.handle, head: T.handle, tail: T.handle):
-        A_ptr = T.match_buffer(A, (M, N), "float32", layout="default")
-        B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32", layout="default")
-        C_ptr = T.match_buffer(C, (M, 1), "float32", layout="default")
-        sem_ptr = T.match_buffer(semaphore, (NUM_BLOCK_M, ), "int32", layout="default")
-        task_types_ptr = T.match_buffer(task_types, (CAPACITY, ), "int32", layout="default")
-        task_idxs_ptr = T.match_buffer(task_idxs, (CAPACITY, 2), "int32", layout="default")
-        head_ptr = T.match_buffer(head, (1, ), "int32", layout="default")
-        tail_ptr = T.match_buffer(tail, (1, ), "int32", layout="default")
+        A_ptr = T.match_buffer(A, (M, N), "float32")
+        B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
+        C_ptr = T.match_buffer(C, (M, 1), "float32")
+        sem_ptr = T.match_buffer(semaphore, (NUM_BLOCK_M, ), "int32")
+        task_types_ptr = T.match_buffer(task_types, (CAPACITY, ), "int32")
+        task_idxs_ptr = T.match_buffer(task_idxs, (CAPACITY, 2), "int32")
+        head_ptr = T.match_buffer(head, (1, ), "int32")
+        tail_ptr = T.match_buffer(tail, (1, ), "int32")
         with T.kernel():
             bx = T.cta_id([TOTAL_SM_CNT], parent="kernel")
             tx = T.thread_id([1024], parent="cta")
             queue = T.meta_var(MPMCQueue(CAPACITY, task_types_ptr, task_idxs_ptr, head_ptr, tail_ptr, NUM_BLOCK_M * NUM_BLOCK_N + NUM_BLOCK_M))
             sem = T.meta_var(Semaphore(NUM_BLOCK_N, sem_ptr, queue))
             with T.cta():
-                A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared", layout="default")
-                B_smem_1 = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared", layout="default")
-                B_smem_2 = T.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared", layout="default")
-                C_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared", layout="default")
+                A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
+                B_smem_1 = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
+                B_smem_2 = T.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
+                C_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
                 tile_scheduler = T.meta_var(DynamicTileScheduler(queue))
                 tile_scheduler.init(bx)
                 while tile_scheduler.valid():

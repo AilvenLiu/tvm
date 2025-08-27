@@ -1079,6 +1079,33 @@ Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
                                      ExecScope::Create(outer_most)};
 }
 
+std::vector<PrimExpr> GetDefaultStrides(const Array<PrimExpr>& data,
+                                        PrimExpr initial_stride = PrimExpr(1)) {
+  if (data.empty()) {
+    return {};
+  }
+
+  size_t n = data.size();
+  std::vector<PrimExpr> strides(n);
+  PrimExpr current_stride = initial_stride;
+
+  for (int i = n - 1; i >= 0; --i) {
+    strides[i] = current_stride;
+    current_stride *= data[i];
+  }
+
+  return strides;
+}
+
+TileLayout TileLayoutNode::DefaultLayout(Array<PrimExpr> shape) {
+  Array<Iter> shard;
+  auto strides = GetDefaultStrides(shape);
+  for (size_t i = 0; i < shape.size(); ++i) {
+    shard.push_back(Iter(shape[i], strides[i], Axis::Get("m")));
+  }
+  return TileLayout(shard, Array<Iter>(), Map<Axis, PrimExpr>());
+}
+
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.TileLayoutGetScope",

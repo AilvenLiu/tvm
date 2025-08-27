@@ -17,15 +17,24 @@
 # pylint: disable=super-init-not-called
 """Definition of layout."""
 import functools
-
-from typing import List, Optional, Tuple, Union, TypeAlias, ClassVar, TYPE_CHECKING, Dict
-import re
 import operator
+import re
+from typing import (
+    TYPE_CHECKING,
+    ClassVar,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    TypeAlias,
+    Union,
+)
 
 import tvm
 import tvm.ffi
 from tvm.runtime import Object, ShapeTuple
 from tvm.tirx.expr import PrimExpr
+
 from . import _ffi_api
 from .exec_scope import ExecScope
 
@@ -349,7 +358,7 @@ class TileLayout(TLayout):
         exclude: List[Tuple[Union[Axis, str], PrimExpr]] = None,
     ):
         # Handle None values
-        if shard is None:
+        if shard is None or shard == ():
             shard = ([], [])
         if replicate is None:
             replicate = ([], [])

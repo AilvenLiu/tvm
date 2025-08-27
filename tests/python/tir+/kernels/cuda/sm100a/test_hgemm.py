@@ -228,8 +228,8 @@ def test():
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def hgemm(A: T.Buffer((M, K), a_type, layout="default"), B: T.Buffer((N, K), b_type, layout="default"), 
-                D: T.Buffer((M, N), d_type, layout="default")):
+    def hgemm(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), 
+                D: T.Buffer((M, N), d_type)):
         
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

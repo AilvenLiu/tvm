@@ -15,16 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 import numpy as np
+import pytest
 
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.transform import LowerTIRp
-import pytest
+
 from .utils import run_on_remote_and_check_correct, ssh_client
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
+
 
 @pytest.mark.dependency(depends=["ssh_success"])
 def test_gemm2(ssh_client):
@@ -94,9 +96,9 @@ def test_gemm2(ssh_client):
     @T.prim_func(tirp=True)
     def matmul2(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle):
         T.func_attr({"num_inputs": 2})
-        A = T.match_buffer(A_ptr, (K, M), dtype, layout="default")
-        B = T.match_buffer(B_ptr, (K, N), dtype, layout="default")
-        C = T.match_buffer(C_ptr, (M, N), dtype, layout="default")
+        A = T.match_buffer(A_ptr, (K, M), dtype)
+        B = T.match_buffer(B_ptr, (K, N), dtype)
+        C = T.match_buffer(C_ptr, (M, N), dtype)
         with T.kernel():
             result_tiles = T.alloc_buffer((2, BLOCK_M, BLOCK_N), "float32", scope="trn.sbuf", layout="FPF")
             b_sbuf = T.alloc_buffer((3, BLOCK_K, BLOCK_N), dtype, scope="trn.sbuf", layout="FPF")
@@ -120,6 +122,7 @@ def test_gemm2(ssh_client):
         mod = tvm.IRModule({"main": matmul2})
         func = mod["main"]
         run_on_remote_and_check_correct(func, lambda x, y: (x.reshape(K, M).T @ y,), target)
+
 
 if __name__ == "__main__":
     test_gemm2()

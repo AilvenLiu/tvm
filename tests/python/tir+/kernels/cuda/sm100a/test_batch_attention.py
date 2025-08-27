@@ -147,7 +147,7 @@ __device__ __forceinline__ float {func_name}(float x, float y) {{
 @T.macro
 def cast_load(v, vec_len, buf, *indices):
     with T.thread():
-        v_tmp = T.alloc_local([vec_len], buf.dtype, layout="default")
+        v_tmp = T.alloc_local([vec_len], buf.dtype)
         for i in T.vectorized(vec_len):
             buffer_load = T.meta_var(T.BufferLoad(buf, indices[:-1] + (indices[-1] + i,)))
             v_tmp[i] = buffer_load
@@ -157,7 +157,7 @@ def cast_load(v, vec_len, buf, *indices):
 @T.macro
 def cast_store(v, vec_len, buf, *indices):
     with T.thread():
-        v_tmp = T.alloc_local([vec_len], buf.dtype, layout="default")
+        v_tmp = T.alloc_local([vec_len], buf.dtype)
         Tp.cast(v_tmp[:], v[:])
         for i in T.vectorized(vec_len):
             T.buffer_store(buf, v_tmp[i], indices[:-1] + (indices[-1] + i,))
@@ -172,13 +172,13 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
     INF = 5e4
 
     def int_var(val=None):
-        buf = T.alloc_local([1], "int32", layout="default")
+        buf = T.alloc_local([1], "int32")
         if val is not None:
             T.buffer_store(buf, val, 0)
         return buf
 
     def float_var(val=None):
-        buf = T.alloc_local([1], "float32", layout="default")
+        buf = T.alloc_local([1], "float32")
         if val is not None:
             T.buffer_store(buf, val, 0)
         return buf
@@ -325,23 +325,23 @@ __device__ __forceinline__ float {func_name}() {{
             max_page_num = T.int64()
             total_page_num = T.int32()
 
-            q_buf = T.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", layout="default")
-            kv_buf = T.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16", layout="default")
-            q_indptr_buf = T.match_buffer(q_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            kv_indptr_buf = T.match_buffer(kv_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            partial_indptr_buf = T.match_buffer(partial_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            kv_indices_buf = T.match_buffer(kv_indices_ptr, [total_page_num], "int32", layout="default", offset_factor=1)
-            q_len_buf = T.match_buffer(q_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            kv_len_buf = T.match_buffer(kv_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            q_start_buf = T.match_buffer(q_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            kv_start_buf = T.match_buffer(kv_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            kv_end_buf = T.match_buffer(kv_end_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            kv_head_idx_buf = T.match_buffer(kv_head_idx_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            work_indptr_buf = T.match_buffer(work_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", layout="default", offset_factor=1)
-            len_kv_chunk_buf = T.match_buffer(len_kv_chunk_ptr, [2], "int32", layout="default", offset_factor=1)
-            o_buf = T.match_buffer(o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", layout="default")
-            partial_o_buf = T.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", layout="default", offset_factor=1)
-            partial_lse_buf = T.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", layout="default", offset_factor=1)
+            q_buf = T.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16")
+            kv_buf = T.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16")
+            q_indptr_buf = T.match_buffer(q_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_indptr_buf = T.match_buffer(kv_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            partial_indptr_buf = T.match_buffer(partial_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_indices_buf = T.match_buffer(kv_indices_ptr, [total_page_num], "int32", offset_factor=1)
+            q_len_buf = T.match_buffer(q_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_len_buf = T.match_buffer(kv_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            q_start_buf = T.match_buffer(q_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_start_buf = T.match_buffer(kv_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_end_buf = T.match_buffer(kv_end_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_head_idx_buf = T.match_buffer(kv_head_idx_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            work_indptr_buf = T.match_buffer(work_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            len_kv_chunk_buf = T.match_buffer(len_kv_chunk_ptr, [2], "int32", offset_factor=1)
+            o_buf = T.match_buffer(o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16")
+            partial_o_buf = T.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", offset_factor=1)
+            partial_lse_buf = T.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", offset_factor=1)
 
             with T.kernel():
                 bx = T.cta_id([SM_COUNT * 2 // WG_COUNT], parent="kernel")
@@ -351,19 +351,19 @@ __device__ __forceinline__ float {func_name}() {{
 
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
                 pool = T.meta_var(Tp.PoolAllocator(buf.data))
-                q_smem = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", layout="default", align=16)
-                k_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", layout="default", align=16)
-                v_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", layout="default", align=16)
+                q_smem = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", align=16)
+                k_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", align=16)
+                v_smem = pool.alloc([WG_COUNT * CTA_TILE_KV * HEAD_DIM], "float16", align=16)
                 # pool.move_base_to(0)
-                cta_sync_o_smem = pool.alloc([WG_COUNT, 1] if NUM_WARPS_KV == 1 else [WG_COUNT, NUM_WARPS, NUM_MMA_Q, NUM_MMA_D_VO, 32, 8], "float32", layout="default", align=16)
-                cta_sync_md_smem = pool.alloc([WG_COUNT, 1] if NUM_WARPS_KV == 1 else [WG_COUNT, NUM_WARPS, NUM_MMA_Q, 16, 2], "float32", layout="default", align=16)
+                cta_sync_o_smem = pool.alloc([WG_COUNT, 1] if NUM_WARPS_KV == 1 else [WG_COUNT, NUM_WARPS, NUM_MMA_Q, NUM_MMA_D_VO, 32, 8], "float32", align=16)
+                cta_sync_md_smem = pool.alloc([WG_COUNT, 1] if NUM_WARPS_KV == 1 else [WG_COUNT, NUM_WARPS, NUM_MMA_Q, 16, 2], "float32", align=16)
                 # pool.move_base_to(0)
-                smem_o = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", layout="default", align=16)
+                smem_o = pool.alloc([WG_COUNT * CTA_TILE_Q * HEAD_DIM], "float16", align=16)
                 print(pool.offset)
 
                 with T.thread():
-                    s_frag = T.alloc_local([NUM_MMA_Q, NUM_MMA_KV, 8], "float32", align=0, layout="default")
-                    o_frag = T.alloc_local([NUM_MMA_Q, NUM_MMA_D_VO, 8], "float32", align=16, layout="default")
+                    s_frag = T.alloc_local([NUM_MMA_Q, NUM_MMA_KV, 8], "float32", align=0)
+                    o_frag = T.alloc_local([NUM_MMA_Q, NUM_MMA_D_VO, 8], "float32", align=16)
                     m = T.alloc_local([NUM_MMA_Q, 2], "float32")
                     d = T.alloc_local([NUM_MMA_Q, 2], "float32")
                     tid = T.alloc_local([3], "int32")
@@ -565,7 +565,7 @@ __device__ __forceinline__ float {func_name}() {{
                             @T.macro
                             def compute_sfm_v():
                                 with T.thread():
-                                    s_frag_f16 = T.alloc_local([NUM_MMA_Q, NUM_MMA_KV, 8], "float16", layout="default")
+                                    s_frag_f16 = T.alloc_local([NUM_MMA_Q, NUM_MMA_KV, 8], "float16")
                                     Tp.cast(s_frag_f16[:, :, :], s_frag[:, :, :])
                                     for mma_q in T.unroll(NUM_MMA_Q):
                                         for mma_kv in T.unroll(NUM_MMA_KV):
@@ -654,7 +654,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 for mma_q in T.unroll(NUM_MMA_Q):
                                     for j in T.unroll(2):
                                         with T.thread():
-                                            md = T.alloc_local([2], "float32", layout="default")
+                                            md = T.alloc_local([2], "float32")
                                             md[0] = m[mma_q, j]
                                             md[1] = d[mma_q, j]
                                             Tp.copy(cta_sync_md_smem[wg_id, warp_id, mma_q, j * 8 + lane_id // 4, :], md[:])
@@ -669,7 +669,7 @@ __device__ __forceinline__ float {func_name}() {{
                                                 d_new = float_var(1.0)
                                                 for i in T.unroll(NUM_WARPS_KV):
                                                     with T.thread():
-                                                        md = T.alloc_local([2], "float32", layout="default") 
+                                                        md = T.alloc_local([2], "float32") 
                                                         Tp.copy(md[:], cta_sync_md_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, j * 8 + lane_id // 4, :])
                                                         m_prev = float_var(m_new[0])
                                                         d_prev = float_var(d_new[0])
@@ -677,19 +677,19 @@ __device__ __forceinline__ float {func_name}() {{
                                                         d_new[0] = d_prev[0] * ptx_exp2(m_prev[0] - m_new[0]) + md[1] * ptx_exp2(md[0] - m_new[0])
                                                 for i in T.unroll(NUM_WARPS_KV):
                                                     with T.thread():
-                                                        md = T.alloc_local([2], "float32", layout="default")
+                                                        md = T.alloc_local([2], "float32")
                                                         Tp.copy(md[:], cta_sync_md_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, j * 8 + lane_id // 4, :])
                                                         o_scale[j, i] = ptx_exp2(md[0] - m_new[0])
                                                 m[mma_q, j] = m_new[0]
                                                 d[mma_q, j] = d_new[0]
                                         for mma_d in T.unroll(NUM_MMA_D_VO):
                                             with T.thread():
-                                                o_new = T.alloc_local([8], "float32", layout="default")
+                                                o_new = T.alloc_local([8], "float32")
                                                 for i in T.unroll(8):
                                                     o_new[i] = 0.0
                                                 for i in T.unroll(NUM_WARPS_KV):
                                                     with T.thread():
-                                                        o_i = T.alloc_local([8], "float32", layout="default")
+                                                        o_i = T.alloc_local([8], "float32")
                                                         Tp.copy(o_i[:], cta_sync_o_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, mma_d, lane_id, :])
                                                         for reg_id in T.unroll(8):
                                                             o_new[reg_id] += o_i[reg_id] * o_scale[(reg_id % 4) // 2, i]
@@ -698,7 +698,7 @@ __device__ __forceinline__ float {func_name}() {{
                             @T.macro
                             def normalize_d():
                                 with T.thread():
-                                    d_rcp = T.alloc_local([NUM_MMA_Q, 2], "float32", layout="default")
+                                    d_rcp = T.alloc_local([NUM_MMA_Q, 2], "float32")
                                     for mma_q in T.unroll(NUM_MMA_Q):
                                         for j in T.unroll(2):
                                             d_rcp[mma_q, j] = T.if_then_else(m[mma_q, j] != -INF, ptx_rcp(d[mma_q, j]), 0.0)
@@ -712,7 +712,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 for mma_q in T.unroll(NUM_MMA_Q):
                                     for mma_d in T.unroll(NUM_MMA_D_VO):
                                         with T.thread():
-                                            o_frag_f16 = T.alloc_local([8], "float16", layout="default")
+                                            o_frag_f16 = T.alloc_local([8], "float16")
                                             Tp.cast(o_frag_f16[:], o_frag[mma_q, mma_d, :])
                                             o_smem_offset_w = int_var(get_permuted_offset(UPCAST_STRIDE_O, wg_id * CTA_TILE_Q + (get_warp_idx_q(tid) * NUM_MMA_Q + mma_q) * 16 + lane_id % 16, mma_d * 2 + lane_id // 16))
                                             T.ptx.stmatrix(4, False, o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]), o_frag_f16.ptr_to([0]))
@@ -820,9 +820,9 @@ __device__ __forceinline__ float {func_name}() {{
         class State:
             def __init__(self, vec_size):
                 self.vec_size = vec_size
-                self.o = T.alloc_local([vec_size], "float32", layout="default")
-                self.m = T.alloc_local([1], "float32", layout="default")
-                self.d = T.alloc_local([1], "float32", layout="default")
+                self.o = T.alloc_local([vec_size], "float32")
+                self.m = T.alloc_local([1], "float32")
+                self.d = T.alloc_local([1], "float32")
                 IRBuilder.name("state_o", self.o)
                 IRBuilder.name("state_m", self.m)
                 IRBuilder.name("state_d", self.d)
@@ -879,12 +879,12 @@ __device__ __forceinline__ void {func_name}() {{
         ):
             batch_size = T.int32()
 
-            partial_o_buf = T.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", layout="default", offset_factor=1)
-            final_o_buf = T.match_buffer(final_o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", layout="default")
-            partial_lse_buf = T.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", layout="default", offset_factor=1)
-            num_qo_len_buf = T.match_buffer(num_qo_len_ptr, [1], "int32", layout="default", offset_factor=1)
-            merge_indptr_buf = T.match_buffer(merge_indptr_ptr, [MAX_NUM_KV_SPLITS], "int32", layout="default", offset_factor=1)
-            merge_o_indices_buf = T.match_buffer(merge_o_indices_ptr, [MAX_NUM_KV_SPLITS], "int32", layout="default", offset_factor=1)
+            partial_o_buf = T.match_buffer(partial_o_ptr, [MAX_NUM_KV_SPLITS * head_dim * kv_heads], "float16", offset_factor=1)
+            final_o_buf = T.match_buffer(final_o_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16")
+            partial_lse_buf = T.match_buffer(partial_lse_ptr, [MAX_NUM_KV_SPLITS * kv_heads], "float32", offset_factor=1)
+            num_qo_len_buf = T.match_buffer(num_qo_len_ptr, [1], "int32", offset_factor=1)
+            merge_indptr_buf = T.match_buffer(merge_indptr_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
+            merge_o_indices_buf = T.match_buffer(merge_o_indices_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
             with T.kernel():
                 bx = T.cta_id([SM_COUNT], parent="kernel")
                 warp_id = T.warp_id([NUM_THREADS // 32], parent="cta")
@@ -895,10 +895,10 @@ __device__ __forceinline__ void {func_name}() {{
                     ty = int_var(lane_id // BDX)
                     worker_id = int_var(bx * NUM_WARPS + warp_id)
 
-                    buf = T.alloc_shared([SMEM_SIZE], "uint8", layout="default")
+                    buf = T.alloc_shared([SMEM_SIZE], "uint8")
                     pool = T.meta_var(Tp.PoolAllocator(buf.data))
-                    v_smem = pool.alloc([NUM_WARPS, NUM_SMEM_STAGES, BDY, HEAD_DIM], "float16", layout="default")
-                    s_smem = pool.alloc([NUM_WARPS, 32], "float32", layout="default")
+                    v_smem = pool.alloc([NUM_WARPS, NUM_SMEM_STAGES, BDY, HEAD_DIM], "float16")
+                    s_smem = pool.alloc([NUM_WARPS, 32], "float32")
 
                     num_qo_len_local = int_var(num_qo_len_buf[0])
 
@@ -941,7 +941,7 @@ __device__ __forceinline__ void {func_name}() {{
                                     T.ptx.cp_async.wait_group(NUM_SMEM_STAGES - 1)
                                     warp_sync()
 
-                                    v = T.alloc_local([VEC_SIZE], "float32", layout="default")
+                                    v = T.alloc_local([VEC_SIZE], "float32")
                                     cast_load(v, VEC_SIZE, v_smem, warp_id, it % NUM_SMEM_STAGES, ty[0], tx[0] * VEC_SIZE)
                                     
                                     if it * BDY + ty[0] < num_index_sets[0]:
@@ -970,7 +970,7 @@ __device__ __forceinline__ void {func_name}() {{
                                 for it in T.unroll(BDY):
                                     with T.thread():
                                         s = float_var(s_smem[warp_id, it])
-                                        v = T.alloc_local([VEC_SIZE], "float32", layout="default")
+                                        v = T.alloc_local([VEC_SIZE], "float32")
                                         cast_load(v, VEC_SIZE, v_smem, warp_id, 0, it, tx[0] * VEC_SIZE)
                                         state.merge(v, s[0], 1)
 

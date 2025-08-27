@@ -874,5 +874,40 @@ def test_range():
     tvm.ir.assert_structural_equal(test, expected)
 
 
+def test_buffer():
+    # fmt: off
+    @T.prim_func(tirp=True, private=True)
+    def test(
+        A: T.Buffer((10, 11), "float32", layout=None),
+        B: T.Buffer((10, 11), "float32", scope="global"),
+        C: T.Buffer((10, 11), "float32", logical_scope="kernel", layout="default"),
+        D: T.Buffer((10, 11), "float32", logical_scope="kernel", layout=T.TileLayout(([10, 11], [1, 10]))),
+        E_ptr: T.handle,
+        F_ptr: T.handle,
+        G_ptr: T.handle,
+        H_ptr: T.handle,
+    ):
+        E = T.match_buffer(E_ptr, [10, 11], "float16", layout=None)
+        F = T.match_buffer(F_ptr, [10, 11], "float16", scope="global")
+        G = T.match_buffer(G_ptr, [10, 11], "float16", logical_scope="kernel", layout="default")
+        H = T.match_buffer(H_ptr, [10, 11], "float16", logical_scope="kernel", layout=T.TileLayout(([10, 11], [1, 10])))
+
+        A0 = T.decl_buffer((10, 11), "float32", data=A.data, layout=None)
+        B0 = T.decl_buffer((10, 11), "float32", data=B.data, scope="global")
+        C0 = T.decl_buffer((10, 11), "float32", data=C.data, logical_scope="kernel", layout="default")
+        D0 = T.decl_buffer((10, 11), "float32", data=D.data, logical_scope="kernel", layout=T.TileLayout(([10, 11], [1, 10])))
+
+        with T.kernel():
+            A1 = T.alloc_buffer((10, 11), "float32", layout=None)
+            B1 = T.alloc_buffer((10, 11), "float32", scope="global")
+            C1 = T.alloc_buffer((10, 11), "float32", logical_scope="kernel", layout="default")
+            D1 = T.alloc_buffer((10, 11), "float32", logical_scope="kernel", layout=T.TileLayout(([10, 11], [1, 10])))
+
+            pass
+    # fmt: on
+    code = test.script()
+    assert_structural_equal(test, from_source(code))
+
+
 if __name__ == "__main__":
     tvm.testing.main()

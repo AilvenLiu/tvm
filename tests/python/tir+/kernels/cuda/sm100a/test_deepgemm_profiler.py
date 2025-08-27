@@ -353,10 +353,10 @@ def test():
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def deepgemm(A: T.Buffer((M, K), a_type, layout="default"), B: T.Buffer((N, K), b_type, layout="default"), 
-                D: T.Buffer((M, N), d_type, layout="default"),
-                SFA: T.Buffer((ceildiv(K, QUANT_SIZE) // 4, M), "uint32", layout="default"),
-                SFB: T.Buffer((ceildiv(K, QUANT_SIZE) // 4, N), "uint32", layout="default"),
+    def deepgemm(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), 
+                D: T.Buffer((M, N), d_type),
+                SFA: T.Buffer((ceildiv(K, QUANT_SIZE) // 4, M), "uint32"),
+                SFB: T.Buffer((ceildiv(K, QUANT_SIZE) // 4, N), "uint32"),
                 profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
         
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)

@@ -203,7 +203,7 @@ class BufferProxy:
         buffer_type="",
         axis_separators=None,
         logical_scope="",
-        layout=None,
+        layout="default",
     ) -> Buffer:
         return buffer(
             shape,

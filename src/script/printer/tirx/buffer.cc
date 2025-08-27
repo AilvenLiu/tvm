@@ -187,7 +187,11 @@ ffi::Map<ffi::String, ExprDoc> BufferAttrs(tirx::Buffer buffer, const AccessPath
   }
   // Step 12. Handle `buffer.layout`
   if (buffer->layout.defined()) {
-    kwargs.Set("layout", d->AsDoc<ExprDoc>(buffer->layout, buffer_p->Attr("layout")));
+    if (!StructuralEqual()(buffer->layout, tir::TileLayoutNode::DefaultLayout(buffer->shape))) {
+      kwargs.Set("layout", d->AsDoc<ExprDoc>(buffer->layout, buffer_p->Attr("layout")));
+    }
+  } else {
+    kwargs.Set("layout", LiteralDoc::None(buffer_p->Attr("layout")));
   }
   // Step 13. Handle `buffer.allocated_addr`
   if (!buffer->allocated_addr.empty()) {

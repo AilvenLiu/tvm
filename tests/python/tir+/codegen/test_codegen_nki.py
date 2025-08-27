@@ -62,6 +62,7 @@ def test_nki_add_1():
                         T.nki.store(B[i, j], B_sbuf[i, j])
     # fmt: on
     src = lower_and_get_source(func)
+    print(src)
     expected = """# Function: func_kernel
 import neuronxcc.nki.language as nl
 from neuronxcc.nki import baremetal, benchmark, simulate_kernel, trace
@@ -75,19 +76,19 @@ import neuronxcc.nki.compiler as ncc
 @nki.compiler.skip_middle_end_transformations
 @baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
 def func_kernel(A, B: nt.mutable_tensor, ):
-  B_buffer = B.reshape([128, 512])
-  A_buffer = A.reshape([128, 512])
+  B_buffer = B.reshape([65536])
+  A_buffer = A.reshape([65536])
   A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
   B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=2048))
   i = nl.arange(128)
   j = nl.arange(512)
-  A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[i[:, None, ], j[None, :, ]])
+  A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[((i[:, None, ] * 512) + j[None, :, ])])
   i_1 = nl.arange(128)
   j_1 = nl.arange(512)
   B_sbuf[i_1[:, None, ], j_1[None, :, ]] = nisa.tensor_scalar(A_sbuf[i_1[:, None, ], j_1[None, :, ]], operand0=1.000000e+00, op0=nki.language.add, reverse0=False)
   i_2 = nl.arange(128)
   j_2 = nl.arange(512)
-  nl.store(B_buffer[i_2[:, None, ], j_2[None, :, ]], B_sbuf[i_2[:, None, ], j_2[None, :, ]])
+  nl.store(B_buffer[((i_2[:, None, ] * 512) + j_2[None, :, ])], B_sbuf[i_2[:, None, ], j_2[None, :, ]])
   return B
   """
     assert compare_strings_ignore_whitespace(src, expected)
@@ -117,6 +118,7 @@ def test_nki_add_2():
 
     # fmt: on
     src = lower_and_get_source(func)
+    print(src)
     expected = """# Function: func_kernel
 import neuronxcc.nki.language as nl
 from neuronxcc.nki import baremetal, benchmark, simulate_kernel, trace
@@ -130,20 +132,20 @@ import neuronxcc.nki.compiler as ncc
 @nki.compiler.skip_middle_end_transformations
 @baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
 def func_kernel(A, B: nt.mutable_tensor, ):
-  B_buffer = B.reshape([128, 2048])
-  A_buffer = A.reshape([128, 2048])
+  B_buffer = B.reshape([262144])
+  A_buffer = A.reshape([262144])
   A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
   B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=2048))
   for k in nl.sequential_range(4, body_no_reorder=True):
     i = nl.arange(128)
     j = nl.arange(512)
-    A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[i[:, None, ], ((k * 512) + j[None, :, ])])
+    A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[(((i[:, None, ] * 2048) + (k * 512)) + j[None, :, ])])
     i_1 = nl.arange(128)
     j_1 = nl.arange(512)
     B_sbuf[i_1[:, None, ], j_1[None, :, ]] = nisa.tensor_scalar(A_sbuf[i_1[:, None, ], j_1[None, :, ]], operand0=1.000000e+00, op0=nki.language.add, reverse0=False)
     i_2 = nl.arange(128)
     j_2 = nl.arange(512)
-    nl.store(B_buffer[i_2[:, None, ], ((k * 512) + j_2[None, :, ])], B_sbuf[i_2[:, None, ], j_2[None, :, ]])
+    nl.store(B_buffer[(((i_2[:, None, ] * 2048) + (k * 512)) + j_2[None, :, ])], B_sbuf[i_2[:, None, ], j_2[None, :, ]])
   return B"""
     assert compare_strings_ignore_whitespace(src, expected)
 
@@ -273,6 +275,7 @@ def test_nki_matmul_1():
     # fmt: on
 
     src = lower_and_get_source(func)
+    print(src)
     expected = """# Function: func_kernel
 import neuronxcc.nki.language as nl
 from neuronxcc.nki import baremetal, benchmark, simulate_kernel, trace
@@ -286,9 +289,9 @@ import neuronxcc.nki.compiler as ncc
 @nki.compiler.skip_middle_end_transformations
 @baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
 def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
-  result_buffer = result.reshape([4096, 2048])
-  lhsT_buffer = lhsT.reshape([1024, 4096])
-  rhs_buffer = rhs.reshape([1024, 2048])
+  result_buffer = result.reshape([8388608])
+  rhs_buffer = rhs.reshape([2097152])
+  lhsT_buffer = lhsT.reshape([4194304])
   result_tiles = nl.ndarray(shape=[128, 2, 16, 1, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
   rhs_tiles = nl.ndarray(shape=[128, 8, 512], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=65536))
   lhsT_tiles = nl.ndarray(shape=[128, 8, 2048], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=73728))
@@ -303,12 +306,12 @@ def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
     for bk_r in nl.sequential_range(8):
       i = nl.arange(128)
       j = nl.arange(512)
-      rhs_tiles[i[:, None, ], bk_r, j[None, :, ]] = nl.load(rhs_buffer[((bk_r * 128) + i[:, None, ]), ((n * 512) + j[None, :, ])])
+      rhs_tiles[i[:, None, ], bk_r, j[None, :, ]] = nl.load(rhs_buffer[((((bk_r * 262144) + (i[:, None, ] * 2048)) + (n * 512)) + j[None, :, ])])
     for m in nl.sequential_range(2):
       for bk_l in nl.sequential_range(8):
         i_1 = nl.arange(128)
         j_1 = nl.arange(2048)
-        lhsT_tiles[i_1[:, None, ], bk_l, j_1[None, :, ]] = nl.load(lhsT_buffer[((bk_l * 128) + i_1[:, None, ]), ((m * 2048) + j_1[None, :, ])])
+        lhsT_tiles[i_1[:, None, ], bk_l, j_1[None, :, ]] = nl.load(lhsT_buffer[((((bk_l * 524288) + (i_1[:, None, ] * 4096)) + (m * 2048)) + j_1[None, :, ])])
       for bm in nl.sequential_range(16):
         i_2 = nl.arange(128)
         j_2 = nl.arange(512)
@@ -328,7 +331,7 @@ def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
         result_packed[i_5[:, None, ], j_5[None, :, ]] = nisa.tensor_copy(result_tiles[i_5[:, None, ], m_1, bm_1, 0, j_5[None, :, ]])
         i_6 = nl.arange(128)
         j_6 = nl.arange(512)
-        nl.store(result_buffer[(((m_1 * 2048) + (bm_1 * 128)) + i_6[:, None, ]), ((n * 512) + j_6[None, :, ])], result_packed[i_6[:, None, ], j_6[None, :, ]])
+        nl.store(result_buffer[(((((m_1 * 4194304) + (bm_1 * 262144)) + (i_6[:, None, ] * 2048)) + (n * 512)) + j_6[None, :, ])], result_packed[i_6[:, None, ], j_6[None, :, ]])
   return result"""
     assert compare_strings_ignore_whitespace(src, expected)
 

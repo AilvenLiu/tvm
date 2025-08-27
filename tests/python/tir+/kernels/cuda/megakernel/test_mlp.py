@@ -1,23 +1,31 @@
 import math
+from enum import Enum
+
+import flashinfer
 import ml_dtypes
 import numpy as np
-from enum import Enum
 import pytest
 
 import tvm
-from tvm.script import tir as T, tirp as Tp
 import tvm.testing
+from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
-import flashinfer
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace
-from tvm.tirp.megakernel.common import KernelConfig, ceildiv, JobType, get_source, ProfileEventType, event_type_names
-from tvm.tirp.megakernel.gemm import GemmTile
-from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
-from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
 from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile
-from tvm.tirp.megakernel.static_scheduler import StaticTileScheduler
+from tvm.tirp.megakernel.common import (
+    JobType,
+    KernelConfig,
+    ProfileEventType,
+    ceildiv,
+    event_type_names,
+    get_source,
+)
 from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
-
+from tvm.tirp.megakernel.gemm import GemmTile
+from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
+from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
+from tvm.tirp.megakernel.static_scheduler import StaticTileScheduler
 
 INTERMEDIATE_SIZE = 25600
 HIDDEN_SIZE = 5120
@@ -36,6 +44,8 @@ NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
 PROFILER_BUFFER_SIZE = int(1e6)
 PROFILER_WRITE_STRIDE = KernelConfig.SM_NUMBER * NUM_GROUPS
 PROFILER_ON = True
+
+
 # fmt: off
 class MegaKernel:
     class_list = [
@@ -80,14 +90,14 @@ class MegaKernel:
         @T.prim_func(tirp=True)
         def mega_kernel_static(
             input_ptr: T.handle,
-            W_gate_up: T.Buffer((INTERMEDIATE_SIZE*2, HIDDEN_SIZE), dtype, layout="default"),
+            W_gate_up: T.Buffer((INTERMEDIATE_SIZE*2, HIDDEN_SIZE), dtype),
             out_gate_up_proj_ptr: T.handle,
             out_silu_multiply_ptr: T.handle,
-            W_down_proj: T.Buffer((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype, layout="default"),
+            W_down_proj: T.Buffer((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype),
             partial_sum_down_proj_ptr: T.handle,
             out_down_proj_ptr: T.handle,
             residual_ptr: T.handle,
-            rmsnorm_weight: T.Buffer((HIDDEN_SIZE, ), dtype, layout="default"),
+            rmsnorm_weight: T.Buffer((HIDDEN_SIZE, ), dtype),
             etensor_gate_up_proj: T.Buffer((INTERMEDIATE_SIZE//GemmTile.BLK_N, ), dtype="int32"),
             etensor_down_proj: T.Buffer((DOWN_PROJ_SPLIT_K_FACTOR, ), dtype="int32"),
             etensor_down_proj_reduce: T.Buffer((HIDDEN_SIZE//GemmTile.BLK_N, ), dtype="int32"),
@@ -96,12 +106,12 @@ class MegaKernel:
             profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
         ):
             batch_size = T.int32()
-            input = T.match_buffer(input_ptr, [batch_size, HIDDEN_SIZE], dtype, layout="default")
-            out_gate_up_proj = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE*2], dtype, layout="default")
-            out_silu_multiply = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE], dtype, layout="default")
-            partial_sum_down_proj = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE], "float32", layout="default")
-            out_down_proj = T.match_buffer(out_down_proj_ptr, [batch_size, HIDDEN_SIZE], dtype, layout="default")
-            residual = T.match_buffer(residual_ptr, [batch_size, HIDDEN_SIZE], dtype, layout="default")
+            input = T.match_buffer(input_ptr, [batch_size, HIDDEN_SIZE], dtype)
+            out_gate_up_proj = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE*2], dtype)
+            out_silu_multiply = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE], dtype)
+            partial_sum_down_proj = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE], "float32")
+            out_down_proj = T.match_buffer(out_down_proj_ptr, [batch_size, HIDDEN_SIZE], dtype)
+            residual = T.match_buffer(residual_ptr, [batch_size, HIDDEN_SIZE], dtype)
             etensor_add_rms_norm = T.match_buffer(etensor_add_rms_norm_ptr, [batch_size], dtype="int32")
             A_tensor_map_up_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
             B_tensor_map_up_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
@@ -211,14 +221,14 @@ class MegaKernel:
         @T.prim_func(tirp=True)
         def mega_kernel_dynamic(
             input_ptr: T.handle,
-            W_gate_up: T.Buffer((INTERMEDIATE_SIZE*2, HIDDEN_SIZE), dtype, layout="default"),
+            W_gate_up: T.Buffer((INTERMEDIATE_SIZE*2, HIDDEN_SIZE), dtype),
             out_gate_up_proj_ptr: T.handle,
             out_silu_multiply_ptr: T.handle,
-            W_down_proj: T.Buffer((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype, layout="default"),
+            W_down_proj: T.Buffer((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype),
             partial_sum_down_proj_ptr: T.handle,
             out_down_proj_ptr: T.handle,
             residual_ptr: T.handle,
-            rmsnorm_weight: T.Buffer((HIDDEN_SIZE, ), dtype, layout="default"),
+            rmsnorm_weight: T.Buffer((HIDDEN_SIZE, ), dtype),
             etensor_gate_up_proj: T.Buffer((INTERMEDIATE_SIZE//GemmTile.BLK_N, ), dtype="int32"),
             etensor_down_proj: T.Buffer((DOWN_PROJ_SPLIT_K_FACTOR, ), dtype="int32"),
             etensor_down_proj_reduce: T.Buffer((HIDDEN_SIZE//GemmTile.BLK_N, ), dtype="int32"),
@@ -231,12 +241,12 @@ class MegaKernel:
             profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
         ):
             batch_size = T.int32()
-            input = T.match_buffer(input_ptr, [batch_size, HIDDEN_SIZE], dtype, layout="default")
-            out_gate_up_proj = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE*2], dtype, layout="default")
-            out_silu_multiply = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE], dtype, layout="default")
-            partial_sum_down_proj = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE], "float32", layout="default")
-            out_down_proj = T.match_buffer(out_down_proj_ptr, [batch_size, HIDDEN_SIZE], dtype, layout="default")
-            residual = T.match_buffer(residual_ptr, [batch_size, HIDDEN_SIZE], dtype, layout="default")
+            input = T.match_buffer(input_ptr, [batch_size, HIDDEN_SIZE], dtype)
+            out_gate_up_proj = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE*2], dtype)
+            out_silu_multiply = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE], dtype)
+            partial_sum_down_proj = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE], "float32")
+            out_down_proj = T.match_buffer(out_down_proj_ptr, [batch_size, HIDDEN_SIZE], dtype)
+            residual = T.match_buffer(residual_ptr, [batch_size, HIDDEN_SIZE], dtype)
             etensor_add_rms_norm = T.match_buffer(etensor_add_rms_norm_ptr, [batch_size], dtype="int32")
             A_tensor_map_up_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
             B_tensor_map_up_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
@@ -375,10 +385,12 @@ class MegaKernel:
 def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
 
     def generate_exec_queue_static():
-        exec_queue = np.zeros((KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4), dtype=np.int32)
+        exec_queue = np.zeros(
+            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4), dtype=np.int32
+        )
         central_queue = []
         # gate_up_proj
-        for n in range(INTERMEDIATE_SIZE*2 // GemmTile.BLK_N):
+        for n in range(INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N):
             central_queue.append((0, n, 0, JobType.GEMM_GATE_UP_PROJ.value))
         # split_silu_multiply
         for n in range(INTERMEDIATE_SIZE // SiluMultiplyTile.TILE_SIZE):
@@ -393,7 +405,10 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
         )
         M_tile_down_proj_reduce = ceildiv(batch_size, M_split_down_proj_reduce)
         M_split_down_proj_reduce = ceildiv(batch_size, M_tile_down_proj_reduce)
-        N_tile = ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, M_split_down_proj_reduce)) * SplitKReduceTile.N_UNIT
+        N_tile = (
+            ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, M_split_down_proj_reduce))
+            * SplitKReduceTile.N_UNIT
+        )
         for m in range(M_split_down_proj_reduce):
             for n in range(HIDDEN_SIZE // N_tile):
                 central_queue.append((m, n, 0, JobType.DOWN_PROJ_REDUCE.value))
@@ -431,31 +446,52 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
         # gate_up_proj
         for n in range(INTERMEDIATE_SIZE // GemmTile.BLK_N):
             exec_queue.enqueue(JobType.GEMM_GATE_UP_PROJ.value, 0, n, 0)
-            exec_queue.enqueue(JobType.GEMM_GATE_UP_PROJ.value, 0, n+INTERMEDIATE_SIZE//GemmTile.BLK_N, 0)
+            exec_queue.enqueue(
+                JobType.GEMM_GATE_UP_PROJ.value, 0, n + INTERMEDIATE_SIZE // GemmTile.BLK_N, 0
+            )
         return exec_queue
 
     def prepare_data():
         import torch
+
         arg_dict = {}
         arg_dict["input"] = torch.randn((batch_size, HIDDEN_SIZE), dtype=torch.float16)
-        arg_dict["W_gate_up"] = torch.zeros((INTERMEDIATE_SIZE*2, HIDDEN_SIZE), dtype=torch.float16)
+        arg_dict["W_gate_up"] = torch.zeros(
+            (INTERMEDIATE_SIZE * 2, HIDDEN_SIZE), dtype=torch.float16
+        )
         torch.nn.init.xavier_normal_(arg_dict["W_gate_up"], gain=1.0)
-        arg_dict["out_gate_up_proj"] = torch.zeros((batch_size, INTERMEDIATE_SIZE*2), dtype=torch.float16)
-        arg_dict["out_silu_multiply"] = torch.zeros((batch_size, INTERMEDIATE_SIZE), dtype=torch.float16)
-        arg_dict["W_down_proj"] = torch.zeros((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype=torch.float16) * 0.01
+        arg_dict["out_gate_up_proj"] = torch.zeros(
+            (batch_size, INTERMEDIATE_SIZE * 2), dtype=torch.float16
+        )
+        arg_dict["out_silu_multiply"] = torch.zeros(
+            (batch_size, INTERMEDIATE_SIZE), dtype=torch.float16
+        )
+        arg_dict["W_down_proj"] = (
+            torch.zeros((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype=torch.float16) * 0.01
+        )
         torch.nn.init.xavier_normal_(arg_dict["W_down_proj"], gain=1.0)
-        arg_dict["partial_sum_down_proj"] = torch.zeros((DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE), dtype=torch.float32)
+        arg_dict["partial_sum_down_proj"] = torch.zeros(
+            (DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE), dtype=torch.float32
+        )
         arg_dict["out_down_proj"] = torch.zeros((batch_size, HIDDEN_SIZE), dtype=torch.float16)
         arg_dict["residual"] = torch.zeros((batch_size, HIDDEN_SIZE), dtype=torch.float16)
         torch.nn.init.xavier_normal_(arg_dict["residual"], gain=1.0)
-        arg_dict["rmsnorm_weight"] = torch.randn((HIDDEN_SIZE, ), dtype=torch.float16)
-        arg_dict["etensor_gate_up_proj"] = torch.zeros((INTERMEDIATE_SIZE//GemmTile.BLK_N, ), dtype=torch.int32)
-        arg_dict["etensor_down_proj"] = torch.zeros((DOWN_PROJ_SPLIT_K_FACTOR, ), dtype=torch.int32)
-        arg_dict["etensor_down_proj_reduce"] = torch.zeros((HIDDEN_SIZE//GemmTile.BLK_N, ), dtype=torch.int32)
-        arg_dict["etensor_add_rms_norm"] = torch.zeros((batch_size, ), dtype=torch.int32)
-        arg_dict["etensor_end"] = torch.zeros((1, ), dtype=torch.int32)
-        arg_dict["actual_order"] = torch.full((KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4), JobType.END.value, dtype=torch.int32)
-        arg_dict["profiler_buffer"] = torch.zeros((PROFILER_BUFFER_SIZE, ), dtype=torch.uint64)
+        arg_dict["rmsnorm_weight"] = torch.randn((HIDDEN_SIZE,), dtype=torch.float16)
+        arg_dict["etensor_gate_up_proj"] = torch.zeros(
+            (INTERMEDIATE_SIZE // GemmTile.BLK_N,), dtype=torch.int32
+        )
+        arg_dict["etensor_down_proj"] = torch.zeros((DOWN_PROJ_SPLIT_K_FACTOR,), dtype=torch.int32)
+        arg_dict["etensor_down_proj_reduce"] = torch.zeros(
+            (HIDDEN_SIZE // GemmTile.BLK_N,), dtype=torch.int32
+        )
+        arg_dict["etensor_add_rms_norm"] = torch.zeros((batch_size,), dtype=torch.int32)
+        arg_dict["etensor_end"] = torch.zeros((1,), dtype=torch.int32)
+        arg_dict["actual_order"] = torch.full(
+            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4),
+            JobType.END.value,
+            dtype=torch.int32,
+        )
+        arg_dict["profiler_buffer"] = torch.zeros((PROFILER_BUFFER_SIZE,), dtype=torch.uint64)
         return arg_dict
 
     arg_dict = prepare_data()
@@ -469,14 +505,25 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
         exec_queue = generate_exec_queue_static()
         exec_queue_tvm = tvm.nd.array(exec_queue, tvm_dev)
         with target:
+
             def func():
-                tvm_arg_dict["etensor_gate_up_proj"] = tvm.nd.array(arg_dict["etensor_gate_up_proj"], device=tvm_dev)
-                tvm_arg_dict["etensor_down_proj"] = tvm.nd.array(arg_dict["etensor_down_proj"], device=tvm_dev)
-                tvm_arg_dict["etensor_down_proj_reduce"] = tvm.nd.array(arg_dict["etensor_down_proj_reduce"], device=tvm_dev)
-                tvm_arg_dict["etensor_add_rms_norm"] = tvm.nd.array(arg_dict["etensor_add_rms_norm"], device=tvm_dev)
+                tvm_arg_dict["etensor_gate_up_proj"] = tvm.nd.array(
+                    arg_dict["etensor_gate_up_proj"], device=tvm_dev
+                )
+                tvm_arg_dict["etensor_down_proj"] = tvm.nd.array(
+                    arg_dict["etensor_down_proj"], device=tvm_dev
+                )
+                tvm_arg_dict["etensor_down_proj_reduce"] = tvm.nd.array(
+                    arg_dict["etensor_down_proj_reduce"], device=tvm_dev
+                )
+                tvm_arg_dict["etensor_add_rms_norm"] = tvm.nd.array(
+                    arg_dict["etensor_add_rms_norm"], device=tvm_dev
+                )
                 tvm_arg_dict["residual"] = tvm.nd.array(arg_dict["residual"], device=tvm_dev)
                 if PROFILER_ON:
-                    tvm_arg_dict["profiler_buffer"] = tvm.nd.array(arg_dict["profiler_buffer"], device=tvm_dev)
+                    tvm_arg_dict["profiler_buffer"] = tvm.nd.array(
+                        arg_dict["profiler_buffer"], device=tvm_dev
+                    )
                 mod_mlp_static(
                     tvm_arg_dict["input"],
                     tvm_arg_dict["W_gate_up"],
@@ -494,6 +541,7 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                     exec_queue_tvm,
                     tvm_arg_dict["profiler_buffer"],
                 )
+
             ms = bench(func, warmup=10, repeat=30, proton_name="tir_static")
             print(f"TIR time: {ms:.3f} ms")
             if PROFILER_ON:
@@ -502,12 +550,18 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                     f"megakernel-mlp-static.perfetto-trace",
                     event_type_names,
                 )
-        return tvm_arg_dict["out_gate_up_proj"].numpy(), tvm_arg_dict["out_silu_multiply"].numpy(), tvm_arg_dict["out_down_proj"].numpy(), tvm_arg_dict["residual"].numpy()
+        return (
+            tvm_arg_dict["out_gate_up_proj"].numpy(),
+            tvm_arg_dict["out_silu_multiply"].numpy(),
+            tvm_arg_dict["out_down_proj"].numpy(),
+            tvm_arg_dict["residual"].numpy(),
+        )
 
     def tir_mlp_dynamic():
         target = tvm.target.Target("cuda")
         exec_queue = generate_exec_queue_dynamic()
         with target:
+
             def func():
                 tvm_arg_dict["etensor_gate_up_proj"] = tvm.nd.array(
                     arg_dict["etensor_gate_up_proj"], device=tvm_dev
@@ -521,16 +575,18 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                 tvm_arg_dict["etensor_add_rms_norm"] = tvm.nd.array(
                     arg_dict["etensor_add_rms_norm"], device=tvm_dev
                 )
-                tvm_arg_dict["etensor_end"] = tvm.nd.array(
-                    arg_dict["etensor_end"], device=tvm_dev
-                )
-                tvm_arg_dict["queue_tasks"] = tvm.nd.array(exec_queue.tasks, tvm_dev)   
+                tvm_arg_dict["etensor_end"] = tvm.nd.array(arg_dict["etensor_end"], device=tvm_dev)
+                tvm_arg_dict["queue_tasks"] = tvm.nd.array(exec_queue.tasks, tvm_dev)
                 tvm_arg_dict["queue_head"] = tvm.nd.array(exec_queue.head, tvm_dev)
                 tvm_arg_dict["queue_tail"] = tvm.nd.array(exec_queue.tail, tvm_dev)
                 tvm_arg_dict["residual"] = tvm.nd.array(arg_dict["residual"], device=tvm_dev)
                 if PROFILER_ON:
-                    tvm_arg_dict["profiler_buffer"] = tvm.nd.array(arg_dict["profiler_buffer"], device=tvm_dev)
-                tvm_arg_dict["actual_order"] = tvm.nd.array(arg_dict["actual_order"], device=tvm_dev)
+                    tvm_arg_dict["profiler_buffer"] = tvm.nd.array(
+                        arg_dict["profiler_buffer"], device=tvm_dev
+                    )
+                tvm_arg_dict["actual_order"] = tvm.nd.array(
+                    arg_dict["actual_order"], device=tvm_dev
+                )
                 mod_mlp_dynamic(
                     tvm_arg_dict["input"],
                     tvm_arg_dict["W_gate_up"],
@@ -552,6 +608,7 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                     tvm_arg_dict["actual_order"],
                     tvm_arg_dict["profiler_buffer"],
                 )
+
             ms = bench(func, warmup=10, repeat=30, proton_name="tir_dynamic")
             print(f"TIR time: {ms:.3f} ms")
             if PROFILER_ON:
@@ -560,14 +617,21 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                     f"megakernel-mlp-dynamic.perfetto-trace",
                     event_type_names,
                 )
-        return tvm_arg_dict["out_gate_up_proj"].numpy(), tvm_arg_dict["out_silu_multiply"].numpy(), tvm_arg_dict["out_down_proj"].numpy(), tvm_arg_dict["residual"].numpy()
+        return (
+            tvm_arg_dict["out_gate_up_proj"].numpy(),
+            tvm_arg_dict["out_silu_multiply"].numpy(),
+            tvm_arg_dict["out_down_proj"].numpy(),
+            tvm_arg_dict["residual"].numpy(),
+        )
 
     def std_mlp():
         import torch
+
         torch_dev = torch.device("cuda")
         std_arg_dict = {}
         for key, value in arg_dict.items():
             std_arg_dict[key] = value.to(torch_dev)
+
         def get_silu_multiply_std_impl():
             VEC_SIZE = 8
             SEQ_LEN = batch_size
@@ -582,7 +646,7 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                     layout="default",
                 )
                 output_global = T.match_buffer(
-                    output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global", layout="default"
+                    output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global"
                 )
 
                 with T.kernel():
@@ -590,9 +654,9 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                     tx = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
 
                     with T.thread():
-                        idx = T.alloc_local([1], "int32", layout="default")
-                        vec1 = T.alloc_local([VEC_SIZE], "float16", layout="default")
-                        vec2 = T.alloc_local([VEC_SIZE], "float16", layout="default")
+                        idx = T.alloc_local([1], "int32")
+                        vec1 = T.alloc_local([VEC_SIZE], "float16")
+                        vec2 = T.alloc_local([VEC_SIZE], "float16")
 
                         idx[0] = bx * KernelConfig.NUM_THREADS + tx
                         while idx[0] * VEC_SIZE < SEQ_LEN * INTERMEDIATE_SIZE:
@@ -601,54 +665,94 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                             for kv in T.serial(VEC_SIZE):
                                 vec1[kv] = input_cat_global[token_idx, offset_imme + kv]
                             for kv in T.serial(VEC_SIZE):
-                                vec2[kv] = input_cat_global[token_idx, INTERMEDIATE_SIZE + offset_imme + kv]
+                                vec2[kv] = input_cat_global[
+                                    token_idx, INTERMEDIATE_SIZE + offset_imme + kv
+                                ]
                             for kv in T.serial(VEC_SIZE):
                                 vec1[kv] = vec1[kv] * T.sigmoid(vec1[kv]) * vec2[kv]
                             for kv in T.serial(VEC_SIZE):
                                 output_global[token_idx, offset_imme + kv] = vec1[kv]
                             idx[0] += KernelConfig.SM_NUMBER * KernelConfig.NUM_THREADS
+
             return fused_split_silu_multiply
+
         _, mod_fused_split_silu_multiply = get_source(get_silu_multiply_std_impl())
+
         def func():
             out_gate_up_proj = torch.matmul(std_arg_dict["input"], std_arg_dict["W_gate_up"].T)
             out_gate_up_proj_tvm = tvm.nd.array(out_gate_up_proj.cpu(), device=tvm.cuda(0))
-            out_silu_multiply_tvm = tvm.nd.array(torch.zeros((batch_size, INTERMEDIATE_SIZE), dtype=torch.float16), device=tvm.cuda(0))
+            out_silu_multiply_tvm = tvm.nd.array(
+                torch.zeros((batch_size, INTERMEDIATE_SIZE), dtype=torch.float16),
+                device=tvm.cuda(0),
+            )
             mod_fused_split_silu_multiply(out_gate_up_proj_tvm, out_silu_multiply_tvm)
             out_silu_multiply = torch.from_numpy(out_silu_multiply_tvm.numpy()).to(torch_dev)
             out_down_proj = torch.matmul(out_silu_multiply, std_arg_dict["W_down_proj"].T)
             residual_clone = std_arg_dict["residual"].clone()
             flashinfer.norm.fused_add_rmsnorm(
-                out_down_proj, residual_clone, std_arg_dict["rmsnorm_weight"], AddRMSNormTile.EPS, enable_pdl=False
+                out_down_proj,
+                residual_clone,
+                std_arg_dict["rmsnorm_weight"],
+                AddRMSNormTile.EPS,
+                enable_pdl=False,
             )
             return out_gate_up_proj, out_silu_multiply, out_down_proj, residual_clone
+
         out_gate_up_proj, out_silu_multiply, out_down_proj, residual = func()
         ms = bench(func, warmup=10, repeat=30, proton_name="std")
         print(f"CUBLAS time: {ms:.3f} ms")
-        return out_gate_up_proj.cpu().numpy(), out_silu_multiply.cpu().numpy(), out_down_proj.cpu().numpy(), residual.cpu().numpy()
+        return (
+            out_gate_up_proj.cpu().numpy(),
+            out_silu_multiply.cpu().numpy(),
+            out_down_proj.cpu().numpy(),
+            residual.cpu().numpy(),
+        )
 
     with ProtonContext("blackwell_mlp"):
-        out_gate_up_proj_tir_static, out_silu_multiply_tir_static, out_add_rmsnorm_tir_static, residual_tir_static = tir_mlp_static()
+        (
+            out_gate_up_proj_tir_static,
+            out_silu_multiply_tir_static,
+            out_add_rmsnorm_tir_static,
+            residual_tir_static,
+        ) = tir_mlp_static()
         print("static pass", flush=True)
-        out_gate_up_proj_tir_dynamic, out_silu_multiply_tir_dynamic, out_add_rmsnorm_tir_dynamic, residual_tir_dynamic = tir_mlp_dynamic()
+        (
+            out_gate_up_proj_tir_dynamic,
+            out_silu_multiply_tir_dynamic,
+            out_add_rmsnorm_tir_dynamic,
+            residual_tir_dynamic,
+        ) = tir_mlp_dynamic()
         print("dynamic pass", flush=True)
         out_gate_up_proj_std, out_silu_multiply_std, out_add_rmsnorm_std, residual_std = std_mlp()
 
-    np.testing.assert_allclose(out_gate_up_proj_tir_static, out_gate_up_proj_std, rtol=1e-3, atol=1e-2)
-    np.testing.assert_allclose(out_silu_multiply_tir_static, out_silu_multiply_std, rtol=1e-3, atol=1e-2)
-    np.testing.assert_allclose(out_add_rmsnorm_tir_static, out_add_rmsnorm_std, rtol=1e-3, atol=1e-2)
+    np.testing.assert_allclose(
+        out_gate_up_proj_tir_static, out_gate_up_proj_std, rtol=1e-3, atol=1e-2
+    )
+    np.testing.assert_allclose(
+        out_silu_multiply_tir_static, out_silu_multiply_std, rtol=1e-3, atol=1e-2
+    )
+    np.testing.assert_allclose(
+        out_add_rmsnorm_tir_static, out_add_rmsnorm_std, rtol=1e-3, atol=1e-2
+    )
     np.testing.assert_allclose(residual_tir_static, residual_std, rtol=1e-3, atol=1e-2)
-    np.testing.assert_allclose(out_gate_up_proj_tir_dynamic, out_gate_up_proj_std, rtol=1e-3, atol=1e-2)
-    np.testing.assert_allclose(out_silu_multiply_tir_dynamic, out_silu_multiply_std, rtol=1e-3, atol=1e-2)
-    np.testing.assert_allclose(out_add_rmsnorm_tir_dynamic, out_add_rmsnorm_std, rtol=1e-3, atol=1e-2)
+    np.testing.assert_allclose(
+        out_gate_up_proj_tir_dynamic, out_gate_up_proj_std, rtol=1e-3, atol=1e-2
+    )
+    np.testing.assert_allclose(
+        out_silu_multiply_tir_dynamic, out_silu_multiply_std, rtol=1e-3, atol=1e-2
+    )
+    np.testing.assert_allclose(
+        out_add_rmsnorm_tir_dynamic, out_add_rmsnorm_std, rtol=1e-3, atol=1e-2
+    )
     np.testing.assert_allclose(residual_tir_dynamic, residual_std, rtol=1e-3, atol=1e-2)
+
 
 if __name__ == "__main__":
     mega_kernel_static = MegaKernel(problem_config).get_static_scheduler_func()
     mega_kernel_dynamic = MegaKernel(problem_config).get_dynamic_scheduler_func()
     src_mlp_static, mod_mlp_static = get_source(mega_kernel_static)
     src_mlp_dynamic, mod_mlp_dynamic = get_source(mega_kernel_dynamic)
-    
-    for batch_size in [127, 63, 31, 15 ,7, 3, 1]:
+
+    for batch_size in [127, 63, 31, 15, 7, 3, 1]:
         print("testing batch size: ", batch_size, flush=True)
         test(batch_size, mod_mlp_static, mod_mlp_dynamic)
-        

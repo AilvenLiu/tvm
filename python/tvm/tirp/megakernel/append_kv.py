@@ -48,9 +48,9 @@ class AppendKVTile(Tile):
         assert pos_map_tvm.shape[0] == self.batch_size
 
     def alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
-        self.idx = T.alloc_local([1], "int32", layout="default")
-        self.pos = T.alloc_local([1], "int32", layout="default")
-        self.vec = T.alloc_local([self.vec_size], "float16", layout="default")
+        self.idx = T.alloc_local([1], "int32")
+        self.pos = T.alloc_local([1], "int32")
+        self.vec = T.alloc_local([self.vec_size], "float16")
         IRBuilder.current().name("idx", self.idx)
         IRBuilder.current().name("pos", self.pos)
         IRBuilder.current().name("vec", self.vec)

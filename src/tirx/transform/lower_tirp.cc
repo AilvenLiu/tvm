@@ -502,11 +502,11 @@ class ScheduleContextRemover : public StmtExprMutator {
   }
 };
 
-class LogicalTensorRemover : public arith::IRMutatorWithAnalyzer {
+class BufferViewGetRemover : public arith::IRMutatorWithAnalyzer {
  public:
   static Stmt Remove(const Stmt& stmt, const Map<tirx::Var, Buffer> buffer_map) {
     arith::Analyzer ana;
-    LogicalTensorRemover remover(&ana);
+    BufferViewGetRemover remover(&ana);
     for (const auto& kv : buffer_map) {
       remover.storage_map_[kv.second] = kv.second;
     }
@@ -514,7 +514,7 @@ class LogicalTensorRemover : public arith::IRMutatorWithAnalyzer {
   }
 
  private:
-  explicit LogicalTensorRemover(arith::Analyzer* analyzer)
+  explicit BufferViewGetRemover(arith::Analyzer* analyzer)
       : arith::IRMutatorWithAnalyzer(analyzer) {}
   Stmt VisitStmt_(const BlockNode* op) override {
     for (const auto& alloc : op->alloc_buffers) {
@@ -590,20 +590,38 @@ class LogicalTensorRemover : public arith::IRMutatorWithAnalyzer {
   std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> replace_map_;
 };
 
-class StorageLower : public arith::IRMutatorWithAnalyzer {
+class LayoutApplier : public arith::IRMutatorWithAnalyzer {
  public:
-  static Stmt Flatten(const Stmt& stmt, const Map<tirx::Var, Buffer> buffer_map,
-                      const Target& target) {
+  static std::pair<Stmt, Map<Var, Buffer>> Flatten(const Stmt& stmt,
+                                                   const Map<tirx::Var, Buffer> buffer_map,
+                                                   const Target& target) {
     arith::Analyzer ana;
-    StorageLower storage_lower(&ana, target);
-    return storage_lower(stmt);
+    LayoutApplier storage_lower(&ana, target);
+    std::unordered_map<Var, Buffer> new_buffer_map;
+    std::vector<Buffer> param_flattened_buffers;
+    for (const auto& kv : buffer_map) {
+      if (kv.second->layout.defined()) {
+        param_flattened_buffers.push_back(storage_lower.GetFlattenedBuffer(kv.second));
+        Buffer buffer = kv.second;
+        auto* writer = buffer.CopyOnWrite();
+        writer->layout = std::nullopt;
+        new_buffer_map[kv.first] = buffer;
+      } else {
+        new_buffer_map[kv.first] = kv.second;
+      }
+    }
+    auto new_stmt = storage_lower(stmt);
+    for (const auto& buf : param_flattened_buffers) {
+      new_stmt = DeclBuffer(buf, new_stmt);
+    }
+    return std::make_pair(new_stmt, Map<Var, Buffer>(new_buffer_map));
   }
 
  protected:
   using IRMutatorWithAnalyzer::VisitExpr_;
   using IRMutatorWithAnalyzer::VisitStmt_;
 
-  explicit StorageLower(arith::Analyzer* analyzer, const Target& target)
+  explicit LayoutApplier(arith::Analyzer* analyzer, const Target& target)
       : arith::IRMutatorWithAnalyzer(analyzer), target_(target) {}
 
   Stmt VisitStmt_(const BlockNode* op) final {
@@ -786,7 +804,6 @@ Pass LowerTIRp() {
     // registers
     // Collect the extents of the ScopeIds for OpCall scheduling
     n->body = ScopeIdDefResolver::Resolve(n->body, target.value());
-
     // TIRp OpCall Scheduling
     int max_try = 100;
     while (!NoOpCallVerifier::Verify(n->body, false)) {
@@ -798,11 +815,13 @@ Pass LowerTIRp() {
       }
       max_try--;
     }
-    // Lower other TIRp aux data structures
     n->body = ExecScopeSliceResolver::Resolve(n->body, target.value());
+
+    // Cleanup other TIRp aux data structures
     n->body = ScheduleContextRemover::Remove(n->body);
-    n->body = LogicalTensorRemover::Remove(n->body, n->buffer_map);
-    n->body = StorageLower::Flatten(n->body, n->buffer_map, target.value());
+    n->body = BufferViewGetRemover::Remove(n->body, n->buffer_map);
+    std::tie(n->body, n->buffer_map) =
+        LayoutApplier::Flatten(n->body, n->buffer_map, target.value());
     n->body = BufferOffsetRemover::Remove(n->body);
     return f;
   };
@@ -815,5 +834,5 @@ TVM_FFI_STATIC_INIT_BLOCK({
 });
 
 }  // namespace transform
-}  // namespace tirxxxxxxxxx
+}  // namespace tirxxxxxxxxxx
 }  // namespace tvm

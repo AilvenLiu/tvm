@@ -39,13 +39,13 @@ class RopeTile(Tile):
         assert self.rope_pos_global.shape[0] == self.batch_size
 
     def alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
-        self.idx = T.alloc_local([1], "int32", layout="default")
-        self.cos = T.alloc_local([self.vec_size], "float32", layout="default")
-        self.sin = T.alloc_local([self.vec_size], "float32", layout="default")
-        self.qk_vec = T.alloc_local([self.vec_size], "float16", layout="default")
-        self.qk_vec32 = T.alloc_local([self.vec_size], "float32", layout="default")
-        self.qk_vec32_other = T.alloc_local([self.vec_size], "float32", layout="default")
-        self.mask = T.alloc_local([1], "uint32", layout="default")
+        self.idx = T.alloc_local([1], "int32")
+        self.cos = T.alloc_local([self.vec_size], "float32")
+        self.sin = T.alloc_local([self.vec_size], "float32")
+        self.qk_vec = T.alloc_local([self.vec_size], "float16")
+        self.qk_vec32 = T.alloc_local([self.vec_size], "float32")
+        self.qk_vec32_other = T.alloc_local([self.vec_size], "float32")
+        self.mask = T.alloc_local([1], "uint32")
         IRBuilder.current().name("idx", self.idx)
         IRBuilder.current().name("cos", self.cos)
         IRBuilder.current().name("sin", self.sin)
