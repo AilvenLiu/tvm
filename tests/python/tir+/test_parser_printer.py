@@ -645,7 +645,7 @@ def test_alloc_apis():
             self.inner_pool = inner_pool
             self.Tb = T.shared_cell("float16", "Tb")
             self.idx = T.local_cell("int32", "idx")
-            self.inner_pool2 = T.decl_cell("float16", self.inner_pool.data, "shared.dyn", 5, "inner_pool2")
+            self.inner_pool2 = T.decl_cell("float16", self.inner_pool.data, "shared.dyn", 5, name="inner_pool2")
 
         @T.macro
         def init(self):

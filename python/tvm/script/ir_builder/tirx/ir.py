@@ -31,7 +31,7 @@ from typing import Literal
 
 # isort: on
 
-from tvm import ir, tirx
+from tvm import DataType, ir, tir
 from tvm.ir import Type
 from tvm.ir.base import deprecated
 from tvm.runtime import String, convert
@@ -117,6 +117,17 @@ def _get_layout(
     return layout
 
 
+def _get_elem_offset(elem_offset, byte_offset, dtype: str):
+    assert (
+        elem_offset is None or byte_offset is None
+    ), "elem_offset and byte_offset cannot be set at the same time"
+    if elem_offset is not None:
+        return elem_offset
+    if byte_offset is None:
+        return None
+    return byte_offset // (DataType(dtype).bits // 8)
+
+
 _block_name_suffix = threading.local()
 
 
@@ -152,6 +163,7 @@ def buffer(
     data: Var = None,
     strides: list[PrimExpr] | None = None,
     elem_offset: PrimExpr = None,
+    byte_offset: PrimExpr = None,
     scope: str = "global",
     align: int = 0,
     offset_factor: int = 0,
@@ -218,7 +230,7 @@ def buffer(
         buffer_name,
         data,
         strides,
-        elem_offset,
+        _get_elem_offset(elem_offset, byte_offset, dtype),
         scope,
         align,
         offset_factor,
@@ -1456,6 +1468,7 @@ def decl_buffer(
     data=None,
     strides=None,
     elem_offset=None,
+    byte_offset=None,
     scope="global",
     align=0,
     offset_factor=0,
@@ -1486,6 +1499,9 @@ def decl_buffer(
 
     elem_offset : PrimExpr
         The offset in terms of number of dtype elements (including lanes).
+
+    byte_offset : PrimExpr
+        The offset in terms of number of bytes.
 
     scope : str
         The optional storage scope of buffer data pointer.
@@ -1521,7 +1537,7 @@ def decl_buffer(
         "",
         data,
         strides,
-        elem_offset,
+        _get_elem_offset(elem_offset, byte_offset, dtype),
         scope,
         align,
         offset_factor,
@@ -1574,14 +1590,14 @@ def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) 
     return buf[()]
 
 
-def decl_cell(dtype, data, scope, elem_offset, name=None) -> BufferLoad:
+def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None) -> BufferLoad:
     """Declare a zero-dimensional buffer (cell) from a pointer."""
     decl_frame = decl_buffer(
         shape=(),
         dtype=dtype,
         data=data,
         scope=scope,
-        elem_offset=elem_offset,
+        elem_offset=_get_elem_offset(elem_offset, byte_offset, dtype),
         strides=None,
         align=-1,
         offset_factor=0,

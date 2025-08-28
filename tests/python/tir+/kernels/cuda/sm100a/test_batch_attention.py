@@ -448,7 +448,7 @@ __device__ __forceinline__ float {func_name}() {{
                                         page_iter = int_var(T.floordiv(packed_block_iter[0], PAGE_SIZE))
                                         entry_idx = int_var(T.floormod(packed_block_iter[0], PAGE_SIZE))
                                         mapped_page = T.meta_var(T.if_then_else(packed_block_iter[0] < packed_kv_bound[0], kv_indices_buf[page_iter[0]], 0))
-                                        thr_local_kv_offset[i] = kv_buf.offset_of_p([mapped_page, 0, kv_head_idx[0], entry_idx[0], (lane_id % KV_THR_LAYOUT_COL) * upcast_size("float16")])
+                                        thr_local_kv_offset[i] = kv_buf.elem_offset_of([mapped_page, 0, kv_head_idx[0], entry_idx[0], (lane_id % KV_THR_LAYOUT_COL) * upcast_size("float16")])
 
                             @T.macro
                             def page_produce_kv(produce_v: bool, kv_idx_base_in, smem_offset, smem):
@@ -477,9 +477,9 @@ __device__ __forceinline__ float {func_name}() {{
                             @T.macro
                             def mma_sync_m16n16k16_row_col_f16f16f32(C_in, c_offset, A_in, a_offset, B_in, b_offset, init: bool):
                                 with T.thread():
-                                    C_mma = T.decl_buffer([8], dtype="float32", data=C_in.data, elem_offset=c_offset)
-                                    A_mma = T.decl_buffer([4], dtype="uint32", data=A_in.data, elem_offset=a_offset)
-                                    B_mma = T.decl_buffer([4], dtype="uint32", data=B_in.data, elem_offset=b_offset)
+                                    C_mma = T.decl_buffer([8], dtype="float32", data=C_in.data, byte_offset=c_offset)
+                                    A_mma = T.decl_buffer([4], dtype="uint32", data=A_in.data, byte_offset=a_offset)
+                                    B_mma = T.decl_buffer([4], dtype="uint32", data=B_in.data, byte_offset=b_offset)
                                     if init:
                                         T.ptx.mma("m16n8k16", "row", "col", "float32", "float16", "float16", "float32",
                                                 C_mma.ptr_to([0]), A_mma.ptr_to([0]), B_mma.ptr_to([0]))
@@ -508,13 +508,13 @@ __device__ __forceinline__ float {func_name}() {{
                                             k_smem_offset_r[0] = advance_offset_by_row(16, UPCAST_STRIDE_K, k_smem_offset_r[0])
                                             for mma_q in T.unroll(NUM_MMA_Q):
                                                 if mma_d == 0:
-                                                    mma_sync_m16n16k16_row_col_f16f16f32(s_frag, s_frag.offset_of_p([mma_q, mma_kv, 0]),
-                                                                                         a_frag, a_frag.offset_of_p([mma_q, 0]),
-                                                                                         b_frag, b_frag.offset_of_p([0]), True)
+                                                    mma_sync_m16n16k16_row_col_f16f16f32(s_frag, s_frag.byte_offset_of([mma_q, mma_kv, 0]),
+                                                                                         a_frag, a_frag.byte_offset_of([mma_q, 0]),
+                                                                                         b_frag, b_frag.byte_offset_of([0]), True)
                                                 else:
-                                                    mma_sync_m16n16k16_row_col_f16f16f32(s_frag, s_frag.offset_of_p([mma_q, mma_kv, 0]),
-                                                                                         a_frag, a_frag.offset_of_p([mma_q, 0]),
-                                                                                         b_frag, b_frag.offset_of_p([0]), False)
+                                                    mma_sync_m16n16k16_row_col_f16f16f32(s_frag, s_frag.byte_offset_of([mma_q, mma_kv, 0]),
+                                                                                         a_frag, a_frag.byte_offset_of([mma_q, 0]),
+                                                                                         b_frag, b_frag.byte_offset_of([0]), False)
                                         k_smem_offset_r[0] = advance_offset_by_column(2, k_smem_offset_r[0], mma_d) - NUM_MMA_KV * 16 * UPCAST_STRIDE_K
                                     q_smem_offset_r[0] -= NUM_MMA_D_QK * 2
                                     k_smem_offset_r[0] -= NUM_MMA_D_QK * size_of("float16")
@@ -576,12 +576,10 @@ __device__ __forceinline__ float {func_name}() {{
                                                 b_frag = T.alloc_local([4], "uint32")
                                                 T.ptx.ldmatrix(True, 4, ".b16", b_frag.ptr_to([0]), v_smem.ptr_to([v_smem_offset_r[0] * upcast_size("float16")]))
                                                 for mma_q in T.unroll(NUM_MMA_Q):
-                                                    s_frag_f16x2 = T.decl_buffer([NUM_MMA_Q, NUM_MMA_KV, 4], "uint32", data=s_frag_f16.data)
-                                                    b_frag_f16 = T.decl_buffer([8], "float16", data=b_frag.data)
                                                     mma_sync_m16n16k16_row_col_f16f16f32(
-                                                        o_frag, o_frag.offset_of_p([mma_q, mma_d, 0]),
-                                                        s_frag_f16x2, s_frag_f16x2.offset_of_p([mma_q, mma_kv, 0]),
-                                                        b_frag, b_frag.offset_of_p([0]), False
+                                                        o_frag, o_frag.byte_offset_of([mma_q, mma_d, 0]),
+                                                        s_frag_f16, s_frag_f16.byte_offset_of([mma_q, mma_kv, 0]),
+                                                        b_frag, b_frag.byte_offset_of([0]), False
                                                     )
                                                 v_smem_offset_r[0] = advance_offset_by_column(2, v_smem_offset_r[0], mma_d)
                                         v_smem_offset_r[0] = advance_offset_by_row(16, UPCAST_STRIDE_V, v_smem_offset_r[0]) - size_of("float16") * NUM_MMA_D_VO
@@ -760,7 +758,7 @@ __device__ __forceinline__ float {func_name}() {{
                                                     o_packed_idx = int_var(o_packed_idx_base + lane_id // 8 + mma_q * 16 + j * 4)
                                                     q = int_var(T.floordiv(o_packed_idx[0], GQA_GROUP_SIZE))
                                                     r = int_var(T.floormod(o_packed_idx[0], GQA_GROUP_SIZE))
-                                                    o_ptr_offset = int_var(o_ptr_base_offset + o_buf.offset_of_p([q[0], r[0], (lane_id % 8) * upcast_size("float16")]))
+                                                    o_ptr_offset = int_var(o_ptr_base_offset + o_buf.elem_offset_of([q[0], r[0], (lane_id % 8) * upcast_size("float16")]))
                                                     for mma_do in T.unroll(NUM_MMA_D_VO // 4):
                                                         if q[0] < qo_upperbound[0]:
                                                             o_buf_1d = Tp.reshape(o_buf, [-1])
@@ -794,7 +792,7 @@ __device__ __forceinline__ float {func_name}() {{
                                     write_partial_o(o_ptr_base_offset[0], num_kv_chunks[0] * KV_HEADS * HEAD_DIM)
                             else:
                                 with T.thread():
-                                    o_ptr_base_offset = int_var(o_buf.offset_of_p([q_indptr[0], kv_head_idx[0] * GQA_GROUP_SIZE, 0]))
+                                    o_ptr_base_offset = int_var(o_buf.elem_offset_of([q_indptr[0], kv_head_idx[0] * GQA_GROUP_SIZE, 0]))
                                     write_final_o(o_ptr_base_offset[0])
 
                             write_partial_lse()

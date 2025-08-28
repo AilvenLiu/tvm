@@ -404,14 +404,14 @@ class GEMMMPMCQueue(MPMCQueue):
         rank,
     ):
         self.head_r[0] = T.cuda.atomic_add(
-            self.head.access_ptr("rw", offset=self.head.offset_of_p([T.int32(0)])), 1
+            self.head.access_ptr("rw", offset=self.head.elem_offset_of([T.int32(0)])), 1
         )
         if self.head_r[0] < self.num_tot_tasks:
             self.masked_pos[0] = self.head_r[0] & self.mask
             fetched_task_type[0] = T.cuda.func_call(
                 "while_ld_global_acquire",
                 self.task_types.access_ptr(
-                    "r", offset=self.task_types.offset_of_p([self.masked_pos[0]])
+                    "r", offset=self.task_types.elem_offset_of([self.masked_pos[0]])
                 ),
                 source_code=while_ld_global_acquire,
                 return_type="int32",
@@ -443,14 +443,14 @@ class RSMPMCQueue(MPMCQueue):
         else:
             # fetch new task
             self.head_r[0] = T.cuda.atomic_add(
-                self.head.access_ptr("rw", offset=self.head.offset_of_p([T.int32(0)])), 1
+                self.head.access_ptr("rw", offset=self.head.elem_offset_of([T.int32(0)])), 1
             )
         if self.head_r[0] < self.num_tot_tasks:
             self.masked_pos[0] = self.head_r[0] & self.mask
             fetched_task_type[0] = T.cuda.func_call(
                 "ld_global_acquire",
                 self.task_types.access_ptr(
-                    "r", offset=self.task_types.offset_of_p([self.masked_pos[0]])
+                    "r", offset=self.task_types.elem_offset_of([self.masked_pos[0]])
                 ),
                 source_code=ld_global_acquire,
                 return_type="int32",
@@ -702,7 +702,7 @@ class Semaphore:
                     T.cuda.func_call(
                         "semaphore_notify_remote",
                         signal_rank,
-                        self.sem.access_ptr("rw", offset=self.sem.offset_of_p((m_idx, n_idx))),
+                        self.sem.access_ptr("rw", offset=self.sem.elem_offset_of((m_idx, n_idx))),
                         T.uint64(1),
                         source_code=semaphore_notify_remote,
                         return_type="uint64",

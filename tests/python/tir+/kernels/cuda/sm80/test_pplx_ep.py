@@ -142,7 +142,7 @@ def test_dispatch_combine(world_size=8):
             if lane_id == 0:
                 T.nvshmem.signal_op(
                     sig_addr=buf_target_wait.access_ptr(
-                        "w", offset=buf_target_wait.offset_of_p([dst_local_expert, group_idx])
+                        "w", offset=buf_target_wait.elem_offset_of([dst_local_expert, group_idx])
                     ),
                     signal=count[0] + 1,
                     sig_op="set",
@@ -189,14 +189,17 @@ def test_dispatch_combine(world_size=8):
                     T.nvshmem.putmem_signal_nbi.warp(
                         dst=buf_recv.access_ptr(
                             "w",
-                            offset=buf_recv.offset_of_p(
+                            offset=buf_recv.elem_offset_of(
                                 [dst_local_expert, group_idx, dst_index, 0]
                             ),
                         ),
-                        src=buf_send.access_ptr("r", offset=buf_send.offset_of_p([token_idx, 0])),
+                        src=buf_send.access_ptr(
+                            "r", offset=buf_send.elem_offset_of([token_idx, 0])
+                        ),
                         nelems=(HIDDEN_DIM + 1) * nbytes,
                         sig_addr=buf_actual_wait.access_ptr(
-                            "w", offset=buf_actual_wait.offset_of_p([dst_local_expert, group_idx])
+                            "w",
+                            offset=buf_actual_wait.elem_offset_of([dst_local_expert, group_idx]),
                         ),
                         signal=1,
                         sig_op="add",
@@ -222,7 +225,7 @@ def test_dispatch_combine(world_size=8):
                     group_rank = T.meta_var(group_idx % N_GROUP)
                     T.nvshmem.wait_until(
                         ivar=buf_target_wait.access_ptr(
-                            "r", offset=buf_target_wait.offset_of_p([local_expert, group_rank])
+                            "r", offset=buf_target_wait.elem_offset_of([local_expert, group_rank])
                         ),
                         cmp="ne",
                         cmp_value=0,
@@ -230,14 +233,14 @@ def test_dispatch_combine(world_size=8):
                     num_recv_tokens = buf_target_wait[local_expert, group_rank] - 1
                     T.nvshmem.wait_until(
                         ivar=buf_actual_wait.access_ptr(
-                            "r", offset=buf_actual_wait.offset_of_p([local_expert, group_rank])
+                            "r", offset=buf_actual_wait.elem_offset_of([local_expert, group_rank])
                         ),
                         cmp="eq",
                         cmp_value=num_recv_tokens,
                     )
                     smem_expert_st[tid] = T.cuda.atomic_add(
                         recv_num_per_expert.access_ptr(
-                            "rw", offset=recv_num_per_expert.offset_of_p([local_expert])
+                            "rw", offset=recv_num_per_expert.elem_offset_of([local_expert])
                         ),
                         T.uint32(num_recv_tokens),
                     )
@@ -368,14 +371,14 @@ def test_dispatch_combine(world_size=8):
                             dst_rank = T.meta_var(group * GROUP_SIZE + idx)
                             T.nvshmem.putmem_signal_nbi.warp(
                                 dst=buf_recv.access_ptr(
-                                    "w", offset=buf_recv.offset_of_p([dst_expert, index, 0])
+                                    "w", offset=buf_recv.elem_offset_of([dst_expert, index, 0])
                                 ),
                                 src=buf_send.access_ptr(
-                                    "r", offset=buf_send.offset_of_p([token_idx, 0])
+                                    "r", offset=buf_send.elem_offset_of([token_idx, 0])
                                 ),
                                 nelems=HIDDEN_DIM * nbytes,
                                 sig_addr=buf_actual_wait.access_ptr(
-                                    "w", offset=buf_actual_wait.offset_of_p([index])
+                                    "w", offset=buf_actual_wait.elem_offset_of([index])
                                 ),
                                 signal=1,
                                 sig_op="add",
@@ -399,7 +402,7 @@ def test_dispatch_combine(world_size=8):
                 if token_idx < M:
                     T.nvshmem.wait_until(
                         ivar=buf_actual_wait.access_ptr(
-                            "r", offset=buf_actual_wait.offset_of_p([token_idx])
+                            "r", offset=buf_actual_wait.elem_offset_of([token_idx])
                         ),
                         cmp="eq",
                         cmp_value=K,

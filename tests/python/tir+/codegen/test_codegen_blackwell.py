@@ -210,7 +210,7 @@ def test_tcgen05_cp_ld_roundtrip():
                     if tx == 0:
                         T.ptx.mbarrier.init(bar.data, 1)
                         for k in range(dtype_bits * WIDTH // 256):
-                            T.ptx.tcgen05.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([0, k * 8])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
+                            T.ptx.tcgen05.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.elem_offset_of([0, k * 8])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
                             T.ptx.tcgen05.cp(tmem_addr, 0, k * 256 // 32, descA[0], "128x256b", dtype, dtype, cta_group=cta_group)
                         T.ptx.tcgen05.commit(bar.data, cta_group)
                     T.ptx.mbarrier.try_wait(bar.data, phase[0])
@@ -342,8 +342,8 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                         T.ptx.mbarrier.init(bar.data, 1)
                         T.ptx.tcgen05.encode_instr_descriptor(descI.data, d_type, a_type, b_type, M, N, MMA_K, trans_a=False, trans_b=False, n_cta_groups=cta_group)
                         for k in range(K // MMA_K):
-                            T.ptx.tcgen05.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.offset_of_p([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
-                            T.ptx.tcgen05.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.offset_of_p([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
+                            T.ptx.tcgen05.encode_matrix_descriptor(descA.data, A_smem.access_ptr("r", offset=A_smem.elem_offset_of([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
+                            T.ptx.tcgen05.encode_matrix_descriptor(descB.data, B_smem.access_ptr("r", offset=B_smem.elem_offset_of([0, k * MMA_K])), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
                             if k == 0:
                                 T.ptx.tcgen05.mma(d_type, a_type, b_type, tmem_addr, descA[0], descB[0], descI[0], use_a_tmem=False, cta_group=cta_group, enable_input_d=False)
                             else:

@@ -43,13 +43,15 @@ class Semaphore:
             self.atomic_add_int32 = atomic_add_int32
         else:
             self.atomic_add_int32 = atomic_add_int32_local
+
     @T.macro
     def semaphore_wait(self, *coord):
         with T.thread():
             if self.cnt >= 0:
                 while 1:
                     T.ptx.ld_global_acquire(
-                        self.state[0], self.sem.access_ptr("r", offset=self.sem.offset_of_p(coord))
+                        self.state[0],
+                        self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
                     )
                     if T.cuda.syncthreads_and(self.state[0] == self.cnt):
                         break
@@ -57,7 +59,8 @@ class Semaphore:
             else:
                 while 1:
                     T.ptx.ld_global_acquire(
-                        self.state[0], self.sem.access_ptr("r", offset=self.sem.offset_of_p(coord))
+                        self.state[0],
+                        self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
                     )
                     if T.cuda.syncthreads_and(self.state[0] == 0):
                         break
@@ -66,22 +69,23 @@ class Semaphore:
     @T.macro
     def semaphore_notify(self, *coord, rank=-1):
         # wg is synced
-            if self.cnt >= 0:
-                T.cuda.func_call(
-                    "atomic_add_int32",
-                    self.sem.ptr_to(coord),
-                    1,
-                    rank,
-                    source_code=self.atomic_add_int32,
-                )
-            else:
-                T.cuda.func_call(
-                    "atomic_add_int32",
-                    self.sem.ptr_to(coord),
-                    -1,
-                    rank,
-                    source_code=self.atomic_add_int32,
-                )
+        if self.cnt >= 0:
+            T.cuda.func_call(
+                "atomic_add_int32",
+                self.sem.ptr_to(coord),
+                1,
+                rank,
+                source_code=self.atomic_add_int32,
+            )
+        else:
+            T.cuda.func_call(
+                "atomic_add_int32",
+                self.sem.ptr_to(coord),
+                -1,
+                rank,
+                source_code=self.atomic_add_int32,
+            )
+
 
 lds_v4 = """
 __forceinline__ __device__ void lds_v4(void* addr, int32_t* v1, int32_t* v2, int32_t* v3, int32_t* v4) {

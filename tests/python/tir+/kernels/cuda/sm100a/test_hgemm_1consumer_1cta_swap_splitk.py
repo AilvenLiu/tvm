@@ -164,7 +164,8 @@ def get_hgemm_kernel(dim_n, dim_k):
             with T.thread():
                 while 1:
                     T.ptx.ld_global_acquire(
-                        self.state[0], self.sem.access_ptr("r", offset=self.sem.offset_of_p(coord))
+                        self.state[0],
+                        self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
                     )
                     if T.cuda.syncthreads_and(self.state[0] == self.cnt):
                         break
@@ -177,7 +178,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                 if tid % 128 == 0:
                     T.cuda.func_call(
                         "atomic_add_system_uint64",
-                        self.sem.access_ptr("rw", offset=self.sem.offset_of_p(coord)),
+                        self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)),
                         T.uint64(1),
                         source_code=atomic_add_system_uint64,
                     )

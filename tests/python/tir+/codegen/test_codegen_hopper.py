@@ -576,16 +576,16 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
                                     T.ptx.fence.proxy("shared")
                                     T.ptx.mbarrier.arrive.expect_tx(T.address_of(bar), total_bytes)
                                     if clusterCtaIdx == 0:
-                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.offset_of_p(coord0[::-1])),
+                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.elem_offset_of(coord0[::-1])),
                                                                        T.address_of(bar), A_map, *coord0, cta_mask=int("1111", 2))
                                     if clusterCtaIdx == 1:
-                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.offset_of_p(coord1[::-1])),
+                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.elem_offset_of(coord1[::-1])),
                                                                        T.address_of(bar), A_map, *coord1, cta_mask=int("1111", 2))
                                     if clusterCtaIdx == 2:
-                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.offset_of_p(coord2[::-1])),
+                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.elem_offset_of(coord2[::-1])),
                                                                        T.address_of(bar), A_map, *coord2, cta_mask=int("1111", 2))
                                     if clusterCtaIdx == 3:
-                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.offset_of_p(coord3[::-1])),
+                                        T.ptx.cp_async.bulk.tensor.g2c(len(shape), A_smem.access_ptr(Buffer.WRITE, offset=A_smem.elem_offset_of(coord3[::-1])),
                                                                        T.address_of(bar), A_map, *coord3, cta_mask=int("1111", 2))
                                 # wait for the copy to finish
                                 T.ptx.mbarrier.try_wait(T.address_of(bar), phase)

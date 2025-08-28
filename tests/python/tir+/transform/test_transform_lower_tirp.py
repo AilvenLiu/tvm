@@ -685,7 +685,7 @@ def test_lower_decl_buffer_access_ptr():
                 A = T.decl_buffer([128], "float16", buf.data, elem_offset=32)
 
                 with T.thread():
-                    T.evaluate(A.access_ptr("rw", offset=A.offset_of_p([64])))
+                    T.evaluate(A.access_ptr("rw", offset=A.elem_offset_of([64])))
 
     @T.prim_func(private=True, tirp=True)
     def after():
@@ -737,7 +737,7 @@ def test_lower_buffer_offset():
                 tx = T.thread_id([128], parent="cta")
                 with T.thread():
                     A = T.alloc_buffer([64, 64], "float16", scope="local")
-                    A0 = T.decl_buffer([64], "float16", A.data, elem_offset=A.offset_of_p([32, 32]))
+                    A0 = T.decl_buffer([64], "float16", A.data, elem_offset=A.elem_offset_of([32, 32]))
                     with T.thread():
                         T.evaluate(T.address_of(A0[32]))
     # fmt: on

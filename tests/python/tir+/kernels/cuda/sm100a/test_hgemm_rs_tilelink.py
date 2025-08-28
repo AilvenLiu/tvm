@@ -227,7 +227,7 @@ class Semaphore:
             if tid % 128 == 0:
                 T.cuda.atomic_add(
                     self.sem.access_ptr(
-                        "rw", offset=self.sem.offset_of_p((m_idx * 4 + wg_id * 2 + cbx, n_idx))
+                        "rw", offset=self.sem.elem_offset_of((m_idx * 4 + wg_id * 2 + cbx, n_idx))
                     ),
                     1,
                 )
@@ -559,7 +559,7 @@ def test_hgemm_rs():
                     for stage in range(WORLD_SIZE):
                         rs_tile_scheduler.init(bx - GEMM_SMS)
                         if stage != 0:
-                            in_flag_addr = T.meta_var(sig_addr.access_ptr("r", offset=sig_addr.offset_of_p([stage - 1, bx - GEMM_SMS])))
+                            in_flag_addr = T.meta_var(sig_addr.access_ptr("r", offset=sig_addr.elem_offset_of([stage - 1, bx - GEMM_SMS])))
                             T.timer_start_cuda(ProfileEventType.WAIT, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
                             T.cuda.func_call("spin_wait", in_flag_addr, source_code=spin_wait)
                             T.timer_end_cuda(ProfileEventType.WAIT, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
@@ -632,7 +632,7 @@ def test_hgemm_rs():
                                 T.timer_end_cuda(ProfileEventType.ACCUM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
                                 rs_tile_scheduler.next_tile(stride=RS_SMS)
                             T.ptx.bar.sync(1, 256)
-                            flag_addr = T.meta_var(sig_addr.access_ptr("w", offset=sig_addr.offset_of_p([stage, bx - GEMM_SMS])))
+                            flag_addr = T.meta_var(sig_addr.access_ptr("w", offset=sig_addr.elem_offset_of([stage, bx - GEMM_SMS])))
                             if tid == 0 :
                                 T.ptx.cp_async.bulk.wait_group(0)
                                 T.cuda.func_call("signal_fp16", flag_addr, dst_rank, 1, source_code=signal_fp16_ptx)

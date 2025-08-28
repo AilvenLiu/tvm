@@ -200,22 +200,52 @@ class Buffer(Object, Scriptable):
         """
         return _ffi_api.BufferOffsetOf(self, indices)  # type: ignore
 
-    def offset_of_p(self, indices):
-        """Get the buffer_offset op for the given index.
+    @property
+    def byte_offset(self):
+        """Get the byte offset of the buffer."""
+        return self.elem_offset * tvm.DataType(self.dtype).bits // 8
+
+    def elem_offset_of(self, indices, inner=True):
+        """Get the element offset of the buffer at the given indices.
+        Note that indices subject to buffer's layout mapping.
 
         Parameters
         ----------
         indices : Union[PrimExpr, List[PrimExpr]]
-
             The indices of the element in the original buffer.
+
+        inner : bool, optional
+            If False, the offset is relative to the original buffer.
+            Default is True.
 
         Returns
         -------
-        op: Op
-
-            The buffer_offset op for the given index.
+        offset: PrimExpr
+            The element offset of the buffer at the given indices.
         """
-        return _ffi_api.BufferOffsetOfp(self, indices)
+        if inner:
+            return _ffi_api.BufferOffsetOfp(self, indices)
+        return self.elem_offset + _ffi_api.BufferOffsetOfp(self, indices)
+
+    def byte_offset_of(self, indices, inner=True):
+        """Get the byte offset of the buffer at the given indices.
+        Note that indices subject to buffer's layout mapping.
+
+        Parameters
+        ----------
+        indices : Union[PrimExpr, List[PrimExpr]]
+            The indices of the element in the original buffer.
+
+        inner : bool, optional
+            If False, the offset is relative to the original buffer.
+            Default is True.
+
+        Returns
+        -------
+        offset: PrimExpr
+            The byte offset of the buffer at the given indices.
+        """
+        return self.elem_offset_of(indices, inner) * tvm.DataType(self.dtype).bits // 8
 
     def is_cell(self, alloc_or_decl=True):
         """Check if the buffer is a cell.
@@ -237,7 +267,7 @@ class Buffer(Object, Scriptable):
 
         Note that the bufferload inside requires LowerTIPp pass to apply the layout to get the physical indices.
         """
-        return self.access_ptr("rw", offset=self.offset_of_p(indices))
+        return tvm.tir.address_of(self[*indices])
 
     def __getitem__(self, indices):
         from ..arith import Analyzer  # pylint: disable=import-outside-toplevel

@@ -67,7 +67,7 @@ def test_partial_reduction():
             self.num_tot_tasks = num_tot_tasks
         @T.macro
         def enqueue(self, task_type: int, *task_idx: int):
-            self.tail_r[0] = T.cuda.atomic_add(self.tail.access_ptr("rw", offset=self.tail.offset_of_p([T.int32(0)])), 1)
+            self.tail_r[0] = T.cuda.atomic_add(self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([T.int32(0)])), 1)
             # TODO: wait if tail - head > capacity
             self.masked_pos[0] = self.tail_r[0] & self.mask
             self.task_types[self.masked_pos[0]] = task_type
@@ -77,13 +77,13 @@ def test_partial_reduction():
 
         @T.macro
         def dequeue(self, fetched_task_type: T.Buffer, fetched_task_idx: T.Buffer):
-            self.head_r[0] = T.cuda.atomic_add(self.head.access_ptr("rw", offset=self.head.offset_of_p([T.int32(0)])), 1)
+            self.head_r[0] = T.cuda.atomic_add(self.head.access_ptr("rw", offset=self.head.elem_offset_of([T.int32(0)])), 1)
             if self.head_r[0] < self.num_tot_tasks:
               self.masked_pos[0] = self.head_r[0] & self.mask
-              T.ptx.ld_global_acquire(fetched_task_type[0], self.task_types.access_ptr("r", offset=self.task_types.offset_of_p([self.masked_pos[0]])))
+              T.ptx.ld_global_acquire(fetched_task_type[0], self.task_types.access_ptr("r", offset=self.task_types.elem_offset_of([self.masked_pos[0]])))
               while fetched_task_type[0] < 0:
                   T.cuda.nano_sleep(40)
-                  T.ptx.ld_global_acquire(fetched_task_type[0], self.task_types.access_ptr("r", offset=self.task_types.offset_of_p([self.masked_pos[0]])))
+                  T.ptx.ld_global_acquire(fetched_task_type[0], self.task_types.access_ptr("r", offset=self.task_types.elem_offset_of([self.masked_pos[0]])))
               self.task_types[self.masked_pos[0]] = -1
               T.cuda.thread_fence()
               for i in T.vectorized(2):
@@ -127,7 +127,7 @@ def test_partial_reduction():
                 T.tvm_storage_sync("shared")
                 with T.thread()[0:1]:
                     # add 1 because atomic_add returns the old value
-                    self.state[0] = T.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.offset_of_p(coord)), 1) + 1
+                    self.state[0] = T.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1) + 1
                     if self.state[0] == self.cnt:
                         self.queue.enqueue(TaskType.REDUCE.value, coord[0], 0)
                 T.cuda.thread_fence()

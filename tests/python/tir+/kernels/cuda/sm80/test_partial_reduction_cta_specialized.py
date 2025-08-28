@@ -48,7 +48,7 @@ class Semaphore:
     def semaphore_wait(self, *coord):
         with T.thread():
             while 1:
-                T.ptx.ld_global_acquire(self.state[0], self.sem.access_ptr("r", offset=self.sem.offset_of_p(coord)))
+                T.ptx.ld_global_acquire(self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)))
                 if T.cuda.syncthreads_and(self.state[0] == self.cnt):
                     break
                 T.cuda.nano_sleep(40)
@@ -58,7 +58,7 @@ class Semaphore:
         with T.thread():
             T.tvm_storage_sync("shared")
             with T.thread()[0:1]:
-                T.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.offset_of_p(coord)), 1)
+                T.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1)
             T.cuda.thread_fence()
 
 # reduction on N

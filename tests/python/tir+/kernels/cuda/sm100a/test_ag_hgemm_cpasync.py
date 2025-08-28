@@ -342,7 +342,7 @@ class Semaphore:
         with T.thread():
             while 1:
                 T.ptx.ld_global_acquire(
-                    self.state[0], self.sem.access_ptr("r", offset=self.sem.offset_of_p(coord))
+                    self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
                 )
                 if self.state[0] == self.cnt:
                     break
@@ -402,7 +402,7 @@ class GEMMMPMCQueue(MPMCQueue):
         rank,
     ):
         self.head_r[0] = T.cuda.atomic_add(
-            self.head.access_ptr("rw", offset=self.head.offset_of_p([T.int32(0)])), 1
+            self.head.access_ptr("rw", offset=self.head.elem_offset_of([T.int32(0)])), 1
         )
         if self.head_r[0] < self.num_tot_tasks:
             # TODO: modify the wait logic to make it faster
@@ -416,7 +416,7 @@ class GEMMMPMCQueue(MPMCQueue):
             fetched_task_type[0] = T.cuda.func_call(
                 "while_ld_global_acquire",
                 self.task_types.access_ptr(
-                    "r", offset=self.task_types.offset_of_p([self.masked_pos[0]])
+                    "r", offset=self.task_types.elem_offset_of([self.masked_pos[0]])
                 ),
                 source_code=while_ld_global_acquire,
                 return_type="int32",
