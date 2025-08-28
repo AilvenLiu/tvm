@@ -144,7 +144,6 @@ def tirp_pipeline():
             tir.transform.UnifyThreadBinding(),
             tir.transform.Simplify(),
             tir.transform.LowerOpaqueBlock(),
-            # tvm.ir.transform.PrintIR(),
             tir.transform.FlattenBuffer(),
             tir.transform.BF16ComputeLegalize(),
             tir.transform.NarrowDataType(32),
@@ -155,14 +154,11 @@ def tirp_pipeline():
                 bool(config.get("tir.enable_equiv_terms_in_cse_tir", False)),
             ),
             tir.transform.Simplify(),
-            # Bind the target first so that target-specific attributes are available.
             tir.transform.FP8ComputeLegalize(),
             tir.transform.VerifyMemory(),
             tir.transform.AnnotateEntryFunc(),
             tir.transform.AnnotateDeviceRegions(),
             tir.transform.SplitHostDevice(),
-            # MergeSharedMemoryAllocations must follow SplitHostDevice.
-            # tir.transform.MergeSharedMemoryAllocations(),
             tir.transform.MakePackedAPI(),
             tir.transform.FP8StorageLegalize(),
             tir.transform.BF16StorageLegalize(),

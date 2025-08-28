@@ -727,5 +727,37 @@ def test_lower_separate_scope_id_def():
     compare(before, after, LowerTIRp)
 
 
+def test_lower_buffer_offset():
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before():
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            with T.cta():
+                tx = T.thread_id([128], parent="cta")
+                with T.thread():
+                    A = T.alloc_buffer([64, 64], "float16", scope="local")
+                    A0 = T.decl_buffer([64], "float16", A.data, elem_offset=A.offset_of_p([32, 32]))
+                    with T.thread():
+                        T.evaluate(T.address_of(A0[32]))
+    # fmt: on
+
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def after():
+        blockIdx_x = T.launch_thread("blockIdx.x", 1)
+        threadIdx_x = T.launch_thread("threadIdx.x", 128)
+        with T.kernel():
+            with T.cta():
+                with T.thread():
+                    A = T.alloc_local((4096,), "float16", layout=None)
+                    A0 = T.decl_buffer((64,), "float16", data=A.data, elem_offset=2080, scope="local", layout=None)
+                    with T.thread():
+                        T.address_of(A0[32])
+    # fmt: on
+
+    compare(before, after, LowerTIRp)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

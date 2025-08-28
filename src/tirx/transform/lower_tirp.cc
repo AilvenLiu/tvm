@@ -655,7 +655,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     return StmtExprMutator::VisitStmt_(decl_buffer.get());
   }
 
-  virtual Buffer GetFlattenedBuffer(Buffer buf) {
+  Buffer GetFlattenedBuffer(Buffer buf) {
     auto it = buffer_remap_.find(buf);
     if (it != buffer_remap_.end()) {
       return it->second;
@@ -689,6 +689,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
       writer->shape.Set(i, analyzer_->canonical_simplify(flattened->shape[i]));
     }
     writer->layout = std::nullopt;
+    writer->elem_offset = StmtExprMutator::VisitExpr(buf->elem_offset);
 
     buffer_remap_[buf] = flattened;
     return flattened;
@@ -730,8 +731,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     }
   }
 
-  virtual Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer,
-                                                  const Array<PrimExpr>& indices) {
+  Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer, const Array<PrimExpr>& indices) {
     if (buffer->layout.defined()) {
       auto tile_layout = buffer->layout.value().as<TileLayoutNode>();
       if (tile_layout && tile_layout->IsTrainium()) {
@@ -789,6 +789,51 @@ class BufferOffsetRemover : public StmtExprMutator {
     }
     return StmtExprMutator::VisitExpr_(call);
   }
+
+  Stmt VisitStmt_(const DeclBufferNode* op) {
+    auto buffer = op->buffer;
+    auto elem_offset = this->VisitExpr(buffer->elem_offset);
+    if (elem_offset.same_as(buffer->elem_offset)) {
+      return StmtExprMutator::VisitStmt_(op);
+    } else {
+      auto n_buffer = buffer.CopyOnWrite();
+      n_buffer->elem_offset = std::move(elem_offset);
+      buffer_remap_[op->buffer] = buffer;
+      auto n = CopyOnWrite(op);
+      n->buffer = GetRef<Buffer>(n_buffer);
+      n->body = StmtExprMutator::VisitStmt(op->body);
+      return StmtExprMutator::VisitStmt_(n.get());
+    }
+  }
+
+  using StmtExprMutator::VisitExpr_;
+  using StmtExprMutator::VisitStmt_;
+
+  Stmt VisitStmt_(const BufferStoreNode* op) final {
+    BufferStore store = Downcast<BufferStore>(StmtExprMutator::VisitStmt_(op));
+    store = VisitBufferAccess(store);
+    return std::move(store);
+  }
+
+  PrimExpr VisitExpr_(const BufferLoadNode* op) final {
+    BufferLoad load = Downcast<BufferLoad>(StmtExprMutator::VisitExpr_(op));
+    load = VisitBufferAccess(load);
+    return std::move(load);
+  }
+
+  template <typename Node>
+  Node VisitBufferAccess(Node node) {
+    ICHECK(node->buffer.defined());
+    auto it = buffer_remap_.find(node->buffer);
+    if (it != buffer_remap_.end()) {
+      auto writer = node.CopyOnWrite();
+      writer->buffer = it->second;
+      return node;
+    }
+    return node;
+  }
+
+  std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_remap_;
 };
 
 namespace transform {
