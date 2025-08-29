@@ -20,6 +20,7 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.tir.event import EventImpl
 from tvm.tir.function import PrimFunc
 from tvm.tir.transform import LowerTIRp
 
@@ -756,6 +757,31 @@ def test_lower_buffer_offset():
                         T.address_of(A0[32])
     # fmt: on
 
+    compare(before, after, LowerTIRp)
+
+
+def test_lower_cell_buffer():
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before():
+        with T.kernel():
+            with T.thread():
+                A = T.local_cell("float16")
+                event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoadOnly, state=[A.buffer], shape=[1])
+                
+                pass
+    # fmt: on
+    
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def after():
+        with T.kernel():
+            with T.thread():
+                A = T.alloc_local((1,), "float16", layout=None)
+                event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoadOnly, state=[A], shape=[1])
+
+                T.evaluate(0)
+    # fmt: on
     compare(before, after, LowerTIRp)
 
 

@@ -1574,26 +1574,26 @@ else:
 def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) -> BufferLoad:
     """Allocate a zero-dimensional buffer (cell)."""
     buf = alloc_buffer(
-        shape=(),
+        shape=(1,),
         dtype=dtype,
         scope=scope,
         strides=None,
         align=-1,
         buffer_type="default",
         axis_separators=None,
-        layout=TileLayout(),
+        layout=TileLayout((1,)),
         allocated_addr=None,
     )
     if name is None:
-        return cell_wrapper(buf[()])
+        return cell_wrapper(buf[0])
     IRBuilder.name(name, buf)
-    return buf[()]
+    return buf[0]
 
 
 def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None) -> BufferLoad:
     """Declare a zero-dimensional buffer (cell) from a pointer."""
     decl_frame = decl_buffer(
-        shape=(),
+        shape=(1,),
         dtype=dtype,
         data=data,
         scope=scope,
@@ -1603,14 +1603,14 @@ def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None)
         offset_factor=0,
         buffer_type="default",
         axis_separators=None,
-        layout=TileLayout(),
+        layout=TileLayout((1,)),
     )
     decl_frame.add_callback(partial(decl_frame.__exit__, None, None, None))
     buf = decl_frame.__enter__()
     if name is None:
-        return cell_wrapper(buf[()])
+        return cell_wrapper(buf[0])
     IRBuilder.name(name, buf)
-    return buf[()]
+    return buf[0]
 
 
 def shared_cell(dtype: str = "float32", name: str = None) -> BufferLoad:

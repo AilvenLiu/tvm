@@ -343,10 +343,10 @@ def test_roundtrip_break_while():
     @T.prim_func(tirp=True)
     def test(A_ptr: T.handle):
         A = T.match_buffer(A_ptr, (10,), "int32")
-        i = T.alloc_buffer((1,), dtype="int32", scope="local")
 
         with T.kernel():
             with T.cta():
+                i = T.alloc_buffer((1,), "int32", scope="local")
                 i[0] = 0
                 while i[0] < 10:
                     A[i[0]] = i[0] * 2
@@ -404,10 +404,10 @@ def test_roundtrip_continue_while():
     @T.prim_func(tirp=True)
     def test(A_ptr: T.handle):
         A = T.match_buffer(A_ptr, (10,), "int32")
-        i = T.alloc_buffer((1,), "int32", scope="local")
 
         with T.kernel():
             with T.cta():
+                i = T.alloc_buffer((1,), "int32", scope="local")
                 i[0] = 0
                 while i[0] < 10:
                     if (i[0] % 2) == 1:
@@ -651,7 +651,7 @@ def test_alloc_apis():
         def init(self):
             self.Ta = self.Ta + T.float16(1)
             self.Tb = self.Tb + T.float16(2)
-            self.idx.buffer[()] = T.int32(0)
+            self.idx.buffer[0] = T.int32(0)
             self.idx = self.idx + T.int32(1)
             self.inner_pool2 = self.inner_pool2 + T.float16(1)
             T.evaluate(T.address_of(self.Ta))
@@ -672,8 +672,8 @@ def test_alloc_apis():
             pool = T.alloc_buffer([10], "uint8", scope="shared.dyn")
             # cell buffer (decl)
             E = T.decl_cell("float16", pool.data, "shared.dyn", 0)
-            # normal 0-dim buffer
-            F = T.alloc_local((), "float16")
+            # normal 1-dim buffer with shape (1,)
+            F = T.alloc_local((1,), "float16")
             with T.thread():
                 Ta = T.local_cell("float16")
                 inner_pool = T.decl_buffer(shape=[10], data=pool.data, dtype="uint8", scope="shared.dyn")
@@ -682,14 +682,14 @@ def test_alloc_apis():
                 A[0] = C
                 A[0] = C + D
                 A[1] = B[0] * C
-                D.buffer[()] = D + T.float16(1)
+                D.buffer[0] = D + T.float16(1)
                 D = D + T.float16(1)
                 C = D
                 T.evaluate(E)
                 E = E + T.float16(1)
-                # normal 0-dim buffer can be assigned directly,
+                # normal 1-dim buffer with shape (1,) can be assigned directly,
                 # but not loaded directly
-                F = F[()] + T.float16(1)
+                F = F[0] + T.float16(1)
                 C += D
                 D += E + C + D
                 T.evaluate(T.address_of(C))

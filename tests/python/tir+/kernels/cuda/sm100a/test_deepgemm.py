@@ -359,10 +359,10 @@ def test():
                 descSFA = T.local_cell("uint64")
                 descSFB = T.local_cell("uint64")
                 descI = T.local_cell("uint32")
-                
-                phase = T.alloc_local((1,), "int32")
-                tx_cnt = T.alloc_local((1,), "int32")
-                
+
+                phase = T.local_cell("int32")
+                tx_cnt = T.local_cell("int32")
+
                 # initialize
                 tma2trans_bar = T.meta_var(Barriers(buf.data, 6, SMEM_PIPE_DEPTH, True))
                 trans2mma_bar = T.meta_var(BarTRANS2MMA(buf.data, 6 + SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, True))
@@ -370,8 +370,8 @@ def test():
                 mma2ld_bar = T.meta_var(BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True))
                 ld2mma_bar = T.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
                 tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
-                
-                tma2trans_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoadOnly, state=[tma2trans_bar.mbar, phase, tx_cnt], shape=[SMEM_PIPE_DEPTH])
+
+                tma2trans_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoadOnly, state=[tma2trans_bar.mbar, phase.buffer, tx_cnt.buffer], shape=[SMEM_PIPE_DEPTH])
                 wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
                 tma2trans_event.init(1)
 
@@ -385,7 +385,7 @@ def test():
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=1)
                     warp_sync()
-                
+
                 # sync
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
@@ -398,7 +398,7 @@ def test():
                         for ks in T.unroll(SMEM_PIPE_DEPTH):
                             stage = ko * SMEM_PIPE_DEPTH + ks
                             main_loop(ks)
-                        phase[0] = phase[0] ^ 1
+                        phase = phase ^ 1
                     if PIPE_REMAIN_NUM > 0:
                         # last remained loop
                         for ks in T.unroll(PIPE_REMAIN_NUM):
@@ -408,7 +408,7 @@ def test():
                         # for unaligned cases   
                         for ks in T.unroll(PIPE_REMAIN_NUM, SMEM_PIPE_DEPTH):
                             epilogue2(ks)
-                        phase[0] = phase[0] ^ 1
+                        phase = phase ^ 1
                     else:
                         epilogue1()
 
@@ -417,7 +417,7 @@ def test():
                     with T.warpgroup()[wg_id == 1]:
                         T.block_attr({"tirp.scope_partition": True})
                         with T.warp(parent="warpgroup")[warp_id == 3]:
-                            phase[0] = 0
+                            phase = 0
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx)
                                 n_idx = T.meta_var(tile_scheduler.n_idx)
@@ -428,7 +428,7 @@ def test():
 
                                 @T.macro
                                 def tma_load(ks):
-                                    mma2tma_bar.wait(ks, phase[0])
+                                    mma2tma_bar.wait(ks, phase)
                                     Tp.copy_async(A_smem[ks, :, :], A[m_start: m_start + BLK_M, k_start: k_start + BLK_K], evt=tma2trans_event[ks])
                                     Tp.copy_async(B_smem[ks, :, :], B[n_start: n_start + BLK_N, k_start: k_start + BLK_K], evt=tma2trans_event[ks])
                                     if stage % 4 == 0:
@@ -438,7 +438,7 @@ def test():
 
                                 @T.macro
                                 def tma_load_epilogue(ks):
-                                    mma2tma_bar.wait(ks, phase[0])
+                                    mma2tma_bar.wait(ks, phase)
                                     tma2trans_event[ks].commit()
 
                                 paritioned_loop(tma_load, skip, tma_load_epilogue)
@@ -446,7 +446,7 @@ def test():
                         
                         with T.warp(parent="warpgroup")[warp_id == 2]:
                             # transpose
-                            phase[0] = 0
+                            phase = 0
                             reg_trans = T.alloc_buffer((4,), "uint32", scope="local")
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx)
@@ -489,7 +489,7 @@ def test():
                                 tmem_phase = T.local_cell("int32", "tmem_phase")
                                 T.ptx.tcgen05.encode_instr_descriptor_block_scaled(T.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type, 
                                                                                     0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
-                                phase[0] = 0
+                                phase = 0
                                 while tile_scheduler.valid():
                                     m_idx = T.meta_var(tile_scheduler.m_idx)
                                     n_idx = T.meta_var(tile_scheduler.n_idx)
@@ -504,7 +504,7 @@ def test():
                                         @T.macro
                                         def mma(ks):
                                             # wait tma and sf-transpose arrival
-                                            trans2mma_bar.wait(ks, phase[0])
+                                            trans2mma_bar.wait(ks, phase)
                                             T.ptx.tcgen05.fence.after_thread_sync()
 
                                             # copy sf to tmem 
@@ -550,7 +550,7 @@ def test():
 
                                         @T.macro
                                         def mma_epilogue2(ks):
-                                            trans2mma_bar.wait(ks, phase[0])
+                                            trans2mma_bar.wait(ks, phase)
                                             mma2tma_bar.arrive(ks)
 
                                         paritioned_loop(mma, mma_epilogue1, mma_epilogue2)
@@ -561,7 +561,7 @@ def test():
                         trap_when_assert_failed(tmem_addr == 0)
                         tmem_idx = T.local_cell("int32", "tmem_idx")
                         tmem_phase = T.local_cell("int32", "tmem_phase")
-                        phase[0] = 0
+                        phase = 0
                         while tile_scheduler.valid():
                             m_idx = T.meta_var(tile_scheduler.m_idx)
                             n_idx = T.meta_var(tile_scheduler.n_idx)
@@ -634,6 +634,7 @@ def test():
     target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": deepgemm})
+        mod.show()
         mod = tvm.tir.transform.LowerTIRp()(mod)
         mod.show()
         src, mod = get_source(deepgemm)

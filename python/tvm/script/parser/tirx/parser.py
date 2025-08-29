@@ -17,14 +17,14 @@
 """The base parser for tirx"""
 
 import ast
-from copy import deepcopy
 import contextlib
+from copy import deepcopy
 from functools import partial
 from typing import Any
 
 import tvm
 from tvm.ir import GlobalVar, PrimType
-from tvm.tirx import Buffer, IterVar, PrimExpr, Var, TLayout
+from tvm.tirx import Buffer, IterVar, PrimExpr, TLayout, Var
 from tvm.tirx.event import BulkGroupEvent, SemaphoreEventTensor
 
 from ...ir_builder import ir as I
@@ -32,8 +32,8 @@ from ...ir_builder import tirx as T
 from ...ir_builder.base import IRBuilder
 from ...ir_builder.base import IRBuilderFrame as Frame
 from .._core import Parser, dispatch, doc
-from ..tir.entry import macro
 from ..core.doc import from_doc
+from ..tir.entry import macro
 
 
 def bind_with_value(self: Parser, node: doc.expr, var_name: str, value: Any) -> Any:
@@ -325,7 +325,7 @@ def visit_assign(self: Parser, node: doc.Assign) -> None:
     else:
         # special case for cell
         # cell = xxx <=> cell.buffer[()] = xxx
-        # or for a normal 0-dim buffer
+        # or for a normal 1-dim buffer with shape (1,)
         # buffer = xxx <=> buffer[()] = xxx
         try:
             lhs_copy = deepcopy(lhs)
@@ -334,9 +334,10 @@ def visit_assign(self: Parser, node: doc.Assign) -> None:
             lhs_value = self.eval_expr(lhs_copy)
             if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
                 buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
-                if len(buffer.shape) == 0:
-                    # only 0-dim buffer can be assigned directly
-                    T.buffer_store(buffer, rhs, [])
+                if len(buffer.shape) == 1 and bool(buffer.shape[0] == 1):
+                    # only 1-dim buffer with shape (1,) can be assigned directly
+                    # Note that shape can be a PrimExpr, so we can only judge by bool(shape[0] == 1) rather than int(shape[0]) == 1
+                    T.buffer_store(buffer, rhs, [0])
                     return
         except Exception:
             pass
@@ -405,9 +406,10 @@ def visit_aug_assign(self: Parser, node: doc.AugAssign) -> None:
             lhs_value = self.eval_expr(lhs_copy)
             if isinstance(lhs_value, (T.BufferLoad, tvm.tirx.Buffer)):
                 buffer = lhs_value.buffer if isinstance(lhs_value, T.BufferLoad) else lhs_value
-                if len(buffer.shape) == 0:
-                    # only 0-dim buffer can be assigned directly
-                    T.buffer_store(buffer, rhs, [])
+                if len(buffer.shape) == 1 and bool(buffer.shape[0] == 1):
+                    # only 1-dim buffer with shape (1,) can be assigned directly
+                    # Note that shape can be a PrimExpr, so we can only judge by bool(shape[0] == 1) rather than int(shape[0]) == 1
+                    T.buffer_store(buffer, rhs, [0])
                     return
         except Exception:
             pass

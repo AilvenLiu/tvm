@@ -32,6 +32,7 @@
 #include <unordered_map>
 
 #include "../../arith/ir_mutator_with_analyzer.h"
+#include "../ir/functor_common.h"
 #include "../ir/tir_visitor_with_path.h"
 
 namespace tvm {
@@ -624,6 +625,17 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
   explicit LayoutApplier(arith::Analyzer* analyzer, const Target& target)
       : arith::IRMutatorWithAnalyzer(analyzer), target_(target) {}
 
+  ffi::Any VisitAny(const ffi::Any& any) {
+    if (auto buffer = any.as<Buffer>()) {
+      return GetFlattenedBuffer(buffer.value());
+    } else if (auto prim_expr = any.as<PrimExpr>()) {
+      return VisitExpr(prim_expr.value());
+    } else if (auto stmt = any.as<Stmt>()) {
+      return VisitStmt(stmt.value());
+    }
+    return any;
+  }
+
   Stmt VisitStmt_(const BlockNode* op) final {
     ICHECK_EQ(op->buffer_gets.size(), 0) << "Unexpected BufferGet found";
     ICHECK_EQ(op->buffer_views.size(), 0) << "Unexpected BufferView found";
@@ -631,6 +643,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
 
     Block block = GetRef<Block>(op);
 
+    // alloc buffers
     Array<Buffer> alloc_buffers = op->alloc_buffers;
     alloc_buffers.MutateByApply([this](Buffer buf) {
       if (target_->kind->name == "trn" && !buf->layout.defined()) {
@@ -640,6 +653,36 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     });
     if (!alloc_buffers.same_as(op->alloc_buffers)) {
       block.CopyOnWrite()->alloc_buffers = alloc_buffers;
+    }
+
+    // bulk_events
+    Array<BulkGroupEvent> bulk_events = op->bulk_events;
+    bulk_events.MutateByApply([this](BulkGroupEvent event) -> BulkGroupEvent {
+      auto* n = event.CopyOnWrite();
+      n->state.MutateByApply([this](ffi::Any state) -> ffi::Any { return VisitAny(state); });
+      if (n->state.same_as(event->state)) {
+        return event;
+      } else {
+        return GetRef<BulkGroupEvent>(n);
+      }
+    });
+    if (!bulk_events.same_as(op->bulk_events)) {
+      block.CopyOnWrite()->bulk_events = bulk_events;
+    }
+
+    // sem_event_tensors
+    Array<SemaphoreEventTensor> sem_event_tensors = op->sem_event_tensors;
+    sem_event_tensors.MutateByApply([this](SemaphoreEventTensor event) -> SemaphoreEventTensor {
+      auto* n = event.CopyOnWrite();
+      n->state.MutateByApply([this](ffi::Any state) -> ffi::Any { return VisitAny(state); });
+      if (n->state.same_as(event->state)) {
+        return event;
+      } else {
+        return GetRef<SemaphoreEventTensor>(n);
+      }
+    });
+    if (!sem_event_tensors.same_as(op->sem_event_tensors)) {
+      block.CopyOnWrite()->sem_event_tensors = sem_event_tensors;
     }
 
     return StmtExprMutator::VisitStmt_(block.get());
@@ -728,6 +771,18 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
       return tvm::cast(DataType::Bool(), load);
     } else {
       return std::move(load);
+    }
+  }
+
+  Stmt VisitStmt_(const tirp::OpCallNode* op) final {
+    Array<ffi::Any> args = op->args;
+    args.MutateByApply([this](ffi::Any arg) -> ffi::Any { return VisitAny(arg); });
+    if (args.same_as(op->args)) {
+      return GetRef<Stmt>(op);
+    } else {
+      auto n = CopyOnWrite(op);
+      n->args = std::move(args);
+      return Stmt(n);
     }
   }
 

@@ -675,18 +675,12 @@ PrimExpr Buffer::OffsetOf_p(const Array<PrimExpr>& indices) const {
 
 bool Buffer::IsCell(bool alloc_or_decl) const {
   // TODO(@bohan): logical scope is not considered
-  auto is_cell_layout = [](const TLayout& layout) -> bool {
-    auto tile_layout = layout.as<TileLayoutNode>();
-    if (!tile_layout) return false;
-    return tile_layout->shard.size() == 0 && tile_layout->replicate.size() == 0 &&
-           tile_layout->exclude.size() == 0;
-  };
-  return (*this)->shape.size() == 0 && (*this)->strides.size() == 0 &&
+  return (*this)->shape.size() == 1 && is_one((*this)->shape[0]) && (*this)->strides.size() == 0 &&
          (*this)->axis_separators.size() == 0 &&
          (!alloc_or_decl || tirx::is_zero((*this)->elem_offset)) && (*this)->data_alignment == 64 &&
          (*this)->offset_factor == 1 && (*this)->buffer_type == tirx::BufferType::kDefault &&
-         (*this)->allocated_addr.size() == 0 &&
-         is_cell_layout((*this)->layout.value_or(TileLayout()));
+         (*this)->allocated_addr.size() == 0 && (*this)->layout.has_value() &&
+         StructuralEqual()((*this)->layout.value(), TileLayoutNode::DefaultLayout({1}));
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -724,5 +718,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("tirx.BufferIsCell", &Buffer::IsCell);
 }
 
-}  // namespace tirxxxxxxx
+}  // namespace tirxxxxxxxx
 }  // namespace tvm

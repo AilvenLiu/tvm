@@ -76,6 +76,7 @@ class BulkGroupEvent : public BaseEvent {
  public:
   TVM_DLL BulkGroupEvent(kEventImpl impl, const Array<ffi::Any>& state, const String& name);
   TVM_DEFINE_OBJECT_REF_METHODS(BulkGroupEvent, BaseEvent, BulkGroupEventNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(BulkGroupEventNode);
 };
 
 class SemaphoreEventTensorNode : public Object {
@@ -104,6 +105,7 @@ class SemaphoreEventTensor : public ObjectRef {
   TVM_DLL SemaphoreEventTensor(const kEventImpl& impl, const Array<ffi::Any>& state,
                                const Array<PrimExpr>& shape, const String& name);
   TVM_DEFINE_OBJECT_REF_METHODS(SemaphoreEventTensor, ObjectRef, SemaphoreEventTensorNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(SemaphoreEventTensorNode);
 };
 
 class SemaphoreEventTensorItemNode : public BaseEventNode {
