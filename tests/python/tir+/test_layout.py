@@ -16,12 +16,13 @@
 # under the License.
 # pylint: disable=missing-module-docstring, missing-function-docstring, missing-class-docstring
 import itertools
+
 import pytest
 
 import tvm
-from tvm.tir.layout import TileLayout, Axis, SwizzleLayout, ComposeLayout
 from tvm.ir import assert_structural_equal
-from tvm.tirp.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
+from tvm.tir.layout import Axis, ComposeLayout, SwizzleLayout, TileLayout
+from tvm.tirp.op_schedule.cuda.copy_async import SwizzleMode, tma_shared_layout
 
 
 def test_axis():
@@ -1434,6 +1435,101 @@ def test_tma_shared_layout():
             TileLayout(shard=([3, 64, 8, 32], [16384, 32, 2048, 1])),
         )
         assert_structural_equal(layout, layout_expected)
+
+    case3()
+
+
+def test_storage():
+    def case1():
+        layout = TileLayout(shard=([8, 8], [8, 1]))
+        assert_structural_equal(layout.storage(), layout)
+
+    case1()
+
+    def case2():
+        layout = TileLayout(shard=([8, 4, 2], [(4, "laneid"), (1, "laneid"), (1, "m")]))
+        layout_stroage = TileLayout(shard=([2], [1]))
+        assert_structural_equal(layout.storage(), layout_stroage)
+
+    case2()
+
+    def case3():
+        layout = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        assert_structural_equal(layout.storage(), layout)
+
+    case3()
+
+    def case4():
+        layout = (
+            TileLayout(shard=([2], [1]))
+            .tile(TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")])), (8, 4), (1, 2))
+            .tile(TileLayout(shard=([2, 1], [1, 2])), (2, 1), (8, 8))
+            .tile(TileLayout(shard=([1, 8], [8, 1])), (1, 8), (16, 8))
+        )
+        layout_stroage = (
+            TileLayout(shard=([2], [1]))
+            .tile(TileLayout(shard=([2, 1], [1, 2])), (2, 1), (1, 2))
+            .tile(TileLayout(shard=([1, 8], [8, 1])), (1, 8), (2, 2))
+        )
+        assert_structural_equal(layout.storage().normalize(), layout_stroage.normalize())
+
+    case4()
+
+
+def test_unpack():
+    def case1():
+        layout = TileLayout(shard=([8, 8], [8, 1]))
+        layout_expected = TileLayout(shard=([8, 16], [16, 1]))
+        assert_structural_equal(layout.unpack(2).normalize(), layout_expected.normalize())
+
+    case1()
+
+    def case2():
+        layout = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        layout_expected = SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
+        assert_structural_equal(layout.unpack(2).normalize(), layout_expected.normalize())
+
+    case2()
+
+    def case3():
+        layout = ComposeLayout(
+            SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+            TileLayout(shard=([8, 64], [64, 1])),
+        )
+        layout_expected = ComposeLayout(
+            SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3),
+            TileLayout(shard=([8, 128], [128, 1])),
+        )
+        assert_structural_equal(layout.unpack(2).normalize(), layout_expected.normalize())
+
+    case3()
+
+
+def test_pack():
+    def case1():
+        layout = TileLayout(shard=([8, 16], [16, 1]))
+        layout_expected = TileLayout(shard=([8, 8], [8, 1]))
+        assert_structural_equal(layout.pack(2).normalize(), layout_expected.normalize())
+
+    case1()
+
+    def case2():
+        layout = SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
+        layout_expected = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
+        assert_structural_equal(layout.pack(2).normalize(), layout_expected.normalize())
+
+    case2()
+
+    def case3():
+        layout = ComposeLayout(
+            SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3),
+            TileLayout(shard=([8, 128], [128, 1])),
+        )
+        layout_expected = ComposeLayout(
+            SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
+            TileLayout(shard=([8, 64], [64, 1])),
+        )
+        assert_structural_equal(layout.pack(2).normalize(), layout_expected.normalize())
 
     case3()
 

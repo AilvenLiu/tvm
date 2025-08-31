@@ -427,47 +427,6 @@ def match_buffer(
     )
 
 
-def view(src_buffer: Buffer, layout: TLayout, shape: List[PrimExpr]) -> Buffer:
-    """The buffer view function.
-
-    Parameters
-    ----------
-    src_buffer : Buffer
-        The physical buffer storing data.
-
-    layout : TLayout
-        The target layout of the logical buffer.
-
-    shape : List[PrimExpr]
-        The target shape of the logical buffer.
-
-    Returns
-    -------
-    res : Buffer
-        The logical buffer.
-    """
-    return _ffi_api.BufferView(src_buffer, layout, shape)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
-def get(src_buffer: Buffer, shape: List[PrimExpr]) -> Buffer:
-    """The buffer get function.
-
-    Parameters
-    ----------
-    src_buffer : Buffer
-        The logical buffer viewed by physical buffer.
-
-    shape : List[PrimExpr]
-        The target shape of the physical buffer.
-
-    Returns
-    -------
-    res : Buffer
-        The physical buffer storing underlying data.
-    """
-    return _ffi_api.BufferGet(src_buffer, shape)  # type: ignore[attr-defined] # pylint: disable=no-member
-
-
 def sblock(
     name: str = "",
     no_realize: bool = False,
@@ -3102,8 +3061,6 @@ __all__ += [
     "TileLayout",
     "SwizzleLayout",
     "ComposeLayout",
-    "view",
-    "get",
     "static_assert",
     "alloc_shared",
     "alloc_local",

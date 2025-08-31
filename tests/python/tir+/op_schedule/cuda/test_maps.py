@@ -356,8 +356,8 @@ def test_unary_op_local(input, op_type, dtype):
 
                 # unary op
                 with T.warp():
-                    acc_view = T.view(acc, layout=acc_layout, shape=acc_shape)
-                    res_view = T.view(res, layout=acc_layout, shape=red_shape)
+                    acc_view = acc.view(*acc_shape, layout=acc_layout)
+                    res_view = res.view(*red_shape, layout=acc_layout)
                     if op_type == "reciprocal":
                         Tp.reciprocal(res_view, acc_view)
                     elif op_type == "exp":
@@ -437,6 +437,7 @@ def test_binary_op_local(input, op_type, dtype):
     A_shape, B_shape = (16, NUM_COL), (16, 4)
     const = T.float16(3.0) if dtype == "float16" else T.float32(3.0)
 
+    # fmt: off
     @T.prim_func(tirp=True)
     def test_broadcast_and_apply_const(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
@@ -468,9 +469,7 @@ def test_binary_op_local(input, op_type, dtype):
                 B_tile = T.TileLayout(shard=([2, 1], [1, 1]))
                 B_layout = B_warp_atom.tile(B_tile, (2, 1), (8, 4))
                 B_buffer = T.alloc_buffer(
-                    [
-                        2,
-                    ],
+                    [2,],
                     dtype=dtype,
                     scope="local",
                     layout=B_atom.tile(B_tile, (2, 1), (1, 1)),
@@ -481,22 +480,17 @@ def test_binary_op_local(input, op_type, dtype):
                     for i in T.serial(NUM_COL // 8):
                         for j in T.unroll(2):
                             for vec in T.vectorized(2):
-                                A_buffer[j, i * 2 + vec] = A[
-                                    wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
-                                    i * 8 + lane_id % 4 * 2 + vec,
-                                ]
+                                A_buffer[j, i * 2 + vec] = A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec]
 
                 # load B into B_buffer
                 with T.thread():
                     for i in T.unroll(2):
-                        B_buffer[i] = B[
-                            wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4
-                        ]
+                        B_buffer[i] = B[wg_id * 64 + warp_id_in_wg * 16 + i * 8 + lane_id // 4, lane_id % 4]
 
                 # binary op
                 with T.warp():
-                    A_view = T.view(A_buffer, layout=A_layout, shape=A_shape)
-                    B_view = T.view(B_buffer, layout=B_layout, shape=B_shape)
+                    A_view = A_buffer.view(*A_shape, layout=A_layout)
+                    B_view = B_buffer.view(*B_shape, layout=B_layout)
                     if op_type == "sub":
                         Tp.sub(A_view, A_view, B_view)
                         Tp.sub(A_view, A_view, const)
@@ -509,10 +503,7 @@ def test_binary_op_local(input, op_type, dtype):
                     for i in T.serial(NUM_COL // 8):
                         for j in T.unroll(2):
                             for vec in T.vectorized(2):
-                                A[
-                                    wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4,
-                                    i * 8 + lane_id % 4 * 2 + vec,
-                                ] = A_buffer[j, i * 2 + vec]
+                                A[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = A_buffer[j, i * 2 + vec]
 
     # fmt: on
 

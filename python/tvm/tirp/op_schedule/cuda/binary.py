@@ -384,8 +384,8 @@ def binary_map_cuda_warp_logical_view_nd_impl(
         @T.prim_func(tirp=True, check_well_formed=False)
         def impl_const():
             with T.thread():
-                src1_local = T.get(src1, src1_local_shape)
-                dst_local = T.get(dst, dst_local_shape)
+                src1_local = src1.storage(*src1_local_shape)
+                dst_local = dst.storage(*dst_local_shape)
                 for i in T.serial(num_rows):
                     for j in T.serial(num_cols):
                         dst_local[i, j] = op_func(src1_local[i, j], CONST)
@@ -406,9 +406,9 @@ def binary_map_cuda_warp_logical_view_nd_impl(
         @T.prim_func(tirp=True, check_well_formed=False)
         def impl_broadcast():
             with T.thread():
-                src1_local = T.get(src1, src1_local_shape)
-                src2_local = T.get(src2, src2_local_shape)
-                dst_local = T.get(dst, dst_local_shape)
+                src1_local = src1.storage(*src1_local_shape)
+                src2_local = src2.storage(*src2_local_shape)
+                dst_local = dst.storage(*dst_local_shape)
                 for i in T.serial(num_rows):
                     for j in T.serial(dst_local_shape[1]):
                         dst_local[i, j] = op_func(src1_local[i, j], src2_local[i, 0])
@@ -431,9 +431,9 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     @T.prim_func(tirp=True, check_well_formed=False)
     def impl():
         with T.thread():
-            src1_local = T.get(src1, src1_local_shape)
-            src2_local = T.get(src2, src2_local_shape)
-            dst_local = T.get(dst, dst_local_shape)
+            src1_local = src1.storage(*src1_local_shape)
+            src2_local = src2.storage(*src2_local_shape)
+            dst_local = dst.storage(*dst_local_shape)
             for i in T.serial(num_rows):
                 for j in T.serial(num_cols):
                     dst_local[i, j] = op_func(src1_local[i, j], src2_local[i, j])

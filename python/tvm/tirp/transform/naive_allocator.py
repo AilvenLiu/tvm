@@ -15,15 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Dict
 import functools
+from typing import Dict, List
 
-from tvm.tir.stmt_functor import StmtVisitor
-from tvm.tir import Block
-from tvm.tir.buffer import Buffer
-from tvm.tir.transform.function_pass import prim_func_pass
-from tvm.tir import IntImm
 from tvm import DataType
+from tvm.tir import Block, IntImm
+from tvm.tir.buffer import Buffer
+from tvm.tir.stmt_functor import StmtVisitor
+from tvm.tir.transform.function_pass import prim_func_pass
+
 from .common import BufferReplacer
 
 
@@ -102,8 +102,6 @@ class AllocMutator(BufferReplacer):
                 match_buffers=op.match_buffers,
                 annotations=op.annotations,
                 exec_scope=op.exec_scope,
-                buffer_views=op.buffer_views,
-                buffer_gets=op.buffer_gets,
             )
         return op
 

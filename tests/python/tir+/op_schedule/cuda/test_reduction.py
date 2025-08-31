@@ -226,8 +226,8 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
 
                 # reduce
                 with T.warp():
-                    acc_view = T.view(acc, layout=acc_layout, shape=acc_shape)
-                    red_view = T.view(red, layout=red_layout, shape=red_shape)
+                    acc_view = acc.view(*acc_shape, layout=acc_layout)
+                    red_view = red.view(*red_shape, layout=red_layout)
                     if op_type == "sum":
                         Tp.sum(red_view, acc_view, schedule_config={"thread_reduce": shuffle})
                     elif op_type == "max":

@@ -14,16 +14,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import numpy as np
 import pytest
 
 import tvm
-from tvm.tir.layout import TileLayout
-import numpy as np
 import tvm.testing
+from tvm.ir import assert_structural_equal
 from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.ir import assert_structural_equal
+from tvm.tir.layout import TileLayout
 from tvm.tirp.transform import NaiveAllocator
 
 
@@ -157,16 +157,16 @@ def test_buffer_views():
         with T.kernel():
             A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
             B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
-            B_view = T.view(B_sbuf, B_sbuf.layout, [2, 256, 512])
+            B_view = B_sbuf.view(2, 256, 512)
             Tp.copy(B_view[0], A_sbuf)
-    
+
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle) -> None:
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
             A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[0])
             B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[2*512*4])
-            B_view = T.view(B_sbuf, B_sbuf.layout, [2, 256, 512])
+            B_view = B_sbuf.view(2, 256, 512)
             Tp.copy(B_view[0], A_sbuf)
     # fmt: on
 

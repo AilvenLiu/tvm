@@ -96,8 +96,8 @@ def test_unary_in_a_loop(op_type):
         with T.kernel():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            A_sbuf_view = T.view(A_sbuf, A_sbuf.layout, (128, 8, 512))
-            B_sbuf_view = T.view(B_sbuf, B_sbuf.layout, (128, 4, 512))
+            A_sbuf_view = A_sbuf.view(128, 8, 512)
+            B_sbuf_view = B_sbuf.view(128, 4, 512)
             for i in range(4):
                 if op_type == "memset":
                     Tp_func(B_sbuf_view[:, i, :], T.float32(0.0))
@@ -110,12 +110,14 @@ def test_unary_in_a_loop(op_type):
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
             B_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            A_sbuf_view = T.decl_buffer((128, 4096), data=A_sbuf.data, scope="trn.sbuf", layout=None)
+            B_sbuf_view = T.decl_buffer((128, 2048), data=B_sbuf.data, scope="trn.sbuf", layout=None)
             for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
                         if op_type == "reciprocal":
-                            T.nki.reciprocal(B_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop])
+                            T.nki.reciprocal(B_sbuf_view[p_loop, i * 512 + f_loop], A_sbuf_view[p_loop, i * 1024 + f_loop])
                         elif op_type == "memset":
                             T.nki.memset(B_sbuf[p_loop, i * 512 + f_loop], 0.0)
     # fmt: on
@@ -227,9 +229,9 @@ def test_binary_complex(op_type, operands_type):
             A_sbuf = T.alloc_buffer(src1_shape, "float32", scope="trn.sbuf", layout=src1_layout)
             B_sbuf = T.alloc_buffer(src2_shape, "float32", scope="trn.sbuf", layout=src2_layout)
             C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            A_sbuf_view = T.view(A_sbuf, A_sbuf.layout, src1_view_shape)
-            B_sbuf_view = T.view(B_sbuf, B_sbuf.layout, src2_view_shape)
-            C_sbuf_view = T.view(C_sbuf, C_sbuf.layout, dst_view_shape)
+            A_sbuf_view = A_sbuf.view(*src1_view_shape)
+            B_sbuf_view = B_sbuf.view(*src2_view_shape)
+            C_sbuf_view = C_sbuf.view(*dst_view_shape)
             for i in range(4):
                 if operands_type == "region_region":
                     Tp_func(C_sbuf_view[:, i, :], A_sbuf_view[:, i * 2, :], B_sbuf_view[:, i, :])
@@ -252,20 +254,23 @@ def test_binary_complex(op_type, operands_type):
             A_sbuf = T.alloc_buffer(src1_layout_data_iter, scope="trn.sbuf")
             B_sbuf = T.alloc_buffer(src2_layout_data_iter, scope="trn.sbuf")
             C_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            A_sbuf_view = T.decl_buffer(src1_layout_data_iter, data=A_sbuf.data, scope="trn.sbuf", layout=None)
+            B_sbuf_view = T.decl_buffer(src2_layout_data_iter, data=B_sbuf.data, scope="trn.sbuf", layout=None)
+            C_sbuf_view = T.decl_buffer((128, 2048), data=C_sbuf.data, scope="trn.sbuf", layout=None)
             for i, b_loop in T.grid(4, b_extent):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, f_extent, annotations={"nki_dim":"F"}):
                         if operands_type == "region_region":
-                            T.nki.tensortensor(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], B_sbuf[p_loop, i * 512 + f_loop], op_type)
+                            T.nki.tensortensor(C_sbuf_view[p_loop, i * 512 + f_loop], A_sbuf_view[p_loop, i * 1024 + f_loop], B_sbuf_view[p_loop, i * 512 + f_loop], op_type)
                         elif operands_type == "const_region":
-                            T.nki.tensorscalar(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(True))
+                            T.nki.tensorscalar(C_sbuf_view[p_loop, i * 512 + f_loop], A_sbuf_view[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(True))
                         elif operands_type == "region_const":
-                            T.nki.tensorscalar(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(False))
+                            T.nki.tensorscalar(C_sbuf_view[p_loop, i * 512 + f_loop], A_sbuf_view[p_loop, i * 1024 + f_loop], T.float32(3.0), op_type, T.bool(False))
                         elif operands_type == "region_broadcast_lhs":
-                            T.nki.tensorscalar(C_sbuf[p_loop, i * 512 + b_loop * 128 + f_loop], B_sbuf[p_loop, i * 512 + b_loop * 128 + f_loop], A_sbuf[p_loop, i * 8 + b_loop], op_type, T.bool(True))
+                            T.nki.tensorscalar(C_sbuf_view[p_loop, i * 512 + b_loop * 128 + f_loop], B_sbuf_view[p_loop, i * 512 + b_loop * 128 + f_loop], A_sbuf_view[p_loop, i * 8 + b_loop], op_type, T.bool(True))
                         elif operands_type == "region_broadcast_rhs":
-                            T.nki.tensortensor(C_sbuf[p_loop, i * 512 + f_loop], A_sbuf[p_loop, i * 1024 + f_loop], B_sbuf[p_loop, f_loop], op_type)
+                            T.nki.tensortensor(C_sbuf_view[p_loop, i * 512 + f_loop], A_sbuf_view[p_loop, i * 1024 + f_loop], B_sbuf_view[p_loop, f_loop], op_type)
 
     # fmt: on
 

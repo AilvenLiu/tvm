@@ -161,8 +161,6 @@ class EventOpInserter(StmtExprMutator):
             block.annotations,
             block.span,
             block.exec_scope,
-            block.buffer_views,
-            block.buffer_gets,
             sem_event_tensors=in_event_tensors + out_event_tensors,
         )
 

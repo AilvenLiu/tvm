@@ -15,18 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 """Statement functor utilities for IR transformations"""
-
-from . import _ffi_api
-
-from typing import Callable, List, TypeVar, Union, Dict, Optional, Any
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 import tvm
 from tvm import ir
 from tvm.ir import PrimExpr, Range
-from tvm.tir import Var, SizeVar, IterVar, Buffer, DataProducer
 from tvm.runtime import Object
+from tvm.tir import Buffer, DataProducer, IterVar, SizeVar, Var
 
-from .expr_functor import ExprFunctor, ExprVisitor, ExprMutator, _visit_array
+from . import _ffi_api
+from .expr_functor import ExprFunctor, ExprMutator, ExprVisitor, _visit_array
+from .function import PrimFunc
 
 T = TypeVar("T")
 
@@ -708,8 +707,6 @@ class StmtMutator(StmtFunctor):
             op.annotations,
             None,
             op.exec_scope,
-            op.buffer_views,
-            op.buffer_gets,
             op.bulk_events,
             op.sem_event_tensors,
         )
@@ -919,3 +916,21 @@ def substitute(node, vmap):
         The result.
     """
     return _ffi_api.Substitute(node, vmap)  # type: ignore
+
+
+def renew_defs(func: PrimFunc):
+    """Re-generate the definition nodes for a TIR, including VarDef, BufferDef.
+    This pass works as a simple DeepCopy to duplicate a function with different Vars and
+    Buffers but the same behavior
+
+    Parameters
+    ----------
+    func: PrimFunc
+        The input function
+
+    Returns
+    -------
+    result : PrimFunc
+        The new generated func.
+    """
+    return _ffi_api.RenewDefs(func)  # type: ignore

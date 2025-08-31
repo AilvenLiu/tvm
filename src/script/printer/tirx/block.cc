@@ -247,22 +247,6 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     ExprDoc rhs = EventTensorDecl(event_tensor, method, event_tensor_p, d);
     (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
   }
-  // buffer_view
-  for (size_t i = 0; i < block->buffer_views.size(); ++i) {
-    tir::BufferView buffer_view = block->buffer_views[i];
-    AccessPath buffer_view_p = block_p->Attr("buffer_views")->ArrayItem(i);
-    IdDoc lhs = DefineBuffer(buffer_view->dst_buffer, *frame, d);
-    ExprDoc rhs = d->AsDoc<ExprDoc>(buffer_view, buffer_view_p);
-    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
-  }
-  // buffer_get
-  for (size_t i = 0; i < block->buffer_gets.size(); ++i) {
-    tir::BufferGet buffer_get = block->buffer_gets[i];
-    AccessPath buffer_get_p = block_p->Attr("buffer_gets")->ArrayItem(i);
-    IdDoc lhs = DefineBuffer(buffer_get->dst_buffer, *frame, d);
-    ExprDoc rhs = d->AsDoc<ExprDoc>(buffer_get, buffer_get_p);
-    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
-  }
 
   // Step 7. Handle init block
   if (block->init.defined()) {
@@ -336,29 +320,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 
 TVM_SCRIPT_REPR(tirx::SBlockNode, ReprPrintTIR);
 TVM_SCRIPT_REPR(tirx::SBlockRealizeNode, ReprPrintTIR);
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::BufferGet>(
-        "", [](tir::BufferGet buffer_get, AccessPath p, IRDocsifier d) -> Doc {
-          Doc doc =
-              TIR(d, "get")->Call({d->AsDoc<ExprDoc>(buffer_get->src_buffer, p->Attr("src_buffer")),
-                                   d->AsDoc<ExprDoc>(buffer_get->dst_buffer->shape,
-                                                     p->Attr("dst_buffer")->Attr("shape"))});
-          return doc;
-        });
-
-TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tir::BufferView>(
-        "", [](tir::BufferView buffer_view, AccessPath p, IRDocsifier d) -> Doc {
-          Doc doc = TIR(d, "view")->Call(
-              {d->AsDoc<ExprDoc>(buffer_view->src_buffer, p->Attr("src_buffer")),
-               d->AsDoc<ExprDoc>(buffer_view->layout, p->Attr("layout")),
-               d->AsDoc<ExprDoc>(buffer_view->dst_buffer->shape,
-                                 p->Attr("dst_buffer")->Attr("shape"))});
-          return doc;
-        });
-TVM_SCRIPT_REPR(tir::BufferGetNode, ReprPrintTIR);
-TVM_SCRIPT_REPR(tir::BufferViewNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tir::ExecScope>(

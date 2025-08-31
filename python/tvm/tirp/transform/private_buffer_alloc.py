@@ -15,15 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Dict
+from typing import Dict, List
 
-from tvm.tir.stmt_functor import StmtVisitor, StmtMutator
-from tvm.tirp.op_schedule.schedule_context import ScheduleContext
-from tvm.target import Target
 from tvm.ir import Range
-from tvm.tir.stmt import Block, AttrStmt, For, OpCall, Stmt
+from tvm.target import Target
 from tvm.tir.buffer import Buffer
+from tvm.tir.stmt import AttrStmt, Block, For, OpCall, Stmt
+from tvm.tir.stmt_functor import StmtMutator, StmtVisitor
 from tvm.tir.transform.function_pass import prim_func_pass
+from tvm.tirp.op_schedule.schedule_context import ScheduleContext
 from tvm.tirp.transform.common import seek_kernel_replace_point
 
 
@@ -66,8 +66,6 @@ class PrivateAllocCollector(StmtVisitor):
         self.private_buf_refs[op] = private_buf_refs
 
 
-
-
 class PrivateAllocMutator(StmtMutator):
     def __init__(
         self,
@@ -100,8 +98,6 @@ class PrivateAllocMutator(StmtMutator):
                 match_buffers=op.match_buffers,
                 annotations=op.annotations,
                 exec_scope=op.exec_scope,
-                buffer_views=op.buffer_views,
-                buffer_gets=op.buffer_gets,
             )
             return block
         return op

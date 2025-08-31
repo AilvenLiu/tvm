@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Abstraction for array data structures."""
-from enum import IntEnum
+import functools
 from numbers import Integral
 
 import tvm_ffi
@@ -269,6 +269,127 @@ class Buffer(Object, Scriptable):
         """
         return tvm.tir.address_of(self[*indices])
 
+    def view(self, *args, **kwargs) -> "Buffer":
+        """Creates a new view of the buffer. (used by parser)
+
+        Signatures:
+        1. view(*shape, layout=None), shape can contain -1 to indicate that the dimension size is auto-inferred
+        2. view(dtype: Union[str, tvm.DataType])
+
+        Returns
+        -------
+        view : DeclBufferFrame
+            The corresponding view buffer.
+        """
+
+        def _infer_shape(shape):
+            shape = list(shape)
+            if -1 in shape and shape.count(-1) == 1:
+                size = functools.reduce(lambda x, y: x * y, self.shape)
+                n_size = functools.reduce(lambda x, y: x * y, [s for s in shape if s != -1], 1)
+                shape[shape.index(-1)] = size // n_size
+            else:
+                assert functools.reduce(lambda x, y: x * y, shape) == functools.reduce(
+                    lambda x, y: x * y, self.shape
+                ), (
+                    "The shape of the buffer "
+                    + str(self.shape)
+                    + " and the new shape "
+                    + str(shape)
+                    + " are not compatible"
+                )
+            return shape
+
+        if len(args) == 1 and isinstance(args[0], (str, tvm.DataType)) and not kwargs:
+            cast_dtype = tvm.DataType(args[0])
+            cur_dtype = tvm.DataType(self.dtype)
+            if cast_dtype.bits > cur_dtype.bits:
+                layout = self.layout.pack(cast_dtype.bits // cur_dtype.bits)
+                shape = [s for s in self.shape[:-1]] + [
+                    self.shape[-1] // (cur_dtype.bits // cast_dtype.bits)
+                ]
+            else:
+                layout = self.layout.unpack(cur_dtype.bits // cast_dtype.bits)
+                shape = [s for s in self.shape[:-1]] + [
+                    self.shape[-1] * (cur_dtype.bits // cast_dtype.bits)
+                ]
+            return tvm.script.ir_builder.tir.decl_buffer(
+                shape,
+                cast_dtype,
+                self.data,
+                self.strides,
+                self.elem_offset,
+                None,
+                self.scope(),
+                self.data_alignment,
+                self.offset_factor,
+                "",
+                self.axis_separators,
+                layout,
+            )
+        else:
+            # --- Signature 1: view(*shape, **opts) ---
+            # Check if all positional args are integers/PrimExprs with dtype int32 or int64 (the shape)
+            shape = args
+            assert all(
+                isinstance(arg, int)
+                or (isinstance(arg, PrimExpr) and arg.dtype in ["int32", "int64"])
+                for arg in shape
+            ), "shape must be a list of integers or PrimExprs with dtype int32 or int64"
+            # Safely get optional keyword arguments
+            layout = kwargs.get("layout", None)
+            # Assert there are no other kwargs
+            assert set(kwargs.keys()).issubset(
+                {"layout"}
+            ), f"Unsupported kwargs for view: {set(kwargs.keys()) - {'layout'}}"
+
+            if layout is None:
+                shape = _infer_shape(shape)
+
+            return tvm.script.ir_builder.tir.decl_buffer(
+                shape,
+                self.dtype,
+                self.data,
+                self.strides,
+                self.elem_offset,
+                None,
+                self.scope(),
+                self.data_alignment,
+                self.offset_factor,
+                "",
+                self.axis_separators,
+                self.layout if layout is None else layout,
+            )
+
+    def storage(self, *shape, layout=None) -> "Buffer":
+        """Create a new view of the mapped storage of the current thread
+        given a logical buffer with multi-threading layout.
+
+        Parameters
+        ----------
+        shape : tuple of Expr
+            The shape of the storage for indexing.
+
+        Returns
+        -------
+        storage : DeclBufferFrame
+            The corresponding storage buffer.
+        """
+        return tvm.script.ir_builder.tir.decl_buffer(
+            shape,
+            self.dtype,
+            self.data,
+            self.strides,
+            self.elem_offset,
+            None,
+            self.scope(),
+            self.data_alignment,
+            self.offset_factor,
+            "",
+            self.axis_separators,
+            self.layout.storage() if layout is None else layout,
+        )
+
     def __getitem__(self, indices):
         from ..arith import Analyzer  # pylint: disable=import-outside-toplevel
         from .expr import (  # pylint: disable=import-outside-toplevel
@@ -321,19 +442,6 @@ class Buffer(Object, Scriptable):
                 else:
                     expr_indices.append(index)
             return BufferLoad(self, expr_indices)
-
-    def is_event_tensor(self):
-        """Check if the buffer is an event tensor."""
-        return "event_i" in self.dtype
-
-    @property
-    def event_impl(self):
-        """Get the event implementation of the buffer."""
-        assert self.is_event_tensor()
-        scope_split = self.scope().split(".")
-        if len(scope_split) == 1:
-            return ""
-        return scope_split[-1]
 
 
 def decl_buffer(

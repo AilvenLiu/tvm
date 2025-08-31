@@ -171,10 +171,10 @@ def test_roundtrip_buffer_view_get1():
                 A = T.alloc_buffer([2], dtype="float16", scope="local")
                 A_layout = T.TileLayout(shard=([1, 2], [2, 1]))
                 A_warp_layout = A_layout.tile(L_LANE, (8, 4), (1, 2))
-                A_warp = T.view(A, layout=A_warp_layout, shape=(8, 8))
+                A_warp = A.view(8, 8, layout=A_warp_layout)
 
                 with T.thread():
-                    A_local = T.get(A_warp, shape=(2,))
+                    A_local = A_warp.storage(2)
                     A_local[0] = T.float16(0)
 
     # fmt: on
@@ -199,13 +199,32 @@ def test_roundtrip_buffer_view_get2():
                 A = T.alloc_buffer([2,], dtype="float16", scope="local")
                 A_layout = T.TileLayout(shard=([1, 2], [2, 1]))
                 B_layout = A_layout.tile(L_LANE, (8, 4), (1, 2))
-                B = T.view(A, layout=B_layout, shape=(8, 8))
-                D = T.get(B, shape=(2,))
+                B = A.view(8, 8, layout=B_layout)
+                D = B.storage(2)
 
                 with T.thread():
                     out[0] = A[0] + B[0, 0] + D[0]
     # fmt: on
     code = test.script()
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_roundtrip_buffer_view_get3():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test() -> None:
+        with T.kernel():
+            with T.cta():
+                A = T.alloc_buffer([8, 8], dtype="float32", scope="local")
+                A_f16 = A.view("float16")
+
+                with T.thread():
+                    A_f16[0, 0] = T.float16(0)
+
+    # fmt: on
+    code = test.script()
+    print(code)
     assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 

@@ -830,65 +830,6 @@ class MatchBufferRegion : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(MatchBufferRegionNode);
 };
 
-// BufferView
-class BufferViewNode : public Object {
- public:
-  /*! \brief The source buffer of the buffer view. */
-  Buffer src_buffer;
-  /*! \brief The layout of the dst buffer */
-  TLayout layout;
-  /*! \brief The dest buffer */
-  Buffer dst_buffer;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<BufferViewNode>()
-        .def_ro("src_buffer", &BufferViewNode::src_buffer)
-        .def_ro("layout", &BufferViewNode::layout)
-        .def_ro("dst_buffer", &BufferViewNode::dst_buffer);
-  }
-
-  static constexpr const char* _type_key = "tirx.BufferView";
-  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_FINAL_OBJECT_INFO(BufferViewNode, Object);
-};
-
-class BufferView : public ObjectRef {
- public:
-  TVM_DLL explicit BufferView(Buffer src_buffer, TLayout layout, Buffer dst_buffer);
-
-  TVM_DEFINE_OBJECT_REF_METHODS(BufferView, ObjectRef, BufferViewNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(BufferViewNode);
-};
-
-// BufferGet
-class BufferGetNode : public Object {
- public:
-  /*! \brief The source buffer of the buffer get */
-  Buffer src_buffer;
-  /*! \brief The target buffer of the buffer get */
-  Buffer dst_buffer;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<BufferGetNode>()
-        .def_ro("src_buffer", &BufferGetNode::src_buffer)
-        .def_ro("dst_buffer", &BufferGetNode::dst_buffer);
-  }
-
-  static constexpr const char* _type_key = "tirx.BufferGet";
-  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_FINAL_OBJECT_INFO(BufferGetNode, Object);
-};
-
-class BufferGet : public ObjectRef {
- public:
-  TVM_DLL explicit BufferGet(Buffer src_buffer, Buffer dst_buffer);
-
-  TVM_DEFINE_OBJECT_REF_METHODS(BufferGet, ObjectRef, BufferGetNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(BufferGetNode);
-};
-
 /*!
  * \brief A block is a basic schedule unit in TIR.
  * \note SBlock's body is parameterized by iter vars.
@@ -940,10 +881,6 @@ class SBlockNode : public StmtNode {
   // TIR+ signature
   // The execution scope of the block.
   Optional<ExecScope> exec_scope;
-  // Collective views of buffers
-  Array<BufferView> buffer_views;
-  // Local views of buffers
-  Array<BufferGet> buffer_gets;
   // Events in the block
   Array<BulkGroupEvent> bulk_events;
   // Event tensors in the block
@@ -964,9 +901,7 @@ class SBlockNode : public StmtNode {
         .def_ro("match_buffers", &SBlockNode::match_buffers)
         .def_ro("annotations", &SBlockNode::annotations)
         .def_ro("init", &SBlockNode::init)
-        .def_ro("body", &SBlockNode::body)
-        .def_ro("buffer_views", &SBlockNode::buffer_views)
-        .def_ro("buffer_gets", &SBlockNode::buffer_gets);
+        .def_ro("body", &SBlockNode::body);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SBlock", SBlockNode, StmtNode);
 };
@@ -985,15 +920,12 @@ class SBlock : public Stmt {
       ffi::Array<MatchBufferRegion> match_buffers = ffi::Array<MatchBufferRegion>(),
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
       Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt,
-      ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
       ffi::Array<BulkGroupEvent> bulk_events = ffi::Array<BulkGroupEvent>(),
       ffi::Array<SemaphoreEventTensor> sem_event_tensors = ffi::Array<SemaphoreEventTensor>());
 
   TVM_DLL explicit SBlock(
       ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_scope = std::nullopt,
       ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
-      ffi::Array<BufferView> buffer_views = ffi::Array<BufferView>(),
-      ffi::Array<BufferGet> buffer_gets = ffi::Array<BufferGet>(),
       ffi::Array<BulkGroupEvent> bulk_events = ffi::Array<BulkGroupEvent>(),
       ffi::Array<SemaphoreEventTensor> sem_event_tensors = ffi::Array<SemaphoreEventTensor>(),
       Span span = Span());
@@ -1352,6 +1284,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxxxxxxx
+}  // namespace tirxxxxxxxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

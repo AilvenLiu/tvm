@@ -196,8 +196,8 @@ def unary_map_cuda_warp_logical_view_nd_impl(
     @T.prim_func(tirp=True, check_well_formed=False)
     def impl():
         with T.thread():
-            src_local = T.get(src, src_local_shape)
-            dst_local = T.get(dst, dst_local_shape)
+            src_local = src.storage(*src_local_shape)
+            dst_local = dst.storage(*dst_local_shape)
             for idx in T.serial(LOCAL_LEN):
                 dst_local[idx] = T.Cast(dtype, op_func(src_local[idx]))
     # fmt: on

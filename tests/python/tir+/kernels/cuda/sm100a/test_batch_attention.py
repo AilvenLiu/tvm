@@ -459,7 +459,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 with T.thread():
                                     kv_idx_base = int_var(kv_idx_base_in)
                                     kv_idx = int_var(kv_idx_base[0] + warp_id * 4 + lane_id // 8)
-                                    kv_buf_1d = Tp.reshape(kv_buf, [-1])
+                                    kv_buf_1d = kv_buf.view(-1)
                                     # unroll
                                     for i in T.unroll(NUM_MMA_KV * 4 // NUM_WARPS_Q):
                                         for j in T.unroll(NUM_MMA_D // (8 // size_of("float16"))):
@@ -761,7 +761,7 @@ __device__ __forceinline__ float {func_name}() {{
                                                     o_ptr_offset = int_var(o_ptr_base_offset + o_buf.elem_offset_of([q[0], r[0], (lane_id % 8) * upcast_size("float16")]))
                                                     for mma_do in T.unroll(NUM_MMA_D_VO // 4):
                                                         if q[0] < qo_upperbound[0]:
-                                                            o_buf_1d = Tp.reshape(o_buf, [-1])
+                                                            o_buf_1d = o_buf.view(-1)
                                                             store_128b(o_buf_1d.ptr_to([o_ptr_offset[0]]), o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]))
                                                         o_ptr_offset[0] += 8 * upcast_size("float16")
                                                         o_smem_offset_w[0] = advance_offset_by_column(8, o_smem_offset_w[0], mma_do)
@@ -977,7 +977,7 @@ __device__ __forceinline__ void {func_name}() {{
                                 warp_sync_state()
                                 state.normalize()
 
-                            final_o_buf_2d = Tp.reshape(final_o_buf, [-1, HEAD_DIM])
+                            final_o_buf_2d = final_o_buf.view(-1, HEAD_DIM)
                             cast_store(state.o, VEC_SIZE, final_o_buf_2d, merge_idx_to_offset, tx[0] * VEC_SIZE)
 
                             i[0] += NUM_WORKERS

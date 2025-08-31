@@ -17,12 +17,20 @@
 
 from typing import Dict, List
 
-from tvm.tir.stmt_functor import StmtExprMutator, StmtMutator
-from tvm.tir import BufferLoad, Block, BufferStore, OpCall, BufferRegion, Var, PrimExpr
+from tvm.tir import (
+    Block,
+    BufferLoad,
+    BufferRegion,
+    BufferStore,
+    OpCall,
+    PrimExpr,
+    Stmt,
+    Var,
+)
 from tvm.tir.buffer import Buffer
-from tvm.tir import BufferView, BufferGet, Stmt
-from tvm.tirp.operator.op import KernelReplacePoint
 from tvm.tir.event import SemaphoreEventTensorItem
+from tvm.tir.stmt_functor import StmtExprMutator, StmtMutator
+from tvm.tirp.operator.op import KernelReplacePoint
 
 
 class BufferReplacer(StmtExprMutator):
@@ -78,68 +86,6 @@ class BufferReplacer(StmtExprMutator):
             else:
                 args.append(arg)
         return OpCall(*args, op=op.op, workspace=new_workspace, schedule_config=op.schedule_config)
-
-    def visit_block_(self, op):
-        op = super().visit_block_(op)
-        new_buffer_views = []
-        new_buffer_gets = []
-        changed = False
-        for buffer_view in op.buffer_views:
-            if (
-                not buffer_view.src_buffer in self.buffer_map
-                and not buffer_view.dst_buffer in self.buffer_map
-            ):
-                new_buffer_views.append(buffer_view)
-            else:
-                new_src_buffer = (
-                    self.buffer_map[buffer_view.src_buffer]
-                    if buffer_view.src_buffer in self.buffer_map
-                    else buffer_view.src_buffer
-                )
-                new_dst_buffer = (
-                    self.buffer_map[buffer_view.dst_buffer]
-                    if buffer_view.dst_buffer in self.buffer_map
-                    else buffer_view.dst_buffer
-                )
-                new_buffer_views.append(
-                    BufferView(new_src_buffer, buffer_view.layout, new_dst_buffer)
-                )
-                changed = True
-
-        for buffer_get in op.buffer_gets:
-            if (
-                not buffer_get.src_buffer in self.buffer_map
-                and not buffer_get.dst_buffer in self.buffer_map
-            ):
-                new_buffer_gets.append(buffer_get)
-            else:
-                new_src_buffer = (
-                    self.buffer_map[buffer_get.src_buffer]
-                    if buffer_get.src_buffer in self.buffer_map
-                    else buffer_get.src_buffer
-                )
-                new_dst_buffer = (
-                    self.buffer_map[buffer_get.dst_buffer]
-                    if buffer_get.dst_buffer in self.buffer_map
-                    else buffer_get.dst_buffer
-                )
-                new_buffer_gets.append(BufferGet(new_src_buffer, new_dst_buffer))
-                changed = True
-        if changed:
-            return Block(
-                op.iter_vars,
-                op.reads,
-                op.writes,
-                op.name_hint,
-                body=op.body,
-                alloc_buffers=op.alloc_buffers,
-                match_buffers=op.match_buffers,
-                annotations=op.annotations,
-                exec_scope=op.exec_scope,
-                buffer_views=new_buffer_views,
-                buffer_gets=new_buffer_gets,
-            )
-        return op
 
 
 class KernelReplacePointSearcher(StmtMutator):

@@ -365,12 +365,6 @@ class ScopeMerger : public StmtExprMutator {
               ICHECK(next_block->exec_scope.defined())
                   << "Internal Error: exec_scope is not defined";
               if (scope->Is(next_block->exec_scope.value())) {
-                new_block->buffer_views.insert(new_block->buffer_views.end(),
-                                               next_block->buffer_views.begin(),
-                                               next_block->buffer_views.end());
-                new_block->buffer_gets.insert(new_block->buffer_gets.end(),
-                                              next_block->buffer_gets.begin(),
-                                              next_block->buffer_gets.end());
                 new_body.push_back(next_block->body);
                 continue;
               }
@@ -503,94 +497,6 @@ class ScheduleContextRemover : public StmtExprMutator {
   }
 };
 
-class BufferViewGetRemover : public arith::IRMutatorWithAnalyzer {
- public:
-  static Stmt Remove(const Stmt& stmt, const Map<tirx::Var, Buffer> buffer_map) {
-    arith::Analyzer ana;
-    BufferViewGetRemover remover(&ana);
-    for (const auto& kv : buffer_map) {
-      remover.storage_map_[kv.second] = kv.second;
-    }
-    return remover(stmt);
-  }
-
- private:
-  explicit BufferViewGetRemover(arith::Analyzer* analyzer)
-      : arith::IRMutatorWithAnalyzer(analyzer) {}
-  Stmt VisitStmt_(const BlockNode* op) override {
-    for (const auto& alloc : op->alloc_buffers) {
-      storage_map_[alloc] = alloc;
-    }
-    for (const auto& view : op->buffer_views) {
-      auto it = storage_map_.find(view->src_buffer);
-      ICHECK(it != storage_map_.end())
-          << "Internal Error: Cannot find storage for " << view->src_buffer;
-      storage_map_[view->dst_buffer] = it->second;
-      replace_map_[view->dst_buffer] = it->second;
-    }
-    for (const auto& get : op->buffer_gets) {
-      auto it = storage_map_.find(get->src_buffer);
-      ICHECK(it != storage_map_.end())
-          << "Internal Error: Cannot find storage for " << get->src_buffer;
-      replace_map_[get->dst_buffer] = it->second;
-    }
-    Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(op));
-    auto* n = block.CopyOnWrite();
-    n->buffer_views.clear();
-    n->buffer_gets.clear();
-    return std::move(block);
-  }
-
-  Array<PrimExpr> RewriteIndices(Array<PrimExpr> indices, Array<PrimExpr> old_shape,
-                                 Array<PrimExpr> new_shape) {
-    PrimExpr indices_prod = 1;
-    for (size_t i = 0; i < indices.size(); i++) {
-      indices_prod *= old_shape[i];
-      indices_prod += indices[i];
-    }
-    std::vector<PrimExpr> new_indices;
-    int new_shape_size = new_shape.size();
-    for (int i = new_shape_size - 1; i >= 0; i--) {
-      new_indices.push_back(analyzer_->Simplify(floormod(indices_prod, new_shape[i])));
-      indices_prod = floordiv(indices_prod, new_shape[i]);
-    }
-    std::reverse(new_indices.begin(), new_indices.end());
-    return Array<PrimExpr>(new_indices.begin(), new_indices.end());
-  }
-
-  using StmtExprMutator::VisitExpr_;
-  using StmtExprMutator::VisitStmt_;
-
-  Stmt VisitStmt_(const BufferStoreNode* op) override {
-    BufferStore store = Downcast<BufferStore>(StmtExprMutator::VisitStmt_(op));
-    auto it = replace_map_.find(op->buffer);
-    if (it != replace_map_.end()) {
-      auto* n = store.CopyOnWrite();
-      n->buffer = it->second;
-      n->indices = RewriteIndices(op->indices, op->buffer->shape, it->second->shape);
-      ICHECK_EQ(it->second->shape.size(), n->indices.size())
-          << "Internal Error: Inconsistent shape for " << it->second;
-    }
-    return std::move(store);
-  }
-
-  PrimExpr VisitExpr_(const BufferLoadNode* op) override {
-    BufferLoad load = Downcast<BufferLoad>(StmtExprMutator::VisitExpr_(op));
-    auto it = replace_map_.find(op->buffer);
-    if (it != replace_map_.end()) {
-      auto* n = load.CopyOnWrite();
-      n->buffer = it->second;
-      n->indices = RewriteIndices(op->indices, op->buffer->shape, it->second->shape);
-      ICHECK_EQ(it->second->shape.size(), n->indices.size())
-          << "Internal Error: Inconsistent shape for " << it->second;
-    }
-    return std::move(load);
-  }
-
-  std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> storage_map_;
-  std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> replace_map_;
-};
-
 class LayoutApplier : public arith::IRMutatorWithAnalyzer {
  public:
   static std::pair<Stmt, Map<Var, Buffer>> Flatten(const Stmt& stmt,
@@ -637,8 +543,6 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
   }
 
   Stmt VisitStmt_(const BlockNode* op) final {
-    ICHECK_EQ(op->buffer_gets.size(), 0) << "Unexpected BufferGet found";
-    ICHECK_EQ(op->buffer_views.size(), 0) << "Unexpected BufferView found";
     ICHECK_EQ(op->match_buffers.size(), 0) << "Unexpected MatchBufferRegion found";
 
     Block block = GetRef<Block>(op);
@@ -919,7 +823,6 @@ Pass LowerTIRp() {
 
     // Cleanup other TIRp aux data structures
     n->body = ScheduleContextRemover::Remove(n->body);
-    n->body = BufferViewGetRemover::Remove(n->body, n->buffer_map);
     std::tie(n->body, n->buffer_map) =
         LayoutApplier::Flatten(n->body, n->buffer_map, target.value());
     n->body = BufferOffsetRemover::Remove(n->body);
@@ -934,5 +837,5 @@ TVM_FFI_STATIC_INIT_BLOCK({
 });
 
 }  // namespace transform
-}  // namespace tirxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxx
 }  // namespace tvm

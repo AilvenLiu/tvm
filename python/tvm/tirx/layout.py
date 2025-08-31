@@ -225,6 +225,92 @@ class TLayout(Object):
             return False
         return _ffi_api.TileLayoutIsTrainium(self)  # pylint: disable=no-member
 
+    def storage(self) -> "TLayout":
+        if isinstance(self, TileLayout):
+            # Filter out shard with thread axis
+            shard = [iter for iter in self.shard if not iter.axis.is_thread()]
+            replicate = [iter for iter in self.replicate if not iter.axis.is_thread()]
+            exclude = {
+                axis: offset for axis, offset in self.exclude.items() if not axis.is_thread()
+            }
+            return _ffi_api.TileLayout(shard, replicate, exclude)  # pylint: disable=no-member
+
+        elif isinstance(self, SwizzleLayout):
+            return self
+        elif isinstance(self, ComposeLayout):
+            return ComposeLayout(self.layout_A.storage(), self.layout_B.storage())
+        else:
+            raise ValueError(f"Unsupported layout type: {type(self)}")
+
+    def unpack(self, num: int) -> "TLayout":
+        """Unpack the layout, where a single element in the layout is unpacked into num contiguous elements.
+
+        Parameters
+        ----------
+        num : int
+            The number of elements to unpack into
+
+        Returns
+        -------
+        TLayout
+            The unpacked layout
+        """
+        if isinstance(self, TileLayout):
+            shard = [Iter(iter.extent, iter.stride * num, iter.axis) for iter in self.shard]
+            shard.append(Iter(num, 1, Axis.get("m")))
+            return _ffi_api.TileLayout(shard, self.replicate, self.exclude)
+        elif isinstance(self, SwizzleLayout):
+            assert num & (num - 1) == 0, "num must be a power of 2"
+            return SwizzleLayout(
+                self.per_element + (num.bit_length() - 1),
+                self.swizzle_len,
+                self.atom_len,
+                self.swizzle_inner,
+            )
+        elif isinstance(self, ComposeLayout):
+            return ComposeLayout(self.layout_A.unpack(num), self.layout_B.unpack(num))
+        else:
+            raise ValueError(f"Unsupported layout type: {type(self)}")
+
+    def pack(self, num: int) -> "TLayout":
+        """Pack the layout, where num contiguous elements in the layout are packed into a single element.
+
+        Parameters
+        ----------
+        num : int
+            The number of elements to pack into
+
+        Returns
+        -------
+        TLayout
+            The packed layout
+        """
+        if isinstance(self, TileLayout):
+            inner_iter = self.shard[-1]
+            assert (
+                inner_iter.stride == 1
+                and inner_iter.extent % num == 0
+                and inner_iter.axis.is_memory()
+            ), f"Layout {self} can not be packed into {num} elements"
+            shard = [Iter(iter.extent, iter.stride // num, iter.axis) for iter in self.shard[:-1]]
+            shard.append(Iter(inner_iter.extent // num, 1, inner_iter.axis))
+            return _ffi_api.TileLayout(shard, self.replicate, self.exclude)
+        elif isinstance(self, SwizzleLayout):
+            assert num & (num - 1) == 0, "num must be a power of 2"
+            assert (
+                self.per_element >= num.bit_length() - 1
+            ), "per_element must be greater than or equal to num.bit_length() - 1"
+            return SwizzleLayout(
+                self.per_element - (num.bit_length() - 1),
+                self.swizzle_len,
+                self.atom_len,
+                self.swizzle_inner,
+            )
+        elif isinstance(self, ComposeLayout):
+            return ComposeLayout(self.layout_A.pack(num), self.layout_B.pack(num))
+        else:
+            raise ValueError(f"Unsupported layout type: {type(self)}")
+
 
 @tvm.ffi.register_object("tir.Axis")
 class Axis(Object):

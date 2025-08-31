@@ -1177,5 +1177,4 @@ __all__ = [
     "alloc_bulk_group_event",
     "alloc_semaphore_event_tensor",
     "PoolAllocator",
-    "reshape",
 ]

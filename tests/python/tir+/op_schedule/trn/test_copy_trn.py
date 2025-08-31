@@ -139,8 +139,8 @@ def test_copy_in_a_loop_2():
         A = T.match_buffer(A_ptr, src_shape, "float32", layout=src_layout)
         with T.kernel():
             A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            A_sbuf_view = T.view(A_sbuf, A_sbuf.layout, (128, 4, 512))
-            A_view = T.view(A, A.layout, (128, 4, 512))
+            A_sbuf_view = A_sbuf.view(128, 4, 512)
+            A_view = A.view(128, 4, 512)
             for i in range(4):
                 Tp.copy(A_sbuf_view[:, i, :], A_view[:, i, :])
 
@@ -151,17 +151,23 @@ def test_copy_in_a_loop_2():
         A_1 = T.decl_buffer((262144,), data=A.data, layout=None)
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 2048), scope="trn.sbuf")
+            A_sbuf_view = T.decl_buffer(
+                (128, 2048), data=A_sbuf.data, scope="trn.sbuf", layout=None
+            )
+            A_view = T.decl_buffer((262144,), data=A.data, layout=None)
             for i, b_loop in T.grid(4, 1):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim": "F"}):
                         T.nki.load(
-                            A_sbuf[p_loop, i * 512 + f_loop], A_1[p_loop * 2048 + i * 512 + f_loop]
+                            A_sbuf_view[p_loop, i * 512 + f_loop],
+                            A_view[p_loop * 2048 + i * 512 + f_loop],
                         )
 
     with target:
         mod = tvm.IRModule({"main": copy})
         mod = tvm.tir.transform.LowerTIRp()(mod)
+        mod.show()
         assert_structural_equal(mod["main"], expected)
 
 
@@ -313,7 +319,7 @@ def test_copy_different_shape():
         with T.kernel():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            B_sbuf_view = T.view(B_sbuf, B_sbuf.layout, (512, 4))
+            B_sbuf_view = B_sbuf.view(512, 4)
             Tp.copy(B_sbuf_view, A_sbuf[:, 0:4])
 
     @T.prim_func(tirp=True)
@@ -322,6 +328,7 @@ def test_copy_different_shape():
         with T.kernel():
             A_sbuf = T.alloc_buffer((128, 256), scope="trn.sbuf")
             B_sbuf = T.alloc_buffer((128, 16), scope="trn.sbuf")
+            B_sbuf_view = T.decl_buffer((128, 16), data=B_sbuf.data, scope="trn.sbuf", layout=None)
             for b_loop in T.serial(0, 4):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim": "P"}):

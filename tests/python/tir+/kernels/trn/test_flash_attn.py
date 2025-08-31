@@ -15,11 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 import pytest
+import torch
+
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-import torch
+
 from .utils import run_on_remote_and_check_correct, ssh_client
 
 target = tvm.target.Target("aws/trn1/trn1.2xlarge")
@@ -32,6 +34,7 @@ head_q = 1
 head_kv = 1
 p_size = 128
 
+
 @pytest.mark.dependency(depends=["ssh_success"])
 def test_flash_attn(ssh_client, causal=True):
 
@@ -42,7 +45,6 @@ def test_flash_attn(ssh_client, causal=True):
 
     INST_SIZE = 512
     NUM_MM1_PER_BLOCK = BLOCK_KV // INST_SIZE
-
 
     running_max_shape = (seqlen_q, 1)
     running_max_layout = "PF"
@@ -73,25 +75,39 @@ def test_flash_attn(ssh_client, causal=True):
             # we enforce kv_range to be a multiple of 512
             # this is to prevent having f_loop/p_loop in the mask of matmul.
             # Neuron compiler does not support this in a proper way.
-            return T.max(T.min((block_q//4*4+4) * BLOCK_Q - block_kv * BLOCK_KV, BLOCK_KV), 0)
+            return T.max(T.min((block_q // 4 * 4 + 4) * BLOCK_Q - block_kv * BLOCK_KV, BLOCK_KV), 0)
         else:
             return BLOCK_KV
 
     @T.macro
     def load_q(q_loaded, q, block_q, head):
-        Tp.copy(q_loaded[block_q % 2], q[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, head, :])
+        Tp.copy(q_loaded[block_q % 2], q[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, head, :])
 
     @T.macro
-    def update_running_max(running_max, mm1_dot_max, prev_running_max, scaling_factor, block_q, block_kv):
+    def update_running_max(
+        running_max, mm1_dot_max, prev_running_max, scaling_factor, block_q, block_kv
+    ):
         # running_max = min(-max(Q@K.T), running_max)
         # scaling_factor = exp(-prev_running_max + running_max) (this is because we apply negate to the max value)
         if block_kv == 0:
-            Tp.copy(running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], mm1_dot_max)
+            Tp.copy(running_max[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0], mm1_dot_max)
         else:
-            Tp.mul(prev_running_max, running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], T.float32(-1.0))
-            Tp.minimum(running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], mm1_dot_max)
-            Tp.exp(scaling_factor[block_q % 2], prev_running_max, bias=running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0])
-            
+            Tp.mul(
+                prev_running_max,
+                running_max[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0],
+                T.float32(-1.0),
+            )
+            Tp.minimum(
+                running_max[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0],
+                running_max[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0],
+                mm1_dot_max,
+            )
+            Tp.exp(
+                scaling_factor[block_q % 2],
+                prev_running_max,
+                bias=running_max[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0],
+            )
+
     @T.macro
     def exp(p, qk, running_max, partial_rowsum_p, rowsum_p, block_q, block_kv):
         # p = exp(Q@K.T + running_max)
@@ -101,49 +117,99 @@ def test_flash_attn(ssh_client, causal=True):
         # F loop can always be relaxed to a constant, so that the mask only contains out-of-bound mask.
         if causal:
             Tp.memset(partial_rowsum_p, 0.0)
-            p_reshape = T.view(p, p.layout, (BLOCK_Q, BLOCK_KV//INST_SIZE, INST_SIZE))
-            qk_reshape = T.view(qk, qk.layout, (2, BLOCK_Q, BLOCK_KV//INST_SIZE, INST_SIZE))
-            running_max_reshape = T.view(running_max, running_max.layout, (seqlen_q, 1, 1))
-            reduced_kv_range = T.meta_var(T.max(T.min((block_q//4+1) - block_kv * BLOCK_KV // INST_SIZE, BLOCK_KV // INST_SIZE), 0))
-            Tp.unary_reduce(p_reshape[:, 0:reduced_kv_range, :], partial_rowsum_p[:, 0:reduced_kv_range], qk_reshape[block_q % 2, :, 0:reduced_kv_range, :], unary_op="exp", reduce_op="sum", bias=running_max_reshape[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0, 0], reduce_axes=-1, schedule_config={"max_inst_size": INST_SIZE})
+            p_reshape = p.view(BLOCK_Q, BLOCK_KV // INST_SIZE, INST_SIZE)
+            qk_reshape = qk.view(2, BLOCK_Q, BLOCK_KV // INST_SIZE, INST_SIZE)
+            running_max_reshape = running_max.view(seqlen_q, 1, 1)
+            reduced_kv_range = T.meta_var(
+                T.max(
+                    T.min(
+                        (block_q // 4 + 1) - block_kv * BLOCK_KV // INST_SIZE, BLOCK_KV // INST_SIZE
+                    ),
+                    0,
+                )
+            )
+            Tp.unary_reduce(
+                p_reshape[:, 0:reduced_kv_range, :],
+                partial_rowsum_p[:, 0:reduced_kv_range],
+                qk_reshape[block_q % 2, :, 0:reduced_kv_range, :],
+                unary_op="exp",
+                reduce_op="sum",
+                bias=running_max_reshape[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0, 0],
+                reduce_axes=-1,
+                schedule_config={"max_inst_size": INST_SIZE},
+            )
             Tp.sum(rowsum_p[block_q % 2], partial_rowsum_p, axes=-1)
         else:
-            Tp.unary_reduce(p, rowsum_p[block_q % 2], qk[block_q % 2], unary_op="exp", reduce_op="sum", bias=running_max[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], reduce_axes=-1)
-     
+            Tp.unary_reduce(
+                p,
+                rowsum_p[block_q % 2],
+                qk[block_q % 2],
+                unary_op="exp",
+                reduce_op="sum",
+                bias=running_max[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0],
+                reduce_axes=-1,
+            )
+
     @T.macro
     def transpose(p, p_transposed, block_q, block_kv):
         kv_range = T.meta_var(get_kv_range(block_q, block_kv, causal))
         Tp.copy(p_transposed[:, 0:kv_range], p[:, 0:kv_range])
-    
+
     @T.macro
     def pv(mm2_out, p_transposed, v_loaded, block_q, block_kv):
         kv_range = T.meta_var(get_kv_range(block_q, block_kv, causal))
         Tp.gemm(mm2_out, p_transposed[:, 0:kv_range], v_loaded[0:kv_range, :], mm2_out)
 
     @T.macro
-    def write_back(l, l_reciprocal, scaling_factor, rowsum_p, out, prev_output, scaled_output, mm2_out, head, block_q, block_kv):
+    def write_back(
+        l,
+        l_reciprocal,
+        scaling_factor,
+        rowsum_p,
+        out,
+        prev_output,
+        scaled_output,
+        mm2_out,
+        head,
+        block_q,
+        block_kv,
+    ):
         kv_range = T.meta_var(get_kv_range(block_q, block_kv, causal))
         # l = sum(p) + scaling_factor * l
         if block_kv == 0:
-            Tp.copy(l[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], rowsum_p[block_q % 2])
+            Tp.copy(l[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0], rowsum_p[block_q % 2])
         else:
-            Tp.binary_chain(l[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], l[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0], scaling_factor[block_q % 2], rowsum_p[block_q % 2], op0="mul", op1="add")
+            Tp.binary_chain(
+                l[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0],
+                l[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0],
+                scaling_factor[block_q % 2],
+                rowsum_p[block_q % 2],
+                op0="mul",
+                op1="add",
+            )
         # l_reciprocal = 1 / l (this is to prepare for the computation of O / l)
         if block_kv == NUM_BLOCKS_KV - 1:
-            Tp.reciprocal(l_reciprocal, l[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, 0])
+            Tp.reciprocal(l_reciprocal, l[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0])
         # O = l * O + mm2_out
         if block_kv == 0:
-            Tp.copy(out[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, head, :], mm2_out)
+            Tp.copy(out[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, head, :], mm2_out)
         elif kv_range > 0 or block_kv == NUM_BLOCKS_KV - 1:
-            Tp.copy(prev_output, out[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, head, :])
+            Tp.copy(prev_output, out[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, head, :])
             if kv_range > 0:
-                Tp.binary_chain(scaled_output, prev_output, scaling_factor[block_q % 2], mm2_out, op0="mul", op1="add")
+                Tp.binary_chain(
+                    scaled_output,
+                    prev_output,
+                    scaling_factor[block_q % 2],
+                    mm2_out,
+                    op0="mul",
+                    op1="add",
+                )
             else:
                 Tp.mul(scaled_output, prev_output, scaling_factor[block_q % 2])
             if block_kv == NUM_BLOCKS_KV - 1:
                 # write O/l to hbm
                 Tp.mul(scaled_output, scaled_output, l_reciprocal)
-            Tp.copy(out[block_q * BLOCK_Q: (block_q + 1) * BLOCK_Q, head, :], scaled_output)
+            Tp.copy(out[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, head, :], scaled_output)
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -213,28 +279,30 @@ def test_flash_attn(ssh_client, causal=True):
                     pv(mm2_out, p_transposed, v_loaded, NUM_BLOCKS_Q-1, block_kv)
                     write_back(l, l_reciprocal, scaling_factor, rowsum_p, out, prev_output, scaled_output, mm2_out, head, NUM_BLOCKS_Q-1, block_kv)
 
-
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": flash_attn})
         func = mod["main"]
+
         def attn_ref(q, k, v):
             q = q.reshape(head_q, d, seqlen_q)
             k = k.reshape(head_kv, d, seqlen_kv)
             v = v.reshape(head_kv, seqlen_kv, d)
-            q = q.transpose(1,2)
+            q = q.transpose(1, 2)
             attn_scores = torch.bmm(q, k)
             attn_scores *= softmax_scale
             if causal:
-                mask = torch.triu(torch.ones((seqlen_q, seqlen_kv), device=q.device), diagonal=1).bool()
-                mask = torch.zeros_like(attn_scores, dtype=q.dtype).masked_fill(mask, float('-inf'))
+                mask = torch.triu(
+                    torch.ones((seqlen_q, seqlen_kv), device=q.device), diagonal=1
+                ).bool()
+                mask = torch.zeros_like(attn_scores, dtype=q.dtype).masked_fill(mask, float("-inf"))
                 attn_scores += mask
             attn_probs = torch.softmax(attn_scores, dim=-1)
             out = torch.bmm(attn_probs, v)
-            return [out.reshape(seqlen_q, head_q, d)]     
+            return [out.reshape(seqlen_q, head_q, d)]
+
         run_on_remote_and_check_correct(func, attn_ref, target)
 
 
 if __name__ == "__main__":
     test_flash_attn(causal=False)
-

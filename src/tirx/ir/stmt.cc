@@ -52,8 +52,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   MatchBufferRegionNode::RegisterReflection();
   SBlockNode::RegisterReflection();
   SBlockRealizeNode::RegisterReflection();
-  BufferViewNode::RegisterReflection();
-  BufferGetNode::RegisterReflection();
 }
 
 // Bind
@@ -570,44 +568,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   });
 }
 
-// BufferView
-BufferView::BufferView(Buffer src_buffer, TLayout layout, Buffer dst_buffer) {
-  ObjectPtr<BufferViewNode> node = make_object<BufferViewNode>();
-  node->src_buffer = std::move(src_buffer);
-  node->layout = std::move(layout);
-  node->dst_buffer = std::move(dst_buffer);
-  data_ = std::move(node);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK({
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.BufferView", [](Buffer src_buffer, TLayout layout, Buffer dst_buffer) {
-    return BufferView(src_buffer, layout, dst_buffer);
-  });
-});
-
-// BufferGet
-BufferGet::BufferGet(Buffer src_buffer, Buffer dst_buffer) {
-  ObjectPtr<BufferGetNode> node = make_object<BufferGetNode>();
-  node->src_buffer = std::move(src_buffer);
-  node->dst_buffer = std::move(dst_buffer);
-  data_ = std::move(node);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK({
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.BufferGet", [](Buffer src_buffer, Buffer dst_buffer) {
-    return BufferGet(src_buffer, dst_buffer);
-  });
-});
-
 // Block
 SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
                ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,
                ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
                ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
-               Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views,
-               ffi::Array<BufferGet> buffer_gets, ffi::Array<BulkGroupEvent> bulk_events,
+               Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BulkGroupEvent> bulk_events,
                ffi::Array<SemaphoreEventTensor> sem_event_tensors) {
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = std::move(iter_vars);
@@ -621,16 +587,13 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
   node->annotations = std::move(annotations);
   node->exec_scope = std::move(exec_scope);
   node->span = std::move(span);
-  node->buffer_views = std::move(buffer_views);
-  node->buffer_gets = std::move(buffer_gets);
   node->bulk_events = std::move(bulk_events);
   node->sem_event_tensors = std::move(sem_event_tensors);
   data_ = std::move(node);
 }
 
 SBlock::SBlock(ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_scope,
-               ffi::Array<Buffer> alloc_buffers, ffi::Array<BufferView> buffer_views,
-               ffi::Array<BufferGet> buffer_gets, ffi::Array<BulkGroupEvent> bulk_events,
+               ffi::Array<Buffer> alloc_buffers, ffi::Array<BulkGroupEvent> bulk_events,
                ffi::Array<SemaphoreEventTensor> sem_event_tensors, Span span) {
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = {};
@@ -644,8 +607,6 @@ SBlock::SBlock(ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_s
   node->annotations = {};
   node->exec_scope = std::move(exec_scope);
   node->span = std::move(span);
-  node->buffer_views = std::move(buffer_views);
-  node->buffer_gets = std::move(buffer_gets);
   node->bulk_events = std::move(bulk_events);
   node->sem_event_tensors = std::move(sem_event_tensors);
   data_ = std::move(node);
@@ -659,12 +620,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
          ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,
          ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
          ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
-         Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BufferView> buffer_views,
-         ffi::Array<BufferGet> buffer_gets, ffi::Array<BulkGroupEvent> bulk_events,
+         Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BulkGroupEvent> bulk_events,
          ffi::Array<SemaphoreEventTensor> sem_event_tensors) {
         return SBlock(iter_vars, reads, writes, name_hint, body, init, alloc_buffers, match_buffers,
-                      annotations, span, exec_scope, buffer_views, buffer_gets, bulk_events,
-                      sem_event_tensors);
+                      annotations, span, exec_scope, bulk_events, sem_event_tensors);
       });
 }
 

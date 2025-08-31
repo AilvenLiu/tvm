@@ -347,8 +347,8 @@ def test():
                 D_smem = pool.alloc((TMEM_PIPE_DEPTH, BLK_M, EPI_TILE), d_type, layout=D_layout)
                 SFA_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), "uint32", layout=SFA_layout)
                 SFB_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), "uint32", layout=SFB_layout)
-                SFA_smem_2d = Tp.reshape(SFA_smem, (SMEM_PIPE_DEPTH, BLK_SFA))
-                SFB_smem_2d = Tp.reshape(SFB_smem, (SMEM_PIPE_DEPTH, BLK_SFB))
+                SFA_smem_2d = SFA_smem.view(SMEM_PIPE_DEPTH, BLK_SFA)
+                SFB_smem_2d = SFB_smem.view(SMEM_PIPE_DEPTH, BLK_SFB)
 
                 # alloc local memory
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")

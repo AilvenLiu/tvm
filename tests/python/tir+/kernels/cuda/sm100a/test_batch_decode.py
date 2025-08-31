@@ -270,7 +270,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
             with T.kernel():
                 bx = T.cta_id([SM_COUNT], parent="kernel")
                 tx, ty, tz = T.thread_id([BDX, BDY, BDZ], parent="cta")
-                kv_global_1d = Tp.reshape(kv_global, (-1,))
+                kv_global_1d = kv_global.view(-1)
 
                 with T.cta():
                     # allocate the memory
@@ -536,7 +536,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                     pool = T.meta_var(Tp.PoolAllocator(buf.data))
                     o_tmp_smem = pool.alloc([PIPE_DEPTH, BDY, HEAD_DIM], "float32")
                     lse_tmp_smem_load = pool.alloc([BDY, BDX], "float32")
-                    lse_tmp_smem_use = Tp.reshape(lse_tmp_smem_load, [BDX, BDY])
+                    lse_tmp_smem_use = lse_tmp_smem_load.view(BDX, BDY)
                     pool.move_base_to(0)
                     o_epi_smem = pool.alloc([BDY, HEAD_DIM], "float32")
                     lse_epi_smem = pool.alloc([BDY], "float32")

@@ -56,26 +56,28 @@ def test_lower_view_get():
                 # load in_buf into A
                 with T.warp():
                     # warp view of this load
-                    B = T.view(A, layout=B_layout, shape=(64, ))
+                    B = A.view(64, layout=B_layout)
                     # B[i] = in_buf[i]
                     with T.thread():
                         # done by each thread
-                        A_local = T.get(B, shape=(2,))
+                        A_local = B.storage(2)
                         for i in T.vectorized(2):
                             A_local[i] = T.float32(in_buf[lane_id * 2 + i])
                 # write A into out
                 with T.warp():
                     # warp view of this write
-                    B = T.view(A, layout=B_layout, shape=(64, ))
+                    B = A.view(64, layout=B_layout)
                     # out[i] = B[i]
                     with T.thread():
                         # done by each thread
-                        A_local = T.get(B, shape=(2,))
+                        A_local = B.storage(2)
                         for i in T.vectorized(2):
                             out[lane_id * 2 + i] = T.float32(A_local[i])
 
     @T.prim_func(private=True, tirp=True)
-    def after1(in_buf: T.Buffer(64, "float32", layout=None), out: T.Buffer(64, "float32", layout=None)) -> None:
+    def after1(in_buf_handle: T.handle, out_handle: T.handle):
+        in_buf = T.match_buffer(in_buf_handle, (64,), layout=None)
+        out = T.match_buffer(out_handle, (64,), layout=None)
         out_1 = T.decl_buffer((64,), data=out.data, layout=None)
         in_buf_1 = T.decl_buffer((64,), data=in_buf.data, layout=None)
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
@@ -86,13 +88,17 @@ def test_lower_view_get():
             with T.thread():
                 A = T.alloc_local((2,), "float16", layout=None)
                 with T.warp():
+                    B = T.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
                     with T.thread():
+                        A_local = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
                         for i in T.vectorized(2):
-                            A[i] = T.Cast("float16", in_buf_1[threadIdx_x * 2 + i])
+                            A_local[i] = T.Cast("float16", in_buf_1[threadIdx_x * 2 + i])
                 with T.warp():
+                    B = T.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
                     with T.thread():
+                        A_local = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
                         for i in T.vectorized(2):
-                            out_1[threadIdx_x * 2 + i] = T.Cast("float32", A[i])
+                            out_1[threadIdx_x * 2 + i] = T.Cast("float32", A_local[i])
     # fmt: on
 
     compare(before1, after1, LowerTIRp)
@@ -116,25 +122,27 @@ def test_lower_view_get():
                 # load in_buf into A
                 with T.warp():
                     # warp view of this load
-                    B = T.view(A, layout=B_layout, shape=(16, 16))
+                    B = A.view(16, 16, layout=B_layout)
                     with T.thread():
                         # done by each thread
-                        A_local = T.get(B, shape=(2, 2, 2))
+                        A_local = B.storage(2, 2, 2)
                         for i in T.unroll(4):
                             for j in T.vectorized(2):
                                 A_local[i // 2, i % 2, j] = in_buf[i // 2 * 8 + lane_id // 4, i % 2 * 8 + lane_id % 4 + j]
                 # write A into out
                 with T.warp():
                     # warp view of this write
-                    B = T.view(A, layout=B_layout, shape=(16, 16))
+                    B = A.view(16, 16, layout=B_layout)
                     with T.thread():
                         # done by each thread
-                        A_local = T.get(B, shape=(8,))
+                        A_local = B.storage(8)
                         for i in T.vectorized(2):
                             out[lane_id // 4 * 8 + i // 2 * 8 + lane_id % 4, lane_id % 4 * 2 + i % 2] = A_local[i]
 
     @T.prim_func(private=True, tirp=True)
-    def after2(in_buf: T.Buffer((16, 16), "float32", layout=None), out: T.Buffer((16, 16), "float32", layout=None)):
+    def after2(in_buf_handle: T.handle, out_handle: T.handle):
+        in_buf = T.match_buffer(in_buf_handle, (16, 16), layout=None)
+        out = T.match_buffer(out_handle, (16, 16), layout=None)
         out_1 = T.decl_buffer((256,), data=out.data, layout=None)
         in_buf_1 = T.decl_buffer((256,), data=in_buf.data, layout=None)
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
@@ -145,14 +153,18 @@ def test_lower_view_get():
             with T.thread():
                 A = T.alloc_local((8,), layout=None)
                 with T.warp():
+                    B = T.decl_buffer((256,), data=A.data, scope="local", layout=None)
                     with T.thread():
+                        A_local = T.decl_buffer((8,), data=A.data, scope="local", layout=None)
                         for i in T.unroll(4):
                             for j in T.vectorized(2):
-                                A[i * 2 + j] = in_buf_1[i // 2 * 128 + threadIdx_x // 4 * 16 + i % 2 * 8 + j + threadIdx_x % 4]
+                                A_local[i * 2 + j] = in_buf_1[i // 2 * 128 + threadIdx_x // 4 * 16 + i % 2 * 8 + j + threadIdx_x % 4]
                 with T.warp():
+                    B = T.decl_buffer((256,), data=A.data, scope="local", layout=None)
                     with T.thread():
+                        A_local = T.decl_buffer((8,), data=A.data, scope="local", layout=None)
                         for i in T.vectorized(2):
-                            out_1[threadIdx_x // 4 * 128 + threadIdx_x % 4 * 18 + i] = A[i]
+                            out_1[threadIdx_x // 4 * 128 + threadIdx_x % 4 * 18 + i] = A_local[i]
     # fmt: on
 
     compare(before2, after2, LowerTIRp)
@@ -182,10 +194,10 @@ def test_lower_view_get():
                 # load in_buf into acc
                 with T.cta():
                     # cta view of this load
-                    A = T.view(acc, layout=layout, shape=(128, 128))
+                    A = acc.view(128, 128, layout=layout)
                     with T.thread():
                         # done by each thread
-                        acc_local = T.get(A, shape=(16, 2, 2))
+                        acc_local = A.storage(16, 2, 2, layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
                         for i in T.serial(128 // 8):
                             for j in T.unroll(2):
                                 for vec in T.vectorized(2):
@@ -194,17 +206,19 @@ def test_lower_view_get():
                 # write acc into out
                 with T.cta():
                     # cta view of this write
-                    A = T.view(acc, layout=layout, shape=(128, 128))
+                    A = acc.view(128, 128, layout=layout)
                     with T.thread():
                         # done by each thread
-                        acc_local = T.get(A, shape=(64,))
+                        acc_local = A.storage(64, layout=atom.tile(tile, (2, 128 // 8), (1, 2)))
                         for i in T.serial(128 // 8):
                             for j in T.unroll(2):
                                 for vec in T.vectorized(2):
                                     out[wg_id * 64 + warp_id_in_wg * 16 + j * 8 + lane_id // 4, i * 8 + lane_id % 4 * 2 + vec] = acc_local[i * 4 + j * 2 + vec]
 
     @T.prim_func(private=True, tirp=True)
-    def after3_wgmma_layout(in_buf: T.Buffer((128, 128), "float32", layout=None), out: T.Buffer((128, 128), "float32", layout=None)):
+    def after3_wgmma_layout(in_buf_handle: T.handle, out_handle: T.handle):
+        in_buf = T.match_buffer(in_buf_handle, (128, 128), layout=None)
+        out = T.match_buffer(out_handle, (128, 128), layout=None)
         out_1 = T.decl_buffer((16384,), data=out.data, layout=None)
         in_buf_1 = T.decl_buffer((16384,), data=in_buf.data, layout=None)
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
@@ -215,17 +229,22 @@ def test_lower_view_get():
             with T.thread():
                 acc = T.alloc_local((64,), layout=None)
                 with T.cta():
+                    A = T.decl_buffer((16384,), data=acc.data, scope="local", layout=None)
                     with T.thread():
+                        acc_local = T.decl_buffer((64,), data=acc.data, scope="local", layout=None)
                         for i in range(16):
                             for j in T.unroll(2):
                                 for vec in T.vectorized(2):
-                                    acc[i % 8 * 8 + j * 4 + i // 8 * 2 + vec] = in_buf_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec]
+                                    acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec] = in_buf_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec]
                 with T.cta():
+                    A = T.decl_buffer((16384,), data=acc.data, scope="local", layout=None)
                     with T.thread():
+                        acc_local = T.decl_buffer((64,), data=acc.data, scope="local", layout=None)
                         for i in range(16):
                             for j in T.unroll(2):
                                 for vec in T.vectorized(2):
-                                    out_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec] = acc[i % 8 * 8 + j * 4 + i // 8 * 2 + vec]    # # fmt: on
+                                    out_1[threadIdx_x // 32 * 2048 + j * 1024 + threadIdx_x % 32 // 4 * 128 + i * 8 + threadIdx_x % 4 * 2 + vec] = acc_local[i % 8 * 8 + j * 4 + i // 8 * 2 + vec]
+    # fmt: on
 
     compare(before3_wgmma_layout, after3_wgmma_layout, LowerTIRp)
 
@@ -242,34 +261,36 @@ def test_lower_view_get():
                 B_layout = A.layout.tile(L_LANE, (32,), (2,))
                 with T.warp():
                     # warp view of this load
-                    B = T.view(A, layout=B_layout, shape=(64, )) # TODO(@bohan): consider making view API directly accepts shard parameters
-                    B_1 = T.view(A, layout=B_layout, shape=(64, )) # TODO(@bohan): consider making view API directly accepts shard parameters
+                    B = A.view(64, layout=B_layout) # TODO(@bohan): consider making view API directly accepts shard parameters
+                    B_1 = A.view(64, layout=B_layout) # TODO(@bohan): consider making view API directly accepts shard parameters
                     # B[i] = in_buf[i]
                     with T.thread():
                         # done by each thread
-                        A_local = T.get(B, shape=(2,))
+                        A_local = B.storage(2)
                         A_local[0] = T.float32(in_buf[lane_id * 2])
                         # done by each thread
-                        A_local_1 = T.get(B_1, shape=(2,))
+                        A_local_1 = B_1.storage(2)
                         A_local_1[1] = T.float32(in_buf[lane_id * 2 + 1])
                 """
                 write A into out
                 """
                 with T.warp():
                     # warp view of this write
-                    B = T.view(A, layout=B_layout, shape=(64, ))
-                    B_1 = T.view(A, layout=B_layout, shape=(64, ))
+                    B = A.view(64, layout=B_layout)
+                    B_1 = A.view(64, layout=B_layout)
                     # out[i] = B[i]
                     with T.thread():
                         # done by each thread
-                        A_local = T.get(B, shape=(2,))
+                        A_local = B.storage(2)
                         out[lane_id * 2] = T.float32(A_local[0])
                         # done by each thread
-                        A_local_1 = T.get(B_1, shape=(2,))
+                        A_local_1 = B_1.storage(2)
                         out[lane_id * 2 + 1] = T.float32(A_local_1[1])
 
     @T.prim_func(private=True, tirp=True)
-    def after4_multi_view_get(in_buf: T.Buffer(64, "float32", layout=None), out: T.Buffer(64, "float32", layout=None)) -> None:
+    def after4_multi_view_get(in_buf_handle: T.handle, out_handle: T.handle):
+        in_buf = T.match_buffer(in_buf_handle, (64,), layout=None)
+        out = T.match_buffer(out_handle, (64,), layout=None)
         out_1 = T.decl_buffer((64,), data=out.data, layout=None)
         in_buf_1 = T.decl_buffer((64,), data=in_buf.data, layout=None)
         blockIdx_x = T.launch_thread("blockIdx.x", 1)
@@ -280,13 +301,22 @@ def test_lower_view_get():
             with T.thread():
                 A = T.alloc_local((2,), "float16", layout=None)
                 with T.warp():
+                    B = T.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
+                    B_1 = T.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
                     with T.thread():
-                        A[0] = T.Cast("float16", in_buf_1[threadIdx_x * 2])
-                        A[1] = T.Cast("float16", in_buf_1[threadIdx_x * 2 + 1])
+                        A_local = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        A_local[0] = T.Cast("float16", in_buf_1[threadIdx_x * 2])
+                        A_local_1 = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        A_local_1[1] = T.Cast("float16", in_buf_1[threadIdx_x * 2 + 1])
                 with T.warp():
+                    B = T.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
+                    B_1 = T.decl_buffer((64,), "float16", data=A.data, scope="local", layout=None)
                     with T.thread():
-                        out_1[threadIdx_x * 2] = T.Cast("float32", A[0])
-                        out_1[threadIdx_x * 2 + 1] = T.Cast("float32", A[1])# fmt: on
+                        A_local = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        out_1[threadIdx_x * 2] = T.Cast("float32", A_local[0])
+                        A_local_1 = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
+                        out_1[threadIdx_x * 2 + 1] = T.Cast("float32", A_local_1[1])    
+    # fmt: on
 
     compare(before4_multi_view_get, after4_multi_view_get, LowerTIRp)
 

@@ -228,9 +228,6 @@ class LayoutVerifier : public Verifier<LayoutVerifier> {
             << " that is not compatible with shape " << buffer->shape;
       }
     };
-    for (const auto& view : op->buffer_views) {
-      verify(view->dst_buffer);
-    }
     for (const auto& alloc : op->alloc_buffers) {
       verify(alloc);
     }

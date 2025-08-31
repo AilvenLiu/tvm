@@ -176,30 +176,6 @@ Buffer MatchBuffer(ObjectRef param, ffi::Array<PrimExpr> shape, DataType dtype,
   return buffer;
 }
 
-Buffer BufferView(tvm::tirx::Buffer buffer, tvm::tirx::TLayout layout, Array<PrimExpr> shape) {
-  SBlockFrame frame = FindSBlockFrame("T.View");
-
-  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", std::nullopt, std::nullopt, std::nullopt,
-                                 buffer.scope(), 1, 1, "auto", std::nullopt, layout);
-
-  frame->buffer_views.push_back(tvm::tirx::BufferView(buffer, layout, dst_buffer));
-  return dst_buffer;
-}
-
-Buffer BufferGet(tvm::tirx::Buffer buffer, Array<PrimExpr> shape) {
-  SBlockFrame frame = FindSBlockFrame("T.Get");
-
-  Buffer dst_buffer = BufferDecl(shape, buffer->dtype, "", std::nullopt, std::nullopt, std::nullopt,
-                                 buffer.scope(), 1, 1, "auto", std::nullopt, std::nullopt);
-  // Check if the buffer is a storage buffer
-  // Copy the dst buffer
-  auto n = dst_buffer.CopyOnWrite();
-  n->data = buffer->data.copy_with_suffix("");
-  frame->buffer_gets.push_back(tvm::tirx::BufferGet(buffer, dst_buffer));
-
-  return dst_buffer;
-}
-
 SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
                   ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
                   ffi::String scope_slice_parent) {
@@ -222,8 +198,6 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
   }
   n->scope_slice_parent = scope_slice_parent;
   n->scope_slice_extents = scope_slice_extents;
-  n->buffer_views.clear();
-  n->buffer_gets.clear();
   return SBlockFrame(n);
 }
 
@@ -962,8 +936,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("script.ir_builder.tir.FuncAttrs", FuncAttrs)
       .def("script.ir_builder.tir.FuncRet", FuncRet)
       .def("script.ir_builder.tir.MatchBuffer", MatchBuffer)
-      .def("script.ir_builder.tir.BufferView", BufferView)
-      .def("script.ir_builder.tir.BufferGet", BufferGet)
       .def("script.ir_builder.tir.BlockFrameSlice", BlockFrameSlice)
       .def("script.ir_builder.tir.Block", Block)
       .def("script.ir_builder.tir.OpCall", OpCall)
@@ -1164,7 +1136,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 });
 
-}  // namespace tirxxxxxx
+}  // namespace tirxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

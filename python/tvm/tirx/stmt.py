@@ -493,48 +493,6 @@ class MatchBufferRegion(Object, Scriptable):
         )
 
 
-@tvm_ffi.register_object("tir.BufferView")
-class BufferView(Object, Scriptable):
-    """BufferView node.
-
-    Parameters
-    ----------
-    src_buffer : Buffer
-        The source buffer.
-
-    layout : TLayout
-        The layout of the buffer view.
-
-    dst_buffer : Buffer
-        The destination buffer.
-    """
-
-    src_buffer: Buffer
-    layout: TLayout
-    dst_buffer: Buffer
-
-    def __init__(self, src_buffer: Buffer, layout: TLayout, dst_buffer: Buffer) -> None:
-        self.__init_handle_by_constructor__(
-            _ffi_api.BufferView, src_buffer, layout, dst_buffer  # type: ignore
-        )
-
-@tvm_ffi.register_object("tir.BufferGet")
-class BufferGet(Object, Scriptable):
-    """BufferGet node.
-
-    Parameters
-    ----------
-    src_buffer : Buffer
-        The source buffer.
-
-    dst_buffer : Buffer
-        The destination buffer.
-    """
-
-    def __init__(self, src_buffer: Buffer, dst_buffer: Buffer) -> None:
-        self.__init_handle_by_constructor__(_ffi_api.BufferGet, src_buffer, dst_buffer)
-
-
 @tvm_ffi.register_object("tir.SBlock")
 class SBlock(Stmt):
     """SBlock node.
@@ -588,8 +546,6 @@ class SBlock(Stmt):
     match_buffers: list[MatchBufferRegion]
     annotations: Mapping[str, Object]
     exec_scope: ExecScope | None
-    buffer_views: list[BufferView]
-    buffer_gets: list[BufferGet]
     bulk_events: list["tvm.tir.event.BulkGroupEvent"]
     sem_event_tensors: list["tvm.tir.event.SemaphoreEventTensor"]
     span: Span | None
@@ -607,8 +563,6 @@ class SBlock(Stmt):
         annotations: Mapping[str, Object] | None = None,
         span: Span | None = None,
         exec_scope: ExecScope | None = None,
-        buffer_views: list[BufferView] | None = None,
-        buffer_gets: list[BufferGet] | None = None,
         bulk_events: list["tvm.tir.event.BulkGroupEvent"] | None = None,
         sem_event_tensors: list["tvm.tir.event.SemaphoreEventTensor"] | None = None,
     ) -> None:
@@ -618,10 +572,6 @@ class SBlock(Stmt):
             match_buffers = []
         if annotations is None:
             annotations = {}
-        if buffer_views is None:
-            buffer_views = []
-        if buffer_gets is None:
-            buffer_gets = []
         if bulk_events is None:
             bulk_events = []
         if sem_event_tensors is None:
@@ -639,8 +589,6 @@ class SBlock(Stmt):
             annotations,
             span,
             exec_scope,
-            buffer_views,
-            buffer_gets,
             bulk_events,
             sem_event_tensors,
         )  # type: ignore
