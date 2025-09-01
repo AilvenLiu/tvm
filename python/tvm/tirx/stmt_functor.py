@@ -56,6 +56,9 @@ class StmtFunctor:
             "tir.Block": self.visit_block_,
             "tir.BlockRealize": self.visit_block_realize_,
             "tir.OpCall": self.visit_op_call_,
+            "tir.AllocBuffer": self.visit_alloc_buffer_,
+            "tir.AllocBulkGroupEvent": self.visit_alloc_bulk_group_event_,
+            "tir.AllocSemaphoreEventTensor": self.visit_alloc_sem_event_tensor_,
         }
 
     def visit_stmt(self, stmt):
@@ -174,6 +177,18 @@ class StmtFunctor:
 
     def visit_buffer_region_(self, op):
         """Visitor for BufferRegion nodes."""
+        return self.visit_stmt_default_(op)
+
+    def visit_alloc_buffer_(self, op):
+        """Visitor for AllocBuffer nodes."""
+        return self.visit_stmt_default_(op)
+
+    def visit_alloc_bulk_group_event_(self, op):
+        """Visitor for AllocBulkGroupEvent nodes."""
+        return self.visit_stmt_default_(op)
+
+    def visit_alloc_sem_event_tensor_(self, op):
+        """Visitor for AllocSemaphoreEventTensor nodes."""
         return self.visit_stmt_default_(op)
 
     def __call__(self, stmt):
@@ -335,6 +350,18 @@ class StmtVisitor(StmtFunctor):
             self.visit_expr(range.extent)
 
         _visit_array(op.region, _visit_range)
+
+    def visit_alloc_buffer_(self, op):
+        """Visitor implementation for AllocBuffer."""
+        self.visit_stmt(op.body)
+
+    def visit_alloc_bulk_group_event_(self, op):
+        """Visitor implementation for AllocBulkGroupEvent."""
+        self.visit_stmt(op.body)
+
+    def visit_alloc_sem_event_tensor_(self, op):
+        """Visitor implementation for AllocSemaphoreEventTensor."""
+        self.visit_stmt(op.body)
 
 
 class StmtMutator(StmtFunctor):
@@ -707,8 +734,6 @@ class StmtMutator(StmtFunctor):
             op.annotations,
             None,
             op.exec_scope,
-            op.bulk_events,
-            op.sem_event_tensors,
         )
 
     def visit_block_realize_(self, op):
@@ -771,6 +796,27 @@ class StmtMutator(StmtFunctor):
             return op
         else:
             return tvm.tir.BufferRegion(op.buffer, region)
+
+    def visit_alloc_buffer_(self, op):
+        """Mutator implementation for AllocBuffer."""
+        body = self.visit_stmt(op.body)
+        if body is op.body:
+            return op
+        return tvm.tir.AllocBuffer(op.buffer, body, op.span)
+
+    def visit_alloc_bulk_group_event_(self, op):
+        """Mutator implementation for AllocBulkGroupEvent."""
+        body = self.visit_stmt(op.body)
+        if body is op.body:
+            return op
+        return tvm.tir.AllocBulkGroupEvent(op.bulk_group_event, body, op.span)
+
+    def visit_alloc_sem_event_tensor_(self, op):
+        """Mutator implementation for AllocSemaphoreEventTensor."""
+        body = self.visit_stmt(op.body)
+        if body is op.body:
+            return op
+        return tvm.tir.AllocSemaphoreEventTensor(op.sem_event_tensor, body, op.span)
 
     def __call__(self, stmt):
         """Call mutator on statement.

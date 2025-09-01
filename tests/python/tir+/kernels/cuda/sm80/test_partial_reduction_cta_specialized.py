@@ -41,8 +41,7 @@ class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
         self.sem = buffer
-        self.state = T.alloc_buffer([1], "int32", scope="local", align=4)
-        IRBuilder.current().name("semaphore_state", self.state)
+        self.state = T.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
         
     @T.macro
     def semaphore_wait(self, *coord):
@@ -100,19 +99,12 @@ STAGE_2_SM_CNT = 16
 TOTAL_SM_CNT = STAGE_1_SM_CNT + STAGE_2_SM_CNT
             
 class SpatialTileScheduler:
-    @staticmethod
-    def int_var():
-        return T.alloc_buffer([1], "int32", scope="local", align=4)
-    
     def __init__(self, prefix: str, tile_num: Tuple[int, int], sm_cnt: int):
         self.tile_num = tile_num
         self.sm_cnt = sm_cnt
-        self.m_idx = self.int_var()
-        self.n_idx = self.int_var()
-        self.linear_idx = self.int_var()
-        IRBuilder.current().name(prefix + "_m_idx", self.m_idx)
-        IRBuilder.current().name(prefix + "_n_idx", self.n_idx)
-        IRBuilder.current().name(prefix + "_linear_idx", self.linear_idx)
+        self.m_idx = T.alloc_local([1], "int32", name=prefix + "_m_idx")
+        self.n_idx = T.alloc_local([1], "int32", name=prefix + "_n_idx")
+        self.linear_idx = T.alloc_local([1], "int32", name=prefix + "_linear_idx")
         
     def get_current_m_n_idx(self, linear_idx):
         row = linear_idx // self.tile_num[1]

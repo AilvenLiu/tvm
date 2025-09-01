@@ -14,12 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from functools import partial
+
 import pytest
 
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.script.ir_builder import IRBuilder
 from tvm.tir.event import EventImpl
 from tvm.tir.function import PrimFunc
 from tvm.tir.transform import LowerTIRp
@@ -798,8 +801,7 @@ def test_lower_cell_buffer():
             with T.thread():
                 A = T.local_cell("float16")
                 event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoadOnly, state=[A.buffer], shape=[1])
-                
-                pass
+                T.evaluate(0)
     # fmt: on
     
     # fmt: off
@@ -808,10 +810,83 @@ def test_lower_cell_buffer():
         with T.kernel():
             with T.thread():
                 A = T.alloc_local((1,), "float16", layout=None)
-                event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoadOnly, state=[A], shape=[1])
-
                 T.evaluate(0)
     # fmt: on
+    compare(before, after, LowerTIRp)
+
+
+def test_lower_alloc_decl_buffer_outside_of_parser():
+    # fmt: off
+    class State:
+        def __init__(self, smem):
+            self.A = T.alloc_local([1], "float16", name="A")
+            self.B = T.alloc_local([1], "float16", name="B")
+            self.C = T.decl_buffer([1], "float16", smem, elem_offset=0, scope="shared.dyn", name="C")
+
+    def int_var1(val):
+        buf = T.local_cell("int32")
+        if val is not None:
+            T.buffer_store(buf.buffer, val, 0)
+        return buf
+    
+    def int_var2(val):
+        frame = T.alloc_local([1], "int32")
+        frame.add_callback(partial(frame.__exit__, None, None, None))
+        buf = frame.__enter__()
+        if val is not None:
+            T.buffer_store(buf, val, 0)
+        return buf
+
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def before():
+        with T.kernel():
+            with T.thread():
+                smem = T.alloc_buffer([100], "uint8", scope="shared.dyn")
+                state = T.meta_var(State(smem.data))
+                state.A[0] = T.float16(1)
+                state.B[0] = T.float16(2)
+                state.C[0] = T.float16(3)
+                D = int_var1(1)
+                D = D + 1
+                E = int_var1(2)
+                E = E + 2
+                F = int_var2(3)
+                F[0] = F[0] + 3
+                G = int_var2(4)
+                G[0] = G[0] + 4
+    # fmt: on
+
+    # fmt: off
+    @T.prim_func(private=True, tirp=True)
+    def after():
+        with T.kernel():
+            with T.thread():
+                smem = T.alloc_buffer([100], "uint8", scope="shared.dyn", layout=None)
+                A = T.alloc_local((1,), "float16", layout=None)
+                B = T.alloc_local((1,), "float16", layout=None)
+                C = T.decl_buffer((1,), "float16", data=smem.data, elem_offset=0, scope="shared.dyn", layout=None)
+                A[0] = T.float16(1)
+                B[0] = T.float16(2)
+                C[0] = T.float16(3)
+                
+                D = T.alloc_local((1,), "int32", layout=None)
+                D = 1
+                D = D[0] + 1
+                
+                E = T.alloc_local((1,), "int32", layout=None)
+                E = 2
+                E = E[0] + 2
+
+                F = T.alloc_local((1,), "int32", layout=None)
+                F = 3
+                F = F[0] + 3
+
+                G = T.alloc_local((1,), "int32", layout=None)
+                G = 4
+                G = G[0] + 4
+    # fmt: on
+
     compare(before, after, LowerTIRp)
 
 

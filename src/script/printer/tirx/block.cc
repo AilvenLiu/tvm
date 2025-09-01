@@ -225,29 +225,6 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     StmtDoc doc = d->AsDoc<StmtDoc>(buffer_region, buffer_region_p);
     (*frame)->stmts.push_back(doc);
   }
-
-  /*********** tir+ ***********/
-  // event
-  for (size_t i = 0; i < block->bulk_events.size(); ++i) {
-    tir::BulkGroupEvent event = block->bulk_events[i];
-    AccessPath event_p = block_p->Attr("bulk_events")->ArrayItem(i);
-    IdDoc lhs = DefineEvent(event, *frame, d);
-    std::string method;
-    method = "alloc_bulk_group_event";
-    ExprDoc rhs = EventDecl(event, method, event_p, d);
-    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
-  }
-  // event_tensor
-  for (size_t i = 0; i < block->sem_event_tensors.size(); ++i) {
-    tir::SemaphoreEventTensor event_tensor = block->sem_event_tensors[i];
-    AccessPath event_tensor_p = block_p->Attr("sem_event_tensors")->ArrayItem(i);
-    IdDoc lhs = DefineEventTensor(event_tensor, *frame, d);
-    std::string method;
-    method = "alloc_semaphore_event_tensor";
-    ExprDoc rhs = EventTensorDecl(event_tensor, method, event_tensor_p, d);
-    (*frame)->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
-  }
-
   // Step 7. Handle init block
   if (block->init.defined()) {
     tirx::Stmt init = block->init.value();

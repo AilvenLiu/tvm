@@ -42,8 +42,7 @@ def test_roundtrip_scopeid1():
             with T.cta():
                 with T.warp():
                     with T.thread():
-                        A_local = T.alloc_buffer([1], dtype="float16",
-                                                 scope="local")
+                        A_local = T.alloc_buffer([1], dtype="float16", scope="local")
                         for i in T.serial(2):
                             A_local[0] = A[lane_id * 2 + i]
     # fmt: on

@@ -830,6 +830,89 @@ class MatchBufferRegion : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(MatchBufferRegionNode);
 };
 
+class AllocBufferNode : public StmtNode {
+ public:
+  /*! \brief The buffer of the alloc buffer. */
+  Buffer buffer;
+  /*! \brief The buffer view of the alloc buffer. */
+  Stmt body;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AllocBufferNode>()
+        .def_ro("buffer", &AllocBufferNode::buffer, refl::AttachFieldFlag::SEqHashDef())
+        .def_ro("body", &AllocBufferNode::body)
+        .def_ro("span", &AllocBufferNode::span);
+  }
+
+  static constexpr const char* _type_key = "tir.AllocBuffer";
+  TVM_DECLARE_FINAL_OBJECT_INFO(AllocBufferNode, StmtNode);
+};
+
+class AllocBuffer : public Stmt {
+ public:
+  TVM_DLL explicit AllocBuffer(Buffer buffer, Stmt body, Span span = Span());
+
+  TVM_DEFINE_OBJECT_REF_METHODS(AllocBuffer, Stmt, AllocBufferNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocBufferNode);
+};
+
+class AllocBulkGroupEventNode : public StmtNode {
+ public:
+  /*! \brief The allocated bulk group event. */
+  BulkGroupEvent bulk_group_event;
+  /*! \brief The body of the alloc bulk group event. */
+  Stmt body;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AllocBulkGroupEventNode>()
+        .def_ro("bulk_group_event", &AllocBulkGroupEventNode::bulk_group_event,
+                refl::AttachFieldFlag::SEqHashDef())
+        .def_ro("body", &AllocBulkGroupEventNode::body)
+        .def_ro("span", &AllocBulkGroupEventNode::span);
+  }
+
+  static constexpr const char* _type_key = "tir.AllocBulkGroupEvent";
+  TVM_DECLARE_FINAL_OBJECT_INFO(AllocBulkGroupEventNode, StmtNode);
+};
+
+class AllocBulkGroupEvent : public Stmt {
+ public:
+  TVM_DLL explicit AllocBulkGroupEvent(BulkGroupEvent bulk_group_event, Stmt body,
+                                       Span span = Span());
+  TVM_DEFINE_OBJECT_REF_METHODS(AllocBulkGroupEvent, Stmt, AllocBulkGroupEventNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocBulkGroupEventNode);
+};
+
+class AllocSemaphoreEventTensorNode : public StmtNode {
+ public:
+  /*! \brief The allocated semaphore event tensor. */
+  SemaphoreEventTensor sem_event_tensor;
+  /*! \brief The body of the alloc semaphore event tensor. */
+  Stmt body;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AllocSemaphoreEventTensorNode>()
+        .def_ro("sem_event_tensor", &AllocSemaphoreEventTensorNode::sem_event_tensor,
+                refl::AttachFieldFlag::SEqHashDef())
+        .def_ro("body", &AllocSemaphoreEventTensorNode::body)
+        .def_ro("span", &AllocSemaphoreEventTensorNode::span);
+  }
+
+  static constexpr const char* _type_key = "tir.AllocSemaphoreEventTensor";
+  TVM_DECLARE_FINAL_OBJECT_INFO(AllocSemaphoreEventTensorNode, StmtNode);
+};
+
+class AllocSemaphoreEventTensor : public Stmt {
+ public:
+  TVM_DLL explicit AllocSemaphoreEventTensor(SemaphoreEventTensor sem_event_tensor, Stmt body,
+                                             Span span = Span());
+  TVM_DEFINE_OBJECT_REF_METHODS(AllocSemaphoreEventTensor, Stmt, AllocSemaphoreEventTensorNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocSemaphoreEventTensorNode);
+};
+
 /*!
  * \brief A block is a basic schedule unit in TIR.
  * \note SBlock's body is parameterized by iter vars.
@@ -881,19 +964,12 @@ class SBlockNode : public StmtNode {
   // TIR+ signature
   // The execution scope of the block.
   Optional<ExecScope> exec_scope;
-  // Events in the block
-  Array<BulkGroupEvent> bulk_events;
-  // Event tensors in the block
-  Array<SemaphoreEventTensor> sem_event_tensors;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<SBlockNode>()
         .def_ro("iter_vars", &SBlockNode::iter_vars, refl::AttachFieldFlag::SEqHashDef())
         .def_ro("exec_scope", &SBlockNode::exec_scope)
-        .def_ro("bulk_events", &SBlockNode::bulk_events, refl::AttachFieldFlag::SEqHashDef())
-        .def_ro("sem_event_tensors", &SBlockNode::sem_event_tensors,
-                refl::AttachFieldFlag::SEqHashDef())
         .def_ro("reads", &SBlockNode::reads)
         .def_ro("writes", &SBlockNode::writes)
         .def_ro("name_hint", &SBlockNode::name_hint, refl::AttachFieldFlag::SEqHashIgnore())
@@ -919,16 +995,12 @@ class SBlock : public Stmt {
       ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
       ffi::Array<MatchBufferRegion> match_buffers = ffi::Array<MatchBufferRegion>(),
       ffi::Map<ffi::String, ffi::Any> annotations = ffi::Map<ffi::String, ffi::Any>(),
-      Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt,
-      ffi::Array<BulkGroupEvent> bulk_events = ffi::Array<BulkGroupEvent>(),
-      ffi::Array<SemaphoreEventTensor> sem_event_tensors = ffi::Array<SemaphoreEventTensor>());
+      Span span = Span(), ffi::Optional<ExecScope> exec_scope = std::nullopt);
 
-  TVM_DLL explicit SBlock(
-      ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_scope = std::nullopt,
-      ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
-      ffi::Array<BulkGroupEvent> bulk_events = ffi::Array<BulkGroupEvent>(),
-      ffi::Array<SemaphoreEventTensor> sem_event_tensors = ffi::Array<SemaphoreEventTensor>(),
-      Span span = Span());
+  TVM_DLL explicit SBlock(ffi::String name_hint, Stmt body,
+                         ffi::Optional<ExecScope> exec_scope = std::nullopt,
+                         ffi::Array<Buffer> alloc_buffers = ffi::Array<Buffer>(),
+                         Span span = Span());
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SBlock, Stmt, SBlockNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SBlockNode);

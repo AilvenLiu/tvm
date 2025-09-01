@@ -753,10 +753,9 @@ def sblock_alloc_buffer(
     axis_separators: list[int] | None = None,
     layout: str | TLayout | None = "default",
     allocated_addr: int | tuple[int, ...] | None = None,
-) -> Buffer:
+    name: str | None = None,
+) -> Buffer | frame.AllocBufferFrame:
     """SBlock-level buffer allocation function.
-
-    Adds a buffer to the alloc_buffers list of the nearest SBlock or root PrimFunc.
 
     Parameters
     ----------
@@ -790,10 +789,15 @@ def sblock_alloc_buffer(
         the Trainium device has a pooled storage scope for the SRAN buffers. ("trn.sbuf")
         CUDA has a pooled storage scope for the shared memory ("shared.dyn")
 
+    name : str
+        If used under @T.prim_func/@T.marco where parser will take over the name,
+        user should not provide name. However, name should be provided.
+
     Returns
     -------
-    res : Buffer
-        The allocated buffer.
+    res : Union[Buffer, frame.AllocBufferFrame]
+        The allocated buffer or the AllocBufferFrame if the function is called under
+        T.prim_func(tirp=True).
     """
     shape = (shape,) if isinstance(shape, PrimExpr | Integral) else shape
     if strides is not None:
@@ -806,7 +810,7 @@ def sblock_alloc_buffer(
         allocated_addr = []
     if not isinstance(allocated_addr, (list, tuple)):
         allocated_addr = [allocated_addr]
-    return _ffi_api.SBlockAllocBuffer(  # type: ignore[attr-defined] # pylint: disable=no-member
+    alloc_frame = _ffi_api.SBlockAllocBuffer(  # type: ignore[attr-defined] # pylint: disable=no-member
         shape,
         dtype,
         data,
@@ -820,6 +824,12 @@ def sblock_alloc_buffer(
         _get_layout(layout, shape, scope),
         allocated_addr,
     )
+    if name is not None and isinstance(alloc_frame, frame.AllocBufferFrame):
+        alloc_frame.add_callback(partial(alloc_frame.__exit__, None, None, None))
+        buf = alloc_frame.__enter__()
+        IRBuilder.name(name, buf)
+        return buf
+    return alloc_frame
 
 
 def _as_range(dom: ir.Range | list[PrimExpr]) -> ir.Range:
@@ -1434,13 +1444,12 @@ def decl_buffer(
     buffer_type="",
     axis_separators=None,
     layout="default",
-) -> Buffer:
+    name=None,
+) -> frame.DeclBufferFrame | Buffer:
     """Create a buffer declaration node.
 
     When ``data`` is provided, creates a DeclBuffer (alias to existing data).
     When ``data`` is None, creates an AllocBuffer (new allocation).
-
-    Emits the statement and returns the Buffer directly.
 
     Parameters
     ----------
@@ -1480,17 +1489,21 @@ def decl_buffer(
     layout : TLayout
         The layout of the buffer.
 
+    name : str
+        If used under @T.prim_func/@T.marco where parser will take over the name,
+        user should not provide name. However, name should be provided.
+
     Returns
     -------
-    res : Buffer
-        The declared buffer.
+    res : frame.DeclBufferFrame | Buffer
+        The result DeclBufferFrame.
     """
     shape = (shape,) if isinstance(shape, PrimExpr | Integral) else shape
     if strides is not None:
         strides = [Var(s, "int32") if isinstance(s, str) else s for s in strides]
     else:
         strides = []
-    return _ffi_api.DeclBuffer(  # type: ignore[attr-defined] # pylint: disable=no-member
+    decl_frame = _ffi_api.DeclBuffer(  # type: ignore[attr-defined] # pylint: disable=no-member
         shape,
         dtype,
         "",
@@ -1504,6 +1517,12 @@ def decl_buffer(
         axis_separators,
         _get_layout(layout, shape, scope),
     )
+    if name is not None:
+        decl_frame.add_callback(partial(decl_frame.__exit__, None, None, None))
+        buf = decl_frame.__enter__()
+        IRBuilder.name(name, buf)
+        return buf
+    return decl_frame
 
 
 alloc_shared = functools.partial(alloc_buffer, scope="shared")
@@ -1527,12 +1546,12 @@ else:
             self.cell = cell
 
         def __getattr__(self, name: str) -> Any:
-            return self.cell.__getattr__(name)
+            return getattr(self.cell, name)
 
 
 def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) -> BufferLoad:
     """Allocate a zero-dimensional buffer (cell)."""
-    buf = alloc_buffer(
+    buf = sblock_alloc_buffer(
         shape=(1,),
         dtype=dtype,
         scope=scope,
@@ -1542,16 +1561,21 @@ def alloc_cell(dtype: str = "float32", scope: str = "global", name: str = None) 
         axis_separators=None,
         layout=TileLayout((1,)),
         allocated_addr=None,
+        name=name,
     )
     if name is None:
-        return cell_wrapper(buf[0])
-    IRBuilder.name(name, buf)
+        if isinstance(buf, frame.AllocBufferFrame):
+            buf.add_callback(partial(buf.__exit__, None, None, None))
+            buf = buf.__enter__()
+            assert isinstance(buf, Buffer)
+            return cell_wrapper(buf[0])
+    assert isinstance(buf, Buffer)
     return buf[0]
 
 
 def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None) -> BufferLoad:
     """Declare a zero-dimensional buffer (cell) from a pointer."""
-    decl_frame = decl_buffer(
+    res = decl_buffer(
         shape=(1,),
         dtype=dtype,
         data=data,
@@ -1563,13 +1587,15 @@ def decl_cell(dtype, data, scope, elem_offset=None, byte_offset=None, name=None)
         buffer_type="default",
         axis_separators=None,
         layout=TileLayout((1,)),
+        name=name,
     )
-    decl_frame.add_callback(partial(decl_frame.__exit__, None, None, None))
-    buf = decl_frame.__enter__()
     if name is None:
+        assert isinstance(res, frame.DeclBufferFrame)
+        res.add_callback(partial(res.__exit__, None, None, None))
+        buf = res.__enter__()
         return cell_wrapper(buf[0])
-    IRBuilder.name(name, buf)
-    return buf[0]
+    assert isinstance(res, Buffer)
+    return res[0]
 
 
 def shared_cell(dtype: str = "float32", name: str = None) -> BufferLoad:

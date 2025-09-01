@@ -485,12 +485,12 @@ def test_unary_with_bias_scale_2(op_type):
         T.func_attr({"global_symbol": "unary"})
         with T.kernel():
             const_bias = T.alloc_buffer((128, 512), scope="trn.sbuf")
-            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
-            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
             with T.attr(0, "tensorized_nki_instruction", 1):
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):
                     for f_loop in T.serial(512, annotations={"nki_dim": "F"}):
                         T.nki.memset(const_bias[p_loop, f_loop], T.float32(1.0))
+            A_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
+            C_sbuf = T.alloc_buffer((128, 4096), scope="trn.sbuf")
             for b_loop in T.serial(0, 8):
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(128, annotations={"nki_dim": "P"}):

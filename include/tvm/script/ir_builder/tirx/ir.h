@@ -211,13 +211,15 @@ void BlockAttrs(ffi::Map<ffi::String, ffi::Any> attrs);
  * \param axis_separators The separators between input axes when generating flattened output axes.
  * \param layout The layout of the buffer.
  * \param allocated_addr The allocated address of the buffer. Might be multi-dimensional.
- * \return The allocated buffer.
+ * \return The allocated buffer or the AllocBufferFrame if the function is called under
+ * T.prim_func(tirp=True).
  */
-Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype = DataType::Float(32),
-                         ffi::Optional<Var> data = std::nullopt, ffi::Array<PrimExpr> strides = {},
-                         PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "",
-                         int align = -1, int offset_factor = 0, ffi::String buffer_type = "default",
-                         ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
+Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
+    ffi::Array<PrimExpr> shape, DataType dtype = DataType::Float(32),
+    ffi::Optional<Var> data = std::nullopt, ffi::Array<PrimExpr> strides = {},
+    PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "", int align = -1,
+    int offset_factor = 0, ffi::String buffer_type = "default",
+    ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
                    ffi::Optional<TLayout> layout = std::nullopt,
                    ffi::Array<Integer> allocated_addr = {});
 
@@ -415,14 +417,14 @@ ElseFrame Else();
  * \param buffer_type The buffer type.
  * \param axis_separators The separators between input axes when generating flattened output axes.
  * \param layout The layout of the buffer.
- * \return The declared buffer.
+ * \return The declaration frame.
  */
-Buffer DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
-                  ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
-                  ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
-                  int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                  ffi::Optional<TLayout> layout = std::nullopt);
+DeclBufferFrame DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
+                           ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
+                           ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
+                           int offset_factor, ffi::String buffer_type,
+                           ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                           ffi::Optional<TLayout> layout = std::nullopt);
 
 /*!
  * \brief Statement-level buffer allocation (creates an AllocBuffer IR node).

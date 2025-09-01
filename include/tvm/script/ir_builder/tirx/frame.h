@@ -167,9 +167,6 @@ class SBlockFrameNode : public TIRFrameNode {
   String scope_slice_parent;
   Optional<Array<PrimExpr>> scope_slice_extents;
 
-  Array<tvm::tirx::BulkGroupEvent> bulk_events;
-  Array<tvm::tirx::SemaphoreEventTensor> sem_event_tensors;
-
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<SBlockFrameNode>()
@@ -186,9 +183,7 @@ class SBlockFrameNode : public TIRFrameNode {
         .def_ro("no_realize", &SBlockFrameNode::no_realize)
         .def_ro("exec_scope", &SBlockFrameNode::exec_scope)
         .def_ro("scope_slice_parent", &SBlockFrameNode::scope_slice_parent)
-        .def_ro("scope_slice_extents", &SBlockFrameNode::scope_slice_extents)
-        .def_ro("bulk_events", &SBlockFrameNode::bulk_events)
-        .def_ro("sem_event_tensors", &SBlockFrameNode::sem_event_tensors);
+        .def_ro("scope_slice_extents", &SBlockFrameNode::scope_slice_extents);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.SSBlockFrame", SBlockFrameNode,
                                     TIRFrameNode);
@@ -669,7 +664,87 @@ class ComposeOpFrame : public TIRFrame {
   }
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ComposeOpFrame, TIRFrame, ComposeOpFrameNode);
 };
-}  // namespace tirxxxxxxx
+class AllocBufferFrameNode : public TIRFrameNode {
+ public:
+  /*! \brief The allocated buffer. */
+  tvm::tirx::Buffer buffer;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AllocBufferFrameNode>().def_ro("buffer", &AllocBufferFrameNode::buffer);
+  }
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.AllocBufferFrame", AllocBufferFrameNode,
+                                    TIRFrameNode);
+
+ public:
+  void ExitWithScope() final;
+};
+
+class AllocBufferFrame : public TIRFrame {
+ public:
+  explicit AllocBufferFrame(ObjectPtr<AllocBufferFrameNode> data) : TIRFrame(data) {
+    TVM_FFI_ICHECK(data != nullptr);
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AllocBufferFrame, TIRFrame, AllocBufferFrameNode);
+};
+
+class AllocBulkGroupEventFrameNode : public TIRFrameNode {
+ public:
+  /*! \brief The allocated bulk group event. */
+  tvm::tirx::BulkGroupEvent bulk_group_event;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AllocBulkGroupEventFrameNode>().def_ro(
+        "bulk_group_event", &AllocBulkGroupEventFrameNode::bulk_group_event);
+  }
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.AllocBulkGroupEventFrame",
+                                    AllocBulkGroupEventFrameNode, TIRFrameNode);
+
+ public:
+  void ExitWithScope() final;
+};
+
+class AllocBulkGroupEventFrame : public TIRFrame {
+ public:
+  explicit AllocBulkGroupEventFrame(ObjectPtr<AllocBulkGroupEventFrameNode> data) : TIRFrame(data) {
+    TVM_FFI_ICHECK(data != nullptr);
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AllocBulkGroupEventFrame, TIRFrame,
+                                                 AllocBulkGroupEventFrameNode);
+};
+
+class AllocSemaphoreEventTensorFrameNode : public TIRFrameNode {
+ public:
+  /*! \brief The allocated semaphore event tensor. */
+  tvm::tirx::SemaphoreEventTensor sem_event_tensor;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AllocSemaphoreEventTensorFrameNode>().def_ro(
+        "sem_event_tensor", &AllocSemaphoreEventTensorFrameNode::sem_event_tensor,
+        refl::AttachFieldFlag::SEqHashDef());
+  }
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.AllocSemaphoreEventTensorFrame",
+                                    AllocSemaphoreEventTensorFrameNode, TIRFrameNode);
+
+ public:
+  void ExitWithScope() final;
+};
+
+class AllocSemaphoreEventTensorFrame : public TIRFrame {
+ public:
+  explicit AllocSemaphoreEventTensorFrame(ObjectPtr<AllocSemaphoreEventTensorFrameNode> data)
+      : TIRFrame(data) {
+    TVM_FFI_ICHECK(data != nullptr);
+  }
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AllocSemaphoreEventTensorFrame, TIRFrame,
+                                                 AllocSemaphoreEventTensorFrameNode);
+};
+}  // namespace tirx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

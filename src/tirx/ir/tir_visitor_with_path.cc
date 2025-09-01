@@ -140,6 +140,16 @@ void TIRVisitorWithPath::VisitBufferDef(const Buffer& buffer, AccessPath path) {
   Visit(buffer->elem_offset, path->Attr("elem_offset"));
 }
 
+void TIRVisitorWithPath::EnterDef(const BulkGroupEvent& bulk_group_event, AccessPath path) {}
+
+void TIRVisitorWithPath::ExitDef(const BulkGroupEvent& bulk_group_event, AccessPath path) {}
+
+void TIRVisitorWithPath::EnterDef(const SemaphoreEventTensor& sem_event_tensor, AccessPath path) {
+  Visit(sem_event_tensor->shape, path->Attr("shape"));
+}
+
+void TIRVisitorWithPath::ExitDef(const SemaphoreEventTensor& sem_event_tensor, AccessPath path) {}
+
 // Default: buffer use sites do not re-visit buffer fields. Buffer fields
 // (shape, strides, elem_offset) are visited at the definition site via
 // VisitBufferDef/EnterDef. Re-visiting at use sites would require those
@@ -327,6 +337,16 @@ void TIRVisitorWithPath::VisitStmt_(const tirp::OpCallNode* op, AccessPath path)
       Visit(buf_region.value(), path->Attr("args")->ArrayItem(i));
     }
   }
+}
+
+void TIRVisitorWithPath::VisitStmt_(const AllocBulkGroupEventNode* op, AccessPath path) {
+  auto context = WithDef(op->bulk_group_event, path->Attr("bulk_group_event"));
+  Visit(op->body, path->Attr("body"));
+}
+
+void TIRVisitorWithPath::VisitStmt_(const AllocSemaphoreEventTensorNode* op, AccessPath path) {
+  auto context = WithDef(op->sem_event_tensor, path->Attr("sem_event_tensor"));
+  Visit(op->body, path->Attr("body"));
 }
 
 void TIRVisitorWithPath::VisitExpr_(const VarNode* op, AccessPath path) {}

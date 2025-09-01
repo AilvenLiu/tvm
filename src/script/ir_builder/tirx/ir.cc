@@ -396,12 +396,11 @@ void BlockAttrs(ffi::Map<ffi::String, Any> attrs) {
   }
 }
 
-Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Optional<Var> data,
-                         ffi::Array<PrimExpr> strides, PrimExpr elem_offset,
-                         ffi::String storage_scope, int align, int offset_factor,
-                         ffi::String buffer_type_str,
-                         ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                         ffi::Optional<TLayout> layout, ffi::Array<Integer> allocated_addr) {
+Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
+    ffi::Array<PrimExpr> shape, DataType dtype, ffi::Optional<Var> data, ffi::Array<PrimExpr> strides,
+    PrimExpr elem_offset, ffi::String storage_scope, int align, int offset_factor,
+    ffi::String buffer_type_str, ffi::Optional<ffi::Array<IntImm>> axis_separators,
+    ffi::Optional<TLayout> layout, ffi::Array<Integer> allocated_addr) {
   Buffer buffer = BufferDecl(shape, dtype, "", std::nullopt, strides, std::nullopt, storage_scope,
                              align, 0, buffer_type_str, axis_separators, layout, allocated_addr);
   IRBuilder builder = IRBuilder::Current();
@@ -410,22 +409,18 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
                                      << "'T.alloc_buffer' is called under T.prim_func()";
   auto func_frame = opt_func_frame.value();
 
+  if (func_frame->is_tirp) {
+    ObjectPtr<AllocBufferFrameNode> n = make_object<AllocBufferFrameNode>();
+    n->buffer = buffer;
+    return AllocBufferFrame(n);
+  }
+
   // First try to get the last frame (most recent)
   if (ffi::Optional<SBlockFrame> block_frame = builder->GetLastFrame<SBlockFrame>()) {
     block_frame.value()->alloc_buffers.push_back(buffer);
   } else if (ffi::Optional<PrimFuncFrame> prim_func_frame =
                  builder->GetLastFrame<PrimFuncFrame>()) {
     prim_func_frame.value()->root_alloc_buffers.push_back(buffer);
-  } else if (func_frame->is_tirp) {
-    // For TIR+ functions, try to find any block or function frame
-    if (ffi::Optional<SBlockFrame> block_frame = builder->FindFrame<SBlockFrame>()) {
-      block_frame.value()->alloc_buffers.push_back(buffer);
-    } else if (ffi::Optional<PrimFuncFrame> prim_func_frame = builder->FindFrame<PrimFuncFrame>()) {
-      prim_func_frame.value()->root_alloc_buffers.push_back(buffer);
-    } else {
-      TVM_FFI_THROW(InternalError) << "ValueError: Block frame or PrimFunc frame not found. Please ensure "
-                    "'T.alloc_buffer' is called under T.sblock() or T.prim_func()";
-    }
   } else {
     TVM_FFI_THROW(InternalError) << "ValueError: Block frame or PrimFunc frame not found. Please ensure "
                   "'T.alloc_buffer' is called under T.sblock() or T.prim_func()";
@@ -433,30 +428,20 @@ Buffer SBlockAllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Option
   return buffer;
 }
 
-BulkGroupEvent AllocBulkGroupEvent(kEventImpl impl, Array<ffi::Any> state, String name) {
+AllocBulkGroupEventFrame AllocBulkGroupEvent(kEventImpl impl, Array<ffi::Any> state, String name) {
   BulkGroupEvent event = BulkGroupEvent(impl, state, name);
-  IRBuilder builder = IRBuilder::Current();
-  if (Optional<BlockFrame> frame = builder->FindFrame<BlockFrame>()) {
-    frame.value()->bulk_events.push_back(event);
-  } else {
-    TVM_FFI_THROW(InternalError) << "ValueError: Block frame not find. Please ensure 'T.alloc_bulk_group_event' is "
-                  "called under T.block()";
-  }
-  return event;
+  ObjectPtr<AllocBulkGroupEventFrameNode> n = make_object<AllocBulkGroupEventFrameNode>();
+  n->bulk_group_event = event;
+  return AllocBulkGroupEventFrame(n);
 }
 
-SemaphoreEventTensor AllocSemaphoreEventTensor(kEventImpl impl, Array<ffi::Any> state,
-                                               Array<PrimExpr> shape, String name) {
+AllocSemaphoreEventTensorFrame AllocSemaphoreEventTensor(kEventImpl impl, Array<ffi::Any> state,
+                                                         Array<PrimExpr> shape, String name) {
   SemaphoreEventTensor event_tensor = SemaphoreEventTensor(impl, state, shape, name);
-  IRBuilder builder = IRBuilder::Current();
-  if (Optional<BlockFrame> frame = builder->FindFrame<BlockFrame>()) {
-    frame.value()->sem_event_tensors.push_back(event_tensor);
-  } else {
-    TVM_FFI_THROW(InternalError)
-        << "ValueError: Block frame not find. Please ensure 'T.alloc_semaphore_event_tensor' is "
-           "called under T.block()";
-  }
-  return event_tensor;
+  ObjectPtr<AllocSemaphoreEventTensorFrameNode> n =
+      make_object<AllocSemaphoreEventTensorFrameNode>();
+  n->sem_event_tensor = event_tensor;
+  return AllocSemaphoreEventTensorFrame(n);
 }
 
 namespace axis {
@@ -813,22 +798,17 @@ void BufferStore(Buffer buffer, PrimExpr value, ffi::Array<PrimExpr> indices,
   AddToParent(tvm::tirx::BufferStore(buffer, value, indices, predicate));
 }
 
-Buffer DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
-                  ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
-                  ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
-                  int offset_factor, ffi::String buffer_type,
-                  ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                  Optional<TLayout> layout) {
-  Buffer buffer = BufferDecl(shape, dtype, buffer_name, data, strides, elem_offset, storage_scope,
-                             align, offset_factor, buffer_type, axis_separators, layout);
-  if (data.defined()) {
-    // Alias an existing buffer: emit DeclBuffer statement
-    AddToParent(tvm::tirx::DeclBuffer(buffer));
-  } else {
-    // No backing data pointer: emit AllocBuffer statement
-    AddToParent(tvm::tirx::AllocBuffer(buffer));
-  }
-  return buffer;
+DeclBufferFrame DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer_name,
+                           ffi::Optional<Var> data, ffi::Optional<ffi::Array<PrimExpr>> strides,
+                           ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope,
+                           int align, int offset_factor, ffi::String buffer_type,
+                           ffi::Optional<ffi::Array<IntImm>> axis_separators,
+                           ffi::Optional<TLayout> layout) {
+  ObjectPtr<DeclBufferFrameNode> n = ffi::make_object<DeclBufferFrameNode>();
+  n->buffer = BufferDecl(shape, dtype, buffer_name, data, strides, elem_offset, storage_scope, align,
+                         offset_factor, buffer_type, axis_separators, layout);
+  n->allocated = data.defined();
+  return DeclBufferFrame(n);
 }
 
 Buffer AllocBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String storage_scope,
@@ -1136,7 +1116,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 });
 
-}  // namespace tirxxxxxxx
+}  // namespace tirxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

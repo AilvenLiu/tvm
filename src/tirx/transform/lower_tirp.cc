@@ -542,26 +542,27 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     return any;
   }
 
-  Stmt VisitStmt_(const BlockNode* op) final {
-    ICHECK_EQ(op->match_buffers.size(), 0) << "Unexpected MatchBufferRegion found";
-
-    Block block = GetRef<Block>(op);
-
-    // alloc buffers
-    Array<Buffer> alloc_buffers = op->alloc_buffers;
-    alloc_buffers.MutateByApply([this](Buffer buf) {
+  Stmt VisitStmt_(const AllocBufferNode* op) final {
+    auto mutate = [this](Buffer buf) {
       if (target_->kind->name == "trn" && !buf->layout.defined()) {
         return buf;
       }
       return GetFlattenedBuffer(buf);
-    });
-    if (!alloc_buffers.same_as(op->alloc_buffers)) {
-      block.CopyOnWrite()->alloc_buffers = alloc_buffers;
+    };
+    auto buffer = mutate(op->buffer);
+    auto body = VisitStmt(op->body);
+    if (buffer.same_as(op->buffer) && body.same_as(op->body)) {
+      return GetRef<Stmt>(op);
+    } else {
+      auto n = CopyOnWrite(op);
+      n->buffer = buffer;
+      n->body = body;
+      return Stmt(n);
     }
+  }
 
-    // bulk_events
-    Array<BulkGroupEvent> bulk_events = op->bulk_events;
-    bulk_events.MutateByApply([this](BulkGroupEvent event) -> BulkGroupEvent {
+  Stmt VisitStmt_(const AllocBulkGroupEventNode* op) final {
+    auto mutate = ([this](BulkGroupEvent event) -> BulkGroupEvent {
       auto* n = event.CopyOnWrite();
       n->state.MutateByApply([this](ffi::Any state) -> ffi::Any { return VisitAny(state); });
       if (n->state.same_as(event->state)) {
@@ -570,13 +571,20 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
         return GetRef<BulkGroupEvent>(n);
       }
     });
-    if (!bulk_events.same_as(op->bulk_events)) {
-      block.CopyOnWrite()->bulk_events = bulk_events;
+    auto event = mutate(op->bulk_group_event);
+    auto body = VisitStmt(op->body);
+    if (event.same_as(op->bulk_group_event) && body.same_as(op->body)) {
+      return GetRef<Stmt>(op);
+    } else {
+      auto n = CopyOnWrite(op);
+      n->bulk_group_event = event;
+      n->body = body;
+      return Stmt(n);
     }
+  }
 
-    // sem_event_tensors
-    Array<SemaphoreEventTensor> sem_event_tensors = op->sem_event_tensors;
-    sem_event_tensors.MutateByApply([this](SemaphoreEventTensor event) -> SemaphoreEventTensor {
+  Stmt VisitStmt_(const AllocSemaphoreEventTensorNode* op) final {
+    auto mutate = ([this](SemaphoreEventTensor event) -> SemaphoreEventTensor {
       auto* n = event.CopyOnWrite();
       n->state.MutateByApply([this](ffi::Any state) -> ffi::Any { return VisitAny(state); });
       if (n->state.same_as(event->state)) {
@@ -585,11 +593,16 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
         return GetRef<SemaphoreEventTensor>(n);
       }
     });
-    if (!sem_event_tensors.same_as(op->sem_event_tensors)) {
-      block.CopyOnWrite()->sem_event_tensors = sem_event_tensors;
+    auto event = mutate(op->sem_event_tensor);
+    auto body = VisitStmt(op->body);
+    if (event.same_as(op->sem_event_tensor) && body.same_as(op->body)) {
+      return GetRef<Stmt>(op);
+    } else {
+      auto n = CopyOnWrite(op);
+      n->sem_event_tensor = event;
+      n->body = body;
+      return Stmt(n);
     }
-
-    return StmtExprMutator::VisitStmt_(block.get());
   }
 
   Stmt VisitStmt_(const DeclBufferNode* op) final {
@@ -795,6 +808,16 @@ class BufferOffsetRemover : public StmtExprMutator {
   std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_remap_;
 };
 
+class EventRemover : public StmtExprMutator {
+ public:
+  static Stmt Remove(const Stmt& stmt) { return EventRemover()(stmt); }
+
+ private:
+  Stmt VisitStmt_(const AllocBulkGroupEventNode* op) final { return VisitStmt(op->body); }
+
+  Stmt VisitStmt_(const AllocSemaphoreEventTensorNode* op) final { return VisitStmt(op->body); }
+};
+
 namespace transform {
 Pass LowerTIRp() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
@@ -826,6 +849,7 @@ Pass LowerTIRp() {
     std::tie(n->body, n->buffer_map) =
         LayoutApplier::Flatten(n->body, n->buffer_map, target.value());
     n->body = BufferOffsetRemover::Remove(n->body);
+    n->body = EventRemover::Remove(n->body);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRp", {});

@@ -48,9 +48,6 @@ from . import ir
 # tvm.tirx
 from . import tirx
 
-# tvm.tirp
-from . import tirp
-
 # tvm.target
 from . import target
 
@@ -77,6 +74,10 @@ if not _RUNTIME_ONLY:
 # NOTE: This file should be python2 compatible so we can
 # raise proper error message when user run the package using
 # an older version of the python
+
+# tvm.tirp
+from .tirp import megakernel
+from .tirp import op_schedule
 
 
 def _should_print_backtrace():

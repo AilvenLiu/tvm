@@ -95,6 +95,16 @@ class TIRVisitorWithPath
   virtual void EnterDef(const Buffer& buffer, ffi::reflection::AccessPath path);
   virtual void ExitDef(const Buffer& buffer, ffi::reflection::AccessPath path);
 
+  // Called when entering/exiting the scope of a BulkGroupEvent definition.
+  virtual void EnterDef(const BulkGroupEvent& bulk_group_event, ffi::reflection::AccessPath path);
+  virtual void ExitDef(const BulkGroupEvent& bulk_group_event, ffi::reflection::AccessPath path);
+
+  // Called when entering/exiting the scope of a SemaphoreEventTensor definition.
+  virtual void EnterDef(const SemaphoreEventTensor& sem_event_tensor,
+                        ffi::reflection::AccessPath path);
+  virtual void ExitDef(const SemaphoreEventTensor& sem_event_tensor,
+                       ffi::reflection::AccessPath path);
+
   // Utility to visit an array of nodes
   template <typename T>
   inline void Visit(const ffi::Array<T>& arr, ffi::reflection::AccessPath path) {
@@ -128,6 +138,9 @@ class TIRVisitorWithPath
   void VisitStmt_(const SBlockNode* op, ffi::reflection::AccessPath path) override;
   void VisitStmt_(const SBlockRealizeNode* op, ffi::reflection::AccessPath path) override;
   void VisitStmt_(const tirp::OpCallNode* op, ffi::reflection::AccessPath path) override;
+  void VisitStmt_(const AllocBulkGroupEventNode* op, ffi::reflection::AccessPath path) override;
+  void VisitStmt_(const AllocSemaphoreEventTensorNode* op,
+                  ffi::reflection::AccessPath path) override;
 
   using ExprFunctor::VisitExpr;
   void VisitExpr_(const VarNode* op, ffi::reflection::AccessPath path) override;

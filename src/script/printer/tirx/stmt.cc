@@ -79,8 +79,8 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
   return call->args[0];
 }
 
-ExprDoc EventDecl(const tirx::BulkGroupEvent& event, const String& method, const AccessPath& p,
-                  const IRDocsifier& d) {
+ExprDoc BulkGroupEventDecl(const tirx::BulkGroupEvent& event, const String& method,
+                           const AccessPath& p, const IRDocsifier& d) {
   return TIRp(d, method)->Call({LiteralDoc::Int(static_cast<int64_t>(event->impl), p->Attr("impl")),
                                 d->AsDoc<ExprDoc>(event->state, p->Attr("state"))});
 }
@@ -89,8 +89,8 @@ ExprDoc HandleEvent(const tirx::BulkGroupEvent& event, const String& method, con
                     const IRDocsifier& d) {
   if (!d->IsVarDefined(event)) {
     if (Optional<Frame> opt_f = FindLowestVarDef(event, d)) {
-      ExprDoc lhs = DefineEvent(event, opt_f.value(), d);
-      ExprDoc rhs = EventDecl(event, method, p, d);
+      ExprDoc lhs = DefineBulkEvent(event, opt_f.value(), d);
+      ExprDoc rhs = BulkGroupEventDecl(event, method, p, d);
       opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
     }
   }
@@ -100,8 +100,8 @@ ExprDoc HandleEvent(const tirx::BulkGroupEvent& event, const String& method, con
   LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << event;
 }
 
-ExprDoc EventTensorDecl(const tirx::SemaphoreEventTensor& event_tensor, const String& method,
-                        const AccessPath& p, const IRDocsifier& d) {
+ExprDoc SemaphoreEventTensorDecl(const tirx::SemaphoreEventTensor& event_tensor,
+                                 const String& method, const AccessPath& p, const IRDocsifier& d) {
   return TIRp(d, method)->Call({
       LiteralDoc::Int(static_cast<int64_t>(event_tensor->impl), p->Attr("impl")),
       d->AsDoc<ExprDoc>(event_tensor->state, p->Attr("state")),
@@ -113,8 +113,8 @@ ExprDoc HandleEventTensor(const tirx::SemaphoreEventTensor& event_tensor, const 
                           const AccessPath& p, const IRDocsifier& d) {
   if (!d->IsVarDefined(event_tensor)) {
     if (Optional<Frame> opt_f = FindLowestVarDef(event_tensor, d)) {
-      ExprDoc lhs = DefineEventTensor(event_tensor, opt_f.value(), d);
-      ExprDoc rhs = EventTensorDecl(event_tensor, method, p, d);
+      ExprDoc lhs = DefineSemaphoreEventTensor(event_tensor, opt_f.value(), d);
+      ExprDoc rhs = SemaphoreEventTensorDecl(event_tensor, method, p, d);
       opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
     }
   }
@@ -311,6 +311,61 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::DeclBuffer>(  //
         "", [](tirx::DeclBuffer stmt, AccessPath p, IRDocsifier d) -> Doc {
           return DeclBufferDoc(stmt, p, d, BufferVarDefinition::None);
+        });
+
+namespace {
+Doc AllocBufferDoc(tirx::AllocBuffer stmt, AccessPath p, IRDocsifier d) {
+  bool concise = AllowConciseScoping(d, stmt);
+  ExprDoc rhs = BufferDecl(stmt->buffer, "alloc_buffer", {}, p->Attr("buffer"), d->frames.back(), d,
+                           BufferVarDefinition::DataPointer);
+  With<TIRFrame> f(d, stmt);
+  ExprDoc lhs = DefineBuffer(stmt->buffer, *f, d);
+  AsDocBody(stmt->body, p->Attr("body"), f->get(), d);
+  return DoConciseScoping(lhs, rhs, &(*f)->stmts, concise);
+}
+}  // namespace
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::AllocBuffer>(  //
+        "", [](tirx::AllocBuffer stmt, AccessPath p, IRDocsifier d) -> Doc {
+          return AllocBufferDoc(stmt, p, d);
+        });
+
+namespace {
+Doc AllocBulkGroupEventDoc(tirx::AllocBulkGroupEvent stmt, AccessPath p, IRDocsifier d) {
+  bool concise = AllowConciseScoping(d, stmt);
+  tirx::BulkGroupEvent event = stmt->bulk_group_event;
+  ExprDoc rhs = BulkGroupEventDecl(event, "alloc_bulk_group_event", p->Attr("bulk_group_event"), d);
+  With<TIRFrame> f(d, stmt);
+  ExprDoc lhs = DefineBulkEvent(event, *f, d);
+  AsDocBody(stmt->body, p->Attr("body"), f->get(), d);
+  return DoConciseScoping(lhs, rhs, &(*f)->stmts, concise);
+}
+}  // namespace
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::AllocBulkGroupEvent>(  //
+        "", [](tirx::AllocBulkGroupEvent stmt, AccessPath p, IRDocsifier d) -> Doc {
+          return AllocBulkGroupEventDoc(stmt, p, d);
+        });
+
+namespace {
+Doc AllocSemaphoreEventTensorDoc(tirx::AllocSemaphoreEventTensor stmt, AccessPath p, IRDocsifier d) {
+  bool concise = AllowConciseScoping(d, stmt);
+  tirx::SemaphoreEventTensor event_tensor = stmt->sem_event_tensor;
+  ExprDoc rhs = SemaphoreEventTensorDecl(event_tensor, "alloc_semaphore_event_tensor",
+                                         p->Attr("sem_event_tensor"), d);
+  With<TIRFrame> f(d, stmt);
+  ExprDoc lhs = DefineSemaphoreEventTensor(event_tensor, *f, d);
+  AsDocBody(stmt->body, p->Attr("body"), f->get(), d);
+  return DoConciseScoping(lhs, rhs, &(*f)->stmts, concise);
+}
+}  // namespace
+
+TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
+    .set_dispatch<tirx::AllocSemaphoreEventTensor>(  //
+        "", [](tirx::AllocSemaphoreEventTensor stmt, AccessPath p, IRDocsifier d) -> Doc {
+          return AllocSemaphoreEventTensorDoc(stmt, p, d);
         });
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)

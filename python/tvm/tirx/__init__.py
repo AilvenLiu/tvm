@@ -16,6 +16,7 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=unused-import, redefined-builtin
+# isort: skip_file
 """Namespace for Tensor-level IR"""
 
 from tvm.ir import PrimExpr
@@ -41,7 +42,7 @@ from .stmt import (
 from .stmt import SeqStmt
 from .stmt import IfThenElse, Evaluate, stmt_seq, stmt_list
 from .stmt import BufferRegion, MatchBufferRegion, SBlock, SBlockRealize
-from .stmt import OpCall
+from .stmt import OpCall, AllocBuffer, AllocBulkGroupEvent, AllocSemaphoreEventTensor
 
 from .function import PrimFunc, TensorIntrin, IndexMap
 

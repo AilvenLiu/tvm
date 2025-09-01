@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import tvm_ffi
 
+from tvm import tir
 from tvm.ir import Op, PrimExpr, Range, Span
 from tvm.runtime import NDArray, Object, Scriptable, const
 from tvm.tir import FloatImm
@@ -40,7 +41,6 @@ from . import _ffi_api
 from .buffer import Buffer
 from .expr import IterVar, StringImm, Var
 from .exec_scope import ExecScope
-from .layout import TLayout
 
 
 @tvm_ffi.register_object("tir.Stmt")
@@ -493,6 +493,58 @@ class MatchBufferRegion(Object, Scriptable):
         )
 
 
+@tvm_ffi.register_object("tir.AllocBuffer")
+class AllocBuffer(Object, Scriptable):
+    """AllocBuffer node.
+
+    Parameters
+    ----------
+    buffer : Buffer
+        The buffer of the alloc buffer.
+
+    body : Stmt
+        The body of the alloc buffer.
+    """
+
+    buffer: Buffer
+    body: Stmt
+
+    def __init__(self, buffer: Buffer, body: Stmt, span: Optional[Span] = None) -> None:
+        self.__init_handle_by_constructor__(_ffi_api.AllocBuffer, buffer, body, span)
+
+
+@tvm_ffi.register_object("tir.AllocBulkGroupEvent")
+class AllocBulkGroupEvent(Object, Scriptable):
+    """AllocBulkGroupEvent node.
+
+    Parameters
+    ----------
+    bulk_group_event : BulkGroupEvent
+        The bulk group event of the alloc bulk group event.
+    """
+
+    def __init__(self, bulk_group_event, body: Stmt, span: Optional[Span] = None) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.AllocBulkGroupEvent, bulk_group_event, body, span
+        )
+
+
+@tvm_ffi.register_object("tir.AllocSemaphoreEventTensor")
+class AllocSemaphoreEventTensor(Object, Scriptable):
+    """AllocSemaphoreEventTensor node.
+
+    Parameters
+    ----------
+    sem_event_tensor : SemaphoreEventTensor
+        The semaphore event tensor of the alloc semaphore event tensor.
+    """
+
+    def __init__(self, sem_event_tensor, body: Stmt, span: Optional[Span] = None) -> None:
+        self.__init_handle_by_constructor__(
+            _ffi_api.AllocSemaphoreEventTensor, sem_event_tensor, body, span
+        )
+
+
 @tvm_ffi.register_object("tir.SBlock")
 class SBlock(Stmt):
     """SBlock node.
@@ -526,12 +578,6 @@ class SBlock(Stmt):
     annotations: Optional[Mapping[str, Object]]
         Additional annotation hints.
 
-    bulk_events: List["tvm.tir.event.BulkGroupEvent"]
-        The bulk events in the block.
-
-    sem_event_tensors: List["tvm.tir.event.SemaphoreEventTensor"]
-        The event tensors in the block.
-
     span : Optional[Span]
         The location of this block in the source code.
     """
@@ -546,8 +592,6 @@ class SBlock(Stmt):
     match_buffers: list[MatchBufferRegion]
     annotations: Mapping[str, Object]
     exec_scope: ExecScope | None
-    bulk_events: list["tvm.tir.event.BulkGroupEvent"]
-    sem_event_tensors: list["tvm.tir.event.SemaphoreEventTensor"]
     span: Span | None
 
     def __init__(
@@ -563,8 +607,6 @@ class SBlock(Stmt):
         annotations: Mapping[str, Object] | None = None,
         span: Span | None = None,
         exec_scope: ExecScope | None = None,
-        bulk_events: list["tvm.tir.event.BulkGroupEvent"] | None = None,
-        sem_event_tensors: list["tvm.tir.event.SemaphoreEventTensor"] | None = None,
     ) -> None:
         if alloc_buffers is None:
             alloc_buffers = []
@@ -572,10 +614,6 @@ class SBlock(Stmt):
             match_buffers = []
         if annotations is None:
             annotations = {}
-        if bulk_events is None:
-            bulk_events = []
-        if sem_event_tensors is None:
-            sem_event_tensors = []
         self.__init_handle_by_constructor__(
             _ffi_api.SBlock,  # type: ignore
             iter_vars,
@@ -589,8 +627,6 @@ class SBlock(Stmt):
             annotations,
             span,
             exec_scope,
-            bulk_events,
-            sem_event_tensors,
         )  # type: ignore
 
 

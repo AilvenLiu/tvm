@@ -41,7 +41,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   IfFrameNode::RegisterReflection();
   ThenFrameNode::RegisterReflection();
   ElseFrameNode::RegisterReflection();
+  DeclBufferFrameNode::RegisterReflection();
   ComposeOpFrameNode::RegisterReflection();
+  AllocBufferFrameNode::RegisterReflection();
+  AllocBulkGroupEventFrameNode::RegisterReflection();
+  AllocSemaphoreEventTensorFrameNode::RegisterReflection();
 }
 
 void PrimFuncFrameNode::ExitWithScope() {
@@ -114,8 +118,7 @@ void SBlockFrameNode::ExitWithScope() {
   }
   tvm::tirx::SBlock block(iter_vars, reads.value_or(ffi::Array<tvm::tirx::BufferRegion>()),
                          writes.value_or(ffi::Array<tvm::tirx::BufferRegion>()), name, AsStmt(stmts),
-                         init, tir_alloc_buffers, match_buffers, attrs, tvm::Span(), exec_scope,
-                         bulk_events, sem_event_tensors);
+                         init, tir_alloc_buffers, match_buffers, attrs, tvm::Span(), exec_scope);
   if (no_realize) {
     TVM_FFI_CHECK(iter_values.empty(), ValueError)
         << "Block bindings are not allowed when `no_realize=True`";
@@ -242,7 +245,22 @@ void ComposeOpFrameNode::ExitWithScope() {
   auto compose_op_op = tvm::Op::Get("tirp.compose_op");
   AddToParent(tvm::tirx::tirp::OpCall(compose_op_op, ops, workspace, schedule_config));
 }
-}  // namespace tirxxx
+
+void AllocBufferFrameNode::ExitWithScope() {
+  TIRFrameNode::ExitWithScope();
+  AddToParent(tvm::tirx::AllocBuffer(buffer, AsStmt(stmts)));
+}
+
+void AllocBulkGroupEventFrameNode::ExitWithScope() {
+  TIRFrameNode::ExitWithScope();
+  AddToParent(tvm::tirx::AllocBulkGroupEvent(bulk_group_event, AsStmt(stmts)));
+}
+
+void AllocSemaphoreEventTensorFrameNode::ExitWithScope() {
+  TIRFrameNode::ExitWithScope();
+  AddToParent(tvm::tirx::AllocSemaphoreEventTensor(sem_event_tensor, AsStmt(stmts)));
+}
+}  // namespace tirx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

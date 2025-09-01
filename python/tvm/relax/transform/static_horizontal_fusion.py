@@ -161,7 +161,6 @@ class EventOpInserter(StmtExprMutator):
             block.annotations,
             block.span,
             block.exec_scope,
-            sem_event_tensors=in_event_tensors + out_event_tensors,
         )
 
 

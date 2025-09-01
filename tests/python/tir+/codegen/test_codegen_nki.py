@@ -42,7 +42,7 @@ def compare_strings_ignore_whitespace(s1, s2):
 
 def test_nki_add_1():
     # fmt: off
-    @T.prim_func
+    @T.prim_func(tirp=True)
     def func(A: T.Buffer((128, 512)), B: T.Buffer((128, 512))):
         T.func_attr({"num_inputs": 1})
         with T.kernel():
@@ -96,7 +96,7 @@ def func_kernel(A, B: nt.mutable_tensor, ):
 
 def test_nki_add_2():
     # fmt: off
-    @T.prim_func
+    @T.prim_func(tirp=True)
     def func(A: T.Buffer((128, 2048)), B: T.Buffer((128, 2048))):
         T.func_attr({"num_inputs": 1})
         with T.kernel():
@@ -172,7 +172,7 @@ def test_nki_matmul_1():
     NUM_BLOCK_N = N // BLOCK_N
     NUM_BLOCK_K = K // BLOCK_K
 
-    @T.prim_func
+    @T.prim_func(tirp=True)
     def func(
         lhsT: T.Buffer((K, M), "float16"),
         rhs: T.Buffer((K, N), "float16"),

@@ -85,20 +85,16 @@ def test_two_stage_reduction():
     # fmt: on
     class SpatialTileScheduler(TileScheduler):
         @staticmethod
-        def int_var():
-            return T.alloc_buffer([1], "int32", scope="local", align=4)
+        def int_var(name):
+            return T.alloc_buffer([1], "int32", scope="local", align=4, name=name)
 
         def __init__(self):
             self.sm_cnt = SM_CNT
             self.division = 132
-            self.m_idx = self.int_var()
-            self.n_idx = self.int_var()
-            self.type = self.int_var()
-            self.linear_idx = self.int_var()
-            IRBuilder.current().name("m_idx", self.m_idx)
-            IRBuilder.current().name("n_idx", self.n_idx)
-            IRBuilder.current().name("linear_idx", self.linear_idx)
-            IRBuilder.current().name("type", self.type)
+            self.m_idx = self.int_var("m_idx")
+            self.n_idx = self.int_var("n_idx")
+            self.type = self.int_var("type")
+            self.linear_idx = self.int_var("linear_idx")
 
         @T.macro
         def update_current_m_n_idx(self):

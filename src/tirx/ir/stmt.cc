@@ -52,6 +52,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   MatchBufferRegionNode::RegisterReflection();
   SBlockNode::RegisterReflection();
   SBlockRealizeNode::RegisterReflection();
+  AllocBufferNode::RegisterReflection();
+  AllocBulkGroupEventNode::RegisterReflection();
+  AllocSemaphoreEventTensorNode::RegisterReflection();
 }
 
 // Bind
@@ -566,6 +569,57 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("tirx.MatchBufferRegion", [](Buffer buffer, BufferRegion source) {
     return MatchBufferRegion(buffer, source);
   });
+});
+
+// AllocBuffer
+AllocBuffer::AllocBuffer(Buffer buffer, Stmt body, Span span) {
+  ObjectPtr<AllocBufferNode> node = make_object<AllocBufferNode>();
+  node->buffer = std::move(buffer);
+  node->body = std::move(body);
+  node->span = std::move(span);
+  data_ = std::move(node);
+}
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.AllocBuffer", [](Buffer buffer, Stmt body, Span span) {
+    return AllocBuffer(buffer, body, span);
+  });
+});
+
+// AllocBulkGroupEvent
+AllocBulkGroupEvent::AllocBulkGroupEvent(BulkGroupEvent bulk_group_event, Stmt body, Span span) {
+  ObjectPtr<AllocBulkGroupEventNode> node = make_object<AllocBulkGroupEventNode>();
+  node->bulk_group_event = std::move(bulk_group_event);
+  node->body = std::move(body);
+  node->span = std::move(span);
+  data_ = std::move(node);
+}
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.AllocBulkGroupEvent",
+                        [](BulkGroupEvent bulk_group_event, Stmt body, Span span) {
+                          return AllocBulkGroupEvent(bulk_group_event, body, span);
+                        });
+});
+
+// AllocSemaphoreEventTensor
+AllocSemaphoreEventTensor::AllocSemaphoreEventTensor(SemaphoreEventTensor sem_event_tensor,
+                                                     Stmt body, Span span) {
+  ObjectPtr<AllocSemaphoreEventTensorNode> node = make_object<AllocSemaphoreEventTensorNode>();
+  node->sem_event_tensor = std::move(sem_event_tensor);
+  node->body = std::move(body);
+  node->span = std::move(span);
+  data_ = std::move(node);
+}
+
+TVM_FFI_STATIC_INIT_BLOCK({
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("tir.AllocSemaphoreEventTensor",
+                        [](SemaphoreEventTensor sem_event_tensor, Stmt body, Span span) {
+                          return AllocSemaphoreEventTensor(sem_event_tensor, body, span);
+                        });
 }
 
 // Block
@@ -573,8 +627,7 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
                ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,
                ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
                ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
-               Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BulkGroupEvent> bulk_events,
-               ffi::Array<SemaphoreEventTensor> sem_event_tensors) {
+               Span span, ffi::Optional<ExecScope> exec_scope) {
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = std::move(iter_vars);
   node->reads = std::move(reads);
@@ -587,14 +640,11 @@ SBlock::SBlock(ffi::Array<IterVar> iter_vars, ffi::Array<BufferRegion> reads,
   node->annotations = std::move(annotations);
   node->exec_scope = std::move(exec_scope);
   node->span = std::move(span);
-  node->bulk_events = std::move(bulk_events);
-  node->sem_event_tensors = std::move(sem_event_tensors);
   data_ = std::move(node);
 }
 
 SBlock::SBlock(ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_scope,
-               ffi::Array<Buffer> alloc_buffers, ffi::Array<BulkGroupEvent> bulk_events,
-               ffi::Array<SemaphoreEventTensor> sem_event_tensors, Span span) {
+               ffi::Array<Buffer> alloc_buffers, Span span) {
   ObjectPtr<SBlockNode> node = ffi::make_object<SBlockNode>();
   node->iter_vars = {};
   node->reads = {};
@@ -607,8 +657,6 @@ SBlock::SBlock(ffi::String name_hint, Stmt body, ffi::Optional<ExecScope> exec_s
   node->annotations = {};
   node->exec_scope = std::move(exec_scope);
   node->span = std::move(span);
-  node->bulk_events = std::move(bulk_events);
-  node->sem_event_tensors = std::move(sem_event_tensors);
   data_ = std::move(node);
 }
 
@@ -620,10 +668,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
          ffi::Array<BufferRegion> writes, ffi::String name_hint, Stmt body,
          ffi::Optional<Stmt> init, ffi::Array<Buffer> alloc_buffers,
          ffi::Array<MatchBufferRegion> match_buffers, ffi::Map<ffi::String, Any> annotations,
-         Span span, ffi::Optional<ExecScope> exec_scope, ffi::Array<BulkGroupEvent> bulk_events,
-         ffi::Array<SemaphoreEventTensor> sem_event_tensors) {
+         Span span, ffi::Optional<ExecScope> exec_scope) {
         return SBlock(iter_vars, reads, writes, name_hint, body, init, alloc_buffers, match_buffers,
-                      annotations, span, exec_scope, bulk_events, sem_event_tensors);
+                      annotations, span, exec_scope);
       });
 }
 

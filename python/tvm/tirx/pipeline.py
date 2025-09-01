@@ -140,7 +140,7 @@ def tirp_pipeline():
         passes = [
             tvm.tirp.transform.PrivateBufferAlloc(),
             tir.transform.LowerTIRp(),
-            tvm.ir.transform.PrintIR(),
+            # tvm.ir.transform.PrintIR(),
             tir.transform.UnifyThreadBinding(),
             tir.transform.Simplify(),
             tir.transform.LowerOpaqueBlock(),

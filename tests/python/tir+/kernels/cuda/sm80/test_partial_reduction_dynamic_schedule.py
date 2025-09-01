@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import enum
-import functools
+from functools import partial
 from typing import Tuple
 
 import numpy as np
@@ -42,9 +42,8 @@ def test_partial_reduction():
     # fmt: off
 
     def int_var(name: str, scope="local"):
-        buf = T.alloc_buffer([1], "int32", scope=scope, align=4)
-        IRBuilder.current().name(name, buf)
-        return buf
+        return T.alloc_buffer([1], "int32", align=4, scope=scope, name=name)
+
     
     class TaskType(enum.Enum):
         PARTIAL = 0
@@ -95,8 +94,7 @@ def test_partial_reduction():
         def __init__(self, queue: MPMCQueue):
             self.queue = queue
             self.fetched_task_type = int_var("fetched_task_type", scope="shared")
-            self.fetched_task_idx = T.alloc_buffer([2], "int32", scope="shared")
-            IRBuilder.current().name("fetched_task_idx", self.fetched_task_idx)
+            self.fetched_task_idx = T.alloc_buffer([2], "int32", scope="shared", name="fetched_task_idx")
             
         @T.macro
         def _fetch_from_queue(self):

@@ -160,8 +160,7 @@ class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
         self.sem = buffer
-        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4)
-        IRBuilder.current().name("semaphore_state", self.state)
+        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4, name="semaphore_state")
 
     @T.macro
     def semaphore_wait(self, *coord):
@@ -201,14 +200,19 @@ class Pipeline:
         self.pipeline_depth = pipeline_depth
         self.pipeline_num = pipeline_num
         self.mbar_p2c = T.decl_buffer(
-            (pipeline_depth, pipeline_num), "uint64", shared_buf, elem_offset=base_offset
-        ).buffer
+            (pipeline_depth, pipeline_num),
+            "uint64",
+            shared_buf,
+            elem_offset=base_offset,
+            name="mbar_p2c",
+        )
         self.mbar_c2p = T.decl_buffer(
             (pipeline_depth, pipeline_num),
             "uint64",
             shared_buf,
             elem_offset=base_offset + pipeline_depth * pipeline_num,
-        ).buffer
+            name="mbar_c2p",
+        )
         self.idx = T.local_cell("int32", name="pipeline_idx")
         self.p2c_phase = T.local_cell("int32", name="pipeline_p2c_phase")
         self.c2p_phase = T.local_cell("int32", name="pipeline_c2p_phase")

@@ -16,10 +16,9 @@
 # under the License.
 
 import functools
-from typing import Dict, List
 
 from tvm import DataType
-from tvm.tir import Block, IntImm
+from tvm.tir import AllocBuffer, Block, IntImm
 from tvm.tir.buffer import Buffer
 from tvm.tir.stmt_functor import StmtVisitor
 from tvm.tir.transform.function_pass import prim_func_pass
@@ -58,17 +57,15 @@ class AllocInfoCollector(StmtVisitor):
         super().__init__()
         self.alloc_pool_start = 0
 
-    def visit_block_(self, op: Block):
-        for buffer in op.alloc_buffers:
-            if len(buffer.allocated_addr) == 0:
-                continue
-            buffer_size = get_buffer_size(buffer)
-            if buffer_size is None:
-                continue
-            self.alloc_pool_start = max(
-                self.alloc_pool_start, buffer.allocated_addr[-1] + buffer_size
-            )
-        return super().visit_block_(op)
+    def visit_alloc_buffer_(self, op: AllocBuffer):
+        super().visit_alloc_buffer_(op)
+        buffer = op.buffer
+        if len(buffer.allocated_addr) == 0:
+            return op
+        buffer_size = get_buffer_size(buffer)
+        if buffer_size is None:
+            return op
+        self.alloc_pool_start = max(self.alloc_pool_start, buffer.allocated_addr[-1] + buffer_size)
 
 
 class AllocMutator(BufferReplacer):
@@ -76,33 +73,21 @@ class AllocMutator(BufferReplacer):
         super().__init__()
         self.alloc_offset = alloc_pool_start
 
-    def visit_block_(self, op: Block):
+    def visit_alloc_buffer_(self, op: AllocBuffer):
         changed = False
-        new_alloc_buffers = []
-        for buffer in op.alloc_buffers:
-            buffer_size = get_buffer_size(buffer)
-            if len(buffer.allocated_addr) > 0 or buffer_size is None:
-                new_alloc_buffers.append(buffer)
-                continue
+        buffer = op.buffer
+        buffer_size = get_buffer_size(buffer)
+        if len(buffer.allocated_addr) > 0 or buffer_size is None:
+            pass
+        else:
             new_buffer = buffer.with_allocated_addr([self.alloc_offset])
-            new_alloc_buffers.append(new_buffer)
             self.buffer_map[buffer] = new_buffer
             changed = True
             self.alloc_offset += buffer_size
 
-        op = super().visit_block_(op)
+        op = super().visit_alloc_buffer_(op)
         if changed:
-            return Block(
-                op.iter_vars,
-                op.reads,
-                op.writes,
-                op.name_hint,
-                body=op.body,
-                alloc_buffers=new_alloc_buffers,
-                match_buffers=op.match_buffers,
-                annotations=op.annotations,
-                exec_scope=op.exec_scope,
-            )
+            return AllocBuffer(new_buffer, op.body, op.span)
         return op
 
 

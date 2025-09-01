@@ -14,6 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from functools import partial
+
 import flashinfer
 import numpy as np
 import pytest
@@ -172,13 +174,17 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
     INF = 5e4
 
     def int_var(val=None):
-        buf = T.alloc_local([1], "int32")
+        frame = T.alloc_local([1], "int32")
+        frame.add_callback(partial(frame.__exit__, None, None, None))
+        buf = frame.__enter__()
         if val is not None:
             T.buffer_store(buf, val, 0)
         return buf
 
     def float_var(val=None):
-        buf = T.alloc_local([1], "float32")
+        frame = T.alloc_local([1], "float32")
+        frame.add_callback(partial(frame.__exit__, None, None, None))
+        buf = frame.__enter__()
         if val is not None:
             T.buffer_store(buf, val, 0)
         return buf
@@ -818,12 +824,9 @@ __device__ __forceinline__ float {func_name}() {{
         class State:
             def __init__(self, vec_size):
                 self.vec_size = vec_size
-                self.o = T.alloc_local([vec_size], "float32")
-                self.m = T.alloc_local([1], "float32")
-                self.d = T.alloc_local([1], "float32")
-                IRBuilder.name("state_o", self.o)
-                IRBuilder.name("state_m", self.m)
-                IRBuilder.name("state_d", self.d)
+                self.o = T.alloc_local([vec_size], "float32", name="state_o")
+                self.m = T.alloc_local([1], "float32", name="state_m")
+                self.d = T.alloc_local([1], "float32", name="state_d")
 
             @T.macro
             def init(self):

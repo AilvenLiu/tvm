@@ -158,6 +158,12 @@ void StmtVisitor::VisitStmt_(const tirp::OpCallNode* op) {
   });
 }
 
+void StmtVisitor::VisitStmt_(const AllocBufferNode* op) { this->VisitStmt(op->body); }
+
+void StmtVisitor::VisitStmt_(const AllocBulkGroupEventNode* op) { this->VisitStmt(op->body); }
+
+void StmtVisitor::VisitStmt_(const AllocSemaphoreEventTensorNode* op) { this->VisitStmt(op->body); }
+
 class StmtMutator::Internal {
  public:
   /*!
@@ -611,6 +617,39 @@ Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
   } else {
     auto n = CopyOnWrite(op);
     n->args = std::move(args);
+    return Stmt(n);
+  }
+}
+
+Stmt StmtMutator::VisitStmt_(const AllocBufferNode* op) {
+  Stmt body = this->VisitStmt(op->body);
+  if (body.same_as(op->body)) {
+    return GetRef<Stmt>(op);
+  } else {
+    auto n = CopyOnWrite(op);
+    n->body = std::move(body);
+    return Stmt(n);
+  }
+}
+
+Stmt StmtMutator::VisitStmt_(const AllocBulkGroupEventNode* op) {
+  Stmt body = this->VisitStmt(op->body);
+  if (body.same_as(op->body)) {
+    return GetRef<Stmt>(op);
+  } else {
+    auto n = CopyOnWrite(op);
+    n->body = std::move(body);
+    return Stmt(n);
+  }
+}
+
+Stmt StmtMutator::VisitStmt_(const AllocSemaphoreEventTensorNode* op) {
+  Stmt body = this->VisitStmt(op->body);
+  if (body.same_as(op->body)) {
+    return GetRef<Stmt>(op);
+  } else {
+    auto n = CopyOnWrite(op);
+    n->body = std::move(body);
     return Stmt(n);
   }
 }

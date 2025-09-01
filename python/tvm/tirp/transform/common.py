@@ -18,7 +18,9 @@
 from typing import Dict, List
 
 from tvm.tir import (
-    Block,
+    AllocBuffer,
+    AllocBulkGroupEvent,
+    AllocSemaphoreEventTensor,
     BufferLoad,
     BufferRegion,
     BufferStore,
@@ -28,7 +30,7 @@ from tvm.tir import (
     Var,
 )
 from tvm.tir.buffer import Buffer
-from tvm.tir.event import SemaphoreEventTensorItem
+from tvm.tir.event import BulkGroupEvent, SemaphoreEventTensor, SemaphoreEventTensorItem
 from tvm.tir.stmt_functor import StmtExprMutator, StmtMutator
 from tvm.tirp.operator.op import KernelReplacePoint
 
@@ -70,6 +72,47 @@ class BufferReplacer(StmtExprMutator):
 
     def visit_array_prim_expr_(self, op: List[PrimExpr]):
         return [self.visit_expr(expr) for expr in op]
+
+    def visit_alloc_buffer_(self, op: AllocBuffer):
+        op = super().visit_alloc_buffer_(op)
+        if op.buffer in self.buffer_map:
+            return AllocBuffer(self.buffer_map[op.buffer], op.body)
+        return op
+
+    def visit_alloc_bulk_group_event_(self, op: AllocBulkGroupEvent):
+        op = super().visit_alloc_bulk_group_event_(op)
+        changed = False
+        states = list()
+        for state in op.bulk_group_event.state:
+            if isinstance(state, Buffer) and state in self.buffer_map:
+                states.append(self.buffer_map[state])
+                changed = True
+            else:
+                states.append(state)
+        if changed:
+            event = BulkGroupEvent(op.bulk_group_event.impl, states, op.bulk_group_event.name)
+            return AllocBulkGroupEvent(event, op.body)
+        return op
+
+    def visit_alloc_sem_event_tensor_(self, op: AllocSemaphoreEventTensor):
+        op = super().visit_alloc_sem_event_tensor_(op)
+        changed = False
+        states = list()
+        for tensor in op.sem_event_tensor.state:
+            if isinstance(tensor, Buffer) and tensor in self.buffer_map:
+                states.append(self.buffer_map[tensor])
+                changed = True
+            else:
+                states.append(tensor)
+        if changed:
+            event = SemaphoreEventTensor(
+                op.sem_event_tensor.impl,
+                states,
+                op.sem_event_tensor.shape,
+                op.sem_event_tensor.name,
+            )
+            return AllocSemaphoreEventTensor(event, op.body)
+        return op
 
     def visit_op_call_(self, op):
         op = super().visit_op_call_(op)
