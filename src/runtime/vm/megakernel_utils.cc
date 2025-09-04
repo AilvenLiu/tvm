@@ -57,11 +57,11 @@ Array<NDArray> GetEventTensorsOnLayer(Array<NDArray> etensors, int layer_id) {
   return Array<NDArray>(etensors_on_layer);
 }
 
-NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int num_qo_heads,
+NDArray GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
                           int num_kv_heads, int head_dim, Device device,
                           Device preferred_host_device) {
   NVTXScopedRange range("Generate execution queue");
-  bool split_kv = batch_size != new_batch_size;
+  bool split_kv = attn_task_num > num_kv_heads * batch_size;
 
   NDArray exec_queue_host = NDArray::Empty({kNumSM, kStaticTileSchedulerMaxTasks, kTaskSize},
                                            DataType::Int(32), preferred_host_device);
@@ -133,25 +133,13 @@ NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int n
     }
   }
 
-  if (split_kv) {
-    for (int n_idx = 0; n_idx < num_kv_heads; ++n_idx) {
-      for (int m_idx = 0; m_idx < new_batch_size; ++m_idx) {
-        f_push_task(m_idx, n_idx, -1, JobType::kBatchDecodeSplit);
-      }
-    }
-  } else {
-    for (int n_idx = 0; n_idx < num_kv_heads; ++n_idx) {
-      for (int m_idx = 0; m_idx < batch_size; ++m_idx) {
-        f_push_task(m_idx, n_idx, -1, JobType::kBatchDecodeNoSplit);
-      }
-    }
+  for (int m_idx = 0; m_idx < ceildiv(attn_task_num, kNumWarpgroupPerBlock); ++m_idx) {
+    f_push_task(m_idx, -1, -1, JobType::kBatchAttention);
   }
 
   if (split_kv) {
-    for (int n_idx = 0; n_idx < num_qo_heads / kDecodeMergeHeadsPerTile; ++n_idx) {
-      for (int m_idx = 0; m_idx < batch_size; ++m_idx) {
-        f_push_task(m_idx, n_idx, -1, JobType::kDecodeMerge);
-      }
+    for (int m_idx = 0; m_idx < ceildiv(batch_size * num_qo_heads, kNumWarpgroupPerBlock * kNumWarpPerWarpgroup); ++m_idx) {
+      f_push_task(m_idx, -1, -1, JobType::kBatchMerge);
     }
   }
 

@@ -22,7 +22,8 @@ class DecodeTile(Tile):
     # max_chunk_size_tvm: [1]
 
     @classmethod
-    def class_config_init(cls, problem_config: Dict[str, Any]):
+    def class_config_init(cls, problem_config: Dict[str, Any], use_device_call = False):
+        cls.use_device_call = use_device_call
         cls.loop_inner = 1
         cls.pipe_depth = 1
         cls.tile_per_bdx = 4

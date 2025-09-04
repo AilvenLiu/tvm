@@ -9,46 +9,40 @@ from .common import F16_BYTES, KernelConfig, Tile, ceildiv, find_power_of_two, r
 
 class AddRMSNormTile(Tile):
     vec_size = 16 // F16_BYTES
-
-    @classmethod
-    def class_config_init(cls, problem_config: Dict[str, Any]):
-        cls.EPS = problem_config["rms_norm_eps"]
-        cls.loop_inner = 2
+    loop_inner = 1
+    bdx = 32
+    bdy = KernelConfig.NUM_THREADS // bdx
 
     # inplace add rms norm
-    def __init__(self, input, residual, weight):
+    def __init__(self, rms_norm_eps, hidden_size, input, residual, weight):
+        self.EPS = rms_norm_eps
+        self.hidden_size = hidden_size
         self.input = input
         self.residual = residual
         self.weight = weight
         self.batch_size = input.shape[0]
-        self.hidden_size = input.shape[1]
-        self.dtype = input.dtype
-        self.bdx = 32
-        self.bdy = KernelConfig.NUM_THREADS // self.bdx
-
-    def init(self, pool_allocator: Tp.PoolAllocator):
+        assert self.hidden_size == input.shape[1]
+    
+    def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+        # alloc shared memory
         self.x_smem = pool_allocator.alloc([self.loop_inner * self.hidden_size], "float32").buffer
         self.sum_sq_smem = pool_allocator.alloc([self.loop_inner, self.bdy], "float32").buffer
-        self.input_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16")
-        self.residual_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16")
-        self.weight_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16")
-        self.input_vec_f32 = T.alloc_local([self.loop_inner, self.vec_size], "float32")
-        self.residual_vec_f32 = T.alloc_local([self.loop_inner, self.vec_size], "float32")
-        self.weight_vec_f32 = T.alloc_local([self.loop_inner, self.vec_size], "float32")
-        self.x_vec = T.alloc_local([self.loop_inner, self.vec_size], "float32")
-        self.x_tmp = T.alloc_local([self.loop_inner, 1], "float32")
-        self.sum_sq = T.alloc_local([self.loop_inner, 1], "float32")
-        self.rms_norm = T.alloc_local([1], "float32")
-        IRBuilder.current().name("input_vec", self.input_vec)
-        IRBuilder.current().name("residual_vec", self.residual_vec)
-        IRBuilder.current().name("weight_vec", self.weight_vec)
-        IRBuilder.current().name("input_vec_f32", self.input_vec_f32)
-        IRBuilder.current().name("residual_vec_f32", self.residual_vec_f32)
-        IRBuilder.current().name("weight_vec_f32", self.weight_vec_f32)
-        IRBuilder.current().name("x_vec", self.x_vec)
-        IRBuilder.current().name("x_tmp", self.x_tmp)
-        IRBuilder.current().name("sum_sq", self.sum_sq)
-        IRBuilder.current().name("rms_norm", self.rms_norm)
+        # alloc local memory
+        self.input_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16", name="input_vec")
+        self.residual_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16", name="residual_vec")
+        self.weight_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16", name="weight_vec")
+        self.input_vec_f32 = T.alloc_local([self.loop_inner, self.vec_size], "float32", name="input_vec_f32")
+        self.residual_vec_f32 = T.alloc_local([self.loop_inner, self.vec_size], "float32", name="residual_vec_f32")
+        self.weight_vec_f32 = T.alloc_local([self.loop_inner, self.vec_size], "float32", name="weight_vec_f32")
+        self.x_vec = T.alloc_local([self.loop_inner, self.vec_size], "float32", name="x_vec")
+        self.x_tmp = T.alloc_local([self.loop_inner, 1], "float32", name="x_tmp")
+        self.sum_sq = T.alloc_local([self.loop_inner, 1], "float32", name="sum_sq")
+        self.rms_norm = T.alloc_local([1], "float32", name="rms_norm")
+
+
+    @T.macro
+    def init(self, pool_allocator: Tp.PoolAllocator):
+        self._alloc_buffer(pool_allocator)
 
     # fmt: off
     @T.macro

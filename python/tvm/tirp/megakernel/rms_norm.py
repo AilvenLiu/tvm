@@ -21,19 +21,20 @@ class RMSnormTile(Tile):
     # weight_tvm: [num_heads]
     # qk_tvm: [batch_size, num_heads, head_dim]
 
-    @classmethod
-    def class_config_init(cls, problem_config: Dict[str, Any]):
-        cls.loop_inner = 1
-        cls.rms_norm_eps = problem_config["rms_norm_eps"]
-        cls.qo_heads = problem_config["num_attention_heads"]
-        cls.kv_heads = problem_config["num_key_value_heads"]
-        cls.head_dim = problem_config["head_dim"]
-        cls.vec_size = max(16 // F16_BYTES, cls.head_dim // 32)
-        cls.bdx = cls.head_dim // cls.vec_size
-        cls.bdy = KernelConfig.NUM_THREADS // cls.bdx
-        cls.min_bdy = 1
+    loop_inner = 1
+    min_bdy = 1
+    h_tile = 1
 
-    def __init__(self, q_weight_tvm: T.handle, k_weight_tvm: T.handle, qkv_tvm: T.handle):
+    def __init__(self, rms_norm_eps, qo_heads, kv_heads, head_dim,
+                 q_weight_tvm, k_weight_tvm, qkv_tvm):
+        self.rms_norm_eps = rms_norm_eps
+        self.qo_heads = qo_heads
+        self.kv_heads = kv_heads
+        self.head_dim = head_dim
+        self.vec_size = max(16 // F16_BYTES, self.head_dim // 32)
+        self.bdx = self.head_dim // self.vec_size
+        self.bdy = KernelConfig.NUM_THREADS // self.bdx
+
         self.q_weight_global = q_weight_tvm
         self.k_weight_global = k_weight_tvm
         self.qkv_global = qkv_tvm
@@ -43,33 +44,24 @@ class RMSnormTile(Tile):
         )
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
-        self.h_tile = 1
         assert self.qo_heads + 2 * self.kv_heads == qkv_tvm.shape[1]
         assert self.head_dim == qkv_tvm.shape[2]
         assert self.head_dim == q_weight_tvm.shape[0]
         assert self.head_dim == k_weight_tvm.shape[0]
 
-    def alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
-        self.idx = T.alloc_local([1], "int32")
-        self.input_vec = T.alloc_local([self.vec_size], "float16")
-        self.weight_vec = T.alloc_local([self.vec_size], "float16")
-        self.input_vec_f32 = T.alloc_local([self.vec_size], "float32")
-        self.weight_vec_f32 = T.alloc_local([self.vec_size], "float32")
-        self.sum_sq = T.alloc_local([1], "float32")
-        self.rms_norm = T.alloc_local([1], "float32")
-        self.mask = T.alloc_local([1], "uint32")
-        IRBuilder.current().name("idx", self.idx)
-        IRBuilder.current().name("input_vec", self.input_vec)
-        IRBuilder.current().name("weight_vec", self.weight_vec)
-        IRBuilder.current().name("input_vec_f32", self.input_vec_f32)
-        IRBuilder.current().name("weight_vec_f32", self.weight_vec_f32)
-        IRBuilder.current().name("sum_sq", self.sum_sq)
-        IRBuilder.current().name("rms_norm", self.rms_norm)
-        IRBuilder.current().name("mask", self.mask)
+    def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+        self.idx = T.alloc_local([1], "int32", name="idx")
+        self.input_vec = T.alloc_local([self.vec_size], "float16", name="input_vec")
+        self.weight_vec = T.alloc_local([self.vec_size], "float16", name="weight_vec")
+        self.input_vec_f32 = T.alloc_local([self.vec_size], "float32", name="input_vec_f32")
+        self.weight_vec_f32 = T.alloc_local([self.vec_size], "float32", name="weight_vec_f32")
+        self.sum_sq = T.alloc_local([1], "float32", name="sum_sq")
+        self.rms_norm = T.alloc_local([1], "float32", name="rms_norm")
+        self.mask = T.alloc_local([1], "uint32", name="mask")
 
     @T.macro
     def init(self, pool_allocator):
-        self.alloc_buffer(pool_allocator)
+        self._alloc_buffer(pool_allocator)
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx):

@@ -201,6 +201,10 @@ DOWN_PROJ_SPLIT_K_FACTOR = {
     1: 10,
     8: 3,
 }
+GATE_UP_PROJ_SPLIT_K_FACTOR = {
+    1: 1,
+    8: 2,
+}
 
 
 VOCAB_SIZE = 151936
@@ -217,7 +221,156 @@ MAX_PAGE_NUM = 8192
 PAGE_SIZE = 16
 
 
-def generate_event_tensor(batch_size, o_indptr, split_kv, WORLD_SIZE):
+def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
+    """The static execution queue generation function for layer testing use."""
+    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE // WORLD_SIZE
+    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS // WORLD_SIZE
+    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS // WORLD_SIZE
+    torch.cuda.nvtx.range_push("generate_exec_queue")
+    exec_queue = np.zeros(
+        (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4), dtype=np.int32
+    )
+    central_queue = []
+
+    # qkv projection
+    for n_idx in range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, GemmTile.BLK_N)):
+        for k_idx in range(SPLIT_QKV_PROJECT[WORLD_SIZE]):
+            central_queue.append((0, n_idx, k_idx, JobType.GEMM_QKV_PROJ.value))
+
+    # qkv reduction
+    m_split = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM // SplitKReduceTile.N_UNIT))
+    m_tile = ceildiv(batch_size, m_split)
+    m_split = ceildiv(batch_size, m_tile)
+    n_tile_qkv_proj_reduce = ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split)) * SplitKReduceTile.N_UNIT
+    for m_idx in range(m_split):
+        for n_idx in range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, n_tile_qkv_proj_reduce)):
+            central_queue.append((m_idx, n_idx, 0, JobType.GEMM_QKV_REDUCE.value))
+
+    # q rmsnorm + rope
+    for m_idx in range(m_split):
+        for n_idx in range(NUM_ATTENTION_HEADS):
+            central_queue.append((m_idx, n_idx, -1, JobType.Q_RMSNORM_ROPE.value))
+
+    # k rmsnorm + rope + append
+    for m_idx in range(m_split):
+        for n_idx in range(NUM_KEY_VALUE_HEADS):
+            central_queue.append((m_idx, n_idx, -1, JobType.K_RMSNORM_ROPE_APPEND_KV.value))
+
+    # v append
+    for m_idx in range(m_split):
+        for n_idx in range(NUM_KEY_VALUE_HEADS):
+            central_queue.append((m_idx, n_idx, -1, JobType.V_APPEND_KV.value))
+
+    # attention
+    for m_idx in range(ceildiv(attn_task_num, KernelConfig.WG_NUMBER)):
+        central_queue.append((m_idx, -1, -1, JobType.BATCH_ATTENTION.value)) 
+
+    if attn_task_num > NUM_KEY_VALUE_HEADS * batch_size:
+        # merge
+        for m_idx in range(ceildiv(batch_size * NUM_ATTENTION_HEADS, KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER)):
+            central_queue.append((m_idx, -1, -1, JobType.BATCH_ATTENTION_MERGE.value))
+
+    # o projection
+    for n_idx in range(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)):
+        for k_idx in range(SPLIT_O_PROJRCT[WORLD_SIZE]):
+            central_queue.append((0, n_idx, k_idx, JobType.GEMM_O_PROJ.value))
+
+    # o reduction
+    m_split_o_proj_reduce = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT))
+    n_tile_o_proj_reduce = (
+        ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_o_proj_reduce))
+        * SplitKReduceTile.N_UNIT
+    )
+    m_tile_o_proj_reduce = ceildiv(batch_size, m_split_o_proj_reduce)
+    m_split_o_proj_reduce = ceildiv(batch_size, m_tile_o_proj_reduce)
+    for n_idx in range(ceildiv(HIDDEN_SIZE, n_tile_o_proj_reduce)):
+        for m_idx in range(m_split_o_proj_reduce):
+            central_queue.append((m_idx, n_idx, 0, JobType.GEMM_O_REDUCE.value))
+    
+    # o allreduce
+    if WORLD_SIZE > 1:
+        for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
+            for n_idx in range(ceildiv(HIDDEN_SIZE, AllreduceTile.N_TILE)):
+                central_queue.append((m_idx, n_idx, 0, JobType.O_ALLREDUCE.value))
+
+    # add rmsnorm
+    for m_idx in range(batch_size):
+        central_queue.append((m_idx, -1, -1, JobType.ATTN_ADD_RMS_NORM.value))
+
+    # gate_up_proj
+    for n_idx in range(ceildiv(INTERMEDIATE_SIZE * 2, GemmTile.BLK_N)):
+        for k_idx in range(GATE_UP_PROJ_SPLIT_K_FACTOR[WORLD_SIZE]):
+            central_queue.append((0, n_idx, k_idx, JobType.GEMM_GATE_UP_PROJ.value))
+
+    # gate_up reduce
+    if GATE_UP_PROJ_SPLIT_K_FACTOR[WORLD_SIZE] > 1:
+        m_split_gate_up_proj_reduce = min(
+            batch_size, ceildiv(KernelConfig.SM_NUMBER, INTERMEDIATE_SIZE * 2 // SplitKReduceTile.N_UNIT)
+        )
+        m_tile_gate_up_proj_reduce = ceildiv(batch_size, m_split_gate_up_proj_reduce)
+        m_split_gate_up_proj_reduce = ceildiv(batch_size, m_tile_gate_up_proj_reduce)
+        for m_idx in range(m_split_gate_up_proj_reduce):
+            for n_idx in range(ceildiv(INTERMEDIATE_SIZE * 2, SplitKReduceTile.N_UNIT)):
+                central_queue.append((m_idx, n_idx, 0, JobType.GATE_UP_PROJ_REDUCE.value))
+    
+    # split_silu_multiply
+    for m_idx in range(ceildiv(INTERMEDIATE_SIZE, SiluMultiplyTile.TILE_SIZE)):
+        central_queue.append((m_idx, 0, 0, JobType.SPLIT_SILU_MULTIPLY.value))
+
+    # gemm_down_proj
+    for n_idx in range(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)):
+        for k_idx in range(DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE]):
+            central_queue.append((0, n_idx, k_idx, JobType.GEMM_DOWN_PROJ.value))
+
+    # down_proj_reduce
+    m_split_down_proj_reduce = min(ceildiv(KernelConfig.SM_NUMBER, ceildiv(HIDDEN_SIZE, SplitKReduceTile.N_UNIT)), batch_size)
+    n_tile = (
+        ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_down_proj_reduce))
+        * SplitKReduceTile.N_UNIT
+    )
+    m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce)
+    m_split_down_proj_reduce = ceildiv(batch_size, m_tile_down_proj_reduce)
+    for m_idx in range(m_split_down_proj_reduce):
+        for n_idx in range(ceildiv(HIDDEN_SIZE, n_tile)):
+            central_queue.append((m_idx, n_idx, 0, JobType.DOWN_PROJ_REDUCE.value))
+
+    # down_proj_allreduce
+    if WORLD_SIZE > 1:
+        for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
+            for n_idx in range(ceildiv(HIDDEN_SIZE, AllreduceTile.N_TILE)):
+                central_queue.append((m_idx, n_idx, 0, JobType.DOWN_PROJ_ALLREDUCE.value))
+    
+    # add_rms_norm
+    for m_idx in range(batch_size):
+        central_queue.append((m_idx, 0, 0, JobType.MLP_ADD_RMS_NORM.value))
+
+    tile_idx = 0
+    while len(central_queue) > 0:
+        for bx in range(KernelConfig.SM_NUMBER):
+            if len(central_queue) > 0:
+                m, n, k, c = central_queue.pop(0)
+                exec_queue[bx, tile_idx, 0] = m
+                exec_queue[bx, tile_idx, 1] = n
+                exec_queue[bx, tile_idx, 2] = k
+                exec_queue[bx, tile_idx, 3] = c
+            else:
+                exec_queue[bx, tile_idx, 0] = -1
+                exec_queue[bx, tile_idx, 1] = -1
+                exec_queue[bx, tile_idx, 2] = -1
+                exec_queue[bx, tile_idx, 3] = JobType.END.value
+        tile_idx += 1
+    for bx in range(KernelConfig.SM_NUMBER):
+        exec_queue[bx, tile_idx, 0] = -1
+        exec_queue[bx, tile_idx, 1] = -1
+        exec_queue[bx, tile_idx, 2] = -1
+        exec_queue[bx, tile_idx, 3] = JobType.END.value
+    DEV = tvm.cuda(0)
+    ret = tvm.nd.array(exec_queue, device=DEV)
+    torch.cuda.nvtx.range_pop()
+    return ret
+
+
+def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORLD_SIZE):
     """The event tensor generation function for layer testing use."""
     INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE // WORLD_SIZE
     NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS // WORLD_SIZE
@@ -239,16 +392,19 @@ def generate_event_tensor(batch_size, o_indptr, split_kv, WORLD_SIZE):
     etensor_v_reduce = tvm.nd.array(
         np.zeros((batch_size, ceildiv(k_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
     )
-    etensor_decode = tvm.nd.array(
+    etensor_attn = tvm.nd.array(
         np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32), device=DEV
     )
-    etensor_decode_merge = np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32)
-    o_indptr = o_indptr.numpy()
-    for b in range(batch_size):
-        num_merge = o_indptr[b + 1] - o_indptr[b]
-        for j in range(NUM_KEY_VALUE_HEADS):
-            etensor_decode_merge[b, j] = num_merge
-    etensor_decode_merge = tvm.nd.array(etensor_decode_merge, device=DEV)
+
+    etensor_attn_merge = np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32)
+    kv_head_idx = kv_head_idx.numpy()
+    q_indptr = q_indptr.numpy()
+    for m in range(KernelConfig.WG_NUMBER * ceildiv(attn_task_num, KernelConfig.WG_NUMBER)):
+        kv_idx = kv_head_idx[m]
+        batch_idx = q_indptr[m]
+        etensor_attn_merge[batch_idx, kv_idx] += 1
+    etensor_attn_merge = tvm.nd.array(etensor_attn_merge, device=DEV)
+
     etensor_o_proj = np.zeros(SPLIT_O_PROJRCT[WORLD_SIZE], dtype=np.int32)
     o_proj_tile_k = (
         ceildiv(
@@ -256,24 +412,29 @@ def generate_event_tensor(batch_size, o_indptr, split_kv, WORLD_SIZE):
         )
         * GemmTile.BLK_K
     )
-    if split_kv:
-        for h in range(NUM_ATTENTION_HEADS // DecodeMergeTile.bdz):
-            range_start = h * DecodeMergeTile.bdz * HEAD_DIM // o_proj_tile_k
-            range_end = ((h + 1) * DecodeMergeTile.bdz * HEAD_DIM - 1) // o_proj_tile_k
+
+    if attn_task_num > NUM_KEY_VALUE_HEADS * batch_size:
+        # to simply, assume that one merge tile will not use two kv head
+        assert KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER <= NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS
+        for m in range(ceildiv(batch_size * NUM_ATTENTION_HEADS, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER)):
+            worker_id = m * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
+            kv_idx = worker_id // (batch_size * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
+            qo_idx = worker_id % (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)
+            range_start = (kv_idx * NUM_KEY_VALUE_HEADS + qo_idx) * HEAD_DIM // o_proj_tile_k
+            range_end = ((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile_k
             for i in range(range_start, range_end + 1):
                 etensor_o_proj[i] += 1
-        etensor_o_proj *= batch_size
         etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
     else:
-        for h in range(NUM_KEY_VALUE_HEADS):
-            range_start = h * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
-            range_end = (
-                (h + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1
-            ) // o_proj_tile_k
+        for m in range(KernelConfig.WG_NUMBER * ceildiv(attn_task_num, KernelConfig.WG_NUMBER)):
+            kv_idx = kv_head_idx[m]
+            batch_idx = q_indptr[m]
+            range_start = kv_idx * NUM_KEY_VALUE_HEADS * HEAD_DIM // o_proj_tile_k
+            range_end = ((kv_idx + 1) * NUM_KEY_VALUE_HEADS * HEAD_DIM - 1) // o_proj_tile_k
             for i in range(range_start, range_end + 1):
                 etensor_o_proj[i] += 1
-        etensor_o_proj *= batch_size
         etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
+
     etensor_o_partial = tvm.nd.array(
         np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV
     )
@@ -310,8 +471,8 @@ def generate_event_tensor(batch_size, o_indptr, split_kv, WORLD_SIZE):
         etensor_q_reduce,
         etensor_k_reduce,
         etensor_v_reduce,
-        etensor_decode,
-        etensor_decode_merge,
+        etensor_attn,
+        etensor_attn_merge,
         etensor_o_proj,
         etensor_o_partial,
         etensor_o_allreduce,

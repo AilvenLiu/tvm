@@ -10,26 +10,31 @@ class SplitKReduceTile(Tile):
     N_UNIT = 128
     N_REPEAT = 1
 
-    def __init__(self, input, output):
+    def __init__(self, N, dtype, split_k_factor, input, output):
+        self.N = N
+        self.dtype = dtype
+        self.split_k_factor = split_k_factor
+        self.N_TILE = self.N_UNIT
+
         self.input = input
         self.output = output
-        self.split_k_factor = input.shape[0]
         self.M = input.shape[1]
-        self.N = input.shape[2]
-        self.dtype = output.dtype
         self.M_split = T.min(ceildiv(KernelConfig.SM_NUMBER, self.N // self.N_UNIT), self.M)
         self.M_TILE = ceildiv(self.M, self.M_split)
         self.M_split = ceildiv(self.M, self.M_TILE)
-        self.N_TILE = self.N_UNIT
+        assert self.split_k_factor == input.shape[0]
+        assert self.N == input.shape[2]
+        assert self.dtype == output.dtype
 
-    def init(self, pool_allocator):
+    def _alloc_buffer(self, pool_allocator):
         self.idx = T.local_cell("int32", name="idx")
-        self.vec_32 = T.alloc_local([self.VEC_SIZE], "float32")
-        self.tmp = T.alloc_local([self.VEC_SIZE], "float32")
-        self.vec_16 = T.alloc_local([self.VEC_SIZE], "float16")
-        IRBuilder.current().name("vec_32", self.vec_32)
-        IRBuilder.current().name("tmp", self.tmp)
-        IRBuilder.current().name("vec_16", self.vec_16)
+        self.vec_32 = T.alloc_local([self.VEC_SIZE], "float32", name="vec_32")
+        self.tmp = T.alloc_local([self.VEC_SIZE], "float32", name="tmp")
+        self.vec_16 = T.alloc_local([self.VEC_SIZE], "float16", name="vec_16")
+            
+    @T.macro
+    def init(self, pool_allocator):
+        self._alloc_buffer(pool_allocator)
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx):

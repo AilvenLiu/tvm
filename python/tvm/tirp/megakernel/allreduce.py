@@ -32,7 +32,7 @@ __forceinline__ __device__ void ld_reduce_8_fp16(void* src_addr, void* dst_addr)
 class AllreduceTile(Tile):
     M_TILE = 16
     N_TILE = 128
-    def __init__(self, input, output, world_size):
+    def __init__(self, input, output, world_size=1):
         self.input = input
         self.output = output
         self.world_size = world_size

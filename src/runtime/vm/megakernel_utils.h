@@ -51,6 +51,8 @@ constexpr const int kIntermediateSizeTP1 = 25600;
 constexpr const int kDecodeMergeHeadsPerTile = 1;
 
 constexpr const int kNumSM = 148;
+constexpr const int kNumWarpgroupPerBlock = 2;
+constexpr const int kNumWarpPerWarpgroup = 4;
 constexpr const int kStaticTileSchedulerMaxTasks = 128;
 constexpr const int kDyanmicTileSchedulerMaxTasks = 8192;
 constexpr const int kTaskSize = 4;
@@ -78,12 +80,14 @@ enum class JobType : int32_t {
   kOAllReduce = 19,
   kDownProjAllReduce = 20,
   kGateUpProjReduce = 21,
+  kBatchAttention = 22,
+  kBatchMerge = 23,
   kEnd = 99,
 };
 
 Array<NDArray> GetEventTensorsOnLayer(Array<NDArray> etensors, int layer_id);
 
-NDArray GenerateExecQueue(int batch_size, int new_batch_size, int tp_size, int num_qo_heads,
+NDArray GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
                           int num_kv_heads, int head_dim, Device device,
                           Device preferred_host_device);
 

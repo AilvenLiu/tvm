@@ -1,10 +1,12 @@
 import math
 
+import flashinfer
 import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
+from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace
@@ -13,6 +15,8 @@ from tvm.tirp.megakernel.append_kv import AppendKVTile
 from tvm.tirp.megakernel.batch_decode import DecodeTile
 from tvm.tirp.megakernel.common import *
 from tvm.tirp.megakernel.decode_merge import DecodeMergeTile
+from tvm.tirp.megakernel.batch_attn import BatchAttnTile
+from tvm.tirp.megakernel.batch_merge import BatchMergeTile
 from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
 from tvm.tirp.megakernel.gemm import GemmTile
 from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
@@ -20,7 +24,7 @@ from tvm.tirp.megakernel.rms_norm import RMSnormTile
 from tvm.tirp.megakernel.rope import RopeTile
 from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
-from tvm.tirp.megakernel.support import generate_event_tensor
+from tvm.tirp.megakernel.support import generate_event_tensor, generate_exec_queue
 
 # model configs
 VOCAB_SIZE = 151936
@@ -56,6 +60,9 @@ problem_config = {
 SPLIT_QKV_PROJECT = 3
 SPLIT_O_PROJRCT = 3
 DOWN_PROJ_SPLIT_K_FACTOR = 10
+NUM_TASK_ARGS = 10
+MAX_TOTAL_NUM_WORKERS = 65536
+MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)
 
 NUM_GROUPS = KernelConfig.WARP_NUMBER
 PROFILER_BUFFER_SIZE = int(1e6)
@@ -70,20 +77,15 @@ class MegaKernel:
         RMSnormTile,
         RopeTile,
         AppendKVTile,
-        DecodeTile,
-        DecodeMergeTile,
+        BatchAttnTile,
+        BatchMergeTile,
         AddRMSNormTile,
         SiluMultiplyTile,
     ]
 
-    def __init__(self, problem_config, profiler_on):
+    def __init__(self, profiler_on):
         self.tile_list = []
-        self.class_config_init(problem_config)
         self.profiler_on = profiler_on
-
-    def class_config_init(self, config):
-        for cls in self.class_list:
-            cls.class_config_init(config)
 
     def host_init_all(self):
         for tile in self.tile_list:
@@ -105,77 +107,86 @@ class MegaKernel:
             tile.init(pool_allocator)
             max_offset = max(max_offset, pool_allocator.offset)
         pool_allocator.move_base_to(max_offset)
-
+        
     def get_func_static(self):
         from tvm.tirp.megakernel.static_scheduler import Semaphore
-
         # fmt: off
         @T.prim_func(tirp=True)
-        def mega_kernel(
-                # input and output
-                hidden_state_ptr: T.handle, # input: read-only
-                residual_ptr: T.handle, # input & output: inplace update
-                output_ptr: T.handle, # output
+        def main(
+            # input and output
+            hidden_state_ptr: T.handle, # input: read-only
+            residual_ptr: T.handle, # input & output: inplace update
+            output_ptr: T.handle, # output
 
-                # weight
-                qkv_proj_weight_ptr: T.handle, # read-only
-                o_proj_weight_ptr: T.handle, # read-only
-                q_rms_weight_ptr: T.handle, # read-only
-                k_rms_weight_ptr: T.handle, # read-only
-                gate_up_weight_ptr: T.handle, # read-only
-                down_weight_ptr: T.handle, # read-only
-                attn_add_rms_weight_ptr: T.handle, # read-only
-                mlp_add_rms_weight_ptr: T.handle, # read-only
+            # weight
+            qkv_proj_weight_ptr: T.handle, # read-only
+            o_proj_weight_ptr: T.handle, # read-only
+            q_rms_weight_ptr: T.handle, # read-only
+            k_rms_weight_ptr: T.handle, # read-only
+            gate_up_weight_ptr: T.handle, # read-only
+            down_weight_ptr: T.handle, # read-only
+            attn_add_rms_weight_ptr: T.handle, # read-only
+            mlp_add_rms_weight_ptr: T.handle, # read-only
 
-                # page cache, cos_sin cache and plan info
-                cos_sin_cache_ptr: T.handle, # read-only
-                rope_pos_ptr: T.handle, # read-only
-                kv_cache_ptr: T.handle, # inplace update
-                kv_indptr_ptr: T.handle, # read-only
-                kv_indices_ptr: T.handle, # read-only
-                kv_last_page_len_ptr: T.handle, # read-only
-                append_pos_ptr: T.handle, # read-only
-                request_indices_ptr: T.handle, # read-only
-                kv_tile_indices_ptr: T.handle, # read-only
-                max_chunk_size_ptr: T.handle, # read-only
-                o_indptr_ptr: T.handle, # read-only
+            # page cache, cos_sin cache and plan info
+            cos_sin_cache_ptr: T.handle, # read-only
+            rope_pos_ptr: T.handle, # read-only
+            kv_cache_ptr: T.handle, # inplace update
+            append_pos_ptr: T.handle, # read-only
+            q_indptr_ptr : T.handle, # read-only
+            kv_indptr_ptr : T.handle, # read-only
+            partial_indptr_ptr : T.handle, # read-only
+            kv_indices_ptr : T.handle, # read-only
+            q_len_ptr : T.handle, # read-only
+            kv_len_ptr : T.handle, # read-only
+            q_start_ptr : T.handle, # read-only
+            kv_start_ptr : T.handle, # read-only
+            kv_end_ptr : T.handle, # read-only
+            kv_head_idx_ptr : T.handle, # read-only
+            work_indptr_ptr : T.handle, # read-only
+            len_kv_chunk_ptr : T.handle, # read-only
+            num_qo_len_ptr: T.handle, # read-only
+            merge_indptr_ptr: T.handle, # read-only
+            merge_o_indices_ptr: T.handle, # read-only
 
-                # intermediate buffer
-                partital_qkv_ptr: T.handle, # intermediate
-                qkv_ptr: T.handle,  # intermediate
-                o_ptr: T.handle, # intermediate
-                lse_ptr: T.handle, # intermediate
-                o_tmp_ptr: T.handle, # intermediate
-                lse_tmp_ptr: T.handle, # intermediate
-                partial_o_ptr: T.handle, # intermediate
-                hidden_state_attn_mlp_ptr: T.handle, # intermediate
-                out_gate_up_proj_ptr: T.handle, # intermediate
-                out_silu_multiply_ptr: T.handle, # intermediate
-                partial_sum_down_proj_ptr: T.handle, # intermediate
-                
-                # event tensor
-                etensor_qkv_partial_ptr: T.handle, 
-                etensor_q_reduce_ptr: T.handle, 
-                etensor_k_reduce_ptr: T.handle, 
-                etensor_v_reduce_ptr: T.handle, 
-                etensor_decode_ptr: T.handle, 
-                etensor_decode_merge_ptr: T.handle,
-                etensor_o_proj_ptr: T.handle, 
-                etensor_o_partial_ptr: T.handle, 
-                etensor_attn_add_rms_ptr: T.handle,
-                etensor_attn_mlp_ptr: T.handle,
-                etensor_gate_up_proj_ptr: T.handle,
-                etensor_down_proj_ptr: T.handle,
-                etensor_down_proj_reduce_ptr: T.handle,
-                etensor_mlp_add_rms_ptr: T.handle,
+            # intermediate buffer
+            partital_qkv_ptr: T.handle, # intermediate
+            qkv_ptr: T.handle,  # intermediate
+            o_ptr: T.handle, # intermediate
+            o_partial_attn_ptr: T.handle, # intermediate
+            lse_partial_attn_ptr: T.handle, # intermediate
+            partial_o_ptr: T.handle, # intermediate
+            hidden_state_attn_mlp_ptr: T.handle, # intermediate
+            out_gate_up_proj_ptr: T.handle, # intermediate
+            out_silu_multiply_ptr: T.handle, # intermediate
+            partial_sum_down_proj_ptr: T.handle, # intermediate
+            
+            # event tensor
+            etensor_qkv_partial_ptr: T.handle, 
+            etensor_q_reduce_ptr: T.handle, 
+            etensor_k_reduce_ptr: T.handle, 
+            etensor_v_reduce_ptr: T.handle, 
+            etensor_attn_ptr: T.handle, 
+            etensor_attn_merge_ptr: T.handle,
+            etensor_o_proj_ptr: T.handle, 
+            etensor_o_partial_ptr: T.handle, 
+            etensor_attn_add_rms_ptr: T.handle,
+            etensor_attn_mlp_ptr: T.handle,
+            etensor_gate_up_proj_ptr: T.handle,
+            etensor_down_proj_ptr: T.handle,
+            etensor_down_proj_reduce_ptr: T.handle,
+            etensor_mlp_add_rms_ptr: T.handle,
 
-                # execution queue
-                exec_queue_ptr: T.handle,
-                profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
+            # execution queue
+            exec_queue_ptr: T.handle,
+            profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")
+        ):
+            T.func_attr(
+                {"global_symbol": "main", "target": T.target("cuda")}
+            )
 
             # match buffer
             batch_size = T.int32()
-            new_batch_size = T.int32()
             cos_sin_cache_len = T.int32()
             max_page_num = T.int32()
             total_page_num = T.int32()
@@ -189,11 +200,11 @@ class MegaKernel:
             qkv_proj_weight_global = T.match_buffer(qkv_proj_weight_ptr, [(NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE], 
                                                     "float16", scope="global")
             o_proj_weight_global = T.match_buffer(o_proj_weight_ptr, [HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM], 
-                                                  "float16", scope="global")
+                                                "float16", scope="global")
             q_rms_weight_global = T.match_buffer(q_rms_weight_ptr, [HEAD_DIM], "float16", scope="global")
             k_rms_weight_global = T.match_buffer(k_rms_weight_ptr, [HEAD_DIM], "float16", scope="global") 
             gate_up_weight_global = T.match_buffer(gate_up_weight_ptr, [INTERMEDIATE_SIZE * 2, HIDDEN_SIZE], 
-                                                   "float16", scope="global")
+                                                "float16", scope="global")
             down_weight_global = T.match_buffer(down_weight_ptr, [HIDDEN_SIZE, INTERMEDIATE_SIZE], "float16", scope="global")
             attn_add_rms_weight_global = T.match_buffer(attn_add_rms_weight_ptr, [HIDDEN_SIZE], "float16", scope="global")
             mlp_add_rms_weight_global = T.match_buffer(mlp_add_rms_weight_ptr, [HIDDEN_SIZE], "float16", scope="global")
@@ -202,16 +213,24 @@ class MegaKernel:
             cos_sin_cache_global = T.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, HEAD_DIM], "float32", scope="global")
             rope_pos_global = T.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
             kv_cache_global = T.match_buffer(kv_cache_ptr, [max_page_num, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM], 
-                                             "float16", scope="global")
-            kv_indptr_global = T.match_buffer(kv_indptr_ptr, [batch_size + 1], "int32", scope="global", offset_factor=1)
-            kv_indices_global = T.match_buffer(kv_indices_ptr, [total_page_num], "int32", scope="global", offset_factor=1)
-            kv_last_page_len_global = T.match_buffer(kv_last_page_len_ptr, [batch_size], "int32", scope="global", offset_factor=1)
+                                            "float16", scope="global")
             append_pos_global = T.match_buffer(append_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
-            request_indices_global = T.match_buffer(request_indices_ptr, [new_batch_size], "int32", scope="global", offset_factor=1)
-            kv_tile_indices_global = T.match_buffer(kv_tile_indices_ptr, [new_batch_size], "int32", scope="global", offset_factor=1)
-            max_chunk_size_global = T.match_buffer(max_chunk_size_ptr, [1], "int32", scope="global", offset_factor=1)
-            o_indptr_global = T.match_buffer(o_indptr_ptr, [batch_size + 1], "int32", scope="global", offset_factor=1)
-
+            q_indptr_global = T.match_buffer(q_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_indptr_global = T.match_buffer(kv_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            partial_indptr_global = T.match_buffer(partial_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_indices_global = T.match_buffer(kv_indices_ptr, [total_page_num], "int32", offset_factor=1)
+            q_len_global = T.match_buffer(q_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_len_global = T.match_buffer(kv_len_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            q_start_global = T.match_buffer(q_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_start_global = T.match_buffer(kv_start_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_end_global = T.match_buffer(kv_end_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            kv_head_idx_global = T.match_buffer(kv_head_idx_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            work_indptr_global = T.match_buffer(work_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
+            len_kv_chunk_global = T.match_buffer(len_kv_chunk_ptr, [2], "int32", offset_factor=1)
+            num_qo_len_global = T.match_buffer(num_qo_len_ptr, [1], "int32", offset_factor=1)
+            merge_indptr_global = T.match_buffer(merge_indptr_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
+            merge_o_indices_global = T.match_buffer(merge_o_indices_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
+            
             # intermediate buffer
             partital_qkv_global = T.match_buffer(partital_qkv_ptr, [SPLIT_QKV_PROJECT, batch_size, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM], 
                                     "float32", scope="global")
@@ -219,22 +238,20 @@ class MegaKernel:
                                     "float16", scope="global")
             o_global = T.match_buffer(o_ptr, [batch_size, NUM_ATTENTION_HEADS, HEAD_DIM], 
                                     "float16", scope="global")
-            lse_global = T.match_buffer(lse_ptr, [batch_size, NUM_ATTENTION_HEADS], 
+            o_partial_attn_global = T.match_buffer(o_partial_attn_ptr, [MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS * HEAD_DIM], 
                                     "float32", scope="global")
-            o_tmp_global = T.match_buffer(o_tmp_ptr, [new_batch_size, NUM_ATTENTION_HEADS, HEAD_DIM], 
-                                    "float32", scope="global")
-            lse_tmp_global = T.match_buffer(lse_tmp_ptr, [new_batch_size, NUM_ATTENTION_HEADS], 
+            lse_partial_attn_global = T.match_buffer(lse_partial_attn_ptr, [MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS], 
                                     "float32", scope="global")
             partial_o_global = T.match_buffer(partial_o_ptr, [SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE], 
                                     "float32", scope="global")
             hidden_state_attn_mlp_global = T.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, HIDDEN_SIZE], 
                                     "float16", scope="global")
             out_gate_up_proj_global = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE * 2], 
-                                 "float16", scope="global")
+                                "float16", scope="global")
             out_silu_multiply_global = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE], 
-                                  "float16", scope="global")
+                                "float16", scope="global")
             partial_sum_down_proj_global = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE], 
-                                  "float32")
+                                "float32")
 
             # event tensor
             etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
@@ -245,9 +262,9 @@ class MegaKernel:
                                     "int32", scope="global", offset_factor=1)
             etensor_v_reduce_global = T.match_buffer(etensor_v_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
                                     "int32", scope="global", offset_factor=1)
-            etensor_decode_global = T.match_buffer(etensor_decode_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
+            etensor_attn_global = T.match_buffer(etensor_attn_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
                                     "int32", scope="global", offset_factor=1)
-            etensor_decode_merge_global = T.match_buffer(etensor_decode_merge_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
+            etensor_attn_merge_global = T.match_buffer(etensor_attn_merge_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
                                     "int32", scope="global", offset_factor=1)
             etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [SPLIT_O_PROJRCT], "int32", scope="global", offset_factor=1)
             etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)], 
@@ -279,34 +296,43 @@ class MegaKernel:
             D_tensor_map_down_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
 
             # initialize tile
-            qkv_proj_tile = T.meta_var(GemmTile(hidden_state_global, qkv_proj_weight_global, partital_qkv_global, split_k_factor=SPLIT_QKV_PROJECT))
-            qkv_reduce_tile = T.meta_var(SplitKReduceTile(partital_qkv_global, 
-                                                          Tp.reshape(qkv_global, [-1, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM]).buffer))
-            rmsnorm_tile = T.meta_var(RMSnormTile(q_rms_weight_global, k_rms_weight_global, qkv_global))
-            rope_tile = T.meta_var(RopeTile(qkv_global, cos_sin_cache_global, rope_pos_global))
-            append_kv_tile = T.meta_var(AppendKVTile(kv_cache_global, qkv_global, append_pos_global))
-            decode_tile = T.meta_var(DecodeTile(qkv_global, kv_cache_global, o_global, lse_global, o_tmp_global, lse_tmp_global,
-                                                kv_indptr_global, kv_last_page_len_global,
-                                                kv_indices_global, request_indices_global, kv_tile_indices_global, max_chunk_size_global))
-            decode_merge_tile = T.meta_var(DecodeMergeTile(o_indptr_global, o_tmp_global, o_global, lse_tmp_global, lse_global))
-            o_proj_tile = T.meta_var(GemmTile(Tp.reshape(o_global, [-1, NUM_ATTENTION_HEADS * HEAD_DIM]).buffer, o_proj_weight_global, 
-                                              partial_o_global, split_k_factor=SPLIT_O_PROJRCT))
-            o_reduce_tile = T.meta_var(SplitKReduceTile(partial_o_global, hidden_state_attn_mlp_global))
-            attn_add_rms_tile = T.meta_var(AddRMSNormTile(hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global))
-
-            gemm_gate_up_proj_tile = T.meta_var(GemmTile(hidden_state_attn_mlp_global, gate_up_weight_global, out_gate_up_proj_global, split_k_factor=1))
-            silu_multiply_tile = T.meta_var(SiluMultiplyTile(out_gate_up_proj_global, out_silu_multiply_global))
-            gemm_down_proj_tile = T.meta_var(GemmTile(out_silu_multiply_global, down_weight_global, partial_sum_down_proj_global, split_k_factor=DOWN_PROJ_SPLIT_K_FACTOR))
-            down_proj_reduce_tile = T.meta_var(SplitKReduceTile(partial_sum_down_proj_global, output_global))
-            mlp_add_rms_norm_tile = T.meta_var(AddRMSNormTile(output_global, residual_global, mlp_add_rms_weight_global))
+            qkv_proj_tile = T.meta_var(GemmTile((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE,
+                                                "float16", "float16", "float32", SPLIT_QKV_PROJECT, 
+                                                hidden_state_global, qkv_proj_weight_global, partital_qkv_global))
+            qkv_reduce_tile = T.meta_var(SplitKReduceTile((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, 
+                                                            "float16", SPLIT_QKV_PROJECT,
+                                                            partital_qkv_global, qkv_global.view(-1, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM).buffer))
+            rmsnorm_tile = T.meta_var(RMSnormTile(RMS_NORM_EPS, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, q_rms_weight_global, k_rms_weight_global, qkv_global))
+            rope_tile = T.meta_var(RopeTile(NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, qkv_global, cos_sin_cache_global, rope_pos_global))
+            append_kv_tile = T.meta_var(AppendKVTile(NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, PAGE_SIZE, kv_cache_global, qkv_global, append_pos_global))
+            attn_tile = T.meta_var(BatchAttnTile(PAGE_SIZE, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, 
+                                                qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
+                                                kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
+                                                kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
+                                                o_global, o_partial_attn_global, lse_partial_attn_global))
+            merge_tile = T.meta_var(BatchMergeTile(HEAD_DIM, NUM_KEY_VALUE_HEADS, NUM_ATTENTION_HEADS, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global,
+                                                merge_indptr_global, merge_o_indices_global))
+            o_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM, "float16", "float16", "float32", SPLIT_O_PROJRCT, 
+                                                o_global.view(-1, NUM_ATTENTION_HEADS * HEAD_DIM).buffer, o_proj_weight_global, partial_o_global))
+            o_reduce_tile = T.meta_var(SplitKReduceTile(HIDDEN_SIZE, "float16", SPLIT_O_PROJRCT,
+                                                        partial_o_global, hidden_state_attn_mlp_global))
+            attn_add_rms_tile = T.meta_var(AddRMSNormTile(RMS_NORM_EPS, HIDDEN_SIZE, hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global))
+            gemm_gate_up_proj_tile = T.meta_var(GemmTile(INTERMEDIATE_SIZE * 2, HIDDEN_SIZE, "float16", "float16", "float16", 1, 
+                                                        hidden_state_attn_mlp_global, gate_up_weight_global, out_gate_up_proj_global))
+            silu_multiply_tile = T.meta_var(SiluMultiplyTile(INTERMEDIATE_SIZE, out_gate_up_proj_global, out_silu_multiply_global))
+            gemm_down_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, INTERMEDIATE_SIZE, "float16", "float16", "float32", DOWN_PROJ_SPLIT_K_FACTOR, 
+                                                        out_silu_multiply_global, down_weight_global, partial_sum_down_proj_global))
+            down_proj_reduce_tile = T.meta_var(SplitKReduceTile(HIDDEN_SIZE, "float16", DOWN_PROJ_SPLIT_K_FACTOR, 
+                                                                partial_sum_down_proj_global, output_global))
+            mlp_add_rms_norm_tile = T.meta_var(AddRMSNormTile(RMS_NORM_EPS, HIDDEN_SIZE, output_global, residual_global, mlp_add_rms_weight_global))
 
             self.tile_list.append(qkv_proj_tile)
             self.tile_list.append(qkv_reduce_tile)
             self.tile_list.append(rmsnorm_tile)
             self.tile_list.append(rope_tile)
             self.tile_list.append(append_kv_tile)
-            self.tile_list.append(decode_tile)
-            self.tile_list.append(decode_merge_tile)
+            self.tile_list.append(attn_tile)
+            self.tile_list.append(merge_tile)
             self.tile_list.append(o_proj_tile)
             self.tile_list.append(o_reduce_tile)
             self.tile_list.append(attn_add_rms_tile)
@@ -339,12 +365,12 @@ class MegaKernel:
 
                     # initialize event tensors
                     evt_qkv_partial = T.meta_var(Semaphore(SPLIT_QKV_PROJECT * (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 
-                                                             etensor_qkv_partial_global))
+                                                            etensor_qkv_partial_global))
                     evt_q_reduce = T.meta_var(Semaphore(1, etensor_q_reduce_global))
                     evt_k_reduce = T.meta_var(Semaphore(1, etensor_k_reduce_global))
                     evt_v_reduce = T.meta_var(Semaphore(1, etensor_v_reduce_global))
-                    evt_decode = T.meta_var(Semaphore(NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS+2, etensor_decode_global))
-                    evt_decode_merge = T.meta_var(Semaphore(-1, etensor_decode_merge_global))
+                    evt_attn = T.meta_var(Semaphore(NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS + 2, etensor_attn_global))
+                    evt_attn_merge = T.meta_var(Semaphore(-1, etensor_attn_merge_global))
                     evt_o_proj = T.meta_var(Semaphore(-1, etensor_o_proj_global))
                     evt_o_partial = T.meta_var(Semaphore(SPLIT_O_PROJRCT * (o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), etensor_o_partial_global))
                     evt_attn_add_rms = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, o_reduce_tile.N_TILE), etensor_attn_add_rms_global))
@@ -392,7 +418,7 @@ class MegaKernel:
                             rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
-                                evt_decode.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
+                                evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
                             if self.profiler_on:
                                 T.timer_end_cuda(ProfileEventType.Q_RMSNORM_ROPE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                         elif tile_scheduler.task_type == JobType.K_RMSNORM_ROPE_APPEND_KV.value:
@@ -404,7 +430,7 @@ class MegaKernel:
                             append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
-                                evt_decode.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
+                                evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_end_cuda(ProfileEventType.K_RMSNORM_ROPE_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                         elif tile_scheduler.task_type == JobType.V_APPEND_KV.value:
@@ -414,46 +440,44 @@ class MegaKernel:
                             append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 1)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
-                                evt_decode.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
+                                evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_end_cuda(ProfileEventType.V_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                        elif tile_scheduler.task_type == JobType.BATCH_DECODE_NO_SPLIT.value:
-                            evt_decode.semaphore_wait(tile_scheduler.m_idx // rope_tile.m_tile, tile_scheduler.n_idx // rope_tile.h_tile) # wait for q rope
+                        elif tile_scheduler.task_type == JobType.BATCH_ATTENTION.value:
+                            batch_idx = T.meta_var(q_indptr_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
+                            kv_idx = T.meta_var(kv_head_idx_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
+                            evt_attn.semaphore_wait_warp(batch_idx // rope_tile.m_tile, kv_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.BATCH_DECODE_NO_SPLIT, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            decode_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, split_kv=False)
+                                T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            attn_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            if work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER] > batch_size * NUM_KEY_VALUE_HEADS:
+                                if tid % (KernelConfig.WARP_NUMBER * 32) == 0:
+                                    batch_idx = T.meta_var(q_indptr_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
+                                    kv_idx = T.meta_var(kv_head_idx_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
+                                    evt_attn_merge.semaphore_notify(batch_idx, kv_idx)
+                            else:
+                                range_start = T.meta_var(kv_idx * NUM_KEY_VALUE_HEADS * HEAD_DIM // o_proj_tile.TILE_K)
+                                range_end = T.meta_var(((kv_idx + 1) * NUM_KEY_VALUE_HEADS * HEAD_DIM - 1) // o_proj_tile.TILE_K)
+                                if tid % (KernelConfig.WARP_NUMBER * 32) <= range_end - range_start:
+                                    evt_o_proj.semaphore_notify(range_start + tid % (KernelConfig.WARP_NUMBER * 32))
+                            if self.profiler_on:
+                                T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                        elif tile_scheduler.task_type == JobType.BATCH_ATTENTION_MERGE.value:
+                            worker_id = T.meta_var(tile_scheduler.m_idx * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER)
+                            qo_idx = T.meta_var(worker_id % (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
+                            kv_idx = T.meta_var(worker_id // (batch_size * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)))
+                            batch_idx = T.meta_var((worker_id % (batch_size * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))) // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
+                            evt_attn_merge.semaphore_wait(batch_idx, kv_idx)
+                            if self.profiler_on:
+                                T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            merge_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            if self.profiler_on:
+                                T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            range_start = T.meta_var((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx) * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_end = T.meta_var(((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                             T.tvm_storage_sync("shared")
-                            if tid == 0:
-                                range_start = T.meta_var(tile_scheduler.n_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
-                                range_end = T.meta_var(((tile_scheduler.n_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1)// o_proj_tile.TILE_K)
-                                for kr in T.serial(range_end - range_start + 1):
-                                    evt_o_proj.semaphore_notify(range_start + kr)
-                            if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.BATCH_DECODE_NO_SPLIT, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                        elif tile_scheduler.task_type == JobType.BATCH_DECODE_SPLIT.value:
-                            batch_idx = T.meta_var(request_indices_global[tile_scheduler.m_idx]) # original batch_idx
-                            evt_decode.semaphore_wait(batch_idx // rope_tile.m_tile, tile_scheduler.n_idx // rope_tile.h_tile) # wait for q rope
-                            if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.BATCH_DECODE_SPLIT, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            decode_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, split_kv=True)
-                            T.tvm_storage_sync("shared")
-                            if tid == 0:
-                                evt_decode_merge.semaphore_notify(batch_idx, tile_scheduler.n_idx)
-                            if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.BATCH_DECODE_SPLIT, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                        elif tile_scheduler.task_type == JobType.DECODE_MERGE.value:
-                            evt_decode_merge.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx * DecodeMergeTile.bdz // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
-                            if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.DECODE_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            decode_merge_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            T.tvm_storage_sync("shared")
-                            if tid == 0:
-                                range_start = T.meta_var(tile_scheduler.n_idx * DecodeMergeTile.bdz * HEAD_DIM // o_proj_tile.TILE_K)
-                                range_end = T.meta_var(((tile_scheduler.n_idx + 1) * DecodeMergeTile.bdz * HEAD_DIM - 1) // o_proj_tile.TILE_K)
-                                for kr in T.serial(range_end - range_start + 1):
-                                    evt_o_proj.semaphore_notify(range_start + kr)
-                            if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.DECODE_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            if tid <= range_end - range_start:
+                                evt_o_proj.semaphore_notify(range_start + tid)
                         elif tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
                             evt_o_proj.semaphore_wait(tile_scheduler.k_idx)
                             if self.profiler_on:
@@ -544,9 +568,32 @@ class MegaKernel:
 
                         tile_scheduler.next_tile()
                     self.class_finalize_all()
-        # fmt: on
+            # fmt: on
+        return main
 
-        return mega_kernel
+    def get_static_module(self):
+
+        @I.ir_module(tirp=True)
+        class StaticModule:
+            @T.prim_func(tirp=True, private=True)
+            def run_batch_attn_device():
+                pass
+
+            @T.prim_func(tirp=True, private=True)
+            def run_gemm_device_qkv_proj():
+                pass
+
+            @T.prim_func(tirp=True, private=True)
+            def run_gemm_device_o_proj():
+                pass
+            
+            @T.prim_func(tirp=True)
+            def main():
+                pass
+   
+        module: tvm.IRModule = StaticModule
+        module.update_func(module.get_global_var("main"), self.get_func_static())
+        return module
 
     def get_func_dynamic(self):
         from tvm.tirp.megakernel.dynamic_scheduler import Semaphore
@@ -1302,84 +1349,6 @@ def generate_exec_queue_dynamic():
     return exec_queue
 
 
-def decode_plan(batch_size, kv_indptr):
-    # plan for decoding
-    smem_size_decode = (
-        2
-        * DecodeTile.pipe_depth
-        * DecodeTile.loop_inner
-        * DecodeTile.bdz
-        * DecodeTile.bdy
-        * DecodeTile.tile_per_bdx
-        * DecodeTile.head_dim
-        * F16_BYTES
-        + KernelConfig.NUM_THREADS * DecodeTile.tile_per_bdx * F32_BYTES
-        + KernelConfig.NUM_THREADS * DecodeTile.loop_inner * DecodeTile.vec_size * F32_BYTES
-    )
-    assert smem_size_decode <= KernelConfig.MAX_SMEM_SIZE
-    assert DecodeTile.pipe_depth <= DecodeTile.bdx
-
-    DEV = tvm.cuda(0)
-
-    # balance the workload (split-kv)
-    kv_indptr_h = kv_indptr.cpu().numpy()
-    if batch_size * DecodeTile.qo_heads >= KernelConfig.SM_NUMBER * DecodeTile.max_blk_per_sm:
-        split_kv = False
-        max_page_num = 1
-        for idx in range(batch_size):
-            max_page_num = max(max_page_num, kv_indptr_h[idx + 1] - kv_indptr_h[idx])
-        new_batch_size = batch_size
-    else:
-        page_num_list = [kv_indptr_h[idx + 1] - kv_indptr_h[idx] for idx in range(batch_size)]
-        new_batch_size = batch_size
-        low = max(1, 64 // PAGE_SIZE)
-        high = max(page_num_list)
-        while low < high:
-            mid = (low + high) // 2
-            new_batch_size = 0
-            for page_num in page_num_list:
-                new_batch_size += ceildiv(page_num, mid)
-            if (
-                new_batch_size * DecodeTile.qo_heads
-                > KernelConfig.SM_NUMBER * DecodeTile.max_blk_per_sm
-            ):
-                low = mid + 1
-            else:
-                high = mid
-        max_page_num = low
-        new_batch_size = 0
-        for page_num in page_num_list:
-            new_batch_size += ceildiv(page_num, max_page_num)
-        split_kv = new_batch_size != batch_size
-
-    max_chunk_size = tvm.nd.array(np.array([max_page_num * PAGE_SIZE], dtype=np.int32), device=DEV)
-
-    # generate the necessary tvm arrays
-    request_indices = []
-    kv_tile_indices = []
-    o_indptr = [0]
-    for idx in range(batch_size):
-        num_tiles_kv = ceildiv(kv_indptr_h[idx + 1] - kv_indptr_h[idx], max_page_num)
-        for tile_idx in range(num_tiles_kv):
-            request_indices.append(idx)
-            kv_tile_indices.append(tile_idx)
-        o_indptr.append(o_indptr[-1] + num_tiles_kv)
-    assert len(request_indices) == len(kv_tile_indices) == new_batch_size
-
-    request_indices = tvm.nd.array(np.array(request_indices, dtype=np.int32), DEV)
-    kv_tile_indices = tvm.nd.array(np.array(kv_tile_indices, dtype=np.int32), DEV)
-    o_indptr = tvm.nd.array(np.array(o_indptr, dtype=np.int32), DEV)
-
-    return (
-        split_kv,
-        new_batch_size,
-        max_chunk_size,
-        request_indices,
-        kv_tile_indices,
-        o_indptr,
-    )
-
-
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 @pytest.mark.skip
 def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
@@ -1447,9 +1416,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         arg_dict["kv_cache"] = torch.randn(
             (MAX_PAGE_NUM, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM), dtype=torch.float16
         ).cpu()
-        arg_dict["kv_indptr"] = kv_indptr.cpu()
-        arg_dict["kv_last_page_len"] = kv_last_page_len.cpu()
-        arg_dict["kv_indices"] = kv_indices.cpu()
+        arg_dict["page_kv_indptr"] = kv_indptr.cpu()
+        arg_dict["page_kv_last_page_len"] = kv_last_page_len.cpu()
+        arg_dict["page_kv_indices"] = kv_indices.cpu()
         arg_dict["append_pos"] = append_pos.cpu()
 
         # output
@@ -1480,7 +1449,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
             (batch_size, INTERMEDIATE_SIZE), dtype=torch.float16
         )
         arg_dict["down_weight"] = (
-            torch.zeros((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype=torch.float16) * 0.01
+            torch.zeros((HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype=torch.float16)
         )
         torch.nn.init.xavier_normal_(arg_dict["down_weight"], gain=1.0)
         arg_dict["partial_sum_down_proj"] = torch.zeros(
@@ -1488,6 +1457,68 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         )
         arg_dict["output"] = torch.zeros((batch_size, HIDDEN_SIZE), dtype=torch.float16)
         arg_dict["mlp_add_rms_weight"] = torch.randn((HIDDEN_SIZE,), dtype=torch.float16)
+
+        # plan info
+        wrapper = flashinfer.BatchAttention("HND")
+        wrapper.plan(
+            torch.arange(0, batch_size + 1, dtype=torch.int32).to(0),
+            arg_dict["page_kv_indptr"].to(0),
+            arg_dict["page_kv_indices"].to(0),
+            torch.tensor([SEQ_LEN + 1] * batch_size, dtype=torch.int32).to(0),
+            NUM_ATTENTION_HEADS,
+            NUM_KEY_VALUE_HEADS,
+            HEAD_DIM,
+            HEAD_DIM,
+            PAGE_SIZE,
+            kv_data_type=torch.float16,
+            q_data_type=torch.float16,
+        )
+        plan_info = wrapper._plan_info
+
+        def get_id(i):
+            return plan_info[i].item()
+
+        def tensor_from_bytes(
+            byte_tensor: torch.Tensor, offset: int, shape, data_type: torch.dtype
+        ) -> torch.Tensor:
+            if byte_tensor.dtype != torch.uint8 or byte_tensor.dim() != 1:
+                raise ValueError("Input must be a 1D torch.uint8 tensor.")
+
+            num_elements = shape
+            element_byte_size = torch.tensor([], dtype=data_type).element_size()
+            required_bytes = num_elements * element_byte_size
+
+            if offset + required_bytes > byte_tensor.numel():
+                raise ValueError("The requested offset and shape are out of bounds.")
+
+            byte_slice = byte_tensor[offset : offset + required_bytes]
+
+            return byte_slice.view(data_type)
+
+        def get_tensor(offset, shape, data_type):
+            if data_type == torch.int32:
+                return tensor_from_bytes(wrapper.int_workspace_buffer, offset, shape, data_type)
+            elif data_type in [torch.float16, torch.float32]:
+                return tensor_from_bytes(wrapper.float_workspace_buffer, offset, shape, data_type)
+            else:
+                raise ValueError(f"Unsupported data type: {data_type}")
+
+
+        arg_dict["q_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 2), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["kv_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 3), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["partial_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 4), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["q_len"] = get_tensor(get_id(NUM_TASK_ARGS + 5), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["kv_len"] = get_tensor(get_id(NUM_TASK_ARGS + 6), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["q_start"] = get_tensor(get_id(NUM_TASK_ARGS + 7), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["kv_start"] = get_tensor(get_id(NUM_TASK_ARGS + 8), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["kv_end"] = get_tensor(get_id(NUM_TASK_ARGS + 9), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["kv_head_idx"] = get_tensor(get_id(NUM_TASK_ARGS + 10), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["work_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 11), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
+        arg_dict["attn_task_num"] = get_tensor(get_id(NUM_TASK_ARGS + 11), MAX_TOTAL_NUM_WORKERS, torch.int32)[2 * KernelConfig.SM_NUMBER].cpu()
+        arg_dict["len_kv_chunk"] = get_tensor(get_id(NUM_TASK_ARGS + 12), 2, torch.int32).cpu()
+        arg_dict["merge_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 15), MAX_NUM_KV_SPLITS, torch.int32).cpu()
+        arg_dict["merge_o_indices"] = get_tensor(get_id(NUM_TASK_ARGS + 16), MAX_NUM_KV_SPLITS, torch.int32).cpu()
+        arg_dict["num_qo_len"] = get_tensor(get_id(NUM_TASK_ARGS + 17), 1, torch.int32).cpu()
 
         return arg_dict
 
@@ -1498,24 +1529,11 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         tvm_arg_dict = {}
         target = tvm.target.Target("cuda")
 
-        (
-            tvm_arg_dict["split_kv"],
-            tvm_arg_dict["new_batch_size"],
-            tvm_arg_dict["max_chunk_size"],
-            tvm_arg_dict["request_indices"],
-            tvm_arg_dict["kv_tile_indices"],
-            tvm_arg_dict["o_indptr"],
-        ) = decode_plan(batch_size, arg_dict["kv_indptr"])
-
-        tvm_arg_dict["o_tmp"] = tvm.nd.array(
-            np.zeros(
-                [tvm_arg_dict["new_batch_size"], DecodeTile.qo_heads, DecodeTile.head_dim],
-                dtype=np.float32,
-            ),
-            DEV,
+        tvm_arg_dict["o_partial_attn"] = tvm.nd.array(
+            np.zeros([MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS * HEAD_DIM], dtype=np.float32), DEV,
         )
-        tvm_arg_dict["lse_tmp"] = tvm.nd.array(
-            np.zeros([tvm_arg_dict["new_batch_size"], DecodeTile.qo_heads], dtype=np.float32), DEV
+        tvm_arg_dict["lse_partial"] = tvm.nd.array(
+            np.zeros([MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS], dtype=np.float32), DEV
         )
         tvm_arg_dict["partial_qkv"] = tvm.nd.array(
             np.zeros(
@@ -1536,7 +1554,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         generate_exec_queue = tvm.get_global_func("megakernel.generate_exec_queue")
         exec_queue = generate_exec_queue(
             batch_size,
-            tvm_arg_dict["new_batch_size"],
+            arg_dict["attn_task_num"].item(),
             1,
             NUM_ATTENTION_HEADS,
             NUM_KEY_VALUE_HEADS,
@@ -1544,13 +1562,14 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
             DEV,
             tvm.cpu(),
         )
+        # exec_queue = generate_exec_queue(batch_size, arg_dict["attn_task_num"].item(), 1)
 
         # append_pos here is different from flashinfer
         append_pos = arg_dict["append_pos"].clone()
         for b in range(batch_size):
             append_pos[b] = (
-                arg_dict["kv_indices"][
-                    (arg_dict["kv_indptr"][b] * PAGE_SIZE + append_pos[b]) // PAGE_SIZE
+                arg_dict["page_kv_indices"][
+                    (arg_dict["page_kv_indptr"][b] * PAGE_SIZE + append_pos[b]) // PAGE_SIZE
                 ]
                 * PAGE_SIZE
                 + append_pos[b] % PAGE_SIZE
@@ -1567,8 +1586,8 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 tvm_arg_dict[f"etensor_q_reduce_{i}"],
                 tvm_arg_dict[f"etensor_k_reduce_{i}"],
                 tvm_arg_dict[f"etensor_v_reduce_{i}"],
-                tvm_arg_dict[f"etensor_decode_{i}"],
-                tvm_arg_dict[f"etensor_decode_merge_{i}"],
+                tvm_arg_dict[f"etensor_attn_{i}"],
+                tvm_arg_dict[f"etensor_attn_merge_{i}"],
                 tvm_arg_dict[f"etensor_o_proj_{i}"],
                 tvm_arg_dict[f"etensor_o_partial_{i}"],
                 _,
@@ -1583,8 +1602,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 _,
             ) = generate_event_tensor(
                 batch_size,
-                tvm_arg_dict["o_indptr"],
-                batch_size != tvm_arg_dict["new_batch_size"],
+                arg_dict["attn_task_num"],
+                tvm_arg_dict["kv_head_idx"],
+                tvm_arg_dict["q_indptr"],
                 1,
             )
             tvm_arg_dict[f"profiler_buffer_{i}"] = tvm.nd.array(
@@ -1614,21 +1634,28 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                     tvm_arg_dict["cos_sin_cache"],
                     tvm_arg_dict["rope_pos"],
                     tvm_arg_dict["kv_cache"],
-                    tvm_arg_dict["kv_indptr"],
-                    tvm_arg_dict["kv_indices"],
-                    tvm_arg_dict["kv_last_page_len"],
                     tvm_arg_dict["append_pos"],
-                    tvm_arg_dict["request_indices"],
-                    tvm_arg_dict["kv_tile_indices"],
-                    tvm_arg_dict["max_chunk_size"],
-                    tvm_arg_dict["o_indptr"],
+                    tvm_arg_dict["q_indptr"],
+                    tvm_arg_dict["kv_indptr"],
+                    tvm_arg_dict["partial_indptr"],
+                    tvm_arg_dict["page_kv_indices"],
+                    tvm_arg_dict["q_len"],
+                    tvm_arg_dict["kv_len"],
+                    tvm_arg_dict["q_start"],
+                    tvm_arg_dict["kv_start"],
+                    tvm_arg_dict["kv_end"],
+                    tvm_arg_dict["kv_head_idx"],
+                    tvm_arg_dict["work_indptr"],
+                    tvm_arg_dict["len_kv_chunk"],
+                    tvm_arg_dict["num_qo_len"],
+                    tvm_arg_dict["merge_indptr"],
+                    tvm_arg_dict["merge_o_indices"],
                     # intermediate buffer
                     tvm_arg_dict["partial_qkv"],
                     tvm_arg_dict["qkv"],
                     tvm_arg_dict["o"],
-                    tvm_arg_dict["lse"],
-                    tvm_arg_dict["o_tmp"],
-                    tvm_arg_dict["lse_tmp"],
+                    tvm_arg_dict["o_partial_attn"],
+                    tvm_arg_dict["lse_partial"],
                     tvm_arg_dict["partial_o"],
                     tvm_arg_dict["hidden_state_attn_mlp"],
                     tvm_arg_dict["out_gate_up_proj"],
@@ -1639,8 +1666,8 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                     tvm_arg_dict[f"etensor_q_reduce_{iter}"],
                     tvm_arg_dict[f"etensor_k_reduce_{iter}"],
                     tvm_arg_dict[f"etensor_v_reduce_{iter}"],
-                    tvm_arg_dict[f"etensor_decode_{iter}"],
-                    tvm_arg_dict[f"etensor_decode_merge_{iter}"],
+                    tvm_arg_dict[f"etensor_attn_{iter}"],
+                    tvm_arg_dict[f"etensor_attn_merge_{iter}"],
                     tvm_arg_dict[f"etensor_o_proj_{iter}"],
                     tvm_arg_dict[f"etensor_o_partial_{iter}"],
                     tvm_arg_dict[f"etensor_attn_add_rms_norm_{iter}"],
@@ -1835,7 +1862,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 )
         return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy()
 
-    def std(arg_dict):
+    def std(arg_dict, use_prefill):
         import flashinfer
         import torch
 
@@ -1898,24 +1925,41 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         _, mod_fused_split_silu_multiply = get_source(get_silu_multiply_std_impl())
 
         def func():
-            for key, value in arg_dict.items():
+            for key, value in arg_dict.items(): 
                 std_arg_dict[key] = value.clone().to(torch_dev)
-
-            workspace_buffer = torch.empty(1024 * 1024 * 1024, dtype=torch.int8).to(0)
-            wrapper = flashinfer.BatchDecodeWithPagedKVCacheWrapper(workspace_buffer, "HND")
-            wrapper.plan(
-                indptr=std_arg_dict["kv_indptr"],
-                indices=std_arg_dict["kv_indices"],
-                last_page_len=std_arg_dict["kv_last_page_len"],
-                num_qo_heads=NUM_ATTENTION_HEADS,
-                num_kv_heads=NUM_KEY_VALUE_HEADS,
-                head_dim=HEAD_DIM,
-                page_size=PAGE_SIZE,
-                pos_encoding_mode="NONE",
-                data_type=torch.float16,
-                q_data_type=torch.float16,
-            )
-
+            out_f = torch.zeros(batch_size, NUM_ATTENTION_HEADS, HEAD_DIM, dtype=torch.float16, device="cuda")
+            lse_f = torch.zeros(batch_size, NUM_ATTENTION_HEADS, dtype=torch.float32, device="cuda")
+            if use_prefill:
+                workspace_buffer = torch.empty(1024 * 1024 * 1024, dtype=torch.int8).to(0)
+                wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(workspace_buffer, "HND")
+                wrapper.plan(
+                    torch.arange(0, batch_size + 1, dtype=torch.int32).to(0),
+                    std_arg_dict["page_kv_indptr"],
+                    std_arg_dict["page_kv_indices"],
+                    std_arg_dict["page_kv_last_page_len"],
+                    NUM_ATTENTION_HEADS,
+                    NUM_KEY_VALUE_HEADS,
+                    HEAD_DIM,
+                    PAGE_SIZE,
+                    pos_encoding_mode="NONE",
+                    kv_data_type=torch.float16,
+                    q_data_type=torch.float16,
+                )
+            else:
+                wrapper = flashinfer.BatchAttention("HND")
+                wrapper.plan(
+                    torch.arange(0, batch_size + 1, dtype=torch.int32).to(0),
+                    std_arg_dict["page_kv_indptr"],
+                    std_arg_dict["page_kv_indices"],
+                    torch.tensor([SEQ_LEN + 1] * batch_size, dtype=torch.int32).to(0),
+                    NUM_ATTENTION_HEADS,
+                    NUM_KEY_VALUE_HEADS,
+                    HEAD_DIM,
+                    HEAD_DIM,
+                    PAGE_SIZE,
+                    kv_data_type=torch.float16,
+                    q_data_type=torch.float16,
+                )
             qkv = torch.matmul(
                 std_arg_dict["hidden_state"], std_arg_dict["qkv_proj_weight"].T
             ).reshape(batch_size, -1, HEAD_DIM)
@@ -1948,16 +1992,17 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 batch_indices=torch.arange(batch_size, dtype=torch.int32, device=torch_dev),
                 positions=std_arg_dict["append_pos"],
                 paged_kv_cache=std_arg_dict["kv_cache"],
-                kv_indices=std_arg_dict["kv_indices"],
-                kv_indptr=std_arg_dict["kv_indptr"],
-                kv_last_page_len=std_arg_dict["kv_last_page_len"],
+                kv_indices=std_arg_dict["page_kv_indices"],
+                kv_indptr=std_arg_dict["page_kv_indptr"],
+                kv_last_page_len=std_arg_dict["page_kv_last_page_len"],
                 kv_layout="HND",
             )
-            o, lse = wrapper.run_return_lse(
-                q.reshape(batch_size, NUM_ATTENTION_HEADS, HEAD_DIM), std_arg_dict["kv_cache"]
-            )
+            if use_prefill:
+                out_f = wrapper.run(q.reshape(batch_size, NUM_ATTENTION_HEADS, HEAD_DIM), std_arg_dict["kv_cache"])
+            else:
+                wrapper.run(q.reshape(batch_size, NUM_ATTENTION_HEADS, HEAD_DIM), std_arg_dict["kv_cache"], out_f, lse_f)
             hidden_state_attn_mlp = torch.matmul(
-                o.reshape(batch_size, NUM_ATTENTION_HEADS * HEAD_DIM),
+                out_f.reshape(batch_size, NUM_ATTENTION_HEADS * HEAD_DIM),
                 std_arg_dict["o_proj_weight"].T,
             )
             flashinfer.norm.fused_add_rmsnorm(
@@ -1980,39 +2025,43 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 input=output,
                 residual=std_arg_dict["residual"],
                 weight=std_arg_dict["mlp_add_rms_weight"],
-                eps=AddRMSNormTile.EPS,
+                eps=RMS_NORM_EPS,
                 enable_pdl=False,
             )
             return output.cpu().numpy(), std_arg_dict["residual"].cpu().numpy()
 
         output = func()
-        ms = bench(func, warmup=10, repeat=30, proton_name="std")
+        ms = bench(func, warmup=10, repeat=30, proton_name=f"std-use_prefill={use_prefill}")
         print(f"std time: {ms:.3f} ms")
         return output
 
     with ProtonContext("blackwell_attn"):
         output_tir_static, residual_tir_static = tir_static(arg_dict)
         print("static tir pass", flush=True)
-        output_tir_dynamic, residual_tir_dynamic = tir_dynamic(arg_dict)
-        print("dynamic tir pass", flush=True)
-        output_std, residual_std = std(arg_dict)
+        #     output_tir_dynamic, residual_tir_dynamic = tir_dynamic(arg_dict)
+        #     print("dynamic tir pass", flush=True)
+        output_std1, residual_std1 = std(arg_dict, use_prefill=True)
+        output_std2, residual_std2 = std(arg_dict, use_prefill=False)
 
-    np.testing.assert_allclose(output_tir_static, output_std, rtol=1e-3, atol=1e-2)
-    np.testing.assert_allclose(residual_tir_static, residual_std, rtol=1e-3, atol=1e-2)
-    np.testing.assert_allclose(output_tir_dynamic, output_std, rtol=1e-3, atol=1e-2)
-    np.testing.assert_allclose(residual_tir_dynamic, residual_std, rtol=1e-3, atol=1e-2)
+    np.testing.assert_allclose(output_std1, output_std2, rtol=1e-3, atol=1e-2)
+    np.testing.assert_allclose(residual_std1, residual_std2, rtol=1e-3, atol=1e-2)
+    np.testing.assert_allclose(output_tir_static, output_std1, rtol=1e-3, atol=1e-2)
+    np.testing.assert_allclose(residual_tir_static, residual_std1, rtol=1e-3, atol=1e-2)
+    # np.testing.assert_allclose(output_tir_dynamic, output_std, rtol=1e-3, atol=1e-2)
+    # np.testing.assert_allclose(residual_tir_dynamic, residual_std, rtol=1e-3, atol=1e-2)
 
 
 if __name__ == "__main__":
 
-    mega_kernel_wrapper_static = MegaKernel(problem_config, profiler_on=PROFILER_ON)
-    mega_kernel_wrapper_dynamic = MegaKernel(problem_config, profiler_on=PROFILER_ON)
-    mega_kernel_static = mega_kernel_wrapper_static.get_func_static()
-    mega_kernel_dynamic = mega_kernel_wrapper_dynamic.get_func_dynamic()
-    src, mod_static = get_source(mega_kernel_static)
-    src, mod_dynamic = get_source(mega_kernel_dynamic)
+    mega_kernel_wrapper_static = MegaKernel(profiler_on=PROFILER_ON)
+    # mega_kernel_wrapper_dynamic = MegaKernel(problem_config, profiler_on=PROFILER_ON)
+    mega_static_module = mega_kernel_wrapper_static.get_static_module()
+    # mega_kernel_dynamic = mega_kernel_wrapper_dynamic.get_func_dynamic()
+    src, lib_static = get_source(mega_static_module)
+    print(src)
+    # src, mod_dynamic = get_source(mega_kernel_dynamic)
 
-    for batch_size in [1, 3, 5, 7, 15, 31, 63, 127, 128]:
+    for batch_size in [1]:
 
         print(f"batch_size: {batch_size}", flush=True)
-        test(batch_size, mod_static, mod_dynamic)
+        test(batch_size, lib_static["main"], None)

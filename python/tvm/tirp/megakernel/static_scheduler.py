@@ -2,7 +2,7 @@ import tvm
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 
-from .common import JobType, KernelConfig
+from .common import JobType, KernelConfig, any_sync
 
 atomic_add_int32 = f"""
 __forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, int32_t pe) {{
@@ -37,13 +37,13 @@ class Semaphore:
     def __init__(self, cnt, buffer, use_nvshmem=False):
         self.cnt = cnt
         self.sem = buffer
-        self.state = T.alloc_buffer([1], "int32", scope="local", align=4)
-        IRBuilder.current().name("semaphore_state", self.state)
+        self.state = T.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
         if use_nvshmem:
             self.atomic_add_int32 = atomic_add_int32
         else:
             self.atomic_add_int32 = atomic_add_int32_local
 
+    # cta-level interface
     @T.macro
     def semaphore_wait(self, *coord):
         with T.thread():
@@ -65,6 +65,33 @@ class Semaphore:
                     if T.cuda.syncthreads_and(self.state[0] == 0):
                         break
                     T.cuda.nano_sleep(40)
+
+    # warp-level interface
+    @T.macro
+    def semaphore_wait_warp(self, *coord, mask=0xffffffff):
+        with T.thread():
+            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            if (mask >> warp_id) & 1 == 1:
+                self.state[0] = -1
+                if self.cnt >= 0:
+                    while 1:
+                        if lane_id == 0:
+                            T.ptx.ld_global_acquire(
+                                self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
+                            )
+                        if any_sync(0xffffffff, self.state[0] == self.cnt):
+                            break
+                        T.cuda.nano_sleep(40)
+                else:
+                    while 1:    
+                        if lane_id == 0:
+                            T.ptx.ld_global_acquire(
+                                self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
+                            )
+                        if any_sync(0xffffffff, self.state[0] == 0):
+                            break
+                        T.cuda.nano_sleep(40)
 
     @T.macro
     def semaphore_notify(self, *coord, rank=-1):

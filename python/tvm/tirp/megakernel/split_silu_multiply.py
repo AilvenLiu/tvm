@@ -7,23 +7,22 @@ from .dynamic_scheduler import DynamicTileScheduler
 
 
 class SiluMultiplyTile(Tile):
-
+    
     TILE_SIZE = 128
     VEC_SIZE = 16 // F16_BYTES
 
-    def __init__(self, input, output):
+    def __init__(self, intermediate_size, input, output):
+        self.intermediate_size = intermediate_size
         self.input = input
         self.output = output
         self.seq_len = input.shape[0]
-        self.intermediate_size = output.shape[1]
+        assert self.intermediate_size == output.shape[1]
         assert self.intermediate_size * 2 == input.shape[1]
         self.dtype = input.dtype
 
-    def init(self, pool_allocator):
-        self.vec1 = T.alloc_local([self.VEC_SIZE], self.dtype)
-        self.vec2 = T.alloc_local([self.VEC_SIZE], self.dtype)
-        IRBuilder.current().name("vec1", self.vec1)
-        IRBuilder.current().name("vec2", self.vec2)
+    def init(self, pool_allocator: Tp.PoolAllocator):
+        self.vec1 = T.alloc_local([self.VEC_SIZE], self.dtype, name="vec1")
+        self.vec2 = T.alloc_local([self.VEC_SIZE], self.dtype, name="vec2")
         self.idx = T.local_cell("int32", name="idx")
         self.prefetch_round = self.seq_len // 64
 

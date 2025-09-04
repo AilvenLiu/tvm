@@ -31,6 +31,8 @@ class JobType(Enum):
     O_ALLREDUCE = 19
     DOWN_PROJ_ALLREDUCE = 20
     GATE_UP_PROJ_REDUCE = 21
+    BATCH_ATTENTION = 22
+    BATCH_ATTENTION_MERGE = 23
     END = 99
 
 
@@ -57,9 +59,6 @@ def find_power_of_two(n):
 
 
 class Tile:
-    @classmethod
-    def class_config_init(cls, config):
-        pass
 
     @classmethod
     def class_init(cls, pool_allocator):
@@ -77,6 +76,7 @@ class Tile:
 
     def run(self, m_idx, n_idx, k_idx):
         raise NotImplementedError("run is not implemented")
+
 
 
 class Barriers:
@@ -184,12 +184,30 @@ def silu(x):
     )
 
 
-def get_source(func: "tvm.tir.PrimFunc") -> str:
+def any_sync(mask, pred):
+    return T.cuda.func_call(
+        "any_sync", mask, pred, source_code=f""" 
+__forceinline__ __device__ int any_sync(unsigned mask, int pred) {{
+  return __any_sync(mask, pred);
+}}
+""", return_type="int32"
+    )
+
+@T.macro
+def block_fence():
+    T.cuda.func_call(
+        "block_fence",
+        source_code=f"""
+__forceinline__ __device__ void block_fence() {{
+  __threadfence_block();
+}}
+""")
+
+def get_source(module: "tvm.ir.IRModule"):
     target = tvm.target.Target("cuda")
-    mod = tvm.IRModule({"main": func})
-    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-    src = mod.mod.imports[0].inspect_source()
-    return src, mod
+    lib = tvm.compile(module, target, tir_pipeline="tirp")
+    src = lib.mod.imports[0].inspect_source()
+    return src, lib
 
 
 class ProfileEventType(Enum):
@@ -217,6 +235,8 @@ class ProfileEventType(Enum):
     O_ALLREDUCE = 21
     DOWN_PROJ_ALLREDUCE = 22
     GATE_UP_PROJ_REDUCE = 23
+    BATCH_ATTENTION = 24
+    BATCH_ATTENTION_MERGE = 25
 
 
 event_type_names = [
@@ -244,4 +264,6 @@ event_type_names = [
     "O_ALLREDUCE",
     "DOWN_PROJ_ALLREDUCE",
     "GATE_UP_PROJ_REDUCE",
+    "BATCH_ATTENTION",
+    "BATCH_ATTENTION_MERGE",
 ]

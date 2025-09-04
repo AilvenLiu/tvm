@@ -1,4 +1,5 @@
 from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 
 from .common import (
@@ -96,31 +97,29 @@ class GemmTile(Tile):
     # idx of current gemm tile (no matter which shape it is)
     tile_idx = None
 
-    def __init__(self, A, B, output, split_k_factor=1):
-        self.A = A
-        self.B = B
-        self.output = output
-        self.M = A.shape[0]
-        self.N = B.shape[0]
-        self.K = A.shape[1]
-        self.a_type = A.dtype
-        self.b_type = B.dtype
-        self.out_type = output.dtype
+    def __init__(self, N, K, a_type, b_type, out_type, split_k_factor, A, B, output):
+        self.N = N
+        self.K = K
+        self.a_type = a_type
+        self.b_type = b_type
+        self.out_type = out_type
         self.split_k_factor = split_k_factor
         self.TILE_K = ceildiv(ceildiv(self.K, self.split_k_factor), self.BLK_K) * self.BLK_K
         self.PIPE_CIRCLE_NUM = (self.TILE_K // self.BLK_K) // self.SMEM_PIPE_DEPTH
         self.PIPE_REMAIN_NUM = (self.TILE_K // self.BLK_K) % self.SMEM_PIPE_DEPTH
-
-    def _alloc_buffer(self, pool_allocator):
-        # alloc local memory
-        self.reg = T.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local")
-        IRBuilder.current().name("reg", self.reg)
-        if self.out_type == "float16":
-            self.reg_fp16 = T.alloc_buffer((self.TMEM_LD_SIZE,), self.out_type, scope="local")
-            IRBuilder.current().name("reg_fp16", self.reg_fp16)
-        self.tmem_idx = T.local_cell("int32", "tmem_idx")
-        self.tmem_phase = T.local_cell("int32", "tmem_phase")
-        self.stage = T.local_cell("int32", name="stage")
+    
+        self.A = A
+        self.B = B
+        self.output = output
+        self.M = A.shape[0]
+        assert self.N == B.shape[0]
+        assert self.K == A.shape[1]
+        assert self.a_type == A.dtype
+        assert self.b_type == B.dtype
+        assert self.out_type == output.dtype
+        
+    def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+        # alloc shared memory
         self.A_smem = pool_allocator.alloc(
             (self.SMEM_PIPE_DEPTH, self.MAX_BLK_M, self.BLK_K),
             self.a_type,
@@ -140,16 +139,26 @@ class GemmTile(Tile):
             align=1024,
         ).buffer
 
+        # alloc local memory
+        self.reg = T.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
+        if self.out_type == "float16":
+            self.reg_fp16 = T.alloc_buffer((self.TMEM_LD_SIZE,), self.out_type, scope="local", name="reg_fp16")
+        self.tmem_idx = T.local_cell("int32", name="tmem_idx")
+        self.tmem_phase = T.local_cell("int32", name="tmem_phase")
+        self.stage = T.local_cell("int32", name="stage")
+
+
     @classmethod
-    def _alloc_buffer_class_member(cls, pool_allocator):
-        cls.tile_idx = T.local_cell("int32", "tile_idx")
+    def _alloc_buffer_class_member(cls, pool_allocator: Tp.PoolAllocator):
+        # alloc shared memory
         cls.tmem_addr = pool_allocator.alloc([1], "uint32").buffer
         cls.tma2mma_bar = BarTMA2MMA(pool_allocator, cls.SMEM_PIPE_DEPTH, True)
         cls.mma2tma_bar = BarMMA2TMA(pool_allocator, cls.SMEM_PIPE_DEPTH, False)
         cls.mma2ld_bar = BarMMA2LD(pool_allocator, cls.TMEM_PIPE_DEPTH, True)
         cls.ld2mma_bar = BarLD2MMA(pool_allocator, cls.TMEM_PIPE_DEPTH, False)
-        cls.phase = T.alloc_buffer((1,), "int32", scope="local")
-        IRBuilder.current().name("phase", cls.phase)
+        # alloc local memory
+        cls.tile_idx = T.local_cell("int32", "tile_idx")
+        cls.phase = T.alloc_buffer((1,), "int32", scope="local", name="phase")
 
     @classmethod
     @T.macro
@@ -194,84 +203,16 @@ class GemmTile(Tile):
     @T.macro
     def host_init(self):
         BLK_M = T.if_then_else(self.M <= 32, 32, T.if_then_else(self.M <= 64, 64, 128))
-        T.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            self.A_tensor_map,
-            self.a_type,
-            2,
-            self.A.data,
-            self.K,
-            self.M,
-            self.K * F16_BYTES,
-            self.BLK_K,
-            BLK_M,
-            1,
-            1,
-            0,
-            self.SWIZZLE,
-            0,
-            0,
-        )
-        T.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            self.B_tensor_map,
-            self.b_type,
-            2,
-            self.B.data,
-            self.K,
-            self.N,
-            self.K * F16_BYTES,
-            self.BLK_K,
-            self.BLK_N,
-            1,
-            1,
-            0,
-            self.SWIZZLE,
-            0,
-            0,
-        )
+        T.call_packed("runtime.cuTensorMapEncodeTiled", self.A_tensor_map, self.a_type, 2, self.A.data, 
+                      self.K, self.M, self.K * F16_BYTES, self.BLK_K, BLK_M, 1, 1, 0, self.SWIZZLE, 0, 0)
+        T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 2, self.B.data, 
+                      self.K, self.N, self.K * F16_BYTES, self.BLK_K, self.BLK_N, 1, 1, 0, self.SWIZZLE, 0, 0)
         if self.split_k_factor > 1:
-            T.call_packed(
-                "runtime.cuTensorMapEncodeTiled",
-                self.output_tensor_map,
-                self.out_type,
-                3,
-                self.output.data,
-                self.N,
-                self.M,
-                self.split_k_factor,
-                self.N * F32_BYTES,
-                self.N * self.M * F32_BYTES,
-                self.MMA_N,
-                self.EPI_TILE,
-                1,
-                1,
-                1,
-                1,
-                0,
-                0,
-                0,
-                0,
-            )
+            T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 3, self.output.data, 
+                          self.N, self.M, self.split_k_factor, self.N * F32_BYTES, self.N * self.M * F32_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 1, 1, 0, 0, 0, 0)
         else:
-            T.call_packed(
-                "runtime.cuTensorMapEncodeTiled",
-                self.output_tensor_map,
-                self.out_type,
-                2,
-                self.output.data,
-                self.N,
-                self.M,
-                self.N * F16_BYTES,
-                self.MMA_N,
-                self.EPI_TILE,
-                1,
-                1,
-                0,
-                0,
-                0,
-                0,
-            )
+            T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data, 
+                          self.N, self.M, self.N * F16_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
 
     @T.macro
     def _run(self, m_idx, n_idx, k_idx, BLK_M, MMA_M):
@@ -280,7 +221,6 @@ class GemmTile(Tile):
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            # alloc shared memory
 
             with T.cta():
                 T.block_attr({"tirp.scope_partition": True})

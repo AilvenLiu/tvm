@@ -15,30 +15,28 @@ class AppendKVTile(Tile):
     # kv_indices_tvm: [total_page_num]
     # kv_last_page_len_tvm: [batch_size]
     # pos_map_tvm: [batch_size]
+    
+    loop_inner = 1
+    min_bdy = 1
+    h_tile = 1
 
-    @classmethod
-    def class_config_init(cls, problem_config: Dict[str, Any]):
-        cls.loop_inner = 1
-        cls.qo_heads = problem_config["num_attention_heads"]
-        cls.kv_heads = problem_config["num_key_value_heads"]
-        cls.head_dim = problem_config["head_dim"]
-        cls.page_size = problem_config["page_size"]
-        cls.vec_size = max(16 // F16_BYTES, cls.head_dim // 32)
-        cls.bdx = cls.head_dim // cls.vec_size
-        cls.bdy = KernelConfig.NUM_THREADS // cls.bdx
-        cls.min_bdy = 1
+    def __init__(self, num_attention_heads, num_key_value_heads, head_dim, page_size, kv_cache_tvm, qkv_tvm, pos_map_tvm):
 
-    def __init__(self, kv_cache_tvm: T.handle, qkv_tvm: T.handle, pos_map_tvm: T.handle):
+        self.qo_heads = num_attention_heads
+        self.kv_heads = num_key_value_heads
+        self.head_dim = head_dim
+        self.page_size = page_size
+        self.vec_size = max(16 // F16_BYTES, self.head_dim // 32)
+        self.bdx = self.head_dim // self.vec_size
+        self.bdy = KernelConfig.NUM_THREADS // self.bdx
+
         self.kv_cache_global = kv_cache_tvm
         self.qkv_global = qkv_tvm
         self.pos_map_global = pos_map_tvm
         self.batch_size = qkv_tvm.shape[0]
-        self.m_split = T.min(
-            ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads), self.batch_size
-        )
+        self.m_split = T.min(ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads), self.batch_size)
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
-        self.h_tile = 1
         assert kv_cache_tvm.shape[1] == 2
         assert kv_cache_tvm.shape[2] == self.kv_heads
         assert kv_cache_tvm.shape[3] == self.page_size
@@ -47,17 +45,14 @@ class AppendKVTile(Tile):
         assert qkv_tvm.shape[2] == self.head_dim
         assert pos_map_tvm.shape[0] == self.batch_size
 
-    def alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
-        self.idx = T.alloc_local([1], "int32")
-        self.pos = T.alloc_local([1], "int32")
-        self.vec = T.alloc_local([self.vec_size], "float16")
-        IRBuilder.current().name("idx", self.idx)
-        IRBuilder.current().name("pos", self.pos)
-        IRBuilder.current().name("vec", self.vec)
+    def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+        self.idx = T.alloc_local([1], "int32", name="idx")
+        self.pos = T.alloc_local([1], "int32", name="pos")
+        self.vec = T.alloc_local([self.vec_size], "float16", name="vec")
 
     @T.macro
     def init(self, pool_allocator: Tp.PoolAllocator):
-        self.alloc_buffer(pool_allocator)
+        self._alloc_buffer(pool_allocator)
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx):

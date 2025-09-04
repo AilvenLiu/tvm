@@ -32,8 +32,9 @@ from ..megakernel.test_layer import (
     SPLIT_O_PROJRCT,
     SPLIT_QKV_PROJECT,
     PROFILER_BUFFER_SIZE,
+    MAX_NUM_KV_SPLITS,
+    MAX_TOTAL_NUM_WORKERS,
     MegaKernel,
-    problem_config,
 )
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
 from .test_rmsnorm import get_rmsnorm_kernel
@@ -51,7 +52,7 @@ target = tvm.target.Target("cuda")
 TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
-MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/qwen3-32b-mlc/lib_tp{TP_SIZE}.so"
+MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/Qwen3-32B-q0f16-tp{TP_SIZE}.so"
 MEGA_LIB_PATH = f"/home/guanjiew/qwen3-mg-debug/mega_layer_lib_tp{TP_SIZE}.so"  # NOTE: update this path
 DEBUG_PATH = "/home/guanjiew/qwen3-mg-debug" # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
@@ -140,7 +141,6 @@ def _craft_pipeline(ext_mods: List[nn.ExternModule], dump_file_prefix: Path):
                 AttachVariableBounds(
                     {
                         "batch_size": config_tp1.max_batch_size,
-                        "new_batch_size": config_tp1.max_batch_size * 2,
                     }
                 ),
                 AttachMemoryPlanAttr(),
@@ -320,7 +320,7 @@ def test_qwen3_model(
     begin_forward_func = get_global_func("vm.builtin.kv_state_begin_forward")
     end_forward_func = get_global_func("vm.builtin.kv_state_end_forward")
 
-    batch_size = 32
+    batch_size = 31
     seq_len = 16
     seq_ids = []
 
@@ -377,7 +377,7 @@ def attach_attr(func, name):
 
 def get_qwen3_megakernel_mod():
     rms_norm = get_rmsnorm_kernel(5120)
-    layer_kernel = MegaKernel(problem_config, profiler_on=False).get_func_static()
+    layer_kernel = MegaKernel(profiler_on=False).get_func_static()
     hgemm, reduce, tile_k_num = get_hgemm_kernel(dim_n=151936, dim_k=5120)
     cos_sin_cache = get_cos_sin_cache_kernel(128, ROPE_THETA)
 
@@ -408,7 +408,7 @@ def get_qwen3_megakernel_mod():
                 etensor_q_reduce,
                 etensor_k_reduce,
                 etensor_v_reduce,
-                etensor_decode,
+                etensor_attn,
                 etensor_o_partial,
                 etensor_o_allreduce,
                 etensor_attn_add_rms_norm,
@@ -421,7 +421,7 @@ def get_qwen3_megakernel_mod():
                 etensor_end,
                 etensor_o_proj,
                 etensor_down_proj,
-                etensor_decode_merge,
+                etensor_attn_merge,
             ) = (
                 etensors_on_layer[0],
                 etensors_on_layer[1],
@@ -447,9 +447,8 @@ def get_qwen3_megakernel_mod():
             partital_qkv = R.builtin.alloc_tensor(R.shape([SPLIT_QKV_PROJECT, batch_size, 10240 // TP_SIZE]), dtype="float32", runtime_device_index=0)
             qkv = R.builtin.alloc_tensor(R.shape([batch_size, 80 // TP_SIZE, 128]), dtype="float16", runtime_device_index=0)
             o = R.builtin.alloc_tensor(R.shape([batch_size, 64 // TP_SIZE, 128]), dtype="float16", runtime_device_index=0)
-            lse = R.builtin.alloc_tensor(R.shape([batch_size, 64 // TP_SIZE]), dtype="float32", runtime_device_index=0)
-            o_tmp = R.builtin.alloc_tensor(R.shape([new_batch_size, 64 // TP_SIZE, 128]), dtype="float32", runtime_device_index=0)
-            lse_tmp = R.builtin.alloc_tensor(R.shape([new_batch_size, 64 // TP_SIZE]), dtype="float32", runtime_device_index=0)
+            o_partial_attn = R.builtin.alloc_tensor(R.shape([MAX_NUM_KV_SPLITS * 8 // TP_SIZE * 128]), dtype="float32", runtime_device_index=0)
+            les_partial = R.builtin.alloc_tensor(R.shape([MAX_NUM_KV_SPLITS * 8 // TP_SIZE]), dtype="float32", runtime_device_index=0)
             partial_o = R.builtin.alloc_tensor(R.shape([SPLIT_O_PROJRCT, batch_size, 5120]), dtype="float32", runtime_device_index=0)
             hidden_state_attn_mlp = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
             out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 51200 // TP_SIZE]), dtype="float16", runtime_device_index=0)
@@ -467,14 +466,15 @@ def get_qwen3_megakernel_mod():
                                         model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,
                                         model_layers_0_post_attention_layernorm_weight1, model_norm_weight1,
                                         # page cache, cos_sin cache and plan info
-                                        cos_sin_cache, rope_pos, kv_data[layer_id], kv_indptr, kv_indices, kv_last_page_len,
-                                        append_pos, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size, plan_o_indptr,
+                                        cos_sin_cache, rope_pos, kv_data[layer_id], append_pos, q_indptr, kv_indptr,
+                                        partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,
+                                        work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices,
                                         # intermediate buffer
-                                        partital_qkv, qkv, o, lse, o_tmp, lse_tmp, partial_o, hidden_state_attn_mlp,
+                                        partital_qkv, qkv, o, o_partial_attn, les_partial, partial_o, hidden_state_attn_mlp,
                                         out_gate_up_proj, out_silu_multiply, partial_sum_down_proj,
                                         # event tensor
-                                        etensor_qkv_partial, etensor_q_reduce, etensor_k_reduce, etensor_v_reduce, etensor_decode,
-                                        etensor_decode_merge, etensor_o_proj, etensor_o_partial, etensor_attn_add_rms_norm, etensor_attn_mlp,
+                                        etensor_qkv_partial, etensor_q_reduce, etensor_k_reduce, etensor_v_reduce, etensor_attn,
+                                        etensor_attn_merge, etensor_o_proj, etensor_o_partial, etensor_attn_add_rms_norm, etensor_attn_mlp,
                                         etensor_gate_up_proj, etensor_down_proj, etensor_down_proj_reduce, etensor_mlp_add_rms_norm,
                                         # execution queue
                                         exec_queue, profiler_buffer),
@@ -531,66 +531,73 @@ def get_qwen3_megakernel_mod():
 
         @T.prim_func(private=True)
         def layer_kernel(
-                # input and output
-                hidden_state_ptr: T.handle, # input: read-only
-                residual_ptr: T.handle, # input & output: inplace update
-                output_ptr: T.handle, # output
+            # input and output
+            hidden_state_ptr: T.handle, # input: read-only
+            residual_ptr: T.handle, # input & output: inplace update
+            output_ptr: T.handle, # output
 
-                # weight
-                qkv_proj_weight_ptr: T.handle, # read-only
-                o_proj_weight_ptr: T.handle, # read-only
-                q_rms_weight_ptr: T.handle, # read-only
-                k_rms_weight_ptr: T.handle, # read-only
-                gate_up_weight_ptr: T.handle, # read-only
-                down_weight_ptr: T.handle, # read-only
-                attn_add_rms_weight_ptr: T.handle, # read-only
-                mlp_add_rms_weight_ptr: T.handle, # read-only
+            # weight
+            qkv_proj_weight_ptr: T.handle, # read-only
+            o_proj_weight_ptr: T.handle, # read-only
+            q_rms_weight_ptr: T.handle, # read-only
+            k_rms_weight_ptr: T.handle, # read-only
+            gate_up_weight_ptr: T.handle, # read-only
+            down_weight_ptr: T.handle, # read-only
+            attn_add_rms_weight_ptr: T.handle, # read-only
+            mlp_add_rms_weight_ptr: T.handle, # read-only
 
-                # page cache, cos_sin cache and plan info
-                cos_sin_cache_ptr: T.handle, # read-only
-                rope_pos_ptr: T.handle, # read-only
-                kv_cache_ptr: T.handle, # inplace update
-                kv_indptr_ptr: T.handle, # read-only
-                kv_indices_ptr: T.handle, # read-only
-                kv_last_page_len_ptr: T.handle, # read-only
-                append_pos_ptr: T.handle, # read-only
-                request_indices_ptr: T.handle, # read-only
-                kv_tile_indices_ptr: T.handle, # read-only
-                max_chunk_size_ptr: T.handle, # read-only
-                o_indptr_ptr: T.handle, # read-only
+            # page cache, cos_sin cache and plan info
+            cos_sin_cache_ptr: T.handle, # read-only
+            rope_pos_ptr: T.handle, # read-only
+            kv_cache_ptr: T.handle, # inplace update
+            append_pos_ptr: T.handle, # read-only
+            q_indptr_ptr : T.handle, # read-only
+            kv_indptr_ptr : T.handle, # read-only
+            partial_indptr_ptr : T.handle, # read-only
+            kv_indices_ptr : T.handle, # read-only
+            q_len_ptr : T.handle, # read-only
+            kv_len_ptr : T.handle, # read-only
+            q_start_ptr : T.handle, # read-only
+            kv_start_ptr : T.handle, # read-only
+            kv_end_ptr : T.handle, # read-only
+            kv_head_idx_ptr : T.handle, # read-only
+            work_indptr_ptr : T.handle, # read-only
+            len_kv_chunk_ptr : T.handle, # read-only
+            num_qo_len_ptr: T.handle, # read-only
+            merge_indptr_ptr: T.handle, # read-only
+            merge_o_indices_ptr: T.handle, # read-only
 
-                # intermediate buffer
-                partital_qkv_ptr: T.handle, # intermediate
-                qkv_ptr: T.handle,  # intermediate
-                o_ptr: T.handle, # intermediate
-                lse_ptr: T.handle, # intermediate
-                o_tmp_ptr: T.handle, # intermediate
-                lse_tmp_ptr: T.handle, # intermediate
-                partial_o_ptr: T.handle, # intermediate
-                hidden_state_attn_mlp_ptr: T.handle, # intermediate
-                out_gate_up_proj_ptr: T.handle, # intermediate
-                out_silu_multiply_ptr: T.handle, # intermediate
-                partial_sum_down_proj_ptr: T.handle, # intermediate
+            # intermediate buffer
+            partital_qkv_ptr: T.handle, # intermediate
+            qkv_ptr: T.handle,  # intermediate
+            o_ptr: T.handle, # intermediate
+            o_partial_attn_ptr: T.handle, # intermediate
+            lse_partial_attn_ptr: T.handle, # intermediate
+            partial_o_ptr: T.handle, # intermediate
+            hidden_state_attn_mlp_ptr: T.handle, # intermediate
+            out_gate_up_proj_ptr: T.handle, # intermediate
+            out_silu_multiply_ptr: T.handle, # intermediate
+            partial_sum_down_proj_ptr: T.handle, # intermediate
+            
+            # event tensor
+            etensor_qkv_partial_ptr: T.handle, 
+            etensor_q_reduce_ptr: T.handle, 
+            etensor_k_reduce_ptr: T.handle, 
+            etensor_v_reduce_ptr: T.handle, 
+            etensor_attn_ptr: T.handle, 
+            etensor_attn_merge_ptr: T.handle,
+            etensor_o_proj_ptr: T.handle, 
+            etensor_o_partial_ptr: T.handle, 
+            etensor_attn_add_rms_ptr: T.handle,
+            etensor_attn_mlp_ptr: T.handle,
+            etensor_gate_up_proj_ptr: T.handle,
+            etensor_down_proj_ptr: T.handle,
+            etensor_down_proj_reduce_ptr: T.handle,
+            etensor_mlp_add_rms_ptr: T.handle,
 
-                # event tensor
-                etensor_qkv_partial_ptr: T.handle,
-                etensor_q_reduce_ptr: T.handle,
-                etensor_k_reduce_ptr: T.handle,
-                etensor_v_reduce_ptr: T.handle,
-                etensor_decode_ptr: T.handle,
-                etensor_decode_merge_ptr: T.handle,
-                etensor_o_proj_ptr: T.handle,
-                etensor_o_partial_ptr: T.handle,
-                etensor_attn_add_rms_ptr: T.handle,
-                etensor_attn_mlp_ptr: T.handle,
-                etensor_gate_up_proj_ptr: T.handle,
-                etensor_down_proj_ptr: T.handle,
-                etensor_down_proj_reduce_ptr: T.handle,
-                etensor_mlp_add_rms_ptr: T.handle,
-
-                # execution queue
-                exec_queue_ptr: T.handle,
-                profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
+            # execution queue
+            exec_queue_ptr: T.handle,
+            profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")
         ):
             pass
 
@@ -617,7 +624,6 @@ def get_qwen3_megakernel_mod():
             ),
         ):
             batch_size = T.int64()
-            new_batch_size = T.int64()
             total_page_num = T.int64()
             max_page_num = T.int64()
             page_size = T.int64()
@@ -634,11 +640,12 @@ def get_qwen3_megakernel_mod():
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
                         R.Tensor((batch_size,), dtype="int32"),
-                        R.Tuple([R.Tensor(None, dtype="int32")] * 5 + [R.Prim("int64")]),
+                        R.Tuple([R.Prim("int64")] * 2 + [R.Tuple([R.Tensor(None, dtype="int32")] * 13)] * 2 + [R.Tensor(None, dtype="int32")] * 5),
                         R.Tuple([R.Tensor(None, dtype="int32")] * 18),
+                        R.Prim("int64"),
                     ],
                 )
-                kv_data_, kv_indptr, kv_indices_, kv_last_page_len, append_pos, rope_pos, attn_plan_results, etensors = (
+                kv_data_, page_kv_indptr, page_kv_indices_, page_kv_last_page_len, append_pos, rope_pos, attn_plan_results, etensors, attn_task_num = (
                     res0[0],
                     res0[1],
                     res0[2],
@@ -647,20 +654,31 @@ def get_qwen3_megakernel_mod():
                     res0[5],
                     res0[6],
                     res0[7],
+                    res0[8],
                 )
                 kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, 128), dtype="float16")] * NUM_HIDDEN_LAYERS))
-                kv_indices = R.match_cast(kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
-                plan_request_indices_, plan_kv_tile_indices_, plan_max_chunk_size_, plan_o_indptr_ = attn_plan_results[0], attn_plan_results[1], attn_plan_results[2], attn_plan_results[3]
-                plan_request_indices = R.match_cast(plan_request_indices_, R.Tensor((new_batch_size,), dtype="int32"))
-                plan_kv_tile_indices = R.match_cast(plan_kv_tile_indices_, R.Tensor((new_batch_size,), dtype="int32"))
-                plan_max_chunk_size = R.match_cast(plan_max_chunk_size_, R.Tensor((1,), dtype="int32"))
-                plan_o_indptr = R.match_cast(plan_o_indptr_, R.Tensor((batch_size + 1,), dtype="int32"))
-
+                page_kv_indices = R.match_cast(page_kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
+                task, len_kv_chunk_, merge_indptr_, merge_o_indices_, num_qo_len_ = attn_plan_results[3], attn_plan_results[4], attn_plan_results[5], attn_plan_results[6], attn_plan_results[7]
+                q_indptr_, kv_indptr_, partial_indptr_, q_len_, kv_len_, q_start_, kv_start_, kv_end_, kv_head_idx_, work_indptr_ = task[0], task[1], task[2], task[3], task[4], task[5], task[6], task[7], task[8], task[9]
+                len_kv_chunk = R.match_cast(len_kv_chunk_, R.Tensor((2,), dtype="int32"))
+                merge_indptr = R.match_cast(merge_indptr_, R.Tensor((MAX_NUM_KV_SPLITS,), dtype="int32"))
+                merge_o_indices = R.match_cast(merge_o_indices_, R.Tensor((MAX_NUM_KV_SPLITS,), dtype="int32"))
+                num_qo_len = R.match_cast(num_qo_len_, R.Tensor((1,), dtype="int32"))
+                q_indptr = R.match_cast(q_indptr_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_indptr = R.match_cast(kv_indptr_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                partial_indptr = R.match_cast(partial_indptr_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                q_len = R.match_cast(q_len_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_len = R.match_cast(kv_len_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                q_start = R.match_cast(q_start_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_start = R.match_cast(kv_start_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_end = R.match_cast(kv_end_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_head_idx = R.match_cast(kv_head_idx_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                work_indptr = R.match_cast(work_indptr_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
                 res2 = R.call_pure_packed(
                     "vm.builtin.paged_attention_kv_cache_get_exec_queue",
                     paged_kv_cache,
                     R.prim_value(batch_size),
-                    R.prim_value(new_batch_size),
+                    attn_task_num,
                     R.prim_value(-1),
                     sinfo_args=[
                         R.Tensor((148, 128, 4), dtype="int32"),

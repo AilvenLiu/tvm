@@ -11,7 +11,8 @@ from .common import F32_BYTES, KernelConfig, Tile, ceildiv, exp2
 class DecodeMergeTile(Tile):
 
     @classmethod
-    def class_config_init(cls, problem_config: Dict[str, Any]):
+    def class_config_init(cls, problem_config: Dict[str, Any], use_device_call = False):
+        cls.use_device_call = use_device_call
         cls.qo_heads = problem_config["num_attention_heads"]
         cls.kv_heads = problem_config["num_key_value_heads"]
         cls.head_dim = problem_config["head_dim"]
@@ -67,22 +68,14 @@ class DecodeMergeTile(Tile):
         self.lse_epi_smem = pool_allocator.alloc([self.bdz, self.bdy], "float32").buffer
 
         # allocate the reg
-        self.new_beg_batch_idx = T.alloc_local([1], "int32")
-        self.num = T.alloc_local([1], "int32")
-        self.tmp = T.alloc_local([self.vec_size], "float16")
-        self.o = T.alloc_local([self.vec_size], "float32")
-        self.m = T.alloc_local([2], "float32")
-        self.d = T.alloc_local([2], "float32")
-        self.m_tmp = T.alloc_local([1], "float32")
-        self.o_tmp = T.alloc_local([self.vec_size], "float32")
-        IRBuilder.current().name("new_beg_batch_idx", self.new_beg_batch_idx)
-        IRBuilder.current().name("num", self.num)
-        IRBuilder.current().name("tmp", self.tmp)
-        IRBuilder.current().name("o", self.o)
-        IRBuilder.current().name("m", self.m)
-        IRBuilder.current().name("d", self.d)
-        IRBuilder.current().name("m_tmp", self.m_tmp)
-        IRBuilder.current().name("o_tmp", self.o_tmp)
+        self.new_beg_batch_idx = T.alloc_local([1], "int32", name="new_beg_batch_idx")
+        self.num = T.alloc_local([1], "int32", name="num")
+        self.tmp = T.alloc_local([self.vec_size], "float16", name="tmp")
+        self.o = T.alloc_local([self.vec_size], "float32", name="o")
+        self.m = T.alloc_local([2], "float32", name="m")
+        self.d = T.alloc_local([2], "float32", name="d")
+        self.m_tmp = T.alloc_local([1], "float32", name="m_tmp")
+        self.o_tmp = T.alloc_local([self.vec_size], "float32", name="o_tmp")
 
     @T.macro
     def init(self, pool_allocator: Tp.PoolAllocator):

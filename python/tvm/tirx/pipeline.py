@@ -143,6 +143,7 @@ def tirp_pipeline():
             # tvm.ir.transform.PrintIR(),
             tir.transform.UnifyThreadBinding(),
             tir.transform.Simplify(),
+            tir.transform.ConvertBlocksToOpaque(),
             tir.transform.LowerOpaqueBlock(),
             tir.transform.FlattenBuffer(),
             tir.transform.BF16ComputeLegalize(),
