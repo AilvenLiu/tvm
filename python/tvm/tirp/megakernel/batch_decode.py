@@ -5,7 +5,7 @@ from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 from tvm.tir.event import EventImpl
 
-from .common import F16_BYTES, KernelConfig, Tile, ceildiv, exp2, find_power_of_two
+from .common import F16_BYTES, KernelConfig, SmemManager, Tile, ceildiv, exp2, find_power_of_two
 
 
 class DecodeTile(Tile):
@@ -69,6 +69,7 @@ class DecodeTile(Tile):
         self.request_indices_global = request_indices_tvm
         self.kv_tile_indices_global = kv_tile_indices_tvm
         self.max_chunk_size_global = max_chunk_size_tvm
+        self.smem_manager = None
         assert qkv_tvm.shape[1] == self.qo_heads + 2 * self.kv_heads
         assert qkv_tvm.shape[2] == self.head_dim
         assert kv_cache_tvm.shape[1] == 2
@@ -91,9 +92,9 @@ class DecodeTile(Tile):
         assert lse_tmp_tvm.shape[0] == self.new_batch_size
         assert lse_tmp_tvm.shape[1] == self.qo_heads
 
-    def alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+    def alloc_buffer(self, smem_manager: SmemManager):
         # allocate the smem
-        self.k_smem = pool_allocator.alloc(
+        self.k_smem = smem_manager.alloc(
             [
                 self.pipe_depth,
                 self.loop_inner,
@@ -105,7 +106,7 @@ class DecodeTile(Tile):
             "float16",
             align=16,
         ).buffer
-        self.v_smem = pool_allocator.alloc(
+        self.v_smem = smem_manager.alloc(
             [
                 self.pipe_depth,
                 self.loop_inner,
@@ -117,13 +118,13 @@ class DecodeTile(Tile):
             "float16",
             align=16,
         ).buffer
-        self.kv_offset = pool_allocator.alloc(
+        self.kv_offset = smem_manager.alloc(
             [self.bdz, self.bdx, self.bdy, self.tile_per_bdx], "int32"
         ).buffer
-        self.epi_o = pool_allocator.alloc(
+        self.epi_o = smem_manager.alloc(
             [self.bdz, self.bdy, self.bdx, self.loop_inner, self.vec_size], "float32"
         ).buffer
-        self.epi_md = pool_allocator.alloc(
+        self.epi_md = smem_manager.alloc(
             [self.bdz, self.bdy, self.loop_inner, 2], "float32"
         ).buffer
 
@@ -166,13 +167,15 @@ class DecodeTile(Tile):
         IRBuilder.current().name("o_tmp", self.o_tmp)
 
     @T.macro
-    def init(self, pool_allocator):
-        self.alloc_buffer(pool_allocator)
+    def init(self, smem_manager: SmemManager):
+        self.alloc_buffer(smem_manager)
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx, split_kv):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
             tx = T.meta_var(tid % self.bdx)
             ty = T.meta_var((tid // self.bdx) % self.bdy)
             tz = T.meta_var(tid // (self.bdx * self.bdy))

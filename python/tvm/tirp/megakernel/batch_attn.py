@@ -1,11 +1,8 @@
-from typing import Any, Dict
-
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
 
-from .common import KernelConfig, Tile, ceildiv
+from .common import KernelConfig, SmemManager, Tile, ceildiv
 
 def upcast_size(dtype):
     return 128 // tvm.DataType(dtype).bits
@@ -229,18 +226,18 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         assert (self.num_warps_kv * self.cta_tile_q * self.head_dim
             == self.num_warps * self.num_mma_q * self.num_mma_d_vo * 32 * 8)
 
-    def _alloc_buffer(self, pool: Tp.PoolAllocator):
+    def _alloc_buffer(self, smem_manager: SmemManager):
+        self.smem_manager = smem_manager
         # allocate smem
-        self.q_smem = pool.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
-        self.k_smem = pool.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16).buffer
-        self.v_smem = pool.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16).buffer
-        self.cta_sync_o_smem = pool.alloc([KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1 
+        self.q_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
+        self.k_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16).buffer
+        self.v_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16).buffer
+        self.cta_sync_o_smem = smem_manager.alloc([KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1 
                                         else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, self.num_mma_d_vo, 32, 8], "float32", align=16).buffer
-        self.cta_sync_md_smem = pool.alloc([KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1 
+        self.cta_sync_md_smem = smem_manager.alloc([KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1 
                                         else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, 16, 2], "float32", align=16).buffer
-        self.smem_o = pool.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
-
-        # allocate register, only works when use_device_call is False (inline)
+        self.smem_o = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
+        # allocate register
         self.s_frag = T.alloc_local([self.num_mma_q, self.num_mma_kv, 8], "float32", align=0, name="s_frag")
         self.o_frag = T.alloc_local([self.num_mma_q, self.num_mma_d_vo, 8], "float32", align=16, name="o_frag")
         self.m = T.alloc_local([self.num_mma_q, 2], "float32", name="m")
@@ -248,8 +245,8 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         self.tid = T.alloc_local([3], "int32", name="tid")
 
     @T.macro
-    def init(self, pool_allocator):
-        self._alloc_buffer(pool_allocator)
+    def init(self, smem_manager: SmemManager):
+        self._alloc_buffer(smem_manager)
 
     @T.macro
     def run(
@@ -294,6 +291,12 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
 
                 work_idx = int_var(name="work_idx")
                 work_idx[0] = m_idx * KernelConfig.WG_NUMBER + wg_id
+                
+                # TODO: Now sync cta for simple, need to finegrain in the future
+                if warp_id == 0 and wg_id == 0:
+                    self.smem_manager.wait_all(lane_id)
+                T.tvm_storage_sync("shared")
+
                 if work_idx[0] < work_indptr_tvm[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]:
                     with T.thread():
                         # get_block_coord
@@ -710,3 +713,9 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
 
                         write_partial_lse()
                         self.scope_sync(wg_id)
+
+                # TODO: Now sync cta for simple, need to finegrain in the future
+                T.tvm_storage_sync("shared")
+                if warp_id == 0 and wg_id == 0:
+                    self.smem_manager.arrive_all(lane_id)
+                self.smem_manager.advance()

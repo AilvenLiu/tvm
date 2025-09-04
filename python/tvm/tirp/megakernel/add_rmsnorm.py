@@ -1,10 +1,7 @@
-from typing import Any, Dict
-
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
 
-from .common import F16_BYTES, KernelConfig, Tile, ceildiv, find_power_of_two, rsqrt
+from .common import F16_BYTES, KernelConfig, Tile, SmemManager, ceildiv, find_power_of_two, rsqrt
 
 
 class AddRMSNormTile(Tile):
@@ -15,13 +12,15 @@ class AddRMSNormTile(Tile):
 
     # inplace add rms norm
     def __init__(self, rms_norm_eps, hidden_size):
+        super().__init__()
         self.EPS = rms_norm_eps
         self.hidden_size = hidden_size
     
-    def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+    def _alloc_buffer(self, smem_manager: SmemManager):
+        self.smem_manager = smem_manager
         # alloc shared memory
-        self.x_smem = pool_allocator.alloc([self.loop_inner * self.hidden_size], "float32").buffer
-        self.sum_sq_smem = pool_allocator.alloc([self.loop_inner, self.bdy], "float32").buffer
+        self.x_smem = smem_manager.alloc([self.loop_inner * self.hidden_size], "float32").buffer
+        self.sum_sq_smem = smem_manager.alloc([self.loop_inner, self.bdy], "float32").buffer
         # alloc local memory
         self.input_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16", name="input_vec")
         self.residual_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16", name="residual_vec")
@@ -36,8 +35,8 @@ class AddRMSNormTile(Tile):
 
 
     @T.macro
-    def init(self, pool_allocator: Tp.PoolAllocator):
-        self._alloc_buffer(pool_allocator)
+    def init(self, smem_manager: SmemManager):
+        self._alloc_buffer(smem_manager)
 
     # fmt: off
     @T.macro
@@ -50,6 +49,9 @@ class AddRMSNormTile(Tile):
             out_residual_buf = T.meta_var(residual if out_residual is None else out_residual)
             # add & sum square
             with T.thread():
+                if warp_id_in_cta == 0:
+                    self.smem_manager.wait_all(lane_id)
+                T.tvm_storage_sync("shared")
                 for kl in T.unroll(self.loop_inner):
                     self.sum_sq[kl, 0] = 0.0
                 self.rms_norm[0] = 0.0
@@ -134,4 +136,9 @@ class AddRMSNormTile(Tile):
                     for kl in T.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
                             Tp.copy(output_buf[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec[kl, :])
+                
+                T.tvm_storage_sync("shared")
+                if warp_id_in_cta == 0:
+                    self.smem_manager.arrive_all(lane_id)
+                self.smem_manager.advance() 
     # fmt: on

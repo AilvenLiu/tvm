@@ -1,8 +1,4 @@
-from typing import Any, Dict
-
 from tvm.script import tir as T
-from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
 
 from .common import Tile, KernelConfig
 
@@ -33,6 +29,7 @@ class AllreduceTile(Tile):
     M_TILE = 16
     N_TILE = 128
     def __init__(self, input, output, world_size=1):
+        super().__init__()
         self.input = input
         self.output = output
         self.world_size = world_size

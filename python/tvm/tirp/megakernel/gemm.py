@@ -2,12 +2,14 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 
-from .common import (
+from tvm.tirp.megakernel.common import (
     F16_BYTES,
     F32_BYTES,
     F128_BYTES,
     Barriers,
     KernelConfig,
+    ProfileEventType,
+    SmemManager,
     Tile,
     ceildiv,
     float22half2,
@@ -97,37 +99,46 @@ class GemmTile(Tile):
     # idx of current gemm tile (no matter which shape it is)
     tile_idx = None
 
-    def __init__(self, N, K, a_type, b_type, out_type, split_k_factor):
+    def __init__(self, N, K, a_type, b_type, out_type, split_k_factor, prefetch_on=False, profiler_on=False):
+        super().__init__()
         self.N = N
         self.K = K
         self.a_type = a_type
         self.b_type = b_type
         self.out_type = out_type
         self.split_k_factor = split_k_factor
+        self.prefetch_on = prefetch_on
+        self.profiler_on = profiler_on
         self.TILE_K = ceildiv(ceildiv(self.K, self.split_k_factor), self.BLK_K) * self.BLK_K
         self.PIPE_CIRCLE_NUM = (self.TILE_K // self.BLK_K) // self.SMEM_PIPE_DEPTH
         self.PIPE_REMAIN_NUM = (self.TILE_K // self.BLK_K) % self.SMEM_PIPE_DEPTH
     
         
-    def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+    def _alloc_buffer(self, smem_manager: SmemManager):
+        self.smem_manager = smem_manager
         # alloc shared memory
-        self.A_smem = pool_allocator.alloc(
+        self.A_smem = smem_manager.alloc(
             (self.SMEM_PIPE_DEPTH, self.MAX_BLK_M, self.BLK_K),
             self.a_type,
             layout=self.A_layout,
             align=1024,
+            split=self.SMEM_PIPE_DEPTH,
+            exclusive=True,
         ).buffer
-        self.B_smem = pool_allocator.alloc(
+        self.B_smem = smem_manager.alloc(
             (self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K),
             self.b_type,
             layout=self.B_layout,
             align=1024,
+            split=self.SMEM_PIPE_DEPTH,
+            exclusive=True,
         ).buffer
-        self.output_smem = pool_allocator.alloc(
+        self.output_smem = smem_manager.alloc(
             (self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N),
             self.out_type,
             layout=self.D_layout,
             align=1024,
+            exclusive=True,
         ).buffer
 
         # alloc local memory
@@ -140,21 +151,21 @@ class GemmTile(Tile):
 
 
     @classmethod
-    def _alloc_buffer_class_member(cls, pool_allocator: Tp.PoolAllocator):
+    def _alloc_buffer_class_member(cls, smem_manager: SmemManager):
         # alloc shared memory
-        cls.tmem_addr = pool_allocator.alloc([1], "uint32").buffer
-        cls.tma2mma_bar = BarTMA2MMA(pool_allocator, cls.SMEM_PIPE_DEPTH, True)
-        cls.mma2tma_bar = BarMMA2TMA(pool_allocator, cls.SMEM_PIPE_DEPTH, False)
-        cls.mma2ld_bar = BarMMA2LD(pool_allocator, cls.TMEM_PIPE_DEPTH, True)
-        cls.ld2mma_bar = BarLD2MMA(pool_allocator, cls.TMEM_PIPE_DEPTH, False)
+        cls.tmem_addr = smem_manager.alloc([1], "uint32", persistent=True).buffer
+        cls.tma2mma_bar = BarTMA2MMA(smem_manager, cls.SMEM_PIPE_DEPTH, True)
+        cls.mma2tma_bar = BarMMA2TMA(smem_manager, cls.SMEM_PIPE_DEPTH, False)
+        cls.mma2ld_bar = BarMMA2LD(smem_manager, cls.TMEM_PIPE_DEPTH, True)
+        cls.ld2mma_bar = BarLD2MMA(smem_manager, cls.TMEM_PIPE_DEPTH, False)
         # alloc local memory
         cls.tile_idx = T.local_cell("int32", "tile_idx")
         cls.phase = T.alloc_buffer((1,), "int32", scope="local", name="phase")
 
     @classmethod
     @T.macro
-    def class_init(cls, pool_allocator):
-        cls._alloc_buffer_class_member(pool_allocator)
+    def class_init(cls, smem_manager: SmemManager):
+        cls._alloc_buffer_class_member(smem_manager)
         cls.tile_idx = 0
         # alloc TMEM
         with T.warp()[0:1]:
@@ -183,8 +194,8 @@ class GemmTile(Tile):
         T.tvm_storage_sync("shared")
 
     @T.macro
-    def init(self, pool_allocator):
-        self._alloc_buffer(pool_allocator)
+    def init(self, smem_manager: SmemManager):
+        self._alloc_buffer(smem_manager)
 
     def set_tensor_map(self, A_tensor_map, B_tensor_map, output_tensor_map, A, B, output):
         self.A_tensor_map = A_tensor_map
@@ -215,15 +226,47 @@ class GemmTile(Tile):
             T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data, 
                           self.N, self.M, self.N * F16_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
 
+    # call by warp 7 (tmp load warp)
     @T.macro
-    def _run(self, m_idx, n_idx, k_idx, BLK_M, MMA_M):
+    def prefetch(self, m_idx, n_idx, k_idx, profiler_buffer, profiler_tag, profiler_write_offset):
+        with T.cta():
+            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
+            lane_id = T.thread_id([32], parent="warp")
+            if wg_id == 1 and warp_id == 3:
+                k_offset = k_idx * self.TILE_K
+                if self.PIPE_CIRCLE_NUM > 0:
+                    for ks in T.unroll(self.SMEM_PIPE_DEPTH):
+                        # GMEM -> SMEM  (tma)
+                        self.stage = ks
+                        self.smem_manager.wait_specific(lane_id, self.B_smem, ks)
+                        if self.profiler_on:
+                            T.timer_start_cuda(ProfileEventType.TMA, profiler_buffer.data, profiler_tag.data, 
+                                               profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                        if T.ptx.elect_sync():
+                            T.ptx.cp_async.bulk.tensor.g2c(
+                                2,
+                                self.B_smem.ptr_to([ks, 0, 0]),
+                                self.tma2mma_bar.mbar.ptr_to([ks]),
+                                self.B_tensor_map,
+                                self.stage * self.BLK_K + k_offset,
+                                n_idx * self.BLK_N,
+                                cta_group=KernelConfig.CTA_GROUP,
+                                cache_hint="evict_first",
+                            )
+                        if self.profiler_on:
+                            T.timer_end_cuda(ProfileEventType.TMA, profiler_buffer.data, profiler_tag.data, 
+                                             profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+
+    @T.macro
+    def _run(self, m_idx, n_idx, k_idx, BLK_M, MMA_M, profiler_buffer, profiler_tag, profiler_write_offset):
         with T.cta():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
 
-            with T.cta():
+            with T.cta():            
                 T.block_attr({"tirp.scope_partition": True})
                 with T.warpgroup()[1:2]:
                     if warp_id == 3:
@@ -234,7 +277,13 @@ class GemmTile(Tile):
                                 for ks in T.unroll(self.SMEM_PIPE_DEPTH):
                                     # GMEM -> SMEM  (tma)
                                     self.stage = ko * self.SMEM_PIPE_DEPTH + ks
-                                    self.mma2tma_bar.wait(ks, self.phase[0])
+                                    if ko > 0:
+                                        self.mma2tma_bar.wait(ks, self.phase[0])
+                                    if self.profiler_on:
+                                        T.timer_start_cuda(ProfileEventType.TMA, profiler_buffer.data, profiler_tag.data, 
+                                                           profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                                    if ko == 0:
+                                        self.smem_manager.wait_specific_one_thread(self.A_smem, ks)
                                     T.ptx.cp_async.bulk.tensor.g2c(
                                         2,
                                         self.A_smem.ptr_to([ks, 0, 0]),
@@ -245,16 +294,23 @@ class GemmTile(Tile):
                                         cta_group=KernelConfig.CTA_GROUP,
                                         cache_hint="evict_last",
                                     )
-                                    T.ptx.cp_async.bulk.tensor.g2c(
-                                        2,
-                                        self.B_smem.ptr_to([ks, 0, 0]),
-                                        self.tma2mma_bar.mbar.ptr_to([ks]),
-                                        self.B_tensor_map,
-                                        self.stage * self.BLK_K + k_offset,
-                                        n_idx * self.BLK_N,
-                                        cta_group=KernelConfig.CTA_GROUP,
-                                        cache_hint="evict_first",
-                                    )
+                                    if not self.prefetch_on and ko == 0:
+                                        self.smem_manager.wait_specific_one_thread(self.B_smem, ks)
+                                    if not self.prefetch_on or ko > 0:
+                                        # ko = 0 is prefetched before
+                                        T.ptx.cp_async.bulk.tensor.g2c(
+                                            2,
+                                            self.B_smem.ptr_to([ks, 0, 0]),
+                                            self.tma2mma_bar.mbar.ptr_to([ks]),
+                                            self.B_tensor_map,
+                                            self.stage * self.BLK_K + k_offset,
+                                            n_idx * self.BLK_N,
+                                            cta_group=KernelConfig.CTA_GROUP,
+                                            cache_hint="evict_first",
+                                        )
+                                    if self.profiler_on:
+                                        T.timer_end_cuda(ProfileEventType.TMA, profiler_buffer.data, profiler_tag.data, 
+                                                         profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
                                     self.tma2mma_bar.arrive(
                                         ks,
                                         KernelConfig.CTA_GROUP
@@ -270,6 +326,9 @@ class GemmTile(Tile):
                                     # GMEM -> SMEM  (tma)
                                     self.stage = self.PIPE_CIRCLE_NUM * self.SMEM_PIPE_DEPTH + ks
                                     self.mma2tma_bar.wait(ks, self.phase[0])
+                                    if self.profiler_on:
+                                        T.timer_start_cuda(ProfileEventType.TMA, profiler_buffer.data, profiler_tag.data, 
+                                                           profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
                                     T.ptx.cp_async.bulk.tensor.g2c(
                                         2,
                                         self.A_smem.ptr_to([ks, 0, 0]),
@@ -290,6 +349,9 @@ class GemmTile(Tile):
                                         cta_group=KernelConfig.CTA_GROUP,
                                         cache_hint="evict_first",
                                     )
+                                    if self.profiler_on:
+                                        T.timer_end_cuda(ProfileEventType.TMA, profiler_buffer.data, profiler_tag.data, 
+                                                         profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
                                     self.tma2mma_bar.arrive(
                                         ks,
                                         KernelConfig.CTA_GROUP
@@ -303,6 +365,8 @@ class GemmTile(Tile):
                                     self.tma2mma_bar.arrive_only(ks)
 
                                 self.phase[0] = self.phase[0] ^ 1
+
+                        T.ptx.bar.sync(13, 64) # notify warp 6 to release smem chunks
 
                     elif warp_id == 0:
                         descA = T.local_cell("uint64")
@@ -338,6 +402,9 @@ class GemmTile(Tile):
                                     T.ptx.tcgen05.fence.after_thread_sync()
 
                                     # issue mma
+                                    if self.profiler_on:
+                                        T.timer_start_cuda(ProfileEventType.MMA, profiler_buffer.data, profiler_tag.data, 
+                                                           profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
                                     for ki in T.unroll(self.BLK_K // self.MMA_K):
                                         T.ptx.tcgen05.encode_matrix_descriptor(
                                             T.address_of(descA),
@@ -380,6 +447,9 @@ class GemmTile(Tile):
                                                 KernelConfig.CTA_GROUP,
                                                 True,
                                             )
+                                    if self.profiler_on:
+                                        T.timer_end_cuda(ProfileEventType.MMA, profiler_buffer.data, profiler_tag.data, 
+                                                            profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
                                     self.mma2tma_bar.arrive(ks)
                                 self.phase[0] = self.phase[0] ^ 1
 
@@ -392,6 +462,9 @@ class GemmTile(Tile):
                                     T.ptx.tcgen05.fence.after_thread_sync()
 
                                     # issue mma
+                                    if self.profiler_on:
+                                        T.timer_start_cuda(ProfileEventType.MMA, profiler_buffer.data, profiler_tag.data, 
+                                                           profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
                                     for ki in T.unroll(self.BLK_K // self.MMA_K):
                                         T.ptx.tcgen05.encode_matrix_descriptor(
                                             T.address_of(descA),
@@ -433,6 +506,9 @@ class GemmTile(Tile):
                                                 KernelConfig.CTA_GROUP,
                                                 True,
                                             )
+                                    if self.profiler_on:
+                                        T.timer_end_cuda(ProfileEventType.MMA, profiler_buffer.data, profiler_tag.data, 
+                                                            profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
                                     self.mma2tma_bar.arrive(ks)
 
                                 # ensure that all mma is issued
@@ -448,9 +524,25 @@ class GemmTile(Tile):
                                 # ensure that all mma is issued
                                 self.mma2ld_bar.arrive(self.tmem_idx)
                         self.tile_idx += 1
-
+                    
+                    elif warp_id == 1:
+                        self.smem_manager.wait_unused(lane_id, self)
+                        self.smem_manager.arrive_unused(lane_id, self)
+                    elif warp_id == 2:
+                        self.phase[0] = self.phase[0] ^ (self.PIPE_CIRCLE_NUM & 1)
+                        if self.PIPE_REMAIN_NUM > 0:
+                            self.phase[0] = self.phase[0] ^ 1
+                        T.ptx.bar.sync(13, 64) # wait warp 7 to finish
+                        for ks in T.unroll(self.SMEM_PIPE_DEPTH):
+                            self.mma2tma_bar.wait(ks, self.phase[0])
+                            self.smem_manager.arrive_specific(lane_id, self.B_smem, ks)
+                            self.smem_manager.arrive_specific(lane_id, self.A_smem, ks)   
+                    
                 with T.warpgroup()[0:1]:
                     trap_when_assert_failed(self.tmem_addr[0] == 0)
+                    if warp_id == 0:
+                        self.smem_manager.wait_specific(lane_id, self.output_smem, 0)
+                    T.ptx.bar.sync(10, 128)
                     self.phase[0] = 0
                     self.tmem_idx = self.tile_idx % self.TMEM_PIPE_DEPTH
                     self.tmem_phase = (self.tile_idx // self.TMEM_PIPE_DEPTH) & 1
@@ -534,12 +626,15 @@ class GemmTile(Tile):
                         T.ptx.cp_async.bulk.wait_group(0)
                     T.ptx.bar.sync(10, 128)
                     self.tile_idx += 1
+                    if warp_id == 0:
+                        self.smem_manager.arrive_specific(lane_id, self.output_smem, 0)
 
     @T.macro
-    def run(self, m_idx, n_idx, k_idx):
+    def run(self, m_idx, n_idx, k_idx, profiler_buffer, profiler_tag, profiler_write_offset):
         if self.M <= 32:
-            self._run(m_idx, n_idx, k_idx, 32, 32)
+            self._run(m_idx, n_idx, k_idx, 32, 32, profiler_buffer, profiler_tag, profiler_write_offset)
         elif self.M <= 64:
-            self._run(m_idx, n_idx, k_idx, 64, 64)
+            self._run(m_idx, n_idx, k_idx, 64, 64, profiler_buffer, profiler_tag, profiler_write_offset)
         else:
-            self._run(m_idx, n_idx, k_idx, 128, 128)
+            self._run(m_idx, n_idx, k_idx, 128, 128, profiler_buffer, profiler_tag, profiler_write_offset)
+        self.smem_manager.advance()

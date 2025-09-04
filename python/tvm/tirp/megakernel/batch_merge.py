@@ -1,13 +1,9 @@
-from typing import Any, Dict
-from typing import Any, Dict
-
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
-from tvm.tir.event import EventImpl
 
-from .common import F16_BYTES, F32_BYTES, KernelConfig, Tile, ceildiv, exp2, find_power_of_two
+
+from .common import F16_BYTES, F32_BYTES, KernelConfig, Tile, ceildiv, SmemManager
 
 def upcast_size(dtype):
     return 128 // tvm.DataType(dtype).bits
@@ -168,13 +164,14 @@ __syncwarp();
         self.smem_size = (self.num_warps * self.num_smem_stages * self.bdy * self.head_dim * F16_BYTES +
                          KernelConfig.NUM_THREADS * F32_BYTES)
 
-    def _alloc_buffer(self, pool: Tp.PoolAllocator):
-        self.v_smem = pool.alloc([self.num_warps, self.num_smem_stages, self.bdy, self.head_dim], "float16").buffer
-        self.s_smem = pool.alloc([self.num_warps, 32], "float32").buffer
+    def _alloc_buffer(self, smem_manager: SmemManager):
+        self.smem_manager = smem_manager
+        self.v_smem = smem_manager.alloc([self.num_warps, self.num_smem_stages, self.bdy, self.head_dim], "float16").buffer
+        self.s_smem = smem_manager.alloc([self.num_warps, 32], "float32").buffer
 
     @T.macro
-    def init(self, pool: Tp.PoolAllocator):
-        self._alloc_buffer(pool)
+    def init(self, smem_manager: SmemManager):
+        self._alloc_buffer(smem_manager)
 
     @T.macro
     def run(
@@ -192,8 +189,12 @@ __syncwarp();
         with T.kernel():
             warp_id = T.warp_id([self.num_warps], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
-
+            
             with T.thread():
+                if warp_id == 0:
+                    self.smem_manager.wait_all(lane_id)
+                T.tvm_storage_sync("shared")
+                
                 tx = int_var(name="tx", val=lane_id % self.bdx)
                 ty = int_var(name="ty", val=lane_id // self.bdx)
                 worker_id = int_var(name="worker_id", val=m_idx * self.num_warps + warp_id)
@@ -276,3 +277,8 @@ __syncwarp();
 
                         final_o_buf_2d = final_o_tvm.view(-1, self.head_dim)
                         cast_store(state.o, self.vec_size, final_o_buf_2d, merge_idx_to_offset, tx[0] * self.vec_size)
+
+                T.tvm_storage_sync("shared")
+                if warp_id == 0:
+                    self.smem_manager.arrive_all(lane_id)
+                self.smem_manager.advance()

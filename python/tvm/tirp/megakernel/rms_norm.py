@@ -1,8 +1,4 @@
-from typing import Any, Dict
-
 from tvm.script import tir as T
-from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
 
 from .common import (
     F16_BYTES,
@@ -13,6 +9,7 @@ from .common import (
     float22half2,
     half22float2,
     rsqrt,
+    SmemManager,
 )
 
 
@@ -25,7 +22,8 @@ class RMSnormTile(Tile):
     min_bdy = 1
     h_tile = 1
 
-    def __init__(self, batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim,):
+    def __init__(self, batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim):
+        super().__init__()
         self.rms_norm_eps = rms_norm_eps
         self.qo_heads = qo_heads
         self.kv_heads = kv_heads
@@ -42,7 +40,7 @@ class RMSnormTile(Tile):
         self.m_split = ceildiv(self.batch_size, self.m_tile)
 
 
-    def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+    def _alloc_buffer(self, smem_manager: SmemManager):
         self.idx = T.alloc_local([1], "int32", name="idx")
         self.input_vec = T.alloc_local([self.vec_size], "float16", name="input_vec")
         self.weight_vec = T.alloc_local([self.vec_size], "float16", name="weight_vec")
@@ -53,8 +51,8 @@ class RMSnormTile(Tile):
         self.mask = T.alloc_local([1], "uint32", name="mask")
 
     @T.macro
-    def init(self, pool_allocator):
-        self._alloc_buffer(pool_allocator)
+    def init(self, smem_manager: SmemManager):
+        self._alloc_buffer(smem_manager)
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx, qkv, q_weight, k_weight):

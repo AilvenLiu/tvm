@@ -1,10 +1,6 @@
-from typing import Any, Dict
-
 from tvm.script import tir as T
-from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
 
-from .common import *
+from .common import KernelConfig, Tile, ceildiv, F16_BYTES, SmemManager
 
 
 class AppendKVTile(Tile):
@@ -21,7 +17,7 @@ class AppendKVTile(Tile):
     h_tile = 1
 
     def __init__(self, batch_size, num_attention_heads, num_key_value_heads, head_dim, page_size):
-
+        super().__init__()
         self.qo_heads = num_attention_heads
         self.kv_heads = num_key_value_heads
         self.head_dim = head_dim
@@ -35,14 +31,14 @@ class AppendKVTile(Tile):
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
 
-    def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+    def _alloc_buffer(self, smem_manager: SmemManager):
         self.idx = T.alloc_local([1], "int32", name="idx")
         self.pos = T.alloc_local([1], "int32", name="pos")
         self.vec = T.alloc_local([self.vec_size], "float16", name="vec")
 
     @T.macro
-    def init(self, pool_allocator: Tp.PoolAllocator):
-        self._alloc_buffer(pool_allocator)
+    def init(self, smem_manager: SmemManager):
+        self._alloc_buffer(smem_manager)
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx, kv_cache, qkv, pos_map):

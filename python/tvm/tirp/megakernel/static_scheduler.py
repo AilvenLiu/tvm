@@ -1,6 +1,6 @@
+
 import tvm
 from tvm.script import tir as T
-from tvm.script.ir_builder import IRBuilder
 
 from .common import JobType, KernelConfig, any_sync
 
@@ -25,7 +25,6 @@ __forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, i
 }}
 """
 
-
 nvshmem_get_ptr = """
 __forceinline__ __device__ void* nvshmem_get_ptr(void* ptr, int32_t pe) {
     return nvshmem_ptr(ptr, pe);
@@ -42,7 +41,7 @@ class Semaphore:
             self.atomic_add_int32 = atomic_add_int32
         else:
             self.atomic_add_int32 = atomic_add_int32_local
-
+    
     # cta-level interface
     @T.macro
     def semaphore_wait(self, *coord):
@@ -92,6 +91,7 @@ class Semaphore:
                         if any_sync(0xffffffff, self.state[0] == 0):
                             break
                         T.cuda.nano_sleep(40)
+    
 
     @T.macro
     def semaphore_notify(self, *coord, rank=-1):
@@ -129,6 +129,7 @@ class StaticTileScheduler:
     MAX_TASKS = 128
 
     def __init__(self, prefix: str, exec_queue, pool_allocator):
+        super().__init__()
         self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
         self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
         self.k_idx = T.local_cell("int32", name=prefix + "_k_idx")

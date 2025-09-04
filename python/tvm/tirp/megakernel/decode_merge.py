@@ -5,7 +5,7 @@ from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 from tvm.tir.event import EventImpl
 
-from .common import F32_BYTES, KernelConfig, Tile, ceildiv, exp2
+from .common import F32_BYTES, KernelConfig, SmemManager, Tile, ceildiv, exp2
 
 
 class DecodeMergeTile(Tile):
@@ -32,6 +32,7 @@ class DecodeMergeTile(Tile):
         lse_tmp_tvm: T.handle,
         lse_tvm: T.handle,
     ):
+        super().__init__()
         self.o_indptr_global = o_indptr_tvm
         self.o_tmp_global = o_tmp_tvm
         self.o_global = o_tvm
@@ -49,23 +50,23 @@ class DecodeMergeTile(Tile):
         assert lse_tvm.shape[0] == self.batch_size
         assert lse_tvm.shape[1] == self.qo_heads
 
-    def alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
+    def alloc_buffer(self, smem_manager: SmemManager):
         # allocate the smem
-        offset = pool_allocator.offset
-        self.o_tmp_smem = pool_allocator.alloc(
+        offset = smem_manager.pool_allocator.offset
+        self.o_tmp_smem = smem_manager.alloc(
             [self.bdz, self.pipe_depth, self.bdy, self.head_dim], "float32", align=16
         ).buffer
-        self.lse_tmp_smem_load = pool_allocator.alloc(
+        self.lse_tmp_smem_load = smem_manager.alloc(
             [self.bdz, self.bdy, self.bdx], "float32"
         ).buffer
         self.lse_tmp_smem_use = Tp.reshape(
             self.lse_tmp_smem_load, [self.bdz, self.bdx, self.bdy]
         ).buffer
-        pool_allocator.move_base_to(offset)
-        self.o_epi_smem = pool_allocator.alloc(
+        smem_manager.pool_allocator.move_base_to(offset)
+        self.o_epi_smem = smem_manager.alloc(
             [self.bdz, self.bdy, self.head_dim], "float32"
         ).buffer
-        self.lse_epi_smem = pool_allocator.alloc([self.bdz, self.bdy], "float32").buffer
+        self.lse_epi_smem = smem_manager.alloc([self.bdz, self.bdy], "float32").buffer
 
         # allocate the reg
         self.new_beg_batch_idx = T.alloc_local([1], "int32", name="new_beg_batch_idx")

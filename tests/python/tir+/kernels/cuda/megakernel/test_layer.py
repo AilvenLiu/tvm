@@ -64,8 +64,8 @@ NUM_TASK_ARGS = 10
 MAX_TOTAL_NUM_WORKERS = 65536
 MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)
 
-NUM_GROUPS = KernelConfig.WARP_NUMBER
-PROFILER_BUFFER_SIZE = int(1e6)
+NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
+PROFILER_BUFFER_SIZE = int(1e7)
 PROFILER_WRITE_STRIDE = KernelConfig.SM_NUMBER * NUM_GROUPS
 PROFILER_ON = False
 
@@ -91,22 +91,24 @@ class MegaKernel:
         for tile in self.tile_list:
             tile.host_init()
 
-    def class_init_all(self, pool_allocator):
+    def class_init_all(self, smem_manager: SmemManager):
         for cls in self.class_list:
-            cls.class_init(pool_allocator)
+            smem_manager.set_tile(cls)
+            cls.class_init(smem_manager)
 
     def class_finalize_all(self):
         for cls in self.class_list:
             cls.class_finalize()
 
-    def device_init_all(self, pool_allocator):
-        offset = pool_allocator.offset
+    def device_init_all(self, smem_manager: SmemManager):
+        offset = smem_manager.pool_allocator.offset
         max_offset = 0
         for tile in self.tile_list:
-            pool_allocator.move_base_to(offset)
-            tile.init(pool_allocator)
-            max_offset = max(max_offset, pool_allocator.offset)
-        pool_allocator.move_base_to(max_offset)
+            smem_manager.pool_allocator.move_base_to(offset)
+            smem_manager.set_tile(tile)
+            tile.init(smem_manager)
+            max_offset = max(max_offset, smem_manager.pool_allocator.offset)
+        smem_manager.pool_allocator.move_base_to(max_offset)
 
     def get_func_static(self):
         from tvm.tirp.megakernel.static_scheduler import Semaphore
@@ -305,12 +307,12 @@ class MegaKernel:
             append_kv_tile = T.meta_var(AppendKVTile(batch_size, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, PAGE_SIZE))
             attn_tile = T.meta_var(BatchAttnTile(PAGE_SIZE, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM))
             merge_tile = T.meta_var(BatchMergeTile(HEAD_DIM, NUM_KEY_VALUE_HEADS, NUM_ATTENTION_HEADS))
-            o_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM, "float16", "float16", "float32", SPLIT_O_PROJRCT))
+            o_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM, "float16", "float16", "float32", SPLIT_O_PROJRCT, prefetch_on=True))
             o_reduce_tile = T.meta_var(SplitKReduceTile(batch_size, HIDDEN_SIZE, "float16", SPLIT_O_PROJRCT))
             attn_add_rms_tile = T.meta_var(AddRMSNormTile(RMS_NORM_EPS, HIDDEN_SIZE))
-            gemm_gate_up_proj_tile = T.meta_var(GemmTile(INTERMEDIATE_SIZE * 2, HIDDEN_SIZE, "float16", "float16", "float16", 1))
+            gemm_gate_up_proj_tile = T.meta_var(GemmTile(INTERMEDIATE_SIZE * 2, HIDDEN_SIZE, "float16", "float16", "float16", 1, prefetch_on=True))
             silu_multiply_tile = T.meta_var(SiluMultiplyTile(batch_size, INTERMEDIATE_SIZE, "float16"))
-            gemm_down_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, INTERMEDIATE_SIZE, "float16", "float16", "float32", DOWN_PROJ_SPLIT_K_FACTOR))
+            gemm_down_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, INTERMEDIATE_SIZE, "float16", "float16", "float32", DOWN_PROJ_SPLIT_K_FACTOR, prefetch_on=True))
             down_proj_reduce_tile = T.meta_var(SplitKReduceTile(batch_size, HIDDEN_SIZE, "float16", DOWN_PROJ_SPLIT_K_FACTOR))
             mlp_add_rms_norm_tile = T.meta_var(AddRMSNormTile(RMS_NORM_EPS, HIDDEN_SIZE))
 
@@ -339,17 +341,20 @@ class MegaKernel:
 
             with T.kernel():
                 bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+                warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+                wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+                tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+                lane_id = T.thread_id([32], parent="warp")
                 profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
                 profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
                 if self.profiler_on:
-                    T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, 0)
+                    T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, warp_id)
                 with T.cta():
-                    wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-                    tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
                     buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
                     pool = T.meta_var(Tp.PoolAllocator(buf.data))
-                    self.device_init_all(pool)
-                    self.class_init_all(pool)
+                    smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, pool))
+                    self.device_init_all(smem_manager)
+                    self.class_init_all(smem_manager)
 
                     # initialize event tensors
                     evt_qkv_partial = T.meta_var(Semaphore(SPLIT_QKV_PROJECT * (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 
@@ -372,21 +377,23 @@ class MegaKernel:
                     # initialize tile scheduler
                     tile_scheduler = T.meta_var(StaticTileScheduler(prefix="attn", exec_queue=exec_queue, pool_allocator=pool))
                     tile_scheduler.init(bx, tid)
+                    smem_manager.init()
+
                     while tile_scheduler.valid():
                         if tile_scheduler.task_type == JobType.GEMM_QKV_PROJ.value:
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.GEMM_QKV_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            qkv_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                                T.timer_start_cuda(ProfileEventType.GEMM_QKV_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            qkv_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
                             if wg_id == 0:
                                 T.ptx.bar.sync(1, 128)
                                 if tid == 0:
                                     evt_qkv_partial.semaphore_notify(tile_scheduler.n_idx // (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT))
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.GEMM_QKV_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.GEMM_QKV_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.GEMM_QKV_REDUCE.value:
                             evt_qkv_partial.semaphore_wait(tile_scheduler.n_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.GEMM_QKV_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.GEMM_QKV_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             qkv_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partital_qkv_global, qkv_global.view(-1, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM).buffer)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
@@ -397,22 +404,22 @@ class MegaKernel:
                                 else:
                                     evt_v_reduce.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx - (NUM_ATTENTION_HEADS + NUM_KEY_VALUE_HEADS) // rmsnorm_tile.h_tile)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.GEMM_QKV_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.GEMM_QKV_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.Q_RMSNORM_ROPE.value:
                             evt_q_reduce.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.Q_RMSNORM_ROPE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.Q_RMSNORM_ROPE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global, )
                             rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, cos_sin_cache_global, rope_pos_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.Q_RMSNORM_ROPE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.Q_RMSNORM_ROPE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.K_RMSNORM_ROPE_APPEND_KV.value:
                             evt_k_reduce.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.K_RMSNORM_ROPE_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.K_RMSNORM_ROPE_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx+NUM_ATTENTION_HEADS//rmsnorm_tile.h_tile, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global)
                             rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx+NUM_ATTENTION_HEADS//rope_tile.h_tile, tile_scheduler.k_idx, qkv_global, cos_sin_cache_global, rope_pos_global)
                             append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, kv_cache_global, qkv_global, append_pos_global)
@@ -420,23 +427,23 @@ class MegaKernel:
                             if tid == 0:
                                 evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.K_RMSNORM_ROPE_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.K_RMSNORM_ROPE_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.V_APPEND_KV.value:
                             evt_v_reduce.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.V_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.V_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 1, kv_cache_global, qkv_global, append_pos_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.V_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.V_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.BATCH_ATTENTION.value:
                             batch_idx = T.meta_var(q_indptr_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
                             kv_idx = T.meta_var(kv_head_idx_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
                             evt_attn.semaphore_wait_warp(batch_idx // rope_tile.m_tile, kv_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             attn_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
                                                 kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
                                                 kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
@@ -452,7 +459,7 @@ class MegaKernel:
                                 if tid % (KernelConfig.WARP_NUMBER * 32) <= range_end - range_start:
                                     evt_o_proj.semaphore_notify(range_start + tid % (KernelConfig.WARP_NUMBER * 32))
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.BATCH_ATTENTION_MERGE.value:
                             worker_id = T.meta_var(tile_scheduler.m_idx * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER)
                             qo_idx = T.meta_var(worker_id % (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
@@ -460,53 +467,62 @@ class MegaKernel:
                             batch_idx = T.meta_var((worker_id % (batch_size * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))) // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
                             evt_attn_merge.semaphore_wait(batch_idx, kv_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             merge_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global,
                                                 merge_indptr_global, merge_o_indices_global)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             range_start = T.meta_var((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx) * HEAD_DIM // o_proj_tile.TILE_K)
                             range_end = T.meta_var(((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                             T.tvm_storage_sync("shared")
                             if tid <= range_end - range_start:
                                 evt_o_proj.semaphore_notify(range_start + tid)
                         elif tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
-                            evt_o_proj.semaphore_wait(tile_scheduler.k_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.GEMM_O_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            o_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            T.tvm_storage_sync("shared")
+                                T.timer_start_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            o_proj_tile.prefetch(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
+                            if self.profiler_on:
+                                T.timer_end_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            evt_o_proj.semaphore_wait_warp(tile_scheduler.k_idx)
+                            if self.profiler_on:
+                                T.timer_start_cuda(ProfileEventType.GEMM_O_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            o_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
                             if wg_id == 0:
                                 T.ptx.bar.sync(1, 128)
                                 if tid == 0:
                                     evt_o_partial.semaphore_notify(tile_scheduler.n_idx // (o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT))
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.GEMM_O_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.GEMM_O_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
                             evt_o_partial.semaphore_wait(tile_scheduler.n_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.GEMM_O_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.GEMM_O_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             o_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partial_o_global, hidden_state_attn_mlp_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_attn_add_rms.semaphore_notify(tile_scheduler.m_idx)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.GEMM_O_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.GEMM_O_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.ATTN_ADD_RMS_NORM.value:
                             evt_attn_add_rms.semaphore_wait(tile_scheduler.m_idx // o_reduce_tile.M_TILE)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.ATTN_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.ATTN_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             attn_add_rms_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_attn_mlp.semaphore_notify(0)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.ATTN_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.ATTN_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.GEMM_GATE_UP_PROJ.value:
-                            evt_attn_mlp.semaphore_wait(0)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.GEMM_GATE_UP_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            gemm_gate_up_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                                T.timer_start_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            gemm_gate_up_proj_tile.prefetch(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
+                            if self.profiler_on:
+                                T.timer_end_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            evt_attn_mlp.semaphore_wait_warp(0)
+                            if self.profiler_on:
+                                T.timer_start_cuda(ProfileEventType.GEMM_GATE_UP_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            gemm_gate_up_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
                             if wg_id == 0:
                                 T.ptx.bar.sync(1, 128)
                                 if tid == 0:
@@ -515,11 +531,11 @@ class MegaKernel:
                                     else:
                                         evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.GEMM_GATE_UP_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.GEMM_GATE_UP_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
-                            evt_gate_up_proj.semaphore_wait(tile_scheduler.m_idx)
+                            evt_gate_up_proj.semaphore_wait_warp(tile_scheduler.m_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.SPLIT_SILU_MULTIPLY, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.SPLIT_SILU_MULTIPLY, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, out_gate_up_proj_global, out_silu_multiply_global, tile_scheduler)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
@@ -528,35 +544,40 @@ class MegaKernel:
                                 for i in T.serial(0, range_end + 1 - range_start):
                                     evt_down_proj.semaphore_notify(i + range_start)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.SPLIT_SILU_MULTIPLY, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.SPLIT_SILU_MULTIPLY, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
-                            evt_down_proj.semaphore_wait(tile_scheduler.k_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.GEMM_DOWN_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                                T.timer_start_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            gemm_down_proj_tile.prefetch(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
+                            if self.profiler_on:
+                                T.timer_end_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            evt_down_proj.semaphore_wait_warp(tile_scheduler.k_idx)
+                            if self.profiler_on:
+                                T.timer_start_cuda(ProfileEventType.GEMM_DOWN_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
                             if wg_id == 0:
                                 T.ptx.bar.sync(1, 128)
                                 if tid == 0:
                                     evt_down_proj_reduce.semaphore_notify(tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N))
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.GEMM_DOWN_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.GEMM_DOWN_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.DOWN_PROJ_REDUCE.value:
                             evt_down_proj_reduce.semaphore_wait(tile_scheduler.n_idx)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             down_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partial_sum_down_proj_global, output_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_add_rms_norm.semaphore_notify(tile_scheduler.m_idx)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
                             evt_add_rms_norm.semaphore_wait(tile_scheduler.m_idx // down_proj_reduce_tile.M_TILE)
                             if self.profiler_on:
-                                T.timer_start_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_start_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             mlp_add_rms_norm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, output_global, residual_global, mlp_add_rms_weight_global)
                             if self.profiler_on:
-                                T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
 
                         tile_scheduler.next_tile()
                     self.class_finalize_all()
@@ -2053,7 +2074,7 @@ if __name__ == "__main__":
     print(src)
     # src, mod_dynamic = get_source(mega_kernel_dynamic)
 
-    for batch_size in [1,3, 5, 7, 15, 31, 63, 127]:
+    for batch_size in [1, 3, 5, 7, 15, 31, 63, 127]:
 
         print(f"batch_size: {batch_size}", flush=True)
         test(batch_size, lib_static["main"], None)
