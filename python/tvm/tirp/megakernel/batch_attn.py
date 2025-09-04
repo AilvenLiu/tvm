@@ -100,7 +100,6 @@ def cast_store(v, vec_len, buf, *indices):
             T.buffer_store(buf, v_tmp[i], indices[:-1] + (indices[-1] + i,))
 
 
-
 class BatchAttnTile(Tile):
 
     inf = 5e4
@@ -128,14 +127,14 @@ class BatchAttnTile(Tile):
     max_num_kv_splits = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)
 
     def get_permuted_offset(self, stride, i, j):
-            return i * stride + (j ^ (i % 8))
+        return i * stride + (j ^ (i % 8))
 
     def get_warp_idx_q(self, tid):
         if self.num_warps_q == 1:
             return 0
         else:
             return tid[1]
-    
+
     def get_warp_idx_kv(self, tid):
         if self.num_warps_kv == 1:
             return 0
@@ -206,30 +205,13 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
 }}
 """
         return T.cuda.func_call(func_name, source_code=source_code, return_type="float32")
-    
+
     def __init__(
         self, 
         page_size,
         qo_heads,
         kv_heads,
         head_dim,
-        q_tvm,
-        kv_tvm,
-        q_indptr_tvm,
-        kv_indptr_tvm,
-        partial_indptr_tvm,
-        kv_indices_tvm,
-        q_len_tvm,
-        kv_len_tvm,
-        q_start_tvm,
-        kv_start_tvm,
-        kv_end_tvm,
-        kv_head_idx_tvm,
-        work_indptr_tvm,
-        len_kv_chunk_tvm,
-        o_tvm,
-        partial_o_tvm,
-        partial_lse_tvm,
     ):
         super().__init__()
         self.page_size = page_size
@@ -247,48 +229,6 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         assert (self.num_warps_kv * self.cta_tile_q * self.head_dim
             == self.num_warps * self.num_mma_q * self.num_mma_d_vo * 32 * 8)
 
-        self.q_global = q_tvm
-        self.kv_global = kv_tvm
-        self.q_indptr_global = q_indptr_tvm
-        self.kv_indptr_global = kv_indptr_tvm
-        self.partial_indptr_global = partial_indptr_tvm
-        self.kv_indices_global = kv_indices_tvm
-        self.q_len_global = q_len_tvm
-        self.kv_len_global = kv_len_tvm
-        self.q_start_global = q_start_tvm
-        self.kv_start_global = kv_start_tvm
-        self.kv_end_global = kv_end_tvm
-        self.kv_head_idx_global = kv_head_idx_tvm
-        self.work_indptr_global = work_indptr_tvm
-        self.len_kv_chunk_global = len_kv_chunk_tvm
-        self.o_global = o_tvm
-        self.partial_o_global = partial_o_tvm
-        self.partial_lse_global = partial_lse_tvm
-        self.batch_size = q_tvm.shape[0]
-        assert q_tvm.shape[1] == self.qo_heads + 2 * self.kv_heads
-        assert q_tvm.shape[2] == self.head_dim
-        assert kv_tvm.shape[1] == 2
-        assert kv_tvm.shape[2] == self.kv_heads
-        assert kv_tvm.shape[3] == self.page_size
-        assert kv_tvm.shape[4] == self.head_dim
-        assert q_indptr_tvm.shape[0] == self.max_total_num_workers
-        assert kv_indptr_tvm.shape[0] == self.max_total_num_workers
-        assert partial_indptr_tvm.shape[0] == self.max_total_num_workers
-        assert q_len_tvm.shape[0] == self.max_total_num_workers
-        assert kv_len_tvm.shape[0] == self.max_total_num_workers
-        assert q_start_tvm.shape[0] == self.max_total_num_workers
-        assert kv_start_tvm.shape[0] == self.max_total_num_workers
-        assert kv_end_tvm.shape[0] == self.max_total_num_workers
-        assert kv_head_idx_tvm.shape[0] == self.max_total_num_workers
-        assert work_indptr_tvm.shape[0] == self.max_total_num_workers
-        assert len_kv_chunk_tvm.shape[0] == 2
-        assert o_tvm.shape[0] == self.batch_size
-        assert o_tvm.shape[1] == self.qo_heads
-        assert o_tvm.shape[2] == self.head_dim
-        assert partial_o_tvm.shape[0] == self.max_num_kv_splits * self.head_dim * self.kv_heads
-        assert partial_lse_tvm.shape[0] == self.max_num_kv_splits * self.kv_heads
-        
-    
     def _alloc_buffer(self, pool: Tp.PoolAllocator):
         # allocate smem
         self.q_smem = pool.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
@@ -310,9 +250,31 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
     @T.macro
     def init(self, pool_allocator):
         self._alloc_buffer(pool_allocator)
-        
+
     @T.macro
-    def run(self, m_idx, n_idx, k_idx):
+    def run(
+        self,
+        m_idx,
+        n_idx,
+        k_idx,
+        q_tvm,
+        kv_tvm,
+        q_indptr_tvm,
+        kv_indptr_tvm,
+        partial_indptr_tvm,
+        kv_indices_tvm,
+        q_len_tvm,
+        kv_len_tvm,
+        q_start_tvm,
+        kv_start_tvm,
+        kv_end_tvm,
+        kv_head_idx_tvm,
+        work_indptr_tvm,
+        len_kv_chunk_tvm,
+        o_tvm,
+        partial_o_tvm,
+        partial_lse_tvm,
+    ):
         with T.kernel():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = T.warp_id([self.num_warps_q * self.num_warps_kv], parent="warpgroup")
@@ -332,20 +294,20 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
 
                 work_idx = int_var(name="work_idx")
                 work_idx[0] = m_idx * KernelConfig.WG_NUMBER + wg_id
-                if work_idx[0] < self.work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]:
+                if work_idx[0] < work_indptr_tvm[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]:
                     with T.thread():
                         # get_block_coord
-                        q_indptr = int_var(name="q_indptr", val=self.q_indptr_global[work_idx[0]])
-                        kv_indptr = int_var(name="kv_indptr", val=self.kv_indptr_global[work_idx[0]])
-                        o_indptr = int_var(name="o_indptr", val=self.partial_indptr_global[work_idx[0]])
-                        q_len = int_var(name="q_len", val=self.q_len_global[work_idx[0]])
-                        kv_len = int_var(name="kv_len", val=self.kv_len_global[work_idx[0]])
-                        packed_qo_start = int_var(name="packed_qo_start", val=self.q_start_global[work_idx[0]])
-                        kv_start = int_var(name="kv_start", val=self.kv_start_global[work_idx[0]])
-                        kv_end = int_var(name="kv_end", val=self.kv_end_global[work_idx[0]])
-                        kv_head_idx = int_var(name="kv_head_idx", val=self.kv_head_idx_global[work_idx[0]])
-                        len_kv_chunk = int_var(name="len_kv_chunk", val=self.len_kv_chunk_global[1])
-                        
+                        q_indptr = int_var(name="q_indptr", val=q_indptr_tvm[work_idx[0]])
+                        kv_indptr = int_var(name="kv_indptr", val=kv_indptr_tvm[work_idx[0]])
+                        o_indptr = int_var(name="o_indptr", val=partial_indptr_tvm[work_idx[0]])
+                        q_len = int_var(name="q_len", val=q_len_tvm[work_idx[0]])
+                        kv_len = int_var(name="kv_len", val=kv_len_tvm[work_idx[0]])
+                        packed_qo_start = int_var(name="packed_qo_start", val=q_start_tvm[work_idx[0]])
+                        kv_start = int_var(name="kv_start", val=kv_start_tvm[work_idx[0]])
+                        kv_end = int_var(name="kv_end", val=kv_end_tvm[work_idx[0]])
+                        kv_head_idx = int_var(name="kv_head_idx", val=kv_head_idx_tvm[work_idx[0]])
+                        len_kv_chunk = int_var(name="len_kv_chunk", val=len_kv_chunk_tvm[1])
+
                         kv_chunk_idx = int_var(name="kv_chunk_idx", val=ceildiv(kv_start[0], len_kv_chunk[0]))
                         num_kv_chunks = int_var(name="num_kv_chunks", val=ceildiv(kv_len[0], len_kv_chunk[0]))
                         qo_packed_idx_base = int_var(name="qo_packed_idx_base", val=packed_qo_start[0] + self.get_warp_idx_q(self.tid) * self.num_mma_q * 16)
@@ -358,7 +320,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             for i0, i1 in T.grid(self.num_mma_q, 2):
                                 self.m[i0, i1] = T.float32(-self.inf)
                                 self.d[i0, i1] = T.float32(0)
-                        
+
                         init_states()
 
                         @T.macro
@@ -375,16 +337,16 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                             for mma_do in T.unroll(self.num_mma_d_qk // 4):
                                                 T.ptx.cp_async(self.q_smem.ptr_to([q_smem_offset_w[0] * upcast_size("float16")]),
                                                                 # TODO: optimize the addr computation here
-                                                                self.q_global.ptr_to([q_indptr[0] + q[0], kv_head_idx[0] * self.gqa_group_size + r[0], (lane_id % 8 + mma_do * 8) * upcast_size("float16")]), cp_size=16, prefetch_size=128, 
+                                                                q_tvm.ptr_to([q_indptr[0] + q[0], kv_head_idx[0] * self.gqa_group_size + r[0], (lane_id % 8 + mma_do * 8) * upcast_size("float16")]), cp_size=16, prefetch_size=128, 
                                                                 predicate=q[0] < qo_upperbound[0])
                                                 q_smem_offset_w[0] = self.advance_offset_by_column(8, q_smem_offset_w[0], mma_do)
                                         q_smem_offset_w[0] = self.advance_offset_by_row(4, self.upcast_stride_q, q_smem_offset_w[0]) - 2 * self.num_mma_d_qk
-                        
+
                         load_q_global_smem()
 
                         kv_tile_idx = int_var(name="kv_tile_idx", val=ceildiv(kv_end[0], self.cta_tile_kv) - 1 - (kv_start[0] // self.cta_tile_kv))
                         mast_tile_idx = int_var(name="mast_tile_idx", val=kv_end[0] // self.cta_tile_kv - (kv_start[0] // self.cta_tile_kv))
-                        
+
                         block_iter_base = int_var(name="block_iter_base", val=kv_indptr[0] * self.page_size + kv_start[0])
                         self.scope_sync(wg_id)
                         packed_kv_bound = int_var(name="packed_kv_bound", val=kv_indptr[0] * self.page_size + kv_len[0])
@@ -398,8 +360,8 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                                                 + self.kv_thr_layout_row * self.num_warps_q * self.num_warps_kv * i)
                                     page_iter = int_var(name="page_iter", val=T.floordiv(packed_block_iter[0], self.page_size))
                                     entry_idx = int_var(name="entry_idx", val=T.floormod(packed_block_iter[0], self.page_size))
-                                    mapped_page = T.meta_var(T.if_then_else(packed_block_iter[0] < packed_kv_bound[0], self.kv_indices_global[page_iter[0]], 0))
-                                    thr_local_kv_offset[i] = self.kv_global.elem_offset_of([mapped_page, 0, kv_head_idx[0], entry_idx[0], (lane_id % self.kv_thr_layout_col) * upcast_size("float16")])
+                                    mapped_page = T.meta_var(T.if_then_else(packed_block_iter[0] < packed_kv_bound[0], kv_indices_tvm[page_iter[0]], 0))
+                                    thr_local_kv_offset[i] = kv_tvm.elem_offset_of([mapped_page, 0, kv_head_idx[0], entry_idx[0], (lane_id % self.kv_thr_layout_col) * upcast_size("float16")])
 
                         @T.macro
                         def page_produce_kv(produce_v: bool, kv_idx_base_in, smem_offset, smem):
@@ -410,7 +372,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             with T.thread():
                                 kv_idx_base = int_var(name="kv_idx_base", val=kv_idx_base_in)
                                 kv_idx = int_var(name="kv_idx", val=kv_idx_base[0] + warp_id * 4 + lane_id // 8)
-                                kv_buf_1d = self.kv_global.view(-1)
+                                kv_buf_1d = kv_tvm.view(-1)
                                 # unroll
                                 for i in T.unroll(self.num_mma_kv * 4 // self.num_warps_q):
                                     for j in T.unroll(NUM_MMA_D // (8 // size_of("float16"))):
@@ -541,7 +503,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             prefetch_offset(block_iter_base[0] + (kv_tile_idx[0] - 1) * self.cta_tile_kv)
                             T.ptx.cp_async.wait_group(1)
                             self.scope_sync(wg_id)
-                            
+
                             compute_qk()
                             if WITH_MASK:
                                 logits_mask()
@@ -551,14 +513,14 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             page_produce_kv(False, kv_start[0] + (kv_tile_idx[0] - 1) * self.cta_tile_kv, k_smem_offset_w, self.k_smem)
                             T.ptx.cp_async.commit_group()
                             T.ptx.cp_async.wait_group(1)
-                            
+
                             self.scope_sync(wg_id)
                             compute_sfm_v()
                             self.scope_sync(wg_id)
 
                             page_produce_kv(True, kv_start[0] + (kv_tile_idx[0] - 1) * self.cta_tile_kv, v_smem_offset_w, self.v_smem)
                             T.ptx.cp_async.commit_group()
-                        
+
                         prefetch_offset(block_iter_base[0] + kv_tile_idx[0] * self.cta_tile_kv)
                         page_produce_kv(False, kv_start[0] + kv_tile_idx[0] * self.cta_tile_kv, k_smem_offset_w, self.k_smem)
                         T.ptx.cp_async.commit_group()
@@ -568,11 +530,11 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                         while kv_tile_idx[0] >= mast_tile_idx[0] and kv_tile_idx[0] > 0:
                             loop_body(True)
                             kv_tile_idx[0] -= 1
-                        
+
                         while kv_tile_idx[0] + 1 > self.num_stages:
                             loop_body(False)
                             kv_tile_idx[0] -= 1
-                        
+
                         T.ptx.cp_async.wait_group(0)
                         self.scope_sync(wg_id)
 
@@ -582,7 +544,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             update_mdo_states()
                             compute_sfm_v()
                             kv_tile_idx[0] -= 1
-                        
+
                         self.scope_sync(wg_id)
 
                         @T.macro
@@ -593,7 +555,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                     for j in T.unroll(2):
                                         if self.m[mma_q, j] != -self.inf:
                                             self.m[mma_q, j] *= sm_scale[0]
-                        
+
                         @T.macro
                         def threadblock_sync_mdo_states():
                             for mma_q in T.unroll(self.num_mma_q):
@@ -673,7 +635,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             o_smem = T.meta_var(self.smem_o)
                             warp_id_x = int_var(name="warp_id_x", val=self.get_warp_idx_q(self.tid))
                             warp_id_z = int_var(name="warp_id_z", val=self.get_warp_idx_kv(self.tid))
-                            
+
                             if warp_id_z[0] == 0:
                                 with T.thread():
                                     store_o_to_smem(o_smem)
@@ -687,7 +649,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                                 o_ptr_offset = int_var(name="o_ptr_offset", val=o_ptr_base_offset + (o_packed_idx[0] - o_packed_idx_base_cta) * o_stride_n + (lane_id % 8) * upcast_size("float16"))
                                                 for mma_do in T.unroll(self.num_mma_d_vo // 4):
                                                     if q[0] < qo_upperbound[0]:
-                                                        self.store_128b(self.partial_o_global.ptr_to([o_ptr_offset[0]]), o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]))
+                                                        self.store_128b(partial_o_tvm.ptr_to([o_ptr_offset[0]]), o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]))
                                                     o_ptr_offset[0] += 8 * upcast_size("float16")
                                                     o_smem_offset_w[0] = self.advance_offset_by_column(8, o_smem_offset_w[0], mma_do)
                                                 o_smem_offset_w[0] = self.advance_offset_by_row(4, self.upcast_stride_o, o_smem_offset_w[0]) - 2 * self.num_mma_d_vo
@@ -709,10 +671,10 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                                 o_packed_idx = int_var(name="o_packed_idx", val=o_packed_idx_base + lane_id // 8 + mma_q * 16 + j * 4)
                                                 q = int_var(name="q", val=T.floordiv(o_packed_idx[0], self.gqa_group_size))
                                                 r = int_var(name="r", val=T.floormod(o_packed_idx[0], self.gqa_group_size))
-                                                o_ptr_offset = int_var(name="o_ptr_offset", val=o_ptr_base_offset + self.o_global.elem_offset_of([q[0], r[0], (lane_id % 8) * upcast_size("float16")]))
+                                                o_ptr_offset = int_var(name="o_ptr_offset", val=o_ptr_base_offset + o_tvm.elem_offset_of([q[0], r[0], (lane_id % 8) * upcast_size("float16")]))
                                                 for mma_do in T.unroll(self.num_mma_d_vo // 4):
                                                     if q[0] < qo_upperbound[0]:
-                                                        o_buf_1d = self.o_global.view(-1)
+                                                        o_buf_1d = o_tvm.view(-1)
                                                         self.store_128b(o_buf_1d.ptr_to([o_ptr_offset[0]]), o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]))
                                                     o_ptr_offset[0] += 8 * upcast_size("float16")
                                                     o_smem_offset_w[0] = self.advance_offset_by_column(8, o_smem_offset_w[0], mma_do)
@@ -730,7 +692,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                                 r = int_var(name="r", val=T.floormod(packed_qo_idx[0], self.gqa_group_size))
                                                 if q[0] < qo_upperbound[0]:                                                    
                                                     partial_lse_buf_offset = T.meta_var((o_indptr[0] + (packed_qo_idx[0] - packed_qo_start[0]) * num_kv_chunks[0] + kv_chunk_idx[0]) * self.kv_heads + kv_head_idx[0])
-                                                    self.partial_lse_global[partial_lse_buf_offset] = ptx_log2(self.d[mma_q, j]) + T.cast(self.m[mma_q, j], "float32")
+                                                    partial_lse_tvm[partial_lse_buf_offset] = ptx_log2(self.d[mma_q, j]) + T.cast(self.m[mma_q, j], "float32")
 
                         finalize_m()
                         threadblock_sync_mdo_states()
@@ -743,7 +705,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                 write_partial_o(o_ptr_base_offset[0], num_kv_chunks[0] * self.kv_heads * self.head_dim)
                         else:
                             with T.thread():
-                                o_ptr_base_offset = int_var(name="o_ptr_base_offset", val=self.o_global.elem_offset_of([q_indptr[0], kv_head_idx[0] * self.gqa_group_size, 0]))
+                                o_ptr_base_offset = int_var(name="o_ptr_base_offset", val=o_tvm.elem_offset_of([q_indptr[0], kv_head_idx[0] * self.gqa_group_size, 0]))
                                 write_final_o(o_ptr_base_offset[0])
 
                         write_partial_lse()

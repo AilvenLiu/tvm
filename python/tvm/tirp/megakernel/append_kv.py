@@ -20,7 +20,7 @@ class AppendKVTile(Tile):
     min_bdy = 1
     h_tile = 1
 
-    def __init__(self, num_attention_heads, num_key_value_heads, head_dim, page_size, kv_cache_tvm, qkv_tvm, pos_map_tvm):
+    def __init__(self, batch_size, num_attention_heads, num_key_value_heads, head_dim, page_size):
 
         self.qo_heads = num_attention_heads
         self.kv_heads = num_key_value_heads
@@ -30,20 +30,10 @@ class AppendKVTile(Tile):
         self.bdx = self.head_dim // self.vec_size
         self.bdy = KernelConfig.NUM_THREADS // self.bdx
 
-        self.kv_cache_global = kv_cache_tvm
-        self.qkv_global = qkv_tvm
-        self.pos_map_global = pos_map_tvm
-        self.batch_size = qkv_tvm.shape[0]
+        self.batch_size = batch_size
         self.m_split = T.min(ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads), self.batch_size)
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
-        assert kv_cache_tvm.shape[1] == 2
-        assert kv_cache_tvm.shape[2] == self.kv_heads
-        assert kv_cache_tvm.shape[3] == self.page_size
-        assert kv_cache_tvm.shape[4] == self.head_dim
-        assert qkv_tvm.shape[1] == self.qo_heads + 2 * self.kv_heads
-        assert qkv_tvm.shape[2] == self.head_dim
-        assert pos_map_tvm.shape[0] == self.batch_size
 
     def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
         self.idx = T.alloc_local([1], "int32", name="idx")
@@ -55,7 +45,7 @@ class AppendKVTile(Tile):
         self._alloc_buffer(pool_allocator)
 
     @T.macro
-    def run(self, m_idx, n_idx, k_idx):
+    def run(self, m_idx, n_idx, k_idx, kv_cache, qkv, pos_map):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             tx = T.meta_var(tid % self.bdx)
@@ -73,18 +63,18 @@ class AppendKVTile(Tile):
                     if batch_idx < self.batch_size and head_idx < self.kv_heads:
 
                         self.pos[0] = T.cuda.ldg(
-                            T.address_of(self.pos_map_global[batch_idx]), "int32"
+                            T.address_of(pos_map[batch_idx]), "int32"
                         )
                         page_id = T.meta_var(self.pos[0] // self.page_size)
                         offset = T.meta_var(self.pos[0] % self.page_size)
                         for vec in T.vectorized(self.vec_size):
-                            self.vec[vec] = self.qkv_global[
+                            self.vec[vec] = qkv[
                                 batch_idx,
                                 self.qo_heads + k_idx * self.kv_heads + head_idx,
                                 stx + vec,
                             ]
                         for vec in T.vectorized(self.vec_size):
-                            self.kv_cache_global[page_id, k_idx, head_idx, offset, stx + vec] = (
+                            kv_cache[page_id, k_idx, head_idx, offset, stx + vec] = (
                                 self.vec[vec]
                             )
 

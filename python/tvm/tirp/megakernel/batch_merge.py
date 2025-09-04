@@ -155,13 +155,7 @@ __syncwarp();
 """
         return T.cuda.func_call(func_name, source_code=source_code)
 
-    def __init__(self, head_dim, num_key_value_heads, num_attention_heads,
-                 partial_o_tvm,
-                 final_o_tvm,
-                 partial_lse_tvm,
-                 num_qo_len_tvm,
-                 merge_indptr_tvm,
-                 merge_o_indices_tvm):
+    def __init__(self, head_dim, num_key_value_heads, num_attention_heads,):
         super().__init__()
         self.head_dim = head_dim
         self.kv_heads = num_key_value_heads
@@ -173,21 +167,6 @@ __syncwarp();
         self.bdy = 32 // self.bdx
         self.smem_size = (self.num_warps * self.num_smem_stages * self.bdy * self.head_dim * F16_BYTES +
                          KernelConfig.NUM_THREADS * F32_BYTES)
-           
-        self.partial_o_global = partial_o_tvm
-        self.final_o_global = final_o_tvm
-        self.partial_lse_global = partial_lse_tvm
-        self.num_qo_len_global = num_qo_len_tvm
-        self.merge_indptr_global = merge_indptr_tvm
-        self.merge_o_indices_global = merge_o_indices_tvm
-        self.batch_size = final_o_tvm.shape[0]
-        assert partial_lse_tvm.shape[0] == self.kv_heads * self.max_num_kv_splits
-        assert final_o_tvm.shape[1] == self.qo_heads
-        assert final_o_tvm.shape[2] == self.head_dim
-        assert partial_o_tvm.shape[0] == self.kv_heads * self.head_dim * self.max_num_kv_splits
-        assert num_qo_len_tvm.shape[0] == 1
-        assert merge_indptr_tvm.shape[0] == self.max_num_kv_splits
-        assert merge_o_indices_tvm.shape[0] == self.max_num_kv_splits
 
     def _alloc_buffer(self, pool: Tp.PoolAllocator):
         self.v_smem = pool.alloc([self.num_warps, self.num_smem_stages, self.bdy, self.head_dim], "float16").buffer
@@ -198,7 +177,18 @@ __syncwarp();
         self._alloc_buffer(pool)
 
     @T.macro
-    def run(self, m_idx, n_idx, k_idx):
+    def run(
+        self,
+        m_idx,
+        n_idx,
+        k_idx,
+        partial_o_tvm,
+        final_o_tvm,
+        partial_lse_tvm,
+        num_qo_len_tvm,
+        merge_indptr_tvm,
+        merge_o_indices_tvm,
+    ):
         with T.kernel():
             warp_id = T.warp_id([self.num_warps], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
@@ -207,7 +197,7 @@ __syncwarp();
                 tx = int_var(name="tx", val=lane_id % self.bdx)
                 ty = int_var(name="ty", val=lane_id // self.bdx)
                 worker_id = int_var(name="worker_id", val=m_idx * self.num_warps + warp_id)
-                num_qo_len_local = int_var(name="num_qo_len_local", val=self.num_qo_len_global[0])
+                num_qo_len_local = int_var(name="num_qo_len_local", val=num_qo_len_tvm[0])
                 if worker_id[0] < num_qo_len_local[0] * self.kv_heads:
                     with T.thread():
                         self._warp_sync()
@@ -215,20 +205,20 @@ __syncwarp();
                         kv_head_idx = int_var(name="kv_head_idx", val=T.floordiv(worker_id[0], num_qo_len_local[0]))
                         qo_head_idx = int_var(name="qo_head_idx", val=T.floormod(packed_qo_idx[0], self.gqa_group_size))
 
-                        partial_idx_to_offset = T.meta_var(lambda off: (self.merge_indptr_global[packed_qo_idx[0]] + off) * self.kv_heads + kv_head_idx[0])
-                        merge_idx_to_offset = T.meta_var((self.merge_o_indices_global[packed_qo_idx[0]] * self.kv_heads + kv_head_idx[0]) * self.gqa_group_size + qo_head_idx[0])
+                        partial_idx_to_offset = T.meta_var(lambda off: (merge_indptr_tvm[packed_qo_idx[0]] + off) * self.kv_heads + kv_head_idx[0])
+                        merge_idx_to_offset = T.meta_var((merge_o_indices_tvm[packed_qo_idx[0]] * self.kv_heads + kv_head_idx[0]) * self.gqa_group_size + qo_head_idx[0])
 
                         state = T.meta_var(self.State(self.vec_size))
                         state.init()
 
-                        num_index_sets = int_var(name="num_index_sets", val=self.merge_indptr_global[packed_qo_idx[0] + 1] - self.merge_indptr_global[packed_qo_idx[0]])
+                        num_index_sets = int_var(name="num_index_sets", val=merge_indptr_tvm[packed_qo_idx[0] + 1] - merge_indptr_tvm[packed_qo_idx[0]])
 
                         # prelogue
                         for it in range(self.num_smem_stages):
                             with T.thread():
                                 T.ptx.cp_async(
                                     self.v_smem.ptr_to([warp_id, it, ty[0], tx[0] * self.vec_size]),
-                                    self.partial_o_global.ptr_to([partial_idx_to_offset(it * self.bdy + ty[0]) * self.head_dim + tx[0] * self.vec_size]),
+                                    partial_o_tvm.ptr_to([partial_idx_to_offset(it * self.bdy + ty[0]) * self.head_dim + tx[0] * self.vec_size]),
                                     cp_size=16, prefetch_size=128,
                                     predicate=it * self.bdy + ty[0] < num_index_sets[0]
                                 )
@@ -239,7 +229,7 @@ __syncwarp();
                                 if it % self.bdx == 0:
                                     self.s_smem[warp_id, ty[0] * self.bdx + tx[0]] = T.if_then_else(
                                         it * self.bdy + (ty[0] * self.bdx + tx[0]) < num_index_sets[0],
-                                        self.partial_lse_global[partial_idx_to_offset(it * self.bdy + ty[0] * self.bdx + tx[0])],
+                                        partial_lse_tvm[partial_idx_to_offset(it * self.bdy + ty[0] * self.bdx + tx[0])],
                                         T.float32(0)
                                     )
                                     self._warp_sync()
@@ -248,7 +238,7 @@ __syncwarp();
 
                                 v = T.alloc_local([self.vec_size], "float32")
                                 cast_load(v, self.vec_size, self.v_smem, warp_id, it % self.num_smem_stages, ty[0], tx[0] * self.vec_size)
-                                
+
                                 if it * self.bdy + ty[0] < num_index_sets[0]:
                                     s = float_var(name="s", val=self.s_smem[warp_id, (it % self.bdx) * self.bdy + ty[0]])
                                     state.merge(v, s[0], 1)
@@ -256,7 +246,7 @@ __syncwarp();
 
                                 T.ptx.cp_async(
                                     self.v_smem.ptr_to([warp_id, (it % self.num_smem_stages), ty[0], tx[0] * self.vec_size]),
-                                    self.partial_o_global.ptr_to([partial_idx_to_offset((it + self.num_smem_stages) * self.bdy + ty[0]) * self.head_dim + tx[0] * self.vec_size]),
+                                    partial_o_tvm.ptr_to([partial_idx_to_offset((it + self.num_smem_stages) * self.bdy + ty[0]) * self.head_dim + tx[0] * self.vec_size]),
                                     cp_size=16, prefetch_size=128,
                                     predicate=(it + self.num_smem_stages) * self.bdy + ty[0] < num_index_sets[0]
                                 )
@@ -284,5 +274,5 @@ __syncwarp();
                             warp_sync_state()
                             state.normalize()
 
-                        final_o_buf_2d = self.final_o_global.view(-1, self.head_dim)
+                        final_o_buf_2d = final_o_tvm.view(-1, self.head_dim)
                         cast_store(state.o, self.vec_size, final_o_buf_2d, merge_idx_to_offset, tx[0] * self.vec_size)

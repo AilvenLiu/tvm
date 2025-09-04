@@ -107,7 +107,7 @@ class MegaKernel:
             tile.init(pool_allocator)
             max_offset = max(max_offset, pool_allocator.offset)
         pool_allocator.move_base_to(max_offset)
-        
+
     def get_func_static(self):
         from tvm.tirp.megakernel.static_scheduler import Semaphore
         # fmt: off
@@ -297,34 +297,22 @@ class MegaKernel:
 
             # initialize tile
             qkv_proj_tile = T.meta_var(GemmTile((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE,
-                                                "float16", "float16", "float32", SPLIT_QKV_PROJECT, 
-                                                hidden_state_global, qkv_proj_weight_global, partital_qkv_global))
-            qkv_reduce_tile = T.meta_var(SplitKReduceTile((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, 
-                                                            "float16", SPLIT_QKV_PROJECT,
-                                                            partital_qkv_global, qkv_global.view(-1, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM).buffer))
-            rmsnorm_tile = T.meta_var(RMSnormTile(RMS_NORM_EPS, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, q_rms_weight_global, k_rms_weight_global, qkv_global))
-            rope_tile = T.meta_var(RopeTile(NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, qkv_global, cos_sin_cache_global, rope_pos_global))
-            append_kv_tile = T.meta_var(AppendKVTile(NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, PAGE_SIZE, kv_cache_global, qkv_global, append_pos_global))
-            attn_tile = T.meta_var(BatchAttnTile(PAGE_SIZE, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, 
-                                                qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
-                                                kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
-                                                kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
-                                                o_global, o_partial_attn_global, lse_partial_attn_global))
-            merge_tile = T.meta_var(BatchMergeTile(HEAD_DIM, NUM_KEY_VALUE_HEADS, NUM_ATTENTION_HEADS, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global,
-                                                merge_indptr_global, merge_o_indices_global))
-            o_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM, "float16", "float16", "float32", SPLIT_O_PROJRCT, 
-                                                o_global.view(-1, NUM_ATTENTION_HEADS * HEAD_DIM).buffer, o_proj_weight_global, partial_o_global))
-            o_reduce_tile = T.meta_var(SplitKReduceTile(HIDDEN_SIZE, "float16", SPLIT_O_PROJRCT,
-                                                        partial_o_global, hidden_state_attn_mlp_global))
-            attn_add_rms_tile = T.meta_var(AddRMSNormTile(RMS_NORM_EPS, HIDDEN_SIZE, hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global))
-            gemm_gate_up_proj_tile = T.meta_var(GemmTile(INTERMEDIATE_SIZE * 2, HIDDEN_SIZE, "float16", "float16", "float16", 1, 
-                                                        hidden_state_attn_mlp_global, gate_up_weight_global, out_gate_up_proj_global))
-            silu_multiply_tile = T.meta_var(SiluMultiplyTile(INTERMEDIATE_SIZE, out_gate_up_proj_global, out_silu_multiply_global))
-            gemm_down_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, INTERMEDIATE_SIZE, "float16", "float16", "float32", DOWN_PROJ_SPLIT_K_FACTOR, 
-                                                        out_silu_multiply_global, down_weight_global, partial_sum_down_proj_global))
-            down_proj_reduce_tile = T.meta_var(SplitKReduceTile(HIDDEN_SIZE, "float16", DOWN_PROJ_SPLIT_K_FACTOR, 
-                                                                partial_sum_down_proj_global, output_global))
-            mlp_add_rms_norm_tile = T.meta_var(AddRMSNormTile(RMS_NORM_EPS, HIDDEN_SIZE, output_global, residual_global, mlp_add_rms_weight_global))
+                                                "float16", "float16", "float32", SPLIT_QKV_PROJECT))
+            qkv_reduce_tile = T.meta_var(SplitKReduceTile(batch_size,(NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, 
+                                                            "float16", SPLIT_QKV_PROJECT))
+            rmsnorm_tile = T.meta_var(RMSnormTile(batch_size, RMS_NORM_EPS, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM))
+            rope_tile = T.meta_var(RopeTile(batch_size, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM))
+            append_kv_tile = T.meta_var(AppendKVTile(batch_size, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM, PAGE_SIZE))
+            attn_tile = T.meta_var(BatchAttnTile(PAGE_SIZE, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM))
+            merge_tile = T.meta_var(BatchMergeTile(HEAD_DIM, NUM_KEY_VALUE_HEADS, NUM_ATTENTION_HEADS))
+            o_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM, "float16", "float16", "float32", SPLIT_O_PROJRCT))
+            o_reduce_tile = T.meta_var(SplitKReduceTile(batch_size, HIDDEN_SIZE, "float16", SPLIT_O_PROJRCT))
+            attn_add_rms_tile = T.meta_var(AddRMSNormTile(RMS_NORM_EPS, HIDDEN_SIZE))
+            gemm_gate_up_proj_tile = T.meta_var(GemmTile(INTERMEDIATE_SIZE * 2, HIDDEN_SIZE, "float16", "float16", "float16", 1))
+            silu_multiply_tile = T.meta_var(SiluMultiplyTile(batch_size, INTERMEDIATE_SIZE, "float16"))
+            gemm_down_proj_tile = T.meta_var(GemmTile(HIDDEN_SIZE, INTERMEDIATE_SIZE, "float16", "float16", "float32", DOWN_PROJ_SPLIT_K_FACTOR))
+            down_proj_reduce_tile = T.meta_var(SplitKReduceTile(batch_size, HIDDEN_SIZE, "float16", DOWN_PROJ_SPLIT_K_FACTOR))
+            mlp_add_rms_norm_tile = T.meta_var(AddRMSNormTile(RMS_NORM_EPS, HIDDEN_SIZE))
 
             self.tile_list.append(qkv_proj_tile)
             self.tile_list.append(qkv_reduce_tile)
@@ -342,10 +330,10 @@ class MegaKernel:
             self.tile_list.append(down_proj_reduce_tile)
             self.tile_list.append(mlp_add_rms_norm_tile)
 
-            qkv_proj_tile.set_tensor_map(A_tensor_map_qkv_proj, B_tensor_map_qkv_proj, D_tensor_map_qkv_proj)
-            o_proj_tile.set_tensor_map(A_tensor_map_o_proj, B_tensor_map_o_proj, D_tensor_map_o_proj)
-            gemm_gate_up_proj_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj)
-            gemm_down_proj_tile.set_tensor_map(A_tensor_map_down_proj, B_tensor_map_down_proj, D_tensor_map_down_proj)
+            qkv_proj_tile.set_tensor_map(A_tensor_map_qkv_proj, B_tensor_map_qkv_proj, D_tensor_map_qkv_proj, hidden_state_global, qkv_proj_weight_global, partital_qkv_global)
+            o_proj_tile.set_tensor_map(A_tensor_map_o_proj, B_tensor_map_o_proj, D_tensor_map_o_proj, o_global.view(-1, NUM_ATTENTION_HEADS * HEAD_DIM).buffer, o_proj_weight_global, partial_o_global)
+            gemm_gate_up_proj_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj, hidden_state_attn_mlp_global, gate_up_weight_global, out_gate_up_proj_global)
+            gemm_down_proj_tile.set_tensor_map(A_tensor_map_down_proj, B_tensor_map_down_proj, D_tensor_map_down_proj, out_silu_multiply_global, down_weight_global, partial_sum_down_proj_global)
 
             self.host_init_all()
 
@@ -399,7 +387,7 @@ class MegaKernel:
                             evt_qkv_partial.semaphore_wait(tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.GEMM_QKV_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            qkv_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            qkv_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partital_qkv_global, qkv_global.view(-1, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM).buffer)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 if tile_scheduler.n_idx < NUM_ATTENTION_HEADS // rmsnorm_tile.h_tile:
@@ -414,8 +402,8 @@ class MegaKernel:
                             evt_q_reduce.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.Q_RMSNORM_ROPE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global, )
+                            rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, cos_sin_cache_global, rope_pos_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
@@ -425,9 +413,9 @@ class MegaKernel:
                             evt_k_reduce.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.K_RMSNORM_ROPE_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx+NUM_ATTENTION_HEADS//rmsnorm_tile.h_tile, tile_scheduler.k_idx)
-                            rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx+NUM_ATTENTION_HEADS//rope_tile.h_tile, tile_scheduler.k_idx)
-                            append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0)
+                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx+NUM_ATTENTION_HEADS//rmsnorm_tile.h_tile, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global)
+                            rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx+NUM_ATTENTION_HEADS//rope_tile.h_tile, tile_scheduler.k_idx, qkv_global, cos_sin_cache_global, rope_pos_global)
+                            append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, kv_cache_global, qkv_global, append_pos_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
@@ -437,7 +425,7 @@ class MegaKernel:
                             evt_v_reduce.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.V_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 1)
+                            append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 1, kv_cache_global, qkv_global, append_pos_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
@@ -449,7 +437,10 @@ class MegaKernel:
                             evt_attn.semaphore_wait_warp(batch_idx // rope_tile.m_tile, kv_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            attn_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            attn_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
+                                                kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
+                                                kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
+                                                o_global, o_partial_attn_global, lse_partial_attn_global)
                             if work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER] > batch_size * NUM_KEY_VALUE_HEADS:
                                 if tid % (KernelConfig.WARP_NUMBER * 32) == 0:
                                     batch_idx = T.meta_var(q_indptr_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
@@ -470,7 +461,8 @@ class MegaKernel:
                             evt_attn_merge.semaphore_wait(batch_idx, kv_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            merge_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            merge_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global,
+                                                merge_indptr_global, merge_o_indices_global)
                             if self.profiler_on:
                                 T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
                             range_start = T.meta_var((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx) * HEAD_DIM // o_proj_tile.TILE_K)
@@ -494,7 +486,7 @@ class MegaKernel:
                             evt_o_partial.semaphore_wait(tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.GEMM_O_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            o_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            o_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partial_o_global, hidden_state_attn_mlp_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_attn_add_rms.semaphore_notify(tile_scheduler.m_idx)
@@ -504,7 +496,7 @@ class MegaKernel:
                             evt_attn_add_rms.semaphore_wait(tile_scheduler.m_idx // o_reduce_tile.M_TILE)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.ATTN_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            attn_add_rms_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            attn_add_rms_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_attn_mlp.semaphore_notify(0)
@@ -528,7 +520,7 @@ class MegaKernel:
                             evt_gate_up_proj.semaphore_wait(tile_scheduler.m_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.SPLIT_SILU_MULTIPLY, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
+                            silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, out_gate_up_proj_global, out_silu_multiply_global, tile_scheduler)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 range_start = T.meta_var(tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // gemm_down_proj_tile.TILE_K)
@@ -552,7 +544,7 @@ class MegaKernel:
                             evt_down_proj_reduce.semaphore_wait(tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.DOWN_PROJ_REDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            down_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            down_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partial_sum_down_proj_global, output_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_add_rms_norm.semaphore_notify(tile_scheduler.m_idx)
@@ -562,7 +554,7 @@ class MegaKernel:
                             evt_add_rms_norm.semaphore_wait(tile_scheduler.m_idx // down_proj_reduce_tile.M_TILE)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
-                            mlp_add_rms_norm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
+                            mlp_add_rms_norm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, output_global, residual_global, mlp_add_rms_weight_global)
                             if self.profiler_on:
                                 T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
 
@@ -586,11 +578,11 @@ class MegaKernel:
             @T.prim_func(tirp=True, private=True)
             def run_gemm_device_o_proj():
                 pass
-            
+
             @T.prim_func(tirp=True)
             def main():
                 pass
-   
+
         module: tvm.IRModule = StaticModule
         module.update_func(module.get_global_var("main"), self.get_func_static())
         return module
@@ -2061,7 +2053,7 @@ if __name__ == "__main__":
     print(src)
     # src, mod_dynamic = get_source(mega_kernel_dynamic)
 
-    for batch_size in [1]:
+    for batch_size in [1,3, 5, 7, 15, 31, 63, 127]:
 
         print(f"batch_size: {batch_size}", flush=True)
         test(batch_size, lib_static["main"], None)

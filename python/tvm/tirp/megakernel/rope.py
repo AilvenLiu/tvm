@@ -16,8 +16,7 @@ class RopeTile(Tile):
     min_bdy = 1
     h_tile = 1
 
-    def __init__(self, qo_heads, kv_heads, head_dim,
-                 qkv_tvm, cos_sin_cache_tvm, rope_pos_tvm):
+    def __init__(self, batch_size, qo_heads, kv_heads, head_dim):
         self.qo_heads = qo_heads
         self.kv_heads = kv_heads
         self.head_dim = head_dim
@@ -25,19 +24,13 @@ class RopeTile(Tile):
         self.bdx = self.head_dim // self.vec_size
         self.bdy = KernelConfig.NUM_THREADS // self.bdx
 
-        self.qkv_global = qkv_tvm
-        self.cos_sin_cache_global = cos_sin_cache_tvm
-        self.rope_pos_global = rope_pos_tvm
-        self.batch_size = qkv_tvm.shape[0]
+        self.batch_size = batch_size
         self.m_split = T.min(
             ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads), self.batch_size
         )
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
-        assert self.qo_heads + 2 * self.kv_heads == qkv_tvm.shape[1]
-        assert self.head_dim == qkv_tvm.shape[2]
-        assert self.cos_sin_cache_global.shape[1] == self.head_dim
-        assert self.rope_pos_global.shape[0] == self.batch_size
+
 
     def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
         self.idx = T.alloc_local([1], "int32", name="idx")
@@ -53,7 +46,7 @@ class RopeTile(Tile):
         self._alloc_buffer(pool_allocator)
 
     @T.macro
-    def run(self, m_idx, n_idx, k_idx):
+    def run(self, m_idx, n_idx, k_idx, qkv, cos_sin_cache, rope_pos):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             tx = T.meta_var(tid % self.bdx)
@@ -71,18 +64,18 @@ class RopeTile(Tile):
                     head_idx = T.meta_var(n_idx * self.h_tile + self.idx[0] % self.h_tile)
                     stx = T.meta_var(tx * self.vec_size)
                     cache_stx = T.meta_var(stx % half_dim)
-                    pos = T.meta_var(self.rope_pos_global[batch_idx])
+                    pos = T.meta_var(rope_pos[batch_idx])
 
                     if batch_idx < self.batch_size and head_idx < self.qo_heads + self.kv_heads:
                         # load cache
                         for kv in T.unroll(self.vec_size):
-                            self.cos[kv] = self.cos_sin_cache_global[pos, cache_stx + kv]
+                            self.cos[kv] = cos_sin_cache[pos, cache_stx + kv]
                         for kv in T.unroll(self.vec_size):
-                            self.sin[kv] = self.cos_sin_cache_global[pos, half_dim + cache_stx + kv]
+                            self.sin[kv] = cos_sin_cache[pos, half_dim + cache_stx + kv]
 
                         # load qk
                         for kv in T.unroll(self.vec_size):
-                            self.qk_vec[kv] = self.qkv_global[batch_idx, head_idx, stx + kv]
+                            self.qk_vec[kv] = qkv[batch_idx, head_idx, stx + kv]
                         for kv in T.unroll(self.vec_size // 2):
                             half22float2(
                                 T.address_of(self.qk_vec32[kv * 2]),
@@ -123,6 +116,6 @@ class RopeTile(Tile):
                                 T.address_of(self.qk_vec32[kv * 2]),
                             )
                         for kv in T.unroll(self.vec_size):
-                            self.qkv_global[batch_idx, head_idx, stx + kv] = self.qk_vec[kv]
+                            qkv[batch_idx, head_idx, stx + kv] = self.qk_vec[kv]
 
                     self.idx[0] += self.bdy

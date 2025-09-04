@@ -97,7 +97,7 @@ class GemmTile(Tile):
     # idx of current gemm tile (no matter which shape it is)
     tile_idx = None
 
-    def __init__(self, N, K, a_type, b_type, out_type, split_k_factor, A, B, output):
+    def __init__(self, N, K, a_type, b_type, out_type, split_k_factor):
         self.N = N
         self.K = K
         self.a_type = a_type
@@ -108,15 +108,6 @@ class GemmTile(Tile):
         self.PIPE_CIRCLE_NUM = (self.TILE_K // self.BLK_K) // self.SMEM_PIPE_DEPTH
         self.PIPE_REMAIN_NUM = (self.TILE_K // self.BLK_K) % self.SMEM_PIPE_DEPTH
     
-        self.A = A
-        self.B = B
-        self.output = output
-        self.M = A.shape[0]
-        assert self.N == B.shape[0]
-        assert self.K == A.shape[1]
-        assert self.a_type == A.dtype
-        assert self.b_type == B.dtype
-        assert self.out_type == output.dtype
         
     def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
         # alloc shared memory
@@ -195,10 +186,20 @@ class GemmTile(Tile):
     def init(self, pool_allocator):
         self._alloc_buffer(pool_allocator)
 
-    def set_tensor_map(self, A_tensor_map, B_tensor_map, output_tensor_map):
+    def set_tensor_map(self, A_tensor_map, B_tensor_map, output_tensor_map, A, B, output):
         self.A_tensor_map = A_tensor_map
         self.B_tensor_map = B_tensor_map
         self.output_tensor_map = output_tensor_map
+        self.M = A.shape[0]
+        self.A = A
+        self.B = B
+        self.output = output
+        assert B.shape[1] == self.K
+        assert A.shape[1] == self.K
+        assert output.shape[-1] == self.N
+        assert self.a_type == A.dtype
+        assert self.b_type == B.dtype
+        assert self.out_type == output.dtype
 
     @T.macro
     def host_init(self):

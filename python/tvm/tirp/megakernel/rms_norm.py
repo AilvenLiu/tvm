@@ -25,8 +25,7 @@ class RMSnormTile(Tile):
     min_bdy = 1
     h_tile = 1
 
-    def __init__(self, rms_norm_eps, qo_heads, kv_heads, head_dim,
-                 q_weight_tvm, k_weight_tvm, qkv_tvm):
+    def __init__(self, batch_size, rms_norm_eps, qo_heads, kv_heads, head_dim,):
         self.rms_norm_eps = rms_norm_eps
         self.qo_heads = qo_heads
         self.kv_heads = kv_heads
@@ -35,19 +34,13 @@ class RMSnormTile(Tile):
         self.bdx = self.head_dim // self.vec_size
         self.bdy = KernelConfig.NUM_THREADS // self.bdx
 
-        self.q_weight_global = q_weight_tvm
-        self.k_weight_global = k_weight_tvm
-        self.qkv_global = qkv_tvm
-        self.batch_size = qkv_tvm.shape[0]  # dynamic shape
+        self.batch_size = batch_size
         self.m_split = T.min(
             ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads), self.batch_size
         )
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
-        assert self.qo_heads + 2 * self.kv_heads == qkv_tvm.shape[1]
-        assert self.head_dim == qkv_tvm.shape[2]
-        assert self.head_dim == q_weight_tvm.shape[0]
-        assert self.head_dim == k_weight_tvm.shape[0]
+
 
     def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
         self.idx = T.alloc_local([1], "int32", name="idx")
@@ -64,7 +57,7 @@ class RMSnormTile(Tile):
         self._alloc_buffer(pool_allocator)
 
     @T.macro
-    def run(self, m_idx, n_idx, k_idx):
+    def run(self, m_idx, n_idx, k_idx, qkv, q_weight, k_weight):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             tx = T.meta_var(tid % self.bdx)
@@ -85,7 +78,7 @@ class RMSnormTile(Tile):
                     self.sum_sq[0] = 0.0
                     if batch_idx < self.batch_size and head_idx < self.kv_heads + self.qo_heads:
                         for kv in T.unroll(self.vec_size):
-                            self.input_vec[kv] = self.qkv_global[batch_idx, head_idx, st + kv]
+                            self.input_vec[kv] = qkv[batch_idx, head_idx, st + kv]
                         for kv in T.unroll(self.vec_size // 2):
                             half22float2(
                                 T.address_of(self.input_vec_f32[kv * 2]),
@@ -112,10 +105,10 @@ class RMSnormTile(Tile):
                         # handle the weight
                         if n_idx * self.h_tile < self.qo_heads:
                             for kv in T.unroll(self.vec_size):
-                                self.weight_vec[kv] = self.q_weight_global[st + kv]
+                                self.weight_vec[kv] = q_weight[st + kv]
                         else:
                             for kv in T.unroll(self.vec_size):
-                                self.weight_vec[kv] = self.k_weight_global[st + kv]
+                                self.weight_vec[kv] = k_weight[st + kv]
                         for kv in T.unroll(self.vec_size // 2):
                             half22float2(
                                 T.address_of(self.weight_vec_f32[kv * 2]),
@@ -131,6 +124,6 @@ class RMSnormTile(Tile):
                                 T.address_of(self.input_vec_f32[kv * 2]),
                             )
                         for kv in T.unroll(self.vec_size):
-                            self.qkv_global[batch_idx, head_idx, st + kv] = self.input_vec[kv]
+                            qkv[batch_idx, head_idx, st + kv] = self.input_vec[kv]
 
                     self.idx[0] += self.bdy

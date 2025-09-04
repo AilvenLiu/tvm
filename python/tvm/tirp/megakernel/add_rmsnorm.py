@@ -14,14 +14,9 @@ class AddRMSNormTile(Tile):
     bdy = KernelConfig.NUM_THREADS // bdx
 
     # inplace add rms norm
-    def __init__(self, rms_norm_eps, hidden_size, input, residual, weight):
+    def __init__(self, rms_norm_eps, hidden_size):
         self.EPS = rms_norm_eps
         self.hidden_size = hidden_size
-        self.input = input
-        self.residual = residual
-        self.weight = weight
-        self.batch_size = input.shape[0]
-        assert self.hidden_size == input.shape[1]
     
     def _alloc_buffer(self, pool_allocator: Tp.PoolAllocator):
         # alloc shared memory
@@ -46,11 +41,13 @@ class AddRMSNormTile(Tile):
 
     # fmt: off
     @T.macro
-    def run(self, m_idx, n_idx, k_idx):
+    def run(self, m_idx, n_idx, k_idx, input, residual, weight, output=None, out_residual=None):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             warp_id_in_cta = T.warp_id([self.bdy], parent="cta")
             lane_id = T.thread_id([self.bdx], parent="warp")
+            output_buf = T.meta_var(input if output is None else output)
+            out_residual_buf = T.meta_var(residual if out_residual is None else out_residual)
             # add & sum square
             with T.thread():
                 for kl in T.unroll(self.loop_inner):
@@ -67,8 +64,8 @@ class AddRMSNormTile(Tile):
 
                     for kl in T.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tp.copy(self.input_vec[kl, :], self.input[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
-                            Tp.copy(self.residual_vec[kl, :], self.residual[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
+                            Tp.copy(self.input_vec[kl, :], input[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
+                            Tp.copy(self.residual_vec[kl, :], residual[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
 
                     for kl in T.unroll(self.loop_inner):
                         Tp.cast(self.input_vec_f32[kl, :], self.input_vec[kl, :])
@@ -81,7 +78,7 @@ class AddRMSNormTile(Tile):
                             self.x_vec[kl, kv] = self.x_tmp[kl, 0]
                     for kl in T.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tp.copy(self.residual[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.residual_vec[kl, :])
+                            Tp.copy(out_residual_buf[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.residual_vec[kl, :])
                             Tp.copy(self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.x_vec[kl, :])
 
                 # warp reduce sum
@@ -125,7 +122,7 @@ class AddRMSNormTile(Tile):
                     st = T.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)
                     for kl in T.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tp.copy(self.weight_vec[kl, :], self.weight[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
+                            Tp.copy(self.weight_vec[kl, :], weight[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
                             Tp.copy(self.x_vec[kl, :], self.x_smem[st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size])
                     for kl in T.unroll(self.loop_inner):
                         Tp.cast(self.weight_vec_f32[kl, :], self.weight_vec[kl, :])
@@ -136,5 +133,5 @@ class AddRMSNormTile(Tile):
                         Tp.cast(self.input_vec[kl, :], self.input_vec_f32[kl, :])
                     for kl in T.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
-                            Tp.copy(self.input[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec[kl, :])
+                            Tp.copy(output_buf[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec[kl, :])
     # fmt: on
