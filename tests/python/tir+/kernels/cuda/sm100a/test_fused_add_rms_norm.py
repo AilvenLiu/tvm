@@ -58,6 +58,7 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
 
                 x_smem = pool.alloc([hidden_size], "float32")
                 sum_sq_smem = pool.alloc([bdy], "float32")
+                residual_smem = pool.alloc([hidden_size], "float16")
 
                 with T.thread():
                     input_vec = T.alloc_local([vec_size], "float16")
@@ -76,31 +77,28 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                     while idx[0] < batch_size:
                         # add & sum square
                         sum_sq[0] = 0.0
-                        for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
-                            for kv in T.unroll(vec_size):
-                                input_vec[kv] = 0.0
-                                residual_vec[kv] = 0.0
-                                x_vec[kv] = 0.0
+                        for ki in T.unroll(ceildiv(hidden_size, vec_size * bdx * bdy)):
                             st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
                             if st < hidden_size:
-                                Tp.copy(input_vec[:], input_global[idx[0], st:st + vec_size])
-                                Tp.copy(residual_vec[:], residual_global[idx[0], st:st + vec_size])
+                                Tp.copy(input_vec[:], input_global[idx[0], st:st + vec_size], schedule_config={"vec_len": vec_size})
+                                Tp.copy(residual_vec[:], residual_global[idx[0], st:st + vec_size], schedule_config={"vec_len": vec_size})
+                                Tp.copy(weight_vec[:], weight_global[st:st + vec_size], schedule_config={"vec_len": vec_size})
                                 Tp.cast(input_vec_f32[:], input_vec[:])
                                 Tp.cast(residual_vec_f32[:], residual_vec[:])
+                                Tp.cast(weight_vec_f32[:], weight_vec[:])
                                 for kv in T.unroll(vec_size):
                                     x_tmp[0] = input_vec_f32[kv] + residual_vec_f32[kv]
                                     sum_sq[0] += x_tmp[0] * x_tmp[0]
                                     residual_vec[kv] = T.cast(x_tmp[0], "float16")
-                                    x_vec[kv] = x_tmp[0]
-                                Tp.copy(residual_global[idx[0], st:st + vec_size], residual_vec[:])
+                                    x_vec[kv] = x_tmp[0] * weight_vec_f32[kv]
+                                Tp.copy(residual_smem[st:st + vec_size], residual_vec[:])
                                 Tp.copy(x_smem[st:st + vec_size], x_vec[:])
                         
                         # warp reduce sum
                         for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
                             sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
                         sum_sq_smem[ty] = sum_sq[0]
-                        T.ptx.bar.sync(1, bdx * bdy)
-                        T.ptx.fence.proxy("shared")
+                        T.tvm_storage_sync("shared")
                         # reduce sum through different warps
                         if ty == 0:
                             if tx < bdy:
@@ -110,29 +108,26 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                             for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
                                 sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
                             sum_sq_smem[0] = sum_sq[0]
-                        T.ptx.bar.sync(1, bdx * bdy)
-                        T.ptx.fence.proxy("shared")
+                        T.tvm_storage_sync("shared")
                         # rms norm
                         rms_norm[0] = T.rsqrt(sum_sq_smem[0] * inv_hidden_size + EPS)
 
                         # handle the weight
-                        for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
-                            for kv in T.unroll(vec_size):
-                                input_vec[kv] = 0.0
-                                weight_vec_f32[kv] = 0.0
-                                x_vec[kv] = 0.0
+                        for ki in T.unroll(ceildiv(hidden_size, vec_size * bdx * bdy)):
                             st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
                             if st < hidden_size:
-                                Tp.copy(weight_vec[:], weight_global[st:st + vec_size])
                                 Tp.copy(x_vec[:], x_smem[st:st + vec_size])
-                                Tp.cast(weight_vec_f32[:], weight_vec[:])
-                            for kv in T.unroll(vec_size):
-                                input_vec_f32[kv] = x_vec[kv] * rms_norm[0] * weight_vec_f32[kv]
-                            if st < hidden_size:
+                                for kv in T.unroll(vec_size):
+                                    input_vec_f32[kv] = x_vec[kv] * rms_norm[0]
                                 Tp.cast(input_vec[:], input_vec_f32[:])
-                                Tp.copy(input_global[idx[0], st:st + vec_size], input_vec[:])
+                                Tp.copy(input_global[idx[0], st:st + vec_size], input_vec[:], schedule_config={"vec_len": vec_size})
 
-                        T.ptx.bar.sync(1, bdx * bdy)
+                        for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
+                            st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
+                            if st < hidden_size:
+                                Tp.copy(residual_global[idx[0], st:st + vec_size], residual_smem[st:st + vec_size], schedule_config={"vec_len": vec_size})
+
+                        T.tvm_storage_sync("shared")
                         idx[0] += SM_COUNT
     # fmt: on
     return fused_add_rmsnorm
@@ -198,8 +193,8 @@ def test_fused_add_rmsnorm(hidden_size, batch_size):
     with target:
         mod = tvm.IRModule({"main": get_fused_add_rmsnorm_kernel(hidden_size)})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        # src = mod_decode_no_split_kv.mod.imports[0].inspect_source()
-        # print(src)
+        src = mod.mod.imports[0].inspect_source()
+        print(src)
 
     with ProtonContext("rms_norm"):
         test_dynamic_batch(batch_size, mod)
@@ -208,7 +203,7 @@ def test_fused_add_rmsnorm(hidden_size, batch_size):
 if __name__ == "__main__":
     import itertools
 
-    hidden_size_list = [5120, 128]
-    batch_size_list = [1, 2, 4, 8, 16, 32, 64, 128, 4113]
+    hidden_size_list = [5120]  # , 128]
+    batch_size_list = [1, 128, 4096]  # 2, 4, 8, 16, 32, 64, 128, 4113]
     for hidden_size, batch_size in itertools.product(hidden_size_list, batch_size_list):
         test_fused_add_rmsnorm(hidden_size, batch_size)
