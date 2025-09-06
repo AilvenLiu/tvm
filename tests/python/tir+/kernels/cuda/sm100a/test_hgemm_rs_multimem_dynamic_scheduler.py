@@ -28,7 +28,6 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
-from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 
@@ -346,8 +345,7 @@ class Pipeline:
 
 
 def int_var(name: str, scope="local", dtype="int32", align=4):
-    buf = T.alloc_buffer([1], dtype, scope=scope, align=align)
-    IRBuilder.current().name(name, buf)
+    buf = T.alloc_buffer([1], dtype, scope=scope, align=align, name=name)
     return buf
 
 
@@ -487,99 +485,6 @@ def consumer_fetch(
     sch_pipe.p2c_phase = sch_pipe.p2c_phase ^ 1
 
 
-class SingleDynamicTileScheduler:
-    def __init__(
-        self,
-        queue: MPMCQueue,
-        packed_value: T.Buffer,
-        sch_pipe: Pipeline,
-    ):
-        self.queue = queue
-        self.sch_pipe = sch_pipe
-        self.fetched_task_type = int_var("fetched_task_type")
-        self.fetched_task_idx0 = int_var("fetched_task_idx0")
-        self.fetched_task_idx1 = int_var("fetched_task_idx1")
-        self.rs_rem = int_var("rs_rem")
-        self.packed_value = packed_value
-        IRBuilder.current().name("packed_value", self.packed_value)
-
-    @T.macro
-    def _fetch_from_queue(self, cbx, bx, rank, warp_id_in_cta, lane_id):
-        # fetch from GEMM queue
-        if warp_id_in_cta == 11 and lane_id == 0:
-            if cbx == 0:
-                self.sch_pipe.producer_wait(0)
-                self.queue.dequeue(
-                    self.fetched_task_type,
-                    self.fetched_task_idx0,
-                    self.fetched_task_idx1,
-                    self.rs_rem,
-                    cbx,
-                    bx,
-                    rank,
-                )
-                T.cuda.func_call(
-                    "pack_values",
-                    self.rs_rem[0],
-                    self.fetched_task_type[0],
-                    self.fetched_task_idx0[0],
-                    self.fetched_task_idx1[0],
-                    self.packed_value.ptr_to([0]),
-                    source_code=pack_values,
-                )
-                T.cuda.thread_fence()
-                T.ptx.mbarrier.arrive(
-                    self.sch_pipe.mbar_p2c.ptr_to([self.sch_pipe.idx, 0]),
-                    cta_id=0,
-                    pred=True,
-                )
-                T.ptx.mbarrier.arrive(
-                    self.sch_pipe.mbar_p2c.ptr_to([self.sch_pipe.idx, 0]),
-                    cta_id=1,
-                    pred=True,
-                )
-                self.sch_pipe.c2p_phase = self.sch_pipe.c2p_phase ^ 1
-        if ENABLE_WARP_BROADCAST:
-            if lane_id == 0:
-                consumer_fetch(
-                    self.sch_pipe,
-                    self.packed_value,
-                    self.rs_rem,
-                    self.fetched_task_type,
-                    self.fetched_task_idx0,
-                    self.fetched_task_idx1,
-                )
-            T.cuda.func_call(
-                "warp_broadcast",
-                self.rs_rem.ptr_to([0]),
-                self.fetched_task_type.ptr_to([0]),
-                self.fetched_task_idx0.ptr_to([0]),
-                self.fetched_task_idx1.ptr_to([0]),
-                source_code=warp_broadcast,
-            )
-        else:
-            consumer_fetch(
-                self.sch_pipe,
-                self.packed_value,
-                self.rs_rem,
-                self.fetched_task_type,
-                self.fetched_task_idx0,
-                self.fetched_task_idx1,
-            )
-
-    @T.macro
-    def init(self, cbx, bx, rank, warp_id_in_cta, lane_id):
-        self.rs_rem[0] = -1
-        self._fetch_from_queue(cbx, bx, rank, warp_id_in_cta, lane_id)
-
-    @T.macro
-    def next_tile(self, cbx, bx, rank, warp_id_in_cta, lane_id):
-        self._fetch_from_queue(cbx, bx, rank, warp_id_in_cta, lane_id)
-
-    def valid(self):
-        return tvm.tir.any(self.fetched_task_type[0] >= 0, self.rs_rem[0] >= 0)
-
-
 class MixedDynamicTileScheduler:
     def __init__(
         self,
@@ -596,7 +501,6 @@ class MixedDynamicTileScheduler:
         self.fetched_task_idx1 = int_var("fetched_task_idx1")
         self.rs_rem = int_var("rs_rem")
         self.packed_value = packed_value
-        IRBuilder.current().name("packed_value", self.packed_value)
 
     @T.macro
     def _fetch_from_queue(self, cbx, bx, rank, warp_id_in_cta, lane_id):
@@ -690,8 +594,7 @@ class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
         self.sem = buffer
-        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4)
-        IRBuilder.current().name("semaphore_state", self.state)
+        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4, name="semaphore_state")
 
     @T.macro
     def semaphore_notify(self, signal_rank, tid, m_idx, n_idx, rs_queue):

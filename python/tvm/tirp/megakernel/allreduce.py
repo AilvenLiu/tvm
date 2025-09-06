@@ -28,24 +28,22 @@ __forceinline__ __device__ void ld_reduce_8_fp16(void* src_addr, void* dst_addr)
 class AllreduceTile(Tile):
     M_TILE = 16
     N_TILE = 128
-    def __init__(self, input, output, world_size=1):
+    def __init__(self, world_size):
         super().__init__()
-        self.input = input
-        self.output = output
         self.world_size = world_size
 
     @T.macro
-    def run(self, m_idx, n_idx, k_idx):
+    def run(self, m_idx, n_idx, k_idx, input, output):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             rank = T.nvshmem.my_pe()
             # restrict tile size so that this will not be iterated over
-            if tid < self.M_TILE * self.N_TILE // 8 and (m_idx * self.M_TILE +  (tid // (self.N_TILE // 8))) < self.input.shape[0]:
+            if tid < self.M_TILE * self.N_TILE // 8 and (m_idx * self.M_TILE +  (tid // (self.N_TILE // 8))) < input.shape[0]:
                 m_start = T.meta_var(m_idx * self.M_TILE +  (tid // (self.N_TILE // 8)))
                 n_start = T.meta_var(n_idx * self.N_TILE * self.world_size + rank * self.N_TILE + tid % (self.N_TILE // 8) * 8)
                 T.cuda.func_call(
                     "ld_reduce_8_fp16",
-                    self.input.ptr_to([m_start, n_start]),
-                    self.output.ptr_to([m_start, n_start]),
+                    input.ptr_to([m_start, n_start]),
+                    output.ptr_to([m_start, n_start]),
                     source_code=ld_reduce_8xfp16,
                 )

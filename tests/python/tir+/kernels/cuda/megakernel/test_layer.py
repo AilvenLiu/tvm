@@ -24,7 +24,7 @@ from tvm.tirp.megakernel.rms_norm import RMSnormTile
 from tvm.tirp.megakernel.rope import RopeTile
 from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
-from tvm.tirp.megakernel.support import generate_event_tensor, generate_exec_queue
+from tvm.tirp.megakernel.support import generate_event_tensor
 
 # model configs
 VOCAB_SIZE = 151936
@@ -40,22 +40,6 @@ ROPE_THETA = 1000000
 MAX_PAGE_NUM = 8192
 PAGE_SIZE = 16
 SEQ_LEN = 511
-
-problem_config = {
-    "vocab_size": VOCAB_SIZE,
-    "max_position_embeddings": MAX_POSITION_EMBEDDINGS,
-    "hidden_size": HIDDEN_SIZE,
-    "intermediate_size": INTERMEDIATE_SIZE,
-    "num_hidden_layers": NUM_HIDDEN_LAYERS,
-    "num_attention_heads": NUM_ATTENTION_HEADS,
-    "num_key_value_heads": NUM_KEY_VALUE_HEADS,
-    "head_dim": HEAD_DIM,
-    "rms_norm_eps": RMS_NORM_EPS,
-    "rope_theta": ROPE_THETA,
-    "max_page_num": 128,
-    "page_size": 16,
-    "seq_len": SEQ_LEN,
-}
 
 SPLIT_QKV_PROJECT = 3
 SPLIT_O_PROJRCT = 3
@@ -409,7 +393,7 @@ class MegaKernel:
                             evt_q_reduce.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.Q_RMSNORM_ROPE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
-                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global, )
+                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global)
                             rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, cos_sin_cache_global, rope_pos_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
@@ -420,8 +404,8 @@ class MegaKernel:
                             evt_k_reduce.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.K_RMSNORM_ROPE_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
-                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx+NUM_ATTENTION_HEADS//rmsnorm_tile.h_tile, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global)
-                            rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx+NUM_ATTENTION_HEADS//rope_tile.h_tile, tile_scheduler.k_idx, qkv_global, cos_sin_cache_global, rope_pos_global)
+                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx + NUM_ATTENTION_HEADS // rmsnorm_tile.h_tile, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global)
+                            rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx + NUM_ATTENTION_HEADS // rope_tile.h_tile, tile_scheduler.k_idx, qkv_global, cos_sin_cache_global, rope_pos_global)
                             append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, kv_cache_global, qkv_global, append_pos_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
@@ -1882,61 +1866,6 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
         torch_dev = torch.device("cuda")
         std_arg_dict = {}
 
-        def get_silu_multiply_std_impl():
-            VEC_SIZE = math.gcd(16 // F16_BYTES, INTERMEDIATE_SIZE)
-            THREAD_NUM = min(256, INTERMEDIATE_SIZE // VEC_SIZE)
-            BDX = 32
-            BDY = THREAD_NUM // BDX
-
-            @T.prim_func(tirp=True)
-            def fused_split_silu_multiply(input_cat_ptr: T.handle, output_ptr: T.handle):
-                batch_size = T.int32()
-
-                input_cat_global = T.match_buffer(
-                    input_cat_ptr,
-                    [batch_size, INTERMEDIATE_SIZE * 2],
-                    "float16",
-                    scope="global",
-                    layout="default",
-                )
-                output_global = T.match_buffer(
-                    output_ptr,
-                    [batch_size, INTERMEDIATE_SIZE],
-                    "float16",
-                    scope="global",
-                    layout="default",
-                )
-
-                with T.kernel():
-                    bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                    tx, ty = T.thread_id([BDX, BDY], parent="cta")
-                    thread_id = T.meta_var(ty * BDX + tx)
-
-                    with T.thread():
-                        idx = T.alloc_local([1], "int32")
-                        vec1 = T.alloc_local([VEC_SIZE], "float16")
-                        vec2 = T.alloc_local([VEC_SIZE], "float16")
-
-                        idx[0] = bx * BDX * BDY + thread_id
-                        while idx[0] * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                            intermediate_idx = T.meta_var((idx[0] * VEC_SIZE) % INTERMEDIATE_SIZE)
-                            batch_idx = T.meta_var((idx[0] * VEC_SIZE) // INTERMEDIATE_SIZE)
-                            for kv in T.serial(VEC_SIZE):
-                                vec1[kv] = input_cat_global[batch_idx, intermediate_idx + kv]
-                            for kv in T.serial(VEC_SIZE):
-                                vec2[kv] = input_cat_global[
-                                    batch_idx, INTERMEDIATE_SIZE + intermediate_idx + kv
-                                ]
-                            for kv in T.serial(VEC_SIZE):
-                                vec1[kv] = vec1[kv] * T.sigmoid(vec1[kv]) * vec2[kv]
-                            for kv in T.serial(VEC_SIZE):
-                                output_global[batch_idx, intermediate_idx + kv] = vec1[kv]
-                            idx[0] += KernelConfig.SM_NUMBER * BDX * BDY
-
-            return fused_split_silu_multiply
-
-        _, mod_fused_split_silu_multiply = get_source(get_silu_multiply_std_impl())
-
         def func():
             for key, value in arg_dict.items(): 
                 std_arg_dict[key] = value.clone().to(torch_dev)
@@ -2026,13 +1955,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic):
                 enable_pdl=False,
             )
             out_gate_up_proj = torch.matmul(hidden_state_attn_mlp, std_arg_dict["gate_up_weight"].T)
-            out_gate_up_proj_tvm = tvm.nd.array(out_gate_up_proj.cpu(), device=tvm.cuda(0))
-            out_silu_multiply_tvm = tvm.nd.array(
-                torch.zeros((batch_size, INTERMEDIATE_SIZE), dtype=torch.float16),
-                device=tvm.cuda(0),
+            out_silu_multiply = flashinfer.activation.silu_and_mul(
+                input=out_gate_up_proj,
             )
-            mod_fused_split_silu_multiply(out_gate_up_proj_tvm, out_silu_multiply_tvm)
-            out_silu_multiply = torch.from_numpy(out_silu_multiply_tvm.numpy()).to(torch_dev)
             output = torch.matmul(out_silu_multiply, std_arg_dict["down_weight"].T)
             flashinfer.norm.fused_add_rmsnorm(
                 input=output,

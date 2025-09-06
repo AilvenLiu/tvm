@@ -246,6 +246,13 @@ def get_source(module: "tvm.ir.IRModule"):
     src = lib.mod.imports[0].inspect_source()
     return src, lib
 
+def get_source_func(func: "tvm.tir.PrimFunc") -> str:
+    target = tvm.target.Target("cuda")
+    mod = tvm.IRModule({"main": func})
+    mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+    src = mod.mod.imports[0].inspect_source()
+    return src, mod
+
 
 class ProfileEventType(Enum):
     GEMM_GATE_UP_PROJ = 0
