@@ -819,6 +819,19 @@ TVM_DLL const Op& timer_start_cuda();
 TVM_DLL const Op& timer_end_cuda();
 
 /*!
+ * \brief tvm intrinsic for finalize the timer for profiling,
+ *        and storing profiling result in a buffer.
+ *
+ *  void timer_finalize_cuda(Var profiler_buffer, Var profiler_tag, Var profiler_write_offset,
+ *                          IntImm profiler_write_stride, Expr leader_cond) {
+ *    // each leader thread in warp group gets the time stamp and end signal, combine with the tag
+ *    // and write to corresponding offset in buffer
+ *    // each leader thread advance offset by stride
+ *  }
+ */
+TVM_DLL const Op& timer_finalize_cuda();
+
+/*!
  * \brief tvm intrinsic for cuda atomic add instruction
  */
 TVM_DLL const Op& cuda_atomic_add();

@@ -253,7 +253,8 @@ class NoOpRemover : public arith::IRMutatorWithAnalyzer {
       if (const CallNode* call = value.as<CallNode>()) {
         if (call->op.same_as(builtin::timer_init_cuda()) ||
             call->op.same_as(builtin::timer_start_cuda()) ||
-            call->op.same_as(builtin::timer_end_cuda())) {
+            call->op.same_as(builtin::timer_end_cuda()) ||
+            call->op.same_as(builtin::timer_finalize_cuda())) {
           return false;
         }
       }

@@ -3300,6 +3300,30 @@ __forceinline__ __device__ void {func_name}(int event_type, uint64_t* profiler_b
     ), ["get_time_stamp"]
 
 
+@register_codegen("timer_finalize_cuda")
+def codegen_timer_finalize_cuda(profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond):
+    func_name = "tvm_builtin_timer_finalize_cuda"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(uint64_t* profiler_buffer, uint64_t* profiler_tag, uint32_t* profiler_write_offset, int profiler_write_stride, bool leader_cond) {{
+    // timer finalize
+    __threadfence_block();
+    if (leader_cond) {{
+        profiler_buffer[profiler_write_offset[0]] = ((uint64_t)tvm_builtin_get_timestamp() << 32) | (profiler_tag[0] | 0x3);
+        profiler_write_offset[0] += profiler_write_stride;
+    }}
+}}
+"""
+    return cuda_func_call(
+        func_name,
+        profiler_buffer,
+        profiler_tag,
+        profiler_write_offset,
+        profiler_write_stride,
+        leader_cond,
+        source_code=source_code,
+    ), ["get_time_stamp"]
+
+
 ########################################################
 # CUDA C++ miscellaneous
 ########################################################

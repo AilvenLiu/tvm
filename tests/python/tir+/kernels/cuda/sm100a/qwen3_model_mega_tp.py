@@ -277,7 +277,7 @@ def load_reference_model_lib():
         embed_func = vm["embed"]
     else:
         vm = get_global_func("runtime.disco.load_vm_module")(MODEL_LIB_PATH, None)
-        mod_get_func = get_global_func("runtime.ModuleGetFunction")
+        mod_get_func = get_global_func("ffi.ModuleGetFunction")
         batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
         kv_cache_create_func_ = mod_get_func(vm, "create_flashinfer_paged_kv_cache", True)
         embed_func_ = mod_get_func(vm, "embed", True)
@@ -471,36 +471,38 @@ def get_qwen3_megakernel_mod():
             partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([DOWN_PROJ_SPLIT_K_FACTOR, batch_size, 5120]), dtype="float32", runtime_device_index=0)
             output_tensor = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
             profiler_buffer = R.builtin.alloc_tensor(R.shape([PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)
-            before_down_proj_allreduce = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
-
-            layer_res = R.call_tir_inplace(cls.layer_kernel, (
-                                        # input and output
-                                        input0, input1, output_tensor,
-                                        # weights
-                                        model_layers_0_self_attn_c_attn_weight1, model_layers_0_self_attn_o_proj_weight1,
-                                        model_layers_0_self_attn_q_norm_weight1, model_layers_0_self_attn_k_norm_weight1,
-                                        model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,
-                                        model_layers_0_post_attention_layernorm_weight1, model_norm_weight1,
-                                        # page cache, cos_sin cache and plan info
-                                        cos_sin_cache, rope_pos, kv_data[layer_id], append_pos, q_indptr, kv_indptr,
-                                        partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,
-                                        work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices,
-                                        # intermediate buffer
-                                        partital_qkv, qkv, o, o_partial_attn, les_partial, partial_o, before_down_proj_allreduce, 
-                                        hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply, 
-                                        partial_sum_down_proj, before_down_proj_allreduce,
-                                        # event tensor
-                                        etensor_qkv_partial, etensor_q_reduce, etensor_k_reduce, etensor_v_reduce, etensor_attn,
-                                        etensor_attn_merge, etensor_o_proj, etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm, 
-                                        etensor_attn_mlp, etensor_gate_up_proj_reduce, etensor_gate_up_proj, etensor_down_proj, 
-                                        etensor_down_proj_reduce, etensor_down_proj_allreduce, etensor_mlp_add_rms_norm,
-                                        # execution queue
-                                        exec_queue, profiler_buffer),
-                                        [2, 1],
-                                        out_sinfo=[
-                                            R.Tensor((batch_size, 5120), dtype="float16"), # residual
-                                            R.Tensor((batch_size, 5120), dtype="float16"), # output
-                                        ]
+            
+            layer_res = R.call_tir_inplace(
+                cls.layer_kernel, 
+                (
+                    # input and output
+                    input0, input1, output_tensor,
+                    # weights
+                    model_layers_0_self_attn_c_attn_weight1, model_layers_0_self_attn_o_proj_weight1,
+                    model_layers_0_self_attn_q_norm_weight1, model_layers_0_self_attn_k_norm_weight1,
+                    model_layers_0_mlp_gate_up_proj_weight1, model_layers_0_mlp_down_proj_weight1,
+                    model_layers_0_post_attention_layernorm_weight1, model_norm_weight1,
+                    # page cache, cos_sin cache and plan info
+                    cos_sin_cache, rope_pos, kv_data[layer_id], append_pos, q_indptr, kv_indptr,
+                    partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,
+                    work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices,
+                    # intermediate buffer
+                    partital_qkv, qkv, o, o_partial_attn, les_partial, partial_o, before_o_allreduce, 
+                    hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply, 
+                    partial_sum_down_proj, before_down_proj_allreduce,
+                    # event tensor
+                    etensor_qkv_partial, etensor_q_reduce, etensor_k_reduce, etensor_v_reduce, etensor_attn,
+                    etensor_attn_merge, etensor_o_proj, etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm, 
+                    etensor_attn_mlp, etensor_gate_up_proj_reduce, etensor_gate_up_proj, etensor_down_proj, 
+                    etensor_down_proj_reduce, etensor_down_proj_allreduce, etensor_mlp_add_rms_norm,
+                    # execution queue
+                    exec_queue, profiler_buffer
+                ),
+                [2, 1],
+                out_sinfo=[
+                    R.Tensor((batch_size, 5120), dtype="float16"), # residual
+                    R.Tensor((batch_size, 5120), dtype="float16"), # output
+                ]
             )
             R.output(layer_res)
         return layer_res
@@ -819,7 +821,7 @@ def get_qwen3_megakernel_batch_decode_func():
         cos_sin_cache_func = vm["cos_sin_cache_func"]
     else:
         vm = get_global_func("runtime.disco.load_vm_module")(MEGA_LIB_PATH, None)
-        mod_get_func = get_global_func("runtime.ModuleGetFunction")
+        mod_get_func = get_global_func("ffi.ModuleGetFunction")
         batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
         cos_sin_cache_func_ = mod_get_func(vm, "cos_sin_cache_func", True)
         batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)

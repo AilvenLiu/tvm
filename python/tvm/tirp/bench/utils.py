@@ -93,6 +93,7 @@ class EventType(Enum):
     kBegin = 0
     kEnd = 1
     kInstant = 2
+    kFinalize = 3
 
 
 def decode_tag(tag, num_groups):
@@ -128,6 +129,7 @@ def export_to_perfetto_trace(
 
     tid_map = {}
     track_map = {}
+    finish_idx = set()
     for block_idx in range(num_blocks):
         pid = tgen.create_group(f"block_{block_idx}")
         for group_idx in range(num_groups):
@@ -141,6 +143,15 @@ def export_to_perfetto_trace(
         tag = int(tag)
         timestamp = int(timestamp)
         block_idx, group_idx, event_idx, event_type = decode_tag(tag, num_groups)
+        
+        if event_type == EventType.kFinalize.value:
+            finish_idx.add((block_idx, group_idx))
+            if len(finish_idx) == num_blocks * num_groups:
+                break
+        else:
+            if (block_idx, group_idx) in finish_idx:
+                continue
+        
         event = event_type_names[event_idx]
         tid = tid_map[(block_idx, group_idx)]
 

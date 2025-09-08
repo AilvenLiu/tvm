@@ -85,6 +85,7 @@ from .op import (
     timer_init_cuda,
     timer_start_cuda,
     timer_end_cuda,
+    timer_finalize_cuda,
 )
 from .op import vectorlow, vectorhigh, vectorcombine
 from .op import infinity, reinterpret

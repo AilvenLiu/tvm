@@ -5207,6 +5207,44 @@ def timer_end_cuda(
         profiler_write_stride,
         leader_cond,
     )
+    
+
+def timer_finalize_cuda(profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond):
+    """TVM intrinsic for finalizing the CUDA profiler, and store profiling result in a buffer.
+
+    Parameters
+    ----------
+    profiler_buffer: Var
+        The buffer to store the profiling result.
+
+    profiler_tag: Var
+        Buffer of length 1 storing the base tag of the current thread.
+
+    profiler_write_offset: Var
+        Buffer of length 1 storing the offset in buffer to write the next
+        profiling result for the current thread.
+
+    profiler_write_stride: int
+        The stride to advance in buffer in the next write.
+
+    leader_cond: PrimExpr
+        The condition to check if the current thread is the leader.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+
+    return call_intrin(
+        "handle",
+        "tir.timer_finalize_cuda",
+        profiler_buffer,
+        profiler_tag,
+        profiler_write_offset,
+        profiler_write_stride,
+        leader_cond,
+    )
 
 
 def cuda_atomic_add(res_addr, value):

@@ -1,8 +1,11 @@
 from enum import Enum
+import threading
+from typing import List
 
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 
 def ceildiv(a, b):
@@ -478,3 +481,29 @@ class SmemManager:
     def arrive_unused(self, lane_id, cur_tile: Tile):
         if lane_id < self.chunk_num and lane_id > self.tiles[str(cur_tile)][0]:
             T.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
+
+
+class ProfilerHandler:
+    def __init__(self, profiler_on, trigger_count, profiler_layer_id: List[int] = [], dir_path: str = ""):
+        self.counter = 0
+        self.profiler_on = profiler_on
+        self.trigger_count = trigger_count
+        self.profiler_layer_id = profiler_layer_id
+        self.lock = threading.Lock()
+        self.dir_path = dir_path
+
+    def export_trace(self, profiler_buffer):
+        if self.profiler_on:
+            with self.lock:
+                self.counter += 1
+                current_run = self.counter    
+            if current_run == self.trigger_count:        
+                for layer_id in self.profiler_layer_id:
+                    export_to_perfetto_trace(
+                        profiler_buffer[layer_id].numpy(),
+                        f"{self.dir_path}/qwen3-model-mega-layer{layer_id}.perfetto-trace",
+                        event_type_names,
+                    )
+    
+    def initialize(self):
+        tvm.register_func("megakernel.export_trace", self.export_trace)

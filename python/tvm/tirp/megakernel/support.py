@@ -420,8 +420,8 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
             worker_id = m * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
             kv_idx = worker_id // (batch_size * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
             qo_idx = worker_id % (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)
-            range_start = (kv_idx * NUM_KEY_VALUE_HEADS + qo_idx) * HEAD_DIM // o_proj_tile_k
-            range_end = ((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile_k
+            range_start = (kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx) * HEAD_DIM // o_proj_tile_k
+            range_end = ((kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile_k
             for i in range(range_start, range_end + 1):
                 etensor_o_proj[i] += 1
         etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
@@ -429,8 +429,8 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
         for m in range(KernelConfig.WG_NUMBER * ceildiv(attn_task_num, KernelConfig.WG_NUMBER)):
             kv_idx = kv_head_idx[m]
             batch_idx = q_indptr[m]
-            range_start = kv_idx * NUM_KEY_VALUE_HEADS * HEAD_DIM // o_proj_tile_k
-            range_end = ((kv_idx + 1) * NUM_KEY_VALUE_HEADS * HEAD_DIM - 1) // o_proj_tile_k
+            range_start = kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
+            range_end = ((kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1) // o_proj_tile_k
             for i in range(range_start, range_end + 1):
                 etensor_o_proj[i] += 1
         etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)

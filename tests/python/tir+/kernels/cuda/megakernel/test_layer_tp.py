@@ -7,6 +7,7 @@ import flashinfer
 
 import tvm
 import tvm.testing
+from tvm.script import ir as I
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
@@ -104,7 +105,7 @@ class MegaKernel:
         from tvm.tirp.megakernel.static_scheduler import Semaphore
         # fmt: off
         @T.prim_func(tirp=True)
-        def mega_kernel(
+        def main(
             # input and output
             hidden_state_ptr: T.handle, # input: read-only
             residual_ptr: T.handle, # input & output: inplace update
@@ -179,6 +180,9 @@ class MegaKernel:
             exec_queue_ptr: T.handle,
             profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")
         ):
+            T.func_attr(
+                {"global_symbol": "main", "target": T.target("cuda")}
+            )
 
             # match buffer
             batch_size = T.int32()
@@ -466,8 +470,8 @@ class MegaKernel:
                                     kv_idx = T.meta_var(kv_head_idx_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
                                     evt_attn_merge.semaphore_notify(batch_idx, kv_idx)
                             else:
-                                range_start = T.meta_var(kv_idx * NUM_KEY_VALUE_HEADS * HEAD_DIM // o_proj_tile.TILE_K)
-                                range_end = T.meta_var(((kv_idx + 1) * NUM_KEY_VALUE_HEADS * HEAD_DIM - 1) // o_proj_tile.TILE_K)
+                                range_start = T.meta_var(kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
+                                range_end = T.meta_var(((kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                                 if tid % (KernelConfig.WARP_NUMBER * 32) <= range_end - range_start:
                                     evt_o_proj.semaphore_notify(range_start + tid % (KernelConfig.WARP_NUMBER * 32))
                             if self.profiler_on:
@@ -484,8 +488,8 @@ class MegaKernel:
                                                 merge_indptr_global, merge_o_indices_global)
                             if self.profiler_on:
                                 T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
-                            range_start = T.meta_var((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx) * HEAD_DIM // o_proj_tile.TILE_K)
-                            range_end = T.meta_var(((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
+                            range_start = T.meta_var((kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx) * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_end = T.meta_var(((kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                             T.tvm_storage_sync("shared")
                             if tid <= range_end - range_start:
                                 evt_o_proj.semaphore_notify(range_start + tid)
@@ -622,9 +626,24 @@ class MegaKernel:
                                 T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
 
                         tile_scheduler.next_tile()
+                    if self.profiler_on:
+                        T.timer_finalize_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                     self.class_finalize_all()
             # fmt: on
-        return mega_kernel
+        return main
+
+    def get_module_static(self):
+
+        @I.ir_module(tirp=True)
+        class StaticModule:
+
+            @T.prim_func(tirp=True)
+            def main():
+                pass
+
+        module: tvm.IRModule = StaticModule
+        module.update_func(module.get_global_var("main"), self.get_func_static())
+        return module
 
     def get_func_dynamic(self):
         from tvm.tirp.megakernel.dynamic_scheduler import Semaphore
@@ -1822,7 +1841,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
 
             def func():
                 nonlocal iter
-                rt_mod["mega_kernel"](
+                rt_mod["main"](
                     # input and output
                     disco_arg_dict["hidden_state"],
                     disco_arg_dict[f"residual_{iter}"],
@@ -2321,9 +2340,9 @@ if __name__ == "__main__":
 
     mega_kernel_wrapper_static = MegaKernel(profiler_on=PROFILER_ON)
     # mega_kernel_wrapper_dynamic = MegaKernel(profiler_on=PROFILER_ON)
-    mega_kernel_static = mega_kernel_wrapper_static.get_func_static()
+    mega_static_module = mega_kernel_wrapper_static.get_module_static()
     # mega_kernel_dynamic = mega_kernel_wrapper_dynamic.get_func_dynamic()
-    src, mod_static = get_source_func(mega_kernel_static)
+    src, lib_static = get_source(mega_static_module)
     print(src)
     # src, mod_dynamic = get_source(mega_kernel_dynamic)
     devices = list(np.arange(WORLD_SIZE))
@@ -2338,6 +2357,6 @@ if __name__ == "__main__":
     for batch_size in [1, 3, 5, 7, 15, 31, 63, 127]:
 
         print(f"batch_size: {batch_size}", flush=True)
-        test(batch_size, mod_static, None, sess)
+        test(batch_size, lib_static, None, sess)
 
     sess.shutdown()

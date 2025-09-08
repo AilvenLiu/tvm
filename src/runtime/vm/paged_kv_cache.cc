@@ -1430,9 +1430,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
             int worker_id = m * kNumWarpgroupPerBlock * kNumWarpPerWarpgroup;
             int kv_idx = worker_id / (cur_batch_size_ * (num_qo_heads_ / num_kv_heads_));
             int qo_idx = worker_id % (num_qo_heads_ / num_kv_heads_);
-            int range_start = (kv_idx * num_kv_heads_ + qo_idx) * v_head_dim_ / o_proj_tile_k;
+            int range_start = (kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx) * v_head_dim_ / o_proj_tile_k;
             int range_end = 
-                ((kv_idx * num_kv_heads_ + qo_idx + kNumWarpgroupPerBlock * kNumWarpPerWarpgroup) * v_head_dim_ - 1) / o_proj_tile_k;
+                ((kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx + kNumWarpgroupPerBlock * kNumWarpPerWarpgroup) * v_head_dim_ - 1) / o_proj_tile_k;
             for (int i = range_start; i <= range_end; ++i) {
               TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
               TVM_FFI_ICHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
@@ -1446,9 +1446,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
           for (int m = 0; m < kNumWarpgroupPerBlock * ceildiv(attn_task_num_, kNumWarpgroupPerBlock); ++m) {
             int kv_idx = kv_head_idx_data[m];
-            int range_start = (kv_idx * num_kv_heads_ * v_head_dim_) / o_proj_tile_k;
+            int range_start = (kv_idx * (num_qo_heads_ / num_kv_heads_) * v_head_dim_) / o_proj_tile_k;
             int range_end =
-                ((kv_idx + 1) * num_kv_heads_ * v_head_dim_ - 1) / o_proj_tile_k;
+                ((kv_idx + 1) * (num_qo_heads_ / num_kv_heads_) * v_head_dim_ - 1) / o_proj_tile_k;
             for (int i = range_start; i <= range_end; ++i) {
               TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
               TVM_FFI_ICHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
@@ -1484,6 +1484,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       }
  
       etensor_attn_merge_host_.resize(num_layers_ * cur_batch_size_ * num_kv_heads_);
+      etensor_attn_merge_host_.fill(0);
       for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
         for (int m = 0; m < kNumWarpgroupPerBlock * ceildiv(attn_task_num_, kNumWarpgroupPerBlock); ++m) {
           int batch_idx = q_indptr_data[m];        

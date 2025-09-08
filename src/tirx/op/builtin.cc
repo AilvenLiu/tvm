@@ -377,6 +377,9 @@ TIR_DEFINE_BUILTIN_FUNC(timer_start_cuda)
 TIR_DEFINE_BUILTIN_FUNC(timer_end_cuda)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(timer_finalize_cuda)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(cuda_atomic_add)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

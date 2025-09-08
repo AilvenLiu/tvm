@@ -2684,6 +2684,7 @@ print_buffer = _op_wrapper(_tir_op.print_buffer)
 timer_init_cuda = _op_wrapper(_tir_op.timer_init_cuda)
 timer_start_cuda = _op_wrapper(_tir_op.timer_start_cuda)
 timer_end_cuda = _op_wrapper(_tir_op.timer_end_cuda)
+timer_finalize_cuda = _op_wrapper(_tir_op.timer_finalize_cuda)
 
 reinterpret = _dtype_forward(_tir_op.reinterpret)
 call_extern = _dtype_forward(_tir_op.call_extern)
@@ -3059,6 +3060,7 @@ __all__ = float_types + [
     "timer_init_cuda",
     "timer_start_cuda",
     "timer_end_cuda",
+    "timer_finalize_cuda",
 ]
 
 __all__ += [

@@ -53,6 +53,7 @@ PROFILER_BUFFER_SIZE = int(1e7)
 PROFILER_WRITE_STRIDE = KernelConfig.SM_NUMBER * NUM_GROUPS
 PROFILER_ON = False
 
+# TODO: fix abnormal slowness of batch-attn on the first tile
 
 class MegaKernel:
     class_list = [
@@ -438,8 +439,8 @@ class MegaKernel:
                                     kv_idx = T.meta_var(kv_head_idx_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
                                     evt_attn_merge.semaphore_notify(batch_idx, kv_idx)
                             else:
-                                range_start = T.meta_var(kv_idx * NUM_KEY_VALUE_HEADS * HEAD_DIM // o_proj_tile.TILE_K)
-                                range_end = T.meta_var(((kv_idx + 1) * NUM_KEY_VALUE_HEADS * HEAD_DIM - 1) // o_proj_tile.TILE_K)
+                                range_start = T.meta_var(kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile.TILE_K)
+                                range_end = T.meta_var(((kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                                 if tid % (KernelConfig.WARP_NUMBER * 32) <= range_end - range_start:
                                     evt_o_proj.semaphore_notify(range_start + tid % (KernelConfig.WARP_NUMBER * 32))
                             if self.profiler_on:
@@ -456,8 +457,8 @@ class MegaKernel:
                                                 merge_indptr_global, merge_o_indices_global)
                             if self.profiler_on:
                                 T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION_MERGE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
-                            range_start = T.meta_var((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx) * HEAD_DIM // o_proj_tile.TILE_K)
-                            range_end = T.meta_var(((kv_idx * NUM_KEY_VALUE_HEADS + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
+                            range_start = T.meta_var((kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx) * HEAD_DIM // o_proj_tile.TILE_K)
+                            range_end = T.meta_var(((kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
                             T.tvm_storage_sync("shared")
                             if tid <= range_end - range_start:
                                 evt_o_proj.semaphore_notify(range_start + tid)
@@ -564,25 +565,18 @@ class MegaKernel:
                                 T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
 
                         tile_scheduler.next_tile()
+                    
+                    if self.profiler_on:
+                        T.timer_finalize_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                    
                     self.class_finalize_all()
             # fmt: on
         return main
 
-    def get_static_module(self):
+    def get_module_static(self):
 
         @I.ir_module(tirp=True)
         class StaticModule:
-            @T.prim_func(tirp=True, private=True)
-            def run_batch_attn_device():
-                pass
-
-            @T.prim_func(tirp=True, private=True)
-            def run_gemm_device_qkv_proj():
-                pass
-
-            @T.prim_func(tirp=True, private=True)
-            def run_gemm_device_o_proj():
-                pass
 
             @T.prim_func(tirp=True)
             def main():
@@ -1993,7 +1987,7 @@ if __name__ == "__main__":
 
     mega_kernel_wrapper_static = MegaKernel(profiler_on=PROFILER_ON)
     # mega_kernel_wrapper_dynamic = MegaKernel(problem_config, profiler_on=PROFILER_ON)
-    mega_static_module = mega_kernel_wrapper_static.get_static_module()
+    mega_static_module = mega_kernel_wrapper_static.get_module_static()
     # mega_kernel_dynamic = mega_kernel_wrapper_dynamic.get_func_dynamic()
     src, lib_static = get_source(mega_static_module)
     print(src)
