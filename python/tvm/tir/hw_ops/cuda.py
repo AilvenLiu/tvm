@@ -3093,6 +3093,54 @@ __forceinline__ __device__ void {func_name}(void* src, const CUtensorMap& tensor
     return cuda_func_call(func_name, src_ptr, tensormap, *coords, source_code=source_code)
 
 
+@register_codegen("ptx_cp_async_bulk_tensor_global_to_cluster_prefetch")
+def codegen_ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, *args):
+    dim = int(dim)
+    coords, cache_hint = args[:-1], args[-1]
+    if len(coords) != dim:
+        raise ValueError(
+            f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."
+        )
+    if cache_hint != "":
+        cache_hint = str(cache_hint)[1:-1]
+
+    func_name = f"ptx_cp_async_bulk_tensor_global_to_cluster_prefetch_{dim}d" + (
+        f"_{cache_hint}" if cache_hint != "" else ""
+    )
+    coord_arg_list = ", ".join([f"int coord{i}" for i in range(dim)])
+
+    coord_indices = (
+        [str(1 + i) for i in range(dim)] if cache_hint == "" else [str(2 + i) for i in range(dim)]
+    )
+    arg_template = "{%" + ", %".join(coord_indices) + "}"
+
+    coord_list_constraints = ", ".join([f'"r"(coord{i})' for i in range(dim)])
+
+    if cache_hint != "":
+        cache_hint_str = f".L2::cache_hint"
+    else:
+        cache_hint_str = ""
+
+    cache_hint_operand = f", %1" if cache_hint != "" else ""
+    cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
+
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(const CUtensorMap& tensormap, {coord_arg_list}) {{
+  unsigned int src_addr = __cvta_generic_to_shared(src);
+  uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&tensormap);
+  __asm__ __volatile__(
+    "cp.async.bulk.prefetch.tensor.{dim}d.L2.global.tile{cache_hint_str}"
+    " [%0, {arg_template}]{cache_hint_operand};"
+    :
+    : "l"(tensormap_addr){cache_hint_value},
+      {coord_list_constraints}
+    : "memory"
+  );
+}}
+"""
+    return cuda_func_call(func_name, tensormap, *coords, source_code=source_code)
+
+
 @register_codegen("ptx_cp_async_bulk_commit_group")
 def codegen_ptx_cp_async_bulk_tensor_commit_group():
     func_name = "ptx_cp_async_bulk_tensor_commit_group"

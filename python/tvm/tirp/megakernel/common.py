@@ -242,6 +242,18 @@ __forceinline__ __device__ void block_fence() {{
   __threadfence_block();
 }}
 """)
+    
+@T.macro
+def grid_sync():
+    cta_id = T.cluster_id([KernelConfig.SM_NUMBER], parent="kernel")
+    T.cuda.func_call(
+        "grid_sync",
+        source_code=f"""
+__forceinline__ __device__ void grid_sync() {{
+  auto g = cooperative_groups::this_thread_block();
+  g.sync();
+}}
+""")        
 
 def get_source(module: "tvm.ir.IRModule"):
     target = tvm.target.Target("cuda")
@@ -287,6 +299,11 @@ class ProfileEventType(Enum):
     PREFETCH_SMEM = 26
     TMA = 27
     MMA = 28
+    ATTN_INIT = 29  
+    ATTN_LOAD_Q = 30
+    ATTN_LOOP_BODY = 31
+    ATTN_COMPUTE_QKV = 32
+    ATTN_WRITE_BACK = 33
 
 
 event_type_names = [
@@ -318,7 +335,12 @@ event_type_names = [
     "BATCH_ATTENTION_MERGE",
     "PREFETCH_SMEM",
     "TMA",
-    "MMA"
+    "MMA",
+    "ATTN_INIT",
+    "ATTN_LOAD_Q",
+    "ATTN_LOOP_BODY",
+    "ATTN_COMPUTE_QKV",
+    "ATTN_WRITE_BACK",
 ]
 
 

@@ -424,15 +424,23 @@ class MegaKernel:
                             if self.profiler_on:
                                 T.timer_end_cuda(ProfileEventType.V_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.BATCH_ATTENTION.value:
+                            if self.profiler_on:
+                                T.timer_start_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            attn_tile.prelogue(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
+                                                kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
+                                                kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
+                                                o_global, o_partial_attn_global, lse_partial_attn_global, profiler_buffer, profiler_tag, profiler_write_offset)
+                            if self.profiler_on:
+                                T.timer_end_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             batch_idx = T.meta_var(q_indptr_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
                             kv_idx = T.meta_var(kv_head_idx_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
                             evt_attn.semaphore_wait_warp(batch_idx // rope_tile.m_tile, kv_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             attn_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
-                                                kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
-                                                kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
-                                                o_global, o_partial_attn_global, lse_partial_attn_global)
+                                            kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
+                                            kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
+                                            o_global, o_partial_attn_global, lse_partial_attn_global, profiler_buffer, profiler_tag, profiler_write_offset)
                             if work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER] > batch_size * NUM_KEY_VALUE_HEADS:
                                 if tid % (KernelConfig.WARP_NUMBER * 32) == 0:
                                     batch_idx = T.meta_var(q_indptr_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])

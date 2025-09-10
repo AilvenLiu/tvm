@@ -2342,6 +2342,7 @@ class CpAsyncBulkTensorNamespace:
     def __init__(self):
         self.g2c = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_global_to_cluster)
         self.s2g = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_shared_to_global)
+        self.g2c_prefetch = _op_wrapper(_tir_op.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch)
 
 
 class CpAsyncMbarrierNamespace:

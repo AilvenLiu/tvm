@@ -3732,6 +3732,37 @@ def ptx_cp_async_bulk_tensor_shared_to_global(dim, src_ptr, tensormap, *coords, 
     )
 
 
+def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, *coords, cache_hint=""):
+    """TVM intrinsic to call cp.async.bulk.prefetch.tensor.dim.L2.global.tile
+
+    Parameters
+    ----------
+    dim : int
+        The dimension of the source tensor.
+
+    tensormap: Var
+        The tensor map.
+
+    coords : List[PrimExpr]
+        specifies the starting coordinates in the tensor data in the global memory
+
+    cache_hint : str
+        The cache hint.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin(
+        "",
+        "tir.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch",
+        dim, tensormap,
+        *coords,
+        cache_hint
+    )
+
+
 def ptx_cp_async_bulk_commit_group():
     """TVM intrinsic to call cp.async.bulk.tensor.commit_group
 

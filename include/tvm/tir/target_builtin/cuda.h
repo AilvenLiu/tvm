@@ -265,6 +265,18 @@ TVM_DLL const Op& ptx_cp_async_bulk_tensor_global_to_cluster();
 TVM_DLL const Op& ptx_cp_async_bulk_tensor_shared_to_global();
 
 /*!
+ * \brief tvm instrinsics to call
+ * cp.async.bulk.prefetch.tensor.dim.L2.global.tile
+ *
+ * TMA alignment requirement:
+ * https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#table-alignment-multi-dim-tma
+ *
+ * ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(int dim, Var tensormap_ptr, int...coords,
+ * string cache_hint)
+ */
+TVM_DLL const Op& ptx_cp_async_bulk_tensor_global_to_cluster_prefetch();
+
+/*!
  * \brief tvm instrinsics to call cp.async.bulk.commit_group
  *
  * ptx_cp_async_bulk_commit_group()
