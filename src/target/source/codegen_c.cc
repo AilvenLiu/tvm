@@ -799,9 +799,11 @@ void CodeGenC::VisitExpr_(const BufferLoadNode* op, std::ostream& os) {  // NOLI
       TVM_FFI_ICHECK(ramp);
       arith::ModularSet me = arith::Analyzer().modular_set(ramp->base);
       // The condition: {k * coeff + base} divisible by the alignment for any k
-      if (me->coeff % op->dtype.lanes() == 0 && me->base % op->dtype.lanes() == 0) {
-        can_vector_load = true;
+      if (!(me->coeff % op->dtype.lanes() == 0 && me->base % op->dtype.lanes() == 0)) {
+        LOG(WARNING) << "WARNNING: TVM can not prove that this vector load "
+                     << ffi::GetRef<BufferLoad>(op) << " is aligned to " << op->dtype;
       }
+      can_vector_load = true;
     }
 
     if (value_dtype.is_float4_e2m1fn() && lanes != 1) {

@@ -34,23 +34,23 @@ TVM_FFI_STATIC_INIT_BLOCK({
 
 /******** Definition of Execution Scope ********/
 // ExecScope
-ExecScope::ExecScope(String name, Array<ScopeIdDef> scope_id_def) {
+ExecScope::ExecScope(ffi::String name, ffi::Array<ScopeIdDef> scope_id_def) {
   CHECK(Valid(name)) << "ValueError: Unknown scope name: " << name;
-  auto n = make_object<ExecScopeNode>();
+  auto n = ffi::make_object<ExecScopeNode>();
   n->name = std::move(name);
   n->scope_id_def = std::move(scope_id_def);
   data_ = std::move(n);
 }
 
-ExecScope ExecScope::Create(String name) { return ExecScope(name); }
+ExecScope ExecScope::Create(ffi::String name) { return ExecScope(name); }
 
-bool ExecScope::Valid(const String& name) { return ScopeOrder.find(name) != ScopeOrder.end(); }
+bool ExecScope::Valid(const ffi::String& name) { return ScopeOrder.find(name) != ScopeOrder.end(); }
 
-bool ExecScopeNode::Is(const String& name) const { return name == this->name; }
+bool ExecScopeNode::Is(const ffi::String& name) const { return name == this->name; }
 
 bool ExecScopeNode::Is(const ExecScope& other) const { return Is(other->name); }
 
-bool ExecScopeNode::Higher(const String& other) const {
+bool ExecScopeNode::Higher(const ffi::String& other) const {
   CHECK(ExecScope::Valid(this->name)) << "ValueError: Unknown scope name";
   CHECK(ExecScope::Valid(other)) << "ValueError: Unknown scope name";
   return ScopeOrder.at(this->name) < ScopeOrder.at(other);
@@ -60,23 +60,25 @@ bool ExecScopeNode::Higher(const ExecScope& other) const { return Higher(other->
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.ExecScope", [](String name) { return ExecScope(name); });
+  refl::GlobalDef().def("tirx.ExecScope", [](ffi::String name) { return ExecScope(name); });
 });
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.ExecScopeCreate", [](String name) { return ExecScope::Create(name); });
+  refl::GlobalDef().def("tirx.ExecScopeCreate",
+                        [](ffi::String name) { return ExecScope::Create(name); });
 });
 
 // ExecScopeSlice
-ExecScopeSlice::ExecScopeSlice(Variant<Array<Range>, PrimExpr> slices,
-                               Optional<Array<PrimExpr>> extents, String parent, String cur) {
-  auto n = make_object<ExecScopeSliceNode>();
+ExecScopeSlice::ExecScopeSlice(ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
+                               ffi::Optional<ffi::Array<PrimExpr>> extents, ffi::String parent,
+                               ffi::String cur) {
+  auto n = ffi::make_object<ExecScopeSliceNode>();
   n->name = cur;
   n->parent = parent;
   n->extents = std::move(extents);
   if (extents.defined()) {
-    if (auto slices_ = slices.as<Array<Range>>()) {
+    if (auto slices_ = slices.as<ffi::Array<Range>>()) {
       CHECK_EQ(slices_.value().size(), extents.value().size())
           << "ValueError: Number of slices must match the number of extents";
     } else if (auto cond = slices.as<PrimExpr>()) {
@@ -98,16 +100,17 @@ bool ExecScopeSliceNode::Is(const ExecScope& other) const {
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "tirx.ExecScopeSlice",
-      [](Variant<Array<Range>, PrimExpr> slices, Optional<Array<PrimExpr>> extents, String parent,
-         String cur) { return ExecScopeSlice(slices, extents, parent, cur); });
+  refl::GlobalDef().def("tirx.ExecScopeSlice", [](ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
+                                                 ffi::Optional<ffi::Array<PrimExpr>> extents,
+                                                 ffi::String parent, ffi::String cur) {
+    return ExecScopeSlice(slices, extents, parent, cur);
+  });
 });
 
 /******** Definition of Var ********/
 // ScopePair
-ScopePair::ScopePair(String parent, String cur) {
-  auto n = make_object<ScopePairNode>();
+ScopePair::ScopePair(ffi::String parent, ffi::String cur) {
+  auto n = ffi::make_object<ScopePairNode>();
   n->parent = parent;
   n->cur = cur;
   data_ = std::move(n);
@@ -116,12 +119,12 @@ ScopePair::ScopePair(String parent, String cur) {
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ScopePair",
-                        [](String parent, String cur) { return ScopePair(parent, cur); });
+                        [](ffi::String parent, ffi::String cur) { return ScopePair(parent, cur); });
 });
 
 // ScopeIdDef
-ScopeIdDef::ScopeIdDef(Array<Var> ids, Array<PrimExpr> extents, ScopePair scope) {
-  auto n = make_object<ScopeIdDefNode>();
+ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopePair scope) {
+  auto n = ffi::make_object<ScopeIdDefNode>();
   CHECK_EQ(ids.size(), extents.size()) << "ValueError: Number of dimensions must match, got "
                                        << ids.size() << " and " << extents.size();
   n->def_ids = std::move(ids);
@@ -142,12 +145,12 @@ PrimExpr ScopeIdDef::fused_extent() const {
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ScopeIdDef",
-                        [](Array<Var> vars, Array<PrimExpr> extents, ScopePair scope) {
+                        [](ffi::Array<Var> vars, ffi::Array<PrimExpr> extents, ScopePair scope) {
                           return ScopeIdDef(vars, extents, scope);
                         });
 });
 
-bool ScopeIdDefVerifier::Verify(const Array<ScopeIdDef>& defs) {
+bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
   id_set.clear();
   arith::Analyzer ana;
   std::queue<ScopeIdDef> queue;
@@ -178,14 +181,14 @@ bool ScopeIdDefVerifier::Verify(const Array<ScopeIdDef>& defs) {
   return true;
 }
 
-Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
+ffi::Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
   return (lhs->scope->cur == rhs->scope->parent)
              ? ScopeIdDef({Var("")}, {lhs.fused_extent() * rhs.fused_extent()},
                           ScopePair(lhs->scope->parent, rhs->scope->cur))
-             : Optional<ScopeIdDef>(std::nullopt);
+             : ffi::Optional<ScopeIdDef>(std::nullopt);
 }
 
-Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
+ffi::Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
   if (lhs->scope->parent == rhs->scope->parent &&
       ExecScope::Create(rhs->scope->cur)->Higher(lhs->scope->cur)) {
     return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
@@ -200,17 +203,17 @@ Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
 }
 
 /******** ScopeIdResolve related functions ********/
-ScopeIdResolveTable::Registry& ScopeIdResolveTable::Register(String parent, String cur,
-                                                             String target_kind) {
+ScopeIdResolveTable::Registry& ScopeIdResolveTable::Register(ffi::String parent, ffi::String cur,
+                                                             ffi::String target_kind) {
   const auto& key = GetKey(ScopePair(parent, cur), target_kind);
   auto* table = Global();
   CHECK(table->resolve_map_.count(key) == 0) << "Duplicate registration for " << key;
   return table->resolve_map_[key];
 }
 
-Array<PrimExpr> ScopeIdResolveTable::Resolve(const ScopePair& scope,
-                                             const Optional<Array<PrimExpr>>& extents, int out_dim,
-                                             String target_kind, const LaunchParams& params) {
+ffi::Array<PrimExpr> ScopeIdResolveTable::Resolve(
+    const ScopePair& scope, const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
+    ffi::String target_kind, const LaunchParams& params) {
   auto table = ScopeIdResolveTable::Global();
   const auto& key = GetKey(scope, target_kind);
   auto it = table->resolve_map_.find(key);
@@ -256,13 +259,13 @@ inline PrimExpr GetLinearThreadIndex(const LaunchParams& params) {
 }
 
 TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cta", "cuda")
-    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+    .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
             const LaunchParams& params) -> Array<PrimExpr> {
       return Trivial3DResolve(params, "blockIdx.", out_dim);
     });
 
 TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cluster", "cuda")
-    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+    .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
             const LaunchParams& params) -> Array<PrimExpr> {
       CHECK_LE(out_dim, 3) << "ValueError: kernel->cluster can only have 3 dimensions for now";
       Array<PrimExpr> ret;
@@ -275,7 +278,7 @@ TVM_REGISTER_SCOPEID_RESOLVE("kernel", "cluster", "cuda")
     });
 
 TVM_REGISTER_SCOPEID_RESOLVE("cluster", "cta", "cuda")
-    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
+    .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
             const LaunchParams& params) -> Array<PrimExpr> {
       return Trivial3DResolve(params, "clusterCtaIdx.", out_dim);
     });
@@ -283,7 +286,7 @@ TVM_REGISTER_SCOPEID_RESOLVE("cluster", "cta", "cuda")
 // Macro to reduce boilerplate for single-dimension checks and thread calculations
 #define REGISTER_1D_THREAD_SCOPE(from, to, divisor, modifier)                                     \
   TVM_REGISTER_SCOPEID_RESOLVE(from, to, "cuda")                                                  \
-      .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,                              \
+      .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,                    \
               const LaunchParams& params) -> Array<PrimExpr> {                                    \
         CHECK_EQ(out_dim, 1) << "ValueError: " from "->" to " can only have 1 dimension for now"; \
         arith::Analyzer ana;                                                                      \
@@ -303,10 +306,10 @@ REGISTER_1D_THREAD_SCOPE("warpgroup", "thread", 1, mod128);
 REGISTER_1D_THREAD_SCOPE("warp", "thread", 1, mod32);
 
 TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
-    .set([](const Optional<Array<PrimExpr>>& extents, int out_dim,
-            const LaunchParams& params) -> Array<PrimExpr> {
+    .set([](const ffi::Optional<ffi::Array<PrimExpr>>& extents, int out_dim,
+            const LaunchParams& params) -> ffi::Array<PrimExpr> {
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirxxxxxx
+}  // namespace tirxxxxxxx
 }  // namespace tvm

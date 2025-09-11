@@ -626,11 +626,11 @@ def test():
 
     DEV = tvm.cuda(0)
     A_fp8, B_fp8, A_scale, B_scale, C, C_standard, C_ref = prepare_data()
-    A_tvm = tvm.nd.array(A_fp8, device=DEV)
-    B_tvm = tvm.nd.array(B_fp8, device=DEV)
-    A_scale_tvm = tvm.nd.array(A_scale, device=DEV)
-    B_scale_tvm = tvm.nd.array(B_scale, device=DEV)
-    C_tvm = tvm.nd.array(C, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_fp8, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_fp8, device=DEV)
+    A_scale_tvm = tvm.runtime.tensor(A_scale, device=DEV)
+    B_scale_tvm = tvm.runtime.tensor(B_scale, device=DEV)
+    C_tvm = tvm.runtime.tensor(C, device=DEV)
     target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": deepgemm})

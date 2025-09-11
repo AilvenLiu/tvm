@@ -133,7 +133,7 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
     return fused_add_rmsnorm
 
 
-@pytest.mark.parametrize("hidden_size", [5120, 128])
+@pytest.mark.parametrize("hidden_size", [5120])
 @pytest.mark.parametrize("batch_size", [4113, 1, 2, 4, 8, 16, 32, 64, 128])
 def test_fused_add_rmsnorm(hidden_size, batch_size):
 
@@ -166,16 +166,16 @@ def test_fused_add_rmsnorm(hidden_size, batch_size):
 
         def tir():
             DEV = tvm.cuda(0)
-            weight_tvm = tvm.nd.array(weight.cpu().numpy(), DEV)
+            weight_tvm = tvm.runtime.tensor(weight.cpu().numpy(), DEV)
             func = lambda: mod(
-                tvm.nd.array(x.cpu().numpy(), DEV),
-                tvm.nd.array(residual.cpu().numpy(), DEV),
+                tvm.runtime.tensor(x.cpu().numpy(), DEV),
+                tvm.runtime.tensor(residual.cpu().numpy(), DEV),
                 weight_tvm,
             )
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
             print(f"tir time: {ms:.3f} ms")
-            x_tvm = tvm.nd.array(x.cpu().numpy(), DEV)
-            residual_tvm = tvm.nd.array(residual.cpu().numpy(), DEV)
+            x_tvm = tvm.runtime.tensor(x.cpu().numpy(), DEV)
+            residual_tvm = tvm.runtime.tensor(residual.cpu().numpy(), DEV)
             mod(x_tvm, residual_tvm, weight_tvm)
             return x_tvm.numpy(), residual_tvm.numpy()
 

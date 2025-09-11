@@ -903,8 +903,7 @@ class BreakDocNode : public StmtDocNode {
     refl::ObjectDef<BreakDocNode>();
   }
 
-  static constexpr const char* _type_key = "script.printer.BreakDoc";
-  TVM_DECLARE_FINAL_OBJECT_INFO(BreakDocNode, StmtDocNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.printer.BreakDoc", BreakDocNode, StmtDocNode);
 };
 
 /*!
@@ -918,7 +917,7 @@ class BreakDoc : public StmtDoc {
    * \brief Constructor of BreakDoc.
    */
   explicit BreakDoc();
-  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(BreakDoc, StmtDoc, BreakDocNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(BreakDoc, StmtDoc, BreakDocNode);
 };
 
 /*!
@@ -933,8 +932,7 @@ class ContinueDocNode : public StmtDocNode {
     refl::ObjectDef<ContinueDocNode>();
   }
 
-  static constexpr const char* _type_key = "script.printer.ContinueDoc";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ContinueDocNode, StmtDocNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.printer.ContinueDoc", ContinueDocNode, StmtDocNode);
 };
 
 /*!
@@ -948,7 +946,7 @@ class ContinueDoc : public StmtDoc {
    * \brief Constructor of ContinueDoc.
    */
   explicit ContinueDoc();
-  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(ContinueDoc, StmtDoc, ContinueDocNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ContinueDoc, StmtDoc, ContinueDocNode);
 };
 
 /*!
@@ -1306,13 +1304,13 @@ class DocStringDoc : public StmtDoc {
 class OpCallDocNode : public StmtDocNode {
  public:
   /*! \brief The callee of this function call */
-  ExprDoc callee{nullptr};
+  ExprDoc callee{ffi::UnsafeInit()};
   /*! \brief The positional arguments */
-  Array<Doc> args;
+  ffi::Array<Doc> args;
   /*! \brief The workspace of this op call */
-  DictDoc workspace{nullptr};
+  ffi::Optional<DictDoc> workspace{std::nullopt};
   /*! \brief The schedule config of this op call */
-  DictDoc schedule_config{nullptr};
+  ffi::Optional<DictDoc> schedule_config{std::nullopt};
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -1323,8 +1321,7 @@ class OpCallDocNode : public StmtDocNode {
         .def_ro("schedule_config", &OpCallDocNode::schedule_config);
   }
 
-  static constexpr const char* _type_key = "script.printer.OpCallDoc";
-  TVM_DECLARE_FINAL_OBJECT_INFO(OpCallDocNode, StmtDocNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.printer.OpCallDoc", OpCallDocNode, StmtDocNode);
 };
 
 /*!
@@ -1341,9 +1338,9 @@ class OpCallDoc : public StmtDoc {
    * \param workspace The workspace of this op call.
    * \param schedule_config The schedule config of this op call.
    */
-  explicit OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace,
-                     DictDoc schedule_config);
-  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(OpCallDoc, StmtDoc, OpCallDocNode);
+  explicit OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, ffi::Optional<DictDoc> workspace,
+                     ffi::Optional<DictDoc> schedule_config);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(OpCallDoc, StmtDoc, OpCallDocNode);
 };
 
 }  // namespace printer

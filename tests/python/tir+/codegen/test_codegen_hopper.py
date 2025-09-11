@@ -87,7 +87,7 @@ def test_stmatrix_sync_aligned(trans):
         else:
             assert "stmatrix.sync.aligned.m8n8.x4.trans.shared.b16" in src
         A_np = np.zeros((16, 16), dtype="float16")
-        A = tvm.nd.array(A_np, device=DEV)
+        A = tvm.runtime.tensor(A_np, device=DEV)
         mod(A)
         A_ref = np.zeros((16, 16), dtype="float16")
         for tx in range(32):
@@ -152,7 +152,7 @@ def test_ptx_stmatrix(trans, num):
     A_full[8:16, 0:8] = np.arange(8 * 8, 16 * 8, dtype="float16").reshape((8, 8))
     A_full[0:8, 8:16] = np.arange(16 * 8, 24 * 8, dtype="float16").reshape((8, 8))
     A_full[8:16, 8:16] = np.arange(24 * 8, 32 * 8, dtype="float16").reshape((8, 8))
-    A = tvm.nd.array(A_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
 
     mod(A)
     print(src)
@@ -354,8 +354,8 @@ def test_cp_async_bulk_tensor_global_to_shared_unicast(dtype, inputs):
 
     A_np = np.array(A_np).reshape(shape).astype(get_np_dtype(dtype))
     B_np = np.zeros(shape).astype(get_np_dtype(dtype))
-    A = tvm.nd.array(A_np, device=DEV)
-    B = tvm.nd.array(B_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
+    B = tvm.runtime.tensor(B_np, device=DEV)
     mod(A, B)
     assert np.allclose(A.numpy().astype("float32"), B.numpy().astype("float32"))
 
@@ -435,8 +435,8 @@ def test_cp_async_bulk_tensor_global_to_shared_swizzle(swizzle, dtype):
     A_np = [i for i in range(total_elems)]
     A_np = np.array(A_np).astype(dtype)
     B_np = np.zeros((total_elems,)).astype(dtype)
-    A = tvm.nd.array(A_np, device=DEV)
-    B = tvm.nd.array(B_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
+    B = tvm.runtime.tensor(B_np, device=DEV)
     mod(A, B)
     dtype = tvm.DataType(dtype)
     layout = T.SwizzleLayout(
@@ -522,8 +522,8 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast1(inputs):
     A_np = [i for i in range(math.prod(shape))]
     A_np = np.array(A_np, dtype="float32").reshape(shape)
     B_np = np.zeros(shape, dtype="float32")
-    A = tvm.nd.array(A_np, device=DEV)
-    B = tvm.nd.array(B_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
+    B = tvm.runtime.tensor(B_np, device=DEV)
     mod(A, B)
 
 
@@ -612,8 +612,8 @@ def test_cp_async_bulk_tensor_global_to_shared_multicast2(inputs):
     A_np = [i for i in range(math.prod(shape))]
     A_np = np.array(A_np, dtype="float32").reshape(shape)
     B_np = np.zeros(shape, dtype="float32")
-    A = tvm.nd.array(A_np, device=DEV)
-    B = tvm.nd.array(B_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
+    B = tvm.runtime.tensor(B_np, device=DEV)
     mod(A, B)
     assert np.allclose(A.numpy(), B.numpy())
 
@@ -671,7 +671,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
     assert "const __grid_constant__ CUtensorMap" in src
 
     A_np = np.zeros(shape, dtype="float32")
-    A = tvm.nd.array(A_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
     mod(A)
 
     A_ref = [i for i in range(math.prod(shape))]
@@ -826,9 +826,9 @@ def test_wgmma_ss_nt():
     B_np = np.random.randn(*shapeB).astype(in_dtype)
     C_np = np.zeros(shapeC).astype(out_dtype)
 
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
-    C_tvm = tvm.nd.array(C_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
+    C_tvm = tvm.runtime.tensor(C_np, device=DEV)
     mod(A_tvm, B_tvm, C_tvm)
 
     C_ref = np.dot(A_np.T, B_np).astype(out_dtype)
@@ -993,9 +993,9 @@ def test_wgmma_rs_nt():
     B_np = np.random.randn(*shapeB).astype(in_dtype)
     C_np = np.zeros(shapeC).astype(out_dtype)
 
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
-    C_tvm = tvm.nd.array(C_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
+    C_tvm = tvm.runtime.tensor(C_np, device=DEV)
     mod(A_tvm, B_tvm, C_tvm)
 
     np.printoptions(threshold=np.inf)

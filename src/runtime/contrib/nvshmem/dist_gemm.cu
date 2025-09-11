@@ -29,7 +29,7 @@
 namespace tvm {
 namespace runtime {
 
-void* get_pointer(NDArray data, ffi::Shape index) {
+void* get_pointer(Tensor data, ffi::Shape index) {
   ICHECK(data.IsContiguous()) << "data is not contiguous";
   char* ptr = reinterpret_cast<char*>(data->data) + data->byte_offset;
   int64_t offset = 0;
@@ -88,7 +88,7 @@ void set_streaming_policy(TVMStreamHandle stream, void* ptr, size_t size) {
   cudaStreamSetAttribute(strm, cudaStreamAttributeAccessPolicyWindow, &streamAttrValue);
 }
 
-void transfer_to_peers_reduce_scatter(NDArray semaphore, NDArray gemm_out, NDArray staging_buffer,
+void transfer_to_peers_reduce_scatter(Tensor semaphore, Tensor gemm_out, Tensor staging_buffer,
                                       TVMStreamHandle stream, int32_t M, int32_t N, int32_t BLK_M,
                                       int32_t BLK_N, int32_t WORLD_SIZE) {
   DiscoWorker* worker = ThreadLocalDiscoWorker::Get()->worker;
@@ -108,7 +108,7 @@ void transfer_to_peers_reduce_scatter(NDArray semaphore, NDArray gemm_out, NDArr
     } else {
       int device_id;
       CUDA_CALL(cudaGetDevice(&device_id));
-      TVMStreamHandle main_stream = TVMFFIEnvGetCurrentStream(kDLCUDA, device_id);
+      TVMStreamHandle main_stream = TVMFFIEnvGetStream(kDLCUDA, device_id);
       copy_to_peer(get_pointer(staging_buffer, ffi::Shape{my_rank, 0, 0}), to_rank,
                    get_pointer(gemm_out, ffi::Shape{to_rank * LOCAL_M, 0}), LOCAL_M * N * 2,
                    main_stream);
@@ -116,9 +116,8 @@ void transfer_to_peers_reduce_scatter(NDArray semaphore, NDArray gemm_out, NDArr
   }
 }
 
-void transfer_to_peers_all_gather(NDArray semaphore, NDArray A, NDArray ag_out,
-                                  TVMStreamHandle stream, int32_t M, int32_t K,
-                                  int32_t WORLD_SIZE) {
+void transfer_to_peers_all_gather(Tensor semaphore, Tensor A, Tensor ag_out, TVMStreamHandle stream,
+                                  int32_t M, int32_t K, int32_t WORLD_SIZE) {
   DiscoWorker* worker = ThreadLocalDiscoWorker::Get()->worker;
   if (worker == nullptr) {
     LOG(FATAL) << "NVSHMEM transfer to peer failed: worker is not initialized";
@@ -144,7 +143,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
       .def("runtime.disco.transfer_to_peers_reduce_scatter", transfer_to_peers_reduce_scatter)
       .def("runtime.disco.transfer_to_peers_all_gather", transfer_to_peers_all_gather)
       .def("runtime.disco.set_streaming_policy",
-           [](TVMStreamHandle stream, NDArray ptr, size_t size) {
+           [](TVMStreamHandle stream, Tensor ptr, size_t size) {
              set_streaming_policy(stream, ptr->data, size);
            });
 });

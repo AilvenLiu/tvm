@@ -62,16 +62,16 @@ class ScopeIdDefRemover : public StmtExprMutator {
   static Stmt Remove(const Stmt& stmt) { return ScopeIdDefRemover()(stmt); }
 
   Stmt VisitStmt_(const BlockNode* op) override {
-    Block block = GetRef<Block>(op);
+    Block block = ffi::GetRef<Block>(op);
     auto* n = block.CopyOnWrite();
     Stmt body = StmtExprMutator::VisitStmt(op->body);
     if (op->exec_scope.defined()) {
       if (const auto* slice = op->exec_scope.value().as<ExecScopeSliceNode>()) {
-        auto n_scope = make_object<ExecScopeSliceNode>(*slice);
+        auto n_scope = ffi::make_object<ExecScopeSliceNode>(*slice);
         n_scope->scope_id_def = {};
         n->exec_scope = ExecScopeSlice(n_scope);
       } else if (const auto* scope = op->exec_scope.value().as<ExecScopeNode>()) {
-        auto n_scope = make_object<ExecScopeNode>(*scope);
+        auto n_scope = ffi::make_object<ExecScopeNode>(*scope);
         n_scope->scope_id_def = {};
         n->exec_scope = ExecScope(n_scope);
       } else {
@@ -163,7 +163,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
         std::string thread_tag = prefix + static_cast<char>('x' + i);
         IterVar iv(Range::FromMinExtent(0, def->extents[i]), Var(thread_tag),
                    IterVarType::kThreadIndex, thread_tag);
-        launch_params->insert({String(prefix + static_cast<char>('x' + i)), iv});
+        launch_params->insert({ffi::String(prefix + static_cast<char>('x' + i)), iv});
       }
     };
     // blockIdx.x, blockIdx.y, blockIdx.z
@@ -185,7 +185,7 @@ class ScopeIdDefResolver : public StmtExprMutator {
   }
 
   /*! \brief The launch params of current kernel scope */
-  Optional<LaunchParams> kernel_launch_params_{std::nullopt};
+  ffi::Optional<LaunchParams> kernel_launch_params_{std::nullopt};
   /*! \brief The arithmetic analyzer */
   arith::Analyzer ana_;
   const Target& target_;
@@ -232,7 +232,7 @@ class TIRpOpScheduler : public StmtExprMutator {
   };
 
   Stmt VisitStmt_(const BlockRealizeNode* op) final {
-    BlockRealize block_realize = GetRef<BlockRealize>(op);
+    BlockRealize block_realize = ffi::GetRef<BlockRealize>(op);
     auto* n = block_realize.CopyOnWrite();
     Stmt body = VisitStmt(n->block);
     if (auto block = body.as<Block>()) {
@@ -246,7 +246,7 @@ class TIRpOpScheduler : public StmtExprMutator {
   Stmt VisitStmt_(const BlockNode* op) final {
     bool is_first_block = false;
     std::swap(is_first_block, is_first_block_);
-    Block block = GetRef<Block>(op);
+    Block block = ffi::GetRef<Block>(op);
     auto* n = block.CopyOnWrite();
     // Get the exec_scope
     if (op->exec_scope.defined()) {
@@ -308,7 +308,7 @@ class TIRpOpScheduler : public StmtExprMutator {
     tirp::ScheduleContext sctx(target_, exec_scope_stack_.back(), launch_params_, var_range_map_);
     static auto f_op_scheduler_ = ffi::Function::GetGlobal("tirp.f_op_scheduler");
     ICHECK(f_op_scheduler_.has_value()) << "Internal Error: tirp.f_op_scheduler is not registered";
-    PrimFunc res = f_op_scheduler_.value()(GetRef<tirp::OpCall>(op), sctx).cast<PrimFunc>();
+    PrimFunc res = f_op_scheduler_.value()(ffi::GetRef<tirp::OpCall>(op), sctx).cast<PrimFunc>();
     if (res.defined()) {
       // Implmentation found, handle callbacks
       if (auto bufs = sctx->callbacks.Get(tirp::callback::kPrivateAlloc)) {
@@ -330,10 +330,10 @@ class TIRpOpScheduler : public StmtExprMutator {
     }
   }
 
-  Map<Var, Range> var_range_map_;
+  ffi::Map<Var, Range> var_range_map_;
   const Target& target_;
   std::vector<ExecScope> exec_scope_stack_;
-  std::unordered_map<String, IterVar> launch_params_;
+  std::unordered_map<ffi::String, IterVar> launch_params_;
   std::vector<Buffer> alloc_buffers_;
   std::vector<Stmt> device_init_stmts_;
   std::vector<Stmt> host_init_stmts_;
@@ -407,11 +407,11 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   Stmt VisitStmt_(const BlockRealizeNode* op) final {
     Stmt block = this->VisitStmt(op->block);
     if (block.same_as(op->block)) {
-      return GetRef<Stmt>(op);
+      return ffi::GetRef<Stmt>(op);
     } else {
       if (auto* block_ptr = block.as<BlockNode>()) {
         auto n = CopyOnWrite(op);
-        n->block = GetRef<Block>(block_ptr);
+        n->block = ffi::GetRef<Block>(block_ptr);
         return Stmt(n);
       } else {
         return block;
@@ -420,7 +420,7 @@ class ExecScopeSliceResolver : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const BlockNode* op) final {
-    Block block = GetRef<Block>(op);
+    Block block = ffi::GetRef<Block>(op);
     auto* n = block.CopyOnWrite();
     if (op->annotations.count("tirp.scope_partition")) {
       // scope partition is enabled, rewrite the body
@@ -488,7 +488,7 @@ class ScheduleContextRemover : public StmtExprMutator {
 
  private:
   Stmt VisitStmt_(const BlockNode* op) final {
-    Block block = GetRef<Block>(op);
+    Block block = ffi::GetRef<Block>(op);
     auto* n = block.CopyOnWrite();
     n->annotations.erase("scope_id_extent_map");
     n->annotations.erase("thread_var_map");
@@ -499,9 +499,9 @@ class ScheduleContextRemover : public StmtExprMutator {
 
 class LayoutApplier : public arith::IRMutatorWithAnalyzer {
  public:
-  static std::pair<Stmt, Map<Var, Buffer>> Flatten(const Stmt& stmt,
-                                                   const Map<tirx::Var, Buffer> buffer_map,
-                                                   const Target& target) {
+  static std::pair<Stmt, ffi::Map<Var, Buffer>> Flatten(const Stmt& stmt,
+                                                        const ffi::Map<tirx::Var, Buffer> buffer_map,
+                                                        const Target& target) {
     arith::Analyzer ana;
     LayoutApplier storage_lower(&ana, target);
     std::unordered_map<Var, Buffer> new_buffer_map;
@@ -521,7 +521,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     for (const auto& buf : param_flattened_buffers) {
       new_stmt = DeclBuffer(buf, new_stmt);
     }
-    return std::make_pair(new_stmt, Map<Var, Buffer>(new_buffer_map));
+    return std::make_pair(new_stmt, ffi::Map<Var, Buffer>(new_buffer_map));
   }
 
  protected:
@@ -552,7 +552,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     auto buffer = mutate(op->buffer);
     auto body = VisitStmt(op->body);
     if (buffer.same_as(op->buffer) && body.same_as(op->body)) {
-      return GetRef<Stmt>(op);
+      return ffi::GetRef<Stmt>(op);
     } else {
       auto n = CopyOnWrite(op);
       n->buffer = buffer;
@@ -568,13 +568,13 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
       if (n->state.same_as(event->state)) {
         return event;
       } else {
-        return GetRef<BulkGroupEvent>(n);
+        return ffi::GetRef<BulkGroupEvent>(n);
       }
     });
     auto event = mutate(op->bulk_group_event);
     auto body = VisitStmt(op->body);
     if (event.same_as(op->bulk_group_event) && body.same_as(op->body)) {
-      return GetRef<Stmt>(op);
+      return ffi::GetRef<Stmt>(op);
     } else {
       auto n = CopyOnWrite(op);
       n->bulk_group_event = event;
@@ -590,13 +590,13 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
       if (n->state.same_as(event->state)) {
         return event;
       } else {
-        return GetRef<SemaphoreEventTensor>(n);
+        return ffi::GetRef<SemaphoreEventTensor>(n);
       }
     });
     auto event = mutate(op->sem_event_tensor);
     auto body = VisitStmt(op->body);
     if (event.same_as(op->sem_event_tensor) && body.same_as(op->body)) {
-      return GetRef<Stmt>(op);
+      return ffi::GetRef<Stmt>(op);
     } else {
       auto n = CopyOnWrite(op);
       n->sem_event_tensor = event;
@@ -608,7 +608,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
   Stmt VisitStmt_(const DeclBufferNode* op) final {
     auto buffer = GetFlattenedBuffer(op->buffer);
 
-    DeclBuffer decl_buffer = GetRef<DeclBuffer>(op);
+    DeclBuffer decl_buffer = ffi::GetRef<DeclBuffer>(op);
     auto n = decl_buffer.CopyOnWrite();
     n->buffer = buffer;
 
@@ -624,12 +624,13 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     Buffer flattened;
     tirx::BufferNode* writer;
     if (trn_layout && trn_layout->IsTrainium()) {
-      Array<PrimExpr> new_shape = buf.scope() == "trn.psum"
-                                      ? Array<PrimExpr>{trn_layout->GetCosize(String("Bank")),
-                                                        trn_layout->GetSize(String("P")),
-                                                        trn_layout->GetCosize(String("F"))}
-                                      : Array<PrimExpr>{trn_layout->GetSize(String("P")),
-                                                        trn_layout->GetCosize(String("F"))};
+      ffi::Array<PrimExpr> new_shape =
+          buf.scope() == "trn.psum"
+              ? ffi::Array<PrimExpr>{trn_layout->GetCosize(ffi::String("Bank")),
+                                     trn_layout->GetSize(ffi::String("P")),
+                                     trn_layout->GetCosize(ffi::String("F"))}
+              : ffi::Array<PrimExpr>{trn_layout->GetSize(ffi::String("P")),
+                                     trn_layout->GetCosize(ffi::String("F"))};
       flattened = buf;
       writer = flattened.CopyOnWrite();
       writer->shape = new_shape;
@@ -692,10 +693,10 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
   }
 
   Stmt VisitStmt_(const tirp::OpCallNode* op) final {
-    Array<ffi::Any> args = op->args;
+    ffi::Array<ffi::Any> args = op->args;
     args.MutateByApply([this](ffi::Any arg) -> ffi::Any { return VisitAny(arg); });
     if (args.same_as(op->args)) {
-      return GetRef<Stmt>(op);
+      return ffi::GetRef<Stmt>(op);
     } else {
       auto n = CopyOnWrite(op);
       n->args = std::move(args);
@@ -703,15 +704,17 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     }
   }
 
-  Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer, const Array<PrimExpr>& indices) {
+  ffi::Array<PrimExpr> GetSimplifiedElemOffset(const Buffer& buffer,
+                                               const ffi::Array<PrimExpr>& indices) {
     if (buffer->layout.defined()) {
       auto tile_layout = buffer->layout.value().as<TileLayoutNode>();
       if (tile_layout && tile_layout->IsTrainium()) {
         auto coord = buffer->layout.value()->Apply(indices, buffer->shape);
         std::vector<PrimExpr> res;
-        for (const auto& axis : buffer.scope() == "trn.psum" ? Array<String>{"Bank", "P", "F"}
-                                                             : Array<String>{"P", "F"}) {
-          auto it = coord.find(String(axis));
+        for (const auto& axis : buffer.scope() == "trn.psum"
+                                    ? ffi::Array<ffi::String>{"Bank", "P", "F"}
+                                    : ffi::Array<ffi::String>{"P", "F"}) {
+          auto it = coord.find(ffi::String(axis));
           if (it != coord.end()) {
             res.push_back(analyzer_->Simplify((*it).second));
           } else {
@@ -772,7 +775,7 @@ class BufferOffsetRemover : public StmtExprMutator {
       n_buffer->elem_offset = std::move(elem_offset);
       buffer_remap_[op->buffer] = buffer;
       auto n = CopyOnWrite(op);
-      n->buffer = GetRef<Buffer>(n_buffer);
+      n->buffer = ffi::GetRef<Buffer>(n_buffer);
       n->body = StmtExprMutator::VisitStmt(op->body);
       return StmtExprMutator::VisitStmt_(n.get());
     }
@@ -861,5 +864,5 @@ TVM_FFI_STATIC_INIT_BLOCK({
 });
 
 }  // namespace transform
-}  // namespace tirxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxx
 }  // namespace tvm

@@ -203,7 +203,7 @@ SBlockFrame Block(ffi::String name, bool no_realize, ffi::String exec_scope,
 
 void OpCall(tvm::tirx::tirp::OpCall op_call) { AddToParent(op_call); }
 
-BlockFrame BlockFrameSlice(BlockFrame block, Variant<Array<Range>, PrimExpr> slice) {
+BlockFrame BlockFrameSlice(BlockFrame block, ffi::Variant<ffi::Array<Range>, PrimExpr> slice) {
   TVM_FFI_ICHECK(block->exec_scope.defined()) << "InternalError: Block frame must have an execution scope";
   TVM_FFI_ICHECK(!block->exec_scope->IsInstance<tvm::tirx::ExecScopeSliceNode>())
       << "InternalError: Block frame already has an execution scope slice";
@@ -245,28 +245,11 @@ BlockFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
   return Block("", false, "thread", scope_slice_extents, scope_slice_parent);
 }
 
-BlockFrame ScopeSlice(ffi::Optional<ffi::Array<Range>> slices, ffi::Optional<PrimExpr> select_cond,
-                      ffi::String parent, ffi::String cur) {
-  ObjectPtr<BlockFrameNode> n = ffi::make_object<BlockFrameNode>();
-  n->name = cur;
-  n->iter_vars.clear();
-  n->reads = std::nullopt;
-  n->writes = std::nullopt;
-  n->init = std::nullopt;
-  n->alloc_buffers.clear();
-  n->match_buffers.clear();
-  n->annotations = std::nullopt;
-  n->iter_values.clear();
-  n->predicate = std::nullopt;
-  n->no_realize = false;
-  n->exec_scope = tvm::tirx::ExecScopeSlice(slices, select_cond, parent, cur);
-  return BlockFrame(n);
-}
-
-Array<tvm::tirx::Var> ScopeId(Array<PrimExpr> extents, String parent, String name, String cur) {
+ffi::Array<tvm::tirx::Var> ScopeId(ffi::Array<PrimExpr> extents, ffi::String parent,
+                                  ffi::String name, ffi::String cur) {
   BlockFrame frame = FindBlockFrame(name);
   TVM_FFI_ICHECK(frame->exec_scope.defined()) << "InternalError: exec_scope is not defined.";
-  Array<tvm::tirx::Var> scope_ids;
+  ffi::Array<tvm::tirx::Var> scope_ids;
   for (size_t i = 0; i < extents.size(); ++i) {
     scope_ids.push_back(tvm::tirx::Var(""));
   }
@@ -276,7 +259,7 @@ Array<tvm::tirx::Var> ScopeId(Array<PrimExpr> extents, String parent, String nam
   return scope_ids;
 }
 
-Array<tvm::tirx::Var> KernelId(Array<PrimExpr> extents, String parent) {
+ffi::Array<tvm::tirx::Var> KernelId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   TVM_FFI_ICHECK(parent == "world") << "ValueError: KernelId only supports parent=world";
   return ScopeId(extents, "world", "T.kernel_id", "kernel");
 }
@@ -285,17 +268,14 @@ ffi::Array<tvm::tirx::Var> ClusterId(ffi::Array<PrimExpr> extents, ffi::String p
   return ScopeId(extents, parent, "T.cluster_id", "cluster");
 }
 
-ffi::Array<tvm::tirx::Var> ClusterId(ffi::Array<PrimExpr> extents, ffi::String parent) {
-  return KernelScopeId(extents, parent, "T.cluster_id", "cluster");
-}
-
 ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   return ScopeId(extents, parent, "T.cta_id", "cta");
 }
 
-Array<tvm::tirx::Var> WarpgroupId(ffi::Array<PrimExpr> extents, ffi::String parent) {
+ffi::Array<tvm::tirx::Var> WarpgroupId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   return ScopeId(extents, parent, "T.warpgroup_id", "warpgroup");
 }
+
 ffi::Array<tvm::tirx::Var> WarpId(ffi::Array<PrimExpr> extents, ffi::String parent) {
   return ScopeId(extents, parent, "T.warp_id", "warp");
 }
@@ -396,7 +376,7 @@ void BlockAttrs(ffi::Map<ffi::String, Any> attrs) {
   }
 }
 
-Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
+ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
     ffi::Array<PrimExpr> shape, DataType dtype, ffi::Optional<Var> data, ffi::Array<PrimExpr> strides,
     PrimExpr elem_offset, ffi::String storage_scope, int align, int offset_factor,
     ffi::String buffer_type_str, ffi::Optional<ffi::Array<IntImm>> axis_separators,
@@ -410,7 +390,7 @@ Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
   auto func_frame = opt_func_frame.value();
 
   if (func_frame->is_tirp) {
-    ObjectPtr<AllocBufferFrameNode> n = make_object<AllocBufferFrameNode>();
+    ObjectPtr<AllocBufferFrameNode> n = ffi::make_object<AllocBufferFrameNode>();
     n->buffer = buffer;
     return AllocBufferFrame(n);
   }
@@ -428,18 +408,21 @@ Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
   return buffer;
 }
 
-AllocBulkGroupEventFrame AllocBulkGroupEvent(kEventImpl impl, Array<ffi::Any> state, String name) {
+AllocBulkGroupEventFrame AllocBulkGroupEvent(kEventImpl impl, ffi::Array<ffi::Any> state,
+                                             ffi::String name) {
   BulkGroupEvent event = BulkGroupEvent(impl, state, name);
-  ObjectPtr<AllocBulkGroupEventFrameNode> n = make_object<AllocBulkGroupEventFrameNode>();
+  ObjectPtr<AllocBulkGroupEventFrameNode> n = ffi::make_object<AllocBulkGroupEventFrameNode>();
   n->bulk_group_event = event;
   return AllocBulkGroupEventFrame(n);
 }
 
-AllocSemaphoreEventTensorFrame AllocSemaphoreEventTensor(kEventImpl impl, Array<ffi::Any> state,
-                                                         Array<PrimExpr> shape, String name) {
+AllocSemaphoreEventTensorFrame AllocSemaphoreEventTensor(kEventImpl impl,
+                                                         ffi::Array<ffi::Any> state,
+                                                         ffi::Array<PrimExpr> shape,
+                                                         ffi::String name) {
   SemaphoreEventTensor event_tensor = SemaphoreEventTensor(impl, state, shape, name);
   ObjectPtr<AllocSemaphoreEventTensorFrameNode> n =
-      make_object<AllocSemaphoreEventTensorFrameNode>();
+      ffi::make_object<AllocSemaphoreEventTensorFrameNode>();
   n->sem_event_tensor = event_tensor;
   return AllocSemaphoreEventTensorFrame(n);
 }
@@ -713,8 +696,9 @@ ElseFrame Else() {
   return ElseFrame(n);
 }
 
-ComposeOpFrame ComposeOp(Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config) {
-  ObjectPtr<ComposeOpFrameNode> n = make_object<ComposeOpFrameNode>();
+ComposeOpFrame ComposeOp(ffi::Map<ffi::String, Buffer> workspace,
+                         ffi::Map<ffi::String, ffi::Any> schedule_config) {
+  ObjectPtr<ComposeOpFrameNode> n = ffi::make_object<ComposeOpFrameNode>();
   n->workspace = workspace;
   n->schedule_config = schedule_config;
   return ComposeOpFrame(n);
@@ -832,7 +816,8 @@ PrimExpr Ptr(runtime::DataType dtype, ffi::String storage_scope = "global",
 using tvm::script::ir_builder::details::Namer;
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
-    .set_dispatch<tvm::tirx::BulkGroupEventNode>([](const ObjectRef& node, String name) -> void {
+    .set_dispatch<tvm::tirx::BulkGroupEventNode>([](const ObjectRef& node,
+                                                   ffi::String name) -> void {
       tvm::tirx::BulkGroupEventNode* bulk_event =
           const_cast<tvm::tirx::BulkGroupEventNode*>(node.as<tvm::tirx::BulkGroupEventNode>());
       bulk_event->name = name;
@@ -840,7 +825,7 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
 
 TVM_STATIC_IR_FUNCTOR(Namer, vtable)
     .set_dispatch<tvm::tirx::SemaphoreEventTensorNode>([](const ObjectRef& node,
-                                                         String name) -> void {
+                                                         ffi::String name) -> void {
       tvm::tirx::SemaphoreEventTensorNode* sem_event_tensor =
           const_cast<tvm::tirx::SemaphoreEventTensorNode*>(
               node.as<tvm::tirx::SemaphoreEventTensorNode>());
@@ -1116,7 +1101,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 });
 
-}  // namespace tirxxxxxxxx
+}  // namespace tirxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -24,7 +24,7 @@
 #ifndef TVM_RUNTIME_VM_MEGAKERNEL_UTILS_H_
 #define TVM_RUNTIME_VM_MEGAKERNEL_UTILS_H_
 
-#include <tvm/runtime/ndarray.h>
+#include <tvm/runtime/tensor.h>
 
 namespace tvm {
 namespace runtime {
@@ -85,16 +85,17 @@ enum class JobType : int32_t {
   kEnd = 99,
 };
 
-Array<NDArray> GetEventTensorsOnLayer(Array<NDArray> etensors, int layer_id);
+ffi::Array<Tensor> GetEventTensorsOnLayer(ffi::Array<Tensor> etensors, int layer_id);
 
-NDArray GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
-                          int num_kv_heads, int head_dim, Device device,
-                          Device preferred_host_device);
+Tensor GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
+                         int num_kv_heads, int head_dim, Device device,
+                         Device preferred_host_device);
 
-Array<Array<NDArray>> GenerateExecQueueDyn(NDArray exec_queue_device_buf,
-                                           NDArray exec_queue_host_buf, int tp_size,
-                                           int num_qo_heads, int num_kv_heads, int head_dim,
-                                           int num_layers, TVMStreamHandle copy_stream);
+ffi::Array<ffi::Array<Tensor>> GenerateExecQueueDyn(Tensor exec_queue_device_buf,
+                                                    Tensor exec_queue_host_buf, int tp_size,
+                                                    int num_qo_heads, int num_kv_heads,
+                                                    int head_dim, int num_layers,
+                                                    TVMStreamHandle copy_stream);
 
 }  // namespace megakernel
 }  // namespace vm

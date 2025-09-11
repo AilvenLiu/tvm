@@ -118,8 +118,8 @@ def test_reduction_op_shared(input, op_type, dtype):
         np.random.seed(0)
         A_np = np.random.rand(*g_shape_a).astype(dtype)
         B_np = np.zeros(g_shape_b, dtype=dtype)
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         # find ref result
@@ -256,8 +256,8 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
         np.random.seed(0)
         A_np = np.random.rand(*g_shape_a).astype(dtype)
         B_np = np.zeros(g_shape_b, dtype=dtype)
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         # find ref result

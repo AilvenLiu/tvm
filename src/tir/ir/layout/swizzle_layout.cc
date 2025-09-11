@@ -23,7 +23,7 @@ namespace tir {
 
 /**************** SwizzleLayout ****************/
 SwizzleLayout::SwizzleLayout(int per_element, int swizzle_len, int atom_len, bool swizzle_inner) {
-  auto n = make_object<SwizzleLayoutNode>();
+  auto n = ffi::make_object<SwizzleLayoutNode>();
   n->per_element = per_element;
   n->swizzle_len = swizzle_len;
   n->atom_len = atom_len;
@@ -49,22 +49,22 @@ bool SwizzleLayoutNode::VerifyWellFormed() const {
   return per_element >= 0 && swizzle_len >= 0 && atom_len >= swizzle_len;
 }
 
-PrimExpr SwizzleLayoutNode::GetSize(Optional<String> axis_name) const {
+PrimExpr SwizzleLayoutNode::GetSize(ffi::Optional<ffi::String> axis_name) const {
   CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for swizzle layout";
   return 1 << (per_element + swizzle_len + atom_len);
 }
 
-PrimExpr SwizzleLayoutNode::GetCosize(Optional<String> axis_name) const {
+PrimExpr SwizzleLayoutNode::GetCosize(ffi::Optional<ffi::String> axis_name) const {
   CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for swizzle layout";
   return GetSize();
 }
 
-Map<String, PrimExpr> SwizzleLayoutNode::Apply(Array<PrimExpr> coord) const {
+ffi::Map<ffi::String, PrimExpr> SwizzleLayoutNode::Apply(ffi::Array<PrimExpr> coord) const {
   LOG(FATAL) << "SwizzleLayoutNode::Apply(Array<PrimExpr>) is not implemented";
   return {};
 }
 
-Map<String, PrimExpr> SwizzleLayoutNode::Apply(PrimExpr coord) const {
+ffi::Map<ffi::String, PrimExpr> SwizzleLayoutNode::Apply(PrimExpr coord) const {
   PrimExpr input = coord;
   auto f = [&](const PrimExpr& x) -> PrimExpr {
     if (swizzle_inner) {
@@ -81,33 +81,33 @@ Map<String, PrimExpr> SwizzleLayoutNode::Apply(PrimExpr coord) const {
       {"m", analyzer.Simplify((f(floordiv(input, base)) << per_element) + floormod(input, base))}};
 }
 
-TLayout SwizzleLayoutNode::Normalize() const { return GetRef<SwizzleLayout>(this); }
+TLayout SwizzleLayoutNode::Normalize() const { return ffi::GetRef<SwizzleLayout>(this); }
 
 // Creates a TileLayout mapping a logical shape to itself (identity).
-TileLayout IdentityTileLayout(Array<PrimExpr> shape) {
+TileLayout IdentityTileLayout(ffi::Array<PrimExpr> shape) {
   PrimExpr extent = std::accumulate(shape.begin() + 1, shape.end(), shape[0],
                                     [](PrimExpr a, PrimExpr b) { return a * b; });
   return TileLayout({Iter(extent, 1, Axis::Get("m"))}, {}, {});
 }
 
-TLayout SwizzleLayoutNode::Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
-                                const Array<PrimExpr>& inner_shape) const {
+TLayout SwizzleLayoutNode::Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
+                                const ffi::Array<PrimExpr>& inner_shape) const {
   // Compose(Swizzle, Identity) -> then tile with `outer`.
-  auto comp = ComposeLayout(GetRef<SwizzleLayout>(this), IdentityTileLayout(inner_shape));
+  auto comp = ComposeLayout(ffi::GetRef<SwizzleLayout>(this), IdentityTileLayout(inner_shape));
   return comp->Tile(outer, outer_shape, inner_shape);
 }
 
-Optional<TileLayout> SwizzleLayoutNode::IsTileInner(const TLayout& tile_layout,
-                                                    const Array<PrimExpr>& tiled_shape,
-                                                    const Array<PrimExpr>& inner_shape) const {
+ffi::Optional<TileLayout> SwizzleLayoutNode::IsTileInner(
+    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+    const ffi::Array<PrimExpr>& inner_shape) const {
   // We expect tile_layout to be Compose(SwizzleLayout(this), _).
   if (auto comp = tile_layout.as<ComposeLayout>()) {
-    if (StructuralEqual()(comp.value()->layout_A, GetRef<SwizzleLayout>(this))) {
+    if (StructuralEqual()(comp.value()->layout_A, ffi::GetRef<SwizzleLayout>(this))) {
       auto identity = IdentityTileLayout(inner_shape);
       return identity->IsTileInner(comp.value()->layout_B, tiled_shape, inner_shape);
     }
   } else if (auto swizzle = tile_layout.as<SwizzleLayout>()) {
-    if (StructuralEqual()(swizzle.value(), GetRef<SwizzleLayout>(this))) {
+    if (StructuralEqual()(swizzle.value(), ffi::GetRef<SwizzleLayout>(this))) {
       auto inner_identity = IdentityTileLayout(inner_shape);
       auto tile_identity = IdentityTileLayout(tiled_shape);
       return inner_identity->IsTileInner(tile_identity, tiled_shape, inner_shape);
@@ -116,9 +116,9 @@ Optional<TileLayout> SwizzleLayoutNode::IsTileInner(const TLayout& tile_layout,
   return std::nullopt;
 }
 
-Optional<TLayout> SwizzleLayoutNode::IsTileOuter(const TLayout& tile_layout,
-                                                 const Array<PrimExpr>& tiled_shape,
-                                                 const Array<PrimExpr>& outer_shape) const {
+ffi::Optional<TLayout> SwizzleLayoutNode::IsTileOuter(
+    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+    const ffi::Array<PrimExpr>& outer_shape) const {
   return std::nullopt;
 }
 

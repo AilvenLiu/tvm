@@ -49,16 +49,15 @@ class PredicateNode : public Object {
         .def_ro("pred", &PredicateNode::pred);
   }
 
-  static constexpr const char* _type_key = "tir.Predicate";
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_FINAL_OBJECT_INFO(PredicateNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tir.Predicate", PredicateNode, Object);
 };
 
 class Predicate : public ObjectRef {
  public:
   explicit Predicate(Array<Var> vars, PrimExpr pred);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(Predicate, ObjectRef, PredicateNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Predicate, ObjectRef, PredicateNode);
 };
 
 }  // namespace tir

@@ -20,7 +20,7 @@ import inspect
 
 from . import _ffi_api
 from typing import List, Callable
-from tvm.ffi import register_object
+from tvm_ffi import register_object
 from tvm.runtime import Object
 from tvm.tirx import Var, PrimExpr
 

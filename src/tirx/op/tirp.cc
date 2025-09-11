@@ -51,7 +51,8 @@ TVM_FFI_STATIC_INIT_BLOCK({ ScheduleContextNode::RegisterReflection(); });
 
 /********************* ScheduleContext **********************/
 template <typename Key, typename Value>
-Value getOrSetDefault(Map<String, ObjectRef>& m, const Key& key, const Value& defaultValue) {
+Value getOrSetDefault(ffi::Map<ffi::String, ObjectRef>& m, const Key& key,
+                      const Value& defaultValue) {
   // try_emplace inserts the defaultValue only if key does not exist.
   auto it = m.find(key);
   if (it == m.end()) {
@@ -62,22 +63,23 @@ Value getOrSetDefault(Map<String, ObjectRef>& m, const Key& key, const Value& de
 }
 
 void ScheduleContextNode::AddAllocBuffer(Buffer buffer) {
-  auto buffers = getOrSetDefault(callbacks, callback::kPrivateAlloc, Array<Buffer>());
+  auto buffers = getOrSetDefault(callbacks, callback::kPrivateAlloc, ffi::Array<Buffer>());
   buffers.push_back(buffer);
   callbacks.Set(callback::kPrivateAlloc, buffers);
 }
 
 void ScheduleContextNode::AddInitStmt(Stmt stmt, bool host) {
   auto tag = host ? callback::kHostInitStmt : callback::kDeviceInitStmt;
-  auto stmts = getOrSetDefault(callbacks, tag, Array<Stmt>());
+  auto stmts = getOrSetDefault(callbacks, tag, ffi::Array<Stmt>());
   stmts.push_back(stmt);
   callbacks.Set(tag, stmts);
 }
 
 ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
-                                 Map<String, IterVar> launch_params, Map<Var, Range> var_range_map,
-                                 bool alloc_only, Map<String, ObjectRef> callbacks) {
-  auto n = make_object<ScheduleContextNode>();
+                                 ffi::Map<ffi::String, IterVar> launch_params,
+                                 ffi::Map<Var, Range> var_range_map, bool alloc_only,
+                                 ffi::Map<ffi::String, ObjectRef> callbacks) {
+  auto n = ffi::make_object<ScheduleContextNode>();
   n->target = std::move(target);
   n->exec_scope = std::move(exec_scope);
   n->launch_params = std::move(launch_params);
@@ -91,8 +93,9 @@ TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("tirp.ScheduleContext",
-           [](Target target, ExecScope exec_scope, Map<String, IterVar> launch_params,
-              Map<Var, Range> var_range_map, bool alloc_only, Map<String, ObjectRef> callbacks) {
+           [](Target target, ExecScope exec_scope, ffi::Map<ffi::String, IterVar> launch_params,
+              ffi::Map<Var, Range> var_range_map, bool alloc_only,
+              ffi::Map<ffi::String, ObjectRef> callbacks) {
              return ScheduleContext(target, exec_scope, launch_params, var_range_map, alloc_only,
                                     callbacks);
            })

@@ -49,8 +49,8 @@ def test_cuda_atomic_add():
     assert "tvm_builtin_cuda_atomic_add" in src
     A_np = np.zeros(1, dtype="int32")
     B_np = np.zeros(1, dtype="float32")
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
     mod["main"](A_tvm, B_tvm)
     np.testing.assert_allclose(A_tvm.numpy(), 1)
     np.testing.assert_allclose(B_tvm.numpy(), 1.0)
@@ -120,8 +120,8 @@ __device__ int32_t add_one(int32_t a) {
         src, mod = _get_source(main)
         A = np.random.randint(0, 10, (16, 16)).astype("int32")
         B = np.zeros((16, 16), dtype="int32")
-        A_tvm = tvm.nd.array(A, device=DEV)
-        B_tvm = tvm.nd.array(B, device=DEV)
+        A_tvm = tvm.runtime.tensor(A, device=DEV)
+        B_tvm = tvm.runtime.tensor(B, device=DEV)
         mod["main"](A_tvm, B_tvm)
         np.testing.assert_allclose(B_tvm.numpy(), A + 1)
         print(src)
@@ -146,7 +146,7 @@ __device__ void print(int32_t a) {
 
         src, mod = _get_source(main)
         A = np.random.randint(0, 10, (16, 16)).astype("int32")
-        A_tvm = tvm.nd.array(A, device=DEV)
+        A_tvm = tvm.runtime.tensor(A, device=DEV)
         mod["main"](A_tvm)
         print(src)
 
@@ -182,7 +182,7 @@ def test_warp_shuffle_xor_sync():
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
     A_np = np.zeros(32, dtype="float32")
-    A = tvm.nd.array(A_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
     mod(A)
     assert "__shfl_xor_sync" in mod.mod.imports[0].inspect_source()
     A_ref = np.ones(32, dtype="float32") * 496
@@ -219,7 +219,7 @@ def test_ptx_cp_async(cp_size, cache_hint, prefetch_size, predicate, fill_mode):
 
     src, mod = _get_source(main)
     A_np = np.ones(N, dtype="float16")
-    A = tvm.nd.array(A_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
     mod(A)
     A_ref = np.ones(N, dtype="float16") * 2
     if int(predicate) == 0:
@@ -262,10 +262,10 @@ def test_ptx_ldmatrix(trans, num):
 
     src, mod = _get_source(main)
     A_np = np.arange(16 * 16, dtype="float16").reshape((16, 16))
-    A = tvm.nd.array(A_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
     B_np = np.zeros((16, 16), dtype="float16")
     B_ref = np.zeros((16, 16), dtype="float16")
-    B = tvm.nd.array(B_np, device=DEV)
+    B = tvm.runtime.tensor(B_np, device=DEV)
 
     mod(A, B)
     if num == 1:
@@ -355,10 +355,10 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
     B_np = np.random.randn(16, 8).astype(b_type)
     C_np = np.random.randn(16, 8).astype(c_type)
 
-    D = tvm.nd.array(D_np, device=DEV)
-    A = tvm.nd.array(A_np, device=DEV)
-    B = tvm.nd.array(B_np, device=DEV)
-    C = tvm.nd.array(C_np, device=DEV)
+    D = tvm.runtime.tensor(D_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
+    B = tvm.runtime.tensor(B_np, device=DEV)
+    C = tvm.runtime.tensor(C_np, device=DEV)
     mod(D, A, B, C)
 
     D_torch = torch.zeros((16, 8), dtype=torch.float16)
@@ -446,10 +446,10 @@ def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
     B_np = np.random.randn(8, 8).astype(b_type)
     C_np = np.random.randn(16, 8).astype(c_type)
 
-    D = tvm.nd.array(D_np, device=DEV)
-    A = tvm.nd.array(A_np, device=DEV)
-    B = tvm.nd.array(B_np, device=DEV)
-    C = tvm.nd.array(C_np, device=DEV)
+    D = tvm.runtime.tensor(D_np, device=DEV)
+    A = tvm.runtime.tensor(A_np, device=DEV)
+    B = tvm.runtime.tensor(B_np, device=DEV)
+    C = tvm.runtime.tensor(C_np, device=DEV)
     mod(D, A, B, C)
 
     D_torch = torch.zeros((16, 8), dtype=torch.float16)

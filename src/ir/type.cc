@@ -48,7 +48,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 PointerType::PointerType(Type element_type, ffi::String storage_scope) {
-  ObjectPtr<PointerTypeNode> n = make_object<PointerTypeNode>();
+  ObjectPtr<PointerTypeNode> n = ffi::make_object<PointerTypeNode>();
   if (storage_scope.empty()) {
     n->storage_scope = "global";
   } else {

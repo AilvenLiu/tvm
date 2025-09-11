@@ -644,8 +644,8 @@ def test_hgemm_rs():
     # B_np = np.random.rand(WORLD_SIZE, N, K).astype(b_type)
     A_np = np.random.uniform(-1, 1, (WORLD_SIZE, M, K)).astype(a_type)
     B_np = np.random.uniform(-1, 1, (WORLD_SIZE, N, K)).astype(b_type)
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
     semaphore_np = np.zeros((WORLD_SIZE,), dtype="uint64")
     profiler_buffer_np = np.zeros((PROFILER_BUFFER_SIZE,), dtype="uint64")
 
@@ -684,15 +684,15 @@ def test_hgemm_rs():
         "staging_buffer_res": sess.empty(
             (WORLD_SIZE, WORLD_SIZE, LOCAL_M, N), d_type, worker0_only=True
         ),
-        "gemm_out_host": tvm.nd.empty((WORLD_SIZE, M, N), d_type, device=DEV),
-        "buffer_host": tvm.nd.empty(
+        "gemm_out_host": tvm.runtime.empty((WORLD_SIZE, M, N), d_type, device=DEV),
+        "buffer_host": tvm.runtime.empty(
             (WORLD_SIZE, M // BLK_M, N // BLK_N, BLK_M, BLK_N), d_type, device=DEV
         ),
-        "out_host": tvm.nd.empty((WORLD_SIZE, LOCAL_M, N), d_type, device=DEV),
-        "profiler_buffer_host": tvm.nd.empty(
+        "out_host": tvm.runtime.empty((WORLD_SIZE, LOCAL_M, N), d_type, device=DEV),
+        "profiler_buffer_host": tvm.runtime.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", device=DEV
         ),
-        "staging_buffer_host": tvm.nd.empty(
+        "staging_buffer_host": tvm.runtime.empty(
             (WORLD_SIZE, WORLD_SIZE, LOCAL_M, N), d_type, device=DEV
         ),
     }
@@ -814,8 +814,8 @@ def test_reduce():
     target = tvm.target.Target("cuda")
     input_torch = torch.randn((WORLD_SIZE, LOCAL_M, N), dtype=torch.float16, device="cuda")
     out_torch = torch.zeros((LOCAL_M, N), dtype=torch.float16, device="cuda")
-    input_tvm = tvm.nd.array(input_torch.cpu(), device=DEV)
-    out_tvm = tvm.nd.array(out_torch.cpu(), device=DEV)
+    input_tvm = tvm.runtime.tensor(input_torch.cpu(), device=DEV)
+    out_tvm = tvm.runtime.tensor(out_torch.cpu(), device=DEV)
     with target:
         mod = ReduceScatter
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")

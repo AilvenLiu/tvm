@@ -109,7 +109,7 @@ inline ExprDoc TIR(const IRDocsifier& d, const ffi::String& attr) {
 }
 
 /*! \brief Creates the TIR+ common prefix, which is by default `Tp` */
-inline ExprDoc TIRp(const IRDocsifier& d, const String& attr) {
+inline ExprDoc TIRp(const IRDocsifier& d, const ffi::String& attr) {
   d->ir_usage.insert("tirp");
   return IdDoc(d->cfg->tirp_prefix)->Attr(attr);
 }

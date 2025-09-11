@@ -23,7 +23,7 @@ namespace tir {
 
 /**************** ComposeLayout ****************/
 ComposeLayout::ComposeLayout(SwizzleLayout layout_A, TileLayout layout_B) {
-  auto n = make_object<ComposeLayoutNode>();
+  auto n = ffi::make_object<ComposeLayoutNode>();
   n->layout_A = layout_A;
   n->layout_B = layout_B;
   CHECK(n->VerifyWellFormed()) << "ValueError: The compose layout is not well-formed";
@@ -51,22 +51,22 @@ bool ComposeLayoutNode::VerifyWellFormed() const {
   return true;
 }
 
-PrimExpr ComposeLayoutNode::GetSize(Optional<String> axis_name) const {
+PrimExpr ComposeLayoutNode::GetSize(ffi::Optional<ffi::String> axis_name) const {
   CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for compose layout";
   return layout_B->GetSize(axis_name);
 }
 
-PrimExpr ComposeLayoutNode::GetCosize(Optional<String> axis_name) const {
+PrimExpr ComposeLayoutNode::GetCosize(ffi::Optional<ffi::String> axis_name) const {
   CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for compose layout";
   return layout_B->GetCosize(axis_name);
 }
 
-Map<String, PrimExpr> ComposeLayoutNode::Apply(Array<PrimExpr> coord) const {
+ffi::Map<ffi::String, PrimExpr> ComposeLayoutNode::Apply(ffi::Array<PrimExpr> coord) const {
   LOG(FATAL) << "ComposeLayoutNode::Apply(Array<PrimExpr>) is not implemented";
   return {};
 }
 
-Map<String, PrimExpr> ComposeLayoutNode::Apply(PrimExpr coord) const {
+ffi::Map<ffi::String, PrimExpr> ComposeLayoutNode::Apply(PrimExpr coord) const {
   auto res = layout_B->Apply(coord);
   CHECK(res.size() == 1 && res.find("m") != res.end());
   auto m = res["m"];
@@ -83,16 +83,16 @@ TLayout ComposeLayoutNode::Normalize() const {
   return ComposeLayout(layout_A, layout_B_normalized);
 }
 
-TLayout ComposeLayoutNode::Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
-                                const Array<PrimExpr>& inner_shape) const {
+TLayout ComposeLayoutNode::Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
+                                const ffi::Array<PrimExpr>& inner_shape) const {
   // layout_B is first tiled with `outer`, then compose with layout_A.
   auto tiled_B = layout_B->Tile(outer, outer_shape, inner_shape).as<TileLayout>().value();
   return ComposeLayout(layout_A, tiled_B);
 }
 
-Optional<TileLayout> ComposeLayoutNode::IsTileInner(const TLayout& tile_layout,
-                                                    const Array<PrimExpr>& tiled_shape,
-                                                    const Array<PrimExpr>& inner_shape) const {
+ffi::Optional<TileLayout> ComposeLayoutNode::IsTileInner(
+    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+    const ffi::Array<PrimExpr>& inner_shape) const {
   if (auto comp = tile_layout.as<ComposeLayout>()) {
     if (StructuralEqual()(comp.value()->layout_A, this->layout_A)) {
       return this->layout_B->IsTileInner(comp.value()->layout_B, tiled_shape, inner_shape);
@@ -101,9 +101,9 @@ Optional<TileLayout> ComposeLayoutNode::IsTileInner(const TLayout& tile_layout,
   return std::nullopt;
 }
 
-Optional<TLayout> ComposeLayoutNode::IsTileOuter(const TLayout& tile_layout,
-                                                 const Array<PrimExpr>& tiled_shape,
-                                                 const Array<PrimExpr>& outer_shape) const {
+ffi::Optional<TLayout> ComposeLayoutNode::IsTileOuter(
+    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+    const ffi::Array<PrimExpr>& outer_shape) const {
   return std::nullopt;
 }
 

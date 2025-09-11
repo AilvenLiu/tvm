@@ -153,7 +153,7 @@ def test_cos_sin_cache(rotary_dim, max_position_embeddings, base):
     cache_ref = prepare_cos_sin_cache(rotary_dim, max_position_embeddings, base)
 
     cache_np = np.zeros((max_position_embeddings, rotary_dim), dtype=np.float32)
-    cache_tvm = tvm.nd.array(cache_np, tvm.cuda(0))
+    cache_tvm = tvm.runtime.tensor(cache_np, tvm.cuda(0))
 
     target = tvm.target.Target("cuda")
     with target:
@@ -237,16 +237,18 @@ def test_rope(num_heads, seq_len, head_dim, batch_size):
 
         def tir():
             DEV = tvm.cuda(0)
-            pos_ids_tvm = tvm.nd.array(pos_ids.cpu().numpy(), DEV)
-            query_tvm = tvm.nd.array(query.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
-            key_tvm = tvm.nd.array(key.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
-            query_out_tvm = tvm.nd.empty(
+            pos_ids_tvm = tvm.runtime.tensor(pos_ids.cpu().numpy(), DEV)
+            query_tvm = tvm.runtime.tensor(
+                query.cpu().numpy().reshape(-1, num_heads, head_dim), DEV
+            )
+            key_tvm = tvm.runtime.tensor(key.cpu().numpy().reshape(-1, num_heads, head_dim), DEV)
+            query_out_tvm = tvm.runtime.empty(
                 (batch_size, num_heads, head_dim), dtype="float16", device=DEV
             )
-            key_out_tvm = tvm.nd.empty(
+            key_out_tvm = tvm.runtime.empty(
                 (batch_size, num_heads, head_dim), dtype="float16", device=DEV
             )
-            cos_sin_cache_tvm = tvm.nd.array(cos_sin_cache.cpu().numpy(), DEV)
+            cos_sin_cache_tvm = tvm.runtime.tensor(cos_sin_cache.cpu().numpy(), DEV)
 
             def func():
                 mod(query_tvm, cos_sin_cache_tvm, pos_ids_tvm, query_out_tvm)

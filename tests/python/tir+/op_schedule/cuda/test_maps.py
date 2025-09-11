@@ -92,7 +92,7 @@ def test_unary_op_shared(input, op_type, dtype):
     with target:
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(dtype)
-        A = tvm.nd.array(A_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
 
         mod = tvm.IRModule({"main": unary_op})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
@@ -262,8 +262,8 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
         np.random.seed(0)
         A_np = np.random.rand(*g_shape).astype(dtype)
         B_np = np.random.rand(*g_shape).astype(dtype)
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
 
         mod = tvm.IRModule({"main": get_prim_func(operands_type)})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
@@ -383,8 +383,8 @@ def test_unary_op_local(input, op_type, dtype):
         np.random.seed(0)
         A_np = np.random.rand(*g_shape_a).astype(dtype)
         B_np = np.zeros(g_shape_b, dtype=dtype)
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         # find ref result
@@ -515,8 +515,8 @@ def test_binary_op_local(input, op_type, dtype):
         np.random.seed(0)
         A_np = np.random.rand(*g_shape_a).astype(dtype)
         B_np = np.random.rand(*g_shape_b).astype(dtype)
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         # find ref result
@@ -541,8 +541,8 @@ def test_cast_thread_local(shape, A_dtype, B_dtype):
     dev = tvm.cuda(0)
     A_ref = np.random.rand(*shape).astype(A_dtype)
     B_ref = np.random.rand(*shape).astype(B_dtype)
-    A = tvm.nd.array(A_ref, dev)
-    B = tvm.nd.array(B_ref, dev)
+    A = tvm.runtime.tensor(A_ref, dev)
+    B = tvm.runtime.tensor(B_ref, dev)
 
     B_ref = A_ref.astype(B_dtype)
 

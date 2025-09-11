@@ -39,13 +39,13 @@ class OpCallNode : public StmtNode {
   tvm::Op op;
 
   // Arguments to the operator.
-  Array<ffi::Any> args;
+  ffi::Array<ffi::Any> args;
 
   // Workspace (pre-allocated buffers) for the operator.
-  Map<String, Buffer> workspace;
+  ffi::Map<ffi::String, Buffer> workspace;
 
   // Schedule config for the operator.
-  Map<String, ffi::Any> schedule_config;
+  ffi::Map<ffi::String, ffi::Any> schedule_config;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -56,8 +56,7 @@ class OpCallNode : public StmtNode {
         .def_ro("schedule_config", &OpCallNode::schedule_config);
   }
 
-  static constexpr const char* _type_key = "tirx.OpCall";
-  TVM_DECLARE_FINAL_OBJECT_INFO(OpCallNode, StmtNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.OpCall", OpCallNode, StmtNode);
 };
 
 /*!
@@ -66,17 +65,18 @@ class OpCallNode : public StmtNode {
  */
 class OpCall : public Stmt {
  public:
-  TVM_DLL OpCall(tvm::Op op, Array<ffi::Any> args, Map<String, Buffer> workspace = {},
-                 Map<String, ffi::Any> schedule_config = {});
+  TVM_DLL OpCall(tvm::Op op, ffi::Array<ffi::Any> args,
+                 ffi::Map<ffi::String, Buffer> workspace = {},
+                 ffi::Map<ffi::String, ffi::Any> schedule_config = {});
 
   static bool IsValidOpCallArgType(const ffi::Any& arg);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(OpCall, Stmt, OpCallNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(OpCall, Stmt, OpCallNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(OpCallNode);
 };
 
-}  // namespace tirxxxp
-}  // namespace tirxxx
+}  // namespace tirxxxxp
+}  // namespace tirxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_TIRP_STMT_H_

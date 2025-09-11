@@ -328,8 +328,8 @@ def test_hgemm_ampere():
     B_np = np.random.randn(N, K).astype(np.float16)
 
     DEV = tvm.cuda()
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
 
     target = tvm.target.Target("cuda")
     print(target)
@@ -339,7 +339,7 @@ def test_hgemm_ampere():
             mod = tvm.IRModule({"main": func})
             mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
             C_np = np.zeros((M, N), dtype=np.float32)
-            C_tvm = tvm.nd.array(C_np, device=DEV)
+            C_tvm = tvm.runtime.tensor(C_np, device=DEV)
 
             func = lambda: mod(A_tvm, B_tvm, C_tvm)
             ms = bench(func, warmup=0, repeat=10, proton_name="tir")

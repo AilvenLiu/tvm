@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import List
 
 import numpy as np
-import threading
 import torch
 from mlc_llm.compiler_pass.attach_support_info import (
     AttachMemoryPlanAttr,
@@ -27,7 +26,6 @@ from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
-from tvm.tirp.megakernel.common import ProfilerHandler
 
 from ..megakernel.test_layer import (
     DOWN_PROJ_SPLIT_K_FACTOR,
@@ -56,8 +54,6 @@ PROFILER_ON = True
 PROFILER_LAYER_ID = [3, 47]
 PROFILER_TRIGGER_COUNT = 399
 PROFILER_DIR_PATH = "/home/guanjiew/qwen3-mg-debug" # NOTE: update this path
-
-ProfilerHandler(PROFILER_ON, PROFILER_TRIGGER_COUNT, PROFILER_LAYER_ID, PROFILER_DIR_PATH).initialize()
 
 TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
@@ -97,8 +93,6 @@ config_tp1 = Qwen3Config(
     weight_block_size=None,
     kwargs={},
 )
-
-
 
 
 def init_disco_session():
@@ -247,7 +241,7 @@ def get_params(named_params, vm):
             else:
                 nn.init.xavier_uniform_(torch_tensor, gain=1.0)
             torch_tensor = torch_tensor
-            result.append(tvm.runtime.ndarray.from_dlpack(torch.to_dlpack(torch_tensor)))
+            result.append(tvm.runtime.from_dlpack(torch.to_dlpack(torch_tensor)))
     else:
         from tvm.contrib import tvmjs
 
@@ -348,7 +342,7 @@ def test_qwen3_model(
     logits_arr = list()
     last_tokens = np.random.randint(0, 100, size=(batch_size,))
     for i in tqdm(range(seq_len)):
-        tokens = tvm.nd.array(last_tokens.astype("int32"), device=dev)
+        tokens = tvm.runtime.tensor(last_tokens.astype("int32"), device=dev)
         if TP_SIZE > 1:
             tokens_d = get_global_func("runtime.disco.empty")(
                 ShapeTuple(list(last_tokens.shape)), "int32", None, False, False
@@ -866,18 +860,21 @@ def get_qwen3_megakernel_batch_decode_func():
         vm = relax.VirtualMachine(ex, dev)
         batch_decode_func = vm["batch_decode"]
         cos_sin_cache_func = vm["cos_sin_cache_func"]
+        profiler_init_func = get_global_func("megakernel.initialize_profiler")
     else:
         vm = get_global_func("runtime.disco.load_vm_module")(MEGA_LIB_PATH, None)
         mod_get_func = get_global_func("ffi.ModuleGetFunction")
         batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
         cos_sin_cache_func_ = mod_get_func(vm, "cos_sin_cache_func", True)
+        profiler_init_func = get_global_func("megakernel.initialize_profiler")
         batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)
         cos_sin_cache_func = lambda *args: disco_sess.call_packed(cos_sin_cache_func_, *args)
 
-    return batch_decode_func, cos_sin_cache_func
+    return batch_decode_func, cos_sin_cache_func, profiler_init_func
 
 
-batch_decode_func, cos_sin_cache_func = get_qwen3_megakernel_batch_decode_func()
+batch_decode_func, cos_sin_cache_func, profiler_init_func = get_qwen3_megakernel_batch_decode_func()
+profiler_init_func(PROFILER_ON, PROFILER_TRIGGER_COUNT, ShapeTuple(PROFILER_LAYER_ID), PROFILER_DIR_PATH, TP_SIZE > 1)
 res1 = test_qwen3_model(
     get_global_func,
     batch_decode_func,

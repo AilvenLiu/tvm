@@ -45,7 +45,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
 
   if (block->exec_scope.defined()) {
     for (auto scope_id_def : block->exec_scope.value()->scope_id_def) {
-      Array<ExprDoc> lhs;
+      ffi::Array<ExprDoc> lhs;
       for (auto scope_id : scope_id_def->def_ids) {
         lhs.push_back(DefineVar(scope_id, *frame, d));
       }
@@ -251,10 +251,10 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
       ExprDoc parent_doc =
           LiteralDoc::Str(scope_slice->parent, block_p->Attr("exec_scope")->Attr("parent"));
       ExprDoc call = TIR(d, block->exec_scope.value()->name)->Call({extents_doc, parent_doc});
-      if (auto slices_opt = scope_slice->slices.as<Array<Range>>()) {
+      if (auto slices_opt = scope_slice->slices.as<ffi::Array<Range>>()) {
         auto slices = slices_opt.value();
         // slices
-        Array<Doc> slices_doc;
+        ffi::Array<Doc> slices_doc;
         for (size_t i = 0; i < slices.size(); ++i) {
           auto path = block_p->Attr("exec_scope")->Attr("slices")->ArrayItem(i);
           auto start = d->AsDoc<ExprDoc>(slices[i]->min, path->Attr("min"));

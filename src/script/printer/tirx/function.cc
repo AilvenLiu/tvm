@@ -115,7 +115,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       // Step 2. Handle `func->attrs`
       if (func->attrs.defined() && !func->attrs->dict.empty()) {
         // for global symbol, don't display it if it matches the func name
-        std::unordered_set<String> keys_to_remove;
+        std::unordered_set<ffi::String> keys_to_remove;
         if (func->attrs->dict.count(tvm::attr::kGlobalSymbol) &&
             Downcast<ffi::String>(func->attrs->dict.at(tvm::attr::kGlobalSymbol)) ==
                 func_name->name) {
@@ -200,8 +200,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       }
       // Step 5. Determine if we need to display the private annotation in the decorator
       ExprDoc decorator = TIR(d, "prim_func");
-      Array<String, void> kwargs_keys;
-      Array<ExprDoc, void> kwargs_values;
+      ffi::Array<ffi::String, void> kwargs_keys;
+      ffi::Array<ExprDoc, void> kwargs_values;
       // mark private if there is no global symbol
       if (!func->attrs.defined() || !func->attrs->dict.count(tvm::attr::kGlobalSymbol)) {
         kwargs_keys.push_back("private");
@@ -209,9 +209,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       }
       if (func->attrs.defined() && func->attrs->dict.count(tvm::attr::kIsTIRp)) {
         kwargs_keys.push_back("tirp");
-        kwargs_values.push_back(LiteralDoc::Boolean(true, Optional<AccessPath>()));
+        kwargs_values.push_back(LiteralDoc::Boolean(true, ffi::Optional<AccessPath>()));
       }
-      Array<ExprDoc> pos_args;
+      ffi::Array<ExprDoc> pos_args;
       decorator = std::move(decorator->Call(pos_args, kwargs_keys, kwargs_values));
       return HeaderWrapper(d, FunctionDoc(
                                   /*name=*/func_name,

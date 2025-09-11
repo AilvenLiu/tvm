@@ -62,7 +62,7 @@ __attribute__((format(printf, 1, 2))) int TVMAPIErrorf(const char* msg, ...) {
 
 const char* TVMGetLastError(void) { return g_last_error; }
 
-// Manipulate NDArray on target device
+// Manipulate Tensor on target device
 
 int TVMArrayAlloc(const tvm_index_t* shape, int ndim, int dtype_code, int dtype_bits,
                   int dtype_lanes, int device_type, int device_id, TVMArrayHandle* out) {

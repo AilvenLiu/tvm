@@ -125,8 +125,8 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
         A_np = np.random.rand(*g_shape).astype(np_dtype)
         B_np = np.zeros(g_shape, dtype=np_dtype)
 
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         B_ref = B_np.copy()
@@ -253,8 +253,8 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
         B_np = np.zeros(g_shape, dtype=np_dtype)
 
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         B_ref = np.zeros(g_shape, dtype=np_dtype)
@@ -365,8 +365,8 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
         B_np = np.zeros(g_shape, dtype=np_dtype)
 
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         np.testing.assert_allclose(A_np, B.numpy())
@@ -472,8 +472,8 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len):
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
         B_np = np.zeros(g_shape, dtype=np_dtype)
 
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         np.testing.assert_allclose(A_np, B.numpy())
@@ -506,7 +506,7 @@ def test_kernel_sempaphore():
         mod = tvm.IRModule({"main": gpu_semaphore_wait})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         print(mod.mod.imports[0].inspect_source())
-        semaphore = tvm.nd.array(np.full((64,), 2, dtype=np.int32), device=tvm.cuda(0))
+        semaphore = tvm.runtime.tensor(np.full((64,), 2, dtype=np.int32), device=tvm.cuda(0))
         mod(semaphore)
         np.testing.assert_equal(semaphore.numpy(), np.full((64,), 0, dtype=np.int32))
 

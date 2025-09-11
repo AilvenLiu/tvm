@@ -36,7 +36,7 @@ namespace codegen {
 
 struct NKIInstructionCtx {
   std::unordered_set<const VarNode*> tensorized_loop_vars;
-  std::unordered_map<const VarNode*, String> loopvar2dim;
+  std::unordered_map<const VarNode*, ffi::String> loopvar2dim;
   bool is_matmul_input = false;
   int buffer_index = -1;
   int used_var_cnt = 0;
@@ -62,7 +62,7 @@ class CodeGenTrainium final : public CodeGenC {
   void VisitStmt_(const ForNode* op) final;                           // NOLINT(*)
   void VisitStmt_(const BufferStoreNode* op) final;                   // NOLINT(*)=
   void VisitStmt_(const EvaluateNode* op) final;                      // NOLINT(*)
-  std::string PrintIndices(const Array<PrimExpr>& indices);           // NOLINT(*)
+  std::string PrintIndices(const ffi::Array<PrimExpr>& indices);      // NOLINT(*)
   void VisitExpr_(const BufferLoadNode* op, std::ostream& os) final;  // NOLINT(*)
   void VisitExpr_(const CallNode* op, std::ostream& os) final;        // NOLINT(*)
   void VisitExpr_(const FloatImmNode* op, std::ostream& os) final;    // NOLINT(*)
@@ -72,7 +72,7 @@ class CodeGenTrainium final : public CodeGenC {
   void VisitStmt_(const DeclBufferNode* op) final;                    // NOLINT(*)
   void VisitStmt_(const IfThenElseNode* op) final;                    // NOLINT(*)
   void VisitExpr_(const AndNode* op, std::ostream& os) final;         // NOLINT(*)
-  void VisitExpr_(const OrNode* op, std::ostream& os) final;         // NOLINT(*)
+  void VisitExpr_(const OrNode* op, std::ostream& os) final;          // NOLINT(*)
 
  private:
   Target target_;

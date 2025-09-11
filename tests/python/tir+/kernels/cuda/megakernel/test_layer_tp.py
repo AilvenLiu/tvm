@@ -1,9 +1,9 @@
 import math
 import tempfile
 
+import flashinfer
 import numpy as np
 import pytest
-import flashinfer
 
 import tvm
 import tvm.testing
@@ -57,7 +57,7 @@ MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)
 NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
 PROFILER_BUFFER_SIZE = int(1e7)
 PROFILER_WRITE_STRIDE = KernelConfig.SM_NUMBER * NUM_GROUPS
-PROFILER_ON = True
+PROFILER_ON = False
 
 
 class MegaKernel:
@@ -103,6 +103,7 @@ class MegaKernel:
 
     def get_func_static(self):
         from tvm.tirp.megakernel.static_scheduler import Semaphore
+
         # fmt: off
         @T.prim_func(tirp=True)
         def main(
@@ -436,8 +437,8 @@ class MegaKernel:
                             evt_k_reduce.semaphore_wait(tile_scheduler.m_idx, tile_scheduler.n_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.K_RMSNORM_ROPE_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
-                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx + NUM_ATTENTION_HEADS//rmsnorm_tile.h_tile, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global)
-                            rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx + NUM_ATTENTION_HEADS//rope_tile.h_tile, tile_scheduler.k_idx, qkv_global, cos_sin_cache_global, rope_pos_global)
+                            rmsnorm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx + NUM_ATTENTION_HEADS // rmsnorm_tile.h_tile, tile_scheduler.k_idx, qkv_global, q_rms_weight_global, k_rms_weight_global)
+                            rope_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx + NUM_ATTENTION_HEADS // rope_tile.h_tile, tile_scheduler.k_idx, qkv_global, cos_sin_cache_global, rope_pos_global)
                             append_kv_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, kv_cache_global, qkv_global, append_pos_global)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
@@ -455,15 +456,23 @@ class MegaKernel:
                             if self.profiler_on:
                                 T.timer_end_cuda(ProfileEventType.V_APPEND_KV, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.BATCH_ATTENTION.value:
+                            if self.profiler_on:
+                                T.timer_start_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                            attn_tile.prelogue(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
+                                                kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
+                                                kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
+                                                o_global, o_partial_attn_global, lse_partial_attn_global, profiler_buffer, profiler_tag, profiler_write_offset)
+                            if self.profiler_on:
+                                T.timer_end_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             batch_idx = T.meta_var(q_indptr_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
                             kv_idx = T.meta_var(kv_head_idx_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
                             evt_attn.semaphore_wait_warp(batch_idx // rope_tile.m_tile, kv_idx)
                             if self.profiler_on:
                                 T.timer_start_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
                             attn_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
-                                                kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
-                                                kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
-                                                o_global, o_partial_attn_global, lse_partial_attn_global)
+                                            kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
+                                            kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
+                                            o_global, o_partial_attn_global, lse_partial_attn_global, profiler_buffer, profiler_tag, profiler_write_offset)
                             if work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER] > batch_size * NUM_KEY_VALUE_HEADS:
                                 if tid % (KernelConfig.WARP_NUMBER * 32) == 0:
                                     batch_idx = T.meta_var(q_indptr_global[tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id])
@@ -1567,7 +1576,8 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         for i in range(batch_size):
             append_pos[i] = SEQ_LEN
         arg_dict["kv_cache"] = torch.randn(
-            (WORLD_SIZE, MAX_PAGE_NUM, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM), dtype=torch.float16,
+            (WORLD_SIZE, MAX_PAGE_NUM, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM),
+            dtype=torch.float16,
         ).cpu()
         arg_dict["page_kv_indptr"] = kv_indptr.cpu()
         arg_dict["page_kv_last_page_len"] = kv_last_page_len.cpu()
@@ -1604,8 +1614,8 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         arg_dict["out_silu_multiply"] = torch.zeros(
             (batch_size, INTERMEDIATE_SIZE), dtype=torch.float16
         )
-        arg_dict["down_weight"] = (
-            torch.zeros((WORLD_SIZE, HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype=torch.float16)
+        arg_dict["down_weight"] = torch.zeros(
+            (WORLD_SIZE, HIDDEN_SIZE, INTERMEDIATE_SIZE), dtype=torch.float16
         )
         torch.nn.init.xavier_normal_(arg_dict["down_weight"], gain=1.0)
         arg_dict["partial_sum_down_proj"] = torch.zeros(
@@ -1659,21 +1669,46 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
             else:
                 raise ValueError(f"Unsupported data type: {data_type}")
 
-
-        arg_dict["q_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 2), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["kv_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 3), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["partial_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 4), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["q_len"] = get_tensor(get_id(NUM_TASK_ARGS + 5), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["kv_len"] = get_tensor(get_id(NUM_TASK_ARGS + 6), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["q_start"] = get_tensor(get_id(NUM_TASK_ARGS + 7), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["kv_start"] = get_tensor(get_id(NUM_TASK_ARGS + 8), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["kv_end"] = get_tensor(get_id(NUM_TASK_ARGS + 9), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["kv_head_idx"] = get_tensor(get_id(NUM_TASK_ARGS + 10), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["work_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 11), MAX_TOTAL_NUM_WORKERS, torch.int32).cpu()
-        arg_dict["attn_task_num"] = get_tensor(get_id(NUM_TASK_ARGS + 11), MAX_TOTAL_NUM_WORKERS, torch.int32)[2 * KernelConfig.SM_NUMBER].cpu()
+        arg_dict["q_indptr"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 2), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["kv_indptr"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 3), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["partial_indptr"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 4), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["q_len"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 5), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["kv_len"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 6), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["q_start"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 7), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["kv_start"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 8), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["kv_end"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 9), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["kv_head_idx"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 10), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["work_indptr"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 11), MAX_TOTAL_NUM_WORKERS, torch.int32
+        ).cpu()
+        arg_dict["attn_task_num"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 11), MAX_TOTAL_NUM_WORKERS, torch.int32
+        )[2 * KernelConfig.SM_NUMBER].cpu()
         arg_dict["len_kv_chunk"] = get_tensor(get_id(NUM_TASK_ARGS + 12), 2, torch.int32).cpu()
-        arg_dict["merge_indptr"] = get_tensor(get_id(NUM_TASK_ARGS + 15), MAX_NUM_KV_SPLITS, torch.int32).cpu()
-        arg_dict["merge_o_indices"] = get_tensor(get_id(NUM_TASK_ARGS + 16), MAX_NUM_KV_SPLITS, torch.int32).cpu()
+        arg_dict["merge_indptr"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 15), MAX_NUM_KV_SPLITS, torch.int32
+        ).cpu()
+        arg_dict["merge_o_indices"] = get_tensor(
+            get_id(NUM_TASK_ARGS + 16), MAX_NUM_KV_SPLITS, torch.int32
+        ).cpu()
         arg_dict["num_qo_len"] = get_tensor(get_id(NUM_TASK_ARGS + 17), 1, torch.int32).cpu()
 
         return arg_dict
@@ -1685,13 +1720,14 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         tvm_arg_dict = {}
         target = tvm.target.Target("cuda")
 
-        tvm_arg_dict["o_partial_attn"] = tvm.nd.array(
-            np.zeros([MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS * HEAD_DIM], dtype=np.float32), DEV,
+        tvm_arg_dict["o_partial_attn"] = tvm.runtime.tensor(
+            np.zeros([MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS * HEAD_DIM], dtype=np.float32),
+            DEV,
         )
-        tvm_arg_dict["lse_partial"] = tvm.nd.array(
+        tvm_arg_dict["lse_partial"] = tvm.runtime.tensor(
             np.zeros([MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS], dtype=np.float32), DEV
         )
-        tvm_arg_dict["partial_qkv"] = tvm.nd.array(
+        tvm_arg_dict["partial_qkv"] = tvm.runtime.tensor(
             np.zeros(
                 [
                     SPLIT_QKV_PROJECT,
@@ -1702,7 +1738,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
             ),
             DEV,
         )
-        tvm_arg_dict["partial_o"] = tvm.nd.array(
+        tvm_arg_dict["partial_o"] = tvm.runtime.tensor(
             np.zeros([SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE], dtype=np.float32), DEV
         )
 
@@ -1731,11 +1767,11 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                 + append_pos[b] % PAGE_SIZE
             )
         for key, value in arg_dict.items():
-            tvm_arg_dict[key] = tvm.nd.array(value, device=DEV)
-        tvm_arg_dict["append_pos"] = tvm.nd.array(append_pos, device=DEV)
+            tvm_arg_dict[key] = tvm.runtime.tensor(value, device=DEV)
+        tvm_arg_dict["append_pos"] = tvm.runtime.tensor(append_pos, device=DEV)
         REPEAT = 100
         for i in range(REPEAT):
-            tvm_arg_dict[f"residual_{i}"] = tvm.nd.array(arg_dict["residual"], device=DEV)
+            tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"], device=DEV)
             # generate event tensor
             (
                 tvm_arg_dict[f"etensor_qkv_partial_{i}"],
@@ -1763,7 +1799,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                 tvm_arg_dict["q_indptr"],
                 WORLD_SIZE,
             )
-            tvm_arg_dict[f"profiler_buffer_{i}"] = tvm.nd.array(
+            tvm_arg_dict[f"profiler_buffer_{i}"] = tvm.runtime.tensor(
                 np.zeros([PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV
             )
 
@@ -1782,7 +1818,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         ]
         disco_arg_dict = {}
         for key, value in tvm_arg_dict.items():
-            if not isinstance(value, tvm.nd.NDArray):
+            if not isinstance(value, tvm.runtime.Tensor):
                 continue
             if key in tensor_to_gather:
                 disco_arg_dict[key] = sess.empty(value.shape[1:], value.dtype)
@@ -1806,15 +1842,15 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         )
 
         res_dict = {
-            "output_host": tvm.nd.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
-            "residual_host": tvm.nd.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
-            "hidden_state_attn_mlp_host": tvm.nd.empty(
+            "output_host": tvm.runtime.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
+            "residual_host": tvm.runtime.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
+            "hidden_state_attn_mlp_host": tvm.runtime.empty(
                 (WORLD_SIZE, batch_size, HIDDEN_SIZE), "float16", device=DEV
             ),
             "hidden_state_attn_mlp_res": sess.empty(
                 (WORLD_SIZE, batch_size, HIDDEN_SIZE), "float16", worker0_only=True
             ),
-            "profiler_buffer_host": tvm.nd.empty(
+            "profiler_buffer_host": tvm.runtime.empty(
                 (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", device=DEV
             ),
             "profiler_buffer_res": sess.empty(
@@ -1958,17 +1994,17 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
             tvm_arg_dict["o_indptr"],
         ) = decode_plan(batch_size, arg_dict["kv_indptr"])
 
-        tvm_arg_dict["o_tmp"] = tvm.nd.array(
+        tvm_arg_dict["o_tmp"] = tvm.runtime.tensor(
             np.zeros(
                 [tvm_arg_dict["new_batch_size"], DecodeTile.qo_heads, DecodeTile.head_dim],
                 dtype=np.float32,
             ),
             DEV,
         )
-        tvm_arg_dict["lse_tmp"] = tvm.nd.array(
+        tvm_arg_dict["lse_tmp"] = tvm.runtime.tensor(
             np.zeros([tvm_arg_dict["new_batch_size"], DecodeTile.qo_heads], dtype=np.float32), DEV
         )
-        tvm_arg_dict["partial_qkv"] = tvm.nd.array(
+        tvm_arg_dict["partial_qkv"] = tvm.runtime.tensor(
             np.zeros(
                 [
                     SPLIT_QKV_PROJECT,
@@ -1979,7 +2015,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
             ),
             DEV,
         )
-        tvm_arg_dict["partial_o"] = tvm.nd.array(
+        tvm_arg_dict["partial_o"] = tvm.runtime.tensor(
             np.zeros([SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE], dtype=np.float32), DEV
         )
 
@@ -1997,11 +2033,11 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                 + append_pos[b] % PAGE_SIZE
             )
         for key, value in arg_dict.items():
-            tvm_arg_dict[key] = tvm.nd.array(value, device=DEV)
-        tvm_arg_dict["append_pos"] = tvm.nd.array(append_pos, device=DEV)
+            tvm_arg_dict[key] = tvm.runtime.tensor(value, device=DEV)
+        tvm_arg_dict["append_pos"] = tvm.runtime.tensor(append_pos, device=DEV)
         REPEAT = 10
         for i in range(REPEAT):
-            tvm_arg_dict[f"residual_{i}"] = tvm.nd.array(arg_dict["residual"], device=DEV)
+            tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"], device=DEV)
             # generate event tensor
             (
                 tvm_arg_dict[f"etensor_qkv_partial_{i}"],
@@ -2028,10 +2064,10 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                 batch_size != tvm_arg_dict["new_batch_size"],
                 WORLD_SIZE,
             )
-            tvm_arg_dict[f"queue_tasks_{i}"] = tvm.nd.array(exec_queue.tasks, DEV)
-            tvm_arg_dict[f"queue_head_{i}"] = tvm.nd.array(exec_queue.head, DEV)
-            tvm_arg_dict[f"queue_tail_{i}"] = tvm.nd.array(exec_queue.tail, DEV)
-            tvm_arg_dict[f"profiler_buffer_{i}"] = tvm.nd.array(
+            tvm_arg_dict[f"queue_tasks_{i}"] = tvm.runtime.tensor(exec_queue.tasks, DEV)
+            tvm_arg_dict[f"queue_head_{i}"] = tvm.runtime.tensor(exec_queue.head, DEV)
+            tvm_arg_dict[f"queue_tail_{i}"] = tvm.runtime.tensor(exec_queue.tail, DEV)
+            tvm_arg_dict[f"profiler_buffer_{i}"] = tvm.runtime.tensor(
                 np.zeros([PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV
             )
 
@@ -2050,7 +2086,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         ]
         disco_arg_dict = {}
         for key, value in tvm_arg_dict.items():
-            if not isinstance(value, tvm.nd.NDArray):
+            if not isinstance(value, tvm.runtime.Tensor):
                 continue
             if key in tensor_to_gather:
                 disco_arg_dict[key] = sess.empty(value.shape[1:], value.dtype)
@@ -2074,15 +2110,15 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
         )
 
         res_dict = {
-            "output_host": tvm.nd.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
-            "residual_host": tvm.nd.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
-            "hidden_state_attn_mlp_host": tvm.nd.empty(
+            "output_host": tvm.runtime.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
+            "residual_host": tvm.runtime.empty((batch_size, HIDDEN_SIZE), "float16", device=DEV),
+            "hidden_state_attn_mlp_host": tvm.runtime.empty(
                 (WORLD_SIZE, batch_size, HIDDEN_SIZE), "float16", device=DEV
             ),
             "hidden_state_attn_mlp_res": sess.empty(
                 (WORLD_SIZE, batch_size, HIDDEN_SIZE), "float16", worker0_only=True
             ),
-            "profiler_buffer_host": tvm.nd.empty(
+            "profiler_buffer_host": tvm.runtime.empty(
                 (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", device=DEV
             ),
             "profiler_buffer_res": sess.empty(
@@ -2292,7 +2328,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, sess):
                 kv_last_page_len=std_arg_dict["page_kv_last_page_len"],
                 kv_layout="HND",
             )
-            o = wrapper.run(q.reshape(batch_size, FULL_NUM_ATTENTION_HEADS, HEAD_DIM), std_arg_dict["kv_cache"])
+            o = wrapper.run(
+                q.reshape(batch_size, FULL_NUM_ATTENTION_HEADS, HEAD_DIM), std_arg_dict["kv_cache"]
+            )
             hidden_state_attn_mlp = torch.matmul(
                 o.reshape(batch_size, FULL_NUM_ATTENTION_HEADS * HEAD_DIM),
                 std_arg_dict["o_proj_weight"].T,

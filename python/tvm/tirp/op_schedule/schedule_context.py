@@ -17,7 +17,7 @@
 """TIRp operator schedule context."""
 from typing import Dict, List
 
-from tvm.ffi import register_object
+from tvm_ffi import register_object
 from tvm.ir import Range
 from tvm.tir import PrimExpr, Var, Buffer, Stmt, IterVar
 from tvm.runtime import Object, Scriptable

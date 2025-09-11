@@ -34,9 +34,9 @@ namespace tirx {
 class ScopePairNode : public Object {
  public:
   /*! \brief The parent scope */
-  String parent;
+  ffi::String parent;
   /*! \brief The current scope */
-  String cur;
+  ffi::String cur;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -45,14 +45,13 @@ class ScopePairNode : public Object {
         .def_ro("cur", &ScopePairNode::cur);
   }
 
-  static constexpr const char* _type_key = "tirx.ScopePair";
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_FINAL_OBJECT_INFO(ScopePairNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ScopePair", ScopePairNode, Object);
 };
 
 class ScopePair : public ObjectRef {
  public:
-  TVM_DLL explicit ScopePair(String parent, String cur);
+  TVM_DLL explicit ScopePair(ffi::String parent, ffi::String cur);
 
   struct ScopePairEqual {
     bool operator()(const ScopePair& a, const ScopePair& b) const {
@@ -62,20 +61,20 @@ class ScopePair : public ObjectRef {
 
   struct ScopePairHash {
     size_t operator()(const ScopePair& a) const {
-      return std::hash<String>()(a->parent) ^ std::hash<String>()(a->cur);
+      return std::hash<ffi::String>()(a->parent) ^ std::hash<ffi::String>()(a->cur);
     }
   };
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ScopePair, ObjectRef, ScopePairNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ScopePair, ObjectRef, ScopePairNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopePairNode);
 };
 
 class ScopeIdDefNode : public Object {
  public:
   /*! \brief The ScopeId defined */
-  Array<Var> def_ids;
+  ffi::Array<Var> def_ids;
   /*! \brief The extents of the ScopeId */
-  Array<PrimExpr> extents;
+  ffi::Array<PrimExpr> extents;
   /*! \brief The scope of the scope id */
   ScopePair scope;
 
@@ -87,26 +86,26 @@ class ScopeIdDefNode : public Object {
         .def_ro("scope", &ScopeIdDefNode::scope);
   }
 
-  static constexpr const char* _type_key = "tirx.ScopeIdDef";
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_FINAL_OBJECT_INFO(ScopeIdDefNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ScopeIdDef", ScopeIdDefNode, Object);
 };
 
 class ScopeIdDef : public ObjectRef {
  public:
-  TVM_DLL explicit ScopeIdDef(Array<Var> def_ids, Array<PrimExpr> extents, ScopePair scope);
+  TVM_DLL explicit ScopeIdDef(ffi::Array<Var> def_ids, ffi::Array<PrimExpr> extents,
+                              ScopePair scope);
 
   PrimExpr fused_extent() const;
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ScopeIdDef, ObjectRef, ScopeIdDefNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ScopeIdDef, ObjectRef, ScopeIdDefNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ScopeIdDefNode);
 };
 
 /*! \brief Compose two scope id definitions */
-Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
+ffi::Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
 
 /*! \brief Compliment two scope id definitions */
-Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
+ffi::Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs);
 
 class ScopeIdDefVerifier {
  public:
@@ -114,7 +113,7 @@ class ScopeIdDefVerifier {
                                         ScopePair::ScopePairEqual>;
 
   /*! \brief Verify the scope id definitions are well formed */
-  bool Verify(const Array<ScopeIdDef>& defs);
+  bool Verify(const ffi::Array<ScopeIdDef>& defs);
 
   /*! \brief The resovled scope id set */
   ScopeIdSet id_set;
@@ -123,10 +122,10 @@ class ScopeIdDefVerifier {
 class ScopeIdResolveTable {
  public:
   using ScopeIdSet = ScopeIdDefVerifier::ScopeIdSet;
-  using LaunchParams = std::unordered_map<String, IterVar>;
+  using LaunchParams = std::unordered_map<ffi::String, IterVar>;
 
-  typedef Array<PrimExpr> (*ResolveFunc)(const Optional<Array<PrimExpr>>& extents, int out_dim,
-                                         const LaunchParams& params);
+  typedef ffi::Array<PrimExpr> (*ResolveFunc)(const ffi::Optional<ffi::Array<PrimExpr>>& extents,
+                                              int out_dim, const LaunchParams& params);
 
   static ScopeIdResolveTable* Global() {
     static ScopeIdResolveTable inst;
@@ -146,14 +145,16 @@ class ScopeIdResolveTable {
   };
 
   /*! \brief Register a ScopeIdDef resolve rule */
-  static Registry& Register(String parent, String cur, String target_kind);
+  static Registry& Register(ffi::String parent, ffi::String cur, ffi::String target_kind);
 
   /*! \brief Resolve a ScopeIdDef */
-  static Array<PrimExpr> Resolve(const ScopePair& scope, const Optional<Array<PrimExpr>>& extents,
-                                 int out_dim, String target_kind, const LaunchParams& params);
+  static ffi::Array<PrimExpr> Resolve(const ScopePair& scope,
+                                      const ffi::Optional<ffi::Array<PrimExpr>>& extents,
+                                      int out_dim, ffi::String target_kind,
+                                      const LaunchParams& params);
 
  private:
-  static std::string GetKey(const ScopePair& scope, const String& target_kind) {
+  static std::string GetKey(const ScopePair& scope, const ffi::String& target_kind) {
     return scope->parent.operator std::string() + "__##__" + scope->cur.operator std::string() +
            "__##__" + target_kind.operator std::string();
   }
@@ -166,22 +167,22 @@ class ScopeIdResolveTable {
 class ExecScope;
 class ExecScopeNode : public Object {
  public:
-  Array<ScopeIdDef> scope_id_def;
+  ffi::Array<ScopeIdDef> scope_id_def;
 
   /*! \brief scope name, used when printing */
-  String name;
+  ffi::String name;
 
   /*! \brief scope's are the same */
   virtual bool Is(const ExecScope& other) const;
 
   /*! \brief scope is identified by name */
-  bool Is(const String& name) const;
+  bool Is(const ffi::String& name) const;
 
   /*! \brief scope is higher than other sope */
   bool Higher(const ExecScope& other) const;
 
   /*! \brief scope is higher than other sope */
-  bool Higher(const String& other) const;
+  bool Higher(const ffi::String& other) const;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -190,32 +191,31 @@ class ExecScopeNode : public Object {
         .def_ro("scope_id_def", &ExecScopeNode::scope_id_def);
   }
 
-  static constexpr const char* _type_key = "tirx.ExecScope";
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_BASE_OBJECT_INFO(ExecScopeNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO("tirx.ExecScope", ExecScopeNode, Object);
 };
 
 class ExecScope : public ObjectRef {
  public:
-  TVM_DLL explicit ExecScope(String name, Array<ScopeIdDef> scope_id_def = {});
+  TVM_DLL explicit ExecScope(ffi::String name, ffi::Array<ScopeIdDef> scope_id_def = {});
 
   /*! \brief create a exec scope from scope name */
-  static ExecScope Create(String name);
+  static ExecScope Create(ffi::String name);
 
   /*! \brief check if a scope name is valid */
-  static bool Valid(const String& name);
+  static bool Valid(const ffi::String& name);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ExecScope, ObjectRef, ExecScopeNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ExecScope, ObjectRef, ExecScopeNode);
 };
 
 class ExecScopeSliceNode : public ExecScopeNode {
  public:
   /*! \brief slices or select condition of the execution scope */
-  Variant<Array<Range>, PrimExpr> slices = Array<Range>({});
+  ffi::Variant<ffi::Array<Range>, PrimExpr> slices = ffi::Array<Range>({});
   /*! \brief extents of the execution scope */
-  Optional<Array<PrimExpr>> extents;
+  ffi::Optional<ffi::Array<PrimExpr>> extents;
   /*! \brief parent scope name */
-  String parent;
+  ffi::String parent;
 
   bool Is(const ExecScope& other) const final;
 
@@ -229,26 +229,26 @@ class ExecScopeSliceNode : public ExecScopeNode {
         .def_ro("scope_id_def", &ExecScopeSliceNode::scope_id_def);
   }
 
-  static constexpr const char* _type_key = "tirx.ExecScopeSlice";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ExecScopeSliceNode, ExecScopeNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ExecScopeSlice", ExecScopeSliceNode, ExecScopeNode);
 };
 
 class ExecScopeSlice : public ExecScope {
  public:
-  TVM_DLL explicit ExecScopeSlice(Variant<Array<Range>, PrimExpr> slices,
-                                  Optional<Array<PrimExpr>> extents, String parent, String cur);
+  TVM_DLL explicit ExecScopeSlice(ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
+                                  ffi::Optional<ffi::Array<PrimExpr>> extents, ffi::String parent,
+                                  ffi::String cur);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ExecScopeSlice, ExecScope, ExecScopeSliceNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ExecScopeSliceNode);
 };
 
 /******** Helper functions ********/
 /*! \brief ExecScope order from highest to lowest */
-static const std::unordered_map<String, int> ScopeOrder = {
+static const std::unordered_map<ffi::String, int> ScopeOrder = {
     {"world", 0},     {"kernel", 1}, {"cluster", 2}, {"cta", 3},
     {"warpgroup", 4}, {"warp", 5},   {"thread", 6}};
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_EXEC_SCOPE_H_

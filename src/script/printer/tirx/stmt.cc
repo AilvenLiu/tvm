@@ -79,29 +79,30 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
   return call->args[0];
 }
 
-ExprDoc BulkGroupEventDecl(const tirx::BulkGroupEvent& event, const String& method,
+ExprDoc BulkGroupEventDecl(const tirx::BulkGroupEvent& event, const ffi::String& method,
                            const AccessPath& p, const IRDocsifier& d) {
   return TIRp(d, method)->Call({LiteralDoc::Int(static_cast<int64_t>(event->impl), p->Attr("impl")),
                                 d->AsDoc<ExprDoc>(event->state, p->Attr("state"))});
 }
 
-ExprDoc HandleEvent(const tirx::BulkGroupEvent& event, const String& method, const AccessPath& p,
-                    const IRDocsifier& d) {
+ExprDoc HandleEvent(const tirx::BulkGroupEvent& event, const ffi::String& method,
+                    const AccessPath& p, const IRDocsifier& d) {
   if (!d->IsVarDefined(event)) {
-    if (Optional<Frame> opt_f = FindLowestVarDef(event, d)) {
+    if (ffi::Optional<Frame> opt_f = FindLowestVarDef(event, d)) {
       ExprDoc lhs = DefineBulkEvent(event, opt_f.value(), d);
       ExprDoc rhs = BulkGroupEventDecl(event, method, p, d);
       opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
     }
   }
-  if (Optional<ExprDoc> doc = d->GetVarDoc(event)) {
+  if (ffi::Optional<ExprDoc> doc = d->GetVarDoc(event)) {
     return doc.value();
   }
   LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << event;
 }
 
 ExprDoc SemaphoreEventTensorDecl(const tirx::SemaphoreEventTensor& event_tensor,
-                                 const String& method, const AccessPath& p, const IRDocsifier& d) {
+                                 const ffi::String& method, const AccessPath& p,
+                                 const IRDocsifier& d) {
   return TIRp(d, method)->Call({
       LiteralDoc::Int(static_cast<int64_t>(event_tensor->impl), p->Attr("impl")),
       d->AsDoc<ExprDoc>(event_tensor->state, p->Attr("state")),
@@ -109,16 +110,16 @@ ExprDoc SemaphoreEventTensorDecl(const tirx::SemaphoreEventTensor& event_tensor,
   });
 }
 
-ExprDoc HandleEventTensor(const tirx::SemaphoreEventTensor& event_tensor, const String& method,
+ExprDoc HandleEventTensor(const tirx::SemaphoreEventTensor& event_tensor, const ffi::String& method,
                           const AccessPath& p, const IRDocsifier& d) {
   if (!d->IsVarDefined(event_tensor)) {
-    if (Optional<Frame> opt_f = FindLowestVarDef(event_tensor, d)) {
+    if (ffi::Optional<Frame> opt_f = FindLowestVarDef(event_tensor, d)) {
       ExprDoc lhs = DefineSemaphoreEventTensor(event_tensor, opt_f.value(), d);
       ExprDoc rhs = SemaphoreEventTensorDecl(event_tensor, method, p, d);
       opt_f.value()->stmts.push_back(AssignDoc(lhs, rhs, std::nullopt));
     }
   }
-  if (Optional<ExprDoc> doc = d->GetVarDoc(event_tensor)) {
+  if (ffi::Optional<ExprDoc> doc = d->GetVarDoc(event_tensor)) {
     return doc.value();
   }
   LOG(FATAL) << "IndexError: Variable is not defined in the environment: " << event_tensor;
@@ -141,7 +142,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::SemaphoreEventTensorItem>(
         "", [](tirx::SemaphoreEventTensorItem item, AccessPath p, IRDocsifier d) -> Doc {
           const auto& e_tensor_doc = d->AsDoc<ExprDoc>(item->tensor, p->Attr("tensor"));
-          Array<Doc> indices_doc;
+          ffi::Array<Doc> indices_doc;
           for (size_t i = 0, n = item->indices.size(); i < n; ++i) {
             indices_doc.push_back(
                 d->AsDoc<Doc>(item->indices[i], p->Attr("indices")->ArrayItem(i)));
@@ -160,7 +161,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           }
 
           auto print_member_function_call = [&](std::string method) {
-            Array<Doc> args;
+            ffi::Array<Doc> args;
             for (size_t i = 1, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
@@ -177,11 +178,11 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           static const auto& async_op_map = Op::GetAttrMap<Bool>("TIsAsyncOp");
           ICHECK(bool(tirp_op_map.get(op, tvm::Bool(false))))
               << "Only TIR+ ops can be used in tirx::tirp::OpCall";
-          String name = op_names.get(op, op->name);
+          ffi::String name = op_names.get(op, op->name);
           if (bool(schedule_op_map.get(op, tvm::Bool(false))) ||
               bool(async_op_map.get(op, tvm::Bool(false)))) {
             // Schedule ops
-            Array<Doc> args;
+            ffi::Array<Doc> args;
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
@@ -191,7 +192,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           } else if (bool(compose_op_map.get(op, tvm::Bool(false)))) {
             // Compose ops
             With<TIRFrame> f(d, op_call);
-            Array<tirx::Stmt> stmts;
+            ffi::Array<tirx::Stmt> stmts;
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               stmts.push_back(Downcast<tirx::Stmt>(op_call->args[i]));
             }
@@ -214,7 +215,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             return print_member_function_call(method);
           } else {
             // Misc ops
-            Array<Doc> args;
+            ffi::Array<Doc> args;
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }

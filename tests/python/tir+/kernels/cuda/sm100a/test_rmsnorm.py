@@ -155,9 +155,9 @@ def test_rmsnorm(hidden_size, batch_size):
 
         def tir():
             DEV = tvm.cuda(0)
-            x_tvm = tvm.nd.array(x.cpu().numpy(), DEV)
-            weight_tvm = tvm.nd.array(weight.cpu().numpy(), DEV)
-            out_tvm = tvm.nd.empty((batch_size, hidden_size), dtype="float16", device=DEV)
+            x_tvm = tvm.runtime.tensor(x.cpu().numpy(), DEV)
+            weight_tvm = tvm.runtime.tensor(weight.cpu().numpy(), DEV)
+            out_tvm = tvm.runtime.empty((batch_size, hidden_size), dtype="float16", device=DEV)
             func = lambda: mod(
                 x_tvm,
                 weight_tvm,

@@ -498,30 +498,30 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
     tvm_dev = tvm.cuda(0)
     tvm_arg_dict = {}
     for key, value in arg_dict.items():
-        tvm_arg_dict[key] = tvm.nd.array(value, device=tvm_dev)
+        tvm_arg_dict[key] = tvm.runtime.tensor(value, device=tvm_dev)
 
     def tir_mlp_static():
         target = tvm.target.Target("cuda")
         exec_queue = generate_exec_queue_static()
-        exec_queue_tvm = tvm.nd.array(exec_queue, tvm_dev)
+        exec_queue_tvm = tvm.runtime.tensor(exec_queue, tvm_dev)
         with target:
 
             def func():
-                tvm_arg_dict["etensor_gate_up_proj"] = tvm.nd.array(
+                tvm_arg_dict["etensor_gate_up_proj"] = tvm.runtime.tensor(
                     arg_dict["etensor_gate_up_proj"], device=tvm_dev
                 )
-                tvm_arg_dict["etensor_down_proj"] = tvm.nd.array(
+                tvm_arg_dict["etensor_down_proj"] = tvm.runtime.tensor(
                     arg_dict["etensor_down_proj"], device=tvm_dev
                 )
-                tvm_arg_dict["etensor_down_proj_reduce"] = tvm.nd.array(
+                tvm_arg_dict["etensor_down_proj_reduce"] = tvm.runtime.tensor(
                     arg_dict["etensor_down_proj_reduce"], device=tvm_dev
                 )
-                tvm_arg_dict["etensor_add_rms_norm"] = tvm.nd.array(
+                tvm_arg_dict["etensor_add_rms_norm"] = tvm.runtime.tensor(
                     arg_dict["etensor_add_rms_norm"], device=tvm_dev
                 )
-                tvm_arg_dict["residual"] = tvm.nd.array(arg_dict["residual"], device=tvm_dev)
+                tvm_arg_dict["residual"] = tvm.runtime.tensor(arg_dict["residual"], device=tvm_dev)
                 if PROFILER_ON:
-                    tvm_arg_dict["profiler_buffer"] = tvm.nd.array(
+                    tvm_arg_dict["profiler_buffer"] = tvm.runtime.tensor(
                         arg_dict["profiler_buffer"], device=tvm_dev
                     )
                 mod_mlp_static(
@@ -563,28 +563,30 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
         with target:
 
             def func():
-                tvm_arg_dict["etensor_gate_up_proj"] = tvm.nd.array(
+                tvm_arg_dict["etensor_gate_up_proj"] = tvm.runtime.tensor(
                     arg_dict["etensor_gate_up_proj"], device=tvm_dev
                 )
-                tvm_arg_dict["etensor_down_proj"] = tvm.nd.array(
+                tvm_arg_dict["etensor_down_proj"] = tvm.runtime.tensor(
                     arg_dict["etensor_down_proj"], device=tvm_dev
                 )
-                tvm_arg_dict["etensor_down_proj_reduce"] = tvm.nd.array(
+                tvm_arg_dict["etensor_down_proj_reduce"] = tvm.runtime.tensor(
                     arg_dict["etensor_down_proj_reduce"], device=tvm_dev
                 )
-                tvm_arg_dict["etensor_add_rms_norm"] = tvm.nd.array(
+                tvm_arg_dict["etensor_add_rms_norm"] = tvm.runtime.tensor(
                     arg_dict["etensor_add_rms_norm"], device=tvm_dev
                 )
-                tvm_arg_dict["etensor_end"] = tvm.nd.array(arg_dict["etensor_end"], device=tvm_dev)
-                tvm_arg_dict["queue_tasks"] = tvm.nd.array(exec_queue.tasks, tvm_dev)
-                tvm_arg_dict["queue_head"] = tvm.nd.array(exec_queue.head, tvm_dev)
-                tvm_arg_dict["queue_tail"] = tvm.nd.array(exec_queue.tail, tvm_dev)
-                tvm_arg_dict["residual"] = tvm.nd.array(arg_dict["residual"], device=tvm_dev)
+                tvm_arg_dict["etensor_end"] = tvm.runtime.tensor(
+                    arg_dict["etensor_end"], device=tvm_dev
+                )
+                tvm_arg_dict["queue_tasks"] = tvm.runtime.tensor(exec_queue.tasks, tvm_dev)
+                tvm_arg_dict["queue_head"] = tvm.runtime.tensor(exec_queue.head, tvm_dev)
+                tvm_arg_dict["queue_tail"] = tvm.runtime.tensor(exec_queue.tail, tvm_dev)
+                tvm_arg_dict["residual"] = tvm.runtime.tensor(arg_dict["residual"], device=tvm_dev)
                 if PROFILER_ON:
-                    tvm_arg_dict["profiler_buffer"] = tvm.nd.array(
+                    tvm_arg_dict["profiler_buffer"] = tvm.runtime.tensor(
                         arg_dict["profiler_buffer"], device=tvm_dev
                     )
-                tvm_arg_dict["actual_order"] = tvm.nd.array(
+                tvm_arg_dict["actual_order"] = tvm.runtime.tensor(
                     arg_dict["actual_order"], device=tvm_dev
                 )
                 mod_mlp_dynamic(
@@ -680,8 +682,8 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
 
         def func():
             out_gate_up_proj = torch.matmul(std_arg_dict["input"], std_arg_dict["W_gate_up"].T)
-            out_gate_up_proj_tvm = tvm.nd.array(out_gate_up_proj.cpu(), device=tvm.cuda(0))
-            out_silu_multiply_tvm = tvm.nd.array(
+            out_gate_up_proj_tvm = tvm.runtime.tensor(out_gate_up_proj.cpu(), device=tvm.cuda(0))
+            out_silu_multiply_tvm = tvm.runtime.tensor(
                 torch.zeros((batch_size, INTERMEDIATE_SIZE), dtype=torch.float16),
                 device=tvm.cuda(0),
             )

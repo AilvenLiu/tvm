@@ -142,10 +142,10 @@ def test_two_stage_reduction():
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
 
-    A_tvm = tvm.nd.array(A_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
 
     # we initialize event on host instead of device because of Tp.fill not correctly implemented
-    sem_tvm = tvm.nd.array(np.full((NUM_BLOCK_M,), NUM_BLOCK_N, dtype=np.int32), device=DEV)
+    sem_tvm = tvm.runtime.tensor(np.full((NUM_BLOCK_M,), NUM_BLOCK_N, dtype=np.int32), device=DEV)
     with target:
 
         std_mod = tvm.compile(mod_std, target=target, tir_pipeline="tirp")

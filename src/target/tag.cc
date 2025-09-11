@@ -476,7 +476,7 @@ TVM_REGISTER_METAL_GPU_TAG("apple/m2-gpu", 1024, 32768, 32);
 #undef TVM_REGISTER_METAL_TAG
 
 #define TVM_REGISTER_TAG_AWS_TRN1(Name, Cores)                                       \
-  TVM_REGISTER_TARGET_TAG(Name).set_config({{"kind", String("trn")},                 \
+  TVM_REGISTER_TARGET_TAG(Name).set_config({{"kind", ffi::String("trn")},            \
                                             {"num-cores", Cores},                    \
                                             {"partition_size", 128},                 \
                                             {"max_sbuf_size_per_partition", 196608}, \

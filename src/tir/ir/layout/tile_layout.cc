@@ -40,32 +40,32 @@ ObjectPtr<Object> CreateAxis(const std::string& name) {
 
 bool AxisNode::IsThreadAxis() const {
   static const auto& thread_attr_map = Axis::GetAttrMap<bool>("thread");
-  return thread_attr_map[GetRef<Axis>(this)];
+  return thread_attr_map[ffi::GetRef<Axis>(this)];
 }
 
 bool AxisNode::IsMemoryAxis() const {
   static const auto& thread_attr_map = Axis::GetAttrMap<bool>("thread");
-  return !thread_attr_map[GetRef<Axis>(this)];
+  return !thread_attr_map[ffi::GetRef<Axis>(this)];
 }
 
-Optional<ExecScope> AxisNode::GetScope() const {
-  static const auto& scope_attr_map = Axis::GetAttrMap<Optional<ExecScope>>("scope");
-  return scope_attr_map.get(GetRef<Axis>(this), std::nullopt);
+ffi::Optional<ExecScope> AxisNode::GetScope() const {
+  static const auto& scope_attr_map = Axis::GetAttrMap<ffi::Optional<ExecScope>>("scope");
+  return scope_attr_map.get(ffi::GetRef<Axis>(this), std::nullopt);
 }
 
-Optional<ExecScope> AxisNode::GetSubscope() const {
-  static const auto& subscope_attr_map = Axis::GetAttrMap<Optional<ExecScope>>("subscope");
-  return subscope_attr_map.get(GetRef<Axis>(this), std::nullopt);
+ffi::Optional<ExecScope> AxisNode::GetSubscope() const {
+  static const auto& subscope_attr_map = Axis::GetAttrMap<ffi::Optional<ExecScope>>("subscope");
+  return subscope_attr_map.get(ffi::GetRef<Axis>(this), std::nullopt);
 }
 
-Optional<FAxisFuser> AxisNode::GetFuser() const {
-  static const auto& fuser_attr_map = Axis::GetAttrMap<Optional<FAxisFuser>>("fuser");
-  return fuser_attr_map.get(GetRef<Axis>(this), std::nullopt);
+ffi::Optional<FAxisFuser> AxisNode::GetFuser() const {
+  static const auto& fuser_attr_map = Axis::GetAttrMap<ffi::Optional<FAxisFuser>>("fuser");
+  return fuser_attr_map.get(ffi::GetRef<Axis>(this), std::nullopt);
 }
 
-Optional<FAxisSplitter> AxisNode::GetSplitter() const {
-  static const auto& splitter_attr_map = Axis::GetAttrMap<Optional<FAxisSplitter>>("splitter");
-  return splitter_attr_map.get(GetRef<Axis>(this), std::nullopt);
+ffi::Optional<FAxisSplitter> AxisNode::GetSplitter() const {
+  static const auto& splitter_attr_map = Axis::GetAttrMap<ffi::Optional<FAxisSplitter>>("splitter");
+  return splitter_attr_map.get(ffi::GetRef<Axis>(this), std::nullopt);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK({
@@ -89,14 +89,14 @@ TVM_FFI_STATIC_INIT_BLOCK({
 });
 
 // Axis
-Axis Axis::Get(const String& name) {
+Axis Axis::Get(const ffi::String& name) {
   const AxisRegEntry* reg = AxisRegistry::Global()->Get(name);
   CHECK(reg != nullptr) << "Axis " << name << " is not registered";
   return reg->axis_;
 }
 
 template <typename ValueType>
-inline AxisAttrMap<ValueType> Axis::GetAttrMap(const String& attr_name) {
+inline AxisAttrMap<ValueType> Axis::GetAttrMap(const ffi::String& attr_name) {
   return AxisAttrMap<ValueType>(AxisRegistry::Global()->GetAttrMap(attr_name));
 }
 
@@ -104,21 +104,24 @@ inline AxisAttrMap<ValueType> Axis::GetAttrMap(const String& attr_name) {
 inline AxisNode* AxisRegEntry::get() { return const_cast<AxisNode*>(axis_.operator->()); }
 
 AxisRegEntry::AxisRegEntry(uint32_t index) {
-  ObjectPtr<AxisNode> n = make_object<AxisNode>();
+  ObjectPtr<AxisNode> n = ffi::make_object<AxisNode>();
   n->index_ = index;
   axis_ = Axis(n);
 }
 
-AxisRegEntry& AxisRegEntry::RegisterOrGet(const String& name) {
+AxisRegEntry& AxisRegEntry::RegisterOrGet(const ffi::String& name) {
   auto& entry = AxisRegistry::Global()->RegisterOrGet(name);
   entry.get()->name = name;
   return entry;
 }
 
-Array<String> AxisRegEntry::ListAxisNames() { return AxisRegistry::Global()->ListAllNames(); }
+ffi::Array<ffi::String> AxisRegEntry::ListAxisNames() {
+  return AxisRegistry::Global()->ListAllNames();
+}
 
 template <typename ValueType>
-inline AxisRegEntry& AxisRegEntry::set_attr(const String& key, const ValueType& value, int plevel) {
+inline AxisRegEntry& AxisRegEntry::set_attr(const ffi::String& key, const ValueType& value,
+                                            int plevel) {
   ICHECK_GT(plevel, 0) << "plevel in set_attr must be greater than 0";
   ffi::Any rv;
   rv = value;
@@ -126,33 +129,33 @@ inline AxisRegEntry& AxisRegEntry::set_attr(const String& key, const ValueType& 
   return *this;
 }
 
-AxisRegEntry& AxisRegEntry::set_scope(const String& scope_name, int plevel) {
-  set_attr<Optional<ExecScope>>("scope", ExecScope::Create(scope_name), plevel);
+AxisRegEntry& AxisRegEntry::set_scope(const ffi::String& scope_name, int plevel) {
+  set_attr<ffi::Optional<ExecScope>>("scope", ExecScope::Create(scope_name), plevel);
   return *this;
 }
 
-AxisRegEntry& AxisRegEntry::set_subscope(const String& subscope_name, int plevel) {
-  set_attr<Optional<ExecScope>>("subscope", ExecScope::Create(subscope_name), plevel);
+AxisRegEntry& AxisRegEntry::set_subscope(const ffi::String& subscope_name, int plevel) {
+  set_attr<ffi::Optional<ExecScope>>("subscope", ExecScope::Create(subscope_name), plevel);
   return *this;
 }
 
 AxisRegEntry& AxisRegEntry::set_fuser(const FAxisFuser& fuser) {
-  set_attr<Optional<FAxisFuser>>("fuser", fuser);
+  set_attr<ffi::Optional<FAxisFuser>>("fuser", fuser);
   return *this;
 }
 
 AxisRegEntry& AxisRegEntry::set_splitter(const FAxisSplitter& splitter) {
-  set_attr<Optional<FAxisSplitter>>("splitter", splitter);
+  set_attr<ffi::Optional<FAxisSplitter>>("splitter", splitter);
   return *this;
 }
 
-void AxisRegEntry::UpdateAttr(const String& key, ffi::Any value, int plevel) {
+void AxisRegEntry::UpdateAttr(const ffi::String& key, ffi::Any value, int plevel) {
   AxisRegistry::Global()->UpdateAttr(key, axis_, value, plevel);
 }
 
 // register theaad axis
-Array<Iter> SplitterGen(const Iter& iter, const Axis& axis_outer, const Axis& axis_inner,
-                        const PrimExpr& e_inner) {
+ffi::Array<Iter> SplitterGen(const Iter& iter, const Axis& axis_outer, const Axis& axis_inner,
+                             const PrimExpr& e_inner) {
   arith::Analyzer analyzer;
   if (analyzer.CanProve(iter->extent * iter->stride < e_inner)) {
     return {Iter(iter->extent, iter->stride, axis_inner)};
@@ -179,13 +182,14 @@ TVM_REGISTER_AXIS("tx")
     .set_attr<bool>("thread", true)
     .set_scope("cta")
     .set_subscope("thread")
-    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+    .set_fuser([](Target target, ffi::String subscope, ffi::String scope,
+                  Iter iter) -> ffi::Optional<Iter> {
       if (target->kind->default_device_type == kDLCUDA) {
         return std::nullopt;
       }
       return std::nullopt;
     })
-    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+    .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
       if (target->kind->default_device_type == kDLCUDA) {
         if (scope == "warp") {
@@ -203,7 +207,8 @@ TVM_REGISTER_AXIS("warpid")
     .set_attr<bool>("thread", true)
     .set_scope("cta")
     .set_subscope("warp")
-    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+    .set_fuser([](Target target, ffi::String subscope, ffi::String scope,
+                  Iter iter) -> ffi::Optional<Iter> {
       if (target->kind->default_device_type == kDLCUDA) {
         // cta->warp ===> cta->thread (tx)
         if (subscope == "thread" && scope == "cta") {
@@ -213,7 +218,7 @@ TVM_REGISTER_AXIS("warpid")
       }
       return std::nullopt;
     })
-    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+    .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
       if (target->kind->default_device_type == kDLCUDA) {
         if (scope == "warp") {
@@ -228,7 +233,8 @@ TVM_REGISTER_AXIS("laneid")
     .set_attr<bool>("thread", true)
     .set_scope("warp")
     .set_subscope("thread")
-    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+    .set_fuser([](Target target, ffi::String subscope, ffi::String scope,
+                  Iter iter) -> ffi::Optional<Iter> {
       if (target->kind->default_device_type == kDLCUDA) {
         if (subscope == "thread" && scope == "warpgroup") {
           // warp->thread ===> warpgroup->thread (tid_in_wg)
@@ -241,7 +247,7 @@ TVM_REGISTER_AXIS("laneid")
       }
       return std::nullopt;
     })
-    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+    .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
       if (target->kind->default_device_type == kDLCUDA) {
         LOG(FATAL) << "laneid can not be split any more";
@@ -252,7 +258,8 @@ TVM_REGISTER_AXIS("wgid")
     .set_attr<bool>("thread", true)
     .set_scope("cta")
     .set_subscope("warpgroup")
-    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+    .set_fuser([](Target target, ffi::String subscope, ffi::String scope,
+                  Iter iter) -> ffi::Optional<Iter> {
       if (target->kind->default_device_type == kDLCUDA) {
         if (subscope == "thread" && scope == "cta") {
           // cta->warpgroup ===> cta->thread (tx)
@@ -264,7 +271,7 @@ TVM_REGISTER_AXIS("wgid")
       }
       return std::nullopt;
     })
-    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+    .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
       if (target->kind->default_device_type == kDLCUDA) {
         LOG(FATAL) << "wgid can not be split any more";
@@ -275,7 +282,8 @@ TVM_REGISTER_AXIS("tid_in_wg")
     .set_attr<bool>("thread", true)
     .set_scope("warpgroup")
     .set_subscope("thread")
-    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+    .set_fuser([](Target target, ffi::String subscope, ffi::String scope,
+                  Iter iter) -> ffi::Optional<Iter> {
       if (target->kind->default_device_type == kDLCUDA) {
         if (subscope == "thread" && scope == "cta") {
           // warpgroup->thread ===> cta->thread (tx)
@@ -285,7 +293,7 @@ TVM_REGISTER_AXIS("tid_in_wg")
       }
       return std::nullopt;
     })
-    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+    .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
       if (target->kind->default_device_type == kDLCUDA) {
         if (scope == "warp") {
@@ -300,7 +308,8 @@ TVM_REGISTER_AXIS("wid_in_wg")
     .set_attr<bool>("thread", true)
     .set_scope("warpgroup")
     .set_subscope("warp")
-    .set_fuser([](Target target, String subscope, String scope, Iter iter) -> Optional<Iter> {
+    .set_fuser([](Target target, ffi::String subscope, ffi::String scope,
+                  Iter iter) -> ffi::Optional<Iter> {
       if (target->kind->default_device_type == kDLCUDA) {
         if (subscope == "thread" && scope == "warpgroup") {
           // warpgroup->warp ===> warpgroup->thread (tid_in_wg)
@@ -316,7 +325,7 @@ TVM_REGISTER_AXIS("wid_in_wg")
       }
       return std::nullopt;
     })
-    .set_splitter([](Target target, String scope, Iter iter) -> Array<Iter> {
+    .set_splitter([](Target target, ffi::String scope, Iter iter) -> ffi::Array<Iter> {
       arith::Analyzer analyzer;
       if (target->kind->default_device_type == kDLCUDA) {
         LOG(FATAL) << "wid_in_wg can not be split any more";
@@ -334,12 +343,12 @@ TVM_REGISTER_AXIS("TLane").set_attr<bool>("thread", false);
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.AxisGet", [](String name) -> Axis { return Axis::Get(name); });
+  refl::GlobalDef().def("tir.AxisGet", [](ffi::String name) -> Axis { return Axis::Get(name); });
 });
 
 /**************** Iter ****************/
 Iter::Iter(PrimExpr extent, PrimExpr stride, Axis axis) {
-  auto n = make_object<IterNode>();
+  auto n = ffi::make_object<IterNode>();
   n->extent = extent;
   n->stride = stride;
   n->axis = axis;
@@ -355,8 +364,9 @@ TVM_FFI_STATIC_INIT_BLOCK({
 
 /**************** TileLayout ****************/
 
-TileLayout::TileLayout(Array<Iter> shard, Array<Iter> replicate, Map<Axis, PrimExpr> exclude) {
-  auto n = make_object<TileLayoutNode>();
+TileLayout::TileLayout(ffi::Array<Iter> shard, ffi::Array<Iter> replicate,
+                       ffi::Map<Axis, PrimExpr> exclude) {
+  auto n = ffi::make_object<TileLayoutNode>();
   n->shard = shard;
   n->replicate = replicate;
   n->exclude = exclude;
@@ -365,10 +375,10 @@ TileLayout::TileLayout(Array<Iter> shard, Array<Iter> replicate, Map<Axis, PrimE
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TileLayout",
-                        [](Array<Iter> shard, Array<Iter> replicate, Map<Axis, PrimExpr> exclude) {
-                          return TileLayout(shard, replicate, exclude);
-                        });
+  refl::GlobalDef().def("tir.TileLayout", [](ffi::Array<Iter> shard, ffi::Array<Iter> replicate,
+                                             ffi::Map<Axis, PrimExpr> exclude) {
+    return TileLayout(shard, replicate, exclude);
+  });
 });
 
 bool TileLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const { return true; }
@@ -414,7 +424,7 @@ bool TileLayoutNode::VerifyWellFormed() const {
   return true;
 }
 
-PrimExpr TileLayoutNode::GetSize(Optional<String> axis_name) const {
+PrimExpr TileLayoutNode::GetSize(ffi::Optional<ffi::String> axis_name) const {
   auto filter = [&](const Iter& iter, PrimExpr acc) {
     if (!axis_name.has_value() || iter->axis->name == axis_name.value()) {
       return acc * iter->extent;
@@ -428,7 +438,7 @@ PrimExpr TileLayoutNode::GetSize(Optional<String> axis_name) const {
   return res;
 }
 
-PrimExpr TileLayoutNode::GetCosize(Optional<String> axis_name) const {
+PrimExpr TileLayoutNode::GetCosize(ffi::Optional<ffi::String> axis_name) const {
   arith::Analyzer analyzer;
   PrimExpr result = 1;
   auto filter = [&](const Axis& axis) {
@@ -448,14 +458,14 @@ PrimExpr TileLayoutNode::GetCosize(Optional<String> axis_name) const {
   return analyzer.Simplify(result);
 }
 
-Map<String, PrimExpr> TileLayoutNode::Apply(PrimExpr coord) const {
+ffi::Map<ffi::String, PrimExpr> TileLayoutNode::Apply(PrimExpr coord) const {
   return Apply(SplitCoord(coord, GetShardShape()));
 }
 
-Map<String, PrimExpr> TileLayoutNode::Apply(Array<PrimExpr> coord) const {
+ffi::Map<ffi::String, PrimExpr> TileLayoutNode::Apply(Array<PrimExpr> coord) const {
   arith::Analyzer analyzer;
   CHECK_EQ(coord.size(), shard.size()) << "Coordinate size must match the number of shard axes";
-  std::unordered_map<String, PrimExpr> result;
+  std::unordered_map<ffi::String, PrimExpr> result;
   for (size_t i = 0; i < shard.size(); ++i) {
     auto it = result.find(shard[i]->axis->name);
     if (it == result.end()) {
@@ -478,19 +488,19 @@ TileLayout RemoveUnitIters(TileLayout layout) {
     new_shard.push_back(Iter(1, 1, layout->shard[0]->axis));
   }
   new_layout->shard = new_shard;
-  return GetRef<TileLayout>(new_layout);
+  return ffi::GetRef<TileLayout>(new_layout);
 }
 
 TileLayout RemoveZeroOffset(TileLayout layout) {
   auto new_layout = layout.CopyOnWrite();
-  Map<Axis, PrimExpr> exclude;
+  ffi::Map<Axis, PrimExpr> exclude;
   for (const auto& [axis, offset] : layout->exclude) {
     if (!is_zero(offset)) {
       exclude.Set(axis, offset);
     }
   }
   new_layout->exclude = exclude;
-  return GetRef<TileLayout>(new_layout);
+  return ffi::GetRef<TileLayout>(new_layout);
 }
 
 TileLayout FuseShardIters(TileLayout layout) {
@@ -515,7 +525,7 @@ TileLayout FuseShardIters(TileLayout layout) {
   }
   auto new_layout = layout.CopyOnWrite();
   new_layout->shard = fused_shard;
-  return GetRef<TileLayout>(new_layout);
+  return ffi::GetRef<TileLayout>(new_layout);
 }
 
 TileLayout TryFuseAxes(TileLayout layout) {
@@ -531,7 +541,7 @@ TileLayout TryFuseAxes(TileLayout layout) {
   // Step 2: Create vectors for the new layout components
   std::vector<Iter> shard;
   std::vector<Iter> replicate;
-  Map<Axis, PrimExpr> exclude;
+  ffi::Map<Axis, PrimExpr> exclude;
 
   // Step 3: Define the axis fusion function
   auto try_fuse_axis = [&](const Iter& iter) -> Iter {
@@ -565,12 +575,12 @@ TileLayout SortReplicateIters(TileLayout layout) {
   };
   std::sort(replicate.begin(), replicate.end(), hash_compare);
   n->replicate = std::move(replicate);
-  return GetRef<TileLayout>(n);
+  return ffi::GetRef<TileLayout>(n);
 }
 
 TLayout TileLayoutNode::Normalize() const {
   // 0. Remove unit iters in shard
-  TileLayout res = RemoveUnitIters(GetRef<TileLayout>(this));
+  TileLayout res = RemoveUnitIters(ffi::GetRef<TileLayout>(this));
   // 1. Remove zero offset in exclude
   res = RemoveZeroOffset(res);
   // 2. Try fuse axes
@@ -583,7 +593,7 @@ TLayout TileLayoutNode::Normalize() const {
 }
 
 std::pair<TileLayout, std::vector<int64_t>> GroupByShape(TileLayout layout,
-                                                         const Array<PrimExpr>& shape) {
+                                                         const ffi::Array<PrimExpr>& shape) {
   arith::Analyzer analyzer;
   size_t shape_idx = 0;
   PrimExpr prod = 1;
@@ -624,7 +634,7 @@ std::pair<TileLayout, std::vector<int64_t>> GroupByShape(TileLayout layout,
 
   auto* n = layout.CopyOnWrite();
   n->shard = new_shard;
-  return {GetRef<TileLayout>(n), seps};
+  return {ffi::GetRef<TileLayout>(n), seps};
 }
 
 TVM_FFI_STATIC_INIT_BLOCK({
@@ -639,7 +649,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
 TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& outer_shape,
                              const Array<PrimExpr>& inner_shape) const {
   auto outer = outer_in->Normalize().as<TileLayout>().value();
-  auto inner = GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+  auto inner = ffi::GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
 
   CHECK_EQ(outer_shape.size(), inner_shape.size()) << "Outer and inner shape size must match";
 
@@ -654,7 +664,7 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
 
   {
     // Scale outer axis strides by inner_cosize_map
-    Map<String, PrimExpr> inner_cosize_map;
+    ffi::Map<ffi::String, PrimExpr> inner_cosize_map;
     for (const auto& iter : inner->shard) {
       if (inner_cosize_map.find(iter->axis->name) == inner_cosize_map.end()) {
         inner_cosize_map.Set(iter->axis->name, inner->GetCosize(iter->axis->name));
@@ -693,7 +703,7 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
   tile_rep.insert(tile_rep.end(), outer->replicate.begin(), outer->replicate.end());
 
   // Combine exclude attributes from both layouts
-  Map<Axis, PrimExpr> tile_offset;
+  ffi::Map<Axis, PrimExpr> tile_offset;
   for (const auto& [axis, offset] : inner->exclude) {
     tile_offset.Set(axis, offset);
   }
@@ -710,11 +720,12 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
 }
 
 // Tiles a logical shape by a given factor array.
-Array<PrimExpr> TileShape(Array<PrimExpr> shape, Array<PrimExpr> factor, bool is_inner) {
+ffi::Array<PrimExpr> TileShape(ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> factor,
+                               bool is_inner) {
   ICHECK_EQ(shape.size(), factor.size()) << "Shape and factor dimension must match.";
   arith::Analyzer analyzer;
 
-  Array<PrimExpr> new_shape;
+  ffi::Array<PrimExpr> new_shape;
   for (int i = 0; i < static_cast<int>(shape.size()); ++i) {
     ICHECK(analyzer.CanProveEqual(floormod(shape[i], factor[i]), 0))
         << "Shape[i] must be divisible by factor[i]";
@@ -730,8 +741,8 @@ Array<PrimExpr> TileShape(Array<PrimExpr> shape, Array<PrimExpr> factor, bool is
   return new_shape;
 }
 
-Array<PrimExpr> ShapeDiv(Array<PrimExpr> shape, Array<PrimExpr> factor) {
-  Array<PrimExpr> new_shape;
+ffi::Array<PrimExpr> ShapeDiv(ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> factor) {
+  ffi::Array<PrimExpr> new_shape;
   for (int i = 0; i < static_cast<int>(shape.size()); ++i) {
     new_shape.push_back(floordiv(shape[i], factor[i]));
   }
@@ -747,12 +758,12 @@ std::vector<int64_t> GetEvenSeps(std::vector<int64_t> seps) {
   return even;
 }
 
-TileLayout SplitAxes(TileLayout layout, const String& split_scope) {
+TileLayout SplitAxes(TileLayout layout, const ffi::String& split_scope) {
   Target target = Target::Current();
   if (!target.defined()) {
     return layout;
   }
-  auto split_iter = [&](const Iter& iter) -> Array<Iter> {
+  auto split_iter = [&](const Iter& iter) -> ffi::Array<Iter> {
     const auto& splitter = iter->axis->GetSplitter();
     if (splitter.has_value()) {
       return splitter.value()(target, split_scope, iter);
@@ -761,7 +772,7 @@ TileLayout SplitAxes(TileLayout layout, const String& split_scope) {
   };
 
   std::vector<Iter> shard, replicate;
-  Map<Axis, PrimExpr> exclude;
+  ffi::Map<Axis, PrimExpr> exclude;
 
   for (const auto& iter : layout->shard) {
     auto split_iters = split_iter(iter);
@@ -788,14 +799,14 @@ TileLayout SplitAxes(TileLayout layout, const String& split_scope) {
   return TileLayout(shard, replicate, exclude);
 }
 
-Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
-                                                 const Array<PrimExpr>& tiled_shape,
-                                                 const Array<PrimExpr>& inner_shape) const {
+ffi::Optional<TileLayout> TileLayoutNode::IsTileInner(
+    const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
+    const ffi::Array<PrimExpr>& inner_shape) const {
   auto maybe_tile = tile_layout.as<TileLayout>();
   if (!maybe_tile) return std::nullopt;
 
   TileLayout tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
-  TileLayout layout = GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+  TileLayout layout = ffi::GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
 
   auto tiled_scope = tiled->GetScope();
   auto inner_scope = layout->GetScope();
@@ -811,13 +822,13 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
 
   arith::Analyzer analyzer;
   // Get the cosize map of the inner layout of each axis
-  Map<String, PrimExpr> inner_cosize_map;
+  ffi::Map<ffi::String, PrimExpr> inner_cosize_map;
   for (const auto& iter : layout->shard) {
     if (inner_cosize_map.find(iter->axis->name) == inner_cosize_map.end()) {
       inner_cosize_map.Set(iter->axis->name, layout->GetCosize(iter->axis->name));
     }
   }
-  auto rescale_iter = [&](const Iter& iter) -> Optional<Iter> {
+  auto rescale_iter = [&](const Iter& iter) -> ffi::Optional<Iter> {
     auto it = inner_cosize_map.find(iter->axis->name);
     if (it != inner_cosize_map.end() && !is_one(iter->extent)) {
       if (!analyzer.CanProveEqual(floormod(iter->stride, (*it).second), 0)) {
@@ -882,7 +893,7 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
     }
   }
   // Gather outer exclude
-  Map<Axis, PrimExpr> outer_exclude;
+  ffi::Map<Axis, PrimExpr> outer_exclude;
   for (const auto& [axis, offset] : tiled->exclude) {
     auto it = layout->exclude.find(axis);
     if (it != layout->exclude.end()) {
@@ -894,9 +905,9 @@ Optional<TileLayout> TileLayoutNode::IsTileInner(const TLayout& tile_layout,
   return TileLayout(outer_shard, outer_replicate, outer_exclude);
 }
 
-Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
-                                              const Array<PrimExpr>& tiled_shape,
-                                              const Array<PrimExpr>& outer_shape) const {
+ffi::Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
+                                                   const ffi::Array<PrimExpr>& tiled_shape,
+                                                   const ffi::Array<PrimExpr>& outer_shape) const {
   auto maybe_tile = tile_layout.as<TileLayout>();
   if (!maybe_tile) {
     // Could be ComposeLayout, in which case we test layout_B of compose.
@@ -908,7 +919,7 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
     return std::nullopt;
   }
   TileLayout tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
-  TileLayout layout = GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+  TileLayout layout = ffi::GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
 
   auto tiled_scope = tiled->GetScope();
   auto outer_scope = layout->GetScope();
@@ -974,7 +985,7 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
   }
 
   // Gather inner exclude
-  Map<Axis, PrimExpr> inner_exclude;
+  ffi::Map<Axis, PrimExpr> inner_exclude;
   for (const auto& [axis, offset] : tiled->exclude) {
     auto it = layout->exclude.find(axis);
     if (it != layout->exclude.end()) {
@@ -992,7 +1003,7 @@ Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
   return std::nullopt;
 }
 
-Array<PrimExpr> TileLayoutNode::GetShardShape() const {
+ffi::Array<PrimExpr> TileLayoutNode::GetShardShape() const {
   return shard.Map([](const Iter& iter) { return iter->extent; });
 }
 
@@ -1034,11 +1045,11 @@ bool TileLayoutNode::HasThreadAxis() const {
                      [](const Iter& iter) { return iter->axis->IsThreadAxis(); });
 }
 
-Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
+ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
   if (!HasThreadAxis()) return std::nullopt;
 
-  std::unordered_map<String, String> scope_map;
-  Optional<String> inner_most;
+  std::unordered_map<ffi::String, ffi::String> scope_map;
+  ffi::Optional<ffi::String> inner_most;
 
   auto check_axis = [&](const Axis& axis) {
     if (!axis->IsThreadAxis()) return;
@@ -1048,8 +1059,8 @@ Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
     CHECK(subscope_opt.defined() && scope_opt.defined())
         << "Thread axis " << axis->name << " has no subscope or scope";
 
-    String subscope = subscope_opt.value()->name;
-    String scope = scope_opt.value()->name;
+    ffi::String subscope = subscope_opt.value()->name;
+    ffi::String scope = scope_opt.value()->name;
 
     if (!inner_most.has_value() ||
         ExecScope::Create(inner_most.value())->Higher(ExecScope::Create(subscope)))
@@ -1066,7 +1077,7 @@ Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
   for (const auto& iter : replicate) check_axis(iter->axis);
   for (const auto& [axis, offset] : exclude) check_axis(axis);
 
-  String outer_most = inner_most.value();
+  ffi::String outer_most = inner_most.value();
   size_t count = 0;
   for (auto it = scope_map.find(outer_most); it != scope_map.end();
        it = scope_map.find(outer_most)) {
@@ -1079,7 +1090,7 @@ Optional<Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const {
                                      ExecScope::Create(outer_most)};
 }
 
-std::vector<PrimExpr> GetDefaultStrides(const Array<PrimExpr>& data,
+std::vector<PrimExpr> GetDefaultStrides(const ffi::Array<PrimExpr>& data,
                                         PrimExpr initial_stride = PrimExpr(1)) {
   if (data.empty()) {
     return {};
@@ -1097,21 +1108,22 @@ std::vector<PrimExpr> GetDefaultStrides(const Array<PrimExpr>& data,
   return strides;
 }
 
-TileLayout TileLayoutNode::DefaultLayout(Array<PrimExpr> shape) {
+TileLayout TileLayoutNode::DefaultLayout(ffi::Array<PrimExpr> shape) {
   Array<Iter> shard;
   auto strides = GetDefaultStrides(shape);
   for (size_t i = 0; i < shape.size(); ++i) {
     shard.push_back(Iter(shape[i], strides[i], Axis::Get("m")));
   }
-  return TileLayout(shard, Array<Iter>(), Map<Axis, PrimExpr>());
+  return TileLayout(shard, ffi::Array<Iter>(), ffi::Map<Axis, PrimExpr>());
 }
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TileLayoutGetScope",
-                        [](const TileLayout& layout) -> Optional<Tuple<ExecScope, ExecScope>> {
-                          return layout->GetScope();
-                        });
+  refl::GlobalDef().def(
+      "tir.TileLayoutGetScope",
+      [](const TileLayout& layout) -> ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> {
+        return layout->GetScope();
+      });
 });
 
 }  // namespace tir

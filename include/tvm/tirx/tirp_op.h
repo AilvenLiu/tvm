@@ -63,13 +63,13 @@ class ScheduleContextNode : public Object {
   /*! \brief The exec scope of the operator */
   ExecScope exec_scope;
   /*! \brief The kernel launch parameters. */
-  Map<String, IterVar> launch_params;
+  ffi::Map<ffi::String, IterVar> launch_params;
   /*! \brief A map from loop variables to their ranges. */
-  Map<Var, Range> var_range_map;
+  ffi::Map<Var, Range> var_range_map;
   /*! \brief Whether the schedule context is only used for buffer allocation. */
   bool alloc_only;
   /*! \brief Callback to be handled when the operator is scheduled. */
-  Map<String, ObjectRef> callbacks;
+  ffi::Map<ffi::String, ObjectRef> callbacks;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -93,8 +93,7 @@ class ScheduleContextNode : public Object {
    */
   void AddInitStmt(Stmt stmt, bool host = false);
 
-  static constexpr const char* _type_key = "tirp.ScheduleContext";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ScheduleContextNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirp.ScheduleContext", ScheduleContextNode, Object);
 };
 
 /*!
@@ -112,11 +111,11 @@ class ScheduleContext : public ObjectRef {
    * \param callbacks The callbacks to be handled when the operator is scheduled.
    */
   TVM_DLL ScheduleContext(Target target, ExecScope exec_scope,
-                          Map<String, IterVar> launch_params = {},
-                          Map<Var, Range> var_range_map = {}, bool alloc_only = false,
-                          Map<String, ObjectRef> callbacks = {});
+                          ffi::Map<ffi::String, IterVar> launch_params = {},
+                          ffi::Map<Var, Range> var_range_map = {}, bool alloc_only = false,
+                          ffi::Map<ffi::String, ObjectRef> callbacks = {});
 
-  TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(ScheduleContext, ObjectRef, ScheduleContextNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ScheduleContext, ObjectRef, ScheduleContextNode);
 };
 
 /*!

@@ -4,6 +4,8 @@ import numpy as np
 import tvm
 from tqdm import tqdm
 
+import tvm_ffi
+
 from tvm import dlight, relax, te, tir, target
 from tvm.contrib import tvmjs
 from tvm.relax.frontend import nn
@@ -161,7 +163,7 @@ def _pipeline(  # pylint: disable=too-many-arguments
     return _craft_pipeline(ext_mods, "opt_llm_mg")
 
 
-tvm.register_func("megakernel.decode_attn_plan", decode_attn_plan, override=True)
+tvm_ffi.register_global_func("megakernel.decode_attn_plan", decode_attn_plan, override=True)
 
 
 def get_params(named_params):
@@ -179,7 +181,7 @@ def get_params(named_params):
         else:
             nn.init.xavier_uniform_(torch_tensor, gain=1.0)
         torch_tensor = torch_tensor
-        result.append(tvm.runtime.ndarray.from_dlpack(torch.to_dlpack(torch_tensor)))
+        result.append(tvm.runtime.from_dlpack(torch.to_dlpack(torch_tensor)))
     return result
 
 
@@ -212,7 +214,9 @@ def test_qwen3_layer(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
     )
 
     if is_megakernel:
-        cos_sin_cache = tvm.nd.array(np.zeros((MAX_SEQ_LEN, 128), dtype="float32"), device=dev)
+        cos_sin_cache = tvm.runtime.tensor(
+            np.zeros((MAX_SEQ_LEN, 128), dtype="float32"), device=dev
+        )
         cos_sin_cache_func(cos_sin_cache)
 
     nd_view_func = tvm.get_global_func("vm.builtin.reshape")
@@ -238,7 +242,7 @@ def test_qwen3_layer(batch_decode_func, is_megakernel=False, cos_sin_cache_func=
     logits_arr = list()
     last_tokens = np.random.randint(0, 100, size=(batch_size,))
     for i in tqdm(range(seq_len)):
-        tokens = tvm.nd.array(last_tokens.astype("int32"), device=dev)
+        tokens = tvm.runtime.tensor(last_tokens.astype("int32"), device=dev)
         hidden_states = embed(tokens, params)
         begin_forward_func(kv_cache, ShapeTuple(seq_ids), ShapeTuple([1] * batch_size))
         if is_megakernel:

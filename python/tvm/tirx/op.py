@@ -1194,7 +1194,7 @@ def all(*args, span=None):
     return val
 
 
-@tvm.ffi.register_func("tvm.default_trace_action")
+@tvm_ffi.register_global_func("tvm.default_trace_action")
 def _tvm_default_trace_action(*args):
     print(list(args))
 
@@ -2876,19 +2876,19 @@ def get_active_lane_mask(dtype, base, limit):
     return call_intrin(dtype, "tir.get_active_lane_mask", base, limit)
 
 
-def get_vscale_expr(dtype: Union[str, tvm.ffi.dtype], min_size: int = 128) -> PrimExpr:
+def get_vscale_expr(dtype: Union[str, tvm_ffi.dtype], min_size: int = 128) -> PrimExpr:
     """
     Create a datatype dependent scalable expression.
 
     Parameters
     ----------
-    dtype : Union[str, tvm.DataType]
+    dtype : Union[str, tvm_ffi.DataType]
         Element data type.
     min_size : int
         The minimum size of the scalable vector in bits.
     """
     if isinstance(dtype, str):
-        dtype = tvm.ffi.dtype(dtype)
+        dtype = tvm_ffi.dtype(dtype)
     return min_size // dtype.bits * vscale()
 
 
@@ -3757,9 +3757,10 @@ def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, *coords,
     return call_intrin(
         "",
         "tir.ptx_cp_async_bulk_tensor_global_to_cluster_prefetch",
-        dim, tensormap,
+        dim,
+        tensormap,
         *coords,
-        cache_hint
+        cache_hint,
     )
 
 
@@ -5238,9 +5239,11 @@ def timer_end_cuda(
         profiler_write_stride,
         leader_cond,
     )
-    
 
-def timer_finalize_cuda(profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond):
+
+def timer_finalize_cuda(
+    profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond
+):
     """TVM intrinsic for finalizing the CUDA profiler, and store profiling result in a buffer.
 
     Parameters

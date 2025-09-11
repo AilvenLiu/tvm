@@ -454,9 +454,9 @@ def test():
 
     def tir_gemm(A_bf16, B_bf16, C_bf16):
         DEV = tvm.cuda(0)
-        A_tvm = tvm.nd.array(A_bf16, device=DEV)
-        B_tvm = tvm.nd.array(B_bf16, device=DEV)
-        C_tvm = tvm.nd.array(C_bf16, device=DEV)
+        A_tvm = tvm.runtime.tensor(A_bf16, device=DEV)
+        B_tvm = tvm.runtime.tensor(B_bf16, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_bf16, device=DEV)
         target = tvm.target.Target("cuda")
         with target:
             src, mod = get_source(hgemm)

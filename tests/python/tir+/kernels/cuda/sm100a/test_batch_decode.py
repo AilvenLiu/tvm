@@ -115,7 +115,7 @@ class PlanInfo:
         self.tmp_lse_tvm = None
 
     def plan(self, batch_size, kv_indptr_h, page_size, max_page_num):
-        if isinstance(kv_indptr_h, tvm.nd.NDArray):
+        if isinstance(kv_indptr_h, tvm.runtime.Tensor):
             kv_indptr_h = kv_indptr_h.numpy().tolist()
 
         PAGE_SIZE = page_size
@@ -172,7 +172,7 @@ class PlanInfo:
 
         self.split_kv = split_kv
         self.new_batch_size = new_batch_size
-        self.max_chunk_size = tvm.nd.array(
+        self.max_chunk_size = tvm.runtime.tensor(
             np.array([max_page_num * PAGE_SIZE], dtype=np.int32), device=DEV
         )
 
@@ -199,18 +199,24 @@ class PlanInfo:
             o_indptr.append(o_indptr[-1] + num_tiles_kv)
         assert len(request_indices) == len(kv_tile_indices) == new_batch_size
 
-        self.request_indices_tvm = tvm.nd.array(np.array(request_indices, dtype=np.int32), DEV)
-        self.kv_tile_indices_tvm = tvm.nd.array(np.array(kv_tile_indices, dtype=np.int32), DEV)
-        self.o_indptr_tvm = tvm.nd.array(np.array(o_indptr, dtype=np.int32), DEV)
-        self.o_tvm = tvm.nd.array(
+        self.request_indices_tvm = tvm.runtime.tensor(
+            np.array(request_indices, dtype=np.int32), DEV
+        )
+        self.kv_tile_indices_tvm = tvm.runtime.tensor(
+            np.array(kv_tile_indices, dtype=np.int32), DEV
+        )
+        self.o_indptr_tvm = tvm.runtime.tensor(np.array(o_indptr, dtype=np.int32), DEV)
+        self.o_tvm = tvm.runtime.tensor(
             np.zeros([batch_size, self.qo_heads, self.head_dim], dtype=np.float16), DEV
         )
-        self.lse_tvm = tvm.nd.array(np.zeros([batch_size, self.qo_heads], dtype=np.float32), DEV)
+        self.lse_tvm = tvm.runtime.tensor(
+            np.zeros([batch_size, self.qo_heads], dtype=np.float32), DEV
+        )
         if split_kv:
-            self.tmp_o_tvm = tvm.nd.array(
+            self.tmp_o_tvm = tvm.runtime.tensor(
                 np.zeros([new_batch_size, self.qo_heads, self.head_dim], dtype=np.float32), DEV
             )
-            self.tmp_lse_tvm = tvm.nd.array(
+            self.tmp_lse_tvm = tvm.runtime.tensor(
                 np.zeros([new_batch_size, self.qo_heads], dtype=np.float32), DEV
             )
 
@@ -676,11 +682,11 @@ def test(num_heads, seq_len, head_dim, batch_size):
 
         def tir():
             DEV = tvm.cuda(0)
-            q_tvm = tvm.nd.array(Q, DEV)
-            kv_data_tvm = tvm.nd.array(KV_data, DEV)
-            kv_indptr_tvm = tvm.nd.array(KV_indptr, DEV)
-            kv_last_page_len_tvm = tvm.nd.array(KV_last_page_len, DEV)
-            kv_indices_tvm = tvm.nd.array(KV_indices, DEV)
+            q_tvm = tvm.runtime.tensor(Q, DEV)
+            kv_data_tvm = tvm.runtime.tensor(KV_data, DEV)
+            kv_indptr_tvm = tvm.runtime.tensor(KV_indptr, DEV)
+            kv_last_page_len_tvm = tvm.runtime.tensor(KV_last_page_len, DEV)
+            kv_indices_tvm = tvm.runtime.tensor(KV_indices, DEV)
             plan_info.plan(batch_size, KV_indptr.numpy().tolist(), PAGE_SIZE, MAX_PAGE_NUM)
 
             decode, merge = get_decode_kernel(plan_info, PAGE_SIZE)

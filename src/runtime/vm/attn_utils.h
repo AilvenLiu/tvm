@@ -521,7 +521,7 @@ class PagedKVCacheAuxDataManager {
 
   // Event tensor transfer.
   virtual void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
-                                    std::vector<NDArray*> etensor_data_views, int num_layers,
+                                    std::vector<Tensor*> etensor_data_views, int num_layers,
                                     int cur_batch_size, int num_qo_heads, int num_kv_heads,
                                     int qk_head_dim, int tp_size) = 0;
 
@@ -724,7 +724,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   void CommitCompactKVAuxDataCopy() final {}
 
   void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
-                            std::vector<NDArray*> etensor_data_views, int num_layers,
+                            std::vector<Tensor*> etensor_data_views, int num_layers,
                             int cur_batch_size, int num_qo_heads, int num_kv_heads, int qk_head_dim,
                             int tp_size) final {
     LOG(FATAL) << "Event tensor transfer is not supported for plain auxiliary data manager.";
@@ -813,10 +813,10 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
       : PagedKVCacheAuxDataManager(dtype_aux, device, preferred_host_device, copy_stream),
         elem_byte_size_((dtype_aux.bits * dtype_aux.lanes + 7) / 8),
         offset_alignment_(cuda_byte_alignment_ / elem_byte_size_) {
-    std::function<NDArray(ffi::Shape)> f_aux_data_manager_nd_empty;
+    std::function<Tensor(ffi::Shape)> f_aux_data_manager_nd_empty;
     if (!use_nvshmem) {
       f_aux_data_manager_nd_empty = [dtype_aux, device](ffi::Shape shape) {
-        return NDArray::Empty(shape, dtype_aux, device);
+        return Tensor::Empty(shape, dtype_aux, device);
       };
     } else {
       const std::optional<ffi::Function> f_nvshmem_init =
@@ -826,7 +826,7 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
       const ffi::Function f_nvshmem_empty =
           tvm::ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.empty");
       f_aux_data_manager_nd_empty = [f_nvshmem_empty, dtype_aux, device](ffi::Shape shape) {
-        return f_nvshmem_empty(shape, dtype_aux, device).cast<NDArray>();
+        return f_nvshmem_empty(shape, dtype_aux, device).cast<Tensor>();
       };
     }
 
@@ -971,13 +971,13 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   }
 
   void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
-                            std::vector<NDArray*> etensor_data_views, int num_layers,
+                            std::vector<Tensor*> etensor_data_views, int num_layers,
                             int cur_batch_size, int num_qo_heads, int num_kv_heads, int qk_head_dim,
                             int tp_size) final {
     TVM_FFI_ICHECK_EQ(etensor_data.size(), 18)
         << "Event tensor size mismatch, expected 18, got " << etensor_data.size();
     TVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
-    std::vector<NDArray> etensor_data_views_raw;
+    std::vector<Tensor> etensor_data_views_raw;
     etensor_data_views_raw.reserve(etensor_data.size());
     for (int i = 0; i < static_cast<int>(etensor_data.size()); i++) {
       HostMemoryVector* etensor_data_item = etensor_data[i];

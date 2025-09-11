@@ -111,13 +111,13 @@ class BufferNode : public Object {
   mutable Span span;
 
   /*! \brief The layout of the buffer */
-  Optional<TLayout> layout;
+  ffi::Optional<TLayout> layout;
 
   /*! \brief The allocated address of the buffer.
    * The address might be multi-dimensional based on its scope.
    * For example, trn.psum takes 2D address, representing (bank, offset).
    */
-  Array<Integer> allocated_addr;
+  ffi::Array<Integer> allocated_addr;
 
   /*! \brief constructor */
   BufferNode() {}

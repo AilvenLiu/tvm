@@ -145,10 +145,10 @@ def test(batch_size):
 
     def tir():
         DEV = tvm.cuda(0)
-        cache_tvm = tvm.nd.array(cache.clone(), device=DEV)
-        k_tvm = tvm.nd.array(k, device=DEV)
-        v_tvm = tvm.nd.array(v, device=DEV)
-        pos_map_tvm = tvm.nd.array(pos_map, device=DEV)
+        cache_tvm = tvm.runtime.tensor(cache.clone(), device=DEV)
+        k_tvm = tvm.runtime.tensor(k, device=DEV)
+        v_tvm = tvm.runtime.tensor(v, device=DEV)
+        pos_map_tvm = tvm.runtime.tensor(pos_map, device=DEV)
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule(

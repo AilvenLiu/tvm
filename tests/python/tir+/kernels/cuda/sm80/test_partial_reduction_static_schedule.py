@@ -216,11 +216,11 @@ def test_partial_reduction():
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
 
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
-    C_tvm = tvm.nd.array(C_np, device=DEV)
-    C_tvm_fused = tvm.nd.array(C_np, device=DEV)
-    sem_tvm = tvm.nd.array(np.zeros((NUM_BLOCK_M,), dtype=np.int32), device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
+    C_tvm = tvm.runtime.tensor(C_np, device=DEV)
+    C_tvm_fused = tvm.runtime.tensor(C_np, device=DEV)
+    sem_tvm = tvm.runtime.tensor(np.zeros((NUM_BLOCK_M,), dtype=np.int32), device=DEV)
     from pathlib import Path
 
     script_directory = Path(__file__).parent.resolve()
@@ -233,9 +233,9 @@ def test_partial_reduction():
     indptr = np.cumsum(indices)
     task_types = np.array(list(map(lambda x: x[1], sm_trace)), dtype=np.int32)
     task_indices = np.array(list(map(lambda x: x[2:], sm_trace)), dtype=np.int32)
-    task_types_tvm = tvm.nd.array(task_types, device=DEV)
-    task_indices_tvm = tvm.nd.array(task_indices, device=DEV)
-    task_indptr_tvm = tvm.nd.array(np.array(indptr, dtype=np.int32), device=DEV)
+    task_types_tvm = tvm.runtime.tensor(task_types, device=DEV)
+    task_indices_tvm = tvm.runtime.tensor(task_indices, device=DEV)
+    task_indptr_tvm = tvm.runtime.tensor(np.array(indptr, dtype=np.int32), device=DEV)
 
     with target:
 

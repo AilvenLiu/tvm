@@ -198,9 +198,9 @@ std::string CodeGenCUDA::Finish() {
   // Generate header
   auto header_generator = ffi::Function::GetGlobal("tir.hw_ops.cuda.header_generator");
   TVM_FFI_ICHECK(header_generator.has_value()) << "tir.hw_ops.cuda.header_generator is not defined";
-  Array<String> tags;
-  for (const auto& tag : codegen_tags_) tags.push_back(String(tag));
-  std::string header = header_generator.value()(tags).cast<String>().operator std::string();
+  ffi::Array<ffi::String> tags;
+  for (const auto& tag : codegen_tags_) tags.push_back(ffi::String(tag));
+  std::string header = header_generator.value()(tags).cast<ffi::String>().operator std::string();
   decl_stream << header;
 
   // Generate util functions
@@ -774,7 +774,6 @@ void CodeGenCUDA::VisitExpr_(const CastNode* op, std::ostream& os) {
 
 void CodeGenCUDA::PrintCallExtern(Type ret_type, ffi::String global_symbol,
                                   const ffi::Array<PrimExpr>& args, bool skip_first_arg,
-
                                   std::ostream& os) {  // NOLINT(*)
   DataType ret_dtype = GetRuntimeDataType(ret_type);
   if (ret_dtype.is_fixed_length_vector()) {
@@ -875,11 +874,11 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     auto codegen_getter = tvm::ffi::Function::GetGlobal("tir.hw_ops.cuda.get_codegen");
     TVM_FFI_ICHECK(codegen_getter.has_value()) << "tir.hw_ops.cuda.get_codegen is not registered";
     // either codegen is registered or not
-    auto codegen = codegen_getter.value()(call_op->name).cast<Optional<tvm::ffi::Function>>();
+    auto codegen = codegen_getter.value()(call_op->name).cast<ffi::Optional<tvm::ffi::Function>>();
     if (codegen.has_value()) {
       // codegen is registered, it should return a Call to cuda_func_call
       auto func_call = codegen.value()(op->args);
-      auto res = func_call.cast<Tuple<Call, Array<String>>>();
+      auto res = func_call.cast<ffi::Tuple<Call, ffi::Array<ffi::String>>>();
       print_cuda_func_call(res.get<0>().get(), os);
       for (const auto& tag : res.get<1>()) {
         codegen_tags_.insert(tag.operator std::string());

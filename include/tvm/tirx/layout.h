@@ -52,28 +52,29 @@ using ffi::Tuple;
 class TLayoutNode : public Object {
  public:
   /*! \brief Compatible with shape */
-  virtual bool CompatibleWithShape(const Array<PrimExpr>& shape) const = 0;
+  virtual bool CompatibleWithShape(const ffi::Array<PrimExpr>& shape) const = 0;
 
   /*! \brief Verify if the layout is well-formed */
   virtual bool VerifyWellFormed() const = 0;
 
   /*! \brief Get the size of the layout (of some axis) */
-  virtual PrimExpr GetSize(Optional<String> axis_name = std::nullopt) const = 0;
+  virtual PrimExpr GetSize(ffi::Optional<ffi::String> axis_name = std::nullopt) const = 0;
 
   /*! \brief Get the cosize of the layout (of some axis) */
-  virtual PrimExpr GetCosize(Optional<String> axis_name = std::nullopt) const = 0;
+  virtual PrimExpr GetCosize(ffi::Optional<ffi::String> axis_name = std::nullopt) const = 0;
 
   /*! \brief Apply layout on the input coordinate and get the mapped output */
-  virtual Map<String, PrimExpr> Apply(Array<PrimExpr> coord) const = 0;
-  virtual Map<String, PrimExpr> Apply(PrimExpr coord) const = 0;
-  Map<String, PrimExpr> Apply(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape) const;
+  virtual ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const = 0;
+  virtual ffi::Map<ffi::String, PrimExpr> Apply(PrimExpr coord) const = 0;
+  ffi::Map<ffi::String, PrimExpr> Apply(const ffi::Array<PrimExpr>& coord,
+                                        const ffi::Array<PrimExpr>& shape) const;
 
   /*! \brief Turn the layout to normalized form */
   virtual TLayout Normalize() const = 0;
 
   /*! \brief Tile the current layout with a given layout */
-  virtual TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
-                       const Array<PrimExpr>& inner_shape) const = 0;
+  virtual TLayout Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
+                       const ffi::Array<PrimExpr>& inner_shape) const = 0;
 
   /*! \brief Check if the layout is the inner layout of a tiled layout
    * \param tile_layout The tiled layout to check
@@ -82,9 +83,9 @@ class TLayoutNode : public Object {
    * \return The outer layout if this layout is the inner layout of tile_layout, std::nullopt
    * otherwise
    */
-  virtual Optional<TileLayout> IsTileInner(const TLayout& tile_layout,
-                                           const Array<PrimExpr>& tiled_shape,
-                                           const Array<PrimExpr>& inner_shape) const = 0;
+  virtual ffi::Optional<TileLayout> IsTileInner(const TLayout& tile_layout,
+                                                const ffi::Array<PrimExpr>& tiled_shape,
+                                                const ffi::Array<PrimExpr>& inner_shape) const = 0;
 
   /*! \brief Check if the layout is the outer layout of a tiled layout
    * \param tile_layout The tiled layout to check
@@ -93,30 +94,29 @@ class TLayoutNode : public Object {
    * \return The inner layout if this layout is the outer layout of tile_layout, std::nullopt
    * otherwise
    */
-  virtual Optional<TLayout> IsTileOuter(const TLayout& tile_layout,
-                                        const Array<PrimExpr>& tiled_shape,
-                                        const Array<PrimExpr>& outer_shape) const = 0;
+  virtual ffi::Optional<TLayout> IsTileOuter(const TLayout& tile_layout,
+                                             const ffi::Array<PrimExpr>& tiled_shape,
+                                             const ffi::Array<PrimExpr>& outer_shape) const = 0;
 
-  static constexpr const char* _type_key = "tirx.TLayout";
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_BASE_OBJECT_INFO(TLayoutNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO("tirx.TLayout", TLayoutNode, Object);
 };
 
 class TLayout : public ObjectRef {
  public:
-  TVM_DEFINE_OBJECT_REF_METHODS(TLayout, ObjectRef, TLayoutNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TLayout, ObjectRef, TLayoutNode);
 };
 
 // target, subscope, scope, iter -> fused_iter
-using FAxisFuser = ffi::TypedFunction<Optional<Iter>(Target, String, String, Iter)>;
+using FAxisFuser = ffi::TypedFunction<ffi::Optional<Iter>(Target, ffi::String, ffi::String, Iter)>;
 // target, scope, iter -> (outer_iter, inner_iter)
-// Note(@bohao): use Array<Iter, void> to avoid incomplete type error (SFINAE)
-using FAxisSplitter = ffi::TypedFunction<Array<Iter, void>(Target, String, Iter)>;
+// Note(@bohao): use ffi::Array<Iter, void> to avoid incomplete type error (SFINAE)
+using FAxisSplitter = ffi::TypedFunction<ffi::Array<Iter, void>(Target, ffi::String, Iter)>;
 
 // Axis
 class AxisNode : public Object {
  public:
-  String name;
+  ffi::String name;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -130,20 +130,19 @@ class AxisNode : public Object {
   bool IsMemoryAxis() const;
 
   /*! \brief Get the scope of the (thread) axis. */
-  Optional<ExecScope> GetScope() const;
+  ffi::Optional<ExecScope> GetScope() const;
 
   /*! \brief Get the subscope of the (thread) axis. */
-  Optional<ExecScope> GetSubscope() const;
+  ffi::Optional<ExecScope> GetSubscope() const;
 
   /*! \brief Get the fuser of the (thread) axis. */
-  Optional<FAxisFuser> GetFuser() const;
+  ffi::Optional<FAxisFuser> GetFuser() const;
 
   /*! \brief Get the splitter of the (thread) axis. */
-  Optional<FAxisSplitter> GetSplitter() const;
+  ffi::Optional<FAxisSplitter> GetSplitter() const;
 
-  static constexpr const char* _type_key = "tirx.Axis";
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_FINAL_OBJECT_INFO(AxisNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.Axis", AxisNode, Object);
 
  private:
   // Iternals necessary for AttrRegistry
@@ -157,7 +156,7 @@ class AxisNode : public Object {
   /*! \brief Return the index stored in attr registry */
   uint32_t AttrRegistryIndex() const { return index_; }
   /*! \brief Return the name stored in attr registry */
-  String AttrRegistryName() const { return name; }
+  ffi::String AttrRegistryName() const { return name; }
 };
 
 class Axis : public ObjectRef {
@@ -165,13 +164,18 @@ class Axis : public ObjectRef {
   Axis() = default;
 
   /*! \brief Get the axis object by name. */
-  TVM_DLL static Axis Get(const String& name);
+  TVM_DLL static Axis Get(const ffi::String& name);
 
   /*! \brief Get the attribute map for the axis. */
   template <typename ValueType>
-  inline static AxisAttrMap<ValueType> GetAttrMap(const String& attr_name);
+  inline static AxisAttrMap<ValueType> GetAttrMap(const ffi::String& attr_name);
 
-  TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(Axis, ObjectRef, AxisNode);
+  explicit Axis(ObjectPtr<AxisNode> data) : ObjectRef(ffi::UnsafeInit{}) {
+    TVM_FFI_ICHECK(data != nullptr);
+    data_ = std::move(data);
+  }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Axis, ObjectRef, AxisNode);
 
  private:
   // Internals necessary for AttrRegistry
@@ -184,20 +188,21 @@ class Axis : public ObjectRef {
 class AxisRegEntry {
  public:
   /*! \brief List all axis names. */
-  TVM_DLL static Array<String> ListAxisNames();
+  TVM_DLL static ffi::Array<ffi::String> ListAxisNames();
 
   /*! \brief Register or get the axis entry by name. */
-  TVM_DLL static AxisRegEntry& RegisterOrGet(const String& name);
+  TVM_DLL static AxisRegEntry& RegisterOrGet(const ffi::String& name);
 
   /*! \brief Set the attribute for the axis. */
   template <typename ValueType>
-  inline AxisRegEntry& set_attr(const String& attr_name, const ValueType& value, int plevel = 10);
+  inline AxisRegEntry& set_attr(const ffi::String& attr_name, const ValueType& value,
+                                int plevel = 10);
 
   /*! \brief Set the scope of the axis. */
-  inline AxisRegEntry& set_scope(const String& scope_name, int plevel = 10);
+  inline AxisRegEntry& set_scope(const ffi::String& scope_name, int plevel = 10);
 
   /*! \brief Set the subscope of the axis. */
-  inline AxisRegEntry& set_subscope(const String& subscope_name, int plevel = 10);
+  inline AxisRegEntry& set_subscope(const ffi::String& subscope_name, int plevel = 10);
 
   /*! \brief Set the fuser of the axis. */
   inline AxisRegEntry& set_fuser(const FAxisFuser& fuser);
@@ -208,11 +213,11 @@ class AxisRegEntry {
  private:
   // return internal pointer to op.
   inline AxisNode* get();
-  TVM_DLL void UpdateAttr(const String& key, ffi::Any value, int plevel);
+  TVM_DLL void UpdateAttr(const ffi::String& key, ffi::Any value, int plevel);
 
   // Internals necessary for AttrRegistry
   Axis axis_;
-  String name;
+  ffi::String name;
   explicit AxisRegEntry(uint32_t index);
   template <typename, typename>
   friend class tvm::AttrRegistry;
@@ -221,7 +226,7 @@ class AxisRegEntry {
 
 using AxisRegistry = AttrRegistry<AxisRegEntry, Axis>;
 
-// AxisAttrMap
+// AxisAttrffi::Map
 template <typename ValueType>
 class AxisAttrMap : public AttrRegistryMap<Axis, ValueType> {
  public:
@@ -257,22 +262,21 @@ class IterNode : public Object {
         .def_ro("axis", &IterNode::axis);
   }
 
-  static constexpr const char* _type_key = "tirx.Iter";
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_FINAL_OBJECT_INFO(IterNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.Iter", IterNode, Object);
 };
 
 class Iter : public ObjectRef {
  public:
   TVM_DLL explicit Iter(PrimExpr extent, PrimExpr stride, Axis axis);
-  TVM_DEFINE_OBJECT_REF_METHODS(Iter, ObjectRef, IterNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Iter, ObjectRef, IterNode);
 };
 
 class TileLayoutNode : public TLayoutNode {
  public:
-  Array<Iter> shard;
-  Array<Iter> replicate;
-  Map<Axis, PrimExpr> exclude;
+  ffi::Array<Iter> shard;
+  ffi::Array<Iter> replicate;
+  ffi::Map<Axis, PrimExpr> exclude;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -283,38 +287,40 @@ class TileLayoutNode : public TLayoutNode {
   }
 
   /*! \brief Check if the layout is compatible with the shape */
-  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
+  bool CompatibleWithShape(const ffi::Array<PrimExpr>& shape) const final;
 
   /*! \brief Verify if the layout is well-formed */
   bool VerifyWellFormed() const final;
 
   /*! \brief Get the size of the layout (of some axis) */
-  PrimExpr GetSize(Optional<String> axis_name = std::nullopt) const final;
+  PrimExpr GetSize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
   /*! \brief Get the cosize of the layout (of some axis) */
-  PrimExpr GetCosize(Optional<String> axis_name = std::nullopt) const final;
+  PrimExpr GetCosize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  Map<String, PrimExpr> Apply(Array<PrimExpr> coord) const final;
-  Map<String, PrimExpr> Apply(PrimExpr coord) const final;
+  ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const final;
+  ffi::Map<ffi::String, PrimExpr> Apply(PrimExpr coord) const final;
 
   /*! \brief Turn the layout to normalized form */
   TLayout Normalize() const final;
 
   /*! \brief Tile the layout with an outer layout */
-  TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
-               const Array<PrimExpr>& inner_shape) const final;
+  TLayout Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
+               const ffi::Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the inner layout of a tiled layout */
-  Optional<TileLayout> IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                                   const Array<PrimExpr>& inner_shape) const final;
+  ffi::Optional<TileLayout> IsTileInner(const TLayout& tile_layout,
+                                        const ffi::Array<PrimExpr>& tiled_shape,
+                                        const ffi::Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the outer layout of a tiled layout */
-  Optional<TLayout> IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                                const Array<PrimExpr>& outer_shape) const final;
+  ffi::Optional<TLayout> IsTileOuter(const TLayout& tile_layout,
+                                     const ffi::Array<PrimExpr>& tiled_shape,
+                                     const ffi::Array<PrimExpr>& outer_shape) const final;
 
   /*! \brief Get the shape of the shard */
-  Array<PrimExpr> GetShardShape() const;
+  ffi::Array<PrimExpr> GetShardShape() const;
 
   /*! \brief Is the layout trivial (pure memory, identical mapping) */
   bool IsTrivial() const;
@@ -329,21 +335,20 @@ class TileLayoutNode : public TLayoutNode {
   bool HasThreadAxis() const;
 
   /*! \brief Get the scope pair of the layout */
-  Optional<Tuple<ExecScope, ExecScope>> GetScope() const;
+  ffi::Optional<Tuple<ExecScope, ExecScope>> GetScope() const;
 
   /*! \brief Get the default layout for the shape */
-  static TileLayout DefaultLayout(Array<PrimExpr> shape);
+  static TileLayout DefaultLayout(ffi::Array<PrimExpr> shape);
 
-  static constexpr const char* _type_key = "tirx.TileLayout";
-  TVM_DECLARE_FINAL_OBJECT_INFO(TileLayoutNode, TLayoutNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.TileLayout", TileLayoutNode, TLayoutNode);
 };
 
 class TileLayout : public TLayout {
  public:
-  TVM_DLL explicit TileLayout(Array<Iter> shard, Array<Iter> replicate,
-                              Map<Axis, PrimExpr> exclude);
+  TVM_DLL explicit TileLayout(ffi::Array<Iter> shard, ffi::Array<Iter> replicate,
+                              ffi::Map<Axis, PrimExpr> exclude);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(TileLayout, TLayout, TileLayoutNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TileLayout, TLayout, TileLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);
 };
 
@@ -365,38 +370,39 @@ class SwizzleLayoutNode : public TLayoutNode {
   }
 
   /*! \brief Check if the layout is compatible with the shape */
-  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
+  bool CompatibleWithShape(const ffi::Array<PrimExpr>& shape) const final;
 
   /*! \brief Verify if the layout is well-formed */
   bool VerifyWellFormed() const final;
 
   /*! \brief Get the size of the layout */
-  PrimExpr GetSize(Optional<String> axis_name = std::nullopt) const final;
+  PrimExpr GetSize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
   /*! \brief Get the cosize of the layout */
-  PrimExpr GetCosize(Optional<String> axis_name = std::nullopt) const final;
+  PrimExpr GetCosize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  Map<String, PrimExpr> Apply(Array<PrimExpr> coord) const final;
-  Map<String, PrimExpr> Apply(PrimExpr coord) const final;
+  ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const final;
+  ffi::Map<ffi::String, PrimExpr> Apply(PrimExpr coord) const final;
 
   /*! \brief Turn the layout to normalized form */
   TLayout Normalize() const final;
 
   /*! \brief Tile the layout with an outer layout */
-  TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
-               const Array<PrimExpr>& inner_shape) const final;
+  TLayout Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
+               const ffi::Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the inner layout of a tiled layout */
-  Optional<TileLayout> IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                                   const Array<PrimExpr>& inner_shape) const final;
+  ffi::Optional<TileLayout> IsTileInner(const TLayout& tile_layout,
+                                        const ffi::Array<PrimExpr>& tiled_shape,
+                                        const ffi::Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the outer layout of a tiled layout */
-  Optional<TLayout> IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                                const Array<PrimExpr>& outer_shape) const final;
+  ffi::Optional<TLayout> IsTileOuter(const TLayout& tile_layout,
+                                     const ffi::Array<PrimExpr>& tiled_shape,
+                                     const ffi::Array<PrimExpr>& outer_shape) const final;
 
-  static constexpr const char* _type_key = "tirx.SwizzleLayout";
-  TVM_DECLARE_FINAL_OBJECT_INFO(SwizzleLayoutNode, TLayoutNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.SwizzleLayout", SwizzleLayoutNode, TLayoutNode);
 
  private:
   friend class SwizzleLayout;
@@ -409,7 +415,7 @@ class SwizzleLayout : public TLayout {
   TVM_DLL explicit SwizzleLayout(int per_element, int swizzle_len, int atom_len,
                                  bool swizzle_inner);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(SwizzleLayout, TLayout, SwizzleLayoutNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SwizzleLayout, TLayout, SwizzleLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SwizzleLayoutNode);
 };
 
@@ -427,52 +433,53 @@ class ComposeLayoutNode : public TLayoutNode {
   }
 
   /*! \brief Check if the layout is compatible with the shape */
-  bool CompatibleWithShape(const Array<PrimExpr>& shape) const final;
+  bool CompatibleWithShape(const ffi::Array<PrimExpr>& shape) const final;
 
   /*! \brief Verify if the layout is well-formed */
   bool VerifyWellFormed() const final;
 
   /*! \brief Get the size (of some axis) of the layout */
-  PrimExpr GetSize(Optional<String> axis_name = std::nullopt) const final;
+  PrimExpr GetSize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
   /*! \brief Get the cosize (of some axis) of the layout */
-  PrimExpr GetCosize(Optional<String> axis_name = std::nullopt) const final;
+  PrimExpr GetCosize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
-  Map<String, PrimExpr> Apply(Array<PrimExpr> coord) const final;
-  Map<String, PrimExpr> Apply(PrimExpr coord) const final;
+  ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const final;
+  ffi::Map<ffi::String, PrimExpr> Apply(PrimExpr coord) const final;
 
   /*! \brief Turn the layout to normalized form */
   TLayout Normalize() const final;
 
   /*! \brief Tile the layout with an outer layout */
-  TLayout Tile(const TileLayout& outer, const Array<PrimExpr>& outer_shape,
-               const Array<PrimExpr>& inner_shape) const final;
+  TLayout Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
+               const ffi::Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the inner layout of a tiled layout */
-  Optional<TileLayout> IsTileInner(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                                   const Array<PrimExpr>& inner_shape) const final;
+  ffi::Optional<TileLayout> IsTileInner(const TLayout& tile_layout,
+                                        const ffi::Array<PrimExpr>& tiled_shape,
+                                        const ffi::Array<PrimExpr>& inner_shape) const final;
 
   /*! \brief Check if the layout is the outer layout of a tiled layout */
-  Optional<TLayout> IsTileOuter(const TLayout& tile_layout, const Array<PrimExpr>& tiled_shape,
-                                const Array<PrimExpr>& outer_shape) const final;
+  ffi::Optional<TLayout> IsTileOuter(const TLayout& tile_layout,
+                                     const ffi::Array<PrimExpr>& tiled_shape,
+                                     const ffi::Array<PrimExpr>& outer_shape) const final;
 
-  static constexpr const char* _type_key = "tirx.ComposeLayout";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ComposeLayoutNode, TLayoutNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ComposeLayout", ComposeLayoutNode, TLayoutNode);
 };
 
 class ComposeLayout : public TLayout {
  public:
   TVM_DLL explicit ComposeLayout(SwizzleLayout layout_A, TileLayout layout_B);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(ComposeLayout, TLayout, ComposeLayoutNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(ComposeLayout, TLayout, ComposeLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ComposeLayoutNode);
 };
 
 constexpr int kPSUMMaxElemPerBank = 512;
 constexpr int kPSUMBankNum = 8;
 
-}  // namespace tirxxxxx
+}  // namespace tirxxxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_LAYOUT_H_

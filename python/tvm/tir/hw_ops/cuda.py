@@ -23,7 +23,8 @@ import functools
 import re
 from dataclasses import dataclass
 
-import tvm.ffi
+import tvm_ffi
+import tvm
 from tvm import DataType
 from tvm.tir.op import cuda_func_call
 
@@ -58,7 +59,7 @@ TAGS = {
 }
 
 
-@tvm.register_func("tir.hw_ops.cuda.header_generator")
+@tvm_ffi.register_global_func("tir.hw_ops.cuda.header_generator")
 def header_generator(tags):
     """Generate the header for the CUDA code."""
     for tag in tags:
@@ -771,7 +772,7 @@ union InstrDescriptorBlockScaled
 CODEGEN_REGISTRY = {}
 
 
-@tvm.ffi.register_func("tir.hw_ops.cuda.get_codegen")
+@tvm_ffi.register_global_func("tir.hw_ops.cuda.get_codegen")
 def get_codegen(op):
     """get the codegen function for a given op"""
     return CODEGEN_REGISTRY.get(op, None)
@@ -799,8 +800,8 @@ def register_codegen(op, backend="cuda"):
     return decorator
 
 
-from_string_func = tvm.ffi.get_global_func("tir.hw_ops.cuda.PTXDTypeFromString")
-to_string_func = tvm.ffi.get_global_func("tir.hw_ops.cuda.PTXDTypeToString")
+from_string_func = tvm_ffi.get_global_func("tir.hw_ops.cuda.PTXDTypeFromString")
+to_string_func = tvm_ffi.get_global_func("tir.hw_ops.cuda.PTXDTypeToString")
 
 
 class PTXDataType(enum.Enum):
@@ -3349,7 +3350,9 @@ __forceinline__ __device__ void {func_name}(int event_type, uint64_t* profiler_b
 
 
 @register_codegen("timer_finalize_cuda")
-def codegen_timer_finalize_cuda(profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond):
+def codegen_timer_finalize_cuda(
+    profiler_buffer, profiler_tag, profiler_write_offset, profiler_write_stride, leader_cond
+):
     func_name = "tvm_builtin_timer_finalize_cuda"
     source_code = f"""
 __forceinline__ __device__ void {func_name}(uint64_t* profiler_buffer, uint64_t* profiler_tag, uint32_t* profiler_write_offset, int profiler_write_stride, bool leader_cond) {{

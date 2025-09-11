@@ -30,19 +30,22 @@ TVM_FFI_STATIC_INIT_BLOCK({
 });
 
 kEventImpl BulkGroupEventNode::GetImpl() const { return impl; }
-Array<ffi::Any> BulkGroupEventNode::GetState() const { return state; }
+ffi::Array<ffi::Any> BulkGroupEventNode::GetState() const { return state; }
 
-BulkGroupEvent::BulkGroupEvent(kEventImpl impl, const Array<ffi::Any>& state, const String& name) {
-  ObjectPtr<BulkGroupEventNode> n = make_object<BulkGroupEventNode>();
+BulkGroupEvent::BulkGroupEvent(kEventImpl impl, const ffi::Array<ffi::Any>& state,
+                               const ffi::String& name) {
+  ObjectPtr<BulkGroupEventNode> n = ffi::make_object<BulkGroupEventNode>();
   n->name = std::move(name);
   n->impl = impl;
   n->state = std::move(state);
   data_ = std::move(n);
 }
 
-SemaphoreEventTensor::SemaphoreEventTensor(const kEventImpl& impl, const Array<ffi::Any>& state,
-                                           const Array<PrimExpr>& shape, const String& name) {
-  ObjectPtr<SemaphoreEventTensorNode> n = make_object<SemaphoreEventTensorNode>();
+SemaphoreEventTensor::SemaphoreEventTensor(const kEventImpl& impl,
+                                           const ffi::Array<ffi::Any>& state,
+                                           const ffi::Array<PrimExpr>& shape,
+                                           const ffi::String& name) {
+  ObjectPtr<SemaphoreEventTensorNode> n = ffi::make_object<SemaphoreEventTensorNode>();
   n->name = std::move(name);
   n->impl = impl;
   n->state = std::move(state);
@@ -51,11 +54,11 @@ SemaphoreEventTensor::SemaphoreEventTensor(const kEventImpl& impl, const Array<f
 }
 
 kEventImpl SemaphoreEventTensorItemNode::GetImpl() const { return tensor->impl; }
-Array<ffi::Any> SemaphoreEventTensorItemNode::GetState() const { return tensor->state; }
+ffi::Array<ffi::Any> SemaphoreEventTensorItemNode::GetState() const { return tensor->state; }
 
 SemaphoreEventTensorItem::SemaphoreEventTensorItem(const SemaphoreEventTensor& tensor,
-                                                   const Array<PrimExpr>& indices) {
-  ObjectPtr<SemaphoreEventTensorItemNode> n = make_object<SemaphoreEventTensorItemNode>();
+                                                   const ffi::Array<PrimExpr>& indices) {
+  ObjectPtr<SemaphoreEventTensorItemNode> n = ffi::make_object<SemaphoreEventTensorItemNode>();
   n->tensor = std::move(tensor);
   n->indices = std::move(indices);
   data_ = std::move(n);
@@ -64,14 +67,15 @@ SemaphoreEventTensorItem::SemaphoreEventTensorItem(const SemaphoreEventTensor& t
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
-      .def("tirp.BulkGroupEvent", [](kEventImpl impl, Array<ffi::Any> state,
-                                     String name) { return BulkGroupEvent(impl, state, name); })
-      .def("tirp.SemaphoreEventTensor",
-           [](kEventImpl impl, Array<ffi::Any> state, Array<PrimExpr> shape, String name) {
-             return SemaphoreEventTensor(impl, state, shape, name);
+      .def("tirp.BulkGroupEvent",
+           [](kEventImpl impl, ffi::Array<ffi::Any> state, ffi::String name) {
+             return BulkGroupEvent(impl, state, name);
            })
+      .def("tirp.SemaphoreEventTensor",
+           [](kEventImpl impl, ffi::Array<ffi::Any> state, ffi::Array<PrimExpr> shape,
+              ffi::String name) { return SemaphoreEventTensor(impl, state, shape, name); })
       .def("tirp.SemaphoreEventTensorItem",
-           [](SemaphoreEventTensor tensor, Array<PrimExpr> indices) {
+           [](SemaphoreEventTensor tensor, ffi::Array<PrimExpr> indices) {
              return SemaphoreEventTensorItem(tensor, indices);
            })
       .def("tirp.BaseEventImplGet", [](BaseEvent event) { return event->GetImpl(); })

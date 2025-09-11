@@ -915,15 +915,15 @@ def test_ag_hgemm():
         "profiler_buffer_res": sess.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", worker0_only=True
         ),
-        "ag_out_host": tvm.nd.empty((WORLD_SIZE, M, K), a_type, device=DEV),
-        "out_host": tvm.nd.empty((WORLD_SIZE, M, LOCAL_N), d_type, device=DEV),
-        "profiler_buffer_host": tvm.nd.empty(
+        "ag_out_host": tvm.runtime.empty((WORLD_SIZE, M, K), a_type, device=DEV),
+        "out_host": tvm.runtime.empty((WORLD_SIZE, M, LOCAL_N), d_type, device=DEV),
+        "profiler_buffer_host": tvm.runtime.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", device=DEV
         ),
     }
 
-    A_tvm = tvm.nd.array(A_torch, device=DEV)
-    B_tvm = tvm.nd.array(B_torch, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_torch, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_torch, device=DEV)
     A_array = sess.empty((WORLD_SIZE, LOCAL_M, K), a_type, worker0_only=True)
     B_array = sess.empty((WORLD_SIZE, LOCAL_N, K), b_type, worker0_only=True)
     sess.copy_to_worker_0(A_tvm, A_array)
@@ -949,10 +949,10 @@ def test_ag_hgemm():
         head_np[rank] = gemm_mpmc_queue.head[0]
         tail_np[rank] = gemm_mpmc_queue.tail[0]
 
-    task_types_tvm = tvm.nd.array(task_types_np, device=DEV)
-    task_idxs_tvm = tvm.nd.array(task_idxs_np, device=DEV)
-    head_tvm = tvm.nd.array(head_np, device=DEV)
-    tail_tvm = tvm.nd.array(tail_np, device=DEV)
+    task_types_tvm = tvm.runtime.tensor(task_types_np, device=DEV)
+    task_idxs_tvm = tvm.runtime.tensor(task_idxs_np, device=DEV)
+    head_tvm = tvm.runtime.tensor(head_np, device=DEV)
+    tail_tvm = tvm.runtime.tensor(tail_np, device=DEV)
 
     task_types_array = sess.empty((WORLD_SIZE, CAPACITY), "int32", worker0_only=True)
     task_idxs_array = sess.empty((WORLD_SIZE, CAPACITY, 2), "int32", worker0_only=True)

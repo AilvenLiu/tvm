@@ -27,7 +27,7 @@ def run_test_break_continue(func, shape, expected):
     with target:
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
     arr_np = np.zeros(shape, dtype="int32")
-    arr = tvm.nd.array(arr_np, device=dev)
+    arr = tvm.runtime.tensor(arr_np, device=dev)
     mod(arr)
     np.testing.assert_allclose(arr.numpy(), expected)
 

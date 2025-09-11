@@ -21,6 +21,8 @@ import numpy as np
 import pytest
 import torch
 
+import tvm_ffi
+
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
@@ -1141,15 +1143,15 @@ def test(num_heads, seq_len, head_dim, batch_size, seed):
 
     def tir():
         def torch_to_tvm(tensor):
-            return tvm.ffi.from_dlpack(torch.to_dlpack(tensor))
+            return tvm_ffi.from_dlpack(torch.to_dlpack(tensor))
 
         DEV = tvm.cuda(0)
-        q_tvm = tvm.nd.array(Q, DEV)
-        kv_data_tvm = tvm.nd.array(KV_data, DEV)
+        q_tvm = tvm.runtime.tensor(Q, DEV)
+        kv_data_tvm = tvm.runtime.tensor(KV_data, DEV)
         q_indptr_tvm = torch_to_tvm(q_indptr)
         kv_indptr_tvm = torch_to_tvm(kv_indptr)
         partial_indptr_tvm = torch_to_tvm(partial_indptr)
-        kv_indices_tvm = tvm.nd.array(KV_indices, DEV)
+        kv_indices_tvm = tvm.runtime.tensor(KV_indices, DEV)
         q_len_tvm = torch_to_tvm(q_len)
         kv_len_tvm = torch_to_tvm(kv_len)
         q_start_tvm = torch_to_tvm(q_start)

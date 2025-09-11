@@ -280,8 +280,8 @@ DocStringDoc::DocStringDoc(ffi::String docs) {
   this->data_ = std::move(n);
 }
 
-OpCallDoc::OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, DictDoc workspace,
-                     DictDoc schedule_config) {
+OpCallDoc::OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, ffi::Optional<DictDoc> workspace,
+                     ffi::Optional<DictDoc> schedule_config) {
   ObjectPtr<OpCallDocNode> n = ffi::make_object<OpCallDocNode>();
   n->callee = callee;
   n->args = args;

@@ -20,6 +20,8 @@ import numpy as np
 from enum import Enum
 from typing import List
 
+import tvm_ffi
+
 import argparse
 import subprocess
 from tvm.contrib import nvcc
@@ -41,7 +43,7 @@ def setup():
 
     if args.dump_ptx:
 
-        @tvm.register_func("tvm_callback_cuda_compile", override=True)
+        @tvm_ffi.register_global_func("tvm_callback_cuda_compile", override=True)
         def tvm_callback_cuda_compile(code, target):
             ptx = nvcc.compile_cuda(code, target_format="ptx")
             with open(args.dump_ptx, "w", encoding="utf-8") as f:
@@ -143,7 +145,7 @@ def export_to_perfetto_trace(
         tag = int(tag)
         timestamp = int(timestamp)
         block_idx, group_idx, event_idx, event_type = decode_tag(tag, num_groups)
-        
+
         if event_type == EventType.kFinalize.value:
             finish_idx.add((block_idx, group_idx))
             if len(finish_idx) == num_blocks * num_groups:
@@ -151,7 +153,7 @@ def export_to_perfetto_trace(
         else:
             if (block_idx, group_idx) in finish_idx:
                 continue
-        
+
         event = event_type_names[event_idx]
         tid = tid_map[(block_idx, group_idx)]
 

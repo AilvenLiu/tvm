@@ -920,8 +920,8 @@ def test_hgemm_rs():
     DEV = tvm.cuda(0)
     A_np = np.random.uniform(-1, 1, (WORLD_SIZE, M, K)).astype(a_type)
     B_np = np.random.uniform(-1, 1, (WORLD_SIZE, N, K)).astype(b_type)
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
 
     class MPMCQueueHost:
         def __init__(self, capacity: int):
@@ -988,9 +988,9 @@ def test_hgemm_rs():
         "profiler_buffer_res": sess.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", worker0_only=True
         ),
-        "gemm_out_host": tvm.nd.empty((WORLD_SIZE, M, N), d_type, device=DEV),
-        "out_host": tvm.nd.empty((WORLD_SIZE, LOCAL_M, N), d_type, device=DEV),
-        "profiler_buffer_host": tvm.nd.empty(
+        "gemm_out_host": tvm.runtime.empty((WORLD_SIZE, M, N), d_type, device=DEV),
+        "out_host": tvm.runtime.empty((WORLD_SIZE, LOCAL_M, N), d_type, device=DEV),
+        "profiler_buffer_host": tvm.runtime.empty(
             (WORLD_SIZE, PROFILER_BUFFER_SIZE), "uint64", device=DEV
         ),
     }

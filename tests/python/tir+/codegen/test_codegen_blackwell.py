@@ -153,8 +153,8 @@ def test_tcgen05_ld_st_roundtrip():
         assert "tcgen05.st.sync.aligned.32x32b.x1.b32" in src
         A_np = np.random.randn(HEIGHT, WIDTH).astype("float32")
         B_np = np.zeros((HEIGHT, WIDTH), dtype="float32")
-        A = tvm.nd.array(A_np, device=DEV)
-        B = tvm.nd.array(B_np, device=DEV)
+        A = tvm.runtime.tensor(A_np, device=DEV)
+        B = tvm.runtime.tensor(B_np, device=DEV)
         mod(A, B)
         np.testing.assert_allclose(A.numpy(), B.numpy())
 
@@ -239,8 +239,8 @@ def test_tcgen05_cp_ld_roundtrip():
         assert "tcgen05.ld.sync.aligned.32x32b.x1.b32" in src
         A_np = np.random.randn(HEIGHT, WIDTH).astype(dtype)
         B_np = np.zeros((HEIGHT, WIDTH), dtype=dtype)
-        A = tvm.nd.array(A_np, device=DEV)
-        B = tvm.nd.array(B_np, device=DEV)
+        A = tvm.runtime.tensor(A_np, device=DEV)
+        B = tvm.runtime.tensor(B_np, device=DEV)
         mod(A, B)
         np.testing.assert_allclose(A.numpy(), B.numpy())
 
@@ -383,9 +383,9 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
         A_torch = torch.rand((M, K), dtype=torch.float16)
         B_torch = torch.rand((N, K), dtype=torch.float16)
         C_torch = torch.zeros((M, N), dtype=torch.float32)
-        A = tvm.nd.array(A_torch, device=DEV)
-        B = tvm.nd.array(B_torch, device=DEV)
-        C = tvm.nd.array(C_torch, device=DEV)
+        A = tvm.runtime.tensor(A_torch, device=DEV)
+        B = tvm.runtime.tensor(B_torch, device=DEV)
+        C = tvm.runtime.tensor(C_torch, device=DEV)
         mod(A, B, C)
         ref = torch.matmul(A_torch, B_torch.T)
         np.testing.assert_allclose(C.numpy(), ref.numpy(), rtol=1e-3, atol=1e-2)

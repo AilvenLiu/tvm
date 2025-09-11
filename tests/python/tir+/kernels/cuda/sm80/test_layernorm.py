@@ -136,12 +136,12 @@ def test_layernorm(dtype):
     out_np = np.zeros((ATTN_B, 1, ATTN_N, ATTN_D)).astype(np_dtype)
     out_resid_np = np.zeros((ATTN_B, 1, ATTN_N, ATTN_D)).astype(np_dtype)
 
-    inp_tvm = tvm.nd.array(inp_np, DEV)
-    inp_resid_tvm = tvm.nd.array(inp_resid_np, DEV)
-    norm_weight_tvm = tvm.nd.array(norm_weight_np, DEV)
-    norm_bias_tvm = tvm.nd.array(norm_bias_np, DEV)
-    out_tvm = tvm.nd.array(out_np, DEV)
-    out_resid_tvm = tvm.nd.array(out_resid_np, DEV)
+    inp_tvm = tvm.runtime.tensor(inp_np, DEV)
+    inp_resid_tvm = tvm.runtime.tensor(inp_resid_np, DEV)
+    norm_weight_tvm = tvm.runtime.tensor(norm_weight_np, DEV)
+    norm_bias_tvm = tvm.runtime.tensor(norm_bias_np, DEV)
+    out_tvm = tvm.runtime.tensor(out_np, DEV)
+    out_resid_tvm = tvm.runtime.tensor(out_resid_np, DEV)
 
     def tir_layernorm():
         with target:

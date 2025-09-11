@@ -52,12 +52,12 @@ void PrimFuncFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
   // if the prim func is not private and there isn't already a global symbol,
   // add a global symbol
-  auto insert_attr = [&](String key, ffi::Any value) {
+  auto insert_attr = [&](ffi::String key, ffi::Any value) {
     if (!attrs.defined()) {
       attrs = {{key, value}};
     } else if (!attrs.count(key)) {
       // copy over attributes (can't mutate the dict inside the optional in-place)
-      Map<String, ffi::Any> new_attrs;
+      ffi::Map<ffi::String, ffi::Any> new_attrs;
       for (auto kv : attrs) {
         new_attrs.Set(kv.first, kv.second);
       }
@@ -236,11 +236,11 @@ void DeclBufferFrameNode::ExitWithScope() {
 
 void ComposeOpFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
-  Array<ObjectRef> ops;
+  ffi::Array<ObjectRef> ops;
   for (const auto& stmt : stmts) {
     auto op_call = stmt.as<tvm::tirx::tirp::OpCallNode>();
     ICHECK(op_call) << "ValueError: Only TIRp op calls allowed in ComposeOp. Violated by " << stmt;
-    ops.push_back(GetRef<tvm::tirx::tirp::OpCall>(op_call));
+    ops.push_back(ffi::GetRef<tvm::tirx::tirp::OpCall>(op_call));
   }
   auto compose_op_op = tvm::Op::Get("tirp.compose_op");
   AddToParent(tvm::tirx::tirp::OpCall(compose_op_op, ops, workspace, schedule_config));
@@ -260,7 +260,7 @@ void AllocSemaphoreEventTensorFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
   AddToParent(tvm::tirx::AllocSemaphoreEventTensor(sem_event_tensor, AsStmt(stmts)));
 }
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

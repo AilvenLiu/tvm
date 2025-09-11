@@ -321,15 +321,15 @@ def test_hgemm_hopper_ws_cooperative():
 
     A_np = np.random.randn(M, K).astype(np.float16)
     B_np = np.random.randn(K, N).astype(np.float16)
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
 
     def flops(ms):
         return M * N * K * 2 / ms / 1e9
 
     def tir_gemm():
         C_np = -np.ones((M, N), dtype=np.float32)
-        C_tvm = tvm.nd.array(C_np, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_np, device=DEV)
 
         with target:
             mod = tvm.IRModule({"main": manual})
@@ -565,15 +565,15 @@ def test_hgemm_hopper_no_ws():
 
     A_np = np.random.randn(M, K).astype(np.float16)
     B_np = np.random.randn(N, K).astype(np.float16)
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
 
     def flops(ms):
         return M * N * K * 2 / ms / 1e9
 
     def tir_gemm():
         C_np = -np.ones((M, N), dtype=np.float16)
-        C_tvm = tvm.nd.array(C_np, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_np, device=DEV)
 
         with target:
             mod = tvm.IRModule({"main": manual})

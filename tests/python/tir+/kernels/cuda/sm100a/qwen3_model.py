@@ -264,7 +264,7 @@ def get_params(named_params, vm):
             else:
                 nn.init.xavier_uniform_(torch_tensor, gain=1.0)
             torch_tensor = torch_tensor
-            result.append(tvm.runtime.ndarray.from_dlpack(torch.to_dlpack(torch_tensor)))
+            result.append(tvm.runtime.from_dlpack(torch.to_dlpack(torch_tensor)))
     else:
         from tvm.contrib import tvmjs
 
@@ -365,7 +365,7 @@ def test_qwen3_model(
     logits_arr = list()
     last_tokens = np.random.randint(0, 100, size=(batch_size,))
     for i in tqdm(range(seq_len)):
-        tokens = tvm.nd.array(last_tokens.astype("int32"), device=dev)
+        tokens = tvm.runtime.tensor(last_tokens.astype("int32"), device=dev)
         if TP_SIZE > 1:
             tokens_d = get_global_func("runtime.disco.empty")(
                 ShapeTuple(list(last_tokens.shape)), "int32", None, False, False

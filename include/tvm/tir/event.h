@@ -39,26 +39,25 @@ enum class kEventImpl : int {
 class BaseEventNode : public Object {
  public:
   virtual kEventImpl GetImpl() const = 0;
-  virtual Array<ffi::Any> GetState() const = 0;
+  virtual ffi::Array<ffi::Any> GetState() const = 0;
 
-  static constexpr const char* _type_key = "tirp.BaseEvent";
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_BASE_OBJECT_INFO(BaseEventNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO("tirp.BaseEvent", BaseEventNode, Object);
 };
 
 class BaseEvent : public ObjectRef {
  public:
-  TVM_DEFINE_OBJECT_REF_METHODS(BaseEvent, ObjectRef, BaseEventNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(BaseEvent, ObjectRef, BaseEventNode);
 };
 
 class BulkGroupEventNode : public BaseEventNode {
  public:
-  String name;
+  ffi::String name;
   kEventImpl impl;
-  Array<ffi::Any> state;
+  ffi::Array<ffi::Any> state;
 
   kEventImpl GetImpl() const final;
-  Array<ffi::Any> GetState() const final;
+  ffi::Array<ffi::Any> GetState() const final;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -68,23 +67,24 @@ class BulkGroupEventNode : public BaseEventNode {
         .def_ro("state", &BulkGroupEventNode::state);
   }
 
-  static constexpr const char* _type_key = "tirp.BulkGroupEvent";
-  TVM_DECLARE_FINAL_OBJECT_INFO(BulkGroupEventNode, BaseEventNode);
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirp.BulkGroupEvent", BulkGroupEventNode, BaseEventNode);
 };
 
 class BulkGroupEvent : public BaseEvent {
  public:
-  TVM_DLL BulkGroupEvent(kEventImpl impl, const Array<ffi::Any>& state, const String& name);
-  TVM_DEFINE_OBJECT_REF_METHODS(BulkGroupEvent, BaseEvent, BulkGroupEventNode);
+  TVM_DLL BulkGroupEvent(kEventImpl impl, const ffi::Array<ffi::Any>& state,
+                         const ffi::String& name);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(BulkGroupEvent, BaseEvent, BulkGroupEventNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(BulkGroupEventNode);
 };
 
 class SemaphoreEventTensorNode : public Object {
  public:
-  String name;
+  ffi::String name;
   kEventImpl impl;
-  Array<ffi::Any> state;
-  Array<PrimExpr> shape;
+  ffi::Array<ffi::Any> state;
+  ffi::Array<PrimExpr> shape;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -95,26 +95,26 @@ class SemaphoreEventTensorNode : public Object {
         .def_ro("shape", &SemaphoreEventTensorNode::shape);
   }
 
-  static constexpr const char* _type_key = "tirp.SemaphoreEventTensor";
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
-  TVM_DECLARE_FINAL_OBJECT_INFO(SemaphoreEventTensorNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirp.SemaphoreEventTensor", SemaphoreEventTensorNode, Object);
 };
 
 class SemaphoreEventTensor : public ObjectRef {
  public:
-  TVM_DLL SemaphoreEventTensor(const kEventImpl& impl, const Array<ffi::Any>& state,
-                               const Array<PrimExpr>& shape, const String& name);
-  TVM_DEFINE_OBJECT_REF_METHODS(SemaphoreEventTensor, ObjectRef, SemaphoreEventTensorNode);
+  TVM_DLL SemaphoreEventTensor(const kEventImpl& impl, const ffi::Array<ffi::Any>& state,
+                               const ffi::Array<PrimExpr>& shape, const ffi::String& name);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SemaphoreEventTensor, ObjectRef,
+                                             SemaphoreEventTensorNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(SemaphoreEventTensorNode);
 };
 
 class SemaphoreEventTensorItemNode : public BaseEventNode {
  public:
   SemaphoreEventTensor tensor;
-  Array<PrimExpr> indices;
+  ffi::Array<PrimExpr> indices;
 
   kEventImpl GetImpl() const final;
-  Array<ffi::Any> GetState() const final;
+  ffi::Array<ffi::Any> GetState() const final;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -123,16 +123,17 @@ class SemaphoreEventTensorItemNode : public BaseEventNode {
         .def_ro("indices", &SemaphoreEventTensorItemNode::indices);
   }
 
-  static constexpr const char* _type_key = "tirp.SemaphoreEventTensorItem";
-  TVM_DECLARE_FINAL_OBJECT_INFO(SemaphoreEventTensorItemNode, BaseEventNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirp.SemaphoreEventTensorItem", SemaphoreEventTensorItemNode,
+                                    BaseEventNode);
 };
 
 class SemaphoreEventTensorItem : public BaseEvent {
  public:
   TVM_DLL SemaphoreEventTensorItem(const SemaphoreEventTensor& tensor,
-                                   const Array<PrimExpr>& indices);
+                                   const ffi::Array<PrimExpr>& indices);
 
-  TVM_DEFINE_OBJECT_REF_METHODS(SemaphoreEventTensorItem, BaseEvent, SemaphoreEventTensorItemNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SemaphoreEventTensorItem, BaseEvent,
+                                             SemaphoreEventTensorItemNode);
 };
 
 }  // namespace tir

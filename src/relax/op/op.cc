@@ -845,11 +845,11 @@ TVM_REGISTER_OP("relax.call_tir_device")
     .set_attr<FNormalize>("FNormalize", NormalizeCallTIR)
     .set_attr<Bool>("FPurity", Bool(true));
 
-Expr MakeCallTIRDevice(Expr func, Tuple args, Array<TensorStructInfo> out_sinfo_list,
+Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_sinfo_list,
                        ShapeExpr tile_num, Tuple in_events, Tuple out_events,
-                       Array<tir::IndexMap> in_deps, Array<tir::IndexMap> out_deps,
-                       Optional<Expr> packed_ints) {
-  ObjectPtr<CallTIRDeviceAttrs> attrs = make_object<CallTIRDeviceAttrs>();
+                       ffi::Array<tir::IndexMap> in_deps, ffi::Array<tir::IndexMap> out_deps,
+                       ffi::Optional<Expr> packed_ints) {
+  ObjectPtr<CallTIRDeviceAttrs> attrs = ffi::make_object<CallTIRDeviceAttrs>();
   attrs->in_deps = in_deps;
   attrs->out_deps = out_deps;
 

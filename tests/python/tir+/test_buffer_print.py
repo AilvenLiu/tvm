@@ -15,7 +15,7 @@ def generate_random_data(shape, dtype):
 
 
 def create_tvm_arrays(data_np, device):
-    return [tvm.nd.array(data, device=device) for data in data_np]
+    return [tvm.runtime.tensor(data, device=device) for data in data_np]
 
 
 def build_and_run_tvm_func(sch, target, *args):
@@ -195,7 +195,7 @@ def test_print():
         sch.bind(i1, "threadIdx.x")
 
         C_np_tmp = np.zeros((M,), dtype=dtype)
-        C_tvm = tvm.nd.array(C_np_tmp, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_np_tmp, device=DEV)
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
@@ -235,7 +235,7 @@ def test_print():
         sch.bind(j1, "threadIdx.y")
 
         C_np_tmp = np.zeros((M, N), dtype=dtype)
-        C_tvm = tvm.nd.array(C_np_tmp, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_np_tmp, device=DEV)
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
@@ -280,7 +280,7 @@ def test_print():
         sch.bind(k1, "threadIdx.z")
 
         C_np_tmp = np.zeros((M, N, K), dtype=dtype)
-        C_tvm = tvm.nd.array(C_np_tmp, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_np_tmp, device=DEV)
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
@@ -317,7 +317,7 @@ def test_print():
         sch.bind(i1, "threadIdx.x")
 
         C_np_tmp = np.zeros((M,), dtype=dtype)
-        C_tvm = tvm.nd.array(C_np_tmp, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_np_tmp, device=DEV)
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())
@@ -354,7 +354,7 @@ def test_print():
         sch.bind(i1, "threadIdx.x")
 
         C_np_tmp = np.zeros((M,), dtype=dtype)
-        C_tvm = tvm.nd.array(C_np_tmp, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_np_tmp, device=DEV)
         func, C_tvm = build_and_run_tvm_func(sch, target, A_tvm, B_tvm, C_tvm)
         verify_result(C_tvm, C_np)
         verify_tir_code(add_func.script())

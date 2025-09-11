@@ -52,8 +52,10 @@ TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
 MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/qwen3-32b-mlc/lib_tp{TP_SIZE}.so"
-MEGA_LIB_PATH = f"/home/guanjiew/qwen3-mg-debug/mega_layer_lib_dyn_tp{TP_SIZE}.so"  # NOTE: update this path
-DEBUG_PATH = "/home/guanjiew/qwen3-mg-debug" # NOTE: update this path
+MEGA_LIB_PATH = (
+    f"/home/guanjiew/qwen3-mg-debug/mega_layer_lib_dyn_tp{TP_SIZE}.so"  # NOTE: update this path
+)
+DEBUG_PATH = "/home/guanjiew/qwen3-mg-debug"  # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
 MAX_SEQ_LEN = 1024
@@ -231,7 +233,7 @@ def get_params(named_params, vm):
             else:
                 nn.init.xavier_uniform_(torch_tensor, gain=1.0)
             torch_tensor = torch_tensor
-            result.append(tvm.runtime.ndarray.from_dlpack(torch.to_dlpack(torch_tensor)))
+            result.append(tvm.runtime.from_dlpack(torch.to_dlpack(torch_tensor)))
     else:
         from tvm.contrib import tvmjs
 
@@ -332,7 +334,7 @@ def test_qwen3_model(
     logits_arr = list()
     last_tokens = np.random.randint(0, 100, size=(batch_size,))
     for i in tqdm(range(seq_len)):
-        tokens = tvm.nd.array(last_tokens.astype("int32"), device=dev)
+        tokens = tvm.runtime.tensor(last_tokens.astype("int32"), device=dev)
         if TP_SIZE > 1:
             tokens_d = get_global_func("runtime.disco.empty")(
                 ShapeTuple(list(last_tokens.shape)), "int32", None, False, False

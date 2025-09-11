@@ -329,9 +329,9 @@ Stmt StmtMutator::VisitStmt_(const WhileNode* op) {
   }
 }
 
-Stmt StmtMutator::VisitStmt_(const BreakNode* op) { return GetRef<Stmt>(op); }
+Stmt StmtMutator::VisitStmt_(const BreakNode* op) { return ffi::GetRef<Stmt>(op); }
 
-Stmt StmtMutator::VisitStmt_(const ContinueNode* op) { return GetRef<Stmt>(op); }
+Stmt StmtMutator::VisitStmt_(const ContinueNode* op) { return ffi::GetRef<Stmt>(op); }
 
 Buffer StmtMutator::VisitBufferDef(const Buffer& buffer, bool alloc_data) {
   if (auto it = buffer_remap_.find(buffer); it != buffer_remap_.end()) {
@@ -611,9 +611,9 @@ Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
     }
     return e;
   };
-  Array<ffi::Any> args = Internal::MutateArray(this, op->args, fmutate);
+  ffi::Array<ffi::Any> args = Internal::MutateArray(this, op->args, fmutate);
   if (args.same_as(op->args)) {
-    return GetRef<Stmt>(op);
+    return ffi::GetRef<Stmt>(op);
   } else {
     auto n = CopyOnWrite(op);
     n->args = std::move(args);
@@ -624,7 +624,7 @@ Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
 Stmt StmtMutator::VisitStmt_(const AllocBufferNode* op) {
   Stmt body = this->VisitStmt(op->body);
   if (body.same_as(op->body)) {
-    return GetRef<Stmt>(op);
+    return ffi::GetRef<Stmt>(op);
   } else {
     auto n = CopyOnWrite(op);
     n->body = std::move(body);
@@ -635,7 +635,7 @@ Stmt StmtMutator::VisitStmt_(const AllocBufferNode* op) {
 Stmt StmtMutator::VisitStmt_(const AllocBulkGroupEventNode* op) {
   Stmt body = this->VisitStmt(op->body);
   if (body.same_as(op->body)) {
-    return GetRef<Stmt>(op);
+    return ffi::GetRef<Stmt>(op);
   } else {
     auto n = CopyOnWrite(op);
     n->body = std::move(body);
@@ -646,7 +646,7 @@ Stmt StmtMutator::VisitStmt_(const AllocBulkGroupEventNode* op) {
 Stmt StmtMutator::VisitStmt_(const AllocSemaphoreEventTensorNode* op) {
   Stmt body = this->VisitStmt(op->body);
   if (body.same_as(op->body)) {
-    return GetRef<Stmt>(op);
+    return ffi::GetRef<Stmt>(op);
   } else {
     auto n = CopyOnWrite(op);
     n->body = std::move(body);

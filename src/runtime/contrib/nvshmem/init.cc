@@ -152,7 +152,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("runtime.disco.nvshmem.barrier_all_on_current_stream", []() {
         int device_id;
         CUDA_CALL(cudaGetDevice(&device_id));
-        TVMStreamHandle stream = TVMFFIEnvGetCurrentStream(kDLCUDA, device_id);
+        TVMStreamHandle stream = TVMFFIEnvGetStream(kDLCUDA, device_id);
         NVSHMEMBarrierAllOnStream(stream);
       });
 }

@@ -201,8 +201,8 @@ def test(batch_size):
 
     def tir_cp_async():
         DEV = tvm.cuda(0)
-        input_cat_tvm = tvm.nd.array(input_cat.clone(), device=DEV)
-        output_tvm = tvm.nd.empty((batch_size, out_dim), dtype="float16", device=DEV)
+        input_cat_tvm = tvm.runtime.tensor(input_cat.clone(), device=DEV)
+        output_tvm = tvm.runtime.empty((batch_size, out_dim), dtype="float16", device=DEV)
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule({"main": get_fused_split_silu_multiply_kernel_cp_async(out_dim)})
@@ -215,8 +215,8 @@ def test(batch_size):
 
     def tir_cp_sync():
         DEV = tvm.cuda(0)
-        input_cat_tvm = tvm.nd.array(input_cat.clone(), device=DEV)
-        output_tvm = tvm.nd.empty((batch_size, out_dim), dtype="float16", device=DEV)
+        input_cat_tvm = tvm.runtime.tensor(input_cat.clone(), device=DEV)
+        output_tvm = tvm.runtime.empty((batch_size, out_dim), dtype="float16", device=DEV)
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule({"main": get_fused_split_silu_multiply_kernel_cp_sync(out_dim)})
@@ -228,10 +228,10 @@ def test(batch_size):
 
     def tir_old():
         DEV = tvm.cuda(0)
-        input_cat_tvm = tvm.nd.array(
+        input_cat_tvm = tvm.runtime.tensor(
             input_cat.clone().reshape(1, batch_size, out_dim * 2), device=DEV
         )
-        output_tvm = tvm.nd.empty((1, batch_size, out_dim), dtype="float16", device=DEV)
+        output_tvm = tvm.runtime.empty((1, batch_size, out_dim), dtype="float16", device=DEV)
         target = tvm.target.Target("cuda")
         with target:
             mod = tvm.IRModule({"main": get_fused_split1_silu1_multiply1_kernel(out_dim)})

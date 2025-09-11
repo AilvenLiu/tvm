@@ -215,11 +215,11 @@ def test_partial_reduction():
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
 
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
-    C_tvm = tvm.nd.array(C_np, device=DEV)
-    C_tvm_fused = tvm.nd.array(C_np, device=DEV)
-    sem_tvm = tvm.nd.array(np.zeros((NUM_BLOCK_M,), dtype=np.int32), device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
+    C_tvm = tvm.runtime.tensor(C_np, device=DEV)
+    C_tvm_fused = tvm.runtime.tensor(C_np, device=DEV)
+    sem_tvm = tvm.runtime.tensor(np.zeros((NUM_BLOCK_M,), dtype=np.int32), device=DEV)
     with target:
 
         ref_mod_stage_1 = tvm.IRModule({"main": partial_reduction_ref_stage1})
@@ -246,12 +246,12 @@ def test_partial_reduction_event():
     DEV = tvm.cuda(0)
     target = tvm.target.Target("cuda")
 
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
-    C_tvm = tvm.nd.array(C_np, device=DEV)
-    C_tvm_fused = tvm.nd.array(C_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
+    C_tvm = tvm.runtime.tensor(C_np, device=DEV)
+    C_tvm_fused = tvm.runtime.tensor(C_np, device=DEV)
     # we initialize event on host instead of device because of Tp.fill not correctly implemented
-    sem_tvm = tvm.nd.array(np.full((NUM_BLOCK_M,), NUM_BLOCK_N, dtype=np.int32), device=DEV)
+    sem_tvm = tvm.runtime.tensor(np.full((NUM_BLOCK_M,), NUM_BLOCK_N, dtype=np.int32), device=DEV)
     with target:
 
         ref_mod_stage_1 = tvm.IRModule({"main": partial_reduction_ref_stage1})

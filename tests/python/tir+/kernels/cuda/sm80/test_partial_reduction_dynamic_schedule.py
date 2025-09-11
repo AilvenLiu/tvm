@@ -232,20 +232,20 @@ def test_partial_reduction():
                 self.task_idxs[pos, i] = task_idx[i]
             self.tail[0] = self.tail[0] + 1
 
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
-    C_tvm = tvm.nd.array(C_np, device=DEV)
-    C_tvm_fused = tvm.nd.array(C_np, device=DEV)
-    sem_tvm = tvm.nd.array(np.zeros((NUM_BLOCK_M,), dtype=np.int32), device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
+    C_tvm = tvm.runtime.tensor(C_np, device=DEV)
+    C_tvm_fused = tvm.runtime.tensor(C_np, device=DEV)
+    sem_tvm = tvm.runtime.tensor(np.zeros((NUM_BLOCK_M,), dtype=np.int32), device=DEV)
     mpmc_queue = MPMCQueueHost(CAPACITY)
     mpmc_queue.init()
     for i in range(NUM_BLOCK_M):
         for j in range(NUM_BLOCK_N):
             mpmc_queue.enqueue(TaskType.PARTIAL, i, j)
-    task_types_tvm = tvm.nd.array(mpmc_queue.task_types, device=DEV)
-    task_idxs_tvm = tvm.nd.array(mpmc_queue.task_idxs, device=DEV)
-    head_tvm = tvm.nd.array(mpmc_queue.head, device=DEV)
-    tail_tvm = tvm.nd.array(mpmc_queue.tail, device=DEV)
+    task_types_tvm = tvm.runtime.tensor(mpmc_queue.task_types, device=DEV)
+    task_idxs_tvm = tvm.runtime.tensor(mpmc_queue.task_idxs, device=DEV)
+    head_tvm = tvm.runtime.tensor(mpmc_queue.head, device=DEV)
+    tail_tvm = tvm.runtime.tensor(mpmc_queue.tail, device=DEV)
     with target:
 
         ref_mod_stage_1 = tvm.IRModule({"main": partial_reduction_ref_stage1})

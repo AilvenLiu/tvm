@@ -34,7 +34,7 @@ import tvm_ffi
 
 from tvm import tir
 from tvm.ir import Op, PrimExpr, Range, Span
-from tvm.runtime import NDArray, Object, Scriptable, const
+from tvm.runtime import Object, Scriptable, const, Tensor
 from tvm.tir import FloatImm
 
 from . import _ffi_api

@@ -86,9 +86,9 @@ class OpaqueBlockLower : public StmtExprMutator {
 
   Stmt VisitStmt_(const AllocBufferNode* op) final {
     const Buffer& buffer = op->buffer;
-    Array<PrimExpr> allocation_shape = GetBufferAllocationShape(buffer);
+    ffi::Array<PrimExpr> allocation_shape = GetBufferAllocationShape(buffer);
     Stmt body = DeclBuffer(buffer, VisitStmt(op->body));
-    Map<String, ffi::Any> allocate_annotations;
+    ffi::Map<ffi::String, ffi::Any> allocate_annotations;
     allocate_annotations.Set(attr::buffer_data_alignment,
                              IntImm(DataType::Int(32), buffer->data_alignment));
     allocate_annotations.Set(attr::buffer_allocated_addr, buffer->allocated_addr);

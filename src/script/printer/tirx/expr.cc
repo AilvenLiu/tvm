@@ -230,10 +230,10 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           }
         });
 
-LambdaDoc PrintPredicate(const ObjectRef& pred, const Array<tirx::Var>& vs, const AccessPath& vs_p,
+LambdaDoc PrintPredicate(const ObjectRef& pred, const ffi::Array<tirx::Var>& vs, const AccessPath& vs_p,
                          const PrimExpr& p, const AccessPath& p_p, const IRDocsifier& d) {
   With<TIRFrame> f(d, pred);
-  Array<IdDoc> vars;
+  ffi::Array<IdDoc> vars;
   for (int i = 0, l = vs.size(); i < l; ++i) {
     vars.push_back(Downcast<IdDoc>(DefineVar(vs[i], *f, d)));
   }

@@ -20,7 +20,7 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/data_type.h>
 #include <tvm/runtime/int_tuple.h>
-#include <tvm/runtime/ndarray.h>
+#include <tvm/runtime/tensor.h>
 
 #include <../../../../3rdparty/flashinfer/include/flashinfer/attention/decode.cuh>
 #include <../../../../3rdparty/flashinfer/include/flashinfer/attention/variants.cuh>
@@ -36,7 +36,7 @@ using tvm::ffi::Any;
 using tvm::ffi::Array;
 using tvm::runtime::DataType;
 using tvm::runtime::IntTuple;
-using tvm::runtime::NDArray;
+using tvm::runtime::Tensor;
 
 namespace tvm {
 namespace runtime {
@@ -119,8 +119,8 @@ IntTuple BatchPrefillWithKVCachePlan(
 }
 
 Array<Any> BatchDecodeWithPagedKVCachePlan(
-    NDArray float_workspace_buffer, NDArray int_workspace_buffer,
-    NDArray page_locked_int_workspace_buffer, NDArray indptr, int64_t batch_size,
+    Tensor float_workspace_buffer, Tensor int_workspace_buffer,
+    Tensor page_locked_int_workspace_buffer, Tensor indptr, int64_t batch_size,
     int64_t num_qo_heads, int64_t num_kv_heads, int64_t page_size, bool enable_cuda_graph,
     int64_t pos_encoding_mode_code, int64_t window_left, int64_t head_dim_qk, int64_t head_dim_vo,
     DataType q_scalar_type, DataType kv_scalar_type) {
@@ -175,28 +175,28 @@ Array<Any> BatchDecodeWithPagedKVCachePlan(
   int64_t o_indptr_size = batch_size + 1;
 
   DataType dtype = DataType::Int(32);
-  NDArray request_indices =
+  Tensor request_indices =
       int_workspace_buffer.CreateView({request_indices_size}, dtype,
                                       /*relative_byte_offset=*/request_indices_offset);
-  NDArray kv_tile_indices =
+  Tensor kv_tile_indices =
       int_workspace_buffer.CreateView({kv_tile_indices_size}, dtype,
                                       /*relative_byte_offset=*/kv_tile_indices_offset);
-  NDArray kv_chunk_size_ptr =
+  Tensor kv_chunk_size_ptr =
       int_workspace_buffer.CreateView({kv_chunk_size_ptr_size}, dtype,
                                       /*relative_byte_offset=*/kv_chunk_size_ptr_offset);
-  NDArray o_indptr_device =
+  Tensor o_indptr_device =
       int_workspace_buffer.CreateView({o_indptr_size}, dtype,
                                       /*relative_byte_offset=*/o_inptr_offset);
-  NDArray o_indptr_host =
+  Tensor o_indptr_host =
       page_locked_int_workspace_buffer.CreateView({o_indptr_size}, dtype,
                                                   /*relative_byte_offset=*/o_inptr_offset);
   return {request_indices, kv_tile_indices, kv_chunk_size_ptr,
           o_indptr_device, o_indptr_host,   split_kv};
 }
 
-Array<Any> BatchPagedAttentionPlan(NDArray float_workspace_buffer, NDArray int_workspace_buffer,
-                                   NDArray page_locked_int_workspace_buffer, NDArray qo_indptr,
-                                   NDArray kv_indptr, NDArray kv_len, int64_t batch_size,
+Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_workspace_buffer,
+                                   Tensor page_locked_int_workspace_buffer, Tensor qo_indptr,
+                                   Tensor kv_indptr, Tensor kv_len, int64_t batch_size,
                                    int64_t num_qo_heads, int64_t num_kv_heads, int64_t head_dim_o,
                                    bool causal) {
   size_t float_workspace_size_in_bytes =
@@ -246,81 +246,81 @@ Array<Any> BatchPagedAttentionPlan(NDArray float_workspace_buffer, NDArray int_w
   ret.push_back(num_blks_y);
 
   for (uint32_t i = 0; i < NUM_TASKS; ++i) {
-    std::vector<NDArray> task_arrays;
+    std::vector<Tensor> task_arrays;
     task_arrays.reserve(NUM_TASK_ARGS);
     int64_t q_indptr_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 0];
-    NDArray q_indptr = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor q_indptr = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                        /*relative_byte_offset=*/q_indptr_offset);
     task_arrays.push_back(q_indptr);
     int64_t kv_indptr_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 1];
-    NDArray kv_indptr = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor kv_indptr = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                         /*relative_byte_offset=*/kv_indptr_offset);
     task_arrays.push_back(kv_indptr);
     int64_t partial_indptr_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 2];
-    NDArray partial_indptr =
+    Tensor partial_indptr =
         int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                         /*relative_byte_offset=*/partial_indptr_offset);
     task_arrays.push_back(partial_indptr);
     int64_t q_len_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 3];
-    NDArray q_len = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor q_len = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                     /*relative_byte_offset=*/q_len_offset);
     task_arrays.push_back(q_len);
     int64_t kv_len_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 4];
-    NDArray kv_len = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor kv_len = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                      /*relative_byte_offset=*/kv_len_offset);
     task_arrays.push_back(kv_len);
     int64_t q_start_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 5];
-    NDArray q_start = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor q_start = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                       /*relative_byte_offset=*/q_start_offset);
     task_arrays.push_back(q_start);
     int64_t kv_start_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 6];
-    NDArray kv_start = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor kv_start = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                        /*relative_byte_offset=*/kv_start_offset);
     task_arrays.push_back(kv_start);
     int64_t kv_end_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 7];
-    NDArray kv_end = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor kv_end = int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                      /*relative_byte_offset=*/kv_end_offset);
     task_arrays.push_back(kv_end);
     int64_t kv_head_idx_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 8];
-    NDArray kv_head_idx =
+    Tensor kv_head_idx =
         int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                         /*relative_byte_offset=*/kv_head_idx_offset);
     task_arrays.push_back(kv_head_idx);
     int64_t work_indptr_offset = plan_info_vec[2 + i * NUM_TASK_ARGS + 9];
-    NDArray work_indptr =
+    Tensor work_indptr =
         int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                         /*relative_byte_offset=*/work_indptr_offset);
     task_arrays.push_back(work_indptr);
     // on the host meomory, needed by event generation of megakernel
-    NDArray q_indptr_host = page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor q_indptr_host = page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                                         /*relative_byte_offset=*/q_indptr_offset);
     task_arrays.push_back(q_indptr_host);
-    NDArray kv_head_idx_host = page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor kv_head_idx_host = page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                                           /*relative_byte_offset=*/kv_head_idx_offset);
     task_arrays.push_back(kv_head_idx_host);
-    NDArray work_indptr_host = page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
+    Tensor work_indptr_host = page_locked_int_workspace_buffer.CreateView({max_total_num_works}, int_dtype,
                                                                           /*relative_byte_offset=*/work_indptr_offset);
     task_arrays.push_back(work_indptr_host);
-    ret.push_back(Array<NDArray>(task_arrays));
+    ret.push_back(Array<Tensor>(task_arrays));
   }
 
   int64_t len_kv_chunk_offset = plan_info_vec[2 + NUM_TASKS * NUM_TASK_ARGS];
-  NDArray len_kv_chunk =
+  Tensor len_kv_chunk =
       int_workspace_buffer.CreateView({NUM_TASKS}, int_dtype,
                                       /*relative_byte_offset=*/len_kv_chunk_offset);
   ret.push_back(len_kv_chunk);
   int64_t merge_indptr_offset = plan_info_vec[5 + NUM_TASKS * NUM_TASK_ARGS];
-  NDArray merge_indptr =
+  Tensor merge_indptr =
       int_workspace_buffer.CreateView({max_num_kv_splits}, int_dtype,
                                       /*relative_byte_offset=*/merge_indptr_offset);
   ret.push_back(merge_indptr);
   int64_t merge_o_indices_offset = plan_info_vec[6 + NUM_TASKS * NUM_TASK_ARGS];
-  NDArray merge_o_indices =
+  Tensor merge_o_indices =
       int_workspace_buffer.CreateView({max_num_kv_splits}, int_dtype,
                                       /*relative_byte_offset=*/merge_o_indices_offset);
   ret.push_back(merge_o_indices);
   int64_t num_qo_len_offset = plan_info_vec[7 + NUM_TASKS * NUM_TASK_ARGS];
-  NDArray num_qo_len = int_workspace_buffer.CreateView({1}, int_dtype,
+  Tensor num_qo_len = int_workspace_buffer.CreateView({1}, int_dtype,
                                                        /*relative_byte_offset=*/num_qo_len_offset);
   ret.push_back(num_qo_len);
   return ret;

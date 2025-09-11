@@ -52,7 +52,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
     if (op->annotations.count(attr::tirp_scope_partition)) {
       // scope partition is enabled, check if body is a list of BlockRealize
       if (auto seq = op->body.as<SeqStmt>()) {
-        Optional<ExecScopeSlice> scope_slice_chk = std::nullopt;
+        ffi::Optional<ExecScopeSlice> scope_slice_chk = std::nullopt;
         for (const auto& stmt : seq.value()->seq) {
           auto block_realize = stmt.as<BlockRealize>();
           if (!block_realize.has_value()) {
@@ -179,7 +179,7 @@ class ExecScopeVerifier : public Verifier<ExecScopeVerifier> {
         << "TIRpError: OpCall at " << path << " has unknown TIR+ op " << op->op;
   }
 
-  Optional<ExecScope> root_ = std::nullopt;
+  ffi::Optional<ExecScope> root_ = std::nullopt;
   std::vector<ExecScope> scope_stack_;
   std::unordered_map<std::string, std::vector<Array<Range>>> scope_slices_;
   std::unordered_map<std::string, PrimExpr> scope_select_cond_;
@@ -268,7 +268,7 @@ class DeviceFuncVerifier : public Verifier<DeviceFuncVerifier> {
         << "TIRpError: Root scope of device function at " << path << " is higher than kernel scope";
   }
 
-  Optional<ExecScope> root_ = std::nullopt;
+  ffi::Optional<ExecScope> root_ = std::nullopt;
 };
 
 bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode, bool device_func) {

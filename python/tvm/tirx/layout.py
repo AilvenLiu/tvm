@@ -31,7 +31,7 @@ from typing import (
 )
 
 import tvm
-import tvm.ffi
+import tvm_ffi
 from tvm.runtime import Object, ShapeTuple
 from tvm.tirx.expr import PrimExpr
 
@@ -39,7 +39,7 @@ from . import _ffi_api
 from .exec_scope import ExecScope
 
 
-@tvm.ffi.register_object("tir.TLayout")
+@tvm_ffi.register_object("tir.TLayout")
 class TLayout(Object):
     def __init__(self):
         self.__init_handle_by_constructor__(_ffi_api.TLayout)  # pylint: disable=no-member
@@ -312,7 +312,7 @@ class TLayout(Object):
             raise ValueError(f"Unsupported layout type: {type(self)}")
 
 
-@tvm.ffi.register_object("tir.Axis")
+@tvm_ffi.register_object("tir.Axis")
 class Axis(Object):
     """Layout axis wrapper."""
 
@@ -409,7 +409,7 @@ for _n in Axis._NAMES:  # pylint: disable=protected-access
     Axis.reg_dict[_n] = _axis_obj
 
 
-@tvm.ffi.register_object("tir.Iter")
+@tvm_ffi.register_object("tir.Iter")
 class Iter(Object):
     """A memory layout that tiles data across devices."""
 
@@ -425,7 +425,7 @@ class Iter(Object):
         )
 
 
-@tvm.ffi.register_object("tir.TileLayout")
+@tvm_ffi.register_object("tir.TileLayout")
 class TileLayout(TLayout):
     """A memory layout that tiles data across devices."""
 
@@ -587,7 +587,7 @@ class TileLayout(TLayout):
         return _ffi_api.TileLayout(shard, [], dict())  # pylint: disable=no-member
 
 
-@tvm.ffi.register_object("tir.SwizzleLayout")
+@tvm_ffi.register_object("tir.SwizzleLayout")
 class SwizzleLayout(TLayout):
     """A memory layout that swizzles elements to improve memory access patterns."""
 
@@ -608,7 +608,7 @@ class SwizzleLayout(TLayout):
         )
 
 
-@tvm.ffi.register_object("tir.ComposeLayout")
+@tvm_ffi.register_object("tir.ComposeLayout")
 class ComposeLayout(TLayout):
     """A memory layout that composes 2 layouts."""
 

@@ -699,8 +699,7 @@ class BreakNode : public StmtNode {
     refl::ObjectDef<BreakNode>().def_ro("span", &BreakNode::span);
   }
 
-  static constexpr const char* _type_key = "tirx.Break";
-  TVM_DECLARE_FINAL_OBJECT_INFO(BreakNode, StmtNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.Break", BreakNode, StmtNode);
 };
 
 /*!
@@ -711,7 +710,7 @@ class Break : public Stmt {
  public:
   TVM_DLL Break(Span span = Span());
 
-  TVM_DEFINE_OBJECT_REF_METHODS(Break, Stmt, BreakNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Break, Stmt, BreakNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(BreakNode);
 };
 
@@ -725,8 +724,7 @@ class ContinueNode : public StmtNode {
     refl::ObjectDef<ContinueNode>().def_ro("span", &ContinueNode::span);
   }
 
-  static constexpr const char* _type_key = "tirx.Continue";
-  TVM_DECLARE_FINAL_OBJECT_INFO(ContinueNode, StmtNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.Continue", ContinueNode, StmtNode);
 };
 
 /*!
@@ -737,7 +735,7 @@ class Continue : public Stmt {
  public:
   TVM_DLL Continue(Span span = Span());
 
-  TVM_DEFINE_OBJECT_REF_METHODS(Continue, Stmt, ContinueNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(Continue, Stmt, ContinueNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(ContinueNode);
 };
 
@@ -845,15 +843,14 @@ class AllocBufferNode : public StmtNode {
         .def_ro("span", &AllocBufferNode::span);
   }
 
-  static constexpr const char* _type_key = "tir.AllocBuffer";
-  TVM_DECLARE_FINAL_OBJECT_INFO(AllocBufferNode, StmtNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.AllocBuffer", AllocBufferNode, StmtNode);
 };
 
 class AllocBuffer : public Stmt {
  public:
   TVM_DLL explicit AllocBuffer(Buffer buffer, Stmt body, Span span = Span());
 
-  TVM_DEFINE_OBJECT_REF_METHODS(AllocBuffer, Stmt, AllocBufferNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(AllocBuffer, Stmt, AllocBufferNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocBufferNode);
 };
 
@@ -873,15 +870,14 @@ class AllocBulkGroupEventNode : public StmtNode {
         .def_ro("span", &AllocBulkGroupEventNode::span);
   }
 
-  static constexpr const char* _type_key = "tir.AllocBulkGroupEvent";
-  TVM_DECLARE_FINAL_OBJECT_INFO(AllocBulkGroupEventNode, StmtNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.AllocBulkGroupEvent", AllocBulkGroupEventNode, StmtNode);
 };
 
 class AllocBulkGroupEvent : public Stmt {
  public:
   TVM_DLL explicit AllocBulkGroupEvent(BulkGroupEvent bulk_group_event, Stmt body,
                                        Span span = Span());
-  TVM_DEFINE_OBJECT_REF_METHODS(AllocBulkGroupEvent, Stmt, AllocBulkGroupEventNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(AllocBulkGroupEvent, Stmt, AllocBulkGroupEventNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocBulkGroupEventNode);
 };
 
@@ -901,15 +897,16 @@ class AllocSemaphoreEventTensorNode : public StmtNode {
         .def_ro("span", &AllocSemaphoreEventTensorNode::span);
   }
 
-  static constexpr const char* _type_key = "tir.AllocSemaphoreEventTensor";
-  TVM_DECLARE_FINAL_OBJECT_INFO(AllocSemaphoreEventTensorNode, StmtNode);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.AllocSemaphoreEventTensor", AllocSemaphoreEventTensorNode,
+                                    StmtNode);
 };
 
 class AllocSemaphoreEventTensor : public Stmt {
  public:
   TVM_DLL explicit AllocSemaphoreEventTensor(SemaphoreEventTensor sem_event_tensor, Stmt body,
                                              Span span = Span());
-  TVM_DEFINE_OBJECT_REF_METHODS(AllocSemaphoreEventTensor, Stmt, AllocSemaphoreEventTensorNode);
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(AllocSemaphoreEventTensor, Stmt,
+                                             AllocSemaphoreEventTensorNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocSemaphoreEventTensorNode);
 };
 
@@ -963,7 +960,7 @@ class SBlockNode : public StmtNode {
 
   // TIR+ signature
   // The execution scope of the block.
-  Optional<ExecScope> exec_scope;
+  ffi::Optional<ExecScope> exec_scope;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -1356,6 +1353,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxxxxxxxx
+}  // namespace tirxxxxxxxxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

@@ -229,8 +229,8 @@ def test_fp8_gemm_hopper_no_ws():
 
     A_np = np.random.randn(M, K).astype(ml_dtypes.float8_e4m3fn)
     B_np = np.random.randn(N, K).astype(ml_dtypes.float8_e4m3fn)
-    A_tvm = tvm.nd.array(A_np, device=DEV)
-    B_tvm = tvm.nd.array(B_np, device=DEV)
+    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
 
     def flops(ms):
         return M * N * K * 2 / ms / 1e9
@@ -240,9 +240,9 @@ def test_fp8_gemm_hopper_no_ws():
 
         gemm_func = tvm.get_global_func("cublaslt.fp8_gemm")
 
-        C_tvm = tvm.nd.array(C_np, device=DEV)
-        workspace = tvm.nd.empty((32 * 1024 * 1024,), dtype="uint8", device=DEV)
-        scale = tvm.nd.array(np.array([1.0], dtype="float32"), device=DEV)
+        C_tvm = tvm.runtime.tensor(C_np, device=DEV)
+        workspace = tvm.runtime.empty((32 * 1024 * 1024,), dtype="uint8", device=DEV)
+        scale = tvm.runtime.tensor(np.array([1.0], dtype="float32"), device=DEV)
         func = lambda: gemm_func(A_tvm, B_tvm, workspace, scale, C_tvm)
         ms = bench(func, warmup=0, repeat=10, proton_name="cublas")
         print(f"CUBLAS flops: {flops(ms)} GFLOPS, time: {ms:.3f} ms")
@@ -250,7 +250,7 @@ def test_fp8_gemm_hopper_no_ws():
 
     def tir_gemm():
         C_np = -np.ones((M, N), dtype=np.float16)
-        C_tvm = tvm.nd.array(C_np, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_np, device=DEV)
 
         with target:
             mod = tvm.IRModule({"main": manual})

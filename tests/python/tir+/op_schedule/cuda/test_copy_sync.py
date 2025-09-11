@@ -151,8 +151,8 @@ def test_copy_g2s_s2g(task, dtype, scope):
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
         B_np = np.zeros(g_shape, dtype=np_dtype)
 
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         B_ref = B_np.copy()
@@ -212,8 +212,8 @@ def test_copy_g2l_l2g_vec_load(task, dtype):
         A_np = tvm.testing.generate_random_array(dtype, g_shape)
         B_np = np.zeros(g_shape, dtype=np_dtype)
 
-        A = tvm.nd.array(A_np, dev)
-        B = tvm.nd.array(B_np, dev)
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
         mod(A, B)
 
         B_ref = B_np.copy()

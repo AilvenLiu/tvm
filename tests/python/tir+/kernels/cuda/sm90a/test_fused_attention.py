@@ -770,14 +770,14 @@ def test_fp16_fused_attn():
     #     return o_torch.cpu().numpy()
 
     def tir():
-        q_tvm = tvm.nd.array(q, DEV)
-        k_tvm = tvm.nd.array(k, DEV)
-        v_tvm = tvm.nd.array(v, DEV)
-        o_tvm = tvm.nd.array(np.zeros(QO_SHAPE, dtype=np.float16), DEV)
+        q_tvm = tvm.runtime.tensor(q, DEV)
+        k_tvm = tvm.runtime.tensor(k, DEV)
+        v_tvm = tvm.runtime.tensor(v, DEV)
+        o_tvm = tvm.runtime.tensor(np.zeros(QO_SHAPE, dtype=np.float16), DEV)
 
         # profiler
         profiler_buffer = np.zeros((PROFILER_BUFFER_SIZE,), dtype=np.uint64)
-        profiler_buffer_tvm = tvm.nd.array(profiler_buffer, DEV)
+        profiler_buffer_tvm = tvm.runtime.tensor(profiler_buffer, DEV)
 
         from heapq import heappush, heappop
 
@@ -821,10 +821,10 @@ def test_fp16_fused_attn():
         q_indices = np.concatenate(q_indices).astype(np.int32)
         h_indices = np.concatenate(h_indices).astype(np.int32)
         b_indices = np.concatenate(b_indices).astype(np.int32)
-        tiles_indptr_tvm = tvm.nd.array(tiles_indptr, DEV)
-        q_indices_tvm = tvm.nd.array(q_indices, DEV)
-        h_indices_tvm = tvm.nd.array(h_indices, DEV)
-        b_indices_tvm = tvm.nd.array(b_indices, DEV)
+        tiles_indptr_tvm = tvm.runtime.tensor(tiles_indptr, DEV)
+        q_indices_tvm = tvm.runtime.tensor(q_indices, DEV)
+        h_indices_tvm = tvm.runtime.tensor(h_indices, DEV)
+        b_indices_tvm = tvm.runtime.tensor(b_indices, DEV)
 
         with target:
             with tvm.transform.PassContext(

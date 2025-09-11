@@ -19,7 +19,7 @@
 from enum import IntEnum
 from typing import List, Any
 
-import tvm.ffi
+import tvm_ffi
 
 from tvm.runtime import Object
 from ..tirp import _ffi_api
@@ -30,7 +30,7 @@ from tvm.tir import PrimExpr
 
 def make_op_call(op_name: str, *args):
     assert isinstance(op_name, str)
-    f = tvm.get_global_func("script.ir_builder.tir.OpCall")
+    f = tvm_ffi.get_global_func("script.ir_builder.tir.OpCall")
     return f(OpCall(*args, op=Op.get("tirp." + op_name)))
 
 
@@ -43,7 +43,7 @@ class EventImpl(IntEnum):
     kGlobalSemaphore = 4
 
 
-@tvm.ffi.register_object("tirp.BaseEvent")
+@tvm_ffi.register_object("tirp.BaseEvent")
 class BaseEvent(Object):
     """Base event"""
 
@@ -57,7 +57,7 @@ class BaseEvent(Object):
         return _ffi_api.BaseEventStateGet(self)
 
 
-@tvm.ffi.register_object("tirp.BulkGroupEvent")
+@tvm_ffi.register_object("tirp.BulkGroupEvent")
 class BulkGroupEvent(BaseEvent):
     """Bulk group event"""
 
@@ -78,7 +78,7 @@ class BulkGroupEvent(BaseEvent):
         return make_op_call("event_wait", self, n_groups)
 
 
-@tvm.ffi.register_object("tirp.SemaphoreEventTensorItem")
+@tvm_ffi.register_object("tirp.SemaphoreEventTensorItem")
 class SemaphoreEventTensorItem(BaseEvent):
     """Event tensor item"""
 
@@ -98,7 +98,7 @@ class SemaphoreEventTensorItem(BaseEvent):
         return make_op_call("event_wait", self)
 
 
-@tvm.ffi.register_object("tirp.SemaphoreEventTensor")
+@tvm_ffi.register_object("tirp.SemaphoreEventTensor")
 class SemaphoreEventTensor(Object):
     """Event tensor"""
 

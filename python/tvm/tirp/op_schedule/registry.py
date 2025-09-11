@@ -17,7 +17,7 @@
 """TIRp operator schedule registry."""
 from typing import Dict, Optional, Callable, Tuple
 
-from tvm.ffi import register_func
+from tvm_ffi import register_global_func
 from tvm.ir import Op
 from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
@@ -60,7 +60,7 @@ def register_schedule(op_name: str, target_kind: str):
     return decorator
 
 
-@register_func("tirp.f_op_scheduler")
+@register_global_func("tirp.f_op_scheduler")
 def f_op_scheduler(op_call: OpCall, sctx: ScheduleContext):
     """Find and return a schedule for the operator.
 

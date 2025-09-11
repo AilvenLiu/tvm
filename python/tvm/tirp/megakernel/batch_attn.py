@@ -326,91 +326,90 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
 
                 self.work_idx[0] = m_idx * KernelConfig.WG_NUMBER + wg_id
                 
-                # get_block_coord
-                self.q_indptr = q_indptr_tvm[self.work_idx[0]]
-                self.kv_indptr = kv_indptr_tvm[self.work_idx[0]]
-                self.o_indptr = partial_indptr_tvm[self.work_idx[0]]
-                self.q_len = q_len_tvm[self.work_idx[0]]
-                self.kv_len = kv_len_tvm[self.work_idx[0]]
-                self.packed_qo_start = q_start_tvm[self.work_idx[0]]
-                self.kv_start = kv_start_tvm[self.work_idx[0]]
-                self.kv_end = kv_end_tvm[self.work_idx[0]]
-                self.kv_head_idx = kv_head_idx_tvm[self.work_idx[0]]
-                self.len_kv_chunk = len_kv_chunk_tvm[1]
-                
-                self.kv_chunk_idx = ceildiv(self.kv_start[0], self.len_kv_chunk[0])
-                self.num_kv_chunks = ceildiv(self.kv_len[0], self.len_kv_chunk[0])
-                self.qo_packed_idx_base = self.packed_qo_start[0] + self.get_warp_idx_q(self.tid) * self.num_mma_q * 16
-                self.qo_upperbound = T.min(self.q_len[0], ceildiv(self.qo_packed_idx_base[0] + self.cta_tile_q, self.gqa_group_size))
-                
-                # TODO: Now sync cta for simple, need to finegrain in the future
-                if warp_id == 0 and wg_id == 0:
-                    self.smem_manager.wait_all(lane_id)
-                T.tvm_storage_sync("shared")
-                
-                @T.macro
-                def init_states():
-                    for i0, i1, i2 in T.grid(self.num_mma_q, self.num_mma_d_vo, 8):
-                        self.o_frag[i0, i1, i2] = T.float32(0)
-                    for i0, i1 in T.grid(self.num_mma_q, 2):
-                        self.m[i0, i1] = T.float32(-self.inf)
-                        self.d[i0, i1] = T.float32(0)
+                if self.work_idx[0] < work_indptr_tvm[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]:
+                    # get_block_coord
+                    self.q_indptr = q_indptr_tvm[self.work_idx[0]]
+                    self.kv_indptr = kv_indptr_tvm[self.work_idx[0]]
+                    self.o_indptr = partial_indptr_tvm[self.work_idx[0]]
+                    self.q_len = q_len_tvm[self.work_idx[0]]
+                    self.kv_len = kv_len_tvm[self.work_idx[0]]
+                    self.packed_qo_start = q_start_tvm[self.work_idx[0]]
+                    self.kv_start = kv_start_tvm[self.work_idx[0]]
+                    self.kv_end = kv_end_tvm[self.work_idx[0]]
+                    self.kv_head_idx = kv_head_idx_tvm[self.work_idx[0]]
+                    self.len_kv_chunk = len_kv_chunk_tvm[1]
+                    
+                    self.kv_chunk_idx = ceildiv(self.kv_start[0], self.len_kv_chunk[0])
+                    self.num_kv_chunks = ceildiv(self.kv_len[0], self.len_kv_chunk[0])
+                    self.qo_packed_idx_base = self.packed_qo_start[0] + self.get_warp_idx_q(self.tid) * self.num_mma_q * 16
+                    self.qo_upperbound = T.min(self.q_len[0], ceildiv(self.qo_packed_idx_base[0] + self.cta_tile_q, self.gqa_group_size))
+                    
+                    # TODO: Now sync cta for simple, need to finegrain in the future
+                    if warp_id == 0 and wg_id == 0:
+                        self.smem_manager.wait_all(lane_id)
+                    T.tvm_storage_sync("shared")
+                    
+                    @T.macro
+                    def init_states():
+                        for i0, i1, i2 in T.grid(self.num_mma_q, self.num_mma_d_vo, 8):
+                            self.o_frag[i0, i1, i2] = T.float32(0)
+                        for i0, i1 in T.grid(self.num_mma_q, 2):
+                            self.m[i0, i1] = T.float32(-self.inf)
+                            self.d[i0, i1] = T.float32(0)
 
-                if self.profiler_on:
-                    T.timer_start_cuda(ProfileEventType.ATTN_INIT, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
-                init_states()
-                if self.profiler_on:
-                    T.timer_end_cuda(ProfileEventType.ATTN_INIT, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)   
-                
-                self.kv_tile_idx = ceildiv(self.kv_end[0], self.cta_tile_kv) - 1 - (self.kv_start[0] // self.cta_tile_kv)
-                self.mast_tile_idx = self.kv_end[0] // self.cta_tile_kv - (self.kv_start[0] // self.cta_tile_kv)
-                self.block_iter_base = self.kv_indptr[0] * self.page_size + self.kv_start[0]
-                self.packed_kv_bound = self.kv_indptr[0] * self.page_size + self.kv_len[0] 
-                
-                @T.macro
-                def prefetch_offset(packed_block_iter_base_in):
-                    with T.thread():
-                        packed_block_iter_base = int_var(name="packed_block_iter_base", val=packed_block_iter_base_in)
-                        for i in T.unroll(self.num_mma_kv * 4 // self.num_warps_q):
-                            packed_block_iter = int_var(name="packed_block_iter", val=packed_block_iter_base[0] + warp_id * self.kv_thr_layout_row + lane_id // self.kv_thr_layout_col 
-                                                        + self.kv_thr_layout_row * self.num_warps_q * self.num_warps_kv * i)
-                            page_iter = int_var(name="page_iter", val=T.floordiv(packed_block_iter[0], self.page_size))
-                            entry_idx = int_var(name="entry_idx", val=T.floormod(packed_block_iter[0], self.page_size))
-                            mapped_page = T.meta_var(T.if_then_else(packed_block_iter[0] < self.packed_kv_bound[0], kv_indices_tvm[page_iter[0]], 0))
-                            self.thr_local_kv_offset[i] = kv_tvm.elem_offset_of([mapped_page, 0, self.kv_head_idx[0], entry_idx[0], (lane_id % self.kv_thr_layout_col) * upcast_size("float16")])
-                            
-                @T.macro
-                def page_prefetch_kv(produce_v: bool, kv_idx_base_in, smem_offset, smem):
-                    v_offset = self.kv_heads * self.page_size * self.head_dim if produce_v else 0
-                    fill_mode = T.meta_var("zero" if produce_v else "")
-                    NUM_MMA_D = T.meta_var(self.num_mma_d_qk if produce_v else self.num_mma_d_vo)
-                    UPCAST_STRIDE = T.meta_var(self.upcast_stride_v if produce_v else self.upcast_stride_k)
-                    with T.thread():
-                        kv_idx_base = int_var(name="kv_idx_base", val=kv_idx_base_in)
-                        kv_idx = int_var(name="kv_idx", val=kv_idx_base[0] + warp_id * 4 + lane_id // 8)
-                        kv_buf_1d = kv_tvm.view(-1)
-                        # unroll
-                        for i in T.unroll(self.num_mma_kv * 4 // self.num_warps_q):
-                            for j in T.unroll(NUM_MMA_D // (8 // size_of("float16"))):
-                                T.ptx.cp_async(
-                                    smem.ptr_to([smem_offset[0] * upcast_size("float16")]),
-                                    # TODO: optimize the addr computation here
-                                    kv_buf_1d.ptr_to([v_offset + self.thr_local_kv_offset[i] + 8 * j * upcast_size("float16")]), cp_size=16, prefetch_size=128, fill_mode=fill_mode,                                            predicate=kv_idx[0] < self.kv_len[0],
-                                )
-                                smem_offset[0] = self.advance_offset_by_column(8, smem_offset[0], j)
-                            kv_idx[0] += self.num_warps * 4
-                            smem_offset[0] = self.advance_offset_by_row(self.num_warps * 4, UPCAST_STRIDE, smem_offset[0]) - size_of("float16") * NUM_MMA_D
-                        smem_offset[0] -= self.cta_tile_kv * UPCAST_STRIDE
+                    if self.profiler_on:
+                        T.timer_start_cuda(ProfileEventType.ATTN_INIT, profiler_buffer.data, profiler_tag.data, 
+                                            profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                    init_states()
+                    if self.profiler_on:
+                        T.timer_end_cuda(ProfileEventType.ATTN_INIT, profiler_buffer.data, profiler_tag.data, 
+                                            profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)   
+                    
+                    self.kv_tile_idx = ceildiv(self.kv_end[0], self.cta_tile_kv) - 1 - (self.kv_start[0] // self.cta_tile_kv)
+                    self.mast_tile_idx = self.kv_end[0] // self.cta_tile_kv - (self.kv_start[0] // self.cta_tile_kv)
+                    self.block_iter_base = self.kv_indptr[0] * self.page_size + self.kv_start[0]
+                    self.packed_kv_bound = self.kv_indptr[0] * self.page_size + self.kv_len[0] 
+                    
+                    @T.macro
+                    def prefetch_offset(packed_block_iter_base_in):
+                        with T.thread():
+                            packed_block_iter_base = int_var(name="packed_block_iter_base", val=packed_block_iter_base_in)
+                            for i in T.unroll(self.num_mma_kv * 4 // self.num_warps_q):
+                                packed_block_iter = int_var(name="packed_block_iter", val=packed_block_iter_base[0] + warp_id * self.kv_thr_layout_row + lane_id // self.kv_thr_layout_col 
+                                                            + self.kv_thr_layout_row * self.num_warps_q * self.num_warps_kv * i)
+                                page_iter = int_var(name="page_iter", val=T.floordiv(packed_block_iter[0], self.page_size))
+                                entry_idx = int_var(name="entry_idx", val=T.floormod(packed_block_iter[0], self.page_size))
+                                mapped_page = T.meta_var(T.if_then_else(packed_block_iter[0] < self.packed_kv_bound[0], kv_indices_tvm[page_iter[0]], 0))
+                                self.thr_local_kv_offset[i] = kv_tvm.elem_offset_of([mapped_page, 0, self.kv_head_idx[0], entry_idx[0], (lane_id % self.kv_thr_layout_col) * upcast_size("float16")])
+                                
+                    @T.macro
+                    def page_prefetch_kv(produce_v: bool, kv_idx_base_in, smem_offset, smem):
+                        v_offset = self.kv_heads * self.page_size * self.head_dim if produce_v else 0
+                        fill_mode = T.meta_var("zero" if produce_v else "")
+                        NUM_MMA_D = T.meta_var(self.num_mma_d_qk if produce_v else self.num_mma_d_vo)
+                        UPCAST_STRIDE = T.meta_var(self.upcast_stride_v if produce_v else self.upcast_stride_k)
+                        with T.thread():
+                            kv_idx_base = int_var(name="kv_idx_base", val=kv_idx_base_in)
+                            kv_idx = int_var(name="kv_idx", val=kv_idx_base[0] + warp_id * 4 + lane_id // 8)
+                            kv_buf_1d = kv_tvm.view(-1)
+                            # unroll
+                            for i in T.unroll(self.num_mma_kv * 4 // self.num_warps_q):
+                                for j in T.unroll(NUM_MMA_D // (8 // size_of("float16"))):
+                                    T.ptx.cp_async(
+                                        smem.ptr_to([smem_offset[0] * upcast_size("float16")]),
+                                        # TODO: optimize the addr computation here
+                                        kv_buf_1d.ptr_to([v_offset + self.thr_local_kv_offset[i] + 8 * j * upcast_size("float16")]), cp_size=16, prefetch_size=128, fill_mode=fill_mode,                                            predicate=kv_idx[0] < self.kv_len[0],
+                                    )
+                                    smem_offset[0] = self.advance_offset_by_column(8, smem_offset[0], j)
+                                kv_idx[0] += self.num_warps * 4
+                                smem_offset[0] = self.advance_offset_by_row(self.num_warps * 4, UPCAST_STRIDE, smem_offset[0]) - size_of("float16") * NUM_MMA_D
+                            smem_offset[0] -= self.cta_tile_kv * UPCAST_STRIDE
 
-                
-                prefetch_offset(self.block_iter_base[0] + self.kv_tile_idx[0] * self.cta_tile_kv) 
-                if self.kv_chunk_idx[0] < self.num_kv_chunks[0] - 1:
-                    page_prefetch_kv(False, self.kv_start[0] + self.kv_tile_idx[0] * self.cta_tile_kv, self.k_smem_offset_w, self.k_smem)
-                    T.ptx.cp_async.commit_group()
-                    page_prefetch_kv(True, self.kv_start[0] + self.kv_tile_idx[0] * self.cta_tile_kv, self.v_smem_offset_w, self.v_smem)
-                    T.ptx.cp_async.commit_group()
+                    prefetch_offset(self.block_iter_base[0] + self.kv_tile_idx[0] * self.cta_tile_kv)
+                    
+                    if self.kv_chunk_idx[0] < self.num_kv_chunks[0] - 1:
+                        page_prefetch_kv(False, self.kv_start[0] + self.kv_tile_idx[0] * self.cta_tile_kv, self.k_smem_offset_w, self.k_smem)
+                        page_prefetch_kv(True, self.kv_start[0] + self.kv_tile_idx[0] * self.cta_tile_kv, self.v_smem_offset_w, self.v_smem)
 
     @T.macro
     def run(
@@ -504,7 +503,8 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                         T.ptx.cp_async(
                                             smem.ptr_to([smem_offset[0] * upcast_size("float16")]),
                                             # TODO: optimize the addr computation here
-                                            kv_buf_1d.ptr_to([v_offset + self.thr_local_kv_offset[i] + 8 * j * upcast_size("float16")]), cp_size=16, prefetch_size=128, fill_mode=fill_mode,                                            predicate=kv_idx[0] < self.kv_len[0],
+                                            kv_buf_1d.ptr_to([v_offset + self.thr_local_kv_offset[i] + 8 * j * upcast_size("float16")]), cp_size=16, prefetch_size=128, fill_mode=fill_mode,
+                                            predicate=kv_idx[0] < self.kv_len[0],
                                         )
                                         smem_offset[0] = self.advance_offset_by_column(8, smem_offset[0], j)
                                     kv_idx[0] += self.num_warps * 4
@@ -649,6 +649,9 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             page_produce_kv(False, self.kv_start[0] + self.kv_tile_idx[0] * self.cta_tile_kv, self.k_smem_offset_w, self.k_smem)
                             T.ptx.cp_async.commit_group()
                             page_produce_kv(True, self.kv_start[0] + self.kv_tile_idx[0] * self.cta_tile_kv, self.v_smem_offset_w, self.v_smem)
+                            T.ptx.cp_async.commit_group()
+                        else:
+                            T.ptx.cp_async.commit_group()
                             T.ptx.cp_async.commit_group()
 
                         if self.profiler_on:

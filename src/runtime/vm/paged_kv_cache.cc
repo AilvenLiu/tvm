@@ -193,14 +193,14 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   std::vector<Tensor> temp_int_attn_workspace_;
   std::vector<Tensor> temp_int_pinned_attn_workspace_;
   Tensor temp_float_attn_workspace_;
-  Array<Any> attn_plan_results_;
+  ffi::Array<ffi::Any> attn_plan_results_;
   int64_t attn_task_num_;
 
   // Megakernel execution queue cache
-  std::vector<std::unordered_map<int, NDArray>> exec_queue_cache_;
-  NDArray exec_queue_device_buf_;
-  NDArray exec_queue_host_buf_;
-  Array<Array<NDArray>> exec_queue_dynamic_;
+  std::vector<std::unordered_map<int, Tensor>> exec_queue_cache_;
+  Tensor exec_queue_device_buf_;
+  Tensor exec_queue_host_buf_;
+  ffi::Array<ffi::Array<Tensor>> exec_queue_dynamic_;
 
   //-------------------------------------------
   // Below are the auxiliary data structure on CPU.
@@ -285,25 +285,25 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   std::vector<Tensor> tree_attn_mn_indptr_view_;
   // Event Tensor device views
   // static zero etensors
-  NDArray etensor_qkv_partial_view_;
-  NDArray etensor_q_reduce_view_;
-  NDArray etensor_k_reduce_view_;
-  NDArray etensor_v_reduce_view_;
-  NDArray etensor_attn_view_;
-  NDArray etensor_o_partial_view_;
-  NDArray etensor_o_allreduce_view_;
-  NDArray etensor_attn_add_rms_view_;
-  NDArray etensor_attn_mlp_view_;
-  NDArray etensor_gate_up_proj_reduce_view_;
-  NDArray etensor_gate_up_proj_view_;
-  NDArray etensor_down_proj_reduce_view_;
-  NDArray etensor_down_proj_allreduce_view_;
-  NDArray etensor_mlp_add_rms_view_;
-  NDArray etensor_end_view_;
+  Tensor etensor_qkv_partial_view_;
+  Tensor etensor_q_reduce_view_;
+  Tensor etensor_k_reduce_view_;
+  Tensor etensor_v_reduce_view_;
+  Tensor etensor_attn_view_;
+  Tensor etensor_o_partial_view_;
+  Tensor etensor_o_allreduce_view_;
+  Tensor etensor_attn_add_rms_view_;
+  Tensor etensor_attn_mlp_view_;
+  Tensor etensor_gate_up_proj_reduce_view_;
+  Tensor etensor_gate_up_proj_view_;
+  Tensor etensor_down_proj_reduce_view_;
+  Tensor etensor_down_proj_allreduce_view_;
+  Tensor etensor_mlp_add_rms_view_;
+  Tensor etensor_end_view_;
   // dynamic etensors
-  NDArray etensor_o_proj_view_;
-  NDArray etensor_down_proj_view_;
-  NDArray etensor_attn_merge_view_;
+  Tensor etensor_o_proj_view_;
+  Tensor etensor_down_proj_view_;
+  Tensor etensor_attn_merge_view_;
 
   ffi::Optional<ffi::Function> f_transpose_append_mha_;
   ffi::Optional<ffi::Function> f_transpose_append_mla_;
@@ -340,8 +340,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       int64_t v_head_dim, std::vector<AttnKind> attn_kinds, int64_t reserved_num_seqs,
       int64_t num_total_pages, int64_t prefill_chunk_size, bool support_sliding_window,
       RoPEMode rope_mode, double rotary_scale, double rotary_theta,
-      ffi::Optional<Tensor> rope_ext_factors, bool enable_kv_transfer, DLDataType dtype,
-      Device device, ffi::Optional<ffi::Function> f_transpose_append_mha,
+      ffi::Optional<Tensor> rope_ext_factors, bool enable_kv_transfer, bool may_use_megakernel,
+      DLDataType dtype, Device device, ffi::Optional<ffi::Function> f_transpose_append_mha,
       ffi::Optional<ffi::Function> f_transpose_append_mla, ffi::Function f_compact_copy,
       std::unique_ptr<RaggedPrefillFunc> f_attention_prefill_ragged,
       std::unique_ptr<PagedPrefillFunc> f_attention_prefill,
@@ -466,8 +466,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       tree_attn_mn_indptr_host_.push_back(
           HostMemoryVector(reserved_num_seqs + 1, dtype_aux_, preferred_host_device));
     }
-    kv_len_arr_host_ =
-        HostMemoryVector(reserved_num_seqs, dtype_aux_, preferred_host_device);
+    kv_len_arr_host_ = HostMemoryVector(reserved_num_seqs, dtype_aux_, preferred_host_device);
     k_ragged_rope_pos_offset_host_ =
         HostMemoryVector(reserved_num_seqs, dtype_aux_, preferred_host_device);
     q_rope_position_map_host_ =
@@ -518,8 +517,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     etensor_v_reduce_host_ = HostMemoryVector(
         num_layers * reserved_num_seqs * ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit),
         dtype_aux_, preferred_host_device);
-    etensor_attn_host_ = HostMemoryVector(num_layers * reserved_num_seqs * num_kv_heads,
-                                          dtype_aux_, preferred_host_device);
+    etensor_attn_host_ = HostMemoryVector(num_layers * reserved_num_seqs * num_kv_heads, dtype_aux_,
+                                          preferred_host_device);
     etensor_o_partial_host_ =
         HostMemoryVector(num_layers * ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN),
                          dtype_aux_, preferred_host_device);
@@ -529,9 +528,10 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     etensor_attn_add_rms_host_ =
         HostMemoryVector(num_layers * reserved_num_seqs, dtype_aux_, preferred_host_device);
     etensor_attn_mlp_host_ = HostMemoryVector(num_layers, dtype_aux_, preferred_host_device);
-    etensor_gate_up_proj_reduce_host_ = HostMemoryVector(
-        num_layers * ceildiv(megakernel::kIntermediateSizeTP1 / tp_size * 2, megakernel::kGemmTileBlkN),
-        dtype_aux_, preferred_host_device);
+    etensor_gate_up_proj_reduce_host_ =
+        HostMemoryVector(num_layers * ceildiv(megakernel::kIntermediateSizeTP1 / tp_size * 2,
+                                              megakernel::kGemmTileBlkN),
+                         dtype_aux_, preferred_host_device);
     etensor_gate_up_proj_host_ = HostMemoryVector(
         num_layers * ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN),
         dtype_aux_, preferred_host_device);
@@ -561,10 +561,10 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                           qk_head_dim, device, preferred_host_device);
       }
     }
-    exec_queue_device_buf_ = NDArray::Empty(
+    exec_queue_device_buf_ = Tensor::Empty(
         {num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 4)},
         DataType::Int(32), device);
-    exec_queue_host_buf_ = NDArray::Empty(
+    exec_queue_host_buf_ = Tensor::Empty(
         {num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 4)},
         DataType::Int(32), preferred_host_device);
 
@@ -1338,12 +1338,10 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         attn_plan_results_ =
             f_attn_plan(temp_float_attn_workspace_, temp_int_attn_workspace_[0],
                         temp_int_pinned_attn_workspace_[0],
-                        qo_indptr_on_depths_host_[0].as_ndarray(),
-                        page_indptr_on_depths_host_[0].as_ndarray(), 
-                        kv_len_arr_host_.as_ndarray(),
-                        cur_batch_size_, num_qo_heads_,
-                        num_kv_heads_, v_head_dim_, false)
-                .cast<Array<Any>>();
+                        qo_indptr_on_depths_host_[0].as_tensor(),
+                        page_indptr_on_depths_host_[0].as_tensor(), kv_len_arr_host_.as_tensor(),
+                        cur_batch_size_, num_qo_heads_, num_kv_heads_, v_head_dim_, false)
+                .cast<ffi::Array<ffi::Any>>();
         TVM_FFI_ICHECK_EQ(attn_plan_results_.size(), 8);
       }
 
@@ -1409,16 +1407,16 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                    megakernel::kGemmTileBlkK) *
                            megakernel::kGemmTileBlkK);
 
-      auto task = attn_plan_results_[3].cast<Array<NDArray>>();
+      auto task = attn_plan_results_[3].cast<ffi::Array<Tensor>>();
       TVM_FFI_ICHECK_EQ(task.size(), 13);
-      NDArray work_indptr_host = task[12];
-      const int32_t* work_indptr_data =
-          static_cast<int32_t*>(work_indptr_host->data) + work_indptr_host->byte_offset / sizeof(int32_t);
-      attn_task_num_ = static_cast<int64_t>(work_indptr_data[kNumWarpgroupPerBlock * kNumSM]); 
-      NDArray q_indptr_host = task[10];
-      NDArray kv_head_idx_host = task[11];
-      const int32_t* kv_head_idx_data =
-          static_cast<int32_t*>(kv_head_idx_host->data) + kv_head_idx_host->byte_offset / sizeof(int32_t);
+      Tensor work_indptr_host = task[12];
+      const int32_t* work_indptr_data = static_cast<int32_t*>(work_indptr_host->data) +
+                                        work_indptr_host->byte_offset / sizeof(int32_t);
+      attn_task_num_ = static_cast<int64_t>(work_indptr_data[kNumWarpgroupPerBlock * kNumSM]);
+      Tensor q_indptr_host = task[10];
+      Tensor kv_head_idx_host = task[11];
+      const int32_t* kv_head_idx_data = static_cast<int32_t*>(kv_head_idx_host->data) +
+                                        kv_head_idx_host->byte_offset / sizeof(int32_t);
       const int32_t* q_indptr_data =
           static_cast<int32_t*>(q_indptr_host->data) + q_indptr_host->byte_offset / sizeof(int32_t);
       bool split_kv = attn_task_num_ > num_kv_heads_ * cur_batch_size_;
@@ -1426,35 +1424,41 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         // to simply, assume that one merge tile will not use two kv head
         TVM_FFI_ICHECK_LE(kNumWarpgroupPerBlock * kNumWarpPerWarpgroup, num_qo_heads_ / num_kv_heads_);
         for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
-          for (int m = 0; m < ceildiv(cur_batch_size_ * num_qo_heads_, kNumWarpgroupPerBlock * kNumWarpPerWarpgroup); ++m) {
+          for (int m = 0; m < ceildiv(cur_batch_size_ * num_qo_heads_,
+                                      kNumWarpgroupPerBlock * kNumWarpPerWarpgroup);
+               ++m) {
             int worker_id = m * kNumWarpgroupPerBlock * kNumWarpPerWarpgroup;
             int kv_idx = worker_id / (cur_batch_size_ * (num_qo_heads_ / num_kv_heads_));
             int qo_idx = worker_id % (num_qo_heads_ / num_kv_heads_);
-            int range_start = (kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx) * v_head_dim_ / o_proj_tile_k;
-            int range_end = 
-                ((kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx + kNumWarpgroupPerBlock * kNumWarpPerWarpgroup) * v_head_dim_ - 1) / o_proj_tile_k;
+            int range_start =
+                (kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx) * v_head_dim_ / o_proj_tile_k;
+            int range_end = ((kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx +
+                              kNumWarpgroupPerBlock * kNumWarpPerWarpgroup) *
+                                 v_head_dim_ -
+                             1) /
+                            o_proj_tile_k;
             for (int i = range_start; i <= range_end; ++i) {
               TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
               TVM_FFI_ICHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
-              etensor_o_proj_host_.set(
-                  layer_id * split_o_project + i,
-                  etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
+              etensor_o_proj_host_.set(layer_id * split_o_project + i,
+                                       etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
             }
           }
         }
       } else {
         for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
-          for (int m = 0; m < kNumWarpgroupPerBlock * ceildiv(attn_task_num_, kNumWarpgroupPerBlock); ++m) {
+          for (int m = 0;
+               m < kNumWarpgroupPerBlock * ceildiv(attn_task_num_, kNumWarpgroupPerBlock); ++m) {
             int kv_idx = kv_head_idx_data[m];
-            int range_start = (kv_idx * (num_qo_heads_ / num_kv_heads_) * v_head_dim_) / o_proj_tile_k;
+            int range_start =
+                (kv_idx * (num_qo_heads_ / num_kv_heads_) * v_head_dim_) / o_proj_tile_k;
             int range_end =
                 ((kv_idx + 1) * (num_qo_heads_ / num_kv_heads_) * v_head_dim_ - 1) / o_proj_tile_k;
             for (int i = range_start; i <= range_end; ++i) {
               TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
               TVM_FFI_ICHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
-              etensor_o_proj_host_.set(
-                  layer_id * split_o_project + i,
-                  etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
+              etensor_o_proj_host_.set(layer_id * split_o_project + i,
+                                       etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
             }
           }
         }
@@ -1482,16 +1486,19 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
           }
         }
       }
- 
+
       etensor_attn_merge_host_.resize(num_layers_ * cur_batch_size_ * num_kv_heads_);
       etensor_attn_merge_host_.fill(0);
       for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
-        for (int m = 0; m < kNumWarpgroupPerBlock * ceildiv(attn_task_num_, kNumWarpgroupPerBlock); ++m) {
-          int batch_idx = q_indptr_data[m];        
+        for (int m = 0; m < kNumWarpgroupPerBlock * ceildiv(attn_task_num_, kNumWarpgroupPerBlock);
+             ++m) {
+          int batch_idx = q_indptr_data[m];
           int kv_idx = kv_head_idx_data[m];
           etensor_attn_merge_host_.set(
-            layer_id * cur_batch_size_ * num_kv_heads_ + batch_idx * num_kv_heads_ + kv_idx,
-            etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ + batch_idx * num_kv_heads_ + kv_idx] + 1);
+              layer_id * cur_batch_size_ * num_kv_heads_ + batch_idx * num_kv_heads_ + kv_idx,
+              etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ +
+                                       batch_idx * num_kv_heads_ + kv_idx] +
+                  1);
         }
       }
     }
@@ -2016,7 +2023,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     TVM_FFI_ICHECK(false) << "DebugSetKV for PageAttentionKVCache not implemented yet.";
   }
 
-  Array<ffi::Any> RetrieveTensor(size_t num_layers) {
+  ffi::Array<ffi::Any> RetrieveTensor(size_t num_layers) {
     TVM_FFI_ICHECK_EQ(num_depths_, 1) << "Only 1 depth is supported for RetrieveTensor";
     TVM_FFI_ICHECK_GT(page_indptr_on_depths_view_.size(), 0)
         << "Only 1 depth is supported for RetrieveTensor";
@@ -2034,20 +2041,21 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     TVM_FFI_ICHECK(q_rope_position_map_view_.defined()) << "q_rope_position_map_view_ is not defined";
     TVM_FFI_ICHECK_GT(attn_task_num_, 0) << "attn_task_num_ must be greater than 0";
     std::vector<ffi::Any> ret;
-    ret.push_back(Array<NDArray>(pages_));
+    ret.push_back(ffi::Array<Tensor>(pages_));
     ret.push_back(page_indptr_on_depths_view_[0]);
     ret.push_back(page_indices_on_depths_view_[0]);
     ret.push_back(length_info_on_depths_view_[0]);
     ret.push_back(append_position_map_view_);
     ret.push_back(q_rope_position_map_view_);
     ret.push_back(attn_plan_results_);
-    ret.push_back(Array<NDArray>{
+    ret.push_back(ffi::Array<Tensor>{
         etensor_qkv_partial_view_, etensor_q_reduce_view_, etensor_k_reduce_view_,
         etensor_v_reduce_view_, etensor_attn_view_, etensor_o_partial_view_,
         etensor_o_allreduce_view_, etensor_attn_add_rms_view_, etensor_attn_mlp_view_,
-        etensor_gate_up_proj_reduce_view_, etensor_gate_up_proj_view_, etensor_down_proj_reduce_view_,
-        etensor_down_proj_allreduce_view_, etensor_mlp_add_rms_view_, etensor_end_view_,
-        etensor_o_proj_view_, etensor_down_proj_view_, etensor_attn_merge_view_});
+        etensor_gate_up_proj_reduce_view_, etensor_gate_up_proj_view_,
+        etensor_down_proj_reduce_view_, etensor_down_proj_allreduce_view_,
+        etensor_mlp_add_rms_view_, etensor_end_view_, etensor_o_proj_view_, etensor_down_proj_view_,
+        etensor_attn_merge_view_});
     ret.push_back(attn_task_num_);
     return ret;
   }
@@ -2055,7 +2063,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   ffi::Any GetExecQueue(int batch_size, int attn_task_num, int dynamic_layer_id) {
     NVTXScopedRange range("GetExecQueue");
     if (dynamic_layer_id >= 0) {
-      Array<NDArray> exec_queue = exec_queue_dynamic_[dynamic_layer_id];
+      ffi::Array<Tensor> exec_queue = exec_queue_dynamic_[dynamic_layer_id];
       return exec_queue;
     }
 
@@ -2071,12 +2079,13 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // Generate the execution queue.
     int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
     Device preferred_host_device = GetPreferredHostDevice(device_);
-    NDArray exec_queue =
+    Tensor exec_queue =
         megakernel::GenerateExecQueue(batch_size, attn_task_num, tp_size, num_qo_heads_,
                                       num_kv_heads_, qk_head_dim_, device_, preferred_host_device);
     exec_queue_cache_[batch_size][attn_task_num] = exec_queue;
     return exec_queue;
   }
+
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.vm.PagedAttentionKVCache", PagedAttentionKVCacheObj,
                                     AttentionKVCacheObj);
 
@@ -2812,28 +2821,42 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // Event tensor transfer.
     int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
     if (use_mega_kernel_) {
-      std::vector<HostMemoryVector*> etensor_data = {
-          &etensor_qkv_partial_host_,      &etensor_q_reduce_host_,
-          &etensor_k_reduce_host_,         &etensor_v_reduce_host_,
-          &etensor_attn_host_,             &etensor_o_partial_host_,
-          &etensor_o_allreduce_host_,      &etensor_attn_add_rms_host_,
-          &etensor_attn_mlp_host_,         &etensor_gate_up_proj_reduce_host_,
-          &etensor_gate_up_proj_host_,
-          &etensor_down_proj_reduce_host_, &etensor_down_proj_allreduce_host_,
-          &etensor_mlp_add_rms_host_,      &etensor_end_host_,
-          &etensor_o_proj_host_,           &etensor_down_proj_host_,
-          &etensor_attn_merge_host_};
-      std::vector<NDArray*> etensor_data_views = {
-          &etensor_qkv_partial_view_,      &etensor_q_reduce_view_,
-          &etensor_k_reduce_view_,         &etensor_v_reduce_view_,
-          &etensor_attn_view_,             &etensor_o_partial_view_,
-          &etensor_o_allreduce_view_,      &etensor_attn_add_rms_view_,
-          &etensor_attn_mlp_view_,         &etensor_gate_up_proj_reduce_view_,
-          &etensor_gate_up_proj_view_,
-          &etensor_down_proj_reduce_view_, &etensor_down_proj_allreduce_view_,
-          &etensor_mlp_add_rms_view_,      &etensor_end_view_,
-          &etensor_o_proj_view_,           &etensor_down_proj_view_,
-          &etensor_attn_merge_view_};
+      std::vector<HostMemoryVector*> etensor_data = {&etensor_qkv_partial_host_,
+                                                     &etensor_q_reduce_host_,
+                                                     &etensor_k_reduce_host_,
+                                                     &etensor_v_reduce_host_,
+                                                     &etensor_attn_host_,
+                                                     &etensor_o_partial_host_,
+                                                     &etensor_o_allreduce_host_,
+                                                     &etensor_attn_add_rms_host_,
+                                                     &etensor_attn_mlp_host_,
+                                                     &etensor_gate_up_proj_reduce_host_,
+                                                     &etensor_gate_up_proj_host_,
+                                                     &etensor_down_proj_reduce_host_,
+                                                     &etensor_down_proj_allreduce_host_,
+                                                     &etensor_mlp_add_rms_host_,
+                                                     &etensor_end_host_,
+                                                     &etensor_o_proj_host_,
+                                                     &etensor_down_proj_host_,
+                                                     &etensor_attn_merge_host_};
+      std::vector<Tensor*> etensor_data_views = {&etensor_qkv_partial_view_,
+                                                 &etensor_q_reduce_view_,
+                                                 &etensor_k_reduce_view_,
+                                                 &etensor_v_reduce_view_,
+                                                 &etensor_attn_view_,
+                                                 &etensor_o_partial_view_,
+                                                 &etensor_o_allreduce_view_,
+                                                 &etensor_attn_add_rms_view_,
+                                                 &etensor_attn_mlp_view_,
+                                                 &etensor_gate_up_proj_reduce_view_,
+                                                 &etensor_gate_up_proj_view_,
+                                                 &etensor_down_proj_reduce_view_,
+                                                 &etensor_down_proj_allreduce_view_,
+                                                 &etensor_mlp_add_rms_view_,
+                                                 &etensor_end_view_,
+                                                 &etensor_o_proj_view_,
+                                                 &etensor_down_proj_view_,
+                                                 &etensor_attn_merge_view_};
       aux_data_manager_->CopyEventTensorAsync(etensor_data, etensor_data_views, num_layers_,
                                               cur_batch_size_, num_qo_heads_, num_kv_heads_,
                                               qk_head_dim_, tp_size);
@@ -2894,7 +2917,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
             double rotary_scale = args[9].cast<double>();
             double rotary_theta = args[10].cast<double>();
             ffi::Optional<Tensor> rope_ext_factors = std::nullopt;  // args[11]
-            Tensor init = args[12].cast<Tensor>();
+            ffi::Tensor init = args[12].cast<ffi::Tensor>();
             ffi::Optional<ffi::Function> f_transpose_append_mha = std::nullopt;  // args[13]
             ffi::Optional<ffi::Function> f_transpose_append_mla = std::nullopt;  // args[14]
             std::unique_ptr<RaggedPrefillFunc> f_attention_prefill_ragged =

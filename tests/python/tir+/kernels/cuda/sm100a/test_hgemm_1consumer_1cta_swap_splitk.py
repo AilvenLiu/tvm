@@ -612,15 +612,15 @@ def test(batch_size):
     def tir_gemm(A_bf16, B_bf16, C_bf16):
         hgemm, reduce, TILE_K_NUM = get_hgemm_kernel(N, K)
         DEV = tvm.cuda(0)
-        A_tvm = tvm.nd.array(A_bf16, device=DEV)
-        B_tvm = tvm.nd.array(B_bf16, device=DEV)
-        C_tvm = tvm.nd.array(C_bf16, device=DEV)
-        partial_sum_tvm = tvm.nd.array(
+        A_tvm = tvm.runtime.tensor(A_bf16, device=DEV)
+        B_tvm = tvm.runtime.tensor(B_bf16, device=DEV)
+        C_tvm = tvm.runtime.tensor(C_bf16, device=DEV)
+        partial_sum_tvm = tvm.runtime.tensor(
             np.zeros((TILE_K_NUM, batch_size, N), dtype=np.float32), device=DEV
         )
         if PROFILER_ON:
             profiler_buffer = np.zeros((PROFILER_BUFFER_SIZE,), dtype=np.uint64)
-            profiler_buffer_tvm = tvm.nd.array(profiler_buffer, DEV)
+            profiler_buffer_tvm = tvm.runtime.tensor(profiler_buffer, DEV)
         target = tvm.target.Target("cuda")
         with target:
             mod_hgemm = tvm.ir.IRModule({"main": hgemm})

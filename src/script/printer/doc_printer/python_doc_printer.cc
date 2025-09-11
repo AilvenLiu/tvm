@@ -613,13 +613,9 @@ void PythonDocPrinter::PrintTypedDoc(const WhileDoc& doc) {
   PrintIndentedBlock(doc->body);
 }
 
-void PythonDocPrinter::PrintTypedDoc(const BreakDoc& doc) {
-  output_ << "break";
-}
+void PythonDocPrinter::PrintTypedDoc(const BreakDoc& doc) { output_ << "break"; }
 
-void PythonDocPrinter::PrintTypedDoc(const ContinueDoc& doc) {
-  output_ << "continue";
-}
+void PythonDocPrinter::PrintTypedDoc(const ContinueDoc& doc) { output_ << "continue"; }
 
 void PythonDocPrinter::PrintTypedDoc(const ForDoc& doc) {
   MaybePrintCommenMultiLines(doc, true);
@@ -744,33 +740,14 @@ void PythonDocPrinter::PrintTypedDoc(const OpCallDoc& doc) {
     }
     PrintDoc(arg);
   }
-  if (doc->workspace.defined() && !doc->workspace->keys.empty()) {
+  if (doc->workspace.has_value() && !doc->workspace.value()->keys.empty()) {
     output_ << ", workspace=";
-    PrintDoc(doc->workspace);
+    PrintDoc(doc->workspace.value());
   }
-  if (doc->schedule_config.defined() && !doc->schedule_config->keys.empty()) {
+  if (doc->schedule_config.has_value() && !doc->schedule_config.value()->keys.empty()) {
     output_ << ", schedule_config=";
-    PrintDoc(doc->schedule_config);
+    PrintDoc(doc->schedule_config.value());
   }
-  output_ << ")";
-}
-
-void PythonDocPrinter::PrintTypedDoc(const OpCallDoc& doc) {
-  PrintDoc(doc->callee);
-
-  output_ << "(";
-
-  // Print positional args
-  bool is_first = true;
-  for (const Doc& arg : doc->args) {
-    if (is_first) {
-      is_first = false;
-    } else {
-      output_ << ", ";
-    }
-    PrintDoc(arg);
-  }
-
   output_ << ")";
 }
 

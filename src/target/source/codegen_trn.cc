@@ -78,7 +78,7 @@ void CodeGenTrainium::AddFunction(const GlobalVar& gvar, const PrimFunc& func) {
   name_supply_->FreshName("v_");
 
   // add to alloc buffer type.
-  auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
+  auto global_symbol = func->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol);
   ICHECK(global_symbol.has_value())
       << "CodeGenC: Expect PrimFunc to have the global_symbol attribute";
 
@@ -249,7 +249,7 @@ void CodeGenTrainium::VisitStmt_(const ForNode* op) {
   if (ctx_.tensorizing) {
     stream << vid << " = nl.arange(" << extent << ")\n";
     if (op->annotations.count("nki_dim")) {
-      ctx_.loopvar2dim[op->loop_var.get()] = Downcast<String>(op->annotations["nki_dim"]);
+      ctx_.loopvar2dim[op->loop_var.get()] = Downcast<ffi::String>(op->annotations["nki_dim"]);
     }
     ctx_.tensorized_loop_vars.insert(op->loop_var.get());
     ICHECK(ctx_.loopvar2dim.empty() || ctx_.loopvar2dim.size() == ctx_.tensorized_loop_vars.size())
@@ -324,7 +324,7 @@ std::string PrintBool(bool b) { return b ? "True" : "False"; }
 void CodeGenTrainium::VisitExpr_(const CallNode* op, std::ostream& os) {  // NOLINT(*)
   CHECK(!op->op.as<GlobalVarNode>())
       << "CodegenTrainium does not support inter-function calls, "
-      << "but expression " << GetRef<Call>(op) << " calls PrimFunc " << op->op;
+      << "but expression " << ffi::GetRef<Call>(op) << " calls PrimFunc " << op->op;
   if (op->op.same_as(builtin::nki_matmul())) {
     ICHECK_EQ(op->args.size(), 4);
     std::string accum = is_one(op->args[3]) ? " += " : " = ";
@@ -463,12 +463,12 @@ void CodeGenTrainium::VisitExpr_(const CallNode* op, std::ostream& os) {  // NOL
           ICHECK(ctx_.loopvar2dim.count(v))
               << "nki_dim must be specified for tensorized loop variables used in mask. However, "
                  "it is not specified for "
-              << GetRef<Var>(v);
+              << ffi::GetRef<Var>(v);
           auto dim_str = ctx_.loopvar2dim[v];
           ICHECK(dim_str == "P" || dim_str == "F")
               << "Only nki_dim = P or F is allowed for tensorized loop variables used in mask. "
                  "However, "
-              << GetRef<Var>(v) << " has nki_dim = " << dim_str;
+              << ffi::GetRef<Var>(v) << " has nki_dim = " << dim_str;
         }
       }
       return true;
@@ -572,7 +572,7 @@ ffi::Module BuildTrainium(IRModule mod, Target target) {
 
   for (auto kv : mod->functions) {
     ICHECK(kv.second->IsInstance<PrimFuncNode>()) << "CodeGenTrainium: Can only take PrimFunc";
-    auto global_symbol = kv.second->GetAttr<String>(tvm::attr::kGlobalSymbol);
+    auto global_symbol = kv.second->GetAttr<ffi::String>(tvm::attr::kGlobalSymbol);
     ICHECK(global_symbol.has_value());
     std::string func_name = global_symbol.value();
     source_maker << "# Function: " << func_name << "\n";

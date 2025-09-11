@@ -22,8 +22,8 @@ namespace tvm {
 namespace tir {
 
 /**************** TLayout ****************/
-Map<String, PrimExpr> TLayoutNode::Apply(const Array<PrimExpr>& coord,
-                                         const Array<PrimExpr>& shape) const {
+ffi::Map<ffi::String, PrimExpr> TLayoutNode::Apply(const ffi::Array<PrimExpr>& coord,
+                                                   const ffi::Array<PrimExpr>& shape) const {
   ICHECK_EQ(coord.size(), shape.size())
       << "ValueError: The size of coord and shape should be equal";
   return Apply(FlattenCoord(coord, shape));
@@ -44,30 +44,33 @@ TVM_FFI_STATIC_INIT_BLOCK({
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutGetSize", [](TLayout layout, Optional<String> axis_name) {
-    return layout->GetSize(axis_name);
-  });
+  refl::GlobalDef().def("tir.TLayoutGetSize",
+                        [](TLayout layout, ffi::Optional<ffi::String> axis_name) {
+                          return layout->GetSize(axis_name);
+                        });
 });
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutGetCosize", [](TLayout layout, Optional<String> axis_name) {
-    return layout->GetCosize(axis_name);
-  });
+  refl::GlobalDef().def("tir.TLayoutGetCosize",
+                        [](TLayout layout, ffi::Optional<ffi::String> axis_name) {
+                          return layout->GetCosize(axis_name);
+                        });
 });
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.TLayoutApplyWithShape",
-                        [](TLayout layout, Array<PrimExpr> coord, Array<PrimExpr> shape) {
+                        [](TLayout layout, ffi::Array<PrimExpr> coord, ffi::Array<PrimExpr> shape) {
                           return layout->Apply(coord, shape);
                         });
 });
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutApply",
-                        [](TLayout layout, Array<PrimExpr> coord) { return layout->Apply(coord); });
+  refl::GlobalDef().def("tir.TLayoutApply", [](TLayout layout, ffi::Array<PrimExpr> coord) {
+    return layout->Apply(coord);
+  });
 });
 
 TVM_FFI_STATIC_INIT_BLOCK({
@@ -83,17 +86,18 @@ TVM_FFI_STATIC_INIT_BLOCK({
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "tir.TLayoutTile",
-      [](TLayout layout, TileLayout outer, Array<PrimExpr> outer_shape,
-         Array<PrimExpr> inner_shape) { return layout->Tile(outer, outer_shape, inner_shape); });
+  refl::GlobalDef().def("tir.TLayoutTile",
+                        [](TLayout layout, TileLayout outer, ffi::Array<PrimExpr> outer_shape,
+                           ffi::Array<PrimExpr> inner_shape) {
+                          return layout->Tile(outer, outer_shape, inner_shape);
+                        });
 });
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.TLayoutIsTileInner",
-                        [](TLayout layout, TLayout tile_layout, Array<PrimExpr> tiled_shape,
-                           Array<PrimExpr> inner_shape) {
+                        [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
+                           ffi::Array<PrimExpr> inner_shape) {
                           return layout->IsTileInner(tile_layout, tiled_shape, inner_shape);
                         });
 });
@@ -101,8 +105,8 @@ TVM_FFI_STATIC_INIT_BLOCK({
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.TLayoutIsTileOuter",
-                        [](TLayout layout, TLayout tile_layout, Array<PrimExpr> tiled_shape,
-                           Array<PrimExpr> outer_shape) {
+                        [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
+                           ffi::Array<PrimExpr> outer_shape) {
                           return layout->IsTileOuter(tile_layout, tiled_shape, outer_shape);
                         });
 });

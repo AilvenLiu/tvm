@@ -162,7 +162,7 @@ BlockFrame Warp(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
 BlockFrame Thread(ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents,
                   ffi::String scope_slice_parent);
 
-Array<tvm::tirx::Var> KernelId(Array<PrimExpr> extents, String parent);
+ffi::Array<tvm::tirx::Var> KernelId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
 ffi::Array<tvm::tirx::Var> CtaId(ffi::Array<PrimExpr> extents, ffi::String parent);
 
@@ -214,14 +214,13 @@ void BlockAttrs(ffi::Map<ffi::String, ffi::Any> attrs);
  * \return The allocated buffer or the AllocBufferFrame if the function is called under
  * T.prim_func(tirp=True).
  */
-Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
+ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
     ffi::Array<PrimExpr> shape, DataType dtype = DataType::Float(32),
     ffi::Optional<Var> data = std::nullopt, ffi::Array<PrimExpr> strides = {},
     PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "", int align = -1,
     int offset_factor = 0, ffi::String buffer_type = "default",
     ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
-                   ffi::Optional<TLayout> layout = std::nullopt,
-                   ffi::Array<Integer> allocated_addr = {});
+    ffi::Optional<TLayout> layout = std::nullopt, ffi::Array<Integer> allocated_addr = {});
 
 namespace axis {
 /*!
@@ -452,7 +451,7 @@ LaunchThreadFrame LaunchThread(Var var, PrimExpr extent);
  * \param extent The extent of environment thread.
  * \return The result LaunchThreadFrame.
  */
-LaunchThreadFrame LaunchThread(String thread_tag, PrimExpr extent);
+LaunchThreadFrame LaunchThread(ffi::String thread_tag, PrimExpr extent);
 
 /*!
  * \brief Compose TIRp op.
@@ -460,7 +459,8 @@ LaunchThreadFrame LaunchThread(String thread_tag, PrimExpr extent);
  * \param schedule_config The schedule config of the compose op.
  * \return The result ComposeOpFrame.
  */
-ComposeOpFrame ComposeOp(Map<String, Buffer> workspace, Map<String, ffi::Any> schedule_config);
+ComposeOpFrame ComposeOp(ffi::Map<ffi::String, Buffer> workspace,
+                         ffi::Map<ffi::String, ffi::Any> schedule_config);
 
 /*!
  * \brief Bind a var to thread env.
@@ -586,7 +586,7 @@ TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST(Void, DataType::Void());
 
 #undef TVM_TIRX_IR_BUILDER_DEF_DTYPE_CAST
 
-}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxxxxxxxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

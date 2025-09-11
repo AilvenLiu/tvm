@@ -246,7 +246,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 // Break
 Break::Break(Span span) {
-  ObjectPtr<BreakNode> node = make_object<BreakNode>();
+  ObjectPtr<BreakNode> node = ffi::make_object<BreakNode>();
   node->span = std::move(span);
   data_ = std::move(node);
 }
@@ -258,7 +258,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
 
 // Continue
 Continue::Continue(Span span) {
-  ObjectPtr<ContinueNode> node = make_object<ContinueNode>();
+  ObjectPtr<ContinueNode> node = ffi::make_object<ContinueNode>();
   node->span = std::move(span);
   data_ = std::move(node);
 }
@@ -573,7 +573,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 // AllocBuffer
 AllocBuffer::AllocBuffer(Buffer buffer, Stmt body, Span span) {
-  ObjectPtr<AllocBufferNode> node = make_object<AllocBufferNode>();
+  ObjectPtr<AllocBufferNode> node = ffi::make_object<AllocBufferNode>();
   node->buffer = std::move(buffer);
   node->body = std::move(body);
   node->span = std::move(span);
@@ -589,7 +589,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
 
 // AllocBulkGroupEvent
 AllocBulkGroupEvent::AllocBulkGroupEvent(BulkGroupEvent bulk_group_event, Stmt body, Span span) {
-  ObjectPtr<AllocBulkGroupEventNode> node = make_object<AllocBulkGroupEventNode>();
+  ObjectPtr<AllocBulkGroupEventNode> node = ffi::make_object<AllocBulkGroupEventNode>();
   node->bulk_group_event = std::move(bulk_group_event);
   node->body = std::move(body);
   node->span = std::move(span);
@@ -607,7 +607,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
 // AllocSemaphoreEventTensor
 AllocSemaphoreEventTensor::AllocSemaphoreEventTensor(SemaphoreEventTensor sem_event_tensor,
                                                      Stmt body, Span span) {
-  ObjectPtr<AllocSemaphoreEventTensorNode> node = make_object<AllocSemaphoreEventTensorNode>();
+  ObjectPtr<AllocSemaphoreEventTensorNode> node = ffi::make_object<AllocSemaphoreEventTensorNode>();
   node->sem_event_tensor = std::move(sem_event_tensor);
   node->body = std::move(body);
   node->span = std::move(span);

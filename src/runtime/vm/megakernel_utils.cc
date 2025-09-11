@@ -24,7 +24,7 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/device_api.h>
-#include <tvm/runtime/ndarray.h>
+#include <tvm/runtime/tensor.h>
 #include <tvm/runtime/nvtx.h>
 
 #include <utility>
@@ -36,12 +36,12 @@ namespace megakernel {
 
 using ffi::Array;
 using ffi::Shape;
-using runtime::NDArray;
+using runtime::Tensor;
 
-Array<NDArray> GetEventTensorsOnLayer(Array<NDArray> etensors, int layer_id) {
+Array<Tensor> GetEventTensorsOnLayer(Array<Tensor> etensors, int layer_id) {
   TVM_FFI_ICHECK_GE(layer_id, 0) << "Layer id must be non-negative, but got " << layer_id;
   TVM_FFI_ICHECK_EQ(etensors.size(), 18) << "Event tensors size must be 18";
-  std::vector<NDArray> etensors_on_layer;
+  std::vector<Tensor> etensors_on_layer;
   etensors_on_layer.reserve(etensors.size());
   for (int i = 0; i < static_cast<int>(etensors.size()); i++) {
     Shape shape = etensors[i].shape();
@@ -54,19 +54,19 @@ Array<NDArray> GetEventTensorsOnLayer(Array<NDArray> etensors, int layer_id) {
     int64_t offset = layer_id * new_shape.Product() * DataType(etensors[i].dtype()).bytes();
     etensors_on_layer.push_back(etensors[i].CreateView(new_shape, etensors[i].dtype(), offset));
   }
-  return Array<NDArray>(etensors_on_layer);
+  return Array<Tensor>(etensors_on_layer);
 }
 
-NDArray GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
+Tensor GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
                           int num_kv_heads, int head_dim, Device device,
                           Device preferred_host_device) {
   NVTXScopedRange range("Generate execution queue");
   bool split_kv = attn_task_num > num_kv_heads * batch_size;
 
-  NDArray exec_queue_host = NDArray::Empty({kNumSM, kStaticTileSchedulerMaxTasks, kTaskSize},
+  Tensor exec_queue_host = Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks, kTaskSize},
                                            DataType::Int(32), preferred_host_device);
-  NDArray exec_queue_device =
-      NDArray::Empty({kNumSM, kStaticTileSchedulerMaxTasks, kTaskSize}, DataType::Int(32), device);
+  Tensor exec_queue_device =
+      Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks, kTaskSize}, DataType::Int(32), device);
   int32_t* exec_queue_host_data = static_cast<int32_t*>(exec_queue_host->data);
 
   // Generate round-robin static execution queue
@@ -241,12 +241,12 @@ NDArray GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int nu
 
   // Transfer to device
   DLTensor exec_queue_device_dl = *exec_queue_device.operator->();
-  NDArray::CopyFromTo(exec_queue_host.operator->(), &exec_queue_device_dl);
+  Tensor::CopyFromTo(exec_queue_host.operator->(), &exec_queue_device_dl);
   return exec_queue_device;
 }
 
-Array<Array<NDArray>> GenerateExecQueueDyn(NDArray exec_queue_device_buf,
-                                           NDArray exec_queue_host_buf, int tp_size,
+Array<Array<Tensor>> GenerateExecQueueDyn(Tensor exec_queue_device_buf,
+                                           Tensor exec_queue_host_buf, int tp_size,
                                            int num_qo_heads, int num_kv_heads, int head_dim,
                                            int num_layers, TVMStreamHandle copy_stream) {
   NVTXScopedRange range("Generate execution queue");
@@ -291,28 +291,28 @@ Array<Array<NDArray>> GenerateExecQueueDyn(NDArray exec_queue_device_buf,
 
   // Transfer to device
   DLTensor exec_queue_device_dl = *exec_queue_device_buf.operator->();
-  NDArray::CopyFromTo(exec_queue_host_buf.operator->(), &exec_queue_device_dl, copy_stream);
+  Tensor::CopyFromTo(exec_queue_host_buf.operator->(), &exec_queue_device_dl, copy_stream);
 
   // Slice the execution queue to get the dynamic execution queue.
-  std::vector<Array<NDArray>> queue_by_layer;
+  std::vector<Array<Tensor>> queue_by_layer;
   queue_by_layer.reserve(num_layers);
   for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
-    NDArray exec_queue = exec_queue_device_buf.CreateView(
+    Tensor exec_queue = exec_queue_device_buf.CreateView(
         {elem_per_layer}, DataType::Int(32),
         /*relative_byte_offset=*/layer_id * elem_per_layer * DataType::Int(32).bytes());
-    NDArray queue_tasks = exec_queue.CreateView(
+    Tensor queue_tasks = exec_queue.CreateView(
         {megakernel::kDyanmicTileSchedulerMaxTasks, megakernel::kTaskSize}, DataType::Int(32));
-    NDArray queue_head =
+    Tensor queue_head =
         exec_queue.CreateView({1}, DataType::Int(32),
                               /*relative_byte_offset=*/megakernel::kDyanmicTileSchedulerMaxTasks *
                                   megakernel::kTaskSize * DataType::Int(32).bytes());
-    NDArray queue_tail = exec_queue.CreateView(
+    Tensor queue_tail = exec_queue.CreateView(
         {1}, DataType::Int(32),
         /*relative_byte_offset=*/
         (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 1) *
             DataType::Int(32).bytes());
 
-    queue_by_layer.push_back(Array<NDArray>({queue_tasks, queue_head, queue_tail}));
+    queue_by_layer.push_back(Array<Tensor>({queue_tasks, queue_head, queue_tail}));
   }
   return queue_by_layer;
 }

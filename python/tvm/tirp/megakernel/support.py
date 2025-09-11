@@ -16,9 +16,14 @@
 # under the License.
 """Plan info for attention kernel."""
 import numpy as np
+import threading
+from typing import List
 import torch
 
+import tvm_ffi
+
 import tvm
+from tvm.script import tir as T
 from tvm.tirp.megakernel.allreduce import AllreduceTile
 from tvm.tirp.megakernel.common import KernelConfig
 from tvm.tirp.megakernel.gemm import GemmTile
@@ -26,6 +31,8 @@ from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
 from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
 from tvm.tirp.megakernel.decode_merge import DecodeMergeTile
+from tvm.tirp.megakernel.common import event_type_names
+from tvm.tirp.bench.utils import export_to_perfetto_trace
 
 # Paged kv-cache config
 KV_LAYOUT = "HND"
@@ -86,7 +93,7 @@ class PlanInfo:
         self.tmp_lse_tvm = None
 
     def plan(self, batch_size, kv_indptr_h, page_size, max_page_num):
-        if isinstance(kv_indptr_h, tvm.nd.NDArray):
+        if isinstance(kv_indptr_h, tvm.runtime.Tensor):
             kv_indptr_h = kv_indptr_h.numpy().tolist()
 
         PAGE_SIZE = page_size
@@ -143,7 +150,7 @@ class PlanInfo:
 
         self.split_kv = split_kv
         self.new_batch_size = new_batch_size
-        self.max_chunk_size_tvm = tvm.nd.array(
+        self.max_chunk_size_tvm = tvm.runtime.tensor(
             np.array([max_page_num * PAGE_SIZE], dtype=np.int32), device=DEV
         )
 
@@ -170,12 +177,16 @@ class PlanInfo:
             o_indptr.append(o_indptr[-1] + num_tiles_kv)
         assert len(request_indices) == len(kv_tile_indices) == new_batch_size
 
-        self.request_indices_tvm = tvm.nd.array(np.array(request_indices, dtype=np.int32), DEV)
-        self.kv_tile_indices_tvm = tvm.nd.array(np.array(kv_tile_indices, dtype=np.int32), DEV)
-        self.o_indptr_tvm = tvm.nd.array(np.array(o_indptr, dtype=np.int32), DEV)
+        self.request_indices_tvm = tvm.runtime.tensor(
+            np.array(request_indices, dtype=np.int32), DEV
+        )
+        self.kv_tile_indices_tvm = tvm.runtime.tensor(
+            np.array(kv_tile_indices, dtype=np.int32), DEV
+        )
+        self.o_indptr_tvm = tvm.runtime.tensor(np.array(o_indptr, dtype=np.int32), DEV)
 
 
-@tvm.register_func("megakernel.decode_attn_plan")
+@tvm_ffi.register_global_func("megakernel.decode_attn_plan")
 def decode_attn_plan(
     qo_heads, kv_heads, head_dim, batch_size, kv_indptr_h, page_size, max_page_num
 ):
@@ -233,17 +244,31 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
     central_queue = []
 
     # qkv projection
-    for n_idx in range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, GemmTile.BLK_N)):
+    for n_idx in range(
+        ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, GemmTile.BLK_N)
+    ):
         for k_idx in range(SPLIT_QKV_PROJECT[WORLD_SIZE]):
             central_queue.append((0, n_idx, k_idx, JobType.GEMM_QKV_PROJ.value))
 
     # qkv reduction
-    m_split = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM // SplitKReduceTile.N_UNIT))
+    m_split = min(
+        batch_size,
+        ceildiv(
+            KernelConfig.SM_NUMBER,
+            (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM // SplitKReduceTile.N_UNIT,
+        ),
+    )
     m_tile = ceildiv(batch_size, m_split)
     m_split = ceildiv(batch_size, m_tile)
-    n_tile_qkv_proj_reduce = ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split)) * SplitKReduceTile.N_UNIT
+    n_tile_qkv_proj_reduce = (
+        ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split)) * SplitKReduceTile.N_UNIT
+    )
     for m_idx in range(m_split):
-        for n_idx in range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, n_tile_qkv_proj_reduce)):
+        for n_idx in range(
+            ceildiv(
+                (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, n_tile_qkv_proj_reduce
+            )
+        ):
             central_queue.append((m_idx, n_idx, 0, JobType.GEMM_QKV_REDUCE.value))
 
     # q rmsnorm + rope
@@ -263,11 +288,15 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
 
     # attention
     for m_idx in range(ceildiv(attn_task_num, KernelConfig.WG_NUMBER)):
-        central_queue.append((m_idx, -1, -1, JobType.BATCH_ATTENTION.value)) 
+        central_queue.append((m_idx, -1, -1, JobType.BATCH_ATTENTION.value))
 
     if attn_task_num > NUM_KEY_VALUE_HEADS * batch_size:
         # merge
-        for m_idx in range(ceildiv(batch_size * NUM_ATTENTION_HEADS, KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER)):
+        for m_idx in range(
+            ceildiv(
+                batch_size * NUM_ATTENTION_HEADS, KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
+            )
+        ):
             central_queue.append((m_idx, -1, -1, JobType.BATCH_ATTENTION_MERGE.value))
 
     # o projection
@@ -276,7 +305,9 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
             central_queue.append((0, n_idx, k_idx, JobType.GEMM_O_PROJ.value))
 
     # o reduction
-    m_split_o_proj_reduce = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT))
+    m_split_o_proj_reduce = min(
+        batch_size, ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT)
+    )
     n_tile_o_proj_reduce = (
         ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_o_proj_reduce))
         * SplitKReduceTile.N_UNIT
@@ -286,7 +317,7 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
     for n_idx in range(ceildiv(HIDDEN_SIZE, n_tile_o_proj_reduce)):
         for m_idx in range(m_split_o_proj_reduce):
             central_queue.append((m_idx, n_idx, 0, JobType.GEMM_O_REDUCE.value))
-    
+
     # o allreduce
     if WORLD_SIZE > 1:
         for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
@@ -305,14 +336,15 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
     # gate_up reduce
     if GATE_UP_PROJ_SPLIT_K_FACTOR[WORLD_SIZE] > 1:
         m_split_gate_up_proj_reduce = min(
-            batch_size, ceildiv(KernelConfig.SM_NUMBER, INTERMEDIATE_SIZE * 2 // SplitKReduceTile.N_UNIT)
+            batch_size,
+            ceildiv(KernelConfig.SM_NUMBER, INTERMEDIATE_SIZE * 2 // SplitKReduceTile.N_UNIT),
         )
         m_tile_gate_up_proj_reduce = ceildiv(batch_size, m_split_gate_up_proj_reduce)
         m_split_gate_up_proj_reduce = ceildiv(batch_size, m_tile_gate_up_proj_reduce)
         for m_idx in range(m_split_gate_up_proj_reduce):
             for n_idx in range(ceildiv(INTERMEDIATE_SIZE * 2, SplitKReduceTile.N_UNIT)):
                 central_queue.append((m_idx, n_idx, 0, JobType.GATE_UP_PROJ_REDUCE.value))
-    
+
     # split_silu_multiply
     for m_idx in range(ceildiv(INTERMEDIATE_SIZE, SiluMultiplyTile.TILE_SIZE)):
         central_queue.append((m_idx, 0, 0, JobType.SPLIT_SILU_MULTIPLY.value))
@@ -323,7 +355,9 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
             central_queue.append((0, n_idx, k_idx, JobType.GEMM_DOWN_PROJ.value))
 
     # down_proj_reduce
-    m_split_down_proj_reduce = min(ceildiv(KernelConfig.SM_NUMBER, ceildiv(HIDDEN_SIZE, SplitKReduceTile.N_UNIT)), batch_size)
+    m_split_down_proj_reduce = min(
+        ceildiv(KernelConfig.SM_NUMBER, ceildiv(HIDDEN_SIZE, SplitKReduceTile.N_UNIT)), batch_size
+    )
     n_tile = (
         ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_down_proj_reduce))
         * SplitKReduceTile.N_UNIT
@@ -339,7 +373,7 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
         for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
             for n_idx in range(ceildiv(HIDDEN_SIZE, AllreduceTile.N_TILE)):
                 central_queue.append((m_idx, n_idx, 0, JobType.DOWN_PROJ_ALLREDUCE.value))
-    
+
     # add_rms_norm
     for m_idx in range(batch_size):
         central_queue.append((m_idx, 0, 0, JobType.MLP_ADD_RMS_NORM.value))
@@ -365,7 +399,7 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
         exec_queue[bx, tile_idx, 2] = -1
         exec_queue[bx, tile_idx, 3] = JobType.END.value
     DEV = tvm.cuda(0)
-    ret = tvm.nd.array(exec_queue, device=DEV)
+    ret = tvm.runtime.tensor(exec_queue, device=DEV)
     torch.cuda.nvtx.range_pop()
     return ret
 
@@ -380,19 +414,19 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
     qk_h_d = (NUM_ATTENTION_HEADS + NUM_KEY_VALUE_HEADS) * HEAD_DIM
     q_h_d = NUM_ATTENTION_HEADS * HEAD_DIM
     k_h_d = NUM_KEY_VALUE_HEADS * HEAD_DIM
-    etensor_qkv_partial = tvm.nd.array(
+    etensor_qkv_partial = tvm.runtime.tensor(
         np.zeros(ceildiv(qkv_h_d, SplitKReduceTile.N_UNIT), dtype=np.int32), device=DEV
     )
-    etensor_q_reduce = tvm.nd.array(
+    etensor_q_reduce = tvm.runtime.tensor(
         np.zeros((batch_size, ceildiv(q_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
     )
-    etensor_k_reduce = tvm.nd.array(
+    etensor_k_reduce = tvm.runtime.tensor(
         np.zeros((batch_size, ceildiv(k_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
     )
-    etensor_v_reduce = tvm.nd.array(
+    etensor_v_reduce = tvm.runtime.tensor(
         np.zeros((batch_size, ceildiv(k_h_d, SplitKReduceTile.N_UNIT)), dtype=np.int32), device=DEV
     )
-    etensor_attn = tvm.nd.array(
+    etensor_attn = tvm.runtime.tensor(
         np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32), device=DEV
     )
 
@@ -403,7 +437,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
         kv_idx = kv_head_idx[m]
         batch_idx = q_indptr[m]
         etensor_attn_merge[batch_idx, kv_idx] += 1
-    etensor_attn_merge = tvm.nd.array(etensor_attn_merge, device=DEV)
+    etensor_attn_merge = tvm.runtime.tensor(etensor_attn_merge, device=DEV)
 
     etensor_o_proj = np.zeros(SPLIT_O_PROJRCT[WORLD_SIZE], dtype=np.int32)
     o_proj_tile_k = (
@@ -415,57 +449,85 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
 
     if attn_task_num > NUM_KEY_VALUE_HEADS * batch_size:
         # to simply, assume that one merge tile will not use two kv head
-        assert KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER <= NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS
-        for m in range(ceildiv(batch_size * NUM_ATTENTION_HEADS, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER)):
+        assert (
+            KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
+            <= NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS
+        )
+        for m in range(
+            ceildiv(
+                batch_size * NUM_ATTENTION_HEADS, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
+            )
+        ):
             worker_id = m * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
             kv_idx = worker_id // (batch_size * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
             qo_idx = worker_id % (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)
-            range_start = (kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx) * HEAD_DIM // o_proj_tile_k
-            range_end = ((kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * HEAD_DIM - 1) // o_proj_tile_k
+            range_start = (
+                (kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx)
+                * HEAD_DIM
+                // o_proj_tile_k
+            )
+            range_end = (
+                (
+                    kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)
+                    + qo_idx
+                    + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
+                )
+                * HEAD_DIM
+                - 1
+            ) // o_proj_tile_k
             for i in range(range_start, range_end + 1):
                 etensor_o_proj[i] += 1
-        etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
+        etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)
     else:
         for m in range(KernelConfig.WG_NUMBER * ceildiv(attn_task_num, KernelConfig.WG_NUMBER)):
             kv_idx = kv_head_idx[m]
             batch_idx = q_indptr[m]
-            range_start = kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
-            range_end = ((kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1) // o_proj_tile_k
+            range_start = (
+                kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
+            )
+            range_end = (
+                (kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1
+            ) // o_proj_tile_k
             for i in range(range_start, range_end + 1):
                 etensor_o_proj[i] += 1
-        etensor_o_proj = tvm.nd.array(etensor_o_proj, device=DEV)
+        etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)
 
-    etensor_o_partial = tvm.nd.array(
+    etensor_o_partial = tvm.runtime.tensor(
         np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV
     )
-    etensor_o_allreduce = tvm.nd.array(
+    etensor_o_allreduce = tvm.runtime.tensor(
         np.zeros(HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV
     )
-    etensor_attn_add_rms_norm = tvm.nd.array(np.zeros(batch_size, dtype=np.int32), device=DEV)
-    etensor_attn_mlp = tvm.nd.array(np.zeros(1, dtype=np.int32), device=DEV)
-    etensor_gate_up_proj_reduce = tvm.nd.array(
+    etensor_attn_add_rms_norm = tvm.runtime.tensor(np.zeros(batch_size, dtype=np.int32), device=DEV)
+    etensor_attn_mlp = tvm.runtime.tensor(np.zeros(1, dtype=np.int32), device=DEV)
+    etensor_gate_up_proj_reduce = tvm.runtime.tensor(
         np.zeros(INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N, dtype=np.int32), device=DEV
     )
-    etensor_gate_up_proj = tvm.nd.array(
+    etensor_gate_up_proj = tvm.runtime.tensor(
         np.zeros(INTERMEDIATE_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
     )
     etensor_down_proj = np.zeros(DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE], dtype=np.int32)
-    down_proj_tile_k = ceildiv(ceildiv(INTERMEDIATE_SIZE, DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE]), GemmTile.BLK_K) * GemmTile.BLK_K
+    down_proj_tile_k = (
+        ceildiv(ceildiv(INTERMEDIATE_SIZE, DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE]), GemmTile.BLK_K)
+        * GemmTile.BLK_K
+    )
     for m in range(INTERMEDIATE_SIZE // SiluMultiplyTile.TILE_SIZE):
         range_start = m * SiluMultiplyTile.TILE_SIZE // down_proj_tile_k
         range_end = ((m + 1) * SiluMultiplyTile.TILE_SIZE - 1) // down_proj_tile_k
         for i in range(range_start, range_end + 1):
             etensor_down_proj[i] += 1
-    etensor_down_proj = tvm.nd.array(etensor_down_proj, device=DEV)
-    etensor_down_proj_reduce = tvm.nd.array(
+    etensor_down_proj = tvm.runtime.tensor(etensor_down_proj, device=DEV)
+    etensor_down_proj_reduce = tvm.runtime.tensor(
         np.zeros(HIDDEN_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV
     )
-    etensor_down_proj_allreduce = tvm.nd.array(
+    etensor_down_proj_allreduce = tvm.runtime.tensor(
         np.zeros(HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV
     )
-    etensor_mlp_add_rms_norm = tvm.nd.array(np.zeros((batch_size,), dtype=np.int32), device=DEV)
+    etensor_mlp_add_rms_norm = tvm.runtime.tensor(
+        np.zeros((batch_size,), dtype=np.int32), device=DEV
+    )
 
-    etensor_end = tvm.nd.array(np.zeros(1, dtype=np.int32), device=DEV)
+    etensor_end = tvm.runtime.tensor(np.zeros(1, dtype=np.int32), device=DEV)
     return (
         etensor_qkv_partial,
         etensor_q_reduce,
@@ -486,3 +548,68 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
         etensor_mlp_add_rms_norm,
         etensor_end,
     )
+
+
+class ProfilerHandler:
+    def __init__(self):
+        self.initialized = False
+        self.counter = 0
+        self.profiler_on = False
+        self.trigger_count = 0
+        self.profiler_layer_id = []
+        self.lock = threading.Lock()
+        self.dir_path = ""
+        self.use_nvshmem = False
+
+    def initialize(
+        self,
+        profiler_on,
+        trigger_count,
+        profiler_layer_id: List[int] = [],
+        dir_path: str = "",
+        use_nvshmem=False,
+    ):
+        self.profiler_on = profiler_on
+        self.trigger_count = trigger_count
+        self.profiler_layer_id = profiler_layer_id
+        self.dir_path = dir_path
+        self.use_nvshmem = use_nvshmem
+        self.initialized = True
+        print(
+            f"ProfilerHandler initialized: profiler_on={profiler_on}, trigger_count={trigger_count}, profiler_layer_id={profiler_layer_id}, dir_path={dir_path}, use_nvshmem={use_nvshmem}"
+        )
+
+    def export_trace(self, profiler_buffer):
+        if not self.initialized:
+            return
+        if self.profiler_on:
+            with self.lock:
+                self.counter += 1
+                current_run = self.counter
+            if current_run == self.trigger_count:
+                rank = T.nvshmem.my_pe() if self.use_nvshmem else 0
+                for layer_id in self.profiler_layer_id:
+                    export_to_perfetto_trace(
+                        profiler_buffer[layer_id].numpy(),
+                        f"{self.dir_path}/qwen3-model-mega-layer{layer_id}-rank{rank}.perfetto-trace",
+                        event_type_names,
+                    )
+                    print(
+                        f"Exported layer {layer_id} to {self.dir_path}/qwen3-model-mega-layer{layer_id}-rank{rank}.perfetto-trace"
+                    )
+
+
+profiler_handler = ProfilerHandler()
+print("Wait for profiler initialization...")
+
+
+@tvm_ffi.register_global_func("megakernel.initialize_profiler")
+def initialize_profiler(profiler_on, trigger_count, profiler_layer_id, dir_path, use_nvshmem):
+    profiler_handler.initialize(
+        profiler_on, trigger_count, profiler_layer_id, dir_path, use_nvshmem
+    )
+
+
+@tvm_ffi.register_global_func("megakernel.export_trace")
+def export_trace(profiler_buffer):
+    profiler_handler.export_trace(profiler_buffer)

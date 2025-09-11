@@ -28,10 +28,10 @@ namespace tir {
 
 TVM_FFI_STATIC_INIT_BLOCK({ PredicateNode::RegisterReflection(); });
 
-PrimExpr PredicateNode::Apply(const Array<PrimExpr>& indices) const {
+PrimExpr PredicateNode::Apply(const ffi::Array<PrimExpr>& indices) const {
   ICHECK_EQ(indices.size(), vars.size());
 
-  Map<Var, PrimExpr> vmap;
+  ffi::Map<Var, PrimExpr> vmap;
 
   for (size_t i = 0; i < vars.size(); i++) {
     vmap.Set(vars[i], indices[i]);
@@ -41,8 +41,8 @@ PrimExpr PredicateNode::Apply(const Array<PrimExpr>& indices) const {
                                             [&](const Var& var) { return vmap.Get(var); });
 }
 
-Predicate::Predicate(Array<Var> vars, PrimExpr pred) {
-  auto n = make_object<PredicateNode>();
+Predicate::Predicate(ffi::Array<Var> vars, PrimExpr pred) {
+  auto n = ffi::make_object<PredicateNode>();
   n->vars = std::move(vars);
   n->pred = std::move(pred);
   data_ = std::move(n);
@@ -51,12 +51,12 @@ Predicate::Predicate(Array<Var> vars, PrimExpr pred) {
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.Predicate",
-                        [](Array<Var> vars, PrimExpr pred) { return Predicate(vars, pred); });
+                        [](ffi::Array<Var> vars, PrimExpr pred) { return Predicate(vars, pred); });
 });
 
 TVM_FFI_STATIC_INIT_BLOCK({
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.PredicateApply", [](Predicate pred, Array<PrimExpr> indices) {
+  refl::GlobalDef().def("tir.PredicateApply", [](Predicate pred, ffi::Array<PrimExpr> indices) {
     return pred->Apply(indices);
   });
 });
