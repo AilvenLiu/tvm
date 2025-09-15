@@ -15,24 +15,37 @@ class AddRMSNormTile(Tile):
         super().__init__()
         self.EPS = rms_norm_eps
         self.hidden_size = hidden_size
-    
+
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory
         self.x_smem = smem_manager.alloc([self.loop_inner * self.hidden_size], "float32").buffer
         self.sum_sq_smem = smem_manager.alloc([self.loop_inner, self.bdy], "float32").buffer
+
+    def _alloc_local(self):
         # alloc local memory
-        self.input_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16", name="input_vec")
-        self.residual_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16", name="residual_vec")
-        self.weight_vec = T.alloc_local([self.loop_inner, self.vec_size], "float16", name="weight_vec")
-        self.input_vec_f32 = T.alloc_local([self.loop_inner, self.vec_size], "float32", name="input_vec_f32")
-        self.residual_vec_f32 = T.alloc_local([self.loop_inner, self.vec_size], "float32", name="residual_vec_f32")
-        self.weight_vec_f32 = T.alloc_local([self.loop_inner, self.vec_size], "float32", name="weight_vec_f32")
+        self.input_vec = T.alloc_local(
+            [self.loop_inner, self.vec_size], "float16", name="input_vec"
+        )
+        self.residual_vec = T.alloc_local(
+            [self.loop_inner, self.vec_size], "float16", name="residual_vec"
+        )
+        self.weight_vec = T.alloc_local(
+            [self.loop_inner, self.vec_size], "float16", name="weight_vec"
+        )
+        self.input_vec_f32 = T.alloc_local(
+            [self.loop_inner, self.vec_size], "float32", name="input_vec_f32"
+        )
+        self.residual_vec_f32 = T.alloc_local(
+            [self.loop_inner, self.vec_size], "float32", name="residual_vec_f32"
+        )
+        self.weight_vec_f32 = T.alloc_local(
+            [self.loop_inner, self.vec_size], "float32", name="weight_vec_f32"
+        )
         self.x_vec = T.alloc_local([self.loop_inner, self.vec_size], "float32", name="x_vec")
         self.x_tmp = T.alloc_local([self.loop_inner, 1], "float32", name="x_tmp")
         self.sum_sq = T.alloc_local([self.loop_inner, 1], "float32", name="sum_sq")
         self.rms_norm = T.alloc_local([1], "float32", name="rms_norm")
-
 
     @T.macro
     def init(self, smem_manager: SmemManager):
@@ -48,6 +61,7 @@ class AddRMSNormTile(Tile):
             output_buf = T.meta_var(input if output is None else output)
             out_residual_buf = T.meta_var(residual if out_residual is None else out_residual)
             # add & sum square
+            self._alloc_local()
             with T.thread():
                 if warp_id_in_cta == 0:
                     self.smem_manager.wait_all(lane_id)

@@ -112,7 +112,7 @@ class GemmTile(Tile):
         self.TILE_K = ceildiv(ceildiv(self.K, self.split_k_factor), self.BLK_K) * self.BLK_K
         self.PIPE_CIRCLE_NUM = (self.TILE_K // self.BLK_K) // self.SMEM_PIPE_DEPTH
         self.PIPE_REMAIN_NUM = (self.TILE_K // self.BLK_K) % self.SMEM_PIPE_DEPTH
-    
+
         
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
@@ -141,14 +141,16 @@ class GemmTile(Tile):
             exclusive=True,
         ).buffer
 
+    def _alloc_local(self):
         # alloc local memory
         self.reg = T.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
         if self.out_type == "float16":
-            self.reg_fp16 = T.alloc_buffer((self.TMEM_LD_SIZE,), self.out_type, scope="local", name="reg_fp16")
+            self.reg_fp16 = T.alloc_buffer(
+                (self.TMEM_LD_SIZE,), self.out_type, scope="local", name="reg_fp16"
+            )
         self.tmem_idx = T.local_cell("int32", name="tmem_idx")
         self.tmem_phase = T.local_cell("int32", name="tmem_phase")
         self.stage = T.local_cell("int32", name="stage")
-
 
     @classmethod
     def _alloc_buffer_class_member(cls, smem_manager: SmemManager):
@@ -229,6 +231,7 @@ class GemmTile(Tile):
     # call by warp 7 (tmp load warp)
     @T.macro
     def prefetch(self, m_idx, n_idx, k_idx, profiler_buffer, profiler_tag, profiler_write_offset):
+        self._alloc_local()
         with T.cta():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
@@ -265,7 +268,6 @@ class GemmTile(Tile):
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-
             with T.cta():            
                 T.block_attr({"tirp.scope_partition": True})
                 with T.warpgroup()[1:2]:
@@ -631,6 +633,8 @@ class GemmTile(Tile):
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx, profiler_buffer, profiler_tag, profiler_write_offset):
+        self._alloc_local()
+        #FIXME: move this tile size selection logic to host side can make performance better
         if self.M <= 32:
             self._run(m_idx, n_idx, k_idx, 32, 32, profiler_buffer, profiler_tag, profiler_write_offset)
         elif self.M <= 64:

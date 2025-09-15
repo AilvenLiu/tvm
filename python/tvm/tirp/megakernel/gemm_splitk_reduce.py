@@ -21,19 +21,16 @@ class SplitKReduceTile(Tile):
         self.M_TILE = ceildiv(self.M, self.M_split)
         self.M_split = ceildiv(self.M, self.M_TILE)
 
-    def _alloc_buffer(self, smem_manager: SmemManager):
+    def _alloc_local(self):
         self.idx = T.local_cell("int32", name="idx")
         self.vec_32 = T.alloc_local([self.VEC_SIZE], "float32", name="vec_32")
         self.tmp = T.alloc_local([self.VEC_SIZE], "float32", name="tmp")
         self.vec_16 = T.alloc_local([self.VEC_SIZE], "float16", name="vec_16")
-            
-    @T.macro
-    def init(self, smem_manager: SmemManager):
-        self._alloc_buffer(smem_manager)
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx, input, output):
         with T.cta():
+            self._alloc_local()
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             self.idx = tid * self.VEC_SIZE
             while (

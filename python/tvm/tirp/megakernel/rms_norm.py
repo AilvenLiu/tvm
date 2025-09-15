@@ -40,7 +40,7 @@ class RMSnormTile(Tile):
         self.m_split = ceildiv(self.batch_size, self.m_tile)
 
 
-    def _alloc_buffer(self, smem_manager: SmemManager):
+    def _alloc_local(self):
         self.idx = T.alloc_local([1], "int32", name="idx")
         self.input_vec = T.alloc_local([self.vec_size], "float16", name="input_vec")
         self.weight_vec = T.alloc_local([self.vec_size], "float16", name="weight_vec")
@@ -51,15 +51,12 @@ class RMSnormTile(Tile):
         self.mask = T.alloc_local([1], "uint32", name="mask")
 
     @T.macro
-    def init(self, smem_manager: SmemManager):
-        self._alloc_buffer(smem_manager)
-
-    @T.macro
     def run(self, m_idx, n_idx, k_idx, qkv, q_weight, k_weight):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             tx = T.meta_var(tid % self.bdx)
             ty = T.meta_var(tid // self.bdx)
+            self._alloc_local()
 
             with T.thread():
 

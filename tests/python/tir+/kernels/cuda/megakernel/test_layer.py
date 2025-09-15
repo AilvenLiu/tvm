@@ -96,6 +96,9 @@ class MegaKernel:
             max_offset = max(max_offset, smem_manager.pool_allocator.offset)
         smem_manager.pool_allocator.move_base_to(max_offset)
 
+
+    #FIXME: change offset_factor to 0 can make performance better
+    #       but it requires change on engine side
     def get_func_static(self):
         from tvm.tirp.megakernel.static_scheduler import Semaphore
 

@@ -239,18 +239,22 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         self.cta_sync_md_smem = smem_manager.alloc([KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1 
                                         else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, 16, 2], "float32", align=16).buffer
         self.smem_o = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
-        # allocate register
-        self.s_frag = T.alloc_local([self.num_mma_q, self.num_mma_kv, 8], "float32", align=0, name="s_frag")
-        self.o_frag = T.alloc_local([self.num_mma_q, self.num_mma_d_vo, 8], "float32", align=16, name="o_frag")
-        self.m = T.alloc_local([self.num_mma_q, 2], "float32", name="m")
-        self.d = T.alloc_local([self.num_mma_q, 2], "float32", name="d")
-        self.tid = T.alloc_local([3], "int32", name="tid")
 
     @T.macro
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
-        
+
     def _alloc_prelogue(self):
+        # allocate register
+        self.s_frag = T.alloc_local(
+            [self.num_mma_q, self.num_mma_kv, 8], "float32", align=0, name="s_frag"
+        )
+        self.o_frag = T.alloc_local(
+            [self.num_mma_q, self.num_mma_d_vo, 8], "float32", align=16, name="o_frag"
+        )
+        self.m = T.alloc_local([self.num_mma_q, 2], "float32", name="m")
+        self.d = T.alloc_local([self.num_mma_q, 2], "float32", name="d")
+        self.tid = T.alloc_local([3], "int32", name="tid")
         self.q_smem_offset_r = int_var(name="q_smem_offset_r")
         self.k_smem_offset_r = int_var(name="k_smem_offset_r")
         self.v_smem_offset_r = int_var(name="v_smem_offset_r")
@@ -258,7 +262,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         self.v_smem_offset_w = int_var(name="v_smem_offset_w")
         self.thr_local_kv_offset = T.alloc_local([self.num_mma_kv * self.kv_thr_layout_col // 2 // self.num_warps_q], "int64", name="thr_local_kv_offset")
         self.work_idx = int_var(name="work_idx")
-        
+
         self.q_indptr = int_var(name="q_indptr")
         self.kv_indptr = int_var(name="kv_indptr")
         self.o_indptr = int_var(name="o_indptr")
@@ -278,7 +282,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         self.mast_tile_idx = int_var(name="mast_tile_idx")
         self.block_iter_base = int_var(name="block_iter_base")
         self.packed_kv_bound = int_var(name="packed_kv_bound")
-    
+
     @T.macro
     def prelogue(
         self,
@@ -311,13 +315,13 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
             warp_id = T.warp_id([self.num_warps_q * self.num_warps_kv], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
 
-            with T.thread():                
+            with T.thread():        
+                self._alloc_prelogue()        
                 self.tid[0] = lane_id
                 self.tid[1] = warp_id % self.num_warps_q
                 self.tid[2] = warp_id // self.num_warps_q
-                
-                self._alloc_prelogue()
-                
+
+
                 self.q_smem_offset_r = self.get_permuted_offset(self.upcast_stride_q, wg_id * self.cta_tile_q + self.get_warp_idx_q(self.tid) * self.num_mma_q * 16 + lane_id % 16, lane_id // 16)
                 self.k_smem_offset_r = self.get_permuted_offset(self.upcast_stride_k, wg_id * self.cta_tile_kv + self.get_warp_idx_kv(self.tid) * self.num_mma_kv * 16 + 8 * (lane_id // 16) + lane_id % 8, (lane_id % 16 // 8))
                 self.v_smem_offset_r = self.get_permuted_offset(self.upcast_stride_v, wg_id * self.cta_tile_kv + self.get_warp_idx_kv(self.tid) * self.num_mma_kv * 16 + lane_id % 16, lane_id // 16)
@@ -347,6 +351,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                     # TODO: Now sync cta for simple, need to finegrain in the future
                     if warp_id == 0 and wg_id == 0:
                         self.smem_manager.wait_all(lane_id)
+                    #FIXME: removing this sync can make performance better
                     T.tvm_storage_sync("shared")
                     
                     @T.macro

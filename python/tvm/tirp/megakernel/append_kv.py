@@ -31,14 +31,11 @@ class AppendKVTile(Tile):
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
 
-    def _alloc_buffer(self, smem_manager: SmemManager):
+    def _alloc_local(self):
         self.idx = T.alloc_local([1], "int32", name="idx")
         self.pos = T.alloc_local([1], "int32", name="pos")
         self.vec = T.alloc_local([self.vec_size], "float16", name="vec")
 
-    @T.macro
-    def init(self, smem_manager: SmemManager):
-        self._alloc_buffer(smem_manager)
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx, kv_cache, qkv, pos_map):
@@ -47,6 +44,8 @@ class AppendKVTile(Tile):
             tx = T.meta_var(tid % self.bdx)
             ty = T.meta_var(tid // self.bdx)
             stx = T.meta_var(tx * self.vec_size)
+            self._alloc_local()
+
             with T.thread():
                 self.idx[0] = ty
 
