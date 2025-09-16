@@ -105,31 +105,21 @@ Tensor GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num
   int32_t m_tile = ceildiv(batch_size, m_split);
   m_split = ceildiv(batch_size, m_tile);
 
-  int32_t n_tile_qkv_proj_reduce =
-      (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split)) * kSplitKReduceTileNUnit);
-  for (int m_idx = 0; m_idx < m_split; ++m_idx) {
-    for (int n_idx = 0;
-         n_idx < ceildiv((num_qo_heads + 2 * num_kv_heads) * head_dim, n_tile_qkv_proj_reduce);
-         ++n_idx) {
-      f_push_task(m_idx, n_idx, 0, JobType::kGemmQKVReduce);
-    }
-  }
-
   for (int m_idx = 0; m_idx < m_split; ++m_idx) {
     for (int n_idx = 0; n_idx < num_qo_heads; ++n_idx) {
-      f_push_task(m_idx, n_idx, -1, JobType::kQRMSNormRope);
+      f_push_task(m_idx, n_idx, -1, JobType::kQReduceNormRope);
     }
   }
 
   for (int m_idx = 0; m_idx < m_split; ++m_idx) {
     for (int n_idx = 0; n_idx < num_kv_heads; ++n_idx) {
-      f_push_task(m_idx, n_idx, -1, JobType::kKRMSNormRopeAppendKV);
+      f_push_task(m_idx, n_idx, -1, JobType::kKReduceNormRopeAppend);
     }
   }
 
   for (int m_idx = 0; m_idx < m_split; ++m_idx) {
     for (int n_idx = 0; n_idx < num_kv_heads; ++n_idx) {
-      f_push_task(m_idx, n_idx, -1, JobType::kVAppendKV);
+      f_push_task(m_idx, n_idx, -1, JobType::kVReduceAppend);
     }
   }
 

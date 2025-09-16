@@ -33,6 +33,9 @@ class JobType(Enum):
     GATE_UP_PROJ_REDUCE = 21
     BATCH_ATTENTION = 22
     BATCH_ATTENTION_MERGE = 23
+    Q_REDUCE_RMS_ROPE = 24
+    K_REDUCE_RMS_ROPE_APPEND = 25
+    V_REDUCE_APPEND = 26
     END = 99
 
 
@@ -300,6 +303,9 @@ class ProfileEventType(Enum):
     ATTN_LOOP_BODY = 31
     ATTN_COMPUTE_QKV = 32
     ATTN_WRITE_BACK = 33
+    Q_REDUCE_RMSNORM_ROPE = 34
+    K_REDUCE_RMSNORM_ROPE_APPEND = 35
+    V_REDUCE_APPEND = 36
 
 
 event_type_names = [
@@ -337,6 +343,9 @@ event_type_names = [
     "ATTN_LOOP_BODY",
     "ATTN_COMPUTE_QKV",
     "ATTN_WRITE_BACK",
+    "Q_REDUCE_RMSNORM_ROPE",
+    "K_REDUCE_RMSNORM_ROPE_APPEND",
+    "V_REDUCE_APPEND",
 ]
 
 

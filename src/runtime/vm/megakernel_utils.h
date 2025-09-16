@@ -82,6 +82,9 @@ enum class JobType : int32_t {
   kGateUpProjReduce = 21,
   kBatchAttention = 22,
   kBatchMerge = 23,
+  kQReduceNormRope = 24,
+  kKReduceNormRopeAppend = 25,
+  kVReduceAppend = 26,
   kEnd = 99,
 };
 

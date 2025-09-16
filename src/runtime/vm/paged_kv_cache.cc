@@ -1447,8 +1447,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         }
       } else {
         for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
-          for (int m = 0;
-               m < kNumWarpgroupPerBlock * ceildiv(attn_task_num_, kNumWarpgroupPerBlock); ++m) {
+          for (int m = 0; m < attn_task_num_; ++m) {
             int kv_idx = kv_head_idx_data[m];
             int range_start =
                 (kv_idx * (num_qo_heads_ / num_kv_heads_) * v_head_dim_) / o_proj_tile_k;
@@ -1490,8 +1489,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       etensor_attn_merge_host_.resize(num_layers_ * cur_batch_size_ * num_kv_heads_);
       etensor_attn_merge_host_.fill(0);
       for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
-        for (int m = 0; m < kNumWarpgroupPerBlock * ceildiv(attn_task_num_, kNumWarpgroupPerBlock);
-             ++m) {
+        for (int m = 0; m < attn_task_num_; ++m) {
           int batch_idx = q_indptr_data[m];
           int kv_idx = kv_head_idx_data[m];
           etensor_attn_merge_host_.set(

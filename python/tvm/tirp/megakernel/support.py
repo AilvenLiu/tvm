@@ -260,31 +260,21 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE):
     )
     m_tile = ceildiv(batch_size, m_split)
     m_split = ceildiv(batch_size, m_tile)
-    n_tile_qkv_proj_reduce = (
-        ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split)) * SplitKReduceTile.N_UNIT
-    )
-    for m_idx in range(m_split):
-        for n_idx in range(
-            ceildiv(
-                (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, n_tile_qkv_proj_reduce
-            )
-        ):
-            central_queue.append((m_idx, n_idx, 0, JobType.GEMM_QKV_REDUCE.value))
-
-    # q rmsnorm + rope
+    
+    # q reduce + rmsnorm + rope
     for m_idx in range(m_split):
         for n_idx in range(NUM_ATTENTION_HEADS):
-            central_queue.append((m_idx, n_idx, -1, JobType.Q_RMSNORM_ROPE.value))
-
-    # k rmsnorm + rope + append
+            central_queue.append((m_idx, n_idx, -1, JobType.Q_REDUCE_RMS_ROPE.value))
+            
+    # k reduce + rmsnorm + rope + append
     for m_idx in range(m_split):
         for n_idx in range(NUM_KEY_VALUE_HEADS):
-            central_queue.append((m_idx, n_idx, -1, JobType.K_RMSNORM_ROPE_APPEND_KV.value))
-
-    # v append
+            central_queue.append((m_idx, n_idx, -1, JobType.K_REDUCE_RMS_ROPE_APPEND.value))
+            
+    # v reduce + append
     for m_idx in range(m_split):
         for n_idx in range(NUM_KEY_VALUE_HEADS):
-            central_queue.append((m_idx, n_idx, -1, JobType.V_APPEND_KV.value))
+            central_queue.append((m_idx, n_idx, -1, JobType.V_REDUCE_APPEND.value))
 
     # attention
     for m_idx in range(ceildiv(attn_task_num, KernelConfig.WG_NUMBER)):
@@ -433,7 +423,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
     etensor_attn_merge = np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32)
     kv_head_idx = kv_head_idx.numpy()
     q_indptr = q_indptr.numpy()
-    for m in range(KernelConfig.WG_NUMBER * ceildiv(attn_task_num, KernelConfig.WG_NUMBER)):
+    for m in range(attn_task_num):
         kv_idx = kv_head_idx[m]
         batch_idx = q_indptr[m]
         etensor_attn_merge[batch_idx, kv_idx] += 1
@@ -479,7 +469,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
                 etensor_o_proj[i] += 1
         etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)
     else:
-        for m in range(KernelConfig.WG_NUMBER * ceildiv(attn_task_num, KernelConfig.WG_NUMBER)):
+        for m in range(attn_task_num):
             kv_idx = kv_head_idx[m]
             batch_idx = q_indptr[m]
             range_start = (
@@ -560,56 +550,40 @@ class ProfilerHandler:
         self.lock = threading.Lock()
         self.dir_path = ""
         self.use_nvshmem = False
-
-    def initialize(
-        self,
-        profiler_on,
-        trigger_count,
-        profiler_layer_id: List[int] = [],
-        dir_path: str = "",
-        use_nvshmem=False,
-    ):
+        
+    
+    def initialize(self, profiler_on=False, trigger_count=-1, profiler_layer_id=[], dir_path="", rank=-1):
         self.profiler_on = profiler_on
         self.trigger_count = trigger_count
         self.profiler_layer_id = profiler_layer_id
         self.dir_path = dir_path
-        self.use_nvshmem = use_nvshmem
+        self.rank = rank
         self.initialized = True
-        print(
-            f"ProfilerHandler initialized: profiler_on={profiler_on}, trigger_count={trigger_count}, profiler_layer_id={profiler_layer_id}, dir_path={dir_path}, use_nvshmem={use_nvshmem}"
-        )
+        print(f"ProfilerHandler initialized: profiler_on={profiler_on}, trigger_count={trigger_count}, profiler_layer_id={profiler_layer_id}, dir_path={dir_path}, rank={rank}")
 
     def export_trace(self, profiler_buffer):
         if not self.initialized:
+            print("Warning: ProfilerHandler not initialized")
             return
         if self.profiler_on:
             with self.lock:
                 self.counter += 1
-                current_run = self.counter
-            if current_run == self.trigger_count:
-                rank = T.nvshmem.my_pe() if self.use_nvshmem else 0
+                current_run = self.counter    
+            if current_run == self.trigger_count:  
                 for layer_id in self.profiler_layer_id:
-                    export_to_perfetto_trace(
-                        profiler_buffer[layer_id].numpy(),
-                        f"{self.dir_path}/qwen3-model-mega-layer{layer_id}-rank{rank}.perfetto-trace",
-                        event_type_names,
-                    )
-                    print(
-                        f"Exported layer {layer_id} to {self.dir_path}/qwen3-model-mega-layer{layer_id}-rank{rank}.perfetto-trace"
-                    )
-
-
+                    if self.rank == -1:
+                        file_name = f"{self.dir_path}/qwen3-model-mega-layer{layer_id}.perfetto-trace"
+                    else:
+                        file_name = f"{self.dir_path}/qwen3-model-mega-layer{layer_id}-rank{self.rank}.perfetto-trace"
+                    export_to_perfetto_trace(profiler_buffer[layer_id].numpy(), file_name, event_type_names)
+                    print(f"Exported layer {layer_id} to {file_name}")                
+    
 profiler_handler = ProfilerHandler()
-print("Wait for profiler initialization...")
-
 
 @tvm_ffi.register_global_func("megakernel.initialize_profiler")
-def initialize_profiler(profiler_on, trigger_count, profiler_layer_id, dir_path, use_nvshmem):
-    profiler_handler.initialize(
-        profiler_on, trigger_count, profiler_layer_id, dir_path, use_nvshmem
-    )
-
-
+def initialize_profiler(profiler_on=False, trigger_count=-1, profiler_layer_id=[], dir_path="", rank=-1):
+    profiler_handler.initialize(profiler_on, trigger_count, profiler_layer_id, dir_path, rank)
+    
 @tvm_ffi.register_global_func("megakernel.export_trace")
 def export_trace(profiler_buffer):
     profiler_handler.export_trace(profiler_buffer)

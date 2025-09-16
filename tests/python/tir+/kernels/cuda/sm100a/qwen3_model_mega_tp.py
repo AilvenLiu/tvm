@@ -51,7 +51,7 @@ dev = tvm.cuda()
 target = tvm.target.Target("cuda")
 
 # profiler
-PROFILER_ON = True
+PROFILER_ON = False
 PROFILER_LAYER_ID = [3, 47]
 PROFILER_TRIGGER_COUNT = 399
 PROFILER_DIR_PATH = "/home/guanjiew/qwen3-mg-debug" # NOTE: update this path
@@ -250,7 +250,7 @@ def get_params(named_params, vm):
 
         print("Loading weights from", LOAD_WEIGHTS)
         if TP_SIZE == 1:
-            params, _ = tvmjs.load_ndarray_cache(LOAD_WEIGHTS, device=dev)
+            params, _ = tvmjs.load_tensor_cache(LOAD_WEIGHTS, device=dev)
             print("Loaded", len(params), "weights")
             result = [params[k] for k, v in named_params]
         else:
@@ -277,6 +277,16 @@ get_global_func = (
     )
 )
 
+def init_profiler():
+    profiler_init_func = get_global_func("megakernel.initialize_profiler")
+    if TP_SIZE > 1:
+        get_rank_func = get_global_func("runtime.disco.worker_rank")
+        rank = get_rank_func()
+    else:
+        rank = -1
+    profiler_init_func(PROFILER_ON, PROFILER_TRIGGER_COUNT, ShapeTuple(PROFILER_LAYER_ID), PROFILER_DIR_PATH, rank)
+
+init_profiler()
 
 def load_reference_model_lib():
     if TP_SIZE == 1:
@@ -884,21 +894,17 @@ def get_qwen3_megakernel_batch_decode_func():
         vm = relax.VirtualMachine(ex, dev)
         batch_decode_func = vm["batch_decode"]
         cos_sin_cache_func = vm["cos_sin_cache_func"]
-        profiler_init_func = get_global_func("megakernel.initialize_profiler")
     else:
         vm = get_global_func("runtime.disco.load_vm_module")(MEGA_LIB_PATH, None)
         mod_get_func = get_global_func("ffi.ModuleGetFunction")
         batch_decode_func_ = mod_get_func(vm, "batch_decode", True)
         cos_sin_cache_func_ = mod_get_func(vm, "cos_sin_cache_func", True)
-        profiler_init_func = get_global_func("megakernel.initialize_profiler")
         batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)
         cos_sin_cache_func = lambda *args: disco_sess.call_packed(cos_sin_cache_func_, *args)
 
-    return batch_decode_func, cos_sin_cache_func, profiler_init_func
+    return batch_decode_func, cos_sin_cache_func
 
-
-batch_decode_func, cos_sin_cache_func, profiler_init_func = get_qwen3_megakernel_batch_decode_func()
-profiler_init_func(PROFILER_ON, PROFILER_TRIGGER_COUNT, ShapeTuple(PROFILER_LAYER_ID), PROFILER_DIR_PATH, TP_SIZE > 1)
+batch_decode_func, cos_sin_cache_func = get_qwen3_megakernel_batch_decode_func()
 res1 = test_qwen3_model(
     get_global_func,
     batch_decode_func,
