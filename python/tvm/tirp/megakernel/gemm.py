@@ -99,13 +99,18 @@ class GemmTile(Tile):
     # idx of current gemm tile (no matter which shape it is)
     tile_idx = None
 
-    def __init__(self, N, K, a_type, b_type, out_type, split_k_factor, prefetch_on=False, profiler_on=False):
+    def __init__(self, N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, out_type=None, prefetch_on=False, profiler_on=False):
         super().__init__()
+        self.BLK_M = BLK_M
+        self.MMA_M = MMA_M
         self.N = N
         self.K = K
         self.a_type = a_type
         self.b_type = b_type
-        self.out_type = out_type
+        if out_type is None:
+            self.out_type = "float32" if split_k_factor > 1 else "float16"
+        else:
+            self.out_type = out_type
         self.split_k_factor = split_k_factor
         self.prefetch_on = prefetch_on
         self.profiler_on = profiler_on
@@ -216,9 +221,8 @@ class GemmTile(Tile):
 
     @T.macro
     def host_init(self):
-        BLK_M = T.if_then_else(self.M <= 32, 32, T.if_then_else(self.M <= 64, 64, 128))
         T.call_packed("runtime.cuTensorMapEncodeTiled", self.A_tensor_map, self.a_type, 2, self.A.data, 
-                      self.K, self.M, self.K * F16_BYTES, self.BLK_K, BLK_M, 1, 1, 0, self.SWIZZLE, 0, 0)
+                      self.K, self.M, self.K * F16_BYTES, self.BLK_K, self.BLK_M, 1, 1, 0, self.SWIZZLE, 0, 0)
         T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 2, self.B.data, 
                       self.K, self.N, self.K * F16_BYTES, self.BLK_K, self.BLK_N, 1, 1, 0, self.SWIZZLE, 0, 0)
         if self.split_k_factor > 1:
@@ -262,7 +266,7 @@ class GemmTile(Tile):
                                              profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
 
     @T.macro
-    def _run(self, m_idx, n_idx, k_idx, BLK_M, MMA_M, profiler_buffer, profiler_tag, profiler_write_offset):
+    def _run(self, m_idx, n_idx, k_idx, profiler_buffer, profiler_tag, profiler_write_offset):
         with T.cta():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
@@ -292,7 +296,7 @@ class GemmTile(Tile):
                                         self.tma2mma_bar.mbar.ptr_to([ks]),
                                         self.A_tensor_map,
                                         self.stage * self.BLK_K + k_offset,
-                                        m_idx * BLK_M,
+                                        m_idx * self.BLK_M,
                                         cta_group=KernelConfig.CTA_GROUP,
                                         cache_hint="evict_last",
                                     )
@@ -317,7 +321,7 @@ class GemmTile(Tile):
                                         ks,
                                         KernelConfig.CTA_GROUP
                                         * self.BLK_K
-                                        * (BLK_M + self.BLK_N)
+                                        * (self.BLK_M + self.BLK_N)
                                         * F16_BYTES,
                                     )
                                 self.phase[0] = self.phase[0] ^ 1
@@ -337,7 +341,7 @@ class GemmTile(Tile):
                                         self.tma2mma_bar.mbar.ptr_to([ks]),
                                         self.A_tensor_map,
                                         self.stage * self.BLK_K + k_offset,
-                                        m_idx * BLK_M,
+                                        m_idx * self.BLK_M,
                                         cta_group=KernelConfig.CTA_GROUP,
                                         cache_hint="evict_last",
                                     )
@@ -358,7 +362,7 @@ class GemmTile(Tile):
                                         ks,
                                         KernelConfig.CTA_GROUP
                                         * self.BLK_K
-                                        * (BLK_M + self.BLK_N)
+                                        * (self.BLK_M + self.BLK_N)
                                         * F16_BYTES,
                                     )
                                 # for unaligned cases
@@ -380,7 +384,7 @@ class GemmTile(Tile):
                             self.a_type,
                             self.b_type,
                             self.MMA_N,
-                            MMA_M,
+                            self.MMA_M,
                             self.MMA_K,
                             False,
                             False,
@@ -428,7 +432,7 @@ class GemmTile(Tile):
                                                 "float32",
                                                 self.a_type,
                                                 self.b_type,
-                                                self.tmem_idx * MMA_M,
+                                                self.tmem_idx * self.MMA_M,
                                                 descB,
                                                 descA,
                                                 descI,
@@ -441,7 +445,7 @@ class GemmTile(Tile):
                                                 "float32",
                                                 self.a_type,
                                                 self.b_type,
-                                                self.tmem_idx * MMA_M,
+                                                self.tmem_idx * self.MMA_M,
                                                 descB,
                                                 descA,
                                                 descI,
@@ -487,7 +491,7 @@ class GemmTile(Tile):
                                                 "float32",
                                                 self.a_type,
                                                 self.b_type,
-                                                self.tmem_idx * MMA_M,
+                                                self.tmem_idx * self.MMA_M,
                                                 descB,
                                                 descA,
                                                 descI,
@@ -500,7 +504,7 @@ class GemmTile(Tile):
                                                 "float32",
                                                 self.a_type,
                                                 self.b_type,
-                                                self.tmem_idx * MMA_M,
+                                                self.tmem_idx * self.MMA_M,
                                                 descB,
                                                 descA,
                                                 descI,
@@ -554,9 +558,9 @@ class GemmTile(Tile):
                     self.mma2ld_bar.wait(self.tmem_idx, self.tmem_phase)
                     T.ptx.tcgen05.fence.after_thread_sync()
 
-                    for ko in T.unroll(MMA_M // self.EPI_TILE):
+                    for ko in T.unroll(self.MMA_M // self.EPI_TILE):
                         self.stage = (
-                            self.tile_idx * MMA_M // self.EPI_TILE + ko
+                            self.tile_idx * self.MMA_M // self.EPI_TILE + ko
                         ) % self.TMEM_PIPE_DEPTH
                         # wait the smem to be free
                         if ko >= self.TMEM_PIPE_DEPTH:
@@ -567,7 +571,7 @@ class GemmTile(Tile):
                         # tmem -> rf (ld) -> smem
                         for ki in T.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
                             T.ptx.tcgen05.ld(
-                                0 + self.tmem_idx * MMA_M + ko * self.EPI_TILE,
+                                0 + self.tmem_idx * self.MMA_M + ko * self.EPI_TILE,
                                 warp_id * 32,
                                 ki * self.TMEM_LD_SIZE,
                                 "32x32b",
@@ -597,7 +601,7 @@ class GemmTile(Tile):
                                         warp_id * 32 + lane_id,
                                     ] = self.reg[vec]
                         # the tmem can be overwritten
-                        if ko == MMA_M // self.EPI_TILE - 1:
+                        if ko == self.MMA_M // self.EPI_TILE - 1:
                             T.ptx.tcgen05.fence.before_thread_sync()
                             self.ld2mma_bar.arrive(self.tmem_idx)
 
@@ -611,7 +615,7 @@ class GemmTile(Tile):
                                     self.output_smem.ptr_to([self.stage, 0, 0]),
                                     self.output_tensor_map,
                                     n_idx * self.BLK_N,
-                                    m_idx * BLK_M + ko * self.EPI_TILE,
+                                    m_idx * self.BLK_M + ko * self.EPI_TILE,
                                     k_idx,
                                     cache_hint="evict_last",
                                 )
@@ -621,7 +625,7 @@ class GemmTile(Tile):
                                     self.output_smem.ptr_to([self.stage, 0, 0]),
                                     self.output_tensor_map,
                                     n_idx * self.BLK_N,
-                                    m_idx * BLK_M + ko * self.EPI_TILE,
+                                    m_idx * self.BLK_M + ko * self.EPI_TILE,
                                 )
                             T.ptx.cp_async.bulk.commit_group()
                     if lane_id == 0 and warp_id == 0:
@@ -634,11 +638,5 @@ class GemmTile(Tile):
     @T.macro
     def run(self, m_idx, n_idx, k_idx, profiler_buffer, profiler_tag, profiler_write_offset):
         self._alloc_local()
-        #FIXME: move this tile size selection logic to host side can make performance better
-        if self.M <= 32:
-            self._run(m_idx, n_idx, k_idx, 32, 32, profiler_buffer, profiler_tag, profiler_write_offset)
-        elif self.M <= 64:
-            self._run(m_idx, n_idx, k_idx, 64, 64, profiler_buffer, profiler_tag, profiler_write_offset)
-        else:
-            self._run(m_idx, n_idx, k_idx, 128, 128, profiler_buffer, profiler_tag, profiler_write_offset)
+        self._run(m_idx, n_idx, k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
         self.smem_manager.advance()

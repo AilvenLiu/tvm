@@ -27,13 +27,7 @@ from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
 
-from ..megakernel.test_layer import (
-    DOWN_PROJ_SPLIT_K_FACTOR,
-    SPLIT_O_PROJRCT,
-    SPLIT_QKV_PROJECT,
-    PROFILER_BUFFER_SIZE,
-    MAX_NUM_KV_SPLITS,
-    MAX_TOTAL_NUM_WORKERS,
+from ..megakernel.test_layer_tp import (
     MegaKernel,
 )
 from .test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
@@ -43,7 +37,7 @@ from .test_rope import get_cos_sin_cache_kernel
 # pyright: reportInvalidTypeForm=false
 
 parser = ArgumentParser()
-parser.add_argument("--tp-size", type=int, default=1, choices=[1])
+parser.add_argument("--tp-size", type=int, default=1, choices=[1, 8])
 args = parser.parse_args()
 
 dev = tvm.cuda()
@@ -53,20 +47,22 @@ target = tvm.target.Target("cuda")
 PROFILER_ON = False
 PROFILER_LAYER_ID = [3, 47]
 PROFILER_TRIGGER_COUNT = 399
-PROFILER_DIR_PATH = "/home/guanjiew/qwen3-mg-debug" # NOTE: update this path
+PROFILER_DIR_PATH = "/home/hongyij/qwen3-mg-debug" # NOTE: update this path
 
 TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
 MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/Qwen3-32B-q0f16-tp{TP_SIZE}.so"
-MEGA_LIB_PATH = f"/home/guanjiew/megalib/Qwen3-32B-q0f16-MLC-tp{TP_SIZE}-profiler{"on" if PROFILER_ON else "off"}.so"  # NOTE: update this path
-DEBUG_PATH = "/home/guanjiew/qwen3-mg-debug" # NOTE: update this path
+MEGA_LIB_PATH = f"/home/hongyij/megalib/Qwen3-32B-q0f16-MLC-tp{TP_SIZE}-profiler{"on" if PROFILER_ON else "off"}.so"  # NOTE: update this path
+DEBUG_PATH = "/home/hongyij/qwen3-mg-debug" # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 32
-MAX_SEQ_LEN = 512
+MAX_SEQ_LEN = 1024
 MAX_TOTAL_SEQ_LEN = MAX_BATCH_SIZE * MAX_SEQ_LEN
 PAGE_SIZE = 16
 ROPE_THETA = 1000000
+
+nvshmem_initialized = False
 
 # problem config
 BATCH_SIZE = 31
@@ -316,6 +312,16 @@ def test_qwen3_model(
     is_megakernel=False,
     cos_sin_cache_func=None,
 ):
+    global nvshmem_initialized
+    if is_megakernel and not nvshmem_initialized and TP_SIZE > 1:
+        print(f"start to initialize nvshmem")
+        f_init_nvshmem_uid = tvm.get_global_func("runtime.disco.nvshmem.init_nvshmem_uid")
+        uid = f_init_nvshmem_uid()
+        f_init_nvshmem = get_global_func("runtime.disco.nvshmem.init_nvshmem")
+        f_init_nvshmem(uid, TP_SIZE, 0)
+        nvshmem_initialized = True
+        print(f"nvshmem initialized")
+
     kv_cache = kv_cache_create_func(
         ShapeTuple([MAX_BATCH_SIZE]),  # max_batch_size
         ShapeTuple([MAX_TOTAL_SEQ_LEN]),  # max_total_seq_len
@@ -397,7 +403,8 @@ def attach_attr(func, name):
 
 def get_qwen3_megakernel_mod():
     rms_norm = get_rmsnorm_kernel(5120)
-    layer_kernel = MegaKernel(profiler_on=PROFILER_ON).get_func_static()
+    mk = MegaKernel(world_size=TP_SIZE, profiler_on=PROFILER_ON)
+    layer_kernel = mk.get_func_static()
     hgemm, reduce, tile_k_num = get_hgemm_kernel(dim_n=151936, dim_k=5120)
     cos_sin_cache = get_cos_sin_cache_kernel(128, ROPE_THETA)
 
@@ -464,18 +471,21 @@ def get_qwen3_megakernel_mod():
             )
 
             default_device = R.call_pure_packed("runtime.disco.device", sinfo_args=[R.Object])
-            partital_qkv = R.builtin.alloc_tensor(R.shape([SPLIT_QKV_PROJECT, batch_size, 10240 // TP_SIZE]), dtype="float32", runtime_device_index=0)
+            partital_qkv = R.builtin.alloc_tensor(R.shape([mk.SPLIT_QKV_PROJECT, batch_size, 10240 // TP_SIZE]), dtype="float32", runtime_device_index=0)
             qkv = R.builtin.alloc_tensor(R.shape([batch_size, 80 // TP_SIZE, 128]), dtype="float16", runtime_device_index=0)
             o = R.builtin.alloc_tensor(R.shape([batch_size, 64 // TP_SIZE, 128]), dtype="float16", runtime_device_index=0)
-            o_partial_attn = R.builtin.alloc_tensor(R.shape([MAX_NUM_KV_SPLITS * 8 // TP_SIZE * 128]), dtype="float32", runtime_device_index=0)
-            les_partial = R.builtin.alloc_tensor(R.shape([MAX_NUM_KV_SPLITS * 8 // TP_SIZE]), dtype="float32", runtime_device_index=0)
-            partial_o = R.builtin.alloc_tensor(R.shape([SPLIT_O_PROJRCT, batch_size, 5120]), dtype="float32", runtime_device_index=0)
-            hidden_state_attn_mlp = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
+            o_partial_attn = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE * 128]), dtype="float32", runtime_device_index=0)
+            lse_partial = R.builtin.alloc_tensor(R.shape([mk.MAX_NUM_KV_SPLITS * 8 // TP_SIZE]), dtype="float32", runtime_device_index=0)
+            partial_o = R.builtin.alloc_tensor(R.shape([mk.SPLIT_O_PROJRCT, batch_size, 5120]), dtype="float32", runtime_device_index=0)
+            before_o_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, 5120]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, 5120), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
+            hidden_state_attn_mlp = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, 5120]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, 5120), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
+            partial_out_gate_up_proj = R.builtin.alloc_tensor(R.shape([mk.GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, 25600 // TP_SIZE * 2]), dtype="float32", runtime_device_index=0)
             out_gate_up_proj = R.builtin.alloc_tensor(R.shape([batch_size, 51200 // TP_SIZE]), dtype="float16", runtime_device_index=0)
             out_silu_multiply = R.builtin.alloc_tensor(R.shape([batch_size, 25600 // TP_SIZE]), dtype="float16", runtime_device_index=0)
-            partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([DOWN_PROJ_SPLIT_K_FACTOR, batch_size, 5120]), dtype="float32", runtime_device_index=0)
-            output_tensor = R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
-            profiler_buffer = R.builtin.alloc_tensor(R.shape([PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)
+            partial_sum_down_proj = R.builtin.alloc_tensor(R.shape([mk.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, 5120]), dtype="float32", runtime_device_index=0)
+            before_down_proj_allreduce = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, 5120]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, 5120), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
+            output_tensor = R.call_pure_packed("runtime.disco.nvshmem.empty", R.shape([batch_size, 5120]), R.dtype("float16"), default_device, sinfo_args=[R.Tensor((batch_size, 5120), "float16")]) if TP_SIZE > 1 else R.builtin.alloc_tensor(R.shape([batch_size, 5120]), dtype="float16", runtime_device_index=0)
+            profiler_buffer = R.builtin.alloc_tensor(R.shape([mk.PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)
 
             layer_res = R.call_tir_inplace(
                 cls.layer_kernel, 
@@ -492,20 +502,22 @@ def get_qwen3_megakernel_mod():
                     partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,
                     work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices,
                     # intermediate buffer
-                    partital_qkv, qkv, o, o_partial_attn, les_partial, partial_o, hidden_state_attn_mlp,
-                    out_gate_up_proj, out_silu_multiply, partial_sum_down_proj,
+                    partital_qkv, qkv, o, o_partial_attn, lse_partial, partial_o, before_o_allreduce, 
+                    hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply, 
+                    partial_sum_down_proj, before_down_proj_allreduce,
                     # event tensor
                     etensor_qkv_partial, etensor_q_reduce, etensor_k_reduce, etensor_v_reduce, etensor_attn,
-                    etensor_attn_merge, etensor_o_proj, etensor_o_partial, etensor_attn_add_rms_norm, etensor_attn_mlp,
-                    etensor_gate_up_proj, etensor_down_proj, etensor_down_proj_reduce, etensor_mlp_add_rms_norm,
+                    etensor_attn_merge, etensor_o_proj, etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm, 
+                    etensor_attn_mlp, etensor_gate_up_proj_reduce, etensor_gate_up_proj, etensor_down_proj, 
+                    etensor_down_proj_reduce, etensor_down_proj_allreduce, etensor_mlp_add_rms_norm,
                     # execution queue
                     exec_queue, profiler_buffer
                 ),
-                [2, 1, 55],
+                [2, 1, 61],
                 out_sinfo=[
                     R.Tensor((batch_size, 5120), dtype="float16"), # residual
                     R.Tensor((batch_size, 5120), dtype="float16"), # output
-                    R.Tensor((PROFILER_BUFFER_SIZE,), dtype="uint64"), # profiler
+                    R.Tensor((mk.PROFILER_BUFFER_SIZE,), dtype="uint64"), # profiler
                 ]
             )
             R.output(layer_res)
@@ -598,10 +610,13 @@ def get_qwen3_megakernel_mod():
             o_partial_attn_ptr: T.handle, # intermediate
             lse_partial_attn_ptr: T.handle, # intermediate
             partial_o_ptr: T.handle, # intermediate
+            before_o_allreduce_ptr: T.handle, # intermediate
             hidden_state_attn_mlp_ptr: T.handle, # intermediate
+            partial_out_gate_up_proj_ptr: T.handle, # intermediate
             out_gate_up_proj_ptr: T.handle, # intermediate
             out_silu_multiply_ptr: T.handle, # intermediate
             partial_sum_down_proj_ptr: T.handle, # intermediate
+            before_down_proj_allreduce_ptr: T.handle, # intermediate
             
             # event tensor
             etensor_qkv_partial_ptr: T.handle, 
@@ -612,16 +627,19 @@ def get_qwen3_megakernel_mod():
             etensor_attn_merge_ptr: T.handle,
             etensor_o_proj_ptr: T.handle, 
             etensor_o_partial_ptr: T.handle, 
+            etensor_o_allreduce_ptr: T.handle,
             etensor_attn_add_rms_ptr: T.handle,
             etensor_attn_mlp_ptr: T.handle,
+            etensor_gate_up_proj_reduce_ptr: T.handle,
             etensor_gate_up_proj_ptr: T.handle,
             etensor_down_proj_ptr: T.handle,
             etensor_down_proj_reduce_ptr: T.handle,
+            etensor_down_proj_allreduce_ptr: T.handle,
             etensor_mlp_add_rms_ptr: T.handle,
 
             # execution queue
             exec_queue_ptr: T.handle,
-            profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")
+            profiler_buffer: T.Buffer((mk.PROFILER_BUFFER_SIZE,), "uint64")
         ):
             pass
 
@@ -685,19 +703,19 @@ def get_qwen3_megakernel_mod():
                 task, len_kv_chunk_, merge_indptr_, merge_o_indices_, num_qo_len_ = attn_plan_results[3], attn_plan_results[4], attn_plan_results[5], attn_plan_results[6], attn_plan_results[7]
                 q_indptr_, kv_indptr_, partial_indptr_, q_len_, kv_len_, q_start_, kv_start_, kv_end_, kv_head_idx_, work_indptr_ = task[0], task[1], task[2], task[3], task[4], task[5], task[6], task[7], task[8], task[9]
                 len_kv_chunk = R.match_cast(len_kv_chunk_, R.Tensor((2,), dtype="int32"))
-                merge_indptr = R.match_cast(merge_indptr_, R.Tensor((MAX_NUM_KV_SPLITS,), dtype="int32"))
-                merge_o_indices = R.match_cast(merge_o_indices_, R.Tensor((MAX_NUM_KV_SPLITS,), dtype="int32"))
+                merge_indptr = R.match_cast(merge_indptr_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
+                merge_o_indices = R.match_cast(merge_o_indices_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
                 num_qo_len = R.match_cast(num_qo_len_, R.Tensor((1,), dtype="int32"))
-                q_indptr = R.match_cast(q_indptr_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                kv_indptr = R.match_cast(kv_indptr_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                partial_indptr = R.match_cast(partial_indptr_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                q_len = R.match_cast(q_len_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                kv_len = R.match_cast(kv_len_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                q_start = R.match_cast(q_start_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                kv_start = R.match_cast(kv_start_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                kv_end = R.match_cast(kv_end_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                kv_head_idx = R.match_cast(kv_head_idx_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                work_indptr = R.match_cast(work_indptr_, R.Tensor((MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                q_indptr = R.match_cast(q_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_indptr = R.match_cast(kv_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                partial_indptr = R.match_cast(partial_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                q_len = R.match_cast(q_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_len = R.match_cast(kv_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                q_start = R.match_cast(q_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_start = R.match_cast(kv_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_end = R.match_cast(kv_end_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                kv_head_idx = R.match_cast(kv_head_idx_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                work_indptr = R.match_cast(work_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
                 res2 = R.call_pure_packed(
                     "vm.builtin.paged_attention_kv_cache_get_exec_queue",
                     paged_kv_cache,
@@ -844,7 +862,7 @@ def get_qwen3_megakernel_mod():
 
             res = model_output[0], model_output[1]
             return res
-    
+
     # fmt: on
     mod = Module
 
