@@ -51,10 +51,11 @@ class MegaKernel:
     PAGE_SIZE = 16
     SEQ_LEN = 511
 
-    SPLIT_QKV_PROJECT_DICT = {1: 3, 8: 4}
-    SPLIT_O_PROJRCT_DICT = {1: 3, 8: 2}
-    GATE_UP_PROJ_SPLIT_K_FACTOR_DICT = {1: 1, 8: 2}
-    DOWN_PROJ_SPLIT_K_FACTOR_DICT = {1: 10, 8: 3}
+    #FIXME: the config for TP 4 is not tuned
+    SPLIT_QKV_PROJECT_DICT = {1: 3, 4: 4, 8: 4}
+    SPLIT_O_PROJRCT_DICT = {1: 3, 4: 2, 8: 2}
+    GATE_UP_PROJ_SPLIT_K_FACTOR_DICT = {1: 1, 4: 2, 8: 2}
+    DOWN_PROJ_SPLIT_K_FACTOR_DICT = {1: 10, 4: 3, 8: 3}
     NUM_TASK_ARGS = 10
     MAX_TOTAL_NUM_WORKERS = 65536
     MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)

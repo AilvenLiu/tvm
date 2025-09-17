@@ -37,7 +37,7 @@ from .test_rope import get_cos_sin_cache_kernel
 # pyright: reportInvalidTypeForm=false
 
 parser = ArgumentParser()
-parser.add_argument("--tp-size", type=int, default=1, choices=[1, 8])
+parser.add_argument("--tp-size", type=int, default=1, choices=[1, 4, 8])
 args = parser.parse_args()
 
 dev = tvm.cuda()

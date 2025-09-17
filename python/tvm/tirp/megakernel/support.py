@@ -202,18 +202,22 @@ def decode_attn_plan(
 
 SPLIT_QKV_PROJECT = {
     1: 3,
+    4: 4,
     8: 4,
 }
 SPLIT_O_PROJRCT = {
     1: 3,
+    4: 2,
     8: 2,
 }
 DOWN_PROJ_SPLIT_K_FACTOR = {
     1: 10,
+    4: 3,
     8: 3,
 }
 GATE_UP_PROJ_SPLIT_K_FACTOR = {
     1: 1,
+    4: 2,
     8: 2,
 }
 
