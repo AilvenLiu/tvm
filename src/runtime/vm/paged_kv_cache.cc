@@ -2873,6 +2873,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       ffi::Function f_nvshmem_barrier =
           ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.barrier_all_on_stream");
       f_nvshmem_barrier(copy_stream_);
+      auto f_sync_stream = tvm::ffi::Function::GetGlobalRequired("runtime.Device_StreamSync");
+      DiscoWorker* disco_worker = ThreadLocalDiscoWorker::Get()->worker;
+      f_sync_stream(disco_worker->default_device, reinterpret_cast<int64_t>(copy_stream_));
     }
     // - Reset the dirty flag to false.
     dirty_aux_data_device_ = false;

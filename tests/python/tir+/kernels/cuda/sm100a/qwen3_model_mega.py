@@ -2,6 +2,8 @@ import json
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import List
+import random
+
 
 import numpy as np
 import torch
@@ -38,13 +40,14 @@ from .test_rope import get_cos_sin_cache_kernel
 
 parser = ArgumentParser()
 parser.add_argument("--tp-size", type=int, default=1, choices=[1, 4, 8])
+parser.add_argument("--profiler-on", action="store_true", default=False)
 args = parser.parse_args()
 
 dev = tvm.cuda()
 target = tvm.target.Target("cuda")
 
 # profiler
-PROFILER_ON = False
+PROFILER_ON = args.profiler_on
 PROFILER_LAYER_ID = [3, 47]
 PROFILER_TRIGGER_COUNT = 399
 PROFILER_DIR_PATH = "/home/hongyij/qwen3-mg-debug" # NOTE: update this path
@@ -56,7 +59,7 @@ MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/Qwen3-32B-q0f16-tp{TP_SI
 MEGA_LIB_PATH = f"/home/hongyij/megalib/Qwen3-32B-q0f16-MLC-tp{TP_SIZE}-profiler{"on" if PROFILER_ON else "off"}.so"  # NOTE: update this path
 DEBUG_PATH = "/home/hongyij/qwen3-mg-debug" # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
-MAX_BATCH_SIZE = 32
+MAX_BATCH_SIZE = 128
 MAX_SEQ_LEN = 1024
 MAX_TOTAL_SEQ_LEN = MAX_BATCH_SIZE * MAX_SEQ_LEN
 PAGE_SIZE = 16
@@ -65,7 +68,7 @@ ROPE_THETA = 1000000
 nvshmem_initialized = False
 
 # problem config
-BATCH_SIZE = 31
+BATCH_SIZE = 128
 SEQ_LEN = 400
 
 config_tp1 = Qwen3Config(
@@ -302,6 +305,7 @@ def load_reference_model_lib():
 
 vm, batch_decode_func, kv_cache_create_func, embed_func = load_reference_model_lib()
 params = get_params(named_params, vm)
+decrease_bs = set([random.randint(1, 20) for i in range(BATCH_SIZE)])
 
 
 def test_qwen3_model(
@@ -358,6 +362,11 @@ def test_qwen3_model(
     logits_arr = list()
     last_tokens = np.random.randint(0, 100, size=(batch_size,))
     for i in tqdm(range(seq_len)):
+        if i in decrease_bs and batch_size > 1:
+            batch_size -= 1
+            last_tokens = last_tokens[:batch_size]
+            seq_ids = seq_ids[:batch_size]
+        print(f"cur batch_size: {batch_size}")
         tokens = tvm.runtime.tensor(last_tokens.astype("int32"), device=dev)
         if TP_SIZE > 1:
             tokens_d = get_global_func("runtime.disco.empty")(
