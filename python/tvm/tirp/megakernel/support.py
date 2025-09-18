@@ -19,6 +19,7 @@ import numpy as np
 import threading
 from typing import List
 import torch
+from pathlib import Path
 
 import tvm_ffi
 
@@ -546,48 +547,28 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
 
 class ProfilerHandler:
     def __init__(self):
-        self.initialized = False
         self.counter = 0
-        self.profiler_on = False
-        self.trigger_count = 0
-        self.profiler_layer_id = []
+        self.trigger_count = 167
+        self.profiler_layer_id = [3, 47]
         self.lock = threading.Lock()
-        self.dir_path = ""
-        self.use_nvshmem = False
+        self.dir_path = Path("~/qwen3-mg-debug").expanduser()
         
-    
-    def initialize(self, profiler_on=False, trigger_count=-1, profiler_layer_id=[], dir_path="", rank=-1):
-        self.profiler_on = profiler_on
-        self.trigger_count = trigger_count
-        self.profiler_layer_id = profiler_layer_id
-        self.dir_path = dir_path
-        self.rank = rank
-        self.initialized = True
-        print(f"ProfilerHandler initialized: profiler_on={profiler_on}, trigger_count={trigger_count}, profiler_layer_id={profiler_layer_id}, dir_path={dir_path}, rank={rank}")
+    def export_trace(self, profiler_buffer, rank):
+        with self.lock:
+            self.counter += 1
+            current_run = self.counter    
+        
+        if current_run == self.trigger_count:  
+            for layer_id in self.profiler_layer_id:
+                if rank == -1:
+                    file_name = f"{self.dir_path}/qwen3-model-mega-layer{layer_id}.perfetto-trace"
+                else:
+                    file_name = f"{self.dir_path}/qwen3-model-mega-layer{layer_id}-rank{rank}.perfetto-trace"
+                export_to_perfetto_trace(profiler_buffer[layer_id].numpy(), file_name, event_type_names)
+                print(f"Exported layer {layer_id} to {file_name}")                
 
-    def export_trace(self, profiler_buffer):
-        if not self.initialized:
-            print("Warning: ProfilerHandler not initialized")
-            return
-        if self.profiler_on:
-            with self.lock:
-                self.counter += 1
-                current_run = self.counter    
-            if current_run == self.trigger_count:  
-                for layer_id in self.profiler_layer_id:
-                    if self.rank == -1:
-                        file_name = f"{self.dir_path}/qwen3-model-mega-layer{layer_id}.perfetto-trace"
-                    else:
-                        file_name = f"{self.dir_path}/qwen3-model-mega-layer{layer_id}-rank{self.rank}.perfetto-trace"
-                    export_to_perfetto_trace(profiler_buffer[layer_id].numpy(), file_name, event_type_names)
-                    print(f"Exported layer {layer_id} to {file_name}")                
-    
 profiler_handler = ProfilerHandler()
 
-@tvm_ffi.register_global_func("megakernel.initialize_profiler")
-def initialize_profiler(profiler_on=False, trigger_count=-1, profiler_layer_id=[], dir_path="", rank=-1):
-    profiler_handler.initialize(profiler_on, trigger_count, profiler_layer_id, dir_path, rank)
-    
 @tvm_ffi.register_global_func("megakernel.export_trace")
-def export_trace(profiler_buffer):
-    profiler_handler.export_trace(profiler_buffer)
+def export_trace(profiler_buffer, rank):
+    profiler_handler.export_trace(profiler_buffer, rank[0])

@@ -273,17 +273,6 @@ get_global_func = (
     )
 )
 
-def init_profiler():
-    profiler_init_func = get_global_func("megakernel.initialize_profiler")
-    if TP_SIZE > 1:
-        get_rank_func = get_global_func("runtime.disco.worker_rank")
-        rank = get_rank_func()
-    else:
-        rank = -1
-    profiler_init_func(PROFILER_ON, PROFILER_TRIGGER_COUNT, ShapeTuple(PROFILER_LAYER_ID), PROFILER_DIR_PATH, rank)
-
-init_profiler()
-
 def load_reference_model_lib():
     if TP_SIZE == 1:
         ex = tvm.runtime.load_module(MODEL_LIB_PATH)
@@ -863,11 +852,17 @@ def get_qwen3_megakernel_mod():
                 cos_sin_cache,
                 packed_params,
             )
-            _ = R.call_packed(
-                "megakernel.export_trace",
-                model_output[2],
-                sinfo_args=[],
-            )
+            if PROFILER_ON:
+                rank = R.call_packed("runtime.disco.worker_id", sinfo_args=[R.Shape()]) if TP_SIZE > 1 else R.prim_value(-1)
+                _ = R.call_packed(
+                    "megakernel.export_trace",
+                    model_output[2],
+                    rank,
+                    sinfo_args=[],
+                )
+            else:
+                # there must be some dummy thing in else statement to avoid error
+                _ = R.prim_value(-1)
 
             res = model_output[0], model_output[1]
             return res
