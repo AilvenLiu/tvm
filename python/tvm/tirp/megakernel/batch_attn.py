@@ -307,7 +307,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         self.packed_kv_bound = int_var(name="packed_kv_bound")
 
     @T.macro
-    def prelogue(
+    def prefetch(
         self,
         m_idx,
         n_idx,
