@@ -3764,6 +3764,34 @@ def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, *coords,
     )
 
 
+def ptx_cp_async_bulk_tensor_shared_to_global_reduce(dim, src_ptr, tensormap, *coords, cache_hint="", red_op="add"):
+
+    """TVM intrinsic to call cp.reduce.async.bulk.tensor.dim.dst.src.redOp
+
+    Parameters
+    ----------
+    dim : int
+        The dimension of the copy tensor.
+        
+    tensor_map: Var
+        The tensor map.
+
+    coords: List[PrimExpr]
+        The coordinates of the tensor.
+
+    cache_hint: str
+        The cache hint.
+        
+    red_op: str
+        The reduction operator.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.ptx_cp_async_bulk_tensor_shared_to_global_reduce", dim, src_ptr, tensormap, *coords, cache_hint, red_op)
+
 def ptx_cp_async_bulk_commit_group():
     """TVM intrinsic to call cp.async.bulk.tensor.commit_group
 
