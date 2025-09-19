@@ -63,9 +63,7 @@ class AddRMSNormTile(Tile):
             # add & sum square
             self._alloc_local()
             with T.thread():
-                if warp_id_in_cta == 0:
-                    self.smem_manager.wait_all(lane_id)
-                T.tvm_storage_sync("shared")
+                self.smem_manager.wait_all("cta")
                 for kl in T.unroll(self.loop_inner):
                     self.sum_sq[kl, 0] = 0.0
                 self.rms_norm[0] = 0.0
@@ -151,8 +149,6 @@ class AddRMSNormTile(Tile):
                         if st < self.hidden_size - kl * self.vec_size:
                             Tp.copy(output_buf[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec[kl, :])
                 
-                T.tvm_storage_sync("shared")
-                if warp_id_in_cta == 0:
-                    self.smem_manager.arrive_all(lane_id)
+                self.smem_manager.arrive_all("cta")
                 self.smem_manager.advance() 
     # fmt: on

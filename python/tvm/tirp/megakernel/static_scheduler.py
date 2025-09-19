@@ -128,14 +128,14 @@ __forceinline__ __device__ void lds_v4(void* addr, int32_t* v1, int32_t* v2, int
 class StaticTileScheduler:
     MAX_TASKS = 128
 
-    def __init__(self, prefix: str, exec_queue, pool_allocator):
+    def __init__(self, prefix: str, exec_queue, smem_manager):
         super().__init__()
         self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
         self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
         self.k_idx = T.local_cell("int32", name=prefix + "_k_idx")
         self.task_type = T.local_cell("int32", name=prefix + "_task_type")
         self.tile_idx = T.local_cell("int32", name=prefix + "_tile_idx")
-        self.queue_smem = pool_allocator.alloc((self.MAX_TASKS, 4), "int32", align=16).buffer
+        self.queue_smem = smem_manager.alloc((self.MAX_TASKS, 4), "int32", align=16, method="persistent").buffer
         self.exec_queue = exec_queue
 
     @T.macro

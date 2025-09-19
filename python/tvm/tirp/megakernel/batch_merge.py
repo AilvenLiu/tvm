@@ -191,9 +191,7 @@ __syncwarp();
             lane_id = T.thread_id([32], parent="warp")
             
             with T.thread():
-                if warp_id == 0:
-                    self.smem_manager.wait_all(lane_id)
-                T.tvm_storage_sync("shared")
+                self.smem_manager.wait_all("cta")
                 
                 tx = int_var(name="tx", val=lane_id % self.bdx)
                 ty = int_var(name="ty", val=lane_id // self.bdx)
@@ -278,7 +276,5 @@ __syncwarp();
                         final_o_buf_2d = final_o_tvm.view(-1, self.head_dim)
                         cast_store(state.o, self.vec_size, final_o_buf_2d, merge_idx_to_offset, tx[0] * self.vec_size)
 
-                T.tvm_storage_sync("shared")
-                if warp_id == 0:
-                    self.smem_manager.arrive_all(lane_id)
+                self.smem_manager.arrive_all("cta")
                 self.smem_manager.advance()

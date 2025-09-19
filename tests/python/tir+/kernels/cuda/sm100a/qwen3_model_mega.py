@@ -50,14 +50,14 @@ target = tvm.target.Target("cuda")
 PROFILER_ON = args.profiler_on
 PROFILER_LAYER_ID = [3, 47]
 PROFILER_TRIGGER_COUNT = 399
-PROFILER_DIR_PATH = "/home/hongyij/qwen3-mg-debug" # NOTE: update this path
+PROFILER_DIR_PATH = "/home/guanjiew/qwen3-mg-debug" # NOTE: update this path
 
 TP_SIZE = args.tp_size
 NUM_HIDDEN_LAYERS = 64
 LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
 MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/Qwen3-32B-q0f16-tp{TP_SIZE}.so"
-MEGA_LIB_PATH = f"/home/hongyij/megalib/Qwen3-32B-q0f16-MLC-tp{TP_SIZE}-profiler{"on" if PROFILER_ON else "off"}.so"  # NOTE: update this path
-DEBUG_PATH = "/home/hongyij/qwen3-mg-debug" # NOTE: update this path
+MEGA_LIB_PATH = f"/home/guanjiew/megalib/Qwen3-32B-q0f16-MLC-tp{TP_SIZE}-profiler{"on" if PROFILER_ON else "off"}.so"  # NOTE: update this path
+DEBUG_PATH = "/home/guanjiew/qwen3-mg-debug" # NOTE: update this path
 # LOAD_WEIGHTS = None  # generate weights
 MAX_BATCH_SIZE = 128
 MAX_SEQ_LEN = 1024
@@ -69,7 +69,7 @@ nvshmem_initialized = False
 
 # problem config
 BATCH_SIZE = 128
-SEQ_LEN = 400
+SEQ_LEN = 300
 
 config_tp1 = Qwen3Config(
     hidden_act="silu",

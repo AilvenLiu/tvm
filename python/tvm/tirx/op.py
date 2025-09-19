@@ -5356,6 +5356,22 @@ def cuda_syncthreads_and(cond):
     return call_intrin("int64", "tir.cuda_syncthreads_and", cond)
 
 
+def cuda_syncthreads_or(cond):
+    """TVM intrinsic to call cuda syncthreads_or instruction
+
+    Parameters
+    ----------
+    cond: PrimExpr
+        The condition.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("int64", "tir.cuda_syncthreads_or", cond)
+
+
 def cuda_nano_sleep(time):
     """TVM intrinsic to call cuda nano sleep instruction
 

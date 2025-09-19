@@ -3465,6 +3465,17 @@ __forceinline__ __device__ int {func_name}(int predicate) {{
     return cuda_func_call(func_name, predicate, source_code=source_code, return_type="int32")
 
 
+@register_codegen("cuda_syncthreads_or")
+def codegen_cuda_syncthreads_or(predicate):
+    func_name = "tvm_builtin_cuda_syncthreads_or"
+    source_code = f"""
+__forceinline__ __device__ int {func_name}(int predicate) {{
+    return __syncthreads_or(predicate);
+}}
+"""
+    return cuda_func_call(func_name, predicate, source_code=source_code, return_type="int32")
+
+
 @register_codegen("cuda_nano_sleep")
 def codegen_cuda_nano_sleep(time):
     func_name = "tvm_builtin_cuda_nano_sleep"

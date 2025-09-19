@@ -847,6 +847,11 @@ TVM_DLL const Op& cuda_thread_fence();
 TVM_DLL const Op& cuda_syncthreads_and();
 
 /*!
+ * \brief tvm intrinsic for cuda syncthreads_or instruction
+ */
+TVM_DLL const Op& cuda_syncthreads_or();
+
+/*!
  * \brief tvm intrinsic for cuda nano sleep instruction
  */
 TVM_DLL const Op& cuda_nano_sleep();

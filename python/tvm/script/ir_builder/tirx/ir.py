@@ -2489,6 +2489,7 @@ class CUDANamespace:
         self.atomic_add = _op_wrapper(_tir_op.cuda_atomic_add)
         self.thread_fence = _op_wrapper(_tir_op.cuda_thread_fence)
         self.syncthreads_and = _op_wrapper(_tir_op.cuda_syncthreads_and)
+        self.syncthreads_or = _op_wrapper(_tir_op.cuda_syncthreads_or)
         self.nano_sleep = _op_wrapper(_tir_op.cuda_nano_sleep)
         self.atomic_cas = _op_wrapper(_tir_op.cuda_atomic_cas)
         self.func_call = _op_wrapper(_tir_op.cuda_func_call)

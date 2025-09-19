@@ -43,9 +43,7 @@ class SiluMultiplyTile(Tile):
             with T.thread():              
                 self.idx = tid * self.VEC_SIZE
 
-                if warp_id == 0:
-                    self.smem_manager.wait_all(lane_id)
-                T.tvm_storage_sync("shared")
+                self.smem_manager.wait_all("cta")
 
                 for ki in T.unroll(self.PIPE_DEPTH - 1):
                     token_idx = T.meta_var(self.idx // self.TILE_SIZE)
@@ -82,8 +80,7 @@ class SiluMultiplyTile(Tile):
                         output[token_idx_write, offset_imme_write + kv] = self.vec1[kv]
                     self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS
 
-                if warp_id == 0:
-                    self.smem_manager.arrive_all(lane_id)
+                self.smem_manager.arrive_all("cta")
                 self.smem_manager.advance()
 
                 # TODO: prefetch

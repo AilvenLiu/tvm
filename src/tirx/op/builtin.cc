@@ -389,6 +389,9 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_thread_fence)
 TIR_DEFINE_BUILTIN_FUNC(cuda_syncthreads_and)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(cuda_syncthreads_or)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(cuda_nano_sleep)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

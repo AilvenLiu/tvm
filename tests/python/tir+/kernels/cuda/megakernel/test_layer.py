@@ -254,9 +254,10 @@ class MegaKernel:
 
         with T.kernel():
             bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid_in_wg = T.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
             profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
             profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
@@ -287,46 +288,46 @@ class MegaKernel:
                 evt_add_rms_norm = T.meta_var(static_scheduler.Semaphore(self.HIDDEN_SIZE // (self.down_proj_reduce_tile.N_TILE if self.world_size == 1 else self.down_proj_allreduce_tile.N_TILE), etensor_mlp_add_rms_global, use_nvshmem=self.world_size > 1))
 
                 # initialize tile scheduler
-                tile_scheduler = T.meta_var(StaticTileScheduler(prefix="attn", exec_queue=exec_queue, pool_allocator=pool))
+                tile_scheduler = T.meta_var(StaticTileScheduler(prefix="attn", exec_queue=exec_queue, smem_manager=smem_manager))
                 tile_scheduler.init(bx, tid)
                 smem_manager.init()
 
                 while tile_scheduler.valid():
                     if tile_scheduler.task_type == JobType.GEMM_QKV_PROJ.value:
+                        smem_manager.enter_tile_runtime(self.qkv_proj_tile)
                         self.run_tile(self.qkv_proj_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
                         if wg_id == 0:
                             T.ptx.bar.sync(1, 128)
                             if tid == 0:
                                 evt_qkv_partial.semaphore_notify(tile_scheduler.n_idx // (self.qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT))
                     elif tile_scheduler.task_type == JobType.Q_REDUCE_RMS_ROPE.value:
+                        smem_manager.enter_tile_runtime(self.reduce_rms_rope_q_tile)
                         evt_qkv_partial.semaphore_wait(tile_scheduler.n_idx)
                         self.run_tile(self.reduce_rms_rope_q_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partital_qkv_global, qkv_global, q_rms_weight_global, rope_pos_global, cos_sin_cache_global)
                         T.tvm_storage_sync("shared")
                         if tid == 0:
                             evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
                     elif tile_scheduler.task_type == JobType.K_REDUCE_RMS_ROPE_APPEND.value:
+                        smem_manager.enter_tile_runtime(self.reduce_rms_rope_append_k_tile)
                         evt_qkv_partial.semaphore_wait(tile_scheduler.n_idx + self.NUM_ATTENTION_HEADS // SplitKReduceRMSnormRopeAppendKTile.h_tile)
                         self.run_tile(self.reduce_rms_rope_append_k_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partital_qkv_global, k_rms_weight_global, rope_pos_global, cos_sin_cache_global, append_pos_global, kv_cache_global)
                         T.tvm_storage_sync("shared")
                         if tid == 0:
                             evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
                     elif tile_scheduler.task_type == JobType.V_REDUCE_APPEND.value:
+                        smem_manager.enter_tile_runtime(self.reduce_append_v_tile)
                         evt_qkv_partial.semaphore_wait(tile_scheduler.n_idx + (self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS) // SplitKReduceAppendVTile.H_TILE)
                         self.run_tile(self.reduce_append_v_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partital_qkv_global, kv_cache_global, append_pos_global)
                         T.tvm_storage_sync("shared")
                         if tid == 0:
                             evt_attn.semaphore_notify(tile_scheduler.m_idx, tile_scheduler.n_idx)
                     elif tile_scheduler.task_type == JobType.BATCH_ATTENTION.value:
+                        smem_manager.enter_tile_runtime(self.attn_tile)
                         worker_idx = tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id
                         attn_task_num = work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]  
                         batch_idx = T.meta_var(q_indptr_global[worker_idx])
-                        kv_idx = T.meta_var(kv_head_idx_global[worker_idx])
-
-                        # TODO: Now sync cta for simple, need to finegrain in the future
-                        if warp_id == 0 and wg_id == 0:
-                            smem_manager.wait_all(lane_id)
-                        T.tvm_storage_sync("shared")   
-
+                        kv_idx = T.meta_var(kv_head_idx_global[worker_idx])                                    
+                        smem_manager.wait_all("cta")
                         if worker_idx < attn_task_num:
                             self.run_tile_prefetch(self.attn_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
                                                 kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
@@ -346,13 +347,19 @@ class MegaKernel:
                                 range_end = T.meta_var(((kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM - 1) // self.o_proj_tile.TILE_K)
                                 if tid % (KernelConfig.WARP_NUMBER * 32) <= range_end - range_start:
                                     evt_o_proj.semaphore_notify(range_start + tid % (KernelConfig.WARP_NUMBER * 32))
-                                    # TODO: Now sync cta for simple, need to finegrain in the future
-                        T.tvm_storage_sync("shared")
-                        if warp_id == 0 and wg_id == 0:
-                            smem_manager.arrive_all(lane_id)
+                        smem_manager.arrive_all("cta")
                         smem_manager.advance()
-
-                    elif tile_scheduler.task_type == JobType.BATCH_ATTENTION_MERGE.value:
+                    else:
+                        break
+                    
+                    smem_manager.exit_tile_runtime()
+                    tile_scheduler.next_tile()
+                    
+                T.tvm_storage_sync("shared")
+                    
+                while tile_scheduler.valid():
+                    if tile_scheduler.task_type == JobType.BATCH_ATTENTION_MERGE.value:
+                        smem_manager.enter_tile_runtime(self.merge_tile)
                         worker_id = T.meta_var(tile_scheduler.m_idx * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER)
                         qo_idx = T.meta_var(worker_id % (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
                         kv_idx = T.meta_var(worker_id // (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)))
@@ -366,6 +373,7 @@ class MegaKernel:
                         if tid <= range_end - range_start:
                             evt_o_proj.semaphore_notify(range_start + tid)
                     elif tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
+                        smem_manager.enter_tile_runtime(self.o_proj_tile)
                         self.run_tile_prefetch(self.o_proj_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
                         evt_o_proj.semaphore_wait_warp(tile_scheduler.k_idx)
                         self.run_tile(self.o_proj_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
@@ -374,6 +382,7 @@ class MegaKernel:
                             if tid == 0:
                                 evt_o_partial.semaphore_notify(tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT))
                     elif tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
+                        smem_manager.enter_tile_runtime(self.o_reduce_tile)
                         evt_o_partial.semaphore_wait(tile_scheduler.n_idx)
                         if self.world_size == 1:
                             self.run_tile(self.o_reduce_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partial_o_global, hidden_state_attn_mlp_global)
@@ -386,13 +395,14 @@ class MegaKernel:
                             else:
                                 evt_o_allreduce.semaphore_notify(tile_scheduler.n_idx // self.world_size, rank=tile_scheduler.n_idx % self.world_size)
                     elif self.world_size > 1 and tile_scheduler.task_type == JobType.O_ALLREDUCE.value:
-                            evt_o_allreduce.semaphore_wait(tile_scheduler.n_idx)
-                            # T.cuda.nano_sleep(1000 * 10)
-                            self.run_tile(self.o_allreduce_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, before_o_allreduce_global, hidden_state_attn_mlp_global)
-                            T.tvm_storage_sync("shared")
-                            if tid < self.world_size:    
-                                evt_attn_add_rms.semaphore_notify(tile_scheduler.m_idx, rank=tid)
+                        smem_manager.enter_tile_runtime(self.o_allreduce_tile)
+                        evt_o_allreduce.semaphore_wait(tile_scheduler.n_idx)
+                        self.run_tile(self.o_allreduce_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, before_o_allreduce_global, hidden_state_attn_mlp_global)
+                        T.tvm_storage_sync("shared")
+                        if tid < self.world_size:    
+                            evt_attn_add_rms.semaphore_notify(tile_scheduler.m_idx, rank=tid)
                     elif tile_scheduler.task_type == JobType.ATTN_ADD_RMS_NORM.value:
+                        smem_manager.enter_tile_runtime(self.attn_add_rms_tile)
                         if self.world_size == 1:
                             evt_attn_add_rms.semaphore_wait(tile_scheduler.m_idx // self.o_reduce_tile.M_TILE)
                         else:
@@ -402,6 +412,7 @@ class MegaKernel:
                         if tid == 0:
                             evt_attn_mlp.semaphore_notify(0)
                     elif tile_scheduler.task_type == JobType.GEMM_GATE_UP_PROJ.value:
+                        smem_manager.enter_tile_runtime(self.gemm_gate_up_proj_tile)
                         self.run_tile_prefetch(self.gemm_gate_up_proj_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
                         evt_attn_mlp.semaphore_wait_warp(0)
                         self.run_tile(self.gemm_gate_up_proj_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
@@ -416,15 +427,17 @@ class MegaKernel:
                                 else:
                                     evt_gate_up_proj_reduce.semaphore_notify(tile_scheduler.n_idx)
                     elif self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1 and tile_scheduler.task_type == JobType.GATE_UP_PROJ_REDUCE.value:
-                            evt_gate_up_proj_reduce.semaphore_wait(tile_scheduler.n_idx)
-                            self.run_tile(self.gemm_gate_up_proj_reduce_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partial_out_gate_up_proj_global, out_gate_up_proj_global)
-                            T.tvm_storage_sync("shared")
-                            if tid == 0:
-                                if tile_scheduler.n_idx >= self.INTERMEDIATE_SIZE // GemmTile.BLK_N:
-                                    evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx - self.INTERMEDIATE_SIZE // GemmTile.BLK_N)
-                                else:
-                                    evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx)
+                        smem_manager.enter_tile_runtime(self.gemm_gate_up_proj_reduce_tile)
+                        evt_gate_up_proj_reduce.semaphore_wait(tile_scheduler.n_idx)
+                        self.run_tile(self.gemm_gate_up_proj_reduce_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partial_out_gate_up_proj_global, out_gate_up_proj_global)
+                        T.tvm_storage_sync("shared")
+                        if tid == 0:
+                            if tile_scheduler.n_idx >= self.INTERMEDIATE_SIZE // GemmTile.BLK_N:
+                                evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx - self.INTERMEDIATE_SIZE // GemmTile.BLK_N)
+                            else:
+                                evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx)
                     elif tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
+                        smem_manager.enter_tile_runtime(self.silu_multiply_tile)
                         evt_gate_up_proj.semaphore_wait_warp(tile_scheduler.m_idx)
                         self.run_tile(self.silu_multiply_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, out_gate_up_proj_global, out_silu_multiply_global, tile_scheduler)
                         T.tvm_storage_sync("shared")
@@ -434,6 +447,7 @@ class MegaKernel:
                             for i in T.serial(0, range_end + 1 - range_start):
                                 evt_down_proj.semaphore_notify(i + range_start)
                     elif tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
+                        smem_manager.enter_tile_runtime(self.gemm_down_proj_tile)
                         self.run_tile_prefetch(self.gemm_down_proj_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
                         evt_down_proj.semaphore_wait_warp(tile_scheduler.k_idx)
                         self.run_tile(self.gemm_down_proj_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, profiler_buffer, profiler_tag, profiler_write_offset)
@@ -442,6 +456,7 @@ class MegaKernel:
                             if tid == 0:
                                 evt_down_proj_reduce.semaphore_notify(tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N))
                     elif tile_scheduler.task_type == JobType.DOWN_PROJ_REDUCE.value:
+                        smem_manager.enter_tile_runtime(self.down_proj_reduce_tile)
                         evt_down_proj_reduce.semaphore_wait(tile_scheduler.n_idx)
                         if self.world_size == 1:
                             self.run_tile(self.down_proj_reduce_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, partial_sum_down_proj_global, output_global)
@@ -454,18 +469,21 @@ class MegaKernel:
                             else:
                                 evt_down_proj_allreduce.semaphore_notify(tile_scheduler.n_idx // self.world_size, rank=tile_scheduler.n_idx % self.world_size)
                     elif self.world_size > 1 and tile_scheduler.task_type == JobType.DOWN_PROJ_ALLREDUCE.value:
+                        smem_manager.enter_tile_runtime(self.down_proj_allreduce_tile)
                         evt_down_proj_allreduce.semaphore_wait(tile_scheduler.n_idx)
                         self.run_tile(self.down_proj_allreduce_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, before_down_proj_allreduce_global, output_global)
                         T.tvm_storage_sync("shared")
                         if tid < self.world_size:
                             evt_add_rms_norm.semaphore_notify(tile_scheduler.m_idx, rank=tid)
                     elif tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
+                        smem_manager.enter_tile_runtime(self.mlp_add_rms_norm_tile)
                         if self.world_size == 1:
                             evt_add_rms_norm.semaphore_wait(tile_scheduler.m_idx // self.down_proj_reduce_tile.M_TILE)
                         else:
                             evt_add_rms_norm.semaphore_wait(tile_scheduler.m_idx // self.down_proj_allreduce_tile.M_TILE)
                         self.run_tile(self.mlp_add_rms_norm_tile, tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, output_global, residual_global, mlp_add_rms_weight_global)
 
+                    smem_manager.exit_tile_runtime()
                     tile_scheduler.next_tile()
 
                 if self.profiler_on:
@@ -668,7 +686,7 @@ class MegaKernel:
             
             @T.macro
             def run(BLK_M):
-                self.static_fused_body(batch_size,hidden_state_global, residual_global, output_global, 
+                self.static_fused_body(batch_size, hidden_state_global, residual_global, output_global, 
                                        qkv_proj_weight_global, o_proj_weight_global, q_rms_weight_global, k_rms_weight_global, gate_up_weight_global, down_weight_global, 
                                        attn_add_rms_weight_global, mlp_add_rms_weight_global, cos_sin_cache_global, rope_pos_global, kv_cache_global, append_pos_global, 
                                        q_indptr_global, kv_indptr_global, partial_indptr_global, kv_indices_global, q_len_global, kv_len_global, q_start_global, 
@@ -2220,6 +2238,6 @@ if __name__ == "__main__":
     # src, mod_dynamic = get_source(mega_kernel_dynamic)
 
     for batch_size in [1, 3, 5, 7, 15, 31, 63, 127, 128]:
-
+        
         print(f"batch_size: {batch_size}", flush=True)
         test(batch_size, lib_static["main"], None, mega_kernel_wrapper_static)
