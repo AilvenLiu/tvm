@@ -25,12 +25,12 @@
 namespace tvm {
 namespace tirx {
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   ExecScopeNode::RegisterReflection();
   ExecScopeSliceNode::RegisterReflection();
   ScopePairNode::RegisterReflection();
   ScopeIdDefNode::RegisterReflection();
-});
+}
 
 /******** Definition of Execution Scope ********/
 // ExecScope
@@ -58,16 +58,16 @@ bool ExecScopeNode::Higher(const ffi::String& other) const {
 
 bool ExecScopeNode::Higher(const ExecScope& other) const { return Higher(other->name); }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ExecScope", [](ffi::String name) { return ExecScope(name); });
-});
+}
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ExecScopeCreate",
                         [](ffi::String name) { return ExecScope::Create(name); });
-});
+}
 
 // ExecScopeSlice
 ExecScopeSlice::ExecScopeSlice(ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
@@ -98,14 +98,14 @@ bool ExecScopeSliceNode::Is(const ExecScope& other) const {
   return ExecScopeNode::Is(other) && StructuralEqual()(this->slices, other_slice->slices);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ExecScopeSlice", [](ffi::Variant<ffi::Array<Range>, PrimExpr> slices,
                                                  ffi::Optional<ffi::Array<PrimExpr>> extents,
                                                  ffi::String parent, ffi::String cur) {
     return ExecScopeSlice(slices, extents, parent, cur);
   });
-});
+}
 
 /******** Definition of Var ********/
 // ScopePair
@@ -116,11 +116,11 @@ ScopePair::ScopePair(ffi::String parent, ffi::String cur) {
   data_ = std::move(n);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ScopePair",
                         [](ffi::String parent, ffi::String cur) { return ScopePair(parent, cur); });
-});
+}
 
 // ScopeIdDef
 ScopeIdDef::ScopeIdDef(ffi::Array<Var> ids, ffi::Array<PrimExpr> extents, ScopePair scope) {
@@ -142,13 +142,13 @@ PrimExpr ScopeIdDef::fused_extent() const {
   return ret;
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.ScopeIdDef",
                         [](ffi::Array<Var> vars, ffi::Array<PrimExpr> extents, ScopePair scope) {
                           return ScopeIdDef(vars, extents, scope);
                         });
-});
+}
 
 bool ScopeIdDefVerifier::Verify(const ffi::Array<ScopeIdDef>& defs) {
   id_set.clear();
@@ -311,5 +311,5 @@ TVM_REGISTER_SCOPEID_RESOLVE("cta", "thread", "cuda")
       return Trivial3DResolve(params, "threadIdx.", out_dim);
     });
 
-}  // namespace tirxxxxxxx
+}  // namespace tirxxxxxxxx
 }  // namespace tvm

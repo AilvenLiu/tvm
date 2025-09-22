@@ -133,7 +133,7 @@ void transfer_to_peers_all_gather(Tensor semaphore, Tensor A, Tensor ag_out, TVM
     }
   }
 }
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("runtime.disco.copy_to_peer", copy_to_peer)
@@ -146,7 +146,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
            [](TVMStreamHandle stream, Tensor ptr, size_t size) {
              set_streaming_policy(stream, ptr->data, size);
            });
-});
+}
 
 }  // namespace runtime
 }  // namespace tvm

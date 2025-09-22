@@ -30,7 +30,7 @@ namespace tvm {
 namespace tirx {
 namespace tirp {
 
-TVM_FFI_STATIC_INIT_BLOCK({ OpCallNode::RegisterReflection(); });
+TVM_FFI_STATIC_INIT_BLOCK() { OpCallNode::RegisterReflection(); }
 
 // OpCall
 OpCall::OpCall(tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buffer> workspace,
@@ -47,20 +47,20 @@ OpCall::OpCall(tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buff
   data_ = std::move(n);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.OpCall", [](tvm::Op op, ffi::Array<ffi::Any> args,
                                          ffi::Map<ffi::String, Buffer> workspace,
                                          ffi::Map<ffi::String, ffi::Any> schedule_config) {
     return OpCall(op, args, workspace, schedule_config);
   });
-});
+}
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.OpCallCopyHandle", [](const OpCall& op) { return OpCall(op); });
-});
+}
 
-}  // namespace tirxxp
-}  // namespace tirxx
+}  // namespace tirxxxp
+}  // namespace tirxxx
 }  // namespace tvm

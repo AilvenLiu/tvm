@@ -251,10 +251,10 @@ Break::Break(Span span) {
   data_ = std::move(node);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.Break", [](Span span) { return Break(span); });
-});
+}
 
 // Continue
 Continue::Continue(Span span) {
@@ -263,10 +263,10 @@ Continue::Continue(Span span) {
   data_ = std::move(node);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.Continue", [](Span span) { return Continue(span); });
-});
+}
 
 // DeclBuffer
 DeclBuffer::DeclBuffer(Buffer buffer, Span span) {
@@ -569,7 +569,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("tirx.MatchBufferRegion", [](Buffer buffer, BufferRegion source) {
     return MatchBufferRegion(buffer, source);
   });
-});
+}
 
 // AllocBuffer
 AllocBuffer::AllocBuffer(Buffer buffer, Stmt body, Span span) {
@@ -580,12 +580,12 @@ AllocBuffer::AllocBuffer(Buffer buffer, Stmt body, Span span) {
   data_ = std::move(node);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.AllocBuffer", [](Buffer buffer, Stmt body, Span span) {
     return AllocBuffer(buffer, body, span);
   });
-});
+}
 
 // AllocBulkGroupEvent
 AllocBulkGroupEvent::AllocBulkGroupEvent(BulkGroupEvent bulk_group_event, Stmt body, Span span) {
@@ -596,13 +596,13 @@ AllocBulkGroupEvent::AllocBulkGroupEvent(BulkGroupEvent bulk_group_event, Stmt b
   data_ = std::move(node);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.AllocBulkGroupEvent",
                         [](BulkGroupEvent bulk_group_event, Stmt body, Span span) {
                           return AllocBulkGroupEvent(bulk_group_event, body, span);
                         });
-});
+}
 
 // AllocSemaphoreEventTensor
 AllocSemaphoreEventTensor::AllocSemaphoreEventTensor(SemaphoreEventTensor sem_event_tensor,
@@ -614,7 +614,7 @@ AllocSemaphoreEventTensor::AllocSemaphoreEventTensor(SemaphoreEventTensor sem_ev
   data_ = std::move(node);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.AllocSemaphoreEventTensor",
                         [](SemaphoreEventTensor sem_event_tensor, Stmt body, Span span) {

@@ -30,7 +30,7 @@ namespace tvm {
 namespace tirx {
 namespace tirp {
 
-TVM_FFI_STATIC_INIT_BLOCK({ ScheduleContextNode::RegisterReflection(); });
+TVM_FFI_STATIC_INIT_BLOCK(){ ScheduleContextNode::RegisterReflection(); }
 
 /********************* Utils **********************/
 
@@ -89,7 +89,7 @@ ScheduleContext::ScheduleContext(Target target, ExecScope exec_scope,
   data_ = std::move(n);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK(){
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("tirp.ScheduleContext",
@@ -101,7 +101,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
            })
       .def_method("tirp.ScheduleContextAddAllocBuffer", &ScheduleContextNode::AddAllocBuffer)
       .def_method("tirp.ScheduleContextAddInitStmt", &ScheduleContextNode::AddInitStmt);
-});
+}
 
 /********************* Schedule Ops **********************/
 #define TIRP_DEFINE_SCHEDULE_OP(OpName) \

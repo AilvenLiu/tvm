@@ -1096,10 +1096,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK(){
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
-});
+}
 
 }  // namespace tirxxxxxxxxx
 }  // namespace ir_builder

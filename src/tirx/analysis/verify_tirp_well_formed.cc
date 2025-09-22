@@ -304,7 +304,7 @@ bool VerifyTIRpWellFormed(const IRModule& mod, bool assert_mode, bool device_fun
   return true;
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.analysis.VerifyTIRpWellFormed",
                         [](const ObjectRef& obj, bool assert_mode, bool device_func) {
@@ -318,6 +318,6 @@ TVM_FFI_STATIC_INIT_BLOCK({
                             return false;
                           }
                         });
-});
+}
 }  // namespace tirx
 }  // namespace tvm

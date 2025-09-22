@@ -149,24 +149,24 @@ inline DataType DTypeFromString(const std::string str) {
   }
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.hw_ops.cuda.PTXDTypeFromString", [](const std::string& str) -> int {
     return static_cast<int>(DTypeFromString(str));
   });
-});
+}
 
 /*!
  * \brief Get the string representation of given PTX data type.
  */
 inline std::string DTypeToString(DataType dtype) { return dtype_str[static_cast<int>(dtype)]; }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.hw_ops.cuda.PTXDTypeToString", [](const int dtype) -> std::string {
     return DTypeToString(static_cast<DataType>(dtype));
   });
-});
+}
 
 /*!
  * \brief Get the number of bits of given PTX data type.

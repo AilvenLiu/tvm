@@ -888,10 +888,10 @@ Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_s
   return call;
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("relax.op.call_tir_device", MakeCallTIRDevice);
-});
+}
 
 // call_dps_packed
 

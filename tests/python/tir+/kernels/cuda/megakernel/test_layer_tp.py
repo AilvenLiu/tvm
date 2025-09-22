@@ -32,7 +32,7 @@ from tvm.tirp.megakernel.reduce_rms_norm_rope_append_k import SplitKReduceRMSnor
 from tvm.tirp.megakernel.reduce_append_v import SplitKReduceAppendVTile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
 from tvm.tirp.megakernel.support import generate_event_tensor
-from .test_layer import MegaKernel, prepare_data
+from kernels.cuda.megakernel.test_layer import MegaKernel, prepare_data
 
 WORLD_SIZE = 8
 
@@ -136,16 +136,16 @@ WORLD_SIZE = 8
 #             out_silu_multiply_ptr: T.handle, # intermediate
 #             partial_sum_down_proj_ptr: T.handle, # intermediate
 #             before_down_proj_allreduce_ptr: T.handle, # intermediate
-            
+
 #             # event tensor
-#             etensor_qkv_partial_ptr: T.handle, 
-#             etensor_q_reduce_ptr: T.handle, 
-#             etensor_k_reduce_ptr: T.handle, 
-#             etensor_v_reduce_ptr: T.handle, 
-#             etensor_attn_ptr: T.handle, 
+#             etensor_qkv_partial_ptr: T.handle,
+#             etensor_q_reduce_ptr: T.handle,
+#             etensor_k_reduce_ptr: T.handle,
+#             etensor_v_reduce_ptr: T.handle,
+#             etensor_attn_ptr: T.handle,
 #             etensor_attn_merge_ptr: T.handle,
-#             etensor_o_proj_ptr: T.handle, 
-#             etensor_o_partial_ptr: T.handle, 
+#             etensor_o_proj_ptr: T.handle,
+#             etensor_o_partial_ptr: T.handle,
 #             etensor_o_allreduce_ptr: T.handle,
 #             etensor_attn_add_rms_ptr: T.handle,
 #             etensor_attn_mlp_ptr: T.handle,
@@ -176,13 +176,13 @@ WORLD_SIZE = 8
 #             output_global = T.match_buffer(output_ptr, [batch_size, HIDDEN_SIZE], "float16")
 
 #             # weight
-#             qkv_proj_weight_global = T.match_buffer(qkv_proj_weight_ptr, [(NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE], 
+#             qkv_proj_weight_global = T.match_buffer(qkv_proj_weight_ptr, [(NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE],
 #                                                     "float16", scope="global")
-#             o_proj_weight_global = T.match_buffer(o_proj_weight_ptr, [HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM], 
+#             o_proj_weight_global = T.match_buffer(o_proj_weight_ptr, [HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM],
 #                                                 "float16", scope="global")
 #             q_rms_weight_global = T.match_buffer(q_rms_weight_ptr, [HEAD_DIM], "float16", scope="global")
-#             k_rms_weight_global = T.match_buffer(k_rms_weight_ptr, [HEAD_DIM], "float16", scope="global") 
-#             gate_up_weight_global = T.match_buffer(gate_up_weight_ptr, [INTERMEDIATE_SIZE * 2, HIDDEN_SIZE], 
+#             k_rms_weight_global = T.match_buffer(k_rms_weight_ptr, [HEAD_DIM], "float16", scope="global")
+#             gate_up_weight_global = T.match_buffer(gate_up_weight_ptr, [INTERMEDIATE_SIZE * 2, HIDDEN_SIZE],
 #                                                 "float16", scope="global")
 #             down_weight_global = T.match_buffer(down_weight_ptr, [HIDDEN_SIZE, INTERMEDIATE_SIZE], "float16", scope="global")
 #             attn_add_rms_weight_global = T.match_buffer(attn_add_rms_weight_ptr, [HIDDEN_SIZE], "float16", scope="global")
@@ -191,7 +191,7 @@ WORLD_SIZE = 8
 #             # page cache, kv cache and plan info
 #             cos_sin_cache_global = T.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, HEAD_DIM], "float32", scope="global")
 #             rope_pos_global = T.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
-#             kv_cache_global = T.match_buffer(kv_cache_ptr, [max_page_num, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM], 
+#             kv_cache_global = T.match_buffer(kv_cache_ptr, [max_page_num, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM],
 #                                             "float16", scope="global")
 #             append_pos_global = T.match_buffer(append_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
 #             q_indptr_global = T.match_buffer(q_indptr_ptr, [MAX_TOTAL_NUM_WORKERS], "int32", offset_factor=1)
@@ -209,57 +209,57 @@ WORLD_SIZE = 8
 #             num_qo_len_global = T.match_buffer(num_qo_len_ptr, [1], "int32", offset_factor=1)
 #             merge_indptr_global = T.match_buffer(merge_indptr_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
 #             merge_o_indices_global = T.match_buffer(merge_o_indices_ptr, [MAX_NUM_KV_SPLITS], "int32", offset_factor=1)
-            
+
 #             # intermediate buffer
-#             partital_qkv_global = T.match_buffer(partital_qkv_ptr, [SPLIT_QKV_PROJECT, batch_size, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM], 
+#             partital_qkv_global = T.match_buffer(partital_qkv_ptr, [SPLIT_QKV_PROJECT, batch_size, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM],
 #                                     "float32", scope="global")
-#             qkv_global = T.match_buffer(qkv_ptr, [batch_size, NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS, HEAD_DIM], 
+#             qkv_global = T.match_buffer(qkv_ptr, [batch_size, NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS, HEAD_DIM],
 #                                     "float16", scope="global")
-#             o_global = T.match_buffer(o_ptr, [batch_size, NUM_ATTENTION_HEADS, HEAD_DIM], 
+#             o_global = T.match_buffer(o_ptr, [batch_size, NUM_ATTENTION_HEADS, HEAD_DIM],
 #                                     "float16", scope="global")
-#             o_partial_attn_global = T.match_buffer(o_partial_attn_ptr, [MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS * HEAD_DIM], 
+#             o_partial_attn_global = T.match_buffer(o_partial_attn_ptr, [MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS * HEAD_DIM],
 #                                     "float32", scope="global")
-#             lse_partial_attn_global = T.match_buffer(lse_partial_attn_ptr, [MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS], 
+#             lse_partial_attn_global = T.match_buffer(lse_partial_attn_ptr, [MAX_NUM_KV_SPLITS * NUM_KEY_VALUE_HEADS],
 #                                     "float32", scope="global")
-#             partial_o_global = T.match_buffer(partial_o_ptr, [SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE], 
+#             partial_o_global = T.match_buffer(partial_o_ptr, [SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE],
 #                                     "float32", scope="global")
-#             before_o_allreduce_global = T.match_buffer(before_o_allreduce_ptr, [batch_size, HIDDEN_SIZE], 
+#             before_o_allreduce_global = T.match_buffer(before_o_allreduce_ptr, [batch_size, HIDDEN_SIZE],
 #                                     "float16", scope="global")
-#             hidden_state_attn_mlp_global = T.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, HIDDEN_SIZE], 
+#             hidden_state_attn_mlp_global = T.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, HIDDEN_SIZE],
 #                                     "float16", scope="global")
-#             partial_out_gate_up_proj_global = T.match_buffer(partial_out_gate_up_proj_ptr, [GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, INTERMEDIATE_SIZE * 2], 
+#             partial_out_gate_up_proj_global = T.match_buffer(partial_out_gate_up_proj_ptr, [GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, INTERMEDIATE_SIZE * 2],
 #                                     "float32", scope="global")
-#             out_gate_up_proj_global = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE * 2], 
+#             out_gate_up_proj_global = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE * 2],
 #                                  "float16", scope="global")
-#             out_silu_multiply_global = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE], 
+#             out_silu_multiply_global = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE],
 #                                   "float16", scope="global")
-#             partial_sum_down_proj_global = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE], 
+#             partial_sum_down_proj_global = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE],
 #                                   "float32")
-#             before_down_proj_allreduce_global = T.match_buffer(before_down_proj_allreduce_ptr, [batch_size, HIDDEN_SIZE], 
+#             before_down_proj_allreduce_global = T.match_buffer(before_down_proj_allreduce_ptr, [batch_size, HIDDEN_SIZE],
 #                                   "float16", scope="global")
 
 #             # event tensor
-#             etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
+#             etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, SplitKReduceTile.N_UNIT)],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_q_reduce_global = T.match_buffer(etensor_q_reduce_ptr, [batch_size, ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
+#             etensor_q_reduce_global = T.match_buffer(etensor_q_reduce_ptr, [batch_size, ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_k_reduce_global = T.match_buffer(etensor_k_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
+#             etensor_k_reduce_global = T.match_buffer(etensor_k_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_v_reduce_global = T.match_buffer(etensor_v_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
+#             etensor_v_reduce_global = T.match_buffer(etensor_v_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_attn_global = T.match_buffer(etensor_attn_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
+#             etensor_attn_global = T.match_buffer(etensor_attn_ptr, [batch_size, NUM_KEY_VALUE_HEADS],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_attn_merge_global = T.match_buffer(etensor_attn_merge_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
+#             etensor_attn_merge_global = T.match_buffer(etensor_attn_merge_ptr, [batch_size, NUM_KEY_VALUE_HEADS],
 #                                     "int32", scope="global", offset_factor=1)
 #             etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [SPLIT_O_PROJRCT], "int32", scope="global", offset_factor=1)
-#             etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)], 
+#             etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)],
 #                                     "int32", scope="global", offset_factor=1)
 #             etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], "int32", scope="global", offset_factor=1)
 #             etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", offset_factor=1)
 #             etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", offset_factor=1)
-#             etensor_gate_up_proj_reduce_global = T.match_buffer(etensor_gate_up_proj_reduce_ptr, [INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N], 
+#             etensor_gate_up_proj_reduce_global = T.match_buffer(etensor_gate_up_proj_reduce_ptr, [INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N],
 #                                                     "int32", scope="global", offset_factor=1)
-#             etensor_gate_up_proj_global = T.match_buffer(etensor_gate_up_proj_ptr, [INTERMEDIATE_SIZE // GemmTile.BLK_N], 
+#             etensor_gate_up_proj_global = T.match_buffer(etensor_gate_up_proj_ptr, [INTERMEDIATE_SIZE // GemmTile.BLK_N],
 #                                     "int32", scope="global", offset_factor=1)
 #             etensor_down_proj_global = T.match_buffer(etensor_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR],
 #                                     "int32", scope="global", offset_factor=1)
@@ -268,7 +268,7 @@ WORLD_SIZE = 8
 #             etensor_down_proj_allreduce_global = T.match_buffer(etensor_down_proj_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], "int32", scope="global", offset_factor=1)
 #             etensor_mlp_add_rms_global = T.match_buffer(etensor_mlp_add_rms_ptr, [batch_size], "int32", scope="global", offset_factor=1)
 
-#             exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4], 
+#             exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS, 4],
 #                         "int32", scope="global")
 
 #             A_tensor_map_qkv_proj: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
@@ -287,7 +287,7 @@ WORLD_SIZE = 8
 #             # initialize tile
 #             qkv_proj_tile = T.meta_var(GemmTile((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE,
 #                                                 "float16", "float16", "float32", SPLIT_QKV_PROJECT))
-#             qkv_reduce_tile = T.meta_var(SplitKReduceTile(batch_size,(NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, 
+#             qkv_reduce_tile = T.meta_var(SplitKReduceTile(batch_size,(NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM,
 #                                                             "float16", SPLIT_QKV_PROJECT))
 #             rmsnorm_tile = T.meta_var(RMSnormTile(batch_size, RMS_NORM_EPS, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM))
 #             rope_tile = T.meta_var(RopeTile(batch_size, NUM_ATTENTION_HEADS, NUM_KEY_VALUE_HEADS, HEAD_DIM))
@@ -356,7 +356,7 @@ WORLD_SIZE = 8
 #                     self.class_init_all(smem_manager)
 
 #                     # initialize event tensors
-#                     evt_qkv_partial = T.meta_var(Semaphore(SPLIT_QKV_PROJECT * (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 
+#                     evt_qkv_partial = T.meta_var(Semaphore(SPLIT_QKV_PROJECT * (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),
 #                                                              etensor_qkv_partial_global, use_nvshmem=True))
 #                     evt_q_reduce = T.meta_var(Semaphore(1, etensor_q_reduce_global, use_nvshmem=True))
 #                     evt_k_reduce = T.meta_var(Semaphore(1, etensor_k_reduce_global, use_nvshmem=True))
@@ -371,7 +371,7 @@ WORLD_SIZE = 8
 #                     evt_gate_up_proj_reduce = T.meta_var(Semaphore(GATE_UP_PROJ_SPLIT_K_FACTOR, etensor_gate_up_proj_reduce_global, use_nvshmem=True))
 #                     evt_gate_up_proj = T.meta_var(Semaphore(2 * gemm_gate_up_proj_reduce_tile.M_split, etensor_gate_up_proj_global, use_nvshmem=True))
 #                     evt_down_proj = T.meta_var(Semaphore(-1, etensor_down_proj_global, use_nvshmem=True))
-#                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
+#                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),
 #                                                                 etensor_down_proj_reduce_global, use_nvshmem=True))
 #                     evt_down_proj_allreduce = T.meta_var(Semaphore(WORLD_SIZE * down_proj_reduce_tile.M_split, etensor_down_proj_allreduce_global, use_nvshmem=True))
 #                     evt_add_rms_norm = T.meta_var(Semaphore(HIDDEN_SIZE// down_proj_allreduce_tile.N_TILE, etensor_mlp_add_rms_global, use_nvshmem=True))
@@ -424,15 +424,15 @@ WORLD_SIZE = 8
 #                                 T.timer_end_cuda(ProfileEventType.V_REDUCE_APPEND, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
 #                         elif tile_scheduler.task_type == JobType.BATCH_ATTENTION.value:
 #                             worker_idx = tile_scheduler.m_idx * KernelConfig.WG_NUMBER + wg_id
-#                             attn_task_num = work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]  
+#                             attn_task_num = work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]
 #                             batch_idx = T.meta_var(q_indptr_global[worker_idx])
 #                             kv_idx = T.meta_var(kv_head_idx_global[worker_idx])
-                            
+
 #                             # TODO: Now sync cta for simple, need to finegrain in the future
 #                             if warp_id == 0 and wg_id == 0:
 #                                 smem_manager.wait_all(lane_id)
-#                             T.tvm_storage_sync("shared")   
-                            
+#                             T.tvm_storage_sync("shared")
+
 #                             if worker_idx < attn_task_num:
 #                                 if self.profiler_on:
 #                                     T.timer_start_cuda(ProfileEventType.PREFETCH_SMEM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
@@ -451,14 +451,14 @@ WORLD_SIZE = 8
 #                                                 o_global, o_partial_attn_global, lse_partial_attn_global, profiler_buffer, profiler_tag, profiler_write_offset)
 #                                 if self.profiler_on:
 #                                     T.timer_end_cuda(ProfileEventType.BATCH_ATTENTION, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
-                            
+
 #                             # TODO: Now sync cta for simple, need to finegrain in the future
 #                             T.tvm_storage_sync("shared")
 #                             if warp_id == 0 and wg_id == 0:
 #                                 smem_manager.arrive_all(lane_id)
 #                             smem_manager.advance()
-                                
-#                             if worker_idx < attn_task_num:    
+
+#                             if worker_idx < attn_task_num:
 #                                 if work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER] > batch_size * NUM_KEY_VALUE_HEADS:
 #                                     if tid % (KernelConfig.WARP_NUMBER * 32) == 0:
 #                                         evt_attn_merge.semaphore_notify(batch_idx, kv_idx)
@@ -467,7 +467,7 @@ WORLD_SIZE = 8
 #                                     range_end = T.meta_var(((kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1) // o_proj_tile.TILE_K)
 #                                     if tid % (KernelConfig.WARP_NUMBER * 32) <= range_end - range_start:
 #                                         evt_o_proj.semaphore_notify(range_start + tid % (KernelConfig.WARP_NUMBER * 32))
-                            
+
 #                         elif tile_scheduler.task_type == JobType.BATCH_ATTENTION_MERGE.value:
 #                             worker_id = T.meta_var(tile_scheduler.m_idx * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER)
 #                             qo_idx = T.meta_var(worker_id % (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
@@ -518,7 +518,7 @@ WORLD_SIZE = 8
 #                                 T.timer_start_cuda(ProfileEventType.O_ALLREDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
 #                             o_allreduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, before_o_allreduce_global, hidden_state_attn_mlp_global)
 #                             T.tvm_storage_sync("shared")
-#                             if tid < WORLD_SIZE:    
+#                             if tid < WORLD_SIZE:
 #                                 evt_attn_add_rms.semaphore_notify(tile_scheduler.m_idx, rank=tid)
 #                             if self.profiler_on:
 #                                 T.timer_end_cuda(ProfileEventType.O_ALLREDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
@@ -619,10 +619,10 @@ WORLD_SIZE = 8
 #                                 T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
 
 #                         tile_scheduler.next_tile()
-                    
+
 #                     if self.profiler_on:
 #                         T.timer_finalize_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
-                    
+
 #                     self.class_finalize_all()
 #             # fmt: on
 #         return main
@@ -692,16 +692,16 @@ WORLD_SIZE = 8
 #             out_silu_multiply_ptr: T.handle, # intermediate
 #             partial_sum_down_proj_ptr: T.handle, # intermediate
 #             before_down_proj_allreduce_ptr: T.handle, # intermediate
-            
+
 #             # event tensor
-#             etensor_qkv_partial_ptr: T.handle, 
-#             etensor_q_reduce_ptr: T.handle, 
-#             etensor_k_reduce_ptr: T.handle, 
-#             etensor_v_reduce_ptr: T.handle, 
-#             etensor_decode_ptr: T.handle, 
+#             etensor_qkv_partial_ptr: T.handle,
+#             etensor_q_reduce_ptr: T.handle,
+#             etensor_k_reduce_ptr: T.handle,
+#             etensor_v_reduce_ptr: T.handle,
+#             etensor_decode_ptr: T.handle,
 #             etensor_decode_merge_ptr: T.handle,
-#             etensor_o_proj_ptr: T.handle, 
-#             etensor_o_partial_ptr: T.handle, 
+#             etensor_o_proj_ptr: T.handle,
+#             etensor_o_partial_ptr: T.handle,
 #             etensor_o_allreduce_ptr: T.handle,
 #             etensor_attn_add_rms_ptr: T.handle,
 #             etensor_attn_mlp_ptr: T.handle,
@@ -733,13 +733,13 @@ WORLD_SIZE = 8
 #             output_global = T.match_buffer(output_ptr, [batch_size, HIDDEN_SIZE], "float16")
 
 #             # weight
-#             qkv_proj_weight_global = T.match_buffer(qkv_proj_weight_ptr, [(NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE], 
+#             qkv_proj_weight_global = T.match_buffer(qkv_proj_weight_ptr, [(NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, HIDDEN_SIZE],
 #                                                     "float16", scope="global")
-#             o_proj_weight_global = T.match_buffer(o_proj_weight_ptr, [HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM], 
+#             o_proj_weight_global = T.match_buffer(o_proj_weight_ptr, [HIDDEN_SIZE, NUM_ATTENTION_HEADS * HEAD_DIM],
 #                                                   "float16", scope="global")
 #             q_rms_weight_global = T.match_buffer(q_rms_weight_ptr, [HEAD_DIM], "float16", scope="global")
-#             k_rms_weight_global = T.match_buffer(k_rms_weight_ptr, [HEAD_DIM], "float16", scope="global") 
-#             gate_up_weight_global = T.match_buffer(gate_up_weight_ptr, [INTERMEDIATE_SIZE * 2, HIDDEN_SIZE], 
+#             k_rms_weight_global = T.match_buffer(k_rms_weight_ptr, [HEAD_DIM], "float16", scope="global")
+#             gate_up_weight_global = T.match_buffer(gate_up_weight_ptr, [INTERMEDIATE_SIZE * 2, HIDDEN_SIZE],
 #                                                    "float16", scope="global")
 #             down_weight_global = T.match_buffer(down_weight_ptr, [HIDDEN_SIZE, INTERMEDIATE_SIZE], "float16", scope="global")
 #             attn_add_rms_weight_global = T.match_buffer(attn_add_rms_weight_ptr, [HIDDEN_SIZE], "float16", scope="global")
@@ -748,7 +748,7 @@ WORLD_SIZE = 8
 #             # page cache, kv cache and plan info
 #             cos_sin_cache_global = T.match_buffer(cos_sin_cache_ptr, [cos_sin_cache_len, HEAD_DIM], "float32", scope="global")
 #             rope_pos_global = T.match_buffer(rope_pos_ptr, [batch_size], "int32", scope="global", offset_factor=1)
-#             kv_cache_global = T.match_buffer(kv_cache_ptr, [max_page_num, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM], 
+#             kv_cache_global = T.match_buffer(kv_cache_ptr, [max_page_num, 2, NUM_KEY_VALUE_HEADS, PAGE_SIZE, HEAD_DIM],
 #                                              "float16", scope="global")
 #             kv_indptr_global = T.match_buffer(kv_indptr_ptr, [batch_size + 1], "int32", scope="global", offset_factor=1)
 #             kv_indices_global = T.match_buffer(kv_indices_ptr, [total_page_num], "int32", scope="global", offset_factor=1)
@@ -760,64 +760,64 @@ WORLD_SIZE = 8
 #             o_indptr_global = T.match_buffer(o_indptr_ptr, [batch_size + 1], "int32", scope="global", offset_factor=1)
 
 #             # intermediate buffer
-#             partital_qkv_global = T.match_buffer(partital_qkv_ptr, [SPLIT_QKV_PROJECT, batch_size, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM], 
+#             partital_qkv_global = T.match_buffer(partital_qkv_ptr, [SPLIT_QKV_PROJECT, batch_size, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM],
 #                                     "float32", scope="global")
-#             qkv_global = T.match_buffer(qkv_ptr, [batch_size, NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS, HEAD_DIM], 
+#             qkv_global = T.match_buffer(qkv_ptr, [batch_size, NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS, HEAD_DIM],
 #                                     "float16", scope="global")
-#             o_global = T.match_buffer(o_ptr, [batch_size, NUM_ATTENTION_HEADS, HEAD_DIM], 
+#             o_global = T.match_buffer(o_ptr, [batch_size, NUM_ATTENTION_HEADS, HEAD_DIM],
 #                                     "float16", scope="global")
-#             lse_global = T.match_buffer(lse_ptr, [batch_size, NUM_ATTENTION_HEADS], 
+#             lse_global = T.match_buffer(lse_ptr, [batch_size, NUM_ATTENTION_HEADS],
 #                                     "float32", scope="global")
-#             o_tmp_global = T.match_buffer(o_tmp_ptr, [new_batch_size, NUM_ATTENTION_HEADS, HEAD_DIM], 
+#             o_tmp_global = T.match_buffer(o_tmp_ptr, [new_batch_size, NUM_ATTENTION_HEADS, HEAD_DIM],
 #                                     "float32", scope="global")
-#             lse_tmp_global = T.match_buffer(lse_tmp_ptr, [new_batch_size, NUM_ATTENTION_HEADS], 
+#             lse_tmp_global = T.match_buffer(lse_tmp_ptr, [new_batch_size, NUM_ATTENTION_HEADS],
 #                                     "float32", scope="global")
-#             partial_o_global = T.match_buffer(partial_o_ptr, [SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE], 
+#             partial_o_global = T.match_buffer(partial_o_ptr, [SPLIT_O_PROJRCT, batch_size, HIDDEN_SIZE],
 #                                     "float32", scope="global")
-#             before_o_allreduce_global = T.match_buffer(before_o_allreduce_ptr, [batch_size, HIDDEN_SIZE], 
+#             before_o_allreduce_global = T.match_buffer(before_o_allreduce_ptr, [batch_size, HIDDEN_SIZE],
 #                                     "float16", scope="global")
-#             hidden_state_attn_mlp_global = T.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, HIDDEN_SIZE], 
+#             hidden_state_attn_mlp_global = T.match_buffer(hidden_state_attn_mlp_ptr, [batch_size, HIDDEN_SIZE],
 #                                     "float16", scope="global")
-#             partial_out_gate_up_proj_global = T.match_buffer(partial_out_gate_up_proj_ptr, [GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, INTERMEDIATE_SIZE * 2], 
+#             partial_out_gate_up_proj_global = T.match_buffer(partial_out_gate_up_proj_ptr, [GATE_UP_PROJ_SPLIT_K_FACTOR, batch_size, INTERMEDIATE_SIZE * 2],
 #                                     "float32", scope="global")
-#             out_gate_up_proj_global = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE * 2], 
+#             out_gate_up_proj_global = T.match_buffer(out_gate_up_proj_ptr, [batch_size, INTERMEDIATE_SIZE * 2],
 #                                  "float16", scope="global")
-#             out_silu_multiply_global = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE], 
+#             out_silu_multiply_global = T.match_buffer(out_silu_multiply_ptr, [batch_size, INTERMEDIATE_SIZE],
 #                                   "float16", scope="global")
-#             partial_sum_down_proj_global = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE], 
+#             partial_sum_down_proj_global = T.match_buffer(partial_sum_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR, batch_size, HIDDEN_SIZE],
 #                                   "float32")
-#             before_down_proj_allreduce_global = T.match_buffer(before_down_proj_allreduce_ptr, [batch_size, HIDDEN_SIZE], 
+#             before_down_proj_allreduce_global = T.match_buffer(before_down_proj_allreduce_ptr, [batch_size, HIDDEN_SIZE],
 #                                   "float16", scope="global")
 
 #             # event tensor
-#             etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
+#             etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, SplitKReduceTile.N_UNIT)],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_q_reduce_global = T.match_buffer(etensor_q_reduce_ptr, [batch_size, ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
+#             etensor_q_reduce_global = T.match_buffer(etensor_q_reduce_ptr, [batch_size, ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)],
 #                                     "int32", scope="global", offset_factor=1  )
-#             etensor_k_reduce_global = T.match_buffer(etensor_k_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
+#             etensor_k_reduce_global = T.match_buffer(etensor_k_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_v_reduce_global = T.match_buffer(etensor_v_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)], 
+#             etensor_v_reduce_global = T.match_buffer(etensor_v_reduce_ptr, [batch_size, ceildiv(NUM_KEY_VALUE_HEADS * HEAD_DIM, SplitKReduceTile.N_UNIT)],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_decode_global = T.match_buffer(etensor_decode_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
+#             etensor_decode_global = T.match_buffer(etensor_decode_ptr, [batch_size, NUM_KEY_VALUE_HEADS],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_decode_merge_global = T.match_buffer(etensor_decode_merge_ptr, [batch_size, NUM_KEY_VALUE_HEADS], 
+#             etensor_decode_merge_global = T.match_buffer(etensor_decode_merge_ptr, [batch_size, NUM_KEY_VALUE_HEADS],
 #                                     "int32", scope="global", offset_factor=1)
 #             etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [SPLIT_O_PROJRCT], "int32", scope="global", offset_factor=1)
-#             etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)], 
+#             etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], 
+#             etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE],
 #                                                         "int32", scope="global", offset_factor=1)
 #             etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", offset_factor=1)
 #             etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", offset_factor=1)
-#             etensor_gate_up_proj_reduce_global = T.match_buffer(etensor_gate_up_proj_reduce_ptr, [INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N], 
+#             etensor_gate_up_proj_reduce_global = T.match_buffer(etensor_gate_up_proj_reduce_ptr, [INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N],
 #                                                     "int32", scope="global", offset_factor=1)
-#             etensor_gate_up_proj_global = T.match_buffer(etensor_gate_up_proj_ptr, [INTERMEDIATE_SIZE // GemmTile.BLK_N], 
+#             etensor_gate_up_proj_global = T.match_buffer(etensor_gate_up_proj_ptr, [INTERMEDIATE_SIZE // GemmTile.BLK_N],
 #                                     "int32", scope="global", offset_factor=1)
 #             etensor_down_proj_global = T.match_buffer(etensor_down_proj_ptr, [DOWN_PROJ_SPLIT_K_FACTOR],
 #                                     "int32", scope="global", offset_factor=1)
 #             etensor_down_proj_reduce_global = T.match_buffer(etensor_down_proj_reduce_ptr, [HIDDEN_SIZE // GemmTile.BLK_N],
 #                                     "int32", scope="global", offset_factor=1)
-#             etensor_down_proj_allreduce_global = T.match_buffer(etensor_down_proj_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE], 
+#             etensor_down_proj_allreduce_global = T.match_buffer(etensor_down_proj_allreduce_ptr, [HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE],
 #                                                                 "int32", scope="global", offset_factor=1)
 #             etensor_mlp_add_rms_global = T.match_buffer(etensor_mlp_add_rms_ptr, [batch_size], "int32", scope="global", offset_factor=1)
 
@@ -837,7 +837,7 @@ WORLD_SIZE = 8
 
 #             # initialize tile
 #             qkv_proj_tile = T.meta_var(GemmTile(hidden_state_global, qkv_proj_weight_global, partital_qkv_global, split_k_factor=SPLIT_QKV_PROJECT))
-#             qkv_reduce_tile = T.meta_var(SplitKReduceTile(partital_qkv_global, 
+#             qkv_reduce_tile = T.meta_var(SplitKReduceTile(partital_qkv_global,
 #                                                           Tp.reshape(qkv_global, [-1, (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM]).buffer))
 #             rmsnorm_tile = T.meta_var(RMSnormTile(q_rms_weight_global, k_rms_weight_global, qkv_global))
 #             rope_tile = T.meta_var(RopeTile(qkv_global, cos_sin_cache_global, rope_pos_global))
@@ -846,7 +846,7 @@ WORLD_SIZE = 8
 #                                                 kv_indptr_global, kv_last_page_len_global,
 #                                                 kv_indices_global, request_indices_global, kv_tile_indices_global, max_chunk_size_global))
 #             decode_merge_tile = T.meta_var(DecodeMergeTile(o_indptr_global, o_tmp_global, o_global, lse_tmp_global, lse_global))
-#             o_proj_tile = T.meta_var(GemmTile(Tp.reshape(o_global, [-1, NUM_ATTENTION_HEADS * HEAD_DIM]).buffer, o_proj_weight_global, 
+#             o_proj_tile = T.meta_var(GemmTile(Tp.reshape(o_global, [-1, NUM_ATTENTION_HEADS * HEAD_DIM]).buffer, o_proj_weight_global,
 #                                               partial_o_global, split_k_factor=SPLIT_O_PROJRCT))
 #             o_reduce_tile = T.meta_var(SplitKReduceTile(partial_o_global, before_o_allreduce_global))
 #             o_allreduce_tile = T.meta_var(AllreduceTile(before_o_allreduce_global, hidden_state_attn_mlp_global, WORLD_SIZE))
@@ -894,7 +894,7 @@ WORLD_SIZE = 8
 #                 profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
 #                 if self.profiler_on:
 #                     T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, warp_id)
-                
+
 #                 with T.cta():
 #                     wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
 #                     tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
@@ -904,7 +904,7 @@ WORLD_SIZE = 8
 #                     self.class_init_all(pool)
 
 #                     # initialize event tensors
-#                     evt_qkv_partial = T.meta_var(Semaphore(SPLIT_QKV_PROJECT * (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 
+#                     evt_qkv_partial = T.meta_var(Semaphore(SPLIT_QKV_PROJECT * (qkv_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),
 #                                                              etensor_qkv_partial_global, use_nvshmem=True))
 #                     evt_q_reduce = T.meta_var(Semaphore(1, etensor_q_reduce_global, use_nvshmem=True))
 #                     evt_k_reduce = T.meta_var(Semaphore(1, etensor_k_reduce_global, use_nvshmem=True))
@@ -919,7 +919,7 @@ WORLD_SIZE = 8
 #                     evt_gate_up_proj_reduce = T.meta_var(Semaphore(GATE_UP_PROJ_SPLIT_K_FACTOR, etensor_gate_up_proj_reduce_global, use_nvshmem=True))
 #                     evt_gate_up_proj = T.meta_var(Semaphore(2 * gemm_gate_up_proj_reduce_tile.M_split, etensor_gate_up_proj_global, use_nvshmem=True))
 #                     evt_down_proj = T.meta_var(Semaphore(-1, etensor_down_proj_global, decrement=True, use_nvshmem=True))
-#                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
+#                     evt_down_proj_reduce = T.meta_var(Semaphore(DOWN_PROJ_SPLIT_K_FACTOR * (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),
 #                                                                 etensor_down_proj_reduce_global, use_nvshmem=True))
 #                     evt_down_proj_allreduce = T.meta_var(Semaphore(WORLD_SIZE * down_proj_reduce_tile.M_split, etensor_down_proj_allreduce_global, use_nvshmem=True))
 #                     evt_add_rms_norm = T.meta_var(Semaphore(ceildiv(HIDDEN_SIZE, down_proj_allreduce_tile.N_TILE), etensor_mlp_add_rms_global, use_nvshmem=True))
@@ -928,7 +928,7 @@ WORLD_SIZE = 8
 #                     # initialize tile scheduler
 #                     tile_scheduler = T.meta_var(DynamicTileScheduler(queue_tasks, queue_head, queue_tail, pool_allocator=pool, use_nvshmem=True))
 #                     tile_scheduler.init(warp_id)
-                    
+
 #                     while tile_scheduler.valid():
 #                         if tile_scheduler.task_type == JobType.GEMM_QKV_PROJ.value:
 #                             if self.profiler_on:
@@ -984,12 +984,12 @@ WORLD_SIZE = 8
 #                             else:
 #                                 tile_scheduler.push_task(
 #                                     JobType.V_APPEND_KV.value,
-#                                     tile_scheduler.m_idx, 
+#                                     tile_scheduler.m_idx,
 #                                     tile_scheduler.n_idx - (NUM_ATTENTION_HEADS + NUM_KEY_VALUE_HEADS) // rmsnorm_tile.h_tile,
 #                                     1,
 #                                     warp_id,
 #                                     evt_v_reduce,
-#                                     tile_scheduler.m_idx, 
+#                                     tile_scheduler.m_idx,
 #                                     tile_scheduler.n_idx - (NUM_ATTENTION_HEADS + NUM_KEY_VALUE_HEADS) // rmsnorm_tile.h_tile,
 #                                 )
 #                             if self.profiler_on:
@@ -1163,7 +1163,7 @@ WORLD_SIZE = 8
 #                                 T.timer_start_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0 or tid == 96 or tid == 224)
 #                             tile_scheduler.push_tasks_along_dim(
 #                                 JobType.DECODE_MERGE.value,
-#                                 batch_idx, 
+#                                 batch_idx,
 #                                 tile_scheduler.n_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) // DecodeMergeTile.bdz,
 #                                 0,
 #                                 (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) // DecodeMergeTile.bdz,
@@ -1330,22 +1330,22 @@ WORLD_SIZE = 8
 #                             if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
 #                                 offset = T.meta_var(tile_scheduler.n_idx-INTERMEDIATE_SIZE//GemmTile.BLK_N)
 #                                 tile_scheduler.push_task(
-#                                     JobType.SPLIT_SILU_MULTIPLY.value, 
-#                                     offset, 
-#                                     0, 
-#                                     0, 
-#                                     warp_id, 
-#                                     evt_gate_up_proj, 
-#                                     offset, 
+#                                     JobType.SPLIT_SILU_MULTIPLY.value,
+#                                     offset,
+#                                     0,
+#                                     0,
+#                                     warp_id,
+#                                     evt_gate_up_proj,
+#                                     offset,
 #                                 )
 #                             else:
 #                                 tile_scheduler.push_task(
-#                                     JobType.SPLIT_SILU_MULTIPLY.value, 
-#                                     tile_scheduler.n_idx, 
-#                                     0, 
-#                                     0, 
-#                                     warp_id, 
-#                                     evt_gate_up_proj, 
+#                                     JobType.SPLIT_SILU_MULTIPLY.value,
+#                                     tile_scheduler.n_idx,
+#                                     0,
+#                                     0,
+#                                     warp_id,
+#                                     evt_gate_up_proj,
 #                                     tile_scheduler.n_idx
 #                                 )
 #                             if self.profiler_on:
@@ -1360,28 +1360,28 @@ WORLD_SIZE = 8
 #                             range_start = T.meta_var(tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // gemm_down_proj_tile.TILE_K)
 #                             range_end = T.meta_var(((tile_scheduler.m_idx + 1) * SiluMultiplyTile.TILE_SIZE - 1) // gemm_down_proj_tile.TILE_K)
 #                             tile_scheduler.push_tasks_along_dim(
-#                                 JobType.GEMM_DOWN_PROJ.value, 
-#                                 0, 
-#                                 0, 
-#                                 range_start, 
-#                                 HIDDEN_SIZE // GemmTile.BLK_N, 
-#                                 1, 
-#                                 warp_id, 
-#                                 lane_id, 
-#                                 evt_down_proj, 
+#                                 JobType.GEMM_DOWN_PROJ.value,
+#                                 0,
+#                                 0,
+#                                 range_start,
+#                                 HIDDEN_SIZE // GemmTile.BLK_N,
+#                                 1,
+#                                 warp_id,
+#                                 lane_id,
+#                                 evt_down_proj,
 #                                 range_start
 #                             )
 #                             for kr in T.serial(range_end - range_start):
 #                                 tile_scheduler.push_tasks_along_dim(
-#                                     JobType.GEMM_DOWN_PROJ.value, 
-#                                     0, 
-#                                     0, 
-#                                     range_start + kr + 1, 
-#                                     HIDDEN_SIZE // GemmTile.BLK_N, 
-#                                     1, 
-#                                     warp_id, 
-#                                     lane_id, 
-#                                     evt_down_proj, 
+#                                     JobType.GEMM_DOWN_PROJ.value,
+#                                     0,
+#                                     0,
+#                                     range_start + kr + 1,
+#                                     HIDDEN_SIZE // GemmTile.BLK_N,
+#                                     1,
+#                                     warp_id,
+#                                     lane_id,
+#                                     evt_down_proj,
 #                                     range_start + kr + 1,
 #                                     use_barrier=False
 #                                 )
@@ -1395,16 +1395,16 @@ WORLD_SIZE = 8
 #                                 T.timer_end_cuda(ProfileEventType.GEMM_DOWN_PROJ, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0 or tid == 96 or tid == 224)
 #                                 T.timer_start_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0 or tid == 96 or tid == 224)
 #                             tile_scheduler.push_tasks_along_dim(
-#                                 JobType.DOWN_PROJ_REDUCE.value, 
-#                                 0, 
-#                                 tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
-#                                 0, 
-#                                 down_proj_reduce_tile.M_split, 
-#                                 0, 
-#                                 warp_id, 
-#                                 lane_id, 
-#                                 evt_down_proj_reduce, 
-#                                 tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 
+#                                 JobType.DOWN_PROJ_REDUCE.value,
+#                                 0,
+#                                 tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),
+#                                 0,
+#                                 down_proj_reduce_tile.M_split,
+#                                 0,
+#                                 warp_id,
+#                                 lane_id,
+#                                 evt_down_proj_reduce,
+#                                 tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),
 #                                 use_barrier=False
 #                             )
 #                             if self.profiler_on:
@@ -1439,16 +1439,16 @@ WORLD_SIZE = 8
 #                                 T.timer_end_cuda(ProfileEventType.DOWN_PROJ_ALLREDUCE, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0 or tid == 96 or tid == 224)
 #                                 T.timer_start_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0 or tid == 96 or tid == 224)
 #                             tile_scheduler.push_tasks_along_dim_wg_with_extend_rank(
-#                                 JobType.MLP_ADD_RMS_NORM.value, 
-#                                 tile_scheduler.m_idx * down_proj_allreduce_tile.M_TILE, 
-#                                 0, 
+#                                 JobType.MLP_ADD_RMS_NORM.value,
+#                                 tile_scheduler.m_idx * down_proj_allreduce_tile.M_TILE,
 #                                 0,
-#                                 T.min(down_proj_allreduce_tile.M_TILE, batch_size - tile_scheduler.m_idx * down_proj_allreduce_tile.M_TILE), 
-#                                 0, 
-#                                 warp_id, 
-#                                 lane_id, 
-#                                 evt_add_rms_norm, 
-#                                 get_rank_map, 
+#                                 0,
+#                                 T.min(down_proj_allreduce_tile.M_TILE, batch_size - tile_scheduler.m_idx * down_proj_allreduce_tile.M_TILE),
+#                                 0,
+#                                 warp_id,
+#                                 lane_id,
+#                                 evt_add_rms_norm,
+#                                 get_rank_map,
 #                                 WORLD_SIZE,
 #                                 tile_scheduler.m_idx
 #                             )
@@ -1463,15 +1463,15 @@ WORLD_SIZE = 8
 #                                 T.timer_end_cuda(ProfileEventType.MLP_ADD_RMS_NORM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0 or tid == 96 or tid == 224)
 #                                 T.timer_start_cuda(ProfileEventType.PUSH, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0 or tid == 96 or tid == 224)
 #                             tile_scheduler.push_tasks_along_dim(
-#                                 JobType.END.value, 
-#                                 0, 
-#                                 0, 
-#                                 0, 
-#                                 KernelConfig.SM_NUMBER, 
-#                                 0, 
-#                                 warp_id, 
-#                                 lane_id, 
-#                                 evt_end, 
+#                                 JobType.END.value,
+#                                 0,
+#                                 0,
+#                                 0,
+#                                 KernelConfig.SM_NUMBER,
+#                                 0,
+#                                 warp_id,
+#                                 lane_id,
+#                                 evt_end,
 #                                 0
 #                             )
 #                             if self.profiler_on:
@@ -1501,7 +1501,6 @@ WORLD_SIZE = 8
 @pytest.mark.skip
 def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrapper, sess):
 
-
     arg_dict = prepare_data(batch_size, mega_kernel_wrapper)
 
     def tir_static(arg_dict, mk: MegaKernel):
@@ -1509,7 +1508,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
         tvm_arg_dict = {}
         target = tvm.target.Target("cuda")
         tvm_arg_dict["o_partial_attn"] = tvm.runtime.tensor(
-            np.zeros([mk.MAX_NUM_KV_SPLITS * mk.NUM_KEY_VALUE_HEADS * mk.HEAD_DIM], dtype=np.float32),
+            np.zeros(
+                [mk.MAX_NUM_KV_SPLITS * mk.NUM_KEY_VALUE_HEADS * mk.HEAD_DIM], dtype=np.float32
+            ),
             DEV,
         )
         tvm_arg_dict["lse_partial"] = tvm.runtime.tensor(
@@ -2056,7 +2057,11 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
 
             for key, value in arg_dict.items():
                 if key == "qkv_proj_weight":
-                    split_sizes = [mk.NUM_ATTENTION_HEADS, mk.NUM_KEY_VALUE_HEADS, mk.NUM_KEY_VALUE_HEADS]
+                    split_sizes = [
+                        mk.NUM_ATTENTION_HEADS,
+                        mk.NUM_KEY_VALUE_HEADS,
+                        mk.NUM_KEY_VALUE_HEADS,
+                    ]
                     value = value.reshape(WORLD_SIZE, -1, mk.HEAD_DIM, mk.HIDDEN_SIZE)
                     q_weight, k_weight, v_weight = torch.split(value, split_sizes, dim=1)
                     q_weight = q_weight.reshape(-1, mk.HIDDEN_SIZE)
@@ -2128,7 +2133,8 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                 kv_layout="HND",
             )
             o = wrapper.run(
-                q.reshape(batch_size, FULL_NUM_ATTENTION_HEADS, mk.HEAD_DIM), std_arg_dict["kv_cache"]
+                q.reshape(batch_size, FULL_NUM_ATTENTION_HEADS, mk.HEAD_DIM),
+                std_arg_dict["kv_cache"],
             )
             hidden_state_attn_mlp = torch.matmul(
                 o.reshape(batch_size, FULL_NUM_ATTENTION_HEADS * mk.HEAD_DIM),
@@ -2175,7 +2181,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
 
 if __name__ == "__main__":
 
-    mega_kernel_wrapper_static = MegaKernel(WORLD_SIZE,profiler_on=False)
+    mega_kernel_wrapper_static = MegaKernel(WORLD_SIZE, profiler_on=False)
     # mega_kernel_wrapper_dynamic = MegaKernel(profiler_on=PROFILER_ON)
     mega_static_module = mega_kernel_wrapper_static.get_module_static()
     # mega_kernel_dynamic = mega_kernel_wrapper_dynamic.get_func_dynamic()

@@ -326,13 +326,13 @@ Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_wor
   return ret;
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK(){
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("flashinfer.batch_prefill_with_kv_cache_plan", BatchPrefillWithKVCachePlan);
   refl::GlobalDef().def("flashinfer.batch_decode_with_paged_kv_cache_plan",
                         BatchDecodeWithPagedKVCachePlan);
   refl::GlobalDef().def("flashinfer.batch_paged_attention_plan", BatchPagedAttentionPlan);
-});
+}
 
 }  // namespace runtime
 }  // namespace tvm

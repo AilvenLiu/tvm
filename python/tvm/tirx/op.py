@@ -3764,15 +3764,16 @@ def ptx_cp_async_bulk_tensor_global_to_cluster_prefetch(dim, tensormap, *coords,
     )
 
 
-def ptx_cp_async_bulk_tensor_shared_to_global_reduce(dim, src_ptr, tensormap, *coords, cache_hint="", red_op="add"):
-
+def ptx_cp_async_bulk_tensor_shared_to_global_reduce(
+    dim, src_ptr, tensormap, *coords, cache_hint="", red_op="add"
+):
     """TVM intrinsic to call cp.reduce.async.bulk.tensor.dim.dst.src.redOp
 
     Parameters
     ----------
     dim : int
         The dimension of the copy tensor.
-        
+
     tensor_map: Var
         The tensor map.
 
@@ -3781,7 +3782,7 @@ def ptx_cp_async_bulk_tensor_shared_to_global_reduce(dim, src_ptr, tensormap, *c
 
     cache_hint: str
         The cache hint.
-        
+
     red_op: str
         The reduction operator.
 
@@ -3790,7 +3791,17 @@ def ptx_cp_async_bulk_tensor_shared_to_global_reduce(dim, src_ptr, tensormap, *c
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.ptx_cp_async_bulk_tensor_shared_to_global_reduce", dim, src_ptr, tensormap, *coords, cache_hint, red_op)
+    return call_intrin(
+        "",
+        "tir.ptx_cp_async_bulk_tensor_shared_to_global_reduce",
+        dim,
+        src_ptr,
+        tensormap,
+        *coords,
+        cache_hint,
+        red_op,
+    )
+
 
 def ptx_cp_async_bulk_commit_group():
     """TVM intrinsic to call cp.async.bulk.tensor.commit_group
@@ -5494,6 +5505,40 @@ def thread_return():
         The call expression.
     """
     return call_intrin("", "tir.thread_return")
+
+
+def continue_loop(span=None):
+    """Create a tir intrinsic call to represent continue expression
+
+    Parameters
+    ----------
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    ret : PrimExpr
+        The continue expression
+    """
+
+    return _ffi_api.continue_loop(span)
+
+
+def break_loop(span=None):
+    """Create a tir intrinsic call to represent break expression
+
+    Parameters
+    ----------
+    span : Optional[Span]
+        The location of this operator in the source code.
+
+    Returns
+    -------
+    ret : PrimExpr
+        The break expression
+    """
+
+    return _ffi_api.break_loop(span)
 
 
 ########################################################

@@ -26,7 +26,7 @@
 namespace tvm {
 namespace tir {
 
-TVM_FFI_STATIC_INIT_BLOCK({ PredicateNode::RegisterReflection(); });
+TVM_FFI_STATIC_INIT_BLOCK() { PredicateNode::RegisterReflection(); }
 
 PrimExpr PredicateNode::Apply(const ffi::Array<PrimExpr>& indices) const {
   ICHECK_EQ(indices.size(), vars.size());
@@ -48,18 +48,18 @@ Predicate::Predicate(ffi::Array<Var> vars, PrimExpr pred) {
   data_ = std::move(n);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.Predicate",
                         [](ffi::Array<Var> vars, PrimExpr pred) { return Predicate(vars, pred); });
-});
+}
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.PredicateApply", [](Predicate pred, ffi::Array<PrimExpr> indices) {
     return pred->Apply(indices);
   });
-});
+}
 
 }  // namespace tir
 }  // namespace tvm

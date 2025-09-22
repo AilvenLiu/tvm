@@ -858,11 +858,11 @@ Pass LowerTIRp() {
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRp", {});
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK(){
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tirx.transform.LowerTIRp", LowerTIRp);
-});
+}
 
 }  // namespace transform
-}  // namespace tirxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxx
 }  // namespace tvm

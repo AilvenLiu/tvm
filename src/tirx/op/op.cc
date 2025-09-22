@@ -1330,7 +1330,7 @@ PrimExpr PrintOpPacked(Var data, DataType dtype, bool is_string, bool is_scalar,
   return tir::Call(dtype, tir::builtin::print_buffer(), args);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def_packed("tir.print_buffer", [](ffi::PackedArgs args, ffi::Any* ret) {
     // Expected arguments:
@@ -1356,6 +1356,6 @@ TVM_FFI_STATIC_INIT_BLOCK({
 
     *ret = PrintOpPacked(buffer_var, dtype, is_string, is_scalar, dim_num, shape);
   });
-});
+}
 
 }  // namespace tvm

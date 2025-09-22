@@ -23,11 +23,11 @@
 namespace tvm {
 namespace tir {
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   BulkGroupEventNode::RegisterReflection();
   SemaphoreEventTensorNode::RegisterReflection();
   SemaphoreEventTensorItemNode::RegisterReflection();
-});
+}
 
 kEventImpl BulkGroupEventNode::GetImpl() const { return impl; }
 ffi::Array<ffi::Any> BulkGroupEventNode::GetState() const { return state; }
@@ -64,7 +64,7 @@ SemaphoreEventTensorItem::SemaphoreEventTensorItem(const SemaphoreEventTensor& t
   data_ = std::move(n);
 }
 
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("tirp.BulkGroupEvent",
@@ -80,7 +80,7 @@ TVM_FFI_STATIC_INIT_BLOCK({
            })
       .def("tirp.BaseEventImplGet", [](BaseEvent event) { return event->GetImpl(); })
       .def("tirp.BaseEventStateGet", [](BaseEvent event) { return event->GetState(); });
-});
+}
 
 }  // namespace tir
 }  // namespace tvm

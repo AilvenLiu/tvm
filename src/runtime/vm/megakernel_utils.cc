@@ -308,13 +308,13 @@ Array<Array<Tensor>> GenerateExecQueueDyn(Tensor exec_queue_device_buf,
 }
 
 // RNN State methods
-TVM_FFI_STATIC_INIT_BLOCK({
+TVM_FFI_STATIC_INIT_BLOCK(){
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("megakernel.get_event_tensors_on_layer", GetEventTensorsOnLayer)
       .def("megakernel.generate_exec_queue", GenerateExecQueue)
       .def("megakernel.generate_exec_queue_dyn", GenerateExecQueueDyn);
-});
+}
 
 }  // namespace megakernel
 }  // namespace vm
