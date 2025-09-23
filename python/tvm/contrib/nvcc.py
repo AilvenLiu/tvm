@@ -135,8 +135,14 @@ def _compile_cuda_nvcc(
     file_name = "tvm_kernels"
     if target_format is None and not use_nvshmem:
         target_format = "ptx"
+
+    tvm_kernel_dump = os.environ.get("TVM_KERNEL_DUMP", None)
+    if tvm_kernel_dump is not None:
+        target_format = "ptx"
+
     if target_format not in ["cubin", "ptx", "fatbin"]:
         raise ValueError("target_format must be in cubin, ptx, fatbin")
+
     temp_code = temp.relpath(f"{file_name}.cu")
     temp_target = temp.relpath(f"{file_name}.{target_format}")
 
@@ -146,6 +152,9 @@ def _compile_cuda_nvcc(
         if "cuda.kernels_output_dir" in pass_context.config
         else None
     )
+    if tvm_kernel_dump is not None:
+        kernels_output_dir = tvm_kernel_dump
+
     if kernels_output_dir is not None:
         if not os.path.isdir(kernels_output_dir):
             os.makedirs(kernels_output_dir)
@@ -162,7 +171,7 @@ def _compile_cuda_nvcc(
 
     cmd = ["nvcc"]
     cmd += [f"--{target_format}", "-O3"]
-    if kernels_output_dir is not None:
+    if os.environ.get("TVM_KERNEL_DEBUG", "0") == "1":
         cmd += ["-lineinfo"]
         cmd += ["-g"]
         cmd += ["-G"]

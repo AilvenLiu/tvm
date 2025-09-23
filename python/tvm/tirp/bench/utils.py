@@ -53,32 +53,36 @@ def setup():
     return args
 
 
-def bench(func, warmup=0, repeat=10, proton_name="kernel"):
-    if not is_running_under_pytest():
-        with proton.scope(proton_name, metrics={}):
+def bench(func, warmup=0, repeat=10, proton_name="kernel", debug=False):
+    if not debug:
+        if not is_running_under_pytest():
+            with proton.scope(proton_name, metrics={}):
+                ms = do_bench(func, warmup=warmup, rep=repeat)
+        else:
             ms = do_bench(func, warmup=warmup, rep=repeat)
     else:
-        ms = do_bench(func, warmup=warmup, rep=repeat)
-
+        func()
+        ms = -1
     return ms
 
 
 class ProtonContext:
     """Context manager for Proton profiling sessions."""
 
-    def __init__(self, name="kernel", hook="triton"):
+    def __init__(self, name="kernel", hook="triton", debug=False):
         self.name = name
         self.hook = hook
         self.session = None
+        self.debug = debug
 
     def __enter__(self):
-        if not is_running_under_pytest():
+        if not is_running_under_pytest() and not self.debug:
             self.session = proton.start(self.name, hook=self.hook)
             proton.activate(self.session)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if not is_running_under_pytest():
+        if not is_running_under_pytest() and not self.debug:
             proton.deactivate(self.session)
             proton.finalize(self.session)
 

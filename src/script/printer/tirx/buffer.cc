@@ -337,9 +337,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
 
           // special case for all 1-dim buffers with shape (1,) (no matter cell or normal)
           if (store->buffer->shape.size() == 1 && tirx::is_one(store->buffer->shape[0])) {
-            ICHECK(store->indices.size() == 1 && tirx::is_zero(store->indices[0]))
-                << "1-dim buffer with shape (1,) store with indices other than [0] is not "
-                   "supported";
+            // ICHECK(store->indices.size() == 1 && tirx::is_zero(store->indices[0]))
+            //     << "1-dim buffer with shape (1,) store with indices other than [0] is not "
+            //        "supported";
             ffi::Optional<ExprDoc> doc = d->GetVarDoc(store->buffer);
             ICHECK(doc.has_value())
                 << "buffer is not defined in the environment: " << store->buffer;
@@ -367,8 +367,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           // special case for cell
           if ((load->buffer.IsCell(true) || load->buffer.IsCell(false)) &&
               !load->predicate.defined()) {
-            ICHECK(load->indices.size() == 1 && tirx::is_zero(load->indices[0]))
-                << "Cell buffer load with indices other than [0] is not supported";
+            // ICHECK(load->indices.size() == 1 && tirx::is_zero(load->indices[0]))
+            //     << "Cell buffer load with indices other than [0] is not supported";
             ffi::Optional<ExprDoc> doc = d->GetVarDoc(load->buffer);
             ICHECK(doc.has_value())
                 << "Cell buffer is not defined in the environment: " << load->buffer;

@@ -243,8 +243,8 @@ def get_vec_len(
             for x in [
                 src_st[-1],
                 dst_st[-1],
-                src.shape[-1],
-                dst.shape[-1],
+                src.shape[-1] if len(src.shape) > 1 else 0,
+                dst.shape[-1] if len(dst.shape) > 1 else 0,
                 src_extent[-1],
                 dst_extent[-1],
                 n_elements // thread_cnt,

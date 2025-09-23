@@ -353,7 +353,7 @@ __device__ __forceinline__ float {func_name}() {{
 
             with T.kernel():
                 bx = T.cta_id([SM_COUNT * 2 // WG_COUNT], parent="kernel")
-                wg_id = T.warpgroup_id([WG_COUNT], parent="cta")
+                wg_id = T.warpgroup_id([m], parent="cta")
                 warp_id = T.warp_id([NUM_WARPS_Q * NUM_WARPS_KV], parent="warpgroup")
                 lane_id = T.thread_id([32], parent="warp")
 

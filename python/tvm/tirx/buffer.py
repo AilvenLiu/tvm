@@ -267,6 +267,9 @@ class Buffer(Object, Scriptable):
 
         Note that the bufferload inside requires LowerTIPp pass to apply the layout to get the physical indices.
         """
+        assert len(indices) == len(
+            self.shape
+        ), f"The number of indices {indices} does not match the shape of the buffer {self.shape}"
         return tvm.tir.address_of(self[*indices])
 
     def view(self, *args, **kwargs) -> "Buffer":
