@@ -33,10 +33,11 @@ __forceinline__ __device__ void* nvshmem_get_ptr(void* ptr, int32_t pe) {
 
 
 class Semaphore:
-    def __init__(self, cnt, buffer, use_nvshmem=False):
+    def __init__(self, cnt, buffer, decrement=False, use_nvshmem=False):
         self.cnt = cnt
         self.sem = buffer
         self.state = T.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
+        self.decrement = decrement
         if use_nvshmem:
             self.atomic_add_int32 = atomic_add_int32
         else:
@@ -46,7 +47,7 @@ class Semaphore:
     @T.macro
     def semaphore_wait(self, *coord):
         with T.thread():
-            if self.cnt >= 0:
+            if not self.decrement:
                 while 1:
                     T.ptx.ld_global_acquire(
                         self.state[0],
@@ -73,7 +74,7 @@ class Semaphore:
             lane_id = T.thread_id([32], parent="warp")
             if (mask >> warp_id) & 1 == 1:
                 self.state[0] = -1
-                if self.cnt >= 0:
+                if not self.decrement:
                     while 1:
                         if lane_id == 0:
                             T.ptx.ld_global_acquire(

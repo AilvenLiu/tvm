@@ -519,11 +519,16 @@ class PagedKVCacheAuxDataManager {
   /*! \brief Commit all the compact KV auxiliary data copy operations since the last commit. */
   virtual void CommitCompactKVAuxDataCopy() = 0;
 
+  // megakernel inverse info for attn
+  virtual Tensor CopyInverseIndptrAsync(HostMemoryVector* data) = 0;
+
+  virtual Tensor CopyInverseIndicesAsync(HostMemoryVector* data) = 0;
+
   // Event tensor transfer.
   virtual void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
                                     std::vector<Tensor*> etensor_data_views, int num_layers,
-                                    int cur_batch_size, int num_qo_heads, int num_kv_heads,
-                                    int qk_head_dim, int tp_size) = 0;
+                                    int cur_batch_size, int attn_num, int num_qo_heads,
+                                    int num_kv_heads, int qk_head_dim, int tp_size) = 0;
 
  protected:
   /*! \brief The dtype of the auxiliary data. It is expected to be int32. */
@@ -723,10 +728,20 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   // The commit of the plain auxiliary data manager is no-op.
   void CommitCompactKVAuxDataCopy() final {}
 
+  Tensor CopyInverseIndptrAsync(HostMemoryVector* data) final {
+    LOG(FATAL) << "Megakernel is not supported for plain auxiliary data manager.";
+    throw;
+  }
+
+  Tensor CopyInverseIndicesAsync(HostMemoryVector* data) final {
+    LOG(FATAL) << "Megakernel is not supported for plain auxiliary data manager.";
+    throw;
+  }
+
   void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
                             std::vector<Tensor*> etensor_data_views, int num_layers,
-                            int cur_batch_size, int num_qo_heads, int num_kv_heads, int qk_head_dim,
-                            int tp_size) final {
+                            int cur_batch_size, int attn_num, int num_qo_heads, int num_kv_heads,
+                            int qk_head_dim, int tp_size) final {
     LOG(FATAL) << "Event tensor transfer is not supported for plain auxiliary data manager.";
     throw;
   }
@@ -970,12 +985,16 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     Tensor::CopyFromTo(&copy_src, &copy_dst, copy_stream_);
   }
 
+  Tensor CopyInverseIndptrAsync(HostMemoryVector* data) { return CopyAttnAuxVecToCache(data); }
+
+  Tensor CopyInverseIndicesAsync(HostMemoryVector* data) { return CopyAttnAuxVecToCache(data); }
+
   void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
                             std::vector<Tensor*> etensor_data_views, int num_layers,
-                            int cur_batch_size, int num_qo_heads, int num_kv_heads, int qk_head_dim,
-                            int tp_size) final {
-    TVM_FFI_ICHECK_EQ(etensor_data.size(), 18)
-        << "Event tensor size mismatch, expected 18, got " << etensor_data.size();
+                            int cur_batch_size, int attn_num, int num_qo_heads, int num_kv_heads,
+                            int qk_head_dim, int tp_size) final {
+    TVM_FFI_ICHECK_EQ(etensor_data.size(), 15)
+        << "Event tensor size mismatch, expected 15, got " << etensor_data.size();
     TVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
     std::vector<Tensor> etensor_data_views_raw;
     etensor_data_views_raw.reserve(etensor_data.size());
@@ -995,45 +1014,36 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     *etensor_data_views[0] = etensor_data_views_raw[0].CreateView(
         {num_layers, ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit)}, dtype_aux_);
     *etensor_data_views[1] = etensor_data_views_raw[1].CreateView(
-        {num_layers, cur_batch_size, ceildiv(q_h_d, megakernel::kSplitKReduceTileNUnit)},
-        dtype_aux_);
+        {num_layers, ceildiv(attn_num, megakernel::kNumWarpgroupPerBlock)}, dtype_aux_);
     *etensor_data_views[2] = etensor_data_views_raw[2].CreateView(
-        {num_layers, cur_batch_size, ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit)},
-        dtype_aux_);
-    *etensor_data_views[3] = etensor_data_views_raw[3].CreateView(
-        {num_layers, cur_batch_size, ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit)},
-        dtype_aux_);
-    *etensor_data_views[4] = etensor_data_views_raw[4].CreateView(
-        {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
-    *etensor_data_views[5] = etensor_data_views_raw[5].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
-    *etensor_data_views[6] = etensor_data_views_raw[6].CreateView(
+    *etensor_data_views[3] = etensor_data_views_raw[3].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize / tp_size, megakernel::kAllReduceTileNTile)},
         dtype_aux_);
-    *etensor_data_views[7] =
-        etensor_data_views_raw[7].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-    *etensor_data_views[8] = etensor_data_views_raw[8].CreateView({num_layers, 1}, dtype_aux_);
-    *etensor_data_views[9] = etensor_data_views_raw[9].CreateView(
+    *etensor_data_views[4] =
+        etensor_data_views_raw[4].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+    *etensor_data_views[5] = etensor_data_views_raw[5].CreateView({num_layers, 1}, dtype_aux_);
+    *etensor_data_views[6] = etensor_data_views_raw[6].CreateView(
         {num_layers,
          ceildiv(megakernel::kIntermediateSizeTP1 / tp_size * 2, megakernel::kGemmTileBlkN)},
         dtype_aux_);
-    *etensor_data_views[10] = etensor_data_views_raw[10].CreateView(
+    *etensor_data_views[7] = etensor_data_views_raw[7].CreateView(
         {num_layers,
          ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN)},
         dtype_aux_);
-    *etensor_data_views[11] = etensor_data_views_raw[11].CreateView(
+    *etensor_data_views[8] = etensor_data_views_raw[8].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
-    *etensor_data_views[12] = etensor_data_views_raw[12].CreateView(
+    *etensor_data_views[9] = etensor_data_views_raw[9].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize / tp_size, megakernel::kAllReduceTileNTile)},
         dtype_aux_);
+    *etensor_data_views[10] =
+        etensor_data_views_raw[10].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+    *etensor_data_views[11] = etensor_data_views_raw[11].CreateView({num_layers, 1}, dtype_aux_);
+    *etensor_data_views[12] =
+        etensor_data_views_raw[12].CreateView({num_layers, split_o_project}, dtype_aux_);
     *etensor_data_views[13] =
-        etensor_data_views_raw[13].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-    *etensor_data_views[14] = etensor_data_views_raw[14].CreateView({num_layers, 1}, dtype_aux_);
-    *etensor_data_views[15] =
-        etensor_data_views_raw[15].CreateView({num_layers, split_o_project}, dtype_aux_);
-    *etensor_data_views[16] =
-        etensor_data_views_raw[16].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
-    *etensor_data_views[17] = etensor_data_views_raw[17].CreateView(
+        etensor_data_views_raw[13].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
+    *etensor_data_views[14] = etensor_data_views_raw[14].CreateView(
         {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
   }
 

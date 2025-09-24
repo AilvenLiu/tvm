@@ -1,9 +1,8 @@
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.layout import TileLayout
 
-from .common import KernelConfig, ProfileEventType, SmemManager, Tile, ceildiv, F16_BYTES, F32_BYTES
+from .common import KernelConfig, ProfileEventType, SmemManager, Tile, ceildiv
 
 def upcast_size(dtype):
     return 128 // tvm.DataType(dtype).bits
@@ -231,24 +230,15 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
-        self.q_smem_stride = smem_manager.chunk_size // self.head_dim // F16_BYTES
         # allocate smem
-        self.k_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16, split=2, method="exclusive").buffer
-        self.v_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16, split=2, method="exclusive").buffer
+        self.q_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
+        self.k_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16).buffer
+        self.v_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16).buffer
         self.cta_sync_o_smem = smem_manager.alloc([KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1 
-                                                  else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, self.num_mma_d_vo, 32, 8], 
-                                                  "float32", align=16, split=2, method="exclusive").buffer
-        self.packed_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.smem_manager.chunk_size], "uint8", align=16, split=2, method="exclusive").buffer
-        beg = self.smem_manager.bufs[self.packed_smem][1]
-        self.q_smem = T.decl_buffer([self.smem_manager.chunk_size // F16_BYTES + self.cta_tile_q * self.head_dim], "float16", 
-                                    self.smem_manager.pool_allocator.ptr, byte_offset=beg, align=16).buffer
-        self.smem_o = T.decl_buffer([self.smem_manager.chunk_size // F16_BYTES + self.cta_tile_q * self.head_dim], "float16",
-                                    self.smem_manager.pool_allocator.ptr, byte_offset=beg + self.cta_tile_q * self.head_dim * F16_BYTES, align=16).buffer
-        cta_sync_md_smem_shape = [KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1 else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, 16, 2]
-        cta_sync_md_smem_stride = [smem_manager.chunk_size // F32_BYTES, 1] if self.num_warps_kv == 1 else [smem_manager.chunk_size // F32_BYTES, self.num_mma_q * 16 * 2, 16 * 2, 2, 1]
-        self.cta_sync_md_smem = T.decl_buffer(cta_sync_md_smem_shape, "float32", smem_manager.pool_allocator.ptr,
-                                               byte_offset=beg + self.cta_tile_q * self.head_dim * F16_BYTES * 2, 
-                                               layout=TileLayout(shard=(cta_sync_md_smem_shape, cta_sync_md_smem_stride)), align=16).buffer
+                                        else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, self.num_mma_d_vo, 32, 8], "float32", align=16).buffer
+        self.cta_sync_md_smem = smem_manager.alloc([KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1 
+                                        else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, 16, 2], "float32", align=16).buffer
+        self.smem_o = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
 
     @T.macro
     def init(self, smem_manager: SmemManager):
@@ -353,8 +343,9 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                 self.tid[0] = lane_id
                 self.tid[1] = warp_id % self.num_warps_q
                 self.tid[2] = warp_id // self.num_warps_q
-                
-                self.q_smem_offset_r = self.get_permuted_offset(self.upcast_stride_q, wg_id * self.q_smem_stride + self.get_warp_idx_q(self.tid) * self.num_mma_q * 16 + lane_id % 16, lane_id // 16)
+
+
+                self.q_smem_offset_r = self.get_permuted_offset(self.upcast_stride_q, wg_id * self.cta_tile_q + self.get_warp_idx_q(self.tid) * self.num_mma_q * 16 + lane_id % 16, lane_id // 16)
                 self.k_smem_offset_r = self.get_permuted_offset(self.upcast_stride_k, wg_id * self.cta_tile_kv + self.get_warp_idx_kv(self.tid) * self.num_mma_kv * 16 + 8 * (lane_id // 16) + lane_id % 8, (lane_id % 16 // 8))
                 self.v_smem_offset_r = self.get_permuted_offset(self.upcast_stride_v, wg_id * self.cta_tile_kv + self.get_warp_idx_kv(self.tid) * self.num_mma_kv * 16 + lane_id % 16, lane_id // 16)
                 self.k_smem_offset_w = self.get_permuted_offset(self.upcast_stride_k, wg_id * self.cta_tile_kv + warp_id * self.kv_thr_layout_row + lane_id // self.kv_thr_layout_col, lane_id % self.kv_thr_layout_col)
@@ -413,10 +404,9 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             self.thr_local_kv_offset[i] = kv_tvm.elem_offset_of([mapped_page, 0, self.kv_head_idx[0], entry_idx[0], (lane_id % self.kv_thr_layout_col) * upcast_size("float16")])
 
                 prefetch_offset(self.block_iter_base[0] + self.kv_tile_idx[0] * self.cta_tile_kv)
-                
+
                 if self.kv_chunk_idx[0] < self.num_kv_chunks[0] - 1:
                     self.page_produce_kv(False, self.kv_start[0] + self.kv_tile_idx[0] * self.cta_tile_kv, self.k_smem_offset_w, self.k_smem, kv_tvm, warp_id, lane_id)
-                    
 
     @T.macro
     def run(
@@ -455,7 +445,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                 @T.macro
                 def load_q_global_smem():
                     if self.get_warp_idx_kv(self.tid) == 0:
-                        q_smem_offset_w = int_var(name="q_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_q, wg_id * self.q_smem_stride + self.get_warp_idx_q(self.tid) * self.num_mma_q * 16 + lane_id // 8, lane_id % 8))
+                        q_smem_offset_w = int_var(name="q_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_q, wg_id * self.cta_tile_q + self.get_warp_idx_q(self.tid) * self.num_mma_q * 16 + lane_id // 8, lane_id % 8))
                         # unroll
                         for mma_q in T.unroll(self.num_mma_q):
                             for j in T.unroll(4):
@@ -742,7 +732,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                             with T.thread():
                                 o_frag_f16 = T.alloc_local([8], "float16", name="o_frag_f16")
                                 Tp.cast(o_frag_f16[:], self.o_frag[mma_q, mma_d, :])
-                                o_smem_offset_w = int_var(name="o_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_o, wg_id * self.q_smem_stride + (self.get_warp_idx_q(self.tid) * self.num_mma_q + mma_q) * 16 + lane_id % 16, mma_d * 2 + lane_id // 16))
+                                o_smem_offset_w = int_var(name="o_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_o, wg_id * self.cta_tile_q + (self.get_warp_idx_q(self.tid) * self.num_mma_q + mma_q) * 16 + lane_id % 16, mma_d * 2 + lane_id // 16))
                                 T.ptx.stmatrix(4, False, o_smem.ptr_to([o_smem_offset_w[0] * upcast_size("float16")]), o_frag_f16.ptr_to([0]))
 
                 @T.macro
@@ -756,7 +746,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                     if warp_id_z[0] == 0:
                         with T.thread():
                             store_o_to_smem(o_smem)
-                            o_smem_offset_w = int_var(name="o_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_o, wg_id * self.q_smem_stride + warp_id_x[0] * self.num_mma_q * 16 + lane_id // 8, lane_id % 8))
+                            o_smem_offset_w = int_var(name="o_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_o, wg_id * self.cta_tile_q + warp_id_x[0] * self.num_mma_q * 16 + lane_id // 8, lane_id % 8))
                             for mma_q in T.unroll(self.num_mma_q):
                                 for j in T.unroll(4):
                                     with T.thread():
@@ -781,7 +771,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                     if warp_id_z[0] == 0:
                         with T.thread():
                             store_o_to_smem(o_smem)
-                            o_smem_offset_w = int_var(name="o_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_o, wg_id * self.q_smem_stride + warp_id_x[0] * self.num_mma_q * 16 + lane_id // 8, lane_id % 8))
+                            o_smem_offset_w = int_var(name="o_smem_offset_w", val=self.get_permuted_offset(self.upcast_stride_o, wg_id * self.cta_tile_q + warp_id_x[0] * self.num_mma_q * 16 + lane_id // 8, lane_id % 8))
                             for mma_q in T.unroll(self.num_mma_q):
                                 for j in T.unroll(4):
                                     with T.thread():

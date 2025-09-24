@@ -57,6 +57,8 @@ constexpr const int kStaticTileSchedulerMaxTasks = 128;
 constexpr const int kDyanmicTileSchedulerMaxTasks = 8192;
 constexpr const int kTaskSize = 4;
 
+constexpr const int kMaxTotalNumWorks = 65536;
+
 enum class JobType : int32_t {
   kGemmGateUpProj = 0,
   kSplitSiluMultiply = 1,
@@ -90,15 +92,15 @@ enum class JobType : int32_t {
 
 ffi::Array<Tensor> GetEventTensorsOnLayer(ffi::Array<Tensor> etensors, int layer_id);
 
-Tensor GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
-                         int num_kv_heads, int head_dim, Device device,
-                         Device preferred_host_device);
+Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
+                               int num_kv_heads, int head_dim, Device device,
+                               Device preferred_host_device);
 
-ffi::Array<ffi::Array<Tensor>> GenerateExecQueueDyn(Tensor exec_queue_device_buf,
-                                                    Tensor exec_queue_host_buf, int tp_size,
-                                                    int num_qo_heads, int num_kv_heads,
-                                                    int head_dim, int num_layers,
-                                                    TVMStreamHandle copy_stream);
+ffi::Array<ffi::Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
+                                                        Tensor exec_queue_host_buf, int tp_size,
+                                                        int num_qo_heads, int num_kv_heads,
+                                                        int head_dim, int num_layers,
+                                                        TVMStreamHandle copy_stream);
 
 }  // namespace megakernel
 }  // namespace vm

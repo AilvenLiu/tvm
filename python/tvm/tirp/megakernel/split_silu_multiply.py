@@ -3,7 +3,7 @@ from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
 
 from .common import SmemManager, Tile, KernelConfig, F16_BYTES, silu
-from .dynamic_scheduler import DynamicTileScheduler
+# from .dynamic_scheduler import DynamicTileScheduler
 
 class SiluMultiplyTile(Tile):
 

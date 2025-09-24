@@ -194,6 +194,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   std::vector<Tensor> temp_int_pinned_attn_workspace_;
   Tensor temp_float_attn_workspace_;
   ffi::Array<ffi::Any> attn_plan_results_;
+  std::vector<std::vector<int>> intermediate_inverse_info_;
   int64_t attn_task_num_;
 
   // Megakernel execution queue cache
@@ -231,13 +232,13 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   HostMemoryVector kv_transfer_page_to_page_local_position_map_host_;
   HostMemoryVector kv_transfer_page_to_page_remote_position_map_host_;
   HostMemoryVector kv_transfer_page_to_page_recver_id_host_;
+  // Host memory tensor for megakernel
+  HostMemoryVector inverse_indptr_host_;
+  HostMemoryVector inverse_indices_host_;
   // Event Tensor host memory vector
   // static zero etensors
   HostMemoryVector etensor_qkv_partial_host_;
-  HostMemoryVector etensor_q_reduce_host_;
-  HostMemoryVector etensor_k_reduce_host_;
-  HostMemoryVector etensor_v_reduce_host_;
-  HostMemoryVector etensor_attn_host_;
+  HostMemoryVector etensor_notify_attn_host_;
   HostMemoryVector etensor_o_partial_host_;
   HostMemoryVector etensor_o_allreduce_host_;
   HostMemoryVector etensor_attn_add_rms_host_;
@@ -283,13 +284,13 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   std::vector<Tensor> k_rope_pos_offset_sliding_window_view_;
   std::vector<Tensor> tree_attn_mask_view_;
   std::vector<Tensor> tree_attn_mn_indptr_view_;
+  // Device views for megakernel
+  Tensor inverse_indptr_view_;
+  Tensor inverse_indices_view_;
   // Event Tensor device views
   // static zero etensors
   Tensor etensor_qkv_partial_view_;
-  Tensor etensor_q_reduce_view_;
-  Tensor etensor_k_reduce_view_;
-  Tensor etensor_v_reduce_view_;
-  Tensor etensor_attn_view_;
+  Tensor etensor_notify_attn_view_;
   Tensor etensor_o_partial_view_;
   Tensor etensor_o_allreduce_view_;
   Tensor etensor_attn_add_rms_view_;
@@ -493,12 +494,14 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     commit_copy_dst_pos_in_page_table_host_ =
         HostMemoryVector(std::min(kTreeAttnMaxTreeSize * reserved_num_seqs, prefill_chunk_size),
                          dtype_aux_, preferred_host_device);
-
+    // alloction for megakernel
+    inverse_indptr_host_ =
+        HostMemoryVector(megakernel::kMaxTotalNumWorks, dtype_aux_, preferred_host_device);
+    inverse_indices_host_ =
+        HostMemoryVector(megakernel::kMaxTotalNumWorks, dtype_aux_, preferred_host_device);
     // Event tensor allocation
     int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads;
     int qkv_h_d = (num_qo_heads + 2 * num_kv_heads) * qk_head_dim;
-    int q_h_d = num_qo_heads * qk_head_dim;
-    int k_h_d = num_kv_heads * qk_head_dim;
     int split_qkv_project = megakernel::kSplitQKVProject[tp_size];
     int split_o_project = megakernel::kSplitOProject[tp_size];
     int down_proj_split_k_factor = megakernel::kDownProjSplitKFactor[tp_size];
@@ -508,17 +511,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     etensor_qkv_partial_host_ =
         HostMemoryVector(num_layers * ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit),
                          dtype_aux_, preferred_host_device);
-    etensor_q_reduce_host_ = HostMemoryVector(
-        num_layers * reserved_num_seqs * ceildiv(q_h_d, megakernel::kSplitKReduceTileNUnit),
+    etensor_notify_attn_host_ = HostMemoryVector(
+        num_layers * ceildiv(megakernel::kMaxTotalNumWorks, megakernel::kNumWarpgroupPerBlock),
         dtype_aux_, preferred_host_device);
-    etensor_k_reduce_host_ = HostMemoryVector(
-        num_layers * reserved_num_seqs * ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit),
-        dtype_aux_, preferred_host_device);
-    etensor_v_reduce_host_ = HostMemoryVector(
-        num_layers * reserved_num_seqs * ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit),
-        dtype_aux_, preferred_host_device);
-    etensor_attn_host_ = HostMemoryVector(num_layers * reserved_num_seqs * num_kv_heads, dtype_aux_,
-                                          preferred_host_device);
     etensor_o_partial_host_ =
         HostMemoryVector(num_layers * ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN),
                          dtype_aux_, preferred_host_device);
@@ -556,14 +551,25 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     for (int bsz = 1; bsz <= max_exec_queue_init_size; ++bsz) {
       for (int rate = 1; rate <= 8; ++rate) {
         int attn_task_num = bsz * num_kv_heads * rate;
-        exec_queue_cache_[bsz][attn_task_num] =
-            megakernel::GenerateExecQueue(bsz, attn_task_num, tp_size, num_qo_heads, num_kv_heads,
-                                          qk_head_dim, device, preferred_host_device);
+        exec_queue_cache_[bsz][attn_task_num] = megakernel::GenerateExecQueueStatic(
+            bsz, attn_task_num, tp_size, num_qo_heads, num_kv_heads, qk_head_dim, device,
+            preferred_host_device);
       }
     }
-    exec_queue_device_buf_ = Tensor::Empty(
-        {num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 4)},
-        DataType::Int(32), device);
+
+    std::function<Tensor(ffi::Shape)> f_empty;
+    if (tp_size == 1) {
+      f_empty = [this](ffi::Shape shape) {
+        return Tensor::Empty(shape, dtype_aux_, device_);
+      };
+    } else {
+      const ffi::Function f_nvshmem_empty =
+        tvm::ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.empty");
+      f_empty = [f_nvshmem_empty, this](ffi::Shape shape) {
+        return f_nvshmem_empty(shape, dtype_aux_, device_).cast<Tensor>();
+      };
+    }
+    exec_queue_device_buf_ = f_empty({num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 4)});
     exec_queue_host_buf_ = Tensor::Empty(
         {num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 4)},
         DataType::Int(32), preferred_host_device);
@@ -1319,11 +1325,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       return;
     }
     {
-      // TODO: Now use constant. Need to be changed in the future.
-      constexpr const int kNumSM = 148;
-      constexpr const int kNumWarpgroupPerBlock = 2;
-      constexpr const int kNumWarpPerWarpgroup = 4;
-
       NVTXScopedRange range("Init event tensors on host");
       TVM_FFI_ICHECK_EQ(num_depths_, 1) << "Megakernel only supports depth 1 for now.";
 
@@ -1344,12 +1345,54 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                 .cast<ffi::Array<ffi::Any>>();
         TVM_FFI_ICHECK_EQ(attn_plan_results_.size(), 8);
       }
+      // retrieve plan information
+      auto task = attn_plan_results_[3].cast<ffi::Array<Tensor>>();
+      TVM_FFI_ICHECK_EQ(task.size(), 13);
+      Tensor work_indptr_host = task[12];
+      const int32_t* work_indptr_data = static_cast<int32_t*>(work_indptr_host->data) +
+                                        work_indptr_host->byte_offset / sizeof(int32_t);
+      attn_task_num_ = static_cast<int64_t>(
+          work_indptr_data[megakernel::kNumWarpgroupPerBlock * megakernel::kNumSM]);
+      Tensor q_indptr_host = task[10];
+      Tensor kv_head_idx_host = task[11];
+      const int32_t* kv_head_idx_data = static_cast<int32_t*>(kv_head_idx_host->data) +
+                                        kv_head_idx_host->byte_offset / sizeof(int32_t);
+      const int32_t* q_indptr_data =
+          static_cast<int32_t*>(q_indptr_host->data) + q_indptr_host->byte_offset / sizeof(int32_t);
+      bool split_kv = attn_task_num_ > num_kv_heads_ * cur_batch_size_;
+      // generate the inverse map for attention task
+      intermediate_inverse_info_.clear();
+      intermediate_inverse_info_.resize(cur_batch_size_ * num_kv_heads_);
+      for (int i = 0; i < attn_task_num_; ++i) {
+        int batch_idx = q_indptr_data[i];
+        int kv_idx = kv_head_idx_data[i];
+        intermediate_inverse_info_[kv_idx * cur_batch_size_ + batch_idx].push_back(
+            i / megakernel::kNumWarpgroupPerBlock);
+      }
+      for (int i = attn_task_num_; i < ceildiv(attn_task_num_, megakernel::kNumWarpgroupPerBlock) *
+                                           megakernel::kNumWarpgroupPerBlock;
+           ++i) {
+        intermediate_inverse_info_[(i - attn_task_num_) % (cur_batch_size_ * num_kv_heads_)]
+            .push_back(i / megakernel::kNumWarpgroupPerBlock);
+      }
+      inverse_indptr_host_.resize(megakernel::kMaxTotalNumWorks);
+      inverse_indices_host_.resize(megakernel::kMaxTotalNumWorks);
+      inverse_indptr_host_.fill(0);
+      inverse_indices_host_.fill(0);
+      for (int i = 0; i < cur_batch_size_ * num_kv_heads_; ++i) {
+        inverse_indptr_host_.set(i + 1,
+                                 inverse_indptr_host_[i] + intermediate_inverse_info_[i].size());
+        for (int j = 0; j < intermediate_inverse_info_[i].size(); ++j) {
+          inverse_indices_host_.set(inverse_indptr_host_[i] + j, intermediate_inverse_info_[i][j]);
+        }
+      }
+      TVM_FFI_ICHECK_EQ(inverse_indptr_host_[cur_batch_size_ * num_kv_heads_],
+               ceildiv(attn_task_num_, megakernel::kNumWarpgroupPerBlock) *
+                   megakernel::kNumWarpgroupPerBlock);
 
       // 2. Initialize event tensors
       int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
       int qkv_h_d = (num_qo_heads_ + 2 * num_kv_heads_) * qk_head_dim_;
-      int q_h_d = num_qo_heads_ * qk_head_dim_;
-      int k_h_d = num_kv_heads_ * qk_head_dim_;
       int split_qkv_project = megakernel::kSplitQKVProject[tp_size];
       int split_o_project = megakernel::kSplitOProject[tp_size];
       int down_proj_split_k_factor = megakernel::kDownProjSplitKFactor[tp_size];
@@ -1360,17 +1403,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       etensor_qkv_partial_host_.resize(num_layers_ *
                                        ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit));
       etensor_qkv_partial_host_.fill(0);
-      etensor_q_reduce_host_.resize(num_layers_ * cur_batch_size_ *
-                                    ceildiv(q_h_d, megakernel::kSplitKReduceTileNUnit));
-      etensor_q_reduce_host_.fill(0);
-      etensor_k_reduce_host_.resize(num_layers_ * cur_batch_size_ *
-                                    ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit));
-      etensor_k_reduce_host_.fill(0);
-      etensor_v_reduce_host_.resize(num_layers_ * cur_batch_size_ *
-                                    ceildiv(k_h_d, megakernel::kSplitKReduceTileNUnit));
-      etensor_v_reduce_host_.fill(0);
-      etensor_attn_host_.resize(num_layers_ * cur_batch_size_ * num_kv_heads_);
-      etensor_attn_host_.fill(0);
+      etensor_notify_attn_host_.resize(num_layers_ *
+                                       ceildiv(attn_task_num_, megakernel::kNumWarpgroupPerBlock));
+      etensor_notify_attn_host_.fill(0);
       etensor_o_partial_host_.resize(num_layers_ *
                                      ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN));
       etensor_o_partial_host_.fill(0);
@@ -1407,36 +1442,27 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                    megakernel::kGemmTileBlkK) *
                            megakernel::kGemmTileBlkK);
 
-      auto task = attn_plan_results_[3].cast<ffi::Array<Tensor>>();
-      TVM_FFI_ICHECK_EQ(task.size(), 13);
-      Tensor work_indptr_host = task[12];
-      const int32_t* work_indptr_data = static_cast<int32_t*>(work_indptr_host->data) +
-                                        work_indptr_host->byte_offset / sizeof(int32_t);
-      attn_task_num_ = static_cast<int64_t>(work_indptr_data[kNumWarpgroupPerBlock * kNumSM]);
-      Tensor q_indptr_host = task[10];
-      Tensor kv_head_idx_host = task[11];
-      const int32_t* kv_head_idx_data = static_cast<int32_t*>(kv_head_idx_host->data) +
-                                        kv_head_idx_host->byte_offset / sizeof(int32_t);
-      const int32_t* q_indptr_data =
-          static_cast<int32_t*>(q_indptr_host->data) + q_indptr_host->byte_offset / sizeof(int32_t);
-      bool split_kv = attn_task_num_ > num_kv_heads_ * cur_batch_size_;
       if (split_kv) {
         // to simply, assume that one merge tile will not use two kv head
-        TVM_FFI_ICHECK_LE(kNumWarpgroupPerBlock * kNumWarpPerWarpgroup, num_qo_heads_ / num_kv_heads_);
+        TVM_FFI_ICHECK_LE(megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup,
+                 num_qo_heads_ / num_kv_heads_);
         for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
-          for (int m = 0; m < ceildiv(cur_batch_size_ * num_qo_heads_,
-                                      kNumWarpgroupPerBlock * kNumWarpPerWarpgroup);
+          for (int m = 0;
+               m < ceildiv(cur_batch_size_ * num_qo_heads_,
+                           megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup);
                ++m) {
-            int worker_id = m * kNumWarpgroupPerBlock * kNumWarpPerWarpgroup;
+            int worker_id =
+                m * megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup;
             int kv_idx = worker_id / (cur_batch_size_ * (num_qo_heads_ / num_kv_heads_));
             int qo_idx = worker_id % (num_qo_heads_ / num_kv_heads_);
             int range_start =
                 (kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx) * v_head_dim_ / o_proj_tile_k;
-            int range_end = ((kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx +
-                              kNumWarpgroupPerBlock * kNumWarpPerWarpgroup) *
-                                 v_head_dim_ -
-                             1) /
-                            o_proj_tile_k;
+            int range_end =
+                ((kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx +
+                  megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup) *
+                     v_head_dim_ -
+                 1) /
+                o_proj_tile_k;
             for (int i = range_start; i <= range_end; ++i) {
               TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
               TVM_FFI_ICHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
@@ -1505,7 +1531,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // Host-side tensors are synced to device.
     int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
     Device preferred_host_device = GetPreferredHostDevice(device_);
-    exec_queue_dynamic_ = megakernel::GenerateExecQueueDyn(
+    exec_queue_dynamic_ = megakernel::GenerateExecQueueDynamic(
         exec_queue_device_buf_, exec_queue_host_buf_, tp_size, num_qo_heads_, num_kv_heads_,
         qk_head_dim_, num_layers_, copy_stream_);
     ComputeStreamWaitForCopyStream();
@@ -2046,9 +2072,10 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     ret.push_back(append_position_map_view_);
     ret.push_back(q_rope_position_map_view_);
     ret.push_back(attn_plan_results_);
+    ret.push_back(inverse_indptr_view_);
+    ret.push_back(inverse_indices_view_);
     ret.push_back(ffi::Array<Tensor>{
-        etensor_qkv_partial_view_, etensor_q_reduce_view_, etensor_k_reduce_view_,
-        etensor_v_reduce_view_, etensor_attn_view_, etensor_o_partial_view_,
+        etensor_qkv_partial_view_, etensor_notify_attn_view_, etensor_o_partial_view_,
         etensor_o_allreduce_view_, etensor_attn_add_rms_view_, etensor_attn_mlp_view_,
         etensor_gate_up_proj_reduce_view_, etensor_gate_up_proj_view_,
         etensor_down_proj_reduce_view_, etensor_down_proj_allreduce_view_,
@@ -2061,11 +2088,12 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   ffi::Any GetExecQueue(int batch_size, int attn_task_num, int dynamic_layer_id) {
     NVTXScopedRange range("GetExecQueue");
     if (dynamic_layer_id >= 0) {
+      // Generate the dynamic execution queue.
       ffi::Array<Tensor> exec_queue = exec_queue_dynamic_[dynamic_layer_id];
       return exec_queue;
     }
 
-    // Try to get the execution queue from the cache.
+    // Try to get the static execution queue from the cache.
     if (batch_size < static_cast<int>(exec_queue_cache_.size())) {
       auto it = exec_queue_cache_[batch_size].find(attn_task_num);
       if (it != exec_queue_cache_[batch_size].end()) {
@@ -2074,12 +2102,12 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     } else {
       exec_queue_cache_.resize(batch_size + 1);
     }
-    // Generate the execution queue.
+    // Generate the static execution queue.
     int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
     Device preferred_host_device = GetPreferredHostDevice(device_);
-    Tensor exec_queue =
-        megakernel::GenerateExecQueue(batch_size, attn_task_num, tp_size, num_qo_heads_,
-                                      num_kv_heads_, qk_head_dim_, device_, preferred_host_device);
+    Tensor exec_queue = megakernel::GenerateExecQueueStatic(
+        batch_size, attn_task_num, tp_size, num_qo_heads_, num_kv_heads_, qk_head_dim_, device_,
+        preferred_host_device);
     exec_queue_cache_[batch_size][attn_task_num] = exec_queue;
     return exec_queue;
   }
@@ -2819,11 +2847,10 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // Event tensor transfer.
     int tp_size = megakernel::kNumAttentionHeadsTP1 / num_qo_heads_;
     if (use_mega_kernel_) {
+      inverse_indptr_view_ = aux_data_manager_->CopyInverseIndptrAsync(&inverse_indptr_host_);
+      inverse_indices_view_ = aux_data_manager_->CopyInverseIndicesAsync(&inverse_indices_host_);
       std::vector<HostMemoryVector*> etensor_data = {&etensor_qkv_partial_host_,
-                                                     &etensor_q_reduce_host_,
-                                                     &etensor_k_reduce_host_,
-                                                     &etensor_v_reduce_host_,
-                                                     &etensor_attn_host_,
+                                                     &etensor_notify_attn_host_,
                                                      &etensor_o_partial_host_,
                                                      &etensor_o_allreduce_host_,
                                                      &etensor_attn_add_rms_host_,
@@ -2838,10 +2865,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                                      &etensor_down_proj_host_,
                                                      &etensor_attn_merge_host_};
       std::vector<Tensor*> etensor_data_views = {&etensor_qkv_partial_view_,
-                                                 &etensor_q_reduce_view_,
-                                                 &etensor_k_reduce_view_,
-                                                 &etensor_v_reduce_view_,
-                                                 &etensor_attn_view_,
+                                                 &etensor_notify_attn_view_,
                                                  &etensor_o_partial_view_,
                                                  &etensor_o_allreduce_view_,
                                                  &etensor_attn_add_rms_view_,
@@ -2856,8 +2880,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                                  &etensor_down_proj_view_,
                                                  &etensor_attn_merge_view_};
       aux_data_manager_->CopyEventTensorAsync(etensor_data, etensor_data_views, num_layers_,
-                                              cur_batch_size_, num_qo_heads_, num_kv_heads_,
-                                              qk_head_dim_, tp_size);
+                                              cur_batch_size_, attn_task_num_, num_qo_heads_,
+                                              num_kv_heads_, qk_head_dim_, tp_size);
     }
 
     // - Commit the copy.

@@ -1,9 +1,10 @@
 from enum import Enum
-from typing import List, Literal
+from typing import List, Literal, Type, Union
 
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.tir.expr import Var
 
 def ceildiv(a, b):
     return (a + b - 1) // b
@@ -103,9 +104,13 @@ class Barriers:
 
     @T.macro
     def init(self, threads_num_wait):
-        with T.thread()[0:1]:
-            for i in T.serial(self.pipe_depth):
-                T.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
+        if self.pipe_depth == 1:
+            with T.thread()[0:1]:
+                T.ptx.mbarrier.init(self.mbar.ptr_to([0]), threads_num_wait)
+        else:
+            with T.thread()[0:1]:
+                for i in T.serial(self.pipe_depth):
+                    T.ptx.mbarrier.init(self.mbar.ptr_to([i]), threads_num_wait)
 
     @T.macro
     def wait(self, idx, phase):
@@ -253,7 +258,23 @@ __forceinline__ __device__ void grid_sync() {{
   auto g = cooperative_groups::this_thread_block();
   g.sync();
 }}
-""")        
+""")
+    
+    
+@T.macro
+def trap_when_assert_failed(cond):
+    T.cuda.func_call(
+        "trap_when_assert_fail",
+        cond,
+        source_code=f"""
+__forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
+    do {{
+        if (not (cond))
+            asm("trap;");
+    }} while (0);
+}}
+    """,
+    )        
 
 def get_source(module: "tvm.ir.IRModule"):
     target = tvm.target.Target("cuda")
@@ -351,17 +372,18 @@ event_type_names = [
 
 
 class SmemManager:
-    def __init__(self, smem_max_bytes, chunk_size, pool_allocator: Tp.PoolAllocator):
+    def __init__(self, smem_max_bytes, chunk_size, ptr: Var):
         self.smem_max_bytes = smem_max_bytes
         self.chunk_size = chunk_size
         self.chunk_num = smem_max_bytes // chunk_size
         assert self.chunk_num <= 32
-        self.pool_allocator = pool_allocator
+        self.pool_allocator = Tp.PoolAllocator(ptr)
         self.tiles = {} # tile id -> [max used chunk id for the tile, {list of exclusive/other buf}, [arrival count for each chunk]]
         self.runtime_tile_chunk_count = {}
         self.bufs = {} # buf -> (split, beg, size, method)
         self.persistent_bufs = {} # persistent buf -> (beg, end)
         self.cur_tile_name = ""
+        self.persistent_offset = self.chunk_size * self.chunk_num
 
     def _inner_alloc(self):
         # notes: these smem will never be overwritten by any tasks
@@ -372,7 +394,7 @@ class SmemManager:
         
     @T.macro
     def init(self):
-        self.check_smem_well_formed(debug=True)
+        self.check_smem_well_formed(debug=False)
         self._inner_alloc()
         self.cur_phase[0] = 1
         with T.thread()[0:1]:
@@ -390,6 +412,9 @@ class SmemManager:
     #         "persistent" -> persistent smem, cannot be wait / arrive
     def alloc(self, shape, dtype="float32", strides=None, scope="global", align=0, buffer_type="",
               axis_separators=None, layout="default", split=1, method: Literal["shared", "exclusive", "persistent"]="shared"):
+        if method == "persistent":
+            offset = self.pool_allocator.offset
+            self.pool_allocator.move_base_to(self.persistent_offset)
         beg = self.pool_allocator.offset
         if align > 0:
             beg = (beg + align - 1) // align * align
@@ -400,6 +425,8 @@ class SmemManager:
         assert size % split == 0
         if method == "persistent":
             self.persistent_bufs[buf.buffer] = (beg, end)
+            self.persistent_offset = end
+            self.pool_allocator.move_base_to(offset)
         else:   
             # check the validity of the method
             if method == "shared":
@@ -474,6 +501,7 @@ class SmemManager:
         self.cur_tile_name = str(cur_tile)
         self.tiles[self.cur_tile_name] = [-1, {"exclusive": [], "shared": []}, [0 for _ in range(self.chunk_num)]]
         self.runtime_tile_chunk_count[self.cur_tile_name] = [[0 for _ in range(self.chunk_num)] for _ in range(2)] # wait count, arrival count
+        self.pool_allocator.move_base_to(0)
         
     def _assert_cond(self, cond):
         assert cond
@@ -563,7 +591,7 @@ class SmemManager:
                         T.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
             elif level == "warpgroup":
                 self.reg_count[0] = 0
-                T.ptx.bar.sync(9 + wg_id, 128)
+                T.ptx.bar.sync(6 + wg_id, 128)
                 if warp_id % KernelConfig.WARP_NUMBER == 0:
                     if lane_id == 0:
                         self.reg_count[0] = T.cuda.atomic_add(T.address_of(self.shared_count[0]), 1) + 1

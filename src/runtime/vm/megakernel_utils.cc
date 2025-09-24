@@ -24,8 +24,8 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/runtime/device_api.h>
-#include <tvm/runtime/tensor.h>
 #include <tvm/runtime/nvtx.h>
+#include <tvm/runtime/tensor.h>
 
 #include <utility>
 
@@ -40,7 +40,7 @@ using runtime::Tensor;
 
 Array<Tensor> GetEventTensorsOnLayer(Array<Tensor> etensors, int layer_id) {
   TVM_FFI_ICHECK_GE(layer_id, 0) << "Layer id must be non-negative, but got " << layer_id;
-  TVM_FFI_ICHECK_EQ(etensors.size(), 18) << "Event tensors size must be 18";
+  TVM_FFI_ICHECK_EQ(etensors.size(), 15) << "Event tensors size must be 15";
   std::vector<Tensor> etensors_on_layer;
   etensors_on_layer.reserve(etensors.size());
   for (int i = 0; i < static_cast<int>(etensors.size()); i++) {
@@ -57,14 +57,14 @@ Array<Tensor> GetEventTensorsOnLayer(Array<Tensor> etensors, int layer_id) {
   return Array<Tensor>(etensors_on_layer);
 }
 
-Tensor GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
-                          int num_kv_heads, int head_dim, Device device,
-                          Device preferred_host_device) {
+Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
+                               int num_kv_heads, int head_dim, Device device,
+                               Device preferred_host_device) {
   NVTXScopedRange range("Generate execution queue");
   bool split_kv = attn_task_num > num_kv_heads * batch_size;
 
   Tensor exec_queue_host = Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks, kTaskSize},
-                                           DataType::Int(32), preferred_host_device);
+                                         DataType::Int(32), preferred_host_device);
   Tensor exec_queue_device =
       Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks, kTaskSize}, DataType::Int(32), device);
   int32_t* exec_queue_host_data = static_cast<int32_t*>(exec_queue_host->data);
@@ -128,7 +128,9 @@ Tensor GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num
   }
 
   if (split_kv) {
-    for (int m_idx = 0; m_idx < ceildiv(batch_size * num_qo_heads, kNumWarpgroupPerBlock * kNumWarpPerWarpgroup); ++m_idx) {
+    for (int m_idx = 0;
+         m_idx < ceildiv(batch_size * num_qo_heads, kNumWarpgroupPerBlock * kNumWarpPerWarpgroup);
+         ++m_idx) {
       f_push_task(m_idx, -1, -1, JobType::kBatchMerge);
     }
   }
@@ -170,12 +172,13 @@ Tensor GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num
     }
   }
   if (gate_up_proj_split_k_factor > 1) {
-    int32_t m_split_gate_up_proj_reduce =
-        std::min(batch_size, ceildiv(kNumSM, kIntermediateSizeTP1 / tp_size * 2 / kSplitKReduceTileNUnit));
+    int32_t m_split_gate_up_proj_reduce = std::min(
+        batch_size, ceildiv(kNumSM, kIntermediateSizeTP1 / tp_size * 2 / kSplitKReduceTileNUnit));
     int32_t m_tile_gate_up_proj_reduce = ceildiv(batch_size, m_split_gate_up_proj_reduce);
     m_split_gate_up_proj_reduce = ceildiv(batch_size, m_tile_gate_up_proj_reduce);
     for (int m_idx = 0; m_idx < m_split_gate_up_proj_reduce; ++m_idx) {
-      for (int n_idx = 0; n_idx < ceildiv(kIntermediateSizeTP1 / tp_size * 2, kGemmTileBlkN); ++n_idx) {
+      for (int n_idx = 0; n_idx < ceildiv(kIntermediateSizeTP1 / tp_size * 2, kGemmTileBlkN);
+           ++n_idx) {
         f_push_task(m_idx, n_idx, 0, JobType::kGateUpProjReduce);
       }
     }
@@ -235,10 +238,10 @@ Tensor GenerateExecQueue(int batch_size, int attn_task_num, int tp_size, int num
   return exec_queue_device;
 }
 
-Array<Array<Tensor>> GenerateExecQueueDyn(Tensor exec_queue_device_buf,
-                                           Tensor exec_queue_host_buf, int tp_size,
-                                           int num_qo_heads, int num_kv_heads, int head_dim,
-                                           int num_layers, TVMStreamHandle copy_stream) {
+Array<Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
+                                              Tensor exec_queue_host_buf, int tp_size,
+                                              int num_qo_heads, int num_kv_heads, int head_dim,
+                                              int num_layers, TVMStreamHandle copy_stream) {
   NVTXScopedRange range("Generate execution queue");
   int elem_per_layer = kDyanmicTileSchedulerMaxTasks * kTaskSize + 4;
   TVM_FFI_ICHECK(exec_queue_device_buf.dtype() == DataType::Int(32));
@@ -312,8 +315,8 @@ TVM_FFI_STATIC_INIT_BLOCK(){
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("megakernel.get_event_tensors_on_layer", GetEventTensorsOnLayer)
-      .def("megakernel.generate_exec_queue", GenerateExecQueue)
-      .def("megakernel.generate_exec_queue_dyn", GenerateExecQueueDyn);
+      .def("megakernel.generate_exec_queue_static", GenerateExecQueueStatic)
+      .def("megakernel.generate_exec_queue_dynamic", GenerateExecQueueDynamic);
 }
 
 }  // namespace megakernel
