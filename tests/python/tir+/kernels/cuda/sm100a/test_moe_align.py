@@ -15,7 +15,10 @@ from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
 NUM_EXPERTS = 128
 TOPK = 8
 BLOCK_SIZE = 16
+
+
 def get_moe_align_kernel(pad_sorted_token_ids):
+    # fmt: off
     @T.prim_func(tirp=True)
     def moe_align_kernel(
         topk_ids_ptr: T.handle,
@@ -42,13 +45,14 @@ def get_moe_align_kernel(pad_sorted_token_ids):
             topk_ids_flattened = topk_ids.view(-1)
             moe_align_tile.run(0, 0, 0, topk_ids_flattened, sorted_token_ids, expert_ids, num_tokens_post_pad, cumsum_buffer)
     return moe_align_kernel
+    # fmt: on
 
 
 @T.prim_func(tirp=True)
 def count_and_sort_expert_tokens_kernel(
     topk_ids_ptr: T.handle,
     sorted_token_ids_ptr: T.handle,
-    cumsum_buffer: T.Buffer((NUM_EXPERTS+1,), "int32"),
+    cumsum_buffer: T.Buffer((NUM_EXPERTS + 1,), "int32"),
 ):
     num_tokens = T.int32()
     topk_ids = T.match_buffer(topk_ids_ptr, (num_tokens, TOPK), dtype="int64")
@@ -65,9 +69,7 @@ def count_and_sort_expert_tokens_kernel(
 def test(num_tokens, num_experts, topk, pad_sorted_token_ids):
     topk_ids = torch.argsort(torch.rand(num_tokens, num_experts), dim=1)[:, :topk]
     max_num_tokens_padded = topk_ids.numel() + num_experts * (BLOCK_SIZE - 1)
-    sorted_ids = torch.empty(
-        (max_num_tokens_padded,), dtype=torch.int32
-    )
+    sorted_ids = torch.empty((max_num_tokens_padded,), dtype=torch.int32)
     if not pad_sorted_token_ids:
         sorted_ids.fill_(topk_ids.numel())
     max_num_m_blocks = max_num_tokens_padded // BLOCK_SIZE
@@ -81,29 +83,53 @@ def test(num_tokens, num_experts, topk, pad_sorted_token_ids):
     expert_ids_tvm = tvm.runtime.tensor(expert_ids.numpy(), device=dev)
     num_tokens_post_pad_tvm = tvm.runtime.tensor(num_tokens_post_pad.numpy(), device=dev)
     cumsum_buffer_tvm = tvm.runtime.tensor(cumsum_buffer.numpy(), device=dev)
+
     def tir():
         target = tvm.target.Target("cuda")
         with target:
-            mod = tvm.IRModule({"moe_align_kernel": get_moe_align_kernel(pad_sorted_token_ids), "count_and_sort_expert_tokens_kernel": count_and_sort_expert_tokens_kernel})
+            mod = tvm.IRModule(
+                {
+                    "moe_align_kernel": get_moe_align_kernel(pad_sorted_token_ids),
+                    "count_and_sort_expert_tokens_kernel": count_and_sort_expert_tokens_kernel,
+                }
+            )
             mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+
             def func():
-                mod["moe_align_kernel"](topk_ids_tvm, sorted_ids_tvm, expert_ids_tvm, num_tokens_post_pad_tvm, cumsum_buffer_tvm)
-                mod["count_and_sort_expert_tokens_kernel"](topk_ids_tvm, sorted_ids_tvm, cumsum_buffer_tvm)
+                mod["moe_align_kernel"](
+                    topk_ids_tvm,
+                    sorted_ids_tvm,
+                    expert_ids_tvm,
+                    num_tokens_post_pad_tvm,
+                    cumsum_buffer_tvm,
+                )
+                mod["count_and_sort_expert_tokens_kernel"](
+                    topk_ids_tvm, sorted_ids_tvm, cumsum_buffer_tvm
+                )
+
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
         return sorted_ids_tvm, expert_ids_tvm, num_tokens_post_pad_tvm
 
     def std():
         def func():
-            sorted_ids_std, expert_ids_std, num_tokens_post_pad_std = moe_align_block_size(topk_ids.to("cuda"), BLOCK_SIZE, num_experts)
+            sorted_ids_std, expert_ids_std, num_tokens_post_pad_std = moe_align_block_size(
+                topk_ids.to("cuda"), BLOCK_SIZE, num_experts
+            )
             return sorted_ids_std, expert_ids_std, num_tokens_post_pad_std
+
         ms = bench(func, warmup=10, repeat=30, proton_name="std")
         return func()
+
     with ProtonContext("moe_align"):
         sorted_ids_tvm, expert_ids_tvm, num_tokens_post_pad_tvm = tir()
         sorted_ids_std, expert_ids_std, num_tokens_post_pad_std = std()
-    tvm.testing.assert_allclose(num_tokens_post_pad_tvm.numpy(), num_tokens_post_pad_std.cpu().numpy())
+    tvm.testing.assert_allclose(
+        num_tokens_post_pad_tvm.numpy(), num_tokens_post_pad_std.cpu().numpy()
+    )
     used_blocks = num_tokens_post_pad_std.item() // BLOCK_SIZE
-    tvm.testing.assert_allclose(expert_ids_tvm.numpy()[:used_blocks], expert_ids_std.cpu().numpy()[:used_blocks])
+    tvm.testing.assert_allclose(
+        expert_ids_tvm.numpy()[:used_blocks], expert_ids_std.cpu().numpy()[:used_blocks]
+    )
 
     # Select an expert to check
     expert_idx = expert_ids_std.max().item()
@@ -115,8 +141,12 @@ def test(num_tokens, num_experts, topk, pad_sorted_token_ids):
         (matching_indices[-1].item() + 1) * BLOCK_SIZE, num_tokens_post_pad_std.item()
     )
     selected_sorted_ids_std = sorted_ids_std[block_sorted_start:block_sorted_end].sort()[0]
-    selected_sorted_ids_tvm = torch.from_numpy(sorted_ids_tvm.numpy())[block_sorted_start:block_sorted_end].sort()[0]
-    tvm.testing.assert_allclose(selected_sorted_ids_std.cpu().numpy(), selected_sorted_ids_tvm.cpu().numpy())
+    selected_sorted_ids_tvm = torch.from_numpy(sorted_ids_tvm.numpy())[
+        block_sorted_start:block_sorted_end
+    ].sort()[0]
+    tvm.testing.assert_allclose(
+        selected_sorted_ids_std.cpu().numpy(), selected_sorted_ids_tvm.cpu().numpy()
+    )
 
 
 if __name__ == "__main__":

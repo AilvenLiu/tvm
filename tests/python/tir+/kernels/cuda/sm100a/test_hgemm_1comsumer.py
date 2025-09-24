@@ -31,7 +31,7 @@ F128_BYTES = 16
 a_type = tvm.DataType("float16")
 b_type = tvm.DataType("float16")
 d_type = tvm.DataType("float16")
-M, N, K = 8192, 8192, 4096
+M, N, K = 8192, 8192, 8192
 BLK_M, BLK_N, BLK_K = 128, 128, 64
 MMA_M, MMA_N, MMA_K = 256, 256, 16
 PIPE_CIRCLE_NUM = (K // BLK_K) // SMEM_PIPE_DEPTH
@@ -292,7 +292,7 @@ def test():
 
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=1)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
                     warp_sync()
                 
                 # sync
@@ -483,8 +483,8 @@ def test():
                                 
                 # dealloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
-                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=1)
+                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=2)
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()

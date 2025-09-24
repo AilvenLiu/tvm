@@ -29,12 +29,13 @@ from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
 
-from .test_layer import MegaKernel
-from ..sm100a.test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
-from ..sm100a.test_rmsnorm import get_rmsnorm_kernel
-from ..sm100a.test_rope import get_cos_sin_cache_kernel
+from kernels.cuda.megakernel.test_layer import MegaKernel
+from kernels.cuda.sm100a.test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
+from kernels.cuda.sm100a.test_rmsnorm import get_rmsnorm_kernel
+from kernels.cuda.sm100a.test_rope import get_cos_sin_cache_kernel
 
 # pyright: reportInvalidTypeForm=false
+
 
 def test(args):
 
@@ -50,8 +51,8 @@ def test(args):
     NUM_HIDDEN_LAYERS = 64
     LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
     MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/Qwen3-32B-q0f16-tp{TP_SIZE}.so"
-    MEGA_LIB_PATH = f"{Path("~/megalib").expanduser()}/Qwen3-32B-q0f16-MLC-tp{TP_SIZE}-profiler{"on" if PROFILER_ON else "off"}.so" # NOTE: update this path
-    DEBUG_PATH = Path("~/qwen3-mg-debug").expanduser() # NOTE: update this path
+    MEGA_LIB_PATH = f"{Path('~/megalib').expanduser()}/Qwen3-32B-q0f16-MLC-tp{TP_SIZE}-profiler{'on' if PROFILER_ON else 'off'}.so"  # NOTE: update this path
+    DEBUG_PATH = Path("~/qwen3-mg-debug").expanduser()  # NOTE: update this path
 
     # LOAD_WEIGHTS = None  # generate weights
     MAX_BATCH_SIZE = 128
@@ -90,7 +91,6 @@ def test(args):
         kwargs={},
     )
 
-
     def init_disco_session():
         if TP_SIZE == 1:
             return None
@@ -99,7 +99,7 @@ def test(args):
         sess = di.ProcessSession(num_workers=len(devices), entrypoint="mlc_llm.cli.worker")
         sess.init_ccl("nccl", *devices)
         return sess
-    
+
     disco_sess = init_disco_session()
 
     def get_default_spec(model):
@@ -233,10 +233,10 @@ def test(args):
                     loader, LOAD_WEIGHTS, vm, json.dumps({"vocab_size": config_tp1.vocab_size})
                 )
         return result
-    
+
     def sample_token(logits):
         return np.argmax(logits, axis=-1)
-        
+
     def load_reference_model_lib():
         if TP_SIZE == 1:
             ex = tvm.runtime.load_module(MODEL_LIB_PATH)
@@ -251,10 +251,12 @@ def test(args):
             kv_cache_create_func_ = mod_get_func(vm, "create_flashinfer_paged_kv_cache", True)
             embed_func_ = mod_get_func(vm, "embed", True)
             batch_decode_func = lambda *args: disco_sess.call_packed(batch_decode_func_, *args)
-            kv_cache_create_func = lambda *args: disco_sess.call_packed(kv_cache_create_func_, *args)
+            kv_cache_create_func = lambda *args: disco_sess.call_packed(
+                kv_cache_create_func_, *args
+            )
             embed_func = lambda *args: disco_sess.call_packed(embed_func_, *args)
         return vm, batch_decode_func, kv_cache_create_func, embed_func
-    
+
     model = Qwen3LMHeadModel(config_tp1)
     model.to("float16")
     _, named_params = model.export_tvm(get_default_spec(model))
@@ -266,7 +268,7 @@ def test(args):
             lambda *args: disco_sess.call_packed(disco_sess.get_global_func(name), *args)
         )
     )
-    
+
     vm, batch_decode_func, kv_cache_create_func, embed_func = load_reference_model_lib()
     params = get_params(named_params, vm)
     decrease_bs = set(random.sample(range(1, SEQ_LEN + 1), BATCH_SIZE))
@@ -368,14 +370,13 @@ def test(args):
         func = func.with_attr("tir.noalias", True)
         return func
 
-
     def get_qwen3_megakernel_mod():
         rms_norm = get_rmsnorm_kernel(5120)
         mk = MegaKernel(world_size=TP_SIZE, profiler_on=PROFILER_ON)
         layer_kernel = mk.get_func(args.scheduler)
         hgemm, reduce, tile_k_num = get_hgemm_kernel(dim_n=151936, dim_k=5120)
         cos_sin_cache = get_cos_sin_cache_kernel(128, ROPE_THETA)
-        
+
         def static_mod():
             # fmt: off
             @R.macro(hygienic=False)
@@ -852,12 +853,14 @@ def test(args):
             mod.update_func(mod.get_global_var("rms_norm"), attach_attr(rms_norm, "rms_norm"))
             mod.update_func(mod.get_global_var("hgemm"), attach_attr(hgemm, "hgemm"))
             mod.update_func(mod.get_global_var("reduce"), attach_attr(reduce, "reduce"))
-            mod.update_func(mod.get_global_var("layer_kernel"), attach_attr(layer_kernel, "layer_kernel"))
+            mod.update_func(
+                mod.get_global_var("layer_kernel"), attach_attr(layer_kernel, "layer_kernel")
+            )
             mod.update_func(
                 mod.get_global_var("cos_sin_cache"), attach_attr(cos_sin_cache, "cos_sin_cache")
             )
             return mod
-        
+
         def dynamic_mod():
             # fmt: off
             @R.macro(hygienic=False)
@@ -1339,12 +1342,14 @@ def test(args):
             mod.update_func(mod.get_global_var("rms_norm"), attach_attr(rms_norm, "rms_norm"))
             mod.update_func(mod.get_global_var("hgemm"), attach_attr(hgemm, "hgemm"))
             mod.update_func(mod.get_global_var("reduce"), attach_attr(reduce, "reduce"))
-            mod.update_func(mod.get_global_var("layer_kernel"), attach_attr(layer_kernel, "layer_kernel"))
+            mod.update_func(
+                mod.get_global_var("layer_kernel"), attach_attr(layer_kernel, "layer_kernel")
+            )
             mod.update_func(
                 mod.get_global_var("cos_sin_cache"), attach_attr(cos_sin_cache, "cos_sin_cache")
             )
             return mod
-        
+
         if args.scheduler == "static":
             return static_mod()
         elif args.scheduler == "dynamic":
@@ -1352,13 +1357,15 @@ def test(args):
         else:
             raise NotImplementedError
 
-
     def get_qwen3_megakernel_batch_decode_func():
         mg_model = get_qwen3_megakernel_mod()
 
         with target:
             ex = tvm.compile(
-                mg_model, target, relax_pipeline=relax.get_pipeline("opt_llm_mg"), tir_pipeline="tirp"
+                mg_model,
+                target,
+                relax_pipeline=relax.get_pipeline("opt_llm_mg"),
+                tir_pipeline="tirp",
             )
             ex.export_library(MEGA_LIB_PATH)
         if TP_SIZE == 1:
@@ -1374,9 +1381,9 @@ def test(args):
             cos_sin_cache_func = lambda *args: disco_sess.call_packed(cos_sin_cache_func_, *args)
 
         return batch_decode_func, cos_sin_cache_func
-    
+
     batch_decode_func_mega, cos_sin_cache_func_mega = get_qwen3_megakernel_batch_decode_func()
-    
+
     res0 = test_qwen3_model(get_global_func, batch_decode_func, kv_cache_create_func, embed_func)
     res1 = test_qwen3_model(
         get_global_func,
@@ -1404,6 +1411,7 @@ def test(args):
             np.testing.assert_allclose(ref_token, mg_token, atol=1e-2, rtol=1e-2)
         except Exception as e:
             print(e)
+
 
 if __name__ == "__main__":
     parser = ArgumentParser()

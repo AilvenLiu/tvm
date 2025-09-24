@@ -606,7 +606,7 @@ def get_hgemm_kernel(dim_n, dim_k):
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 @pytest.mark.parametrize("batch_size", [1, 2, 4, 8, 16, 32, 64, 128])
 def test(batch_size):
-    N, K = 5120, 5120
+    N, K = 8192, 8192
     A_bf16, B_bf16, C_bf16 = prepare_data(batch_size, N, K)
 
     def tir_gemm(A_bf16, B_bf16, C_bf16):
@@ -669,5 +669,5 @@ def test(batch_size):
 
 
 if __name__ == "__main__":
-    for batch_size in [1]:
+    for batch_size in [8192]:
         test(batch_size)
