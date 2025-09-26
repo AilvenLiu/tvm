@@ -25,7 +25,11 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir import PrimFunc, Buffer
 from tvm.tir.stmt import OpCall
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tirp.op_schedule import (
+    ScheduleContext,
+    register_dispatch,
+    predicate,
+)
 from .common import target_cuda
 from tvm.tir import BufferRegion
 from tvm.tir.event import SemaphoreEventTensor, EventImpl, BulkGroupEvent, SemaphoreEventTensorItem
@@ -73,19 +77,7 @@ def tma_atom_shape(
     return atom_shape
 
 
-def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape):
-    """Generate the TMA layout for the shared memory given shape and dtype.
-    It uses a default tiling strategy to tile the TMA atom layout into the shared memory.
-    """
-    if isinstance(swizzle_mode, int):
-        swizzle_mode = SwizzleMode(swizzle_mode)
-    if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
-        return TileLayout(shape).normalize()
-    atom_shape = tma_atom_shape(dtype, swizzle_mode, shape)
-    layout = tma_atom_layout(dtype, swizzle_mode)
-    tile_to_shape = copy.copy(atom_shape)
-    tile_to_shape[-2] = shape[-2]
-    return layout.tile_to(tile_to_shape, atom_shape).tile_to(shape, tile_to_shape).normalize()
+ 
 
 
 def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
@@ -372,26 +364,53 @@ def copy_tma_impl(
     return impl
 
 
-@register_schedule("copy_async", "cuda")
-@target_cuda
-def copy_async(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Schedule copy_async operation."""
+def _is_cp_async_event(op: OpCall, sctx: ScheduleContext):
     evt = op.args[2]
-    if not validate_copy_op(op, sctx):
-        return None
-    if isinstance(evt, BulkGroupEvent):
-        if evt.get_impl() == EventImpl.kCpAsync:
-            res = copy_vec_load_impl(op, sctx, CopyInstType.CP_ASYNC)
-            if res is not None:
-                return res
-        elif evt.get_impl() == EventImpl.kTMAStore:
-            res = copy_tma_impl(op, sctx)
-            if res is not None:
-                return res
-    elif isinstance(evt, SemaphoreEventTensorItem):
-        if evt.get_impl() in [EventImpl.kTMALoad, EventImpl.kTMALoadOnly]:
-            res = copy_tma_impl(op, sctx)
-            if res is not None:
-                return res
+    return (
+        isinstance(evt, BulkGroupEvent) and evt.get_impl() == EventImpl.kCpAsync
+    ), "event is not cp.async bulk"
 
-    return None
+
+def _is_tma_event(op: OpCall, sctx: ScheduleContext):
+    evt = op.args[2]
+    return (
+        (isinstance(evt, BulkGroupEvent) and evt.get_impl() == EventImpl.kTMAStore)
+        or (
+            isinstance(evt, SemaphoreEventTensorItem)
+            and evt.get_impl() in [EventImpl.kTMALoad, EventImpl.kTMALoadOnly]
+        )
+    ), "event is not TMA (load/store)"
+
+
+@register_dispatch(
+    "copy_async",
+    "cuda",
+    variant="cp_async",
+    priority=20,
+    when=[
+        predicate(
+            "validate_copy_op",
+            lambda op, sctx: (validate_copy_op(op, sctx), "validate_copy_op failed"),
+        ),
+        predicate("event", _is_cp_async_event),
+    ],
+)
+def copy_async_dispatch_cp_async(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return copy_vec_load_impl(op, sctx, CopyInstType.CP_ASYNC)
+
+
+@register_dispatch(
+    "copy_async",
+    "cuda",
+    variant="tma",
+    priority=10,
+    when=[
+        predicate(
+            "validate_copy_op",
+            lambda op, sctx: (validate_copy_op(op, sctx), "validate_copy_op failed"),
+        ),
+        predicate("event", _is_tma_event),
+    ],
+)
+def copy_async_dispatch_tma(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return copy_tma_impl(op, sctx)

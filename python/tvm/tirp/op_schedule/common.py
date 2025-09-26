@@ -19,11 +19,10 @@
 from enum import Enum
 from typing import Optional, List, Callable, Union
 
-from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tirp.op_schedule import ScheduleContext, register_dispatch
+from .dispatcher import predicate
 from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
-
-from .registry import register_schedule
 
 
 class MapOpType(Enum):
@@ -40,7 +39,7 @@ class MapOpType(Enum):
     MAX = 8
     MIN = 9
     EXP = 10
-    FILL = 11 # FIXME: FILL and MEMSET are the same. merge them.
+    FILL = 11  # FIXME: FILL and MEMSET are the same. merge them.
 
 
 class ReduceOpType(Enum):
@@ -60,13 +59,26 @@ def register_unary_binary_schedule(
 ) -> None:
     """Register a schedule function for a given operation type."""
 
-    @register_schedule(op_name, target_kind)
-    @target_check
-    def schedule(op: OpCall, sctx: ScheduleContext):
-        for schedule in schedule_candidates:
-            res = schedule(op, op_type, sctx)
-            if res is not None:
-                return res
-        return None
+    # Register per-candidate dispatch variants in the dispatcher.
+    # Higher priority for earlier candidates to preserve ordering.
+    for prio, candidate in zip(range(len(schedule_candidates), 0, -1), schedule_candidates):
+
+        @register_dispatch(
+            op_name,
+            target_kind,
+            variant=candidate.__name__,
+            priority=prio,
+            when=[
+                predicate(
+                    "target",
+                    lambda op, sctx, tk=target_kind: (
+                        str(sctx.target.kind) == tk,
+                        f"target mismatch: {sctx.target.kind}",
+                    ),
+                )
+            ],
+        )
+        def _dispatch_variant(op: OpCall, sctx: ScheduleContext, _cand=candidate, _ty=op_type):
+            return _cand(op, _ty, sctx)
 
     return None

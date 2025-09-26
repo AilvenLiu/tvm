@@ -15,7 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .registry import ScheduleContext, register_schedule
+from .registry import ScheduleContext
+from .dispatcher import (
+    register_dispatch,
+    predicate,
+    fail,
+    list_registered_schedules,
+)
 from .cuda.copy import *
 from .cuda.reduction import *
 from .cuda.event import *
@@ -23,4 +29,10 @@ from .cuda.copy_async import *
 from .cuda.cast import *
 from .trn import *
 
-__all__ = ["ScheduleContext", "register_schedule"]
+__all__ = [
+    "ScheduleContext",
+    "register_dispatch",
+    "predicate",
+    "fail",
+    "list_registered_schedules",
+]

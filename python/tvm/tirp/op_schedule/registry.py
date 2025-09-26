@@ -14,8 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""TIRp operator schedule registry."""
-from typing import Dict, Optional, Callable, Tuple
+"""TIRp operator schedule registry.
+
+All operator dispatch is handled by the rich dispatcher. This module exposes
+the global entry `tirp.f_op_scheduler` used by the C++ lowering pass to query a
+dispatch result.
+"""
+from typing import Optional
+import os
 
 from tvm_ffi import register_global_func
 from tvm.ir import Op
@@ -24,40 +30,8 @@ from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule.schedule_context import ScheduleContext
 from tvm.tirp.operator import get_tirp_op
 
-# Global registry to store operator implementations
-_OP_REGISTRY: Dict[Tuple[Op, str], Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]] = {}
 
-
-def register_schedule(op_name: str, target_kind: str):
-    """Decorator function to register operator implementations
-
-    Parameters
-    ----------
-    op_name : str
-        The operator to be registered.
-
-    target_kind : str
-        The target kind to be registered.
-
-    impl_func : Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]
-        The implementation function.
-
-    Returns
-    -------
-    Callable
-        A decorator function that registers the implementation.
-    """
-
-    def decorator(impl_func: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
-        # Register the implementation
-        op = get_tirp_op(op_name)
-        if (op, target_kind) not in _OP_REGISTRY:
-            _OP_REGISTRY[(op, target_kind)] = impl_func
-        else:
-            raise ValueError(f"Operator {op_name} already registered")
-        return impl_func
-
-    return decorator
+# Note: legacy `register_schedule` is intentionally removed.
 
 
 @register_global_func("tirp.f_op_scheduler")
@@ -78,7 +52,20 @@ def f_op_scheduler(op_call: OpCall, sctx: ScheduleContext):
     """
     assert sctx.target is not None, "Target not found"
     key = (op_call.op, str(sctx.target.kind))
-    assert (
-        key in _OP_REGISTRY
-    ), f"No schedule registered for operator {op_call.op} on target {sctx.target.kind}"
-    return _OP_REGISTRY[key](op_call, sctx=sctx)
+
+    # Use rich dispatcher for all dispatching
+    try:
+        from .dispatcher import run_dispatch  # local import to avoid cycles
+    except Exception:  # pragma: no cover - fallback if import fails
+        run_dispatch = None  # type: ignore
+
+    if run_dispatch is not None:
+        try:
+            res = run_dispatch(op_call, sctx)
+        except Exception:
+            # propagate exceptions (STRICT mode or unexpected error)
+            raise
+        if res is not None:
+            return res
+    # No matching case; return None to indicate no replacement
+    return None

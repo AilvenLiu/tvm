@@ -23,7 +23,11 @@ import operator
 
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc, OpCall, FloatImm
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tirp.op_schedule import (
+    ScheduleContext,
+    register_dispatch,
+    predicate,
+)
 from tvm.tirp.operator.op import Select
 from .common import (
     init_analyzer,
@@ -33,7 +37,6 @@ from .common import (
 )
 
 
-@register_schedule("select", "trn")
 def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Generate schedule for select operation on Trainium."""
     if sctx.exec_scope.name != "kernel":
@@ -123,3 +126,23 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # fmt: on
 
     return impl
+
+
+# Rich dispatcher variant for TRN select
+@register_dispatch(
+    "select",
+    "trn",
+    variant="default",
+    priority=10,
+    when=[
+        predicate(
+            "exec_scope",
+            lambda op, sctx: (
+                sctx.exec_scope.name == "kernel",
+                f"unsupported exec_scope {sctx.exec_scope.name}",
+            ),
+        )
+    ],
+)
+def select_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return select_trn(op, sctx)

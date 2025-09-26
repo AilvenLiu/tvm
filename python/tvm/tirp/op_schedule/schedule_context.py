@@ -107,21 +107,6 @@ class ScheduleContext(Object, Scriptable):
         """
         _ffi_api.ScheduleContextAddInitStmt(self, stmt, host)  # pylint: disable=no-member
 
-    def add_create_tensor_map(self, tensor_map: Var, params: List[Object]) -> None:
-        """Add a tensor map to the schedule context.
-
-        Parameters
-        ----------
-        tensor_map : Var
-            The tensor map to be added.
-
-        params : List[Object]
-            The parameters of the tensor map.
-        """
-        _ffi_api.ScheduleContextAddCreateTensorMap(  # pylint: disable=no-member
-            self, tensor_map, params
-        )
-
     def is_cuda(self) -> bool:
         """Check if the target is CUDA."""
         return self.target.kind.name == "cuda"

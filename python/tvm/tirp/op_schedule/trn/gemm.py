@@ -24,7 +24,11 @@ from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.ir import assert_structural_equal
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tirp.op_schedule import (
+    ScheduleContext,
+    register_dispatch,
+    predicate,
+)
 from tvm.tir.stmt import OpCall
 from .common import (
     normalize_and_group,
@@ -104,7 +108,6 @@ def get_pf_dim_from_buffer_region(
     return p_dim, f_dim
 
 
-@register_schedule("gemm", "trn")
 @target_trn
 def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule GEMM operation on Trainium."""
@@ -275,3 +278,23 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                             T.evaluate(T.nki.tensor_copy(C[acc_indices], acc_psum[b_idx % max_psum_slots, lhs_f_loop, rhs_f_loop]))
     # fmt: on
     return impl_C_sbuf
+
+
+# Rich dispatcher variant for TRN gemm
+@register_dispatch(
+    "gemm",
+    "trn",
+    variant="default",
+    priority=10,
+    when=[
+        predicate(
+            "exec_scope",
+            lambda op, sctx: (
+                sctx.exec_scope.name == "kernel",
+                f"unsupported exec_scope {sctx.exec_scope.name}",
+            ),
+        )
+    ],
+)
+def gemm_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return matmul_trn(op, sctx)

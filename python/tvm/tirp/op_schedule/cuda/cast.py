@@ -25,7 +25,11 @@ from tvm.arith import Analyzer
 from tvm.script import tir as T
 from tvm.tir import Buffer, BufferRegion, PrimFunc
 from tvm.tir.stmt import OpCall
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tirp.op_schedule import (
+    ScheduleContext,
+    register_dispatch,
+    predicate,
+)
 
 from .common import get_indices, get_st_extent, get_vec_len, target_cuda
 
@@ -118,19 +122,28 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
     return impl
 
 
-@register_schedule("cast", "cuda")
-@target_cuda
-def cast_schedule(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Schedule cast operation between global and shared memory on CUDA."""
-    dst_buffer_region, src_buffer_region = op_call.args
-
-    if not validate_cast_op(dst_buffer_region, src_buffer_region, sctx):
-        return None
-
-    for schedule_fn, args in [
-        (cast_thread_wise_impl, (dst_buffer_region, src_buffer_region, sctx)),
-    ]:
-        res = schedule_fn(*args)
-        if res is not None:
-            return res
-    return None
+# Rich dispatcher variant for cast
+@register_dispatch(
+    "cast",
+    "cuda",
+    variant="thread_wise",
+    priority=10,
+    when=[
+        predicate(
+            "validate_cast_op",
+            lambda op, sctx: (
+                validate_cast_op(op.args[0], op.args[1], sctx),
+                "validate_cast_op failed",
+            ),
+        ),
+        predicate(
+            "exec_scope",
+            lambda op, sctx: (
+                sctx.exec_scope.name == "thread",
+                f"unsupported exec_scope {sctx.exec_scope.name}",
+            ),
+        ),
+    ],
+)
+def cast_dispatch_thread_wise(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return cast_thread_wise_impl(op_call.args[0], op_call.args[1], sctx)

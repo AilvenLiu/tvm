@@ -22,7 +22,11 @@ from functools import wraps
 from tvm.script import tir as T
 from tvm.tir import PrimFunc, Buffer
 from tvm.tir.stmt import OpCall
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tirp.op_schedule import (
+    ScheduleContext,
+    register_dispatch,
+    predicate,
+)
 from .common import target_cuda, thread_selector
 from tvm.tirp.operator import EventInit, EventCommit, EventWait
 from tvm.tir.event import (
@@ -35,42 +39,6 @@ from tvm.tir.event import (
 EVENT_INIT_IMPL_DICT = dict()
 EVENT_COMMIT_IMPL_DICT = dict()
 EVENT_WAIT_IMPL_DICT = dict()
-
-
-@register_schedule("event_init", "cuda")
-@target_cuda
-def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Schedule event init."""
-    event = op.args[0]
-    impl = event.get_impl()
-    if impl not in EVENT_INIT_IMPL_DICT:
-        return None
-
-    return EVENT_INIT_IMPL_DICT[impl](op, sctx)
-
-
-@register_schedule("event_commit", "cuda")
-@target_cuda
-def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Schedule event commit."""
-    event = op.args[0]
-    impl = event.get_impl()
-    if impl not in EVENT_COMMIT_IMPL_DICT:
-        return None
-
-    return EVENT_COMMIT_IMPL_DICT[impl](op, sctx)
-
-
-@register_schedule("event_wait", "cuda")
-@target_cuda
-def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Schedule event wait."""
-    event = op.args[0]
-    impl = event.get_impl()
-    if impl not in EVENT_WAIT_IMPL_DICT:
-        return None
-
-    return EVENT_WAIT_IMPL_DICT[impl](op, sctx)
 
 
 def target_event_impl(op_name: str, exp_impl: EventImpl):
@@ -403,3 +371,45 @@ def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                 T.ptx.ld_global_acquire(state[0], sem.ptr_to(evt.indices))
 
     return func
+
+
+# -----------------------------------------------------------------------------
+# Register rich dispatcher variants per event implementation
+# -----------------------------------------------------------------------------
+
+_IMPL_NAME = {
+    EventImpl.kTMALoad: "kTMALoad",
+    EventImpl.kTMALoadOnly: "kTMALoadOnly",
+    EventImpl.kTMAStore: "kTMAStore",
+    EventImpl.kCpAsync: "kCpAsync",
+    EventImpl.kGlobalSemaphore: "kGlobalSemaphore",
+}
+
+
+def _event_impl_predicate(expected_impl):
+    def _pred(op: OpCall, sctx: ScheduleContext):
+        evt = op.args[0]
+        return (evt.get_impl() == expected_impl), f"event impl is {evt.get_impl()}"
+
+    return _pred
+
+
+def _register_event_dispatch_table(op_name: str, table):
+    for impl, fn in table.items():
+        name = _IMPL_NAME.get(impl, str(impl))
+
+        @register_dispatch(
+            op_name,
+            "cuda",
+            variant=name,
+            priority=10,
+            when=[predicate("event_impl", _event_impl_predicate(impl))],
+        )
+        def _dispatch(op: OpCall, sctx: ScheduleContext, _fn=fn, _impl=impl):
+            # predicate handled by wrapper; explicit predicate gives clearer reason
+            return _fn(op, sctx)
+
+
+_register_event_dispatch_table("event_init", EVENT_INIT_IMPL_DICT)
+_register_event_dispatch_table("event_commit", EVENT_COMMIT_IMPL_DICT)
+_register_event_dispatch_table("event_wait", EVENT_WAIT_IMPL_DICT)

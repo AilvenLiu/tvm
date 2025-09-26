@@ -259,7 +259,7 @@ def test():
                                         elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * NUM_CONSUMER * BLK_M * BLK_K)
                 D_smem = T.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, layout=D_layout,
                                         elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * (NUM_CONSUMER * BLK_M + BLK_N) * BLK_K)
-               
+
                 # alloc local memory
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                 reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
@@ -268,7 +268,7 @@ def test():
                 descI = T.local_cell("uint32")
                 phase = T.alloc_buffer((1,), "int32", scope="local")
                 stage = T.local_cell("int32", name="stage")
-                
+
                 # initialize
                 tma2mma = T.meta_var(BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True))
                 mma2tma = T.meta_var(BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False))
@@ -341,7 +341,6 @@ def test():
                                         phase[0] = phase[0] ^ 1
                                 tile_scheduler.next_tile()
 
-                
                         elif warp_id < 2 and cbx == 0:
                             phase_tmem = T.alloc_buffer((1,), "int32", scope="local")
                             phase_tmem[0] = 0
@@ -373,7 +372,7 @@ def test():
                                                     else:
                                                         T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB, 
                                                                             descI, False, CTA_GROUP, True)
-                                            
+
                                                 mma2tma.arrive(ks)
                                             phase[0] = phase[0] ^ 1
                                         if PIPE_REMAIN_NUM > 0:

@@ -23,7 +23,11 @@ from functools import reduce
 
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc, OpCall
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tirp.op_schedule import (
+    ScheduleContext,
+    register_dispatch,
+    predicate,
+)
 from tvm.ir import Op
 from tvm.tirp.operator.op import BinaryReduce, UnaryReduce, BinaryChain, ReduceNegate
 from .common import (
@@ -58,7 +62,6 @@ optype_table = {
 }
 
 
-@register_schedule("binary_reduce", "trn")
 def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Generate a TRN schedule for binary reduction operations."""
     op = OpCall.downcast(op)
@@ -74,7 +77,9 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     reduce_axes = [i if i >= 0 else len(binary_output.buffer.shape) + i for i in reduce_axes]
 
     # Find instruction patterns
-    inst_gen = InstructionGenerator([binary_output, binary_input1, binary_input2, reduce_output], analyzer)
+    inst_gen = InstructionGenerator(
+        [binary_output, binary_input1, binary_input2, reduce_output], analyzer
+    )
     reduce_dim_map = get_reduction_dim_map(binary_output, reduce_output, reduce_axes, analyzer)
     inst_gen.link_buffer_regions(binary_output, reduce_output, reduce_dim_map)
     inst_repr, inst_type, reverse = try_find_inst_nary(
@@ -177,7 +182,6 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     return impl
 
 
-@register_schedule("unary_reduce", "trn")
 def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Generate a TRN schedule for unary reduction operations."""
     op = OpCall.downcast(op)
@@ -214,7 +218,7 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # Apply instruction size limits
     inst_size_limit = op.schedule_config.get("max_inst_size", None)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
-    
+
     p_var = T.var("int32", "P")
     f_var = T.var("int32", "F")
     reduction_b_var = T.var("int32", "rB")
@@ -301,7 +305,6 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         return impl
 
 
-@register_schedule("binary_chain", "trn")
 def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Generate a TRN schedule for binary chain operations."""
     op = OpCall.downcast(op)
@@ -329,7 +332,7 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     reverse[0] = _reverse[0]
     if reverse[0]:
         srcs[0], srcs[1] = srcs[1], srcs[0]
-        
+
     p_var = T.var("int32", name="P")
     b_var = T.var("int32", name="B")
     f_var = T.var("int32", name="F")
@@ -350,6 +353,7 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         if inst_types[1] == InstType.TENSOR_SCALAR
         else T.nki.scalar_tensor_tensor
     )
+
     # Helper function to get source indices
     def get_srcs(inst_gen):
         return [
@@ -379,7 +383,6 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     return impl
 
 
-@register_schedule("reduce_negate", "trn")
 def reduce_negate_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Generate a TRN schedule for reduce negate operations."""
     op = OpCall.downcast(op)
@@ -387,9 +390,104 @@ def reduce_negate_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     return reduction_trn(op, optype_table[op.reduce_op], sctx, negate=True)
 
 
-@register_schedule("compose_op", "trn")
 def compose_op_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Generate a TRN schedule for compose operations."""
     raise NotImplementedError(
         "Generic compose_op must be lowered to specific compose ops before operator-level passes"
     )
+
+
+# Rich dispatcher variants for TRN compose ops
+@register_dispatch(
+    "binary_reduce",
+    "trn",
+    variant="default",
+    priority=10,
+    when=[
+        predicate(
+            "exec_scope",
+            lambda op, sctx: (
+                sctx.exec_scope.name == "kernel",
+                f"unsupported exec_scope {sctx.exec_scope.name}",
+            ),
+        )
+    ],
+)
+def binary_reduce_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return binary_reduce_trn(op, sctx)
+
+
+@register_dispatch(
+    "unary_reduce",
+    "trn",
+    variant="default",
+    priority=10,
+    when=[
+        predicate(
+            "exec_scope",
+            lambda op, sctx: (
+                sctx.exec_scope.name == "kernel",
+                f"unsupported exec_scope {sctx.exec_scope.name}",
+            ),
+        )
+    ],
+)
+def unary_reduce_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return unary_reduce_trn(op, sctx)
+
+
+@register_dispatch(
+    "binary_chain",
+    "trn",
+    variant="default",
+    priority=10,
+    when=[
+        predicate(
+            "exec_scope",
+            lambda op, sctx: (
+                sctx.exec_scope.name == "kernel",
+                f"unsupported exec_scope {sctx.exec_scope.name}",
+            ),
+        )
+    ],
+)
+def binary_chain_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return binary_chain_trn(op, sctx)
+
+
+@register_dispatch(
+    "reduce_negate",
+    "trn",
+    variant="default",
+    priority=10,
+    when=[
+        predicate(
+            "exec_scope",
+            lambda op, sctx: (
+                sctx.exec_scope.name == "kernel",
+                f"unsupported exec_scope {sctx.exec_scope.name}",
+            ),
+        )
+    ],
+)
+def reduce_negate_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return reduce_negate_trn(op, sctx)
+
+
+@register_dispatch(
+    "compose_op",
+    "trn",
+    variant="default",
+    priority=10,
+    when=[
+        predicate(
+            "exec_scope",
+            lambda op, sctx: (
+                sctx.exec_scope.name == "kernel",
+                f"unsupported exec_scope {sctx.exec_scope.name}",
+            ),
+        )
+    ],
+)
+def compose_op_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return compose_op_trn(op, sctx)

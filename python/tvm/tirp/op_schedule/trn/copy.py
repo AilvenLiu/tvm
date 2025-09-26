@@ -26,7 +26,11 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir import PrimFunc
 from tvm.tir.stmt import OpCall
-from tvm.tirp.op_schedule import ScheduleContext, register_schedule
+from tvm.tirp.op_schedule import (
+    ScheduleContext,
+    register_dispatch,
+    predicate,
+)
 
 from .common import (
     get_ewise_dim_map,
@@ -197,7 +201,6 @@ def transpose_schedule(
     return transpose_sbuf_output
 
 
-@register_schedule("copy", "trn")
 @target_trn
 def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
@@ -296,3 +299,23 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                             func(dst[*dst_indices], src[*src_indices])
     # fmt: on
     return impl
+
+
+# Rich dispatcher variant for TRN copy
+@register_dispatch(
+    "copy",
+    "trn",
+    variant="default",
+    priority=10,
+    when=[
+        predicate(
+            "exec_scope",
+            lambda op, sctx: (
+                sctx.exec_scope.name == "kernel",
+                f"unsupported exec_scope {sctx.exec_scope.name}",
+            ),
+        )
+    ],
+)
+def copy_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return copy_trn(op, sctx)

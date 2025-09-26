@@ -510,8 +510,32 @@ TVM_DLL Pass InstrumentProfileIntrinsics();
 TVM_DLL Pass DefaultGPUSchedule();
 
 /*!
+ * \brief Resolve scope id definitions in TIRp programs for the given target.
+ * \return The pass.
+ */
+TVM_DLL Pass LowerTIRpResolveScopeIds();
+
+/*!
+ * \brief Lower TIRp op calls using registered op schedulers for the given target.
+ * \return The pass.
+ */
+TVM_DLL Pass LowerTIRpScheduleOps();
+
+/*!
+ * \brief Resolve exec scope slices introduced during TIRp lowering.
+ * \return The pass.
+ */
+TVM_DLL Pass LowerTIRpResolveScopeSlices();
+
+/*!
+ * \brief Finalize TIRp lowering by applying layout rewriters and cleanup passes.
+ * \return The pass.
+ */
+TVM_DLL Pass LowerTIRpCleanup();
+
+/*!
  * \brief Lower the TIR to a lower level IR for the given target.
- * \return The Pass
+ * \return The pass.
  */
 TVM_DLL Pass LowerTIRp();
 
