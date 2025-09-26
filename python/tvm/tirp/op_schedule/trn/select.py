@@ -97,7 +97,7 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     inst_repr = inst_gen.find_max_inst_size_from_one_region(dst)
     inst_repr = inst_gen.fit_inst_tile_to_region(inst_repr, true_value)
     inst_repr = inst_gen.restrict_inst_to_one_dim(inst_repr)
-    inst_repr.bound_inst_size(op.schedule_config.get("max_inst_size", 512), analyzer)
+    inst_repr.bound_inst_size(op.config.get("max_inst_size", 512), analyzer)
 
     p_var = T.var("int32", name="p")
     b_var = T.var("int32", name="b")

@@ -23,7 +23,7 @@ from tvm.tir.stmt import OpCall
 
 
 def _test(op: str, *args):
-    return OpCall(*args, op=Op.get("tirp." + op), workspace={}, schedule_config={})
+    return OpCall(*args, op=Op.get("tirp." + op), workspace={}, config={})
 
 
 def test_copy():

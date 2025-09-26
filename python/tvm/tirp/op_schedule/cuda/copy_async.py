@@ -77,7 +77,19 @@ def tma_atom_shape(
     return atom_shape
 
 
- 
+def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape):
+    """Generate the TMA layout for the shared memory given shape and dtype.
+    It uses a default tiling strategy to tile the TMA atom layout into the shared memory.
+    """
+    if isinstance(swizzle_mode, int):
+        swizzle_mode = SwizzleMode(swizzle_mode)
+    if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
+        return TileLayout(shape).normalize()
+    atom_shape = tma_atom_shape(dtype, swizzle_mode, shape)
+    layout = tma_atom_layout(dtype, swizzle_mode)
+    tile_to_shape = copy.copy(atom_shape)
+    tile_to_shape[-2] = shape[-2]
+    return layout.tile_to(tile_to_shape, atom_shape).tile_to(shape, tile_to_shape).normalize()
 
 
 def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
@@ -291,7 +303,7 @@ def copy_tma_impl(
                     tensor_map,
                     *reversed(g_st),
                     cta_group=cta_group,
-                    cache_hint=op_call.schedule_config.get("cache_hint", ""),
+                    cache_hint=op_call.config.get("cache_hint", ""),
                 )
             else:
                 T.ptx.cp_async.bulk.tensor.s2g(
@@ -314,7 +326,7 @@ def copy_tma_impl(
                         tensor_map,
                         *reversed(g_coord),
                         cta_group=cta_group,
-                        cache_hint=op_call.schedule_config.get("cache_hint", ""),
+                        cache_hint=op_call.config.get("cache_hint", ""),
                     )
                 else:
                     s_coord = T.meta_var(make_shared_coord(s_st, lvs))

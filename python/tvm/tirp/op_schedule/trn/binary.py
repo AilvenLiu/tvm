@@ -266,7 +266,7 @@ def binary_trn(
     b_var = T.var("int32", name="B")
     f_var = T.var("int32", name="F")
     p_size = dst.layout.size("P")
-    inst_size_limit = op.schedule_config.get("max_inst_size", 512)
+    inst_size_limit = op.config.get("max_inst_size", 512)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
     inst_gen.bind_inst_iter(_dst, p_var, p_size, 1, False)
     inst_gen.bind_inst_iter(_dst, f_var, inst_repr.size, inst_repr.stride, True)

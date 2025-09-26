@@ -456,11 +456,11 @@ LaunchThreadFrame LaunchThread(ffi::String thread_tag, PrimExpr extent);
 /*!
  * \brief Compose TIRp op.
  * \param workspace The workspace of the compose op.
- * \param schedule_config The schedule config of the compose op.
+ * \param config The config of the compose op.
  * \return The result ComposeOpFrame.
  */
 ComposeOpFrame ComposeOp(ffi::Map<ffi::String, Buffer> workspace,
-                         ffi::Map<ffi::String, ffi::Any> schedule_config);
+                         ffi::Map<ffi::String, ffi::Any> config);
 
 /*!
  * \brief Bind a var to thread env.

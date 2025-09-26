@@ -280,7 +280,7 @@ class DecodeTile(Tile):
                                     ],
                                     self.kv_cache_global[g_st : g_st + self.vec_size],
                                     evt,
-                                    schedule_config={"vec_len": self.vec_size},
+                                    config={"vec_len": self.vec_size},
                                 )
                     evt.commit()
 
@@ -301,7 +301,7 @@ class DecodeTile(Tile):
                                     ],
                                     self.kv_cache_global[g_st : g_st + self.vec_size],
                                     evt,
-                                    schedule_config={"vec_len": self.vec_size},
+                                    config={"vec_len": self.vec_size},
                                 )
                     evt.commit()
 
@@ -408,7 +408,7 @@ class DecodeTile(Tile):
                                         ],
                                         self.kv_cache_global[g_st : g_st + self.vec_size],
                                         evt,
-                                        schedule_config={"vec_len": self.vec_size},
+                                        config={"vec_len": self.vec_size},
                                     )
                         evt.commit()
 
@@ -457,7 +457,7 @@ class DecodeTile(Tile):
                                         ],
                                         self.kv_cache_global[g_st : g_st + self.vec_size],
                                         evt,
-                                        schedule_config={"vec_len": self.vec_size},
+                                        config={"vec_len": self.vec_size},
                                     )
                         evt.commit()
                         self.idx[0] = (self.idx[0] + 1) % self.pipe_depth

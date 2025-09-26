@@ -235,7 +235,7 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
                     event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
                     event[0].init(1)
 
-                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0], schedule_config={"cache_hint": cache_hint})
+                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0], config={"cache_hint": cache_hint})
                     event[0].commit()
                     event[0].wait()
 

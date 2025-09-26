@@ -92,7 +92,7 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     )
 
     # Apply instruction size limits
-    inst_size_limit = op.schedule_config.get("max_inst_size", None)
+    inst_size_limit = op.config.get("max_inst_size", None)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
 
     # Generate axes and validate
@@ -216,7 +216,7 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         )
 
     # Apply instruction size limits
-    inst_size_limit = op.schedule_config.get("max_inst_size", None)
+    inst_size_limit = op.config.get("max_inst_size", None)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
 
     p_var = T.var("int32", "P")
@@ -337,7 +337,7 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     b_var = T.var("int32", name="B")
     f_var = T.var("int32", name="F")
     p_size = output.buffer.layout.size("P")
-    inst_size_limit = op.schedule_config.get("max_inst_size", 512)
+    inst_size_limit = op.config.get("max_inst_size", 512)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
     inst_gen.bind_inst_iter(output, p_var, p_size, 1, False)
     inst_gen.bind_inst_iter(output, f_var, inst_repr.size, inst_repr.stride, True)

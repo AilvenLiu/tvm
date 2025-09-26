@@ -229,15 +229,15 @@ def test_reduction_op_local(input, op_type, dtype, shuffle):
                     acc_view = acc.view(*acc_shape, layout=acc_layout)
                     red_view = red.view(*red_shape, layout=red_layout)
                     if op_type == "sum":
-                        Tp.sum(red_view, acc_view, schedule_config={"thread_reduce": shuffle})
+                        Tp.sum(red_view, acc_view, config={"thread_reduce": shuffle})
                     elif op_type == "max":
-                        Tp.max(red_view, acc_view, schedule_config={"thread_reduce": shuffle})
+                        Tp.max(red_view, acc_view, config={"thread_reduce": shuffle})
                     # perform an additional shuffle step if not shuffled above
                     if not shuffle:
                         if op_type == "sum":
-                            Tp.sum(red_view, red_view, schedule_config={"thread_reduce": True})
+                            Tp.sum(red_view, red_view, config={"thread_reduce": True})
                         elif op_type == "max":
-                            Tp.max(red_view, red_view, schedule_config={"thread_reduce": True})
+                            Tp.max(red_view, red_view, config={"thread_reduce": True})
 
                 # write red into B
                 with T.thread():

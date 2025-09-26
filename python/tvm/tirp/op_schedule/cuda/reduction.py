@@ -174,12 +174,12 @@ def reduction_cuda_warp_logical_view_impl(
     src_buffer_region: BufferRegion,
     accum: bool,
     reduce_op: ReduceOpType,
-    schedule_config: Dict[str, Any],
+    config: Dict[str, Any],
     sctx: ScheduleContext,
 ) -> Optional[PrimFunc]:
     """Schedule reduction operation on logical tensor of local memory on CUDA.
 
-    If 'thread_reduce' is set to True in schedule_config, perform a reduction
+    If 'thread_reduce' is set to True in config, perform a reduction
     across threads based on the src buffer layout.
 
     Currently, only WGMMA layout is supported for this feature.
@@ -242,7 +242,7 @@ def reduction_cuda_warp_logical_view_impl(
     red_atom = T.TileLayout(shard=([1, 1], [1, 1]))
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))
 
-    shuffle = T.bool(schedule_config.get("thread_reduce", False))
+    shuffle = T.bool(config.get("thread_reduce", False))
 
     # get reduce op
     op_func = reduce_op_table.get(reduce_op)
@@ -327,7 +327,7 @@ def reduction_cuda_impl(
 
     # FIXME: correctly handle the axes field
     dst_buffer_region, src_buffer_region, axes, accum = op.args
-    schedule_config = op.schedule_config
+    config = op.config
 
     if src_buffer_region.buffer.scope().startswith("shared"):
         return reduction_cuda_shared_nd_sync_cta_impl(
@@ -335,7 +335,7 @@ def reduction_cuda_impl(
         )
     elif src_buffer_region.buffer.scope() == "local":
         return reduction_cuda_warp_logical_view_impl(
-            dst_buffer_region, src_buffer_region, accum, reduce_op, schedule_config, sctx
+            dst_buffer_region, src_buffer_region, accum, reduce_op, config, sctx
         )
     return None
 

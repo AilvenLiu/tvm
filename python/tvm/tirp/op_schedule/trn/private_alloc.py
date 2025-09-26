@@ -47,7 +47,7 @@ def alloc_const_bias_trn(
     if not isinstance(bias, (FloatImm)):
         return {}
     par_size = op.dsts[0].buffer.layout.size("P")
-    max_inst_size = op.schedule_config.get("max_inst_size", 512)
+    max_inst_size = op.config.get("max_inst_size", 512)
     if ("const_bias", bias.value) in buffer_dict:
         bias_buffer, bias_init_stmt = buffer_dict[("const_bias", bias.value)]
         old_shape = bias_buffer.shape
@@ -158,7 +158,7 @@ def alloc_copy_trn(
 def alloc_unary_reduce_trn(
     op: OpCall, buffer_dict: Dict[Any, Tuple[Buffer, Optional[Stmt]]], sctx: ScheduleContext
 ) -> Dict[str, Buffer]:
-    if "max_inst_size" in op.schedule_config:
+    if "max_inst_size" in op.config:
         partial_reduce_dict = alloc_partial_reduce_trn(op, buffer_dict, sctx)
         const_bias_dict = alloc_const_bias_trn(op, buffer_dict, sctx)
         return partial_reduce_dict | const_bias_dict

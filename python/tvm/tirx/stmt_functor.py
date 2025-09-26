@@ -775,7 +775,7 @@ class StmtMutator(StmtFunctor):
             return op
 
         return tvm.tir.OpCall(
-            *new_args, op=op.op, workspace=op.workspace, schedule_config=op.schedule_config
+            *new_args, op=op.op, workspace=op.workspace, config=op.config, dispatch=op.dispatch
         )
 
     def visit_buffer_region_(self, op):

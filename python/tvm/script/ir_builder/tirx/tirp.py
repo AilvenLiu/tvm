@@ -50,7 +50,8 @@ def zero(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Zero out all elements in src and store to dst.
 
@@ -67,11 +68,11 @@ def zero(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src = _to_region(src)
-    return f_insert(tirp_op.Zero(dst, src, workspace=workspace, schedule_config=schedule_config))
+    return f_insert(tirp_op.Zero(dst, src, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def sqrt(
@@ -80,7 +81,8 @@ def sqrt(
     bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
     scale: Optional[FloatImm] = None,
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Sqrt all elements in src and store to dst.
 
@@ -105,8 +107,8 @@ def sqrt(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src = _to_region(src)
     if workspace is None:
@@ -114,7 +116,7 @@ def sqrt(
     if bias is not None and isinstance(bias, Buffer):
         bias = _to_region(bias)
     return f_insert(
-        tirp_op.Sqrt(dst, src, bias, scale, workspace=workspace, schedule_config=schedule_config)
+        tirp_op.Sqrt(dst, src, bias, scale, workspace=workspace, config=config, dispatch=dispatch)
     )
 
 
@@ -123,7 +125,8 @@ def add(
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Add data from src1 and src2, store to dst.
 
@@ -143,16 +146,14 @@ def add(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(
-        tirp_op.Add(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Add(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def sub(
@@ -160,7 +161,8 @@ def sub(
     src1: Union[BufferRegion, Buffer],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Sub data from src2 to src1, store to dst.
 
@@ -180,16 +182,14 @@ def sub(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(
-        tirp_op.Sub(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Sub(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def mul(
@@ -197,7 +197,8 @@ def mul(
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Multiply data from src1 and src2, store to dst.
 
@@ -217,16 +218,14 @@ def mul(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(
-        tirp_op.Mul(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Mul(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def fdiv(
@@ -234,7 +233,8 @@ def fdiv(
     src1: Union[BufferRegion, Buffer],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """(Float) Div data from src2 to src1, store to dst.
 
@@ -254,22 +254,21 @@ def fdiv(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(
-        tirp_op.FDiv(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.FDiv(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def cast(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Cast src to dst.
 
@@ -284,23 +283,24 @@ def cast(
     workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
 
-    schedule_config : Optional[Dict[str, Any]]
-        The schedule config of the operator.
+    config : Optional[Dict[str, Any]]
+        The config dict for the scheduler/variant.
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src = _to_region(src)
-    return f_insert(tirp_op.Cast(dst, src, workspace=workspace, schedule_config=schedule_config))
+    return f_insert(tirp_op.Cast(dst, src, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def copy(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Copy data from src to dst.
 
@@ -315,16 +315,16 @@ def copy(
     workspace : Optional[Dict[str, Buffer]]
         The workspace of the operator.
 
-    schedule_config : Optional[Dict[str, Any]]
-        The schedule config of the operator.
+    config : Optional[Dict[str, Any]]
+        The config dict for the scheduler/variant.
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src = _to_region(src)
-    return f_insert(tirp_op.Copy(dst, src, workspace=workspace, schedule_config=schedule_config))
+    return f_insert(tirp_op.Copy(dst, src, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def copy_async(
@@ -332,18 +332,18 @@ def copy_async(
     src: Union[BufferRegion, Buffer],
     evt: BaseEvent,
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
-    return f_insert(
-        tirp_op.CopyAsync(dst, src, evt, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.CopyAsync(dst, src, evt, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def fill(
     dst: Union[BufferRegion, Buffer],
     value: PrimExpr,
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Fill the buffer region with the value.
 
@@ -360,10 +360,10 @@ def fill(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
-    return f_insert(tirp_op.Fill(dst, value, workspace=workspace, schedule_config=schedule_config))
+    return f_insert(tirp_op.Fill(dst, value, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def gemm(
@@ -376,7 +376,8 @@ def gemm(
     alpha: PrimExpr = 1.0,
     beta: PrimExpr = 0.0,
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """General matrix multiplication.
 
@@ -413,8 +414,8 @@ def gemm(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     D = _to_region(D)
     A = _to_region(A)
     B = _to_region(B)
@@ -430,7 +431,8 @@ def gemm(
             alpha,
             beta,
             workspace=workspace,
-            schedule_config=schedule_config,
+            config=config,
+            dispatch=dispatch,
         )
     )
 
@@ -441,7 +443,8 @@ def sum(
     axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """
     Sum all elements in src and store to dst.
@@ -465,14 +468,12 @@ def sum(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src = _to_region(src)
     axes = _wrap_elem_in_tuple(axes)
-    return f_insert(
-        tirp_op.Sum(dst, src, axes, accum, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Sum(dst, src, axes, accum, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def max(
@@ -481,7 +482,8 @@ def max(
     axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """
     Max all elements in src and store to dst.
@@ -505,14 +507,12 @@ def max(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src = _to_region(src)
     axes = _wrap_elem_in_tuple(axes)
-    return f_insert(
-        tirp_op.Max(dst, src, axes, accum, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Max(dst, src, axes, accum, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def min(
@@ -521,7 +521,8 @@ def min(
     axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """
     Min all elements in src and store to dst.
@@ -545,21 +546,20 @@ def min(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src = _to_region(src)
     axes = _wrap_elem_in_tuple(axes)
-    return f_insert(
-        tirp_op.Min(dst, src, axes, accum, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Min(dst, src, axes, accum, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def reciprocal(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Reciprocal all elements in src and store to dst.
 
@@ -576,20 +576,19 @@ def reciprocal(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src = _to_region(src)
-    return f_insert(
-        tirp_op.Reciprocal(dst, src, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Reciprocal(dst, src, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def memset(
     dst: Union[BufferRegion, Buffer],
     value: PrimExpr,
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Set all elements in dst to value.
 
@@ -606,12 +605,10 @@ def memset(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
-    return f_insert(
-        tirp_op.Memset(dst, value, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Memset(dst, value, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def maximum(
@@ -619,7 +616,8 @@ def maximum(
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Maximum all elements in src1 and src2 and store to dst.
 
@@ -639,16 +637,14 @@ def maximum(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(
-        tirp_op.Maximum(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Maximum(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def minimum(
@@ -656,7 +652,8 @@ def minimum(
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Minimum all elements in src1 and src2 and store to dst.
 
@@ -676,16 +673,14 @@ def minimum(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(
-        tirp_op.Minimum(dst, src1, src2, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Minimum(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def exp(
@@ -694,7 +689,8 @@ def exp(
     bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
     scale: Optional[FloatImm] = None,
     workspace: Dict[str, Buffer] = None,
-    schedule_config: Dict[str, Any] = None,
+    config: Dict[str, Any] = None,
+    dispatch: Optional[str] = None,
 ):
     """Exponentiate all elements in src and store to dst.
 
@@ -717,19 +713,17 @@ def exp(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
+    if config is None:
+        config = {}
     dst = _to_region(dst)
     src = _to_region(src)
     if bias is not None and isinstance(bias, Buffer):
         bias = _to_region(bias)
-    return f_insert(
-        tirp_op.Exp(dst, src, bias, scale, workspace=workspace, schedule_config=schedule_config)
-    )
+    return f_insert(tirp_op.Exp(dst, src, bias, scale, workspace=workspace, config=config, dispatch=dispatch))
 
 
 def compose_op(
-    workspace: Dict[str, Buffer] = None, schedule_config: Dict[str, Any] = None
+    workspace: Dict[str, Buffer] = None, config: Dict[str, Any] = None
 ) -> frame.ComposeOpFrame:
     """Compose a TIRp op.
 
@@ -745,14 +739,14 @@ def compose_op(
     """
     if workspace is None:
         workspace = {}
-    if schedule_config is None:
-        schedule_config = {}
-    return _ffi_api.ComposeOp(workspace, schedule_config)  # pylint: disable=no-member
+    if config is None:
+        config = {}
+    return _ffi_api.ComposeOp(workspace, config)  # pylint: disable=no-member
 
 
 def tvm_kernel_replace_point():
     """A placeholder for the kernel replace point, used in TIRp op scheduling."""
-    return f_insert(tirp_op.KernelReplacePoint(workspace={}, schedule_config={}))
+    return f_insert(tirp_op.KernelReplacePoint(workspace={}, config={}))
 
 
 def binary_reduce(
@@ -764,7 +758,8 @@ def binary_reduce(
     reduce_op: Union[str, Op],
     reduce_axes: Union[int, Tuple[int]] = -1,
     workspace: Dict[str, Buffer] = {},
-    schedule_config: Dict[str, Any] = {},
+    config: Dict[str, Any] = {},
+    dispatch: Optional[str] = None,
 ):
     """Combine a binary operation with a reduction operation.
 
@@ -794,8 +789,8 @@ def binary_reduce(
     workspace : Dict[str, Buffer]
         The workspace of the operator.
 
-    schedule_config : Dict[str, Any]
-        The schedule configuration.
+    config : Dict[str, Any]
+        The scheduler configuration.
     """
     binary_output = _to_region(binary_output)
     reduce_output = _to_region(reduce_output)
@@ -820,7 +815,8 @@ def binary_reduce(
             reduce_op,
             reduce_axes,
             workspace=workspace,
-            schedule_config=schedule_config,
+            config=config,
+            dispatch=dispatch,
         )
     )
 
@@ -835,7 +831,8 @@ def unary_reduce(
     scale: Optional[FloatImm] = None,
     reduce_axes: Union[int, Tuple[int]] = -1,
     workspace: Dict[str, Buffer] = {},
-    schedule_config: Dict[str, Any] = {},
+    config: Dict[str, Any] = {},
+    dispatch: Optional[str] = None,
 ):
     """Combine a unary operation with a reduction operation.
 
@@ -868,8 +865,8 @@ def unary_reduce(
     workspace : Dict[str, Buffer]
         The workspace of the operator.
 
-    schedule_config : Dict[str, Any]
-        The schedule configuration.
+    config : Dict[str, Any]
+        The scheduler configuration.
     """
     unary_output = _to_region(unary_output)
     reduce_output = _to_region(reduce_output)
@@ -896,7 +893,8 @@ def unary_reduce(
             scale,
             reduce_axes,
             workspace=workspace,
-            schedule_config=schedule_config,
+            config=config,
+            dispatch=dispatch,
         )
     )
 
@@ -910,7 +908,8 @@ def binary_chain(
     op1: Union[str, Op],
     reverse1: bool = False,
     workspace: Dict[str, Buffer] = {},
-    schedule_config: Dict[str, Any] = {},
+    config: Dict[str, Any] = {},
+    dispatch: Optional[str] = None,
 ):
     """Chain multiple binary operations together.
 
@@ -945,8 +944,8 @@ def binary_chain(
     workspace : Dict[str, Buffer]
         The workspace of the operator.
 
-    schedule_config : Dict[str, Any]
-        The schedule configuration.
+    config : Dict[str, Any]
+        The scheduler configuration.
     """
     output = _to_region(output)
     data = _to_region(data)
@@ -971,7 +970,8 @@ def binary_chain(
             op1,
             reverse1,
             workspace=workspace,
-            schedule_config=schedule_config,
+            config=config,
+            dispatch=dispatch,
         )
     )
 
@@ -983,7 +983,8 @@ def reduce_negate(
     reduce_axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = {},
-    schedule_config: Dict[str, Any] = {},
+    config: Dict[str, Any] = {},
+    dispatch: Optional[str] = None,
 ):
     """Negate the result of a reduction operation.
 
@@ -1007,8 +1008,8 @@ def reduce_negate(
     workspace : Dict[str, Buffer]
         The workspace of the operator.
 
-    schedule_config : Dict[str, Any]
-        The schedule configuration.
+    config : Dict[str, Any]
+        The scheduler configuration.
     """
     output = _to_region(output)
     input = _to_region(input)
@@ -1025,7 +1026,8 @@ def reduce_negate(
             accum,
             reduce_op,
             workspace=workspace,
-            schedule_config=schedule_config,
+            config=config,
+            dispatch=dispatch,
         )
     )
 

@@ -128,7 +128,7 @@ class BufferReplacer(StmtExprMutator):
                 )
             else:
                 args.append(arg)
-        return OpCall(*args, op=op.op, workspace=new_workspace, schedule_config=op.schedule_config)
+        return OpCall(*args, op=op.op, workspace=new_workspace, config=op.config, dispatch=op.dispatch)
 
 
 class KernelReplacePointSearcher(StmtMutator):

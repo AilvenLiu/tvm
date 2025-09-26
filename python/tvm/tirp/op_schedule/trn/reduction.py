@@ -121,7 +121,7 @@ def reduction_trn(
     inst_gen = InstructionGenerator([src_buffer_region, dst_buffer_region], analyzer)
     inst_gen.link_buffer_regions(src_buffer_region, dst_buffer_region, dim_map)
     inst_repr = inst_gen.find_max_inst_size_from_one_region(src_buffer_region, axes)
-    inst_size_limit = op.schedule_config.get("max_inst_size", None)
+    inst_size_limit = op.config.get("max_inst_size", None)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
     assert analyzer.can_prove(inst_repr.size > 1), "Instruction size must be greater than 1"
 

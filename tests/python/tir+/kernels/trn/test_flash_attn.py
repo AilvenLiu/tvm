@@ -136,7 +136,7 @@ def test_flash_attn(ssh_client, causal=True):
                 reduce_op="sum",
                 bias=running_max_reshape[block_q * BLOCK_Q : (block_q + 1) * BLOCK_Q, 0, 0],
                 reduce_axes=-1,
-                schedule_config={"max_inst_size": INST_SIZE},
+                config={"max_inst_size": INST_SIZE},
             )
             Tp.sum(rowsum_p[block_q % 2], partial_rowsum_p, axes=-1)
         else:

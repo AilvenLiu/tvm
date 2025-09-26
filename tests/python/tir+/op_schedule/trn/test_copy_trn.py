@@ -783,7 +783,7 @@ def test_copy_with_specified_max_inst_size():
         with T.kernel():
             A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            Tp.copy(A_sbuf, B_sbuf, schedule_config={"max_inst_size": 128})
+            Tp.copy(A_sbuf, B_sbuf, config={"max_inst_size": 128})
             
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle):

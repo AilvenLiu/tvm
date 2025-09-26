@@ -1309,8 +1309,10 @@ class OpCallDocNode : public StmtDocNode {
   ffi::Array<Doc> args;
   /*! \brief The workspace of this op call */
   ffi::Optional<DictDoc> workspace{std::nullopt};
-  /*! \brief The schedule config of this op call */
-  ffi::Optional<DictDoc> schedule_config{std::nullopt};
+  /*! \brief The config of this op call */
+  ffi::Optional<DictDoc> config{std::nullopt};
+  /*! \brief The optional dispatch variant of this op call */
+  ffi::Optional<ExprDoc> dispatch{std::nullopt};
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -1318,7 +1320,8 @@ class OpCallDocNode : public StmtDocNode {
         .def_ro("callee", &OpCallDocNode::callee)
         .def_ro("args", &OpCallDocNode::args)
         .def_ro("workspace", &OpCallDocNode::workspace)
-        .def_ro("schedule_config", &OpCallDocNode::schedule_config);
+        .def_ro("config", &OpCallDocNode::config)
+        .def_ro("dispatch", &OpCallDocNode::dispatch);
   }
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.printer.OpCallDoc", OpCallDocNode, StmtDocNode);
@@ -1336,10 +1339,11 @@ class OpCallDoc : public StmtDoc {
    * \param callee The callee of this function call.
    * \param args The positional arguments.
    * \param workspace The workspace of this op call.
-   * \param schedule_config The schedule config of this op call.
+   * \param config The config of this op call.
+   * \param dispatch The optional dispatch variant name of this op call.
    */
   explicit OpCallDoc(ExprDoc callee, ffi::Array<Doc> args, ffi::Optional<DictDoc> workspace,
-                     ffi::Optional<DictDoc> schedule_config);
+                     ffi::Optional<DictDoc> config, ffi::Optional<ExprDoc> dispatch = std::nullopt);
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(OpCallDoc, StmtDoc, OpCallDocNode);
 };
 

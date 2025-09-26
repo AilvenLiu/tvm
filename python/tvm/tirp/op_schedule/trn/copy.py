@@ -266,11 +266,11 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         func = T.nki.tensor_copy
 
     if func == T.nki.tensor_copy:
-        inst_size_limit = op.schedule_config.get("max_inst_size", 512)
+        inst_size_limit = op.config.get("max_inst_size", 512)
         inst.bound_inst_size(inst_size_limit, analyzer)
     else:
         assert (
-            "max_inst_size" not in op.schedule_config
+            "max_inst_size" not in op.config
         ), "max_inst_size is not supported for load/store"
 
     p_var = T.var("int32", name="P")

@@ -697,10 +697,10 @@ ElseFrame Else() {
 }
 
 ComposeOpFrame ComposeOp(ffi::Map<ffi::String, Buffer> workspace,
-                         ffi::Map<ffi::String, ffi::Any> schedule_config) {
+                         ffi::Map<ffi::String, ffi::Any> config) {
   ObjectPtr<ComposeOpFrameNode> n = ffi::make_object<ComposeOpFrameNode>();
   n->workspace = workspace;
-  n->schedule_config = schedule_config;
+  n->config = config;
   return ComposeOpFrame(n);
 }
 

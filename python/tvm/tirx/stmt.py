@@ -760,13 +760,17 @@ class OpCall(Stmt):
     workspace : Map[str, Buffer]
         The workspace.
 
-    schedule_config : Map[str, ObjectRef]
-        The schedule config.
+    config : Map[str, ObjectRef]
+        The scheduler/config dictionary.
+
+    dispatch : Optional[str]
+        The explicit variant name to dispatch to.
     """
 
     args: List[PrimExpr]
     workspace: Dict[str, Buffer]
-    schedule_config: Dict[str, Any]
+    config: Dict[str, Any]
+    dispatch: Optional[str]
     _registry = {}
 
     def __init__(
@@ -774,18 +778,19 @@ class OpCall(Stmt):
         *args: List[PrimExpr],
         op: Optional[Op] = None,
         workspace: Dict[str, Buffer] = None,
-        schedule_config: Dict[str, Any] = None,
+        config: Dict[str, Any] = None,
+        dispatch: Optional[str] = None,
     ) -> None:
         if workspace is None:
             workspace = {}
-        if schedule_config is None:
-            schedule_config = {}
+        if config is None:
+            config = {}
         if op is None:
             assert self.__class__ != OpCall, "Directly instantiating OpCall needs to specify the op"
             op = self.__class__.op
         args = list(map(normalize_const_arg, args))
         self.__init_handle_by_constructor__(
-            _ffi_api.OpCall, op, args, workspace, schedule_config  # pylint: disable=no-member
+            _ffi_api.OpCall, op, args, workspace, config, dispatch  # pylint: disable=no-member
         )
         casted_op = OpCall.downcast(self)
         casted_op.validate()

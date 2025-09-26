@@ -142,7 +142,7 @@ def generate_unary_func(
     scale,
     analyzer,
     workspace,
-    schedule_config,
+    config,
     sctx,
 ):
     """Generate a function that implements a unary operation."""
@@ -150,7 +150,7 @@ def generate_unary_func(
     p_size = dst_buffer_region.buffer.layout.size("P")
 
     # Apply instruction size limits if specified
-    inst_size_limit = schedule_config.get("max_inst_size", 512)
+    inst_size_limit = config.get("max_inst_size", 512)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
 
     f_var = T.var("int32", "F")
@@ -245,7 +245,7 @@ def unary_trn(
         None,  # No scale
         analyzer,
         op.workspace,
-        op.schedule_config,
+        op.config,
         sctx,
     )
 
@@ -294,6 +294,6 @@ def unary_with_bias_scale_trn(
         scale,
         analyzer,
         op.workspace,
-        op.schedule_config,
+        op.config,
         sctx,
     )

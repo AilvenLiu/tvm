@@ -170,6 +170,21 @@ def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 
     failures: List[str] = []
 
+    # If explicit dispatch is set, filter to that variant only
+    forced_variant = getattr(op_call, "dispatch", None)
+    if forced_variant is not None:
+        cases = [c for c in cases if c.variant == forced_variant]
+        if not cases:
+            msg = (
+                f"TIRp schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
+                f"\n- no variant named '{forced_variant}' is registered"
+            )
+            if _env_truthy("TVM_TIRP_SCHED_TRACE") and _match_trace_filter(op_call, sctx):
+                print(msg)
+            if _env_truthy("TVM_TIRP_SCHED_STRICT"):
+                raise RuntimeError(msg)
+            return None
+
     for case in sorted(cases, key=lambda c: (-c.priority, c.variant)):
         # evaluate predicates
         pred_ok = True

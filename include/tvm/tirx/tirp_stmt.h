@@ -44,8 +44,11 @@ class OpCallNode : public StmtNode {
   // Workspace (pre-allocated buffers) for the operator.
   ffi::Map<ffi::String, Buffer> workspace;
 
-  // Schedule config for the operator.
-  ffi::Map<ffi::String, ffi::Any> schedule_config;
+  // Config for the operator/scheduler.
+  ffi::Map<ffi::String, ffi::Any> config;
+
+  // Optional dispatch variant name registered via @register_dispatch.
+  ffi::Optional<ffi::String> dispatch{std::nullopt};
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -53,7 +56,8 @@ class OpCallNode : public StmtNode {
         .def_ro("op", &OpCallNode::op)
         .def_ro("args", &OpCallNode::args)
         .def_ro("workspace", &OpCallNode::workspace)
-        .def_ro("schedule_config", &OpCallNode::schedule_config);
+        .def_ro("config", &OpCallNode::config)
+        .def_ro("dispatch", &OpCallNode::dispatch);
   }
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.OpCall", OpCallNode, StmtNode);
@@ -67,7 +71,8 @@ class OpCall : public Stmt {
  public:
   TVM_DLL OpCall(tvm::Op op, ffi::Array<ffi::Any> args,
                  ffi::Map<ffi::String, Buffer> workspace = {},
-                 ffi::Map<ffi::String, ffi::Any> schedule_config = {});
+                 ffi::Map<ffi::String, ffi::Any> config = {},
+                 ffi::Optional<ffi::String> dispatch = std::nullopt);
 
   static bool IsValidOpCallArgType(const ffi::Any& arg);
 

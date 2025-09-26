@@ -744,9 +744,13 @@ void PythonDocPrinter::PrintTypedDoc(const OpCallDoc& doc) {
     output_ << ", workspace=";
     PrintDoc(doc->workspace.value());
   }
-  if (doc->schedule_config.has_value() && !doc->schedule_config.value()->keys.empty()) {
-    output_ << ", schedule_config=";
-    PrintDoc(doc->schedule_config.value());
+  if (doc->config.has_value() && !doc->config.value()->keys.empty()) {
+    output_ << ", config=";
+    PrintDoc(doc->config.value());
+  }
+  if (doc->dispatch.has_value()) {
+    output_ << ", dispatch=";
+    PrintDoc(doc->dispatch.value());
   }
   output_ << ")";
 }

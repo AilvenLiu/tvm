@@ -287,7 +287,7 @@ def copy_vec_load_impl(
         return None
 
     elem_size = DataType(src.dtype).bits  # in bits
-    vec_len = op_call.schedule_config.get("vec_len", None)
+    vec_len = op_call.config.get("vec_len", None)
     if vec_len is None:
         vec_len = get_vec_len(
             dst_buffer_region,

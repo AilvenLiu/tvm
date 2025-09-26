@@ -108,7 +108,7 @@ class PrivateAllocMutator(StmtMutator):
             return op
         new_workspace = dict(op.workspace)
         new_workspace.update(self.added_workspace[op])
-        op = OpCall(*op.args, op=op.op, workspace=new_workspace, schedule_config=op.schedule_config)
+        op = OpCall(*op.args, op=op.op, workspace=new_workspace, config=op.config, dispatch=op.dispatch)
         return op
 
 

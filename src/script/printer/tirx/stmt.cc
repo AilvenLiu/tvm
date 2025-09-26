@@ -168,7 +168,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             return OpCallDoc(
                 AttrAccessDoc(d->AsDoc<ExprDoc>(op_call->args[0], p->Attr("args")->ArrayItem(0)),
                               method),
-                args, {}, {});
+                args, {}, {}, std::nullopt);
           };
 
           static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
@@ -186,9 +186,13 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
+            ffi::Optional<ExprDoc> disp = std::nullopt;
+            if (op_call->dispatch.has_value()) {
+              disp = LiteralDoc::Str(op_call->dispatch.value(), p->Attr("dispatch"));
+            }
             return OpCallDoc(
                 TIRp(d, name), args, d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")),
-                d->AsDoc<DictDoc>(op_call->schedule_config, p->Attr("schedule_config")));
+                d->AsDoc<DictDoc>(op_call->config, p->Attr("config")), disp);
           } else if (bool(compose_op_map.get(op, tvm::Bool(false)))) {
             // Compose ops
             With<TIRFrame> f(d, op_call);
@@ -200,10 +204,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             AsDocBody(seq_stmt, p->Attr("args"), f->get(), d);
             return ScopeDoc(std::nullopt,
                             TIRp(d, "compose_op")
-                                ->Call({}, {"workspace", "schedule_config"},
+                                ->Call({}, {"workspace", "config"},
                                        {d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")),
-                                        d->AsDoc<DictDoc>(op_call->schedule_config,
-                                                          p->Attr("schedule_config"))}),
+                                        d->AsDoc<DictDoc>(op_call->config, p->Attr("config"))}),
                             (*f)->stmts);
           } else if (bool(event_op_map.get(op, tvm::Bool(false)))) {
             // Event ops
@@ -219,7 +222,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
-            return OpCallDoc(TIRp(d, name), args, {}, {});
+            return OpCallDoc(TIRp(d, name), args, {}, {}, std::nullopt);
           }
         });
 TVM_SCRIPT_REPR(tirx::tirp::OpCallNode, ReprPrintTIR);

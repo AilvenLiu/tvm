@@ -34,7 +34,7 @@ TVM_FFI_STATIC_INIT_BLOCK() { OpCallNode::RegisterReflection(); }
 
 // OpCall
 OpCall::OpCall(tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buffer> workspace,
-               ffi::Map<ffi::String, ffi::Any> schedule_config) {
+               ffi::Map<ffi::String, ffi::Any> config, ffi::Optional<ffi::String> dispatch) {
   // Check if the op is a TIR+ op.
   static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
   ICHECK_EQ(tirp_op_map.count(op), 1) << "Only TIR+ ops can be used in tirx::tirp::OpCall";
@@ -43,17 +43,19 @@ OpCall::OpCall(tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buff
   n->op = std::move(op);
   n->args = std::move(args);
   n->workspace = std::move(workspace);
-  n->schedule_config = std::move(schedule_config);
+  n->config = std::move(config);
+  n->dispatch = std::move(dispatch);
   data_ = std::move(n);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tirx.OpCall", [](tvm::Op op, ffi::Array<ffi::Any> args,
-                                         ffi::Map<ffi::String, Buffer> workspace,
-                                         ffi::Map<ffi::String, ffi::Any> schedule_config) {
-    return OpCall(op, args, workspace, schedule_config);
-  });
+  refl::GlobalDef().def(
+      "tirx.OpCall",
+      [](tvm::Op op, ffi::Array<ffi::Any> args, ffi::Map<ffi::String, Buffer> workspace,
+         ffi::Map<ffi::String, ffi::Any> config, ffi::Optional<ffi::String> dispatch) {
+        return OpCall(op, args, workspace, config, dispatch);
+      });
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -61,6 +63,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("tirx.OpCallCopyHandle", [](const OpCall& op) { return OpCall(op); });
 }
 
-}  // namespace tirxxxp
-}  // namespace tirxxx
+}  // namespace tirxxxxp
+}  // namespace tirxxxx
 }  // namespace tvm
