@@ -58,6 +58,10 @@ F32_BYTES = 4
 F128_BYTES = 16
 
 
+def is_power_of_two(n: T.int32):
+    return tvm.tir.all(n > 0, T.bitwise_and(n, n - 1) == 0)
+
+
 def find_power_of_two(n):
     assert n > 0 and (n & (n - 1)) == 0
     return n.bit_length() - 1
@@ -328,6 +332,7 @@ class ProfileEventType(Enum):
     Q_REDUCE_RMSNORM_ROPE = 34
     K_REDUCE_RMSNORM_ROPE_APPEND = 35
     V_REDUCE_APPEND = 36
+    TOPK_SOFTMAX = 37
 
 
 event_type_names = [
@@ -368,6 +373,7 @@ event_type_names = [
     "Q_REDUCE_RMSNORM_ROPE",
     "K_REDUCE_RMSNORM_ROPE_APPEND",
     "V_REDUCE_APPEND",
+    "TOPK_SOFTMAX"
 ]
 
 
