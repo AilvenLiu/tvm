@@ -13,7 +13,7 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
-from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace
+from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
 from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile
 from tvm.tirp.megakernel.allreduce import AllreduceTile
 from tvm.tirp.megakernel.append_kv import AppendKVTile
@@ -104,18 +104,22 @@ class MegaKernel:
         self.mlp_add_rms_norm_tile = self._add_tile(AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), ProfileEventType.MLP_ADD_RMS_NORM)
         
 
-    def _init_profiler(self, profiler_buffer, profiler_tag, profiler_write_offset):
-        self.profiler_buffer = profiler_buffer
-        self.profiler_tag = profiler_tag
-        self.profiler_write_offset = profiler_write_offset
+    def _init_profiler(self, profiler_buffer):
+        self.profiler = T.meta_var(
+            CudaProfiler(
+                profiler_buffer,
+                write_stride=self.PROFILER_WRITE_STRIDE,
+                num_groups=self.NUM_GROUPS,
+            )
+        )
 
     @T.macro
-    def init_profiler(self, profiler_buffer, profiler_tag, profiler_write_offset):
-        self._init_profiler(profiler_buffer, profiler_tag, profiler_write_offset)
+    def init_profiler(self, profiler_buffer):
+        self._init_profiler(profiler_buffer)
         with T.cta():
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
             if self.profiler_on:
-                T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, self.NUM_GROUPS, warp_id)
+                self.profiler.init(warp_id)
                 
     def _init_tile_scheduler(self, is_static_scheduler, smem_manager, exec_queue, exec_tasks, exec_head, exec_tail):
         self.smem_manager = smem_manager
@@ -143,10 +147,10 @@ class MegaKernel:
         with T.cta():
             lane_id = T.thread_id([32], parent="warp")
             if self.profiler_on:
-                T.timer_start_cuda(event_type, self.profiler_buffer.data, self.profiler_tag.data, self.profiler_write_offset.data, self.PROFILER_WRITE_STRIDE, lane_id == 0)
+                self.profiler.start(event_type, lane_id == 0)
             tile.run(*args)
             if self.profiler_on:
-                T.timer_end_cuda(event_type, self.profiler_buffer.data, self.profiler_tag.data, self.profiler_write_offset.data, self.PROFILER_WRITE_STRIDE, lane_id == 0)
+                self.profiler.end(event_type, lane_id == 0)
 
     @T.macro
     def run_tile_prefetch(self, tile, *args):
@@ -154,10 +158,10 @@ class MegaKernel:
         with T.cta():
             lane_id = T.thread_id([32], parent="warp")
             if self.profiler_on:
-                T.timer_start_cuda(ProfileEventType.PREFETCH_SMEM, self.profiler_buffer.data, self.profiler_tag.data, self.profiler_write_offset.data, self.PROFILER_WRITE_STRIDE, lane_id == 0)
+                self.profiler.start(ProfileEventType.PREFETCH_SMEM, lane_id == 0)
             tile.prefetch(*args)
             if self.profiler_on:
-                T.timer_end_cuda(ProfileEventType.PREFETCH_SMEM, self.profiler_buffer.data, self.profiler_tag.data, self.profiler_write_offset.data, self.PROFILER_WRITE_STRIDE, lane_id == 0)
+                self.profiler.end(ProfileEventType.PREFETCH_SMEM, lane_id == 0)
 
     def _add_tile(self, tile, profiler_event_type):
         self.tile_attr[tile] = profiler_event_type
@@ -286,9 +290,7 @@ class MegaKernel:
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             tid_in_wg = T.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
-            profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
-            profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
-            self.init_profiler(profiler_buffer, profiler_tag, profiler_write_offset)
+            self.init_profiler(profiler_buffer)
             with T.cta():
                 buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
                 smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
@@ -734,7 +736,7 @@ class MegaKernel:
                     self.tile_scheduler.next_tile()
                     
                 if self.profiler_on:
-                    T.timer_finalize_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, self.PROFILER_WRITE_STRIDE, lane_id == 0)
+                    self.profiler.finalize(lane_id == 0)
                 self.class_finalize_all()
 
     # fmt: on

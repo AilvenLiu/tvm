@@ -28,7 +28,7 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
-from tvm.tirp.bench.utils import export_to_perfetto_trace
+from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
 
 
 class TaskType(Enum):
@@ -690,12 +690,17 @@ def test_hgemm_rs():
                 packed_value = T.decl_buffer([1,], "uint64", data=packed_ptr, scope="shared")
                 sch_pipe = T.meta_var(Pipeline(buf.data, 64 + 4, pipeline_depth=1, pipeline_num=1, p_single_cta=True, c_single_cta=False))
                 tile_scheduler = T.meta_var(MixedDynamicTileScheduler(gemm_queue, rs_queue, packed_value, sch_pipe))
-                profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
-                profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
+                profiler = T.meta_var(
+                    CudaProfiler(
+                        profiler_buffer,
+                        write_stride=PROFILER_WRITE_STRIDE,
+                        num_groups=NUM_GROUPS,
+                    )
+                )
 
                 # initialize
                 if PROFILER_ON:
-                    T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, warp_id_in_cta)
+                    profiler.init(warp_id_in_cta)
                 tma2mma = T.meta_var(BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True))
                 mma2tma = T.meta_var(BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False))
                 mma2ld = T.meta_var(BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True))
@@ -726,7 +731,7 @@ def test_hgemm_rs():
                     while tile_scheduler.valid():
                         if tile_scheduler.fetched_task_type[0] == TaskType.RS.value:
                             if PROFILER_ON:
-                                T.timer_start_cuda(ProfileEventType.RS, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                profiler.start(ProfileEventType.RS, tid == 0)
                             m_idx = T.meta_var(tile_scheduler.fetched_task_idx0[0])
                             n_idx = T.meta_var(tile_scheduler.fetched_task_idx1[0])
                             offset = tid
@@ -744,11 +749,11 @@ def test_hgemm_rs():
                                 else:
                                     break
                             if PROFILER_ON:
-                                T.timer_end_cuda(ProfileEventType.RS, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                profiler.end(ProfileEventType.RS, tid == 0)
 
                         elif tile_scheduler.fetched_task_type[0] == TaskType.GEMM.value:
                             if PROFILER_ON:
-                                T.timer_start_cuda(ProfileEventType.GEMM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                profiler.start(ProfileEventType.GEMM, tid == 0)
                             with T.cta():
                                 m_idx = T.meta_var(tile_scheduler.fetched_task_idx0[0])
                                 n_idx = T.meta_var(tile_scheduler.fetched_task_idx1[0])
@@ -891,7 +896,7 @@ def test_hgemm_rs():
                                     sem.semaphore_notify(signal_rank, tid, comm_m_idx_local, n_idx, rs_queue)
 
                             if PROFILER_ON:
-                                T.timer_end_cuda(ProfileEventType.GEMM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                                profiler.end(ProfileEventType.GEMM, tid == 0)
 
                         tile_scheduler.next_tile(cbx, bx, rank, warp_id_in_cta, lane_id)
 

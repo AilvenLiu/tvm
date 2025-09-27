@@ -32,7 +32,7 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
-from tvm.tirp.bench.utils import export_to_perfetto_trace
+from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
 
 
 class JobType(Enum):
@@ -413,10 +413,15 @@ def test_hgemm_rs():
                 task_id = T.local_cell("int32")
                 task_id = 0
                 task_smem = T.decl_buffer((MAX_TASKS, 3), "int32", buf.data, elem_offset=SMEM_OFFSET // 4)
-                profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
-                profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
+                profiler = T.meta_var(
+                    CudaProfiler(
+                        profiler_buffer,
+                        write_stride=PROFILER_WRITE_STRIDE,
+                        num_groups=NUM_GROUPS,
+                    )
+                )
                 if PROFILER_ON:
-                    T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, wg_id)
+                    profiler.init(wg_id)
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
@@ -440,7 +445,7 @@ def test_hgemm_rs():
                     # GEMM
                     if task_smem[task_id, 2] == JobType.GEMM.value:
                         if PROFILER_ON:
-                            T.timer_start_cuda(ProfileEventType.GEMM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            profiler.start(ProfileEventType.GEMM, tid == 0)
                         with T.cta():
                             T.block_attr({"tirp.scope_partition": True})
                             with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
@@ -513,7 +518,7 @@ def test_hgemm_rs():
                                         T.nvshmem.signal_op(sem.sem.ptr_to([comm_m_idx_local, n_idx]), 1, "add", signal_rank)
                                 mma2ld_pipe.advance()
                         if PROFILER_ON:
-                            T.timer_end_cuda(ProfileEventType.GEMM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            profiler.end(ProfileEventType.GEMM, tid == 0)
 
                     elif task_smem[task_id, 2] == JobType.RS.value:
                         T.tvm_storage_sync("shared")
@@ -521,7 +526,7 @@ def test_hgemm_rs():
                         n_idx = task_smem[task_id, 1]
                         sem.semaphore_wait(m_idx, n_idx)
                         if PROFILER_ON:
-                            T.timer_start_cuda(ProfileEventType.RS, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            profiler.start(ProfileEventType.RS, tid == 0)
                         offset = tid
                         while True:
                             if offset < TILE_M * TILE_N // 8:
@@ -537,7 +542,7 @@ def test_hgemm_rs():
                             else:
                                 break
                         if PROFILER_ON:
-                            T.timer_end_cuda(ProfileEventType.RS, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                            profiler.end(ProfileEventType.RS, tid == 0)
                     task_id += 1
 
                 # dealloc TMEM

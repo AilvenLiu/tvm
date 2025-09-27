@@ -29,7 +29,7 @@ from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
-from tvm.tirp.bench.utils import export_to_perfetto_trace
+from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
 
 
 class ProfileEventType(Enum):
@@ -355,11 +355,16 @@ class ReduceScatter:
             sem = T.meta_var(Semaphore(cnt=WORLD_SIZE, buffer=semaphore))
             with T.cta():
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
-                profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
-                T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, 0)
+                profiler = T.meta_var(
+                    CudaProfiler(
+                        profiler_buffer,
+                        write_stride=PROFILER_WRITE_STRIDE,
+                        num_groups=NUM_GROUPS,
+                    )
+                )
+                profiler.init(0)
                 with T.cta()[0:GEMM_SMS]:
-                    T.timer_start_cuda(ProfileEventType.GEMM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                    profiler.start(ProfileEventType.GEMM, lane_id == 0)
                     tmem_addr = T.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
                     A_smem = T.decl_buffer((PIPE_DEPTH, NUM_CONSUMER,BLK_M, BLK_K), a_type, buf.data, elem_offset=512, layout=A_layout)
                     B_smem = T.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)
@@ -475,7 +480,7 @@ class ReduceScatter:
                     with T.warp()[0:1]:
                         T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
                         T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
-                    T.timer_end_cuda(ProfileEventType.GEMM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                    profiler.end(ProfileEventType.GEMM, lane_id == 0)
                     
 
     @T.prim_func(tirp=True)

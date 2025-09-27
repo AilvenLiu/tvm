@@ -18,7 +18,7 @@
 import os
 import numpy as np
 from enum import Enum
-from typing import List
+from typing import List, Union
 
 import tvm_ffi
 
@@ -28,6 +28,8 @@ from tvm.contrib import nvcc
 import triton.profiler as proton
 from triton.testing import do_bench
 import tvm
+from tvm.script import tir as T
+
 
 
 def is_running_under_pytest():
@@ -175,3 +177,75 @@ def export_to_perfetto_trace(
             track.instant(timestamp, event)
 
     tgen.flush()
+
+
+class CudaProfiler:
+    """A lightweight wrapper around T.timer_* CUDA intrinsics.
+
+    Stores repeated arguments used by timer_init/start/end/finalize so users can
+    call concise methods in kernels. Intended to mirror Pipeline/TileScheduler helpers.
+    """
+
+    def __init__(
+        self,
+        profiler_buffer: T.Buffer,
+        write_stride: int,
+        num_groups: int,
+        default_leader: Union[None, tvm.tir.PrimExpr, bool] = None,
+    ):
+        self.buffer = profiler_buffer
+        self.write_stride = write_stride
+        self.num_groups = num_groups
+        self.default_leader = default_leader
+
+        self.profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
+        self.profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
+
+    def _leader(self, leader: Union[None, tvm.tir.PrimExpr, bool]):
+        if leader is not None:
+            return leader
+        if self.default_leader is not None:
+            return self.default_leader
+        return T.bool(True)
+
+    @T.macro
+    def init(self, group_id: tvm.tir.PrimExpr):
+        T.timer_init_cuda(
+            self.buffer.data,
+            self.profiler_tag.data,
+            self.profiler_write_offset.data,
+            self.num_groups,
+            group_id,
+        )
+
+    @T.macro
+    def start(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
+        T.timer_start_cuda(
+            event_type,
+            self.buffer.data,
+            self.profiler_tag.data,
+            self.profiler_write_offset.data,
+            self.write_stride,
+            self._leader(leader),
+        )
+
+    @T.macro
+    def end(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
+        T.timer_end_cuda(
+            event_type,
+            self.buffer.data,
+            self.profiler_tag.data,
+            self.profiler_write_offset.data,
+            self.write_stride,
+            self._leader(leader),
+        )
+
+    @T.macro
+    def finalize(self, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
+        T.timer_finalize_cuda(
+            self.buffer.data,
+            self.profiler_tag.data,
+            self.profiler_write_offset.data,
+            self.write_stride,
+            self._leader(leader),
+        )

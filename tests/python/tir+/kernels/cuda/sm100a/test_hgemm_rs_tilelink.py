@@ -28,7 +28,7 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
-from tvm.tirp.bench.utils import export_to_perfetto_trace
+from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
 
 
 class ProfileEventType(Enum):
@@ -415,13 +415,18 @@ def test_hgemm_rs():
             sem = T.meta_var(Semaphore(cnt=1, buffer=semaphore))
             with T.cta():
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
-                profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
+                profiler = T.meta_var(
+                    CudaProfiler(
+                        profiler_buffer,
+                        write_stride=PROFILER_WRITE_STRIDE,
+                        num_groups=NUM_GROUPS,
+                    )
+                )
                 
                 reg_fp16 = T.alloc_buffer((BLK_N,), d_type, scope="local")
                 if bx < GEMM_SMS:
-                    T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, 0)
-                    T.timer_start_cuda(ProfileEventType.GEMM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                    profiler.init(0)
+                    profiler.start(ProfileEventType.GEMM, tid == 0)
                     tmem_addr = T.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
                     A_smem = T.decl_buffer((PIPE_DEPTH, NUM_CONSUMER,BLK_M, BLK_K), a_type, buf.data, elem_offset=512, layout=A_layout)
                     B_smem = T.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)
@@ -536,10 +541,10 @@ def test_hgemm_rs():
                     with T.warp()[0:1]:
                         T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
                         T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
-                    T.timer_end_cuda(ProfileEventType.GEMM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid == 0)
+                    profiler.end(ProfileEventType.GEMM, tid == 0)
                 # reduce scatter
                 else:
-                    T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, wg_id)
+                    profiler.init(wg_id)
                     buffer_load_smem = T.decl_buffer((RS_PIPE_DEPTH, RS_BLK_M, RS_BLK_N), dtype=d_type, data=buf.data, scope="shared", elem_offset=512)
                     gemm_out_load_smem = T.decl_buffer((RS_PIPE_DEPTH, RS_BLK_M, RS_BLK_N), dtype=d_type, data=buf.data, scope="shared", elem_offset=512 + RS_BLK_M * RS_BLK_N * RS_PIPE_DEPTH)
                     out_smem = T.decl_buffer((2, RS_BLK_M, RS_BLK_N), dtype=d_type, data=buf.data, scope="shared", elem_offset=512 + RS_BLK_M * RS_BLK_N * RS_PIPE_DEPTH * 2)
@@ -560,9 +565,9 @@ def test_hgemm_rs():
                         rs_tile_scheduler.init(bx - GEMM_SMS)
                         if stage != 0:
                             in_flag_addr = T.meta_var(sig_addr.access_ptr("r", offset=sig_addr.elem_offset_of([stage - 1, bx - GEMM_SMS])))
-                            T.timer_start_cuda(ProfileEventType.WAIT, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                            profiler.start(ProfileEventType.WAIT, tid_in_wg == 0)
                             T.cuda.func_call("spin_wait", in_flag_addr, source_code=spin_wait)
-                            T.timer_end_cuda(ProfileEventType.WAIT, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                            profiler.end(ProfileEventType.WAIT, tid_in_wg == 0)
                         if wg_id == 2:
                             while rs_tile_scheduler.valid():
                                 m_idx = T.meta_var(rs_tile_scheduler.m_idx)
@@ -572,7 +577,7 @@ def test_hgemm_rs():
                                 if warp_id == 0:
                                     sem.semaphore_wait(m_idx_global, n_idx)
                                     if lane_id == 0:
-                                        T.timer_start_cuda(ProfileEventType.LOAD, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                                        profiler.start(ProfileEventType.LOAD, tid_in_wg == 0)
                                         for m_o in range(M_SEG):
                                             load_pipe.producer_wait(0)
                                             if stage != 0:
@@ -583,7 +588,7 @@ def test_hgemm_rs():
                                                 T.ptx.cp_async.bulk.tensor.g2c(2, gemm_out_load_smem.ptr_to([load_pipe.idx, 0, 0]), load_pipe.mbar_p2c.ptr_to([load_pipe.idx, 0]), gemm_out_tensor_map, n_idx * BLK_N, m_idx_global * BLK_M + m_o * RS_BLK_M)
                                                 T.ptx.mbarrier.arrive.expect_tx(load_pipe.mbar_p2c.ptr_to([load_pipe.idx, 0]), RS_BLK_M * RS_BLK_N * 2)
                                             load_pipe.advance()
-                                        T.timer_end_cuda(ProfileEventType.LOAD, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                                        profiler.end(ProfileEventType.LOAD, tid_in_wg == 0)
                                 rs_tile_scheduler.next_tile(stride=RS_SMS)
                         else:
                             while rs_tile_scheduler.valid():
@@ -591,7 +596,7 @@ def test_hgemm_rs():
                                 n_idx = T.meta_var(rs_tile_scheduler.n_idx)
                                 seg = T.meta_var((rank + stage + 1) % WORLD_SIZE)
                                 m_idx_global = T.meta_var(m_idx + seg * LOCAL_M // BLK_M)
-                                T.timer_start_cuda(ProfileEventType.ACCUM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                                profiler.start(ProfileEventType.ACCUM, tid_in_wg == 0)
                                 for m_o in range(M_SEG):
                                     load_pipe.consumer_wait(0)
                                     n_elems = T.meta_var(RS_BLK_M * RS_BLK_N)
@@ -629,7 +634,7 @@ def test_hgemm_rs():
                                         T.ptx.cp_async.bulk.commit_group()
                                     load_pipe.consumer_release(0)
                                     load_pipe.advance()
-                                T.timer_end_cuda(ProfileEventType.ACCUM, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                                profiler.end(ProfileEventType.ACCUM, tid_in_wg == 0)
                                 rs_tile_scheduler.next_tile(stride=RS_SMS)
                             T.ptx.bar.sync(1, 256)
                             flag_addr = T.meta_var(sig_addr.access_ptr("w", offset=sig_addr.elem_offset_of([stage, bx - GEMM_SMS])))

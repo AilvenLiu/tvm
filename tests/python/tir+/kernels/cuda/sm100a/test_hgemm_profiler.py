@@ -28,7 +28,7 @@ import tvm.testing
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tirp.bench.utils import export_to_perfetto_trace
+from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
 
 
 def _get_source(func: tvm.tir.PrimFunc) -> str:
@@ -273,8 +273,13 @@ def test_tcgen05_mma_ss_tma():
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
                 descI = T.local_cell("uint32")
-                profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
-                profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
+                profiler = T.meta_var(
+                    CudaProfiler(
+                        profiler_buffer,
+                        write_stride=PROFILER_WRITE_STRIDE,
+                        num_groups=NUM_GROUPS,
+                    )
+                )
                 tma2mma_pipe = T.meta_var(TMA2MMAPipeline(buf.data, 1, PIPE_DEPTH, 1, p_single_cta=False, c_single_cta=True))
                 mma2ld_pipe = T.meta_var(MMA2LDpipeline(buf.data, 1 + PIPE_DEPTH * 2, 1, NUM_CONSUMER, p_single_cta=True, c_single_cta=False))
                 mma2ld_pipe.init(c2p_thread_count=128 * 2)
@@ -294,7 +299,7 @@ def test_tcgen05_mma_ss_tma():
                     with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
                         T.ptx.setmaxnreg(False, 56)
                         if warp_id == 3:
-                            T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, 0)
+                            profiler.init(0)
                             # first_iter = T.alloc_buffer((1,), "bool", scope="local")
                             first_iter = T.local_cell("bool")
                             first_iter = True
@@ -309,11 +314,11 @@ def test_tcgen05_mma_ss_tma():
                                             # wait for the completion of all the mma of the same tile
                                             # and then notify the epilogue stage to load the result
                                             T.ptx.mbarrier.arrive(mma2ld_pipe.mbar_p2c.ptr_to([0, 0]))
-                                        T.timer_start_cuda(ProfileEventType.IssueTMA, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id== 0)
+                                        profiler.start(ProfileEventType.IssueTMA, lane_id == 0)
                                         T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 0, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + cbx) * BLK_M, cta_group=2)
                                         T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([tma2mma_pipe.idx, 1, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), A_tensor_map, ko * BLK_K, (m_idx * 4 + 2 + cbx) * BLK_M, cta_group=2)
                                         T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), tma_finished.ptr_to([tma2mma_pipe.idx]), B_tensor_map, ko * BLK_K, n_idx * BLK_N + cbx * BLK_N // 2, cta_group=2)
-                                        T.timer_end_cuda(ProfileEventType.IssueTMA, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id == 0)
+                                        profiler.end(ProfileEventType.IssueTMA, lane_id == 0)
                                         if cbx == 0:
                                             # notify the mma stage that tma load is finished
                                             T.ptx.mbarrier.arrive.expect_tx(tma_finished.ptr_to([tma2mma_pipe.idx]), (BLK_K * BLK_M * 2 * 2 + BLK_K * BLK_N) * 2)
@@ -327,7 +332,7 @@ def test_tcgen05_mma_ss_tma():
                             if lane_id == 0:
                                 T.ptx.mbarrier.arrive(mma2ld_pipe.mbar_p2c.ptr_to([0, 0]))
                         elif warp_id < NUM_CONSUMER:
-                            T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, warp_id+1)
+                            profiler.init(warp_id + 1)
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx) # represent cluster task id
                                 n_idx = T.meta_var(tile_scheduler.n_idx)
@@ -339,7 +344,7 @@ def test_tcgen05_mma_ss_tma():
                                         for ko in T.serial(0, K // BLK_K):
                                             # wait for tma load to finish
                                             tma2mma_pipe.consumer_wait(0)
-                                            T.timer_start_cuda(ProfileEventType.IssueMMA, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id  == 0)
+                                            profiler.start(ProfileEventType.IssueMMA, lane_id == 0)
                                             for ki in range(BLK_K // MMA_K):
                                                 T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([tma2mma_pipe.idx, warp_id, 0, ki * MMA_K]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
                                                 T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([tma2mma_pipe.idx, 0, ki * MMA_K]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
@@ -347,7 +352,7 @@ def test_tcgen05_mma_ss_tma():
                                                     T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=False)
                                                 else:
                                                     T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_addr + warp_id * MMA_N, descA, descB, descI, use_a_tmem=False, cta_group=cta_group, enable_input_d=True)
-                                            T.timer_end_cuda(ProfileEventType.IssueMMA, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, lane_id  == 0)
+                                            profiler.end(ProfileEventType.IssueMMA, lane_id == 0)
                                             tma2mma_pipe.consumer_release(0)
                                             tma2mma_pipe.advance()
                                         mma2ld_pipe.advance()
@@ -355,24 +360,24 @@ def test_tcgen05_mma_ss_tma():
 
                     with T.warpgroup()[0:NUM_CONSUMER]:
                         T.ptx.setmaxnreg(True, 224)
-                        T.timer_init_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, NUM_GROUPS, wg_id+3)
+                        profiler.init(wg_id + 3)
                         while tile_scheduler.valid():
                             m_idx = T.meta_var(tile_scheduler.m_idx) # represent cluster task id
                             n_idx = T.meta_var(tile_scheduler.n_idx)
                             # wait for the completion of all the mma of the same tile
                             mma2ld_pipe.consumer_wait(0)
-                            T.timer_start_cuda(ProfileEventType.TMEMLD, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                            profiler.start(ProfileEventType.TMEMLD, tid_in_wg == 0)
                             # TMEM -> RF
                             for i in range(BLK_N // TMEM_LD_SIZE):
                                 T.ptx.tcgen05.ld(tmem_addr + wg_id * MMA_N, warp_id * 32, i * TMEM_LD_SIZE, "32x32b", TMEM_LD_SIZE, False, *[reg[j] for j in range(TMEM_LD_SIZE)])
                                 T.ptx.tcgen05.wait.ld()
                                 for j in range(TMEM_LD_SIZE):
                                     reg_fp16[i * TMEM_LD_SIZE + j] = T.cast(reg[j], "float16")
-                            T.timer_end_cuda(ProfileEventType.TMEMLD, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                            profiler.end(ProfileEventType.TMEMLD, tid_in_wg == 0)
                             # the tmem can be overwritten by the next tile
                             mma2ld_pipe.consumer_release(wg_id)
                             # RF -> GMEM
-                            T.timer_start_cuda(ProfileEventType.WRITEBACK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                            profiler.start(ProfileEventType.WRITEBACK, tid_in_wg == 0)
                             for i in range(BLK_N // EPI_TILE):
                                 for it in range(EPI_TILE // 8):
                                     for vec in T.vectorized(8):
@@ -384,7 +389,7 @@ def test_tcgen05_mma_ss_tma():
                                     T.ptx.cp_async.bulk.commit_group()
                                     T.ptx.cp_async.bulk.wait_group(0)
                                 T.ptx.bar.sync(wg_id, 128)
-                            T.timer_end_cuda(ProfileEventType.WRITEBACK, profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, PROFILER_WRITE_STRIDE, tid_in_wg == 0)
+                            profiler.end(ProfileEventType.WRITEBACK, tid_in_wg == 0)
                             mma2ld_pipe.advance()
                             tile_scheduler.next_tile()
                 # dealloc TMEM
