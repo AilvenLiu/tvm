@@ -41,6 +41,7 @@ from tvm.target import Target
 from tvm.target.codegen import llvm_lookup_intrinsic_id
 from tvm.tirx import Buffer, BufferRegion, IndexMap, PrimExpr
 from tvm.tirx import op as _tir_op
+from tvm.ir import register_op_attr as _register_op_attr
 from tvm.tirx import type_annotation
 from tvm.tirx.exec_scope import ExecScope, ScopeIdDef, Var
 from tvm.tirx.layout import (
@@ -2267,6 +2268,11 @@ def _op_wrapper(func: Callable[P, T]) -> Callable[P, T]:
             kwargs.pop("dtype")
         return func(*args, **kwargs)
 
+    # Expose underlying tir op name for printer registration
+    try:
+        wrapped.__tir_op_name__ = getattr(func, "__name__", None)
+    except Exception:  # pragma: no cover
+        pass
     return wrapped
 
 
@@ -2277,6 +2283,11 @@ def _dtype_forward(func):
             args = (kwargs.pop("dtype"),) + args
         return func(*args, **kwargs)
 
+    # Expose underlying tir op name for printer registration
+    try:
+        wrapped.__tir_op_name__ = getattr(func, "__name__", None)
+    except Exception:  # pragma: no cover
+        pass
     return wrapped
 
 
@@ -2306,6 +2317,8 @@ class MmaNamespace:
 
     def __init__(self):
         self.sp = _dtype_forward(_tir_op.ptx_mma_sp)
+        # __call__ corresponds to ptx_mma
+        self.__tir_call_op_name__ = "ptx_mma"
 
     def __call__(self, *args, **kwds):
         return _dtype_forward(_tir_op.ptx_mma)(*args, **kwds)
@@ -2322,6 +2335,8 @@ class CpAsyncNamespace:
 
     def __call__(self, *args, **kwds):
         return _dtype_forward(_tir_op.ptx_cp_async)(*args, **kwds)
+    # __call__ corresponds to ptx_cp_async
+    __tir_call_op_name__ = "ptx_cp_async"
 
 
 class CpAsyncBulkNamespace:
@@ -2334,6 +2349,8 @@ class CpAsyncBulkNamespace:
 
     def __call__(self, *args, **kwds):
         return _dtype_forward(_tir_op.ptx_cp_async_bulk)(*args, **kwds)
+    # __call__ corresponds to ptx_cp_async_bulk
+    __tir_call_op_name__ = "ptx_cp_async_bulk"
 
 
 class CpAsyncBulkTensorNamespace:
@@ -2390,6 +2407,8 @@ class MbarrierArriveNamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.ptx_mbarrier_arrive)(*args, **kwds)
+    # __call__ corresponds to ptx_mbarrier_arrive
+    __tir_call_op_name__ = "ptx_mbarrier_arrive"
 
 
 class Tcgen05Namespace:
@@ -2431,6 +2450,8 @@ class Tcgen05MmaNamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.ptx_tcgen05_mma)(*args, **kwds)
+    # __call__ corresponds to ptx_tcgen05_mma
+    __tir_call_op_name__ = "ptx_tcgen05_mma"
 
 
 class Tcgen05MmaSpNamespace:
@@ -2441,6 +2462,8 @@ class Tcgen05MmaSpNamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.ptx_tcgen05_mma_sp)(*args, **kwds)
+    # __call__ corresponds to ptx_tcgen05_mma_sp
+    __tir_call_op_name__ = "ptx_tcgen05_mma_sp"
 
 
 class Tcgen05WaitNamespace:
@@ -2522,6 +2545,8 @@ class NVSHMEMGetMemNBINamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.nvshmem_getmem_nbi)(*args, **kwds)
+    # __call__ corresponds to nvshmem_getmem_nbi
+    __tir_call_op_name__ = "nvshmem_getmem_nbi"
 
 
 class NVSHMEMPutMemNBINamespace:
@@ -2533,6 +2558,8 @@ class NVSHMEMPutMemNBINamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.nvshmem_putmem_nbi)(*args, **kwds)
+    # __call__ corresponds to nvshmem_putmem_nbi
+    __tir_call_op_name__ = "nvshmem_putmem_nbi"
 
 
 class NVSHMEMPutMemSignalNBINamespace:
@@ -2544,6 +2571,8 @@ class NVSHMEMPutMemSignalNBINamespace:
 
     def __call__(self, *args, **kwds):
         return _op_wrapper(_tir_op.nvshmem_putmem_signal_nbi)(*args, **kwds)
+    # __call__ corresponds to nvshmem_putmem_signal_nbi
+    __tir_call_op_name__ = "nvshmem_putmem_signal_nbi"
 
 
 class NKINamespace:
@@ -2572,6 +2601,52 @@ ptx = PTXNamespace()
 cuda = CUDANamespace()
 nvshmem = NVSHMEMNamespace()
 nki = NKINamespace()
+
+
+#
+# Register printer namespace mapping from the builder namespaces
+# so that the TVMScript printer emits T.cuda/T.ptx/T.nvshmem/T.nki dotted names.
+# This keeps parser and printer consistent using a single registration source.
+#
+def _register_tir_namespace_printer_names():
+    def visit(ns_obj, dotted_prefix):
+        # If the namespace object itself maps to an op via __call__
+        call_op = getattr(ns_obj, "__tir_call_op_name__", None)
+        if call_op:
+            _register_op_attr(
+                f"tir.{call_op}", "TScriptPrinterName", dotted_prefix, level=20
+            )
+        # Walk attributes to find wrapped ops and sub-namespaces
+        for name in dir(ns_obj):
+            if name.startswith("_"):
+                continue
+            try:
+                val = getattr(ns_obj, name)
+            except Exception:
+                continue
+            # Sub-namespace: recurse
+            if hasattr(val, "__dict__") and val.__class__.__name__.endswith("Namespace"):
+                visit(val, f"{dotted_prefix}.{name}")
+                continue
+            # Wrapped op (callable with attached __tir_op_name__)
+            op_name = getattr(val, "__tir_op_name__", None)
+            if callable(val) and op_name:
+                _register_op_attr(
+                    f"tir.{op_name}", "TScriptPrinterName", f"{dotted_prefix}.{name}", level=20
+                )
+
+    try:
+        visit(ptx, "ptx")
+        visit(cuda, "cuda")
+        visit(nvshmem, "nvshmem")
+        visit(nki, "nki")
+    except Exception:
+        # Best-effort registration; avoid import-time hard failure
+        pass
+
+
+# Execute registration on import so printer picks up dotted names
+_register_tir_namespace_printer_names()
 
 
 abs = _op_wrapper(_tir_op.abs)  # pylint: disable=redefined-builtin
