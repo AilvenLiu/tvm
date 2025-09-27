@@ -31,7 +31,6 @@ import tvm
 from tvm.script import tir as T
 
 
-
 def is_running_under_pytest():
     """Check if the code is being executed within a pytest session."""
     return "PYTEST_CURRENT_TEST" in os.environ
@@ -198,8 +197,12 @@ class CudaProfiler:
         self.num_groups = num_groups
         self.default_leader = default_leader
 
-        self.profiler_tag = T.alloc_buffer([1], "uint64", scope="local", align=8)
-        self.profiler_write_offset = T.alloc_buffer([1], "uint32", scope="local", align=8)
+        self.profiler_tag = T.alloc_buffer(
+            [1], "uint64", scope="local", align=8, name="profiler_tag"
+        )
+        self.profiler_write_offset = T.alloc_buffer(
+            [1], "uint32", scope="local", align=8, name="profiler_write_offset"
+        )
 
     def _leader(self, leader: Union[None, tvm.tir.PrimExpr, bool]):
         if leader is not None:

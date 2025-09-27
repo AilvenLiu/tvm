@@ -625,7 +625,7 @@ def test():
 
                                                 # copy sf to tmem 
                                                 if stage % 4 == 0:
-                                                profiler.start(ProfileEventType.IssueCP, True)
+                                                    profiler.start(ProfileEventType.IssueCP, True)
                                                     for ki in T.unroll(0, BLK_SFA // 128):
                                                         T.ptx.tcgen05.encode_matrix_descriptor(
                                                             T.address_of(descSFA), SFA_smem.ptr_to([ks, ki * 4, 0]),
