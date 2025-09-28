@@ -255,32 +255,52 @@ def test_lower_view_get():
 def test_lower_tirp_dedup_cu_tensormap():
     # fmt: off
     @T.prim_func(private=True, tirp=True)
-    def before(A_ptr: T.handle) -> None:
+    def before(A_ptr: T.handle, cond: T.bool) -> None:
         A = T.match_buffer(A_ptr, (64, 32), "float16", scope="global")
 
         # Two tensormap allocations
         map1: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         map2: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        map3: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
 
-        # Two identical cuTensorMapEncodeTiled initializations
-        T.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map1, "float16", 2, A.data,
-            32, 64,    # global_shape (reversed)
-            64,        # global stride
-            16, 16,    # shared_shape (boxDim)
-            1, 1,      # shared_strides
-            0, 0, 0, 0 # interleave, swizzle, l2, oob
-        )
-        T.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            map2, "float16", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 0, 0, 0
-        )
-
+        if cond:
+            # Two identical cuTensorMapEncodeTiled initializations
+            T.call_packed(
+                "runtime.cuTensorMapEncodeTiled",
+                map1, "float16", 2, A.data,
+                32, 64,    # global_shape (reversed)
+                64,        # global stride
+                16, 16,    # shared_shape (boxDim)
+                1, 1,      # shared_strides
+                0, 0, 0, 0 # interleave, swizzle, l2, oob
+            )
+            T.call_packed(
+                "runtime.cuTensorMapEncodeTiled",
+                map2, "float16", 2, A.data,
+                32, 64, 64,
+                16, 16,
+                1, 1,
+                0, 0, 0, 0
+            )
+            # unused map, should be removed in the pass
+            T.call_packed(
+                "runtime.cuTensorMapEncodeTiled",
+                map3, "float16", 2, A.data,
+                32, 64, 64,
+                16, 16,
+                1, 1,
+                0, 0, 0, 0
+            )
+        else:
+            T.call_packed(
+                "runtime.cuTensorMapEncodeTiled",
+                map1, "float16", 2, A.data,
+                32, 64, 64,
+                16, 16,
+                1, 1,
+                0, 0, 0, 0
+            )
+        
         # Use site of map2, should be rewritten to map1
         with T.kernel():
             with T.cta():
@@ -288,18 +308,28 @@ def test_lower_tirp_dedup_cu_tensormap():
                 T.ptx.cp_async.bulk.tensor.s2g(2, S.ptr_to([0, 0]), map2, 0, 0)
 
     @T.prim_func(private=True, tirp=True)
-    def after(A_ptr: T.handle) -> None:
+    def after(A_ptr: T.handle, cond: T.bool) -> None:
         A = T.match_buffer(A_ptr, (64, 32), "float16", layout=None)
         A_1 = T.decl_buffer((2048,), "float16", data=A.data, layout=None)
         tmap: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        T.call_packed(
-            "runtime.cuTensorMapEncodeTiled",
-            tmap, "float16", 2, A.data,
-            32, 64, 64,
-            16, 16,
-            1, 1,
-            0, 0, 0, 0
-        )
+        if cond:
+            T.call_packed(
+                "runtime.cuTensorMapEncodeTiled",
+                tmap, "float16", 2, A.data,
+                32, 64, 64,
+                16, 16,
+                1, 1,
+                0, 0, 0, 0
+            )
+        else:
+            T.call_packed(
+                "runtime.cuTensorMapEncodeTiled",
+                tmap, "float16", 2, A.data,
+                32, 64, 64,
+                16, 16,
+                1, 1,
+                0, 0, 0, 0
+            )
         with T.kernel():
             with T.cta():
                 S = T.alloc_buffer((256,), "float16", scope="shared", layout=None)
