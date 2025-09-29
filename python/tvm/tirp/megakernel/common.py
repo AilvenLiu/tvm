@@ -11,34 +11,80 @@ def ceildiv(a, b):
 
 
 class JobType(Enum):
-    GEMM_GATE_UP_PROJ = 0
-    SPLIT_SILU_MULTIPLY = 1
-    GEMM_DOWN_PROJ = 2
-    DOWN_PROJ_REDUCE = 3
-    MLP_ADD_RMS_NORM = 4
-    GEMM_QKV_PROJ = 5
-    GEMM_QKV_REDUCE = 6
-    RMSNORM = 7
-    ROPE = 8
-    APPEND_KV = 9
-    BATCH_DECODE_NO_SPLIT = 10
-    BATCH_DECODE_SPLIT = 11
-    DECODE_MERGE = 12
-    GEMM_O_PROJ = 13
-    GEMM_O_REDUCE = 14
-    ATTN_ADD_RMS_NORM = 15
-    K_RMSNORM_ROPE_APPEND_KV = 16
-    Q_RMSNORM_ROPE = 17
-    V_APPEND_KV = 18
-    O_ALLREDUCE = 19
-    DOWN_PROJ_ALLREDUCE = 20
-    GATE_UP_PROJ_REDUCE = 21
-    BATCH_ATTENTION = 22
-    BATCH_ATTENTION_MERGE = 23
-    Q_REDUCE_RMS_ROPE = 24
-    K_REDUCE_RMS_ROPE_APPEND = 25
-    V_REDUCE_APPEND = 26
-    END = 99
+    V_REDUCE_APPEND = 0
+    K_REDUCE_RMS_ROPE_APPEND = 1
+    Q_REDUCE_RMS_ROPE = 2
+    BATCH_ATTENTION = 3
+    BATCH_ATTENTION_MERGE = 4
+    GATE_UP_PROJ_REDUCE = 5
+    DOWN_PROJ_ALLREDUCE = 6
+    O_ALLREDUCE = 7
+    ATTN_ADD_RMS_NORM = 8
+    GEMM_O_REDUCE = 9
+    GEMM_O_PROJ = 10
+    GEMM_QKV_PROJ = 11
+    MLP_ADD_RMS_NORM = 12
+    DOWN_PROJ_REDUCE = 13
+    GEMM_DOWN_PROJ = 14
+    SPLIT_SILU_MULTIPLY = 15
+    GEMM_GATE_UP_PROJ = 16
+
+    # the following are not used now
+    GEMM_QKV_REDUCE = 17
+    RMSNORM = 18
+    ROPE = 19
+    APPEND_KV = 20
+    BATCH_DECODE_NO_SPLIT = 21
+    BATCH_DECODE_SPLIT = 22
+    DECODE_MERGE = 23
+    K_RMSNORM_ROPE_APPEND_KV = 24
+    Q_RMSNORM_ROPE = 25
+    V_APPEND_KV = 26
+    
+    # end
+    END = 31
+    
+    
+# every task info in exec queue will be squashed into 32bit:
+# task_type: [0:5], m_idx: [5:18], n_idx: [18:27], k_idx: [27:32]
+MAX_TASK_TYPE = 1 << 5
+MAX_M_IDX = 1 << 14
+MAX_N_IDX = 1 << 9
+MAX_K_IDX = 1 << 5
+def pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=True, debug=True):
+    if host:
+        if debug:
+            assert task_type < MAX_TASK_TYPE and m_idx < MAX_M_IDX and n_idx < MAX_N_IDX and k_idx < MAX_K_IDX
+        return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 27)
+    else:
+        if debug:
+            trap_when_assert_failed(task_type < MAX_TASK_TYPE)
+            trap_when_assert_failed(m_idx < MAX_M_IDX)
+            trap_when_assert_failed(n_idx < MAX_N_IDX)
+            trap_when_assert_failed(k_idx < MAX_K_IDX)
+        return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 27)
+
+unpack_from_32bit_code = """
+__forceinline__ __device__ void unpack_from_32bit(int32_t task_info, int32_t* task_type_ptr, int32_t* m_idx_ptr, int32_t* n_idx_ptr, int32_t* k_idx_ptr) {
+    *task_type_ptr = task_info & 0b11111;
+    *m_idx_ptr = (task_info >> 5) & 0b1111111111111;
+    *n_idx_ptr = (task_info >> 18) & 0b111111111;
+    *k_idx_ptr = task_info >> 27;
+}
+"""
+    
+@T.macro
+def unpack_from_32bit(task_info, task_type_ptr, m_idx_ptr, n_idx_ptr, k_idx_ptr):
+    T.cuda.func_call(
+        "unpack_from_32bit",
+        task_info,
+        task_type_ptr,
+        m_idx_ptr,
+        n_idx_ptr,
+        k_idx_ptr,
+        source_code=unpack_from_32bit_code,
+    )
+    
 
 
 class KernelConfig:
@@ -321,7 +367,7 @@ class ProfileEventType(Enum):
     GATE_UP_PROJ_REDUCE = 23
     BATCH_ATTENTION = 24
     BATCH_ATTENTION_MERGE = 25
-    PREFETCH_SMEM = 26
+    PREFETCH = 26
     TMA = 27
     MMA = 28
     ATTN_INIT = 29  
@@ -362,7 +408,7 @@ event_type_names = [
     "GATE_UP_PROJ_REDUCE",
     "BATCH_ATTENTION",
     "BATCH_ATTENTION_MERGE",
-    "PREFETCH_SMEM",
+    "PREFETCH",
     "TMA",
     "MMA",
     "ATTN_INIT",
@@ -630,4 +676,5 @@ class SmemManager:
     @T.macro
     def arrive_chunk(self, chunk_id):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([chunk_id]))
+            
             

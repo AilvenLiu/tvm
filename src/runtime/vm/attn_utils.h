@@ -1005,16 +1005,14 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     }
 
     int qkv_h_d = (num_qo_heads + 2 * num_kv_heads) * qk_head_dim;
-    int q_h_d = num_qo_heads * qk_head_dim;
-    int k_h_d = num_kv_heads * qk_head_dim;
     int split_o_project = megakernel::kSplitOProject[tp_size];
     int down_proj_split_k_factor = megakernel::kDownProjSplitKFactor[tp_size];
     TVM_FFI_ITVM_FFI_ICHECK_NE(split_o_project, -1);
     TVM_FFI_ITVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
     *etensor_data_views[0] = etensor_data_views_raw[0].CreateView(
         {num_layers, ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit)}, dtype_aux_);
-    *etensor_data_views[1] = etensor_data_views_raw[1].CreateView(
-        {num_layers, ceildiv(attn_num, megakernel::kNumWarpgroupPerBlock)}, dtype_aux_);
+    *etensor_data_views[1] =
+        etensor_data_views_raw[1].CreateView({num_layers, megakernel::kNumSM}, dtype_aux_);
     *etensor_data_views[2] = etensor_data_views_raw[2].CreateView(
         {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
     *etensor_data_views[3] = etensor_data_views_raw[3].CreateView(

@@ -511,9 +511,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     etensor_qkv_partial_host_ =
         HostMemoryVector(num_layers * ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit),
                          dtype_aux_, preferred_host_device);
-    etensor_notify_attn_host_ = HostMemoryVector(
-        num_layers * ceildiv(megakernel::kMaxTotalNumWorks, megakernel::kNumWarpgroupPerBlock),
-        dtype_aux_, preferred_host_device);
+    etensor_notify_attn_host_ =
+        HostMemoryVector(num_layers * megakernel::kNumSM, dtype_aux_, preferred_host_device);
     etensor_o_partial_host_ =
         HostMemoryVector(num_layers * ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN),
                          dtype_aux_, preferred_host_device);
@@ -559,20 +558,19 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
 
     std::function<Tensor(ffi::Shape)> f_empty;
     if (tp_size == 1) {
-      f_empty = [this](ffi::Shape shape) {
-        return Tensor::Empty(shape, dtype_aux_, device_);
-      };
+      f_empty = [this](ffi::Shape shape) { return Tensor::Empty(shape, dtype_aux_, device_); };
     } else {
       const ffi::Function f_nvshmem_empty =
-        tvm::ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.empty");
+          tvm::ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.empty");
       f_empty = [f_nvshmem_empty, this](ffi::Shape shape) {
         return f_nvshmem_empty(shape, dtype_aux_, device_).cast<Tensor>();
       };
     }
-    exec_queue_device_buf_ = f_empty({num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 4)});
-    exec_queue_host_buf_ = Tensor::Empty(
-        {num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks * megakernel::kTaskSize + 4)},
-        DataType::Int(32), preferred_host_device);
+    exec_queue_device_buf_ =
+        f_empty({num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks + 4)});
+    exec_queue_host_buf_ =
+        Tensor::Empty({num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks + 4)},
+                      DataType::Int(32), preferred_host_device);
 
     for (int d = 0; d < kPagedKVCacheMaxBlockDepth; ++d) {
       if (NeedKernelBeginForward()) {
@@ -1367,7 +1365,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         int batch_idx = q_indptr_data[i];
         int kv_idx = kv_head_idx_data[i];
         intermediate_inverse_info_[kv_idx * cur_batch_size_ + batch_idx].push_back(
-            i / megakernel::kNumWarpgroupPerBlock);
+            (i / megakernel::kNumWarpgroupPerBlock) % megakernel::kNumSM);
       }
       for (int i = attn_task_num_; i < ceildiv(attn_task_num_, megakernel::kNumWarpgroupPerBlock) *
                                            megakernel::kNumWarpgroupPerBlock;
@@ -1382,7 +1380,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       for (int i = 0; i < cur_batch_size_ * num_kv_heads_; ++i) {
         inverse_indptr_host_.set(i + 1,
                                  inverse_indptr_host_[i] + intermediate_inverse_info_[i].size());
-        for (int j = 0; j < intermediate_inverse_info_[i].size(); ++j) {
+        for (int j = 0; j < static_cast<int32_t>(intermediate_inverse_info_[i].size()); ++j) {
           inverse_indices_host_.set(inverse_indptr_host_[i] + j, intermediate_inverse_info_[i][j]);
         }
       }
@@ -1403,9 +1401,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       etensor_qkv_partial_host_.resize(num_layers_ *
                                        ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit));
       etensor_qkv_partial_host_.fill(0);
-      etensor_notify_attn_host_.resize(num_layers_ *
-                                       ceildiv(attn_task_num_, megakernel::kNumWarpgroupPerBlock));
-      etensor_notify_attn_host_.fill(0);
       etensor_o_partial_host_.resize(num_layers_ *
                                      ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN));
       etensor_o_partial_host_.fill(0);
@@ -1436,12 +1431,27 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       etensor_end_host_.resize(num_layers_);
       etensor_end_host_.fill(0);
       // dynamic etensors
+      etensor_notify_attn_host_.resize(num_layers_ * megakernel::kNumSM);
+      etensor_notify_attn_host_.fill(0);
+      int attn_tile_num = ceildiv(attn_task_num_, megakernel::kNumWarpgroupPerBlock);
+      int unit = megakernel::kNumWarpgroupPerBlock * (2 + num_qo_heads_ / num_kv_heads_);
+      int num = unit * (attn_tile_num / megakernel::kNumSM);
+      int remain = attn_tile_num % megakernel::kNumSM;
+      for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+        for (int i = 0; i < megakernel::kNumSM; ++i) {
+          int cnt = (i < remain) ? unit + num : num;
+          CHECK_LE(cnt, megakernel::kSemaphoreBase);
+          CHECK_LT(cnt * (megakernel::kSemaphoreBase + 1), megakernel::kMaxSemaphore);
+          etensor_notify_attn_host_.set(layer_id * megakernel::kNumSM + i,
+                                        cnt * (megakernel::kSemaphoreBase + 1));
+        }
+      }
+
       etensor_o_proj_host_.resize(num_layers_ * split_o_project);
       etensor_o_proj_host_.fill(0);
       int o_proj_tile_k = (ceildiv(ceildiv(num_qo_heads_ * v_head_dim_, split_o_project),
                                    megakernel::kGemmTileBlkK) *
                            megakernel::kGemmTileBlkK);
-
       if (split_kv) {
         // to simply, assume that one merge tile will not use two kv head
         TVM_FFI_ICHECK_LE(megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup,
@@ -1488,6 +1498,18 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
           }
         }
       }
+      for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+        for (int i = 0; i < split_o_project; ++i) {
+          CHECK_LE(etensor_o_proj_host_[layer_id * split_o_project + i],
+                   megakernel::kSemaphoreBase);
+          CHECK_LT(etensor_o_proj_host_[layer_id * split_o_project + i] *
+                       (megakernel::kSemaphoreBase + 1),
+                   megakernel::kMaxSemaphore);
+          etensor_o_proj_host_.set(layer_id * split_o_project + i,
+                                   etensor_o_proj_host_[layer_id * split_o_project + i] *
+                                       (megakernel::kSemaphoreBase + 1));
+        }
+      }
 
       etensor_down_proj_host_.resize(num_layers_ * down_proj_split_k_factor);
       etensor_down_proj_host_.fill(0);
@@ -1511,6 +1533,19 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
           }
         }
       }
+      for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+        for (int i = 0; i < down_proj_split_k_factor; ++i) {
+          CHECK_LE(etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i],
+                   megakernel::kSemaphoreBase);
+          CHECK_LT(etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] *
+                       (megakernel::kSemaphoreBase + 1),
+                   megakernel::kMaxSemaphore);
+          etensor_down_proj_host_.set(
+              layer_id * down_proj_split_k_factor + i,
+              etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] *
+                  (megakernel::kSemaphoreBase + 1));
+        }
+      }
 
       etensor_attn_merge_host_.resize(num_layers_ * cur_batch_size_ * num_kv_heads_);
       etensor_attn_merge_host_.fill(0);
@@ -1524,6 +1559,19 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                        batch_idx * num_kv_heads_ + kv_idx] +
                   1);
         }
+      }
+    }
+    for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+      for (int i = 0; i < cur_batch_size_ * num_kv_heads_; ++i) {
+        CHECK_LE(etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ + i],
+                 megakernel::kSemaphoreBase);
+        CHECK_LT(etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ + i] *
+                     (megakernel::kSemaphoreBase + 1),
+                 megakernel::kMaxSemaphore);
+        etensor_attn_merge_host_.set(
+            layer_id * cur_batch_size_ * num_kv_heads_ + i,
+            etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ + i] *
+                (megakernel::kSemaphoreBase + 1));
       }
     }
 

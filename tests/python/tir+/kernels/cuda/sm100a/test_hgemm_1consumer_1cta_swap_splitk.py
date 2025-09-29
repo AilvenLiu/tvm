@@ -324,13 +324,14 @@ def get_hgemm_kernel(dim_n, dim_k):
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
                 descI = T.local_cell("uint32")
-                profiler = T.meta_var(
-                    CudaProfiler(
-                        profiler_buffer,
-                        write_stride=PROFILER_WRITE_STRIDE,
-                        num_groups=NUM_GROUPS,
+                if PROFILER_ON:
+                    profiler = T.meta_var(
+                        CudaProfiler(
+                            profiler_buffer,
+                            write_stride=PROFILER_WRITE_STRIDE,
+                            num_groups=NUM_GROUPS,
+                        )
                     )
-                )
                 # initialize
                 tma2mma_bar = T.meta_var(BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True))
                 mma2tma_bar = T.meta_var(BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))

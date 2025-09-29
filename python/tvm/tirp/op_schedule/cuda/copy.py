@@ -33,6 +33,7 @@ from .common import (
     CopyInstType,
     copy_vec_load_impl,
     get_st_extent,
+    get_vec_len,
     target_cuda,
     validate_copy_op,
 )

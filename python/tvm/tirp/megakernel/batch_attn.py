@@ -1,6 +1,7 @@
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
+from tvm.tirp.bench.utils import CudaProfiler
 
 from .common import KernelConfig, ProfileEventType, SmemManager, Tile, ceildiv
 
@@ -329,9 +330,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         o_tvm,
         partial_o_tvm,
         partial_lse_tvm,
-        profiler_buffer,
-        profiler_tag,
-        profiler_write_offset
+        profiler: CudaProfiler = None,
     ):
         with T.kernel():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
@@ -379,13 +378,11 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                         self.d[i0, i1] = T.float32(0)
 
                 if self.profiler_on:
-                    T.timer_start_cuda(ProfileEventType.ATTN_INIT, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                    profiler.start(ProfileEventType.ATTN_INIT, lane_id == 0)
                 init_states()
                 if self.profiler_on:
-                    T.timer_end_cuda(ProfileEventType.ATTN_INIT, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)   
-                
+                    profiler.end(ProfileEventType.ATTN_INIT, lane_id == 0)
+                   
                 self.kv_tile_idx = ceildiv(self.kv_end[0], self.cta_tile_kv) - 1 - (self.kv_start[0] // self.cta_tile_kv)
                 self.mast_tile_idx = self.kv_end[0] // self.cta_tile_kv - (self.kv_start[0] // self.cta_tile_kv)
                 self.block_iter_base = self.kv_indptr[0] * self.page_size + self.kv_start[0]
@@ -431,9 +428,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
         o_tvm,
         partial_o_tvm,
         partial_lse_tvm,
-        profiler_buffer,
-        profiler_tag,
-        profiler_write_offset
+        profiler: CudaProfiler = None,
     ):
         with T.kernel():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
@@ -462,12 +457,10 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                                 q_smem_offset_w[0] = self.advance_offset_by_row(4, self.upcast_stride_q, q_smem_offset_w[0]) - 2 * self.num_mma_d_qk
 
                 if self.profiler_on:
-                    T.timer_start_cuda(ProfileEventType.ATTN_LOAD_Q, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                    profiler.start(ProfileEventType.ATTN_LOAD_Q, lane_id == 0)
                 load_q_global_smem()
                 if self.profiler_on:
-                    T.timer_end_cuda(ProfileEventType.ATTN_LOAD_Q, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                    profiler.end(ProfileEventType.ATTN_LOAD_Q, lane_id == 0)
                 self.scope_sync(wg_id)
 
                 @T.macro
@@ -623,8 +616,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                 T.ptx.cp_async.commit_group()
 
                 if self.profiler_on:
-                    T.timer_start_cuda(ProfileEventType.ATTN_LOOP_BODY, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                    profiler.start(ProfileEventType.ATTN_LOOP_BODY, lane_id == 0)
                 while self.kv_tile_idx[0] >= self.mast_tile_idx[0] and self.kv_tile_idx[0] > 0:
                     loop_body(True)
                     self.kv_tile_idx[0] -= 1
@@ -632,16 +624,13 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                     loop_body(False)
                     self.kv_tile_idx[0] -= 1
                 if self.profiler_on:
-                    T.timer_end_cuda(ProfileEventType.ATTN_LOOP_BODY, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                    profiler.end(ProfileEventType.ATTN_LOOP_BODY, lane_id == 0)
 
                 T.ptx.cp_async.wait_group(0)
                 self.scope_sync(wg_id)
                 
-                
                 if self.profiler_on:
-                    T.timer_start_cuda(ProfileEventType.ATTN_COMPUTE_QKV, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                    profiler.start(ProfileEventType.ATTN_COMPUTE_QKV, lane_id == 0)
                 while self.kv_tile_idx[0] >= 0:
                     compute_qk()
                     logits_mask()
@@ -649,9 +638,8 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                     compute_sfm_v()
                     self.kv_tile_idx[0] -= 1
                 if self.profiler_on:
-                    T.timer_end_cuda(ProfileEventType.ATTN_COMPUTE_QKV, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
-
+                    profiler.end(ProfileEventType.ATTN_COMPUTE_QKV, lane_id == 0)
+                  
                 self.scope_sync(wg_id)
 
                 @T.macro
@@ -806,8 +794,7 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                 normalize_d()
 
                 if self.profiler_on:
-                    T.timer_start_cuda(ProfileEventType.ATTN_WRITE_BACK, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                    profiler.start(ProfileEventType.ATTN_WRITE_BACK, lane_id == 0)
                 if self.num_kv_chunks[0] > 1:
                     # reuse q, k, v's smem
                     with T.thread():
@@ -822,5 +809,4 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
                 self.scope_sync(wg_id)
                 
                 if self.profiler_on:
-                    T.timer_end_cuda(ProfileEventType.ATTN_WRITE_BACK, profiler_buffer.data, profiler_tag.data, 
-                                        profiler_write_offset.data, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER * KernelConfig.SM_NUMBER, lane_id == 0)
+                    profiler.end(ProfileEventType.ATTN_WRITE_BACK, lane_id == 0)

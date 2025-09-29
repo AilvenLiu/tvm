@@ -55,40 +55,60 @@ constexpr const int kNumWarpgroupPerBlock = 2;
 constexpr const int kNumWarpPerWarpgroup = 4;
 constexpr const int kStaticTileSchedulerMaxTasks = 128;
 constexpr const int kDyanmicTileSchedulerMaxTasks = 8192;
-constexpr const int kTaskSize = 4;
 
 constexpr const int kMaxTotalNumWorks = 65536;
+constexpr const int kSemaphoreBase = (1 << 20);
+constexpr const int kMaxSemaphore = 2147483647;
 
 enum class JobType : int32_t {
-  kGemmGateUpProj = 0,
-  kSplitSiluMultiply = 1,
-  kGemmDownProj = 2,
-  kDownProjReduce = 3,
-  kMLPAddRMSNorm = 4,
-  kGemmQKVProj = 5,
-  kGemmQKVReduce = 6,
-  kRMSNorm = 7,
-  kRope = 8,
-  kAppendKV = 9,
-  kBatchDecodeNoSplit = 10,
-  kBatchDecodeSplit = 11,
-  kDecodeMerge = 12,
-  kGemmOProj = 13,
-  kGemmOReduce = 14,
-  kAttnAddRMSNorm = 15,
-  kKRMSNormRopeAppendKV = 16,
-  kQRMSNormRope = 17,
-  kVAppendKV = 18,
-  kOAllReduce = 19,
-  kDownProjAllReduce = 20,
-  kGateUpProjReduce = 21,
-  kBatchAttention = 22,
-  kBatchMerge = 23,
-  kQReduceNormRope = 24,
-  kKReduceNormRopeAppend = 25,
-  kVReduceAppend = 26,
-  kEnd = 99,
+  kVReduceAppend = 0,
+  kKReduceNormRopeAppend = 1,
+  kQReduceNormRope = 2,
+  kBatchAttention = 3,
+  kBatchMerge = 4,
+  kGateUpProjReduce = 5,
+  kDownProjAllReduce = 6,
+  kOAllReduce = 7,
+  kAttnAddRMSNorm = 8,
+  kGemmOReduce = 9,
+  kGemmOProj = 10,
+  kGemmQKVProj = 11,
+  kMLPAddRMSNorm = 12,
+  kDownProjReduce = 13,
+  kGemmDownProj = 14,
+  kSplitSiluMultiply = 15,
+  kGemmGateUpProj = 16,
+
+  // the following are not used now
+  kGemmQKVReduce = 17,
+  kRMSNorm = 18,
+  kRope = 19,
+  kAppendKV = 20,
+  kBatchDecodeNoSplit = 21,
+  kBatchDecodeSplit = 22,
+  kDecodeMerge = 23,
+  kKRMSNormRopeAppendKV = 24,
+  kQRMSNormRope = 25,
+  kVAppendKV = 26,
+  
+  // end
+  kEnd = 31,
 };
+
+// every task info in exec queue will be squashed into 32bit:
+// task_type: [0:5], m_idx: [5:18], n_idx: [18:27], k_idx: [27:32]
+constexpr const int kMaxTaskType = 1 << 5;
+constexpr const int kMaxMIdx = 1 << 14;
+constexpr const int kMaxNIdx = 1 << 9;
+constexpr const int kMaxKIdx = 1 << 5;
+
+inline int32_t PackInto32bit(int32_t task_type, int32_t m_idx, int32_t n_idx, int32_t k_idx) {
+  CHECK_LT(task_type, kMaxTaskType);
+  CHECK_LT(m_idx, kMaxMIdx);
+  CHECK_LT(n_idx, kMaxNIdx);
+  CHECK_LT(k_idx, kMaxKIdx);
+  return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 27);
+}
 
 ffi::Array<Tensor> GetEventTensorsOnLayer(ffi::Array<Tensor> etensors, int layer_id);
 

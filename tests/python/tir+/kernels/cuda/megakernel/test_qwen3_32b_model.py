@@ -702,7 +702,7 @@ def test(args):
                             attn_task_num,
                             R.prim_value(-1),
                             sinfo_args=[
-                                R.Tensor((148, 128, 4), dtype="int32"),
+                                R.Tensor((148, 128), dtype="int32"),
                             ]
                         )
 
@@ -941,7 +941,7 @@ def test(args):
                         attn_task_num,
                         R.prim_value(layer_id),
                         sinfo_args=[
-                            R.Tensor((8192, 4), dtype="int32"),
+                            R.Tensor((8192,), dtype="int32"),
                             R.Tensor((1,), dtype="int32"),
                             R.Tensor((1,), dtype="int32"),
                         ]
