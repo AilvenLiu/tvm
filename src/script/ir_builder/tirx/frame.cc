@@ -243,7 +243,7 @@ void ComposeOpFrameNode::ExitWithScope() {
     ops.push_back(ffi::GetRef<tvm::tirx::tirp::OpCall>(op_call));
   }
   auto compose_op_op = tvm::Op::Get("tirp.compose_op");
-  AddToParent(tvm::tirx::tirp::OpCall(compose_op_op, ops, workspace, config));
+  AddToParent(tvm::tirx::tirp::OpCall(compose_op_op, ops, workspace, config, dispatch));
 }
 
 void AllocBufferFrameNode::ExitWithScope() {
@@ -260,7 +260,7 @@ void AllocSemaphoreEventTensorFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
   AddToParent(tvm::tirx::AllocSemaphoreEventTensor(sem_event_tensor, AsStmt(stmts)));
 }
-}  // namespace tirxxx
+}  // namespace tirxxxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

@@ -50,9 +50,9 @@ class SiluMultiplyTile(Tile):
                     offset_imme = T.meta_var(m_idx * self.TILE_SIZE + self.idx % self.TILE_SIZE)
                     if self.idx < self.batch_size * self.TILE_SIZE:
                         Tp.copy_async(self.buf[ki, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE], 
-                                      evt, config={"vec_len": self.VEC_SIZE})
+                                      evt, vec_len=self.VEC_SIZE)
                         Tp.copy_async(self.buf[ki, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE], 
-                                      evt, config={"vec_len": self.VEC_SIZE})
+                                      evt, vec_len=self.VEC_SIZE)
                     evt.commit()
                     self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS
 
@@ -62,9 +62,9 @@ class SiluMultiplyTile(Tile):
                     if self.idx < self.batch_size * self.TILE_SIZE:
                         cp_pipe_idx = T.meta_var((self.idx // (self.VEC_SIZE * KernelConfig.NUM_THREADS)) % self.PIPE_DEPTH)
                         Tp.copy_async(self.buf[cp_pipe_idx, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE], 
-                                      evt, config={"vec_len": self.VEC_SIZE})
+                                      evt, vec_len=self.VEC_SIZE)
                         Tp.copy_async(self.buf[cp_pipe_idx, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE], 
-                                      evt, config={"vec_len": self.VEC_SIZE})
+                                      evt, vec_len=self.VEC_SIZE)
                     evt.commit()
                     evt.wait(self.PIPE_DEPTH - 1)
                     pipe_idx = T.meta_var((self.idx // (self.VEC_SIZE * KernelConfig.NUM_THREADS) - (self.PIPE_DEPTH - 1)) % self.PIPE_DEPTH)

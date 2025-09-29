@@ -17,7 +17,7 @@
 """TIRp event"""
 
 from enum import IntEnum
-from typing import List, Any
+from typing import List, Any, Dict, Optional
 
 import tvm_ffi
 
@@ -28,19 +28,23 @@ from tvm.ir import Op
 from tvm.tir import PrimExpr
 
 
-def make_op_call(op_name: str, *args):
+def make_op_call(
+    op_name: str,
+    *args,
+    dispatch: Optional[str] = None,
+    config: Dict[str, Any] = None,
+):
     assert isinstance(op_name, str)
     f = tvm_ffi.get_global_func("script.ir_builder.tir.OpCall")
-    return f(OpCall(*args, op=Op.get("tirp." + op_name)))
+    return f(OpCall(*args, op=Op.get("tirp." + op_name), config=config, dispatch=dispatch))
 
 
 class EventImpl(IntEnum):
     # see also include/tvm/tir/event.h kEventImpl
     kCpAsync = 0
-    kTMALoad = 1
-    kTMALoadOnly = 2
-    kTMAStore = 3
-    kGlobalSemaphore = 4
+    kTMALoad = 1  # state: mbarrier, phase, tx_cnt
+    kTMAStore = 2
+    kGlobalSemaphore = 3  # state sem, state
 
 
 @tvm_ffi.register_object("tirp.BaseEvent")
@@ -71,11 +75,11 @@ class BulkGroupEvent(BaseEvent):
     def init(self):
         return make_op_call("event_init", self)
 
-    def commit(self):
-        return make_op_call("event_commit", self)
+    def commit(self, dispatch: Optional[str] = None, **kwargs):
+        return make_op_call("event_commit", self, dispatch=dispatch, config=kwargs)
 
-    def wait(self, n_groups: int = 0):
-        return make_op_call("event_wait", self, n_groups)
+    def wait(self, n_groups: int = 0, dispatch: Optional[str] = None, **kwargs):
+        return make_op_call("event_wait", self, n_groups, dispatch=dispatch, config=kwargs)
 
 
 @tvm_ffi.register_object("tirp.SemaphoreEventTensorItem")
@@ -88,14 +92,14 @@ class SemaphoreEventTensorItem(BaseEvent):
     def __init__(self, tensor: "SemaphoreEventTensor", indices: List[PrimExpr]):
         self.__init_handle_by_constructor__(_ffi_api.SemaphoreEventTensorItem, tensor, indices)
 
-    def init(self, expected_count: PrimExpr):
-        return make_op_call("event_init", self, expected_count)
+    def init(self, expected_count: PrimExpr, dispatch: Optional[str] = None, **kwargs):
+        return make_op_call("event_init", self, expected_count, dispatch=dispatch, config=kwargs)
 
-    def commit(self):
-        return make_op_call("event_commit", self)
+    def commit(self, dispatch: Optional[str] = None, **kwargs):
+        return make_op_call("event_commit", self, dispatch=dispatch, config=kwargs)
 
-    def wait(self):
-        return make_op_call("event_wait", self)
+    def wait(self, dispatch: Optional[str] = None, **kwargs):
+        return make_op_call("event_wait", self, dispatch=dispatch, config=kwargs)
 
 
 @tvm_ffi.register_object("tirp.SemaphoreEventTensor")
@@ -120,8 +124,8 @@ class SemaphoreEventTensor(Object):
         )
         return SemaphoreEventTensorItem(self, indices)
 
-    def init(self, expected_count: PrimExpr):
-        return make_op_call("event_init", self, expected_count)
+    def init(self, expected_count: PrimExpr, dispatch: Optional[str] = None, **kwargs):
+        return make_op_call("event_init", self, expected_count, dispatch=dispatch, config=kwargs)
 
     def get_impl(self) -> EventImpl:
         return self.impl

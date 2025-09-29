@@ -234,10 +234,13 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
                 with T.cta():
                     event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
                     event[0].init(1)
+                    T.ptx.fence.proxy("shared")
+                    T.tvm_storage_sync("shared")
 
-                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0], config={"cache_hint": cache_hint})
+                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0], cache_hint=cache_hint)
                     event[0].commit()
                     event[0].wait()
+                    T.tvm_storage_sync("shared")
 
                     Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
@@ -302,7 +305,9 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
         ),
     ],
 )
-def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
+@pytest.mark.parametrize("phase_managed", [False, True])
+@pytest.mark.parametrize("tx_cnt_managed", [False, True])
+def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len, phase_managed, tx_cnt_managed):
     g_shape, s_shape, thread_cnt, layoutA, layoutB, layoutS_fn = task
     dev = tvm.cuda(0)
     n = g_shape[0]
@@ -325,6 +330,13 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
             *[slice(0, g_shape[i]) for i in range(1, len(g_shape))],
         ]
 
+    def get_state(phase_managed, tx_cnt_managed, mbarrier, phase, tx_cnt):
+        return [
+            mbarrier,
+            phase if phase_managed else None,
+            tx_cnt if tx_cnt_managed else None,
+        ]
+
     # fmt: off
     @T.prim_func(tirp=True)
     def copy_async(A_ptr: T.handle, B_ptr: T.handle) -> None:
@@ -344,13 +356,32 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
                 tx_cnt = T.alloc_buffer([1], "int32", scope="local")
 
                 with T.cta():
-                    event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
+                    state = T.meta_var(get_state(phase_managed, tx_cnt_managed, mbarrier, phase, tx_cnt))
+                    event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=state)
+
                     event[0].init(1)
+                    if not phase_managed:
+                        phase[0] = 0
+
+                    T.ptx.fence.proxy("shared")
+                    T.tvm_storage_sync("shared")
 
                     for stage in range(n):
                         Tp.copy_async(A_smem[*r_smem], A[*r_gmem(stage)], event[0])
-                        event[0].commit()
-                        event[0].wait()
+
+                        if tx_cnt_managed:
+                            event[0].commit()
+                        else:
+                            event[0].commit(tx_cnt=smem_bytes)
+
+                        if phase_managed:
+                            event[0].wait()
+                        else:
+                            event[0].wait(phase=phase[0])
+                            phase[0] = phase[0] ^ 1
+
+                        T.ptx.fence.proxy("shared")
+                        T.tvm_storage_sync("shared")
 
                         Tp.copy(B[*r_gmem(stage)], A_smem[*r_smem])
     # fmt: on
@@ -360,6 +391,7 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
     with target:
         mod = tvm.IRModule({"main": copy_async})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        print(mod.mod.imports[0].inspect_source())
 
         np.random.seed(0)
         A_np = tvm.testing.generate_random_array(dtype, g_shape)

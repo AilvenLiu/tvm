@@ -78,9 +78,6 @@ def target_event_impl(op_name: str, exp_impl: EventImpl):
 @target_event_impl("event_init", EventImpl.kTMALoad)
 def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event initialization."""
-    if sctx.exec_scope.name != "cta":
-        return None
-
     evt, expected_count = op.args
     mbar, phase, tx_cnt = evt.get_state()
 
@@ -88,11 +85,16 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 
         @T.prim_func(tirp=True, check_well_formed=False)
         def func():
-            phase[*evt.indices] = 0
-            tx_cnt[*evt.indices] = 0
-            with T.thread()[0:1]:
-                T.evaluate(T.ptx.mbarrier.init(mbar.ptr_to([*evt.indices]), expected_count))
-            T.tvm_storage_sync("shared")
+            if phase is not None:
+                phase[*evt.indices] = 0
+            if tx_cnt is not None:
+                tx_cnt[*evt.indices] = 0
+
+            @T.macro
+            def mbarrier_init():
+                T.ptx.mbarrier.init(mbar.ptr_to([*evt.indices]), expected_count)
+
+            thread_selector(sctx, mbarrier_init, macro=True)()
 
         return func
     elif isinstance(evt, SemaphoreEventTensor):
@@ -100,12 +102,17 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         @T.prim_func(tirp=True, check_well_formed=False)
         def func():
             for i in T.grid(*evt.shape):
-                phase[i] = 0
-                tx_cnt[i] = 0
-            with T.thread()[0:1]:
+                if phase is not None:
+                    phase[i] = 0
+                if tx_cnt is not None:
+                    tx_cnt[i] = 0
+
+            @T.macro
+            def mbarrier_init():
                 for i in T.grid(*evt.shape):
-                    T.evaluate(T.ptx.mbarrier.init(mbar.ptr_to([i]), expected_count))
-            T.tvm_storage_sync("shared")
+                    T.ptx.mbarrier.init(mbar.ptr_to([i]), expected_count)
+
+            thread_selector(sctx, mbarrier_init, macro=True)()
 
         return func
     else:
@@ -115,112 +122,61 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 @target_event_impl("event_commit", EventImpl.kTMALoad)
 def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event commit."""
-    if sctx.exec_scope.name != "cta":
-        return None
-
     evt = op.args[0]
     assert isinstance(evt, SemaphoreEventTensorItem), "event must be a SemaphoreEventTensor"
     mbar, phase, tx_cnt = evt.get_state()
 
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def func():
-        with T.thread()[0:1]:
-            T.evaluate(
-                T.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to([*evt.indices]), tx_cnt[*evt.indices])
-            )
+    if tx_cnt is not None:
 
-    return func
+        @T.macro
+        def func():
+            T.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to([*evt.indices]), tx_cnt[*evt.indices])
+
+        return thread_selector(sctx, func)
+
+    else:
+        # get tx_cnt from config
+        tx_cnt = op.config.get("tx_cnt", None)
+        if tx_cnt is None:
+            raise ValueError("tx_cnt is neither in event state nor set in config")
+
+        @T.macro
+        def func():
+            T.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to([*evt.indices]), tx_cnt)
+
+        return thread_selector(sctx, func)
 
 
 @target_event_impl("event_wait", EventImpl.kTMALoad)
 def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event wait."""
-    if sctx.exec_scope.name != "cta":
-        return None
-
     evt = op.args[0]
     assert isinstance(evt, SemaphoreEventTensorItem), "event must be a SemaphoreEventTensor"
     mbar, phase, tx_cnt = evt.get_state()
 
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def func():
-        T.evaluate(T.ptx.mbarrier.try_wait(mbar.ptr_to([*evt.indices]), phase[*evt.indices]))
-        tx_cnt[*evt.indices] = 0
-        phase[*evt.indices] = phase[*evt.indices] ^ 1
-        T.tvm_storage_sync("shared")
-
-    return func
-
-
-######################## kTMALoadOnly ########################
-@target_event_impl("event_init", EventImpl.kTMALoadOnly)
-def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Schedule event initialization."""
-    if sctx.exec_scope.name != "cta":
-        return None
-
-    evt, expected_count = op.args
-    mbar, phase, tx_cnt = evt.get_state()
-
-    if isinstance(evt, SemaphoreEventTensor):
-        # init all mbars in the tensor
+    if phase is not None:
+        # phase is managed by the event
         @T.prim_func(tirp=True, check_well_formed=False)
         def func():
-            tx_cnt[0] = 0
-            with T.thread()[0:1]:
-                for i in T.grid(*evt.shape):
-                    T.ptx.mbarrier.init(mbar.ptr_to([i]), expected_count)
-            T.tvm_storage_sync("shared")
-
-        return func
-    elif isinstance(evt, SemaphoreEventTensorItem):
-        # init the mbar
-        @T.prim_func(tirp=True, check_well_formed=False)
-        def func():
-            tx_cnt[0] = 0
-            with T.thread()[0:1]:
-                T.ptx.mbarrier.init(mbar.ptr_to(evt.indices), expected_count)
-            T.tvm_storage_sync("shared")
+            T.ptx.mbarrier.try_wait(mbar.ptr_to([*evt.indices]), phase[*evt.indices])
+            if tx_cnt is not None:
+                tx_cnt[*evt.indices] = 0
+            phase[*evt.indices] = phase[*evt.indices] ^ 1
 
         return func
     else:
-        raise ValueError(f"Invalid event type: {type(evt)}")
+        # phase is not managed by the event, get it from config
+        phase = op.config.get("phase", None)
+        if phase is None:
+            raise ValueError("phase is neither in event state nor set in config")
 
+        @T.prim_func(tirp=True, check_well_formed=False)
+        def func():
+            T.ptx.mbarrier.try_wait(mbar.ptr_to([*evt.indices]), phase)
+            if tx_cnt is not None:
+                tx_cnt[*evt.indices] = 0
 
-@target_event_impl("event_commit", EventImpl.kTMALoadOnly)
-def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Schedule event commit."""
-    if sctx.exec_scope.name != "warp":
-        return None
-
-    evt = op.args[0]
-    assert isinstance(evt, SemaphoreEventTensorItem), "evt must be a SemaphoreEventTensorItem"
-    mbar, phase, tx_cnt = evt.get_state()
-
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def func():
-        with T.thread()[T.ptx.elect_sync()]:
-            T.ptx.mbarrier.arrive.expect_tx(mbar.ptr_to(evt.indices), tx_cnt[0])
-            tx_cnt[0] = 0
-
-    return func
-
-
-@target_event_impl("event_wait", EventImpl.kTMALoadOnly)
-def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Schedule event wait."""
-    if sctx.exec_scope.name != "warp":
-        return None
-
-    evt = op.args[0]
-    assert isinstance(evt, SemaphoreEventTensorItem), "evt must be a SemaphoreEventTensorItem"
-    mbar, phase, tx_cnt = evt.get_state()
-
-    @T.prim_func(tirp=True, check_well_formed=False)
-    def func():
-        T.ptx.mbarrier.try_wait(mbar.ptr_to(evt.indices), phase[0])
-
-    return func
+        return func
 
 
 ######################## kTMAStore ########################
@@ -239,7 +195,7 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event commit."""
 
-    @T.macro()
+    @T.macro
     def func():
         T.ptx.cp_async.bulk.commit_group()
 
@@ -251,7 +207,7 @@ def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event wait."""
     n = op.args[1]
 
-    @T.macro()
+    @T.macro
     def func():
         T.ptx.cp_async.bulk.wait_group(n)
 
@@ -379,7 +335,6 @@ def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 
 _IMPL_NAME = {
     EventImpl.kTMALoad: "kTMALoad",
-    EventImpl.kTMALoadOnly: "kTMALoadOnly",
     EventImpl.kTMAStore: "kTMAStore",
     EventImpl.kCpAsync: "kCpAsync",
     EventImpl.kGlobalSemaphore: "kGlobalSemaphore",

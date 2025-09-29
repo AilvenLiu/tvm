@@ -155,6 +155,49 @@ def test_roundtrip_layout():
 
     code = test.script()
     assert from_source(code).script() == code
+
+
+def test_print_kwargs_schedule_op_full_code():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        A = T.alloc_buffer((16,), "float32")
+        Tp.memset(A[0:16], T.float32(1.25), dispatch="v10", bar=7, foo=42)
+    # fmt: on
+
+    expected = (
+        "# from tvm.script import tir as T\n\n"
+        "@T.prim_func(tirp=True)\n"
+        "def test():\n"
+        "    A = T.alloc_buffer((16,))\n"
+        '    Tp.memset(A[0:16], T.float32(1.25), dispatch="v10", bar=7, foo=42)'
+    )
+    code = test.script()
+    assert code == expected
+    assert from_source(code).script() == code
+    assert_structural_equal(test, from_source(code))
+
+
+def test_print_kwargs_event_op_full_code():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def test():
+        bulk_event = Tp.alloc_bulk_group_event(0, [])
+        bulk_event.commit(dispatch="c1", delay=3, mode="fast")
+        bulk_event.wait(2, dispatch="w2", timeout=5)
+    # fmt: on
+
+    expected = (
+        "# from tvm.script import tir as T\n\n"
+        "@T.prim_func(tirp=True)\n"
+        "def test():\n"
+        "    bulk_event = Tp.alloc_bulk_group_event(0, [])\n"
+        '    bulk_event.commit(dispatch="c1", delay=3, mode="fast")\n'
+        '    bulk_event.wait(2, dispatch="w2", timeout=5)'
+    )
+    code = test.script()
+    assert code == expected
+    assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
 
@@ -602,7 +645,7 @@ def test_roundtrip_op_call_config():
         A = T.match_buffer(A_ptr, [10], "float32", scope="global")
         B = T.match_buffer(B_ptr, [10], "float32", scope="global")
         with T.kernel():
-            Tp.add(B, A, T.float32(1), config={"schedule": "A"})
+            Tp.add(B, A, T.float32(1), schedule="A")
     # fmt: on
     code = test.script()
     assert from_source(code).script() == code
@@ -618,7 +661,7 @@ def test_roundtrip_compose_op_call_config():
             B = T.alloc_buffer([10], "float32", scope="trn.sbuf")
             C = T.alloc_buffer([10], "float32", scope="trn.sbuf")
             psum = T.alloc_buffer([10], "float32", scope="trn.psum")
-            with Tp.compose_op(config={"schedule": "A"}):
+            with Tp.compose_op( schedule="A"):
                 Tp.add(B, A, T.float32(1))
                 Tp.add(C, B, T.float32(1), workspace={"psum": psum})
     # fmt: on

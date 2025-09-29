@@ -134,12 +134,14 @@ def copy_tma_impl(
         shared_region, global_region = src_buffer_region, dst_buffer_region
     else:
         # Unsupported combination (e.g. global→global, shared→shared, etc.)
-        return None
+        raise ValueError(
+            f"Unsupported combination of src and dst scopes: src={src_scope} dst={dst_scope}"
+        )
 
     # For now, we require that the global side layout is trivial.
     # TODO(bohan): support strided global memory in the future.
     if not g_buf.layout.is_trivial():
-        return None
+        raise ValueError(f"Global buffer layout is not trivial: {g_buf.layout}")
 
     # ---------------------------------------------------------------------
     # Region metadata & axis‑matching between global and shared coordinates
@@ -273,6 +275,12 @@ def copy_tma_impl(
 
     if direction == "g2s":
         mbar, phase, tx_cnt = evt.get_state()
+        assert isinstance(evt, SemaphoreEventTensorItem), "event must be a SemaphoreEventTensor"
+        if mbar is None:
+            # get mbar from config
+            mbar = op_call.config.get("mbar", None)
+            if mbar is None:
+                raise ValueError("mbar is neither in event state nor set in config")
 
     # ---------------------------------------------------------------------
     # Device‑side TIR implementation
@@ -294,7 +302,8 @@ def copy_tma_impl(
         # make sure smem write is visible to tma proxy
         if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
             if direction == "g2s":
-                tx_cnt[0] += total_bytes()
+                if tx_cnt is not None:
+                    tx_cnt[*evt.indices] += total_bytes()
                 T.ptx.cp_async.bulk.tensor.g2c(
                     rank,
                     s_buf.ptr_to(s_st),
@@ -314,7 +323,8 @@ def copy_tma_impl(
                 )
         else:
             if direction == "g2s":
-                tx_cnt[0] += total_bytes()
+                if tx_cnt is not None:
+                    tx_cnt[*evt.indices] += total_bytes()
             for lvs in T.grid(*iter_ranges):
                 if direction == "g2s":
                     s_coord = T.meta_var(make_shared_coord(s_st, lvs))
@@ -387,10 +397,7 @@ def _is_tma_event(op: OpCall, sctx: ScheduleContext):
     evt = op.args[2]
     return (
         (isinstance(evt, BulkGroupEvent) and evt.get_impl() == EventImpl.kTMAStore)
-        or (
-            isinstance(evt, SemaphoreEventTensorItem)
-            and evt.get_impl() in [EventImpl.kTMALoad, EventImpl.kTMALoadOnly]
-        )
+        or (isinstance(evt, SemaphoreEventTensorItem) and evt.get_impl() in [EventImpl.kTMALoad])
     ), "event is not TMA (load/store)"
 
 

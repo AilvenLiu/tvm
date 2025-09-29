@@ -31,9 +31,8 @@ namespace tir {
 enum class kEventImpl : int {
   kMbarrier = 0,
   kCpAsync = 1,
-  kTMALoadOnly = 2,
-  kTMAStore2 = 3,
-  kGlobalSemaphore = 4,
+  kTMAStore = 2,
+  kGlobalSemaphore = 3,
 };
 
 class BaseEventNode : public Object {

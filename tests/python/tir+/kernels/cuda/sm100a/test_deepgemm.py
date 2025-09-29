@@ -371,7 +371,7 @@ def test():
                 ld2mma_bar = T.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
                 tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
 
-                tma2trans_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoadOnly, state=[tma2trans_bar.mbar, phase.buffer, tx_cnt.buffer], shape=[SMEM_PIPE_DEPTH])
+                tma2trans_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma2trans_bar.mbar, phase.buffer, tx_cnt.buffer], shape=[SMEM_PIPE_DEPTH])
                 wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
                 tma2trans_event.init(1)
 

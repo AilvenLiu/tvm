@@ -124,8 +124,8 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
                     intermediate_idx = T.meta_var((real_idx * VEC_SIZE) % INTERMEDIATE_SIZE)
                     batch_idx = T.meta_var((real_idx * VEC_SIZE) // INTERMEDIATE_SIZE)
                     if real_idx * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                        Tp.copy_async(shared_buf[idx[0], 0, tx, :], input_cat_global[batch_idx, intermediate_idx:intermediate_idx + VEC_SIZE], evt, config={"vec_len": VEC_SIZE})
-                        Tp.copy_async(shared_buf[idx[0], 1, tx, :], input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx:INTERMEDIATE_SIZE + intermediate_idx + VEC_SIZE], evt, config={"vec_len": VEC_SIZE})
+                        Tp.copy_async(shared_buf[idx[0], 0, tx, :], input_cat_global[batch_idx, intermediate_idx:intermediate_idx + VEC_SIZE], evt, vec_len=VEC_SIZE)
+                        Tp.copy_async(shared_buf[idx[0], 1, tx, :], input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx:INTERMEDIATE_SIZE + intermediate_idx + VEC_SIZE], evt, vec_len=VEC_SIZE)
                     evt.commit()
                     idx[0] += 1
                 
@@ -138,8 +138,8 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
                     intermediate_idx_to_prefetch = T.meta_var((real_idx_to_prefetch * VEC_SIZE) % INTERMEDIATE_SIZE)
                     batch_idx_to_prefetch = T.meta_var((real_idx_to_prefetch * VEC_SIZE) // INTERMEDIATE_SIZE)
                     if real_idx_to_prefetch * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                        Tp.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 0, tx, :], input_cat_global[batch_idx_to_prefetch, intermediate_idx_to_prefetch:intermediate_idx_to_prefetch + VEC_SIZE], evt, config={"vec_len": VEC_SIZE})
-                        Tp.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 1, tx, :], input_cat_global[batch_idx_to_prefetch, INTERMEDIATE_SIZE + intermediate_idx_to_prefetch:INTERMEDIATE_SIZE + intermediate_idx_to_prefetch + VEC_SIZE], evt, config={"vec_len": VEC_SIZE})
+                        Tp.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 0, tx, :], input_cat_global[batch_idx_to_prefetch, intermediate_idx_to_prefetch:intermediate_idx_to_prefetch + VEC_SIZE], evt, vec_len=VEC_SIZE)
+                        Tp.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 1, tx, :], input_cat_global[batch_idx_to_prefetch, INTERMEDIATE_SIZE + intermediate_idx_to_prefetch:INTERMEDIATE_SIZE + intermediate_idx_to_prefetch + VEC_SIZE], evt, vec_len=VEC_SIZE)
                     evt.commit()
                     evt.wait(PIPE_DEPTH - 1)
                     for kv in T.vectorized(VEC_SIZE):

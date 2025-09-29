@@ -88,7 +88,7 @@ def test_reduction_with_multiple_axes():
         with T.kernel():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            Tp.sum(B_sbuf, A_sbuf, axes=(1, 2), config={"max_inst_size": 2048})
+            Tp.sum(B_sbuf, A_sbuf, axes=(1, 2), max_inst_size=2048)
 
     @T.prim_func(tirp=True)
     def expected():
@@ -196,7 +196,7 @@ def test_reduction_with_guard():
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             for i in range(4):
                 for j in range(4):
-                    Tp.sum(B_sbuf[0: (i+1) * 128, 0], A_sbuf[0: (i+1) * 128, 0: (j+1) * 256], config={"max_inst_size": 512})
+                    Tp.sum(B_sbuf[0: (i+1) * 128, 0], A_sbuf[0: (i+1) * 128, 0: (j+1) * 256], max_inst_size=512)
 
     @T.prim_func(tirp=True)
     def expected():

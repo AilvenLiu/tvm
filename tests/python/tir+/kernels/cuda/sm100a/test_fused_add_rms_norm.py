@@ -80,9 +80,9 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                         for ki in T.unroll(ceildiv(hidden_size, vec_size * bdx * bdy)):
                             st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
                             if st < hidden_size:
-                                Tp.copy(input_vec[:], input_global[idx[0], st:st + vec_size], config={"vec_len": vec_size})
-                                Tp.copy(residual_vec[:], residual_global[idx[0], st:st + vec_size], config={"vec_len": vec_size})
-                                Tp.copy(weight_vec[:], weight_global[st:st + vec_size], config={"vec_len": vec_size})
+                                Tp.copy(input_vec[:], input_global[idx[0], st:st + vec_size], vec_len=vec_size)
+                                Tp.copy(residual_vec[:], residual_global[idx[0], st:st + vec_size], vec_len=vec_size)
+                                Tp.copy(weight_vec[:], weight_global[st:st + vec_size], vec_len=vec_size)
                                 Tp.cast(input_vec_f32[:], input_vec[:])
                                 Tp.cast(residual_vec_f32[:], residual_vec[:])
                                 Tp.cast(weight_vec_f32[:], weight_vec[:])
@@ -120,12 +120,12 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                                 for kv in T.unroll(vec_size):
                                     input_vec_f32[kv] = x_vec[kv] * rms_norm[0]
                                 Tp.cast(input_vec[:], input_vec_f32[:])
-                                Tp.copy(input_global[idx[0], st:st + vec_size], input_vec[:], config={"vec_len": vec_size})
+                                Tp.copy(input_global[idx[0], st:st + vec_size], input_vec[:], vec_len=vec_size)
 
                         for ki in T.serial(ceildiv(hidden_size, vec_size * bdx * bdy)):
                             st = T.meta_var((ki * bdx * bdy + thread_id) * vec_size)
                             if st < hidden_size:
-                                Tp.copy(residual_global[idx[0], st:st + vec_size], residual_smem[st:st + vec_size], config={"vec_len": vec_size})
+                                Tp.copy(residual_global[idx[0], st:st + vec_size], residual_smem[st:st + vec_size], vec_len=vec_size)
 
                         T.tvm_storage_sync("shared")
                         idx[0] += SM_COUNT

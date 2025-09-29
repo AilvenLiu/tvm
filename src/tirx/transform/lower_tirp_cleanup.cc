@@ -91,6 +91,9 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
       : arith::IRMutatorWithAnalyzer(analyzer), target_(target) {}
 
   ffi::Any VisitAny(const ffi::Any& any) {
+    if (any == nullptr) {
+      return any;
+    }
     if (auto buffer = any.as<Buffer>()) {
       return GetFlattenedBuffer(buffer.value());
     } else if (auto prim_expr = any.as<PrimExpr>()) {

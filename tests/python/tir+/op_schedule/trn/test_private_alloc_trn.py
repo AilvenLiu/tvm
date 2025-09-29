@@ -325,7 +325,7 @@ def test_workspace_reuse():
         with T.kernel():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             C_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            Tp.exp(C_sbuf, A_sbuf, bias=0.0, scale=scale, config={"max_inst_size": 1024})
+            Tp.exp(C_sbuf, A_sbuf, bias=0.0, scale=scale, max_inst_size=1024)
             Tp.exp(C_sbuf, C_sbuf)
             
     @T.prim_func(tirp=True)
@@ -341,7 +341,7 @@ def test_workspace_reuse():
                                     layout=T.TileLayout(([128, 4096], [(1, "P"), (1, "F")])))
             C_sbuf = T.alloc_buffer((512, 1024), scope="trn.sbuf", 
                                     layout=T.TileLayout(([128, 4096], [(1, "P"), (1, "F")])))
-            Tp.exp(C_sbuf[0:512, 0:1024], A_sbuf[0:512, 0:1024], T.float32(0.0), T.float32(2.0), workspace={"const_bias": const_bias}, config={"max_inst_size": 1024})
+            Tp.exp(C_sbuf[0:512, 0:1024], A_sbuf[0:512, 0:1024], T.float32(0.0), T.float32(2.0), workspace={"const_bias": const_bias}, max_inst_size=1024)
             Tp.exp(C_sbuf[0:512, 0:1024], C_sbuf[0:512, 0:1024], None, None, workspace={"const_bias": const_bias})
 
     # fmt: on

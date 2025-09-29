@@ -369,7 +369,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                         for kb in T.unroll(HEAD_PER_CTA):
                                             g_st = T.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
                                             Tp.copy_async(k_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], evt,
-                                                            config={"vec_len": VEC_SIZE})
+                                                            vec_len=VEC_SIZE)
                                 evt.commit()
 
                                 # fetch V
@@ -378,7 +378,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                         for kb in T.unroll(HEAD_PER_CTA):
                                             g_st = T.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
                                             Tp.copy_async(v_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], evt,
-                                                            config={"vec_len": VEC_SIZE})
+                                                            vec_len=VEC_SIZE)
                                 evt.commit()
 
                             # initilize the value
@@ -441,7 +441,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                         for kb in T.unroll(HEAD_PER_CTA):
                                             g_st = T.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
                                             Tp.copy_async(k_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], evt,
-                                                            config={"vec_len": VEC_SIZE})
+                                                            vec_len=VEC_SIZE)
                                 evt.commit()
 
                                 # calculate softmax(qk)v
@@ -461,7 +461,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                         for kb in T.unroll(HEAD_PER_CTA):
                                             g_st = T.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
                                             Tp.copy_async(v_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], evt,
-                                                            config={"vec_len": VEC_SIZE})
+                                                            vec_len=VEC_SIZE)
                                 evt.commit()
                                 idx[0] = (idx[0] + 1) % PIPE_DEPTH
 
@@ -583,7 +583,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 if kp * BDY + ty < num[0]:
                                     Tp.copy_async(o_tmp_smem[kp, ty, tx_start:tx_start + VEC_SIZE], 
                                                   o_tmp_global[new_beg_batch_idx[0] + kp * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
-                                                  evt, config={"vec_len": VEC_SIZE})
+                                                  evt, vec_len=VEC_SIZE)
                                 evt.commit()
                             
                             # initialize the value
@@ -620,7 +620,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 if (PIPE_DEPTH + ki) * BDY + ty < num[0]:
                                     Tp.copy_async(o_tmp_smem[ki % PIPE_DEPTH, ty, tx_start:tx_start + VEC_SIZE], 
                                                   o_tmp_global[new_beg_batch_idx[0] + (ki + PIPE_DEPTH) * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
-                                                  evt, config={"vec_len": VEC_SIZE})
+                                                  evt, vec_len=VEC_SIZE)
                                 evt.commit()
                             evt.wait(0)
                             T.ptx.bar.sync(2, BDX * BDY)

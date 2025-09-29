@@ -1020,7 +1020,7 @@ def test_lower_cell_buffer():
         with T.kernel():
             with T.thread():
                 A = T.local_cell("float16")
-                event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoadOnly, state=[A.buffer], shape=[1])
+                event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[A.buffer], shape=[1])
                 T.evaluate(0)
     # fmt: on
     

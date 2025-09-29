@@ -50,8 +50,8 @@ def zero(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Zero out all elements in src and store to dst.
 
@@ -68,8 +68,7 @@ def zero(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
     return f_insert(tirp_op.Zero(dst, src, workspace=workspace, config=config, dispatch=dispatch))
@@ -81,8 +80,8 @@ def sqrt(
     bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
     scale: Optional[FloatImm] = None,
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Sqrt all elements in src and store to dst.
 
@@ -107,8 +106,7 @@ def sqrt(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
     if workspace is None:
@@ -125,8 +123,8 @@ def add(
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Add data from src1 and src2, store to dst.
 
@@ -146,14 +144,15 @@ def add(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(tirp_op.Add(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Add(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def sub(
@@ -161,8 +160,8 @@ def sub(
     src1: Union[BufferRegion, Buffer],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Sub data from src2 to src1, store to dst.
 
@@ -182,14 +181,15 @@ def sub(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(tirp_op.Sub(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Sub(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def mul(
@@ -197,8 +197,8 @@ def mul(
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Multiply data from src1 and src2, store to dst.
 
@@ -218,14 +218,15 @@ def mul(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(tirp_op.Mul(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Mul(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def fdiv(
@@ -233,8 +234,8 @@ def fdiv(
     src1: Union[BufferRegion, Buffer],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """(Float) Div data from src2 to src1, store to dst.
 
@@ -254,21 +255,22 @@ def fdiv(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(tirp_op.FDiv(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.FDiv(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def cast(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Cast src to dst.
 
@@ -288,8 +290,7 @@ def cast(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
     return f_insert(tirp_op.Cast(dst, src, workspace=workspace, config=config, dispatch=dispatch))
@@ -299,8 +300,8 @@ def copy(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Copy data from src to dst.
 
@@ -320,8 +321,7 @@ def copy(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
     return f_insert(tirp_op.Copy(dst, src, workspace=workspace, config=config, dispatch=dispatch))
@@ -332,18 +332,21 @@ def copy_async(
     src: Union[BufferRegion, Buffer],
     evt: BaseEvent,
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
-    return f_insert(tirp_op.CopyAsync(dst, src, evt, workspace=workspace, config=config, dispatch=dispatch))
+    config = kwargs or {}
+    return f_insert(
+        tirp_op.CopyAsync(dst, src, evt, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def fill(
     dst: Union[BufferRegion, Buffer],
     value: PrimExpr,
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Fill the buffer region with the value.
 
@@ -360,8 +363,7 @@ def fill(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     return f_insert(tirp_op.Fill(dst, value, workspace=workspace, config=config, dispatch=dispatch))
 
@@ -376,8 +378,8 @@ def gemm(
     alpha: PrimExpr = 1.0,
     beta: PrimExpr = 0.0,
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """General matrix multiplication.
 
@@ -414,8 +416,7 @@ def gemm(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     D = _to_region(D)
     A = _to_region(A)
     B = _to_region(B)
@@ -443,8 +444,8 @@ def sum(
     axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """
     Sum all elements in src and store to dst.
@@ -468,12 +469,13 @@ def sum(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
     axes = _wrap_elem_in_tuple(axes)
-    return f_insert(tirp_op.Sum(dst, src, axes, accum, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Sum(dst, src, axes, accum, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def max(
@@ -482,8 +484,8 @@ def max(
     axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """
     Max all elements in src and store to dst.
@@ -507,12 +509,13 @@ def max(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
     axes = _wrap_elem_in_tuple(axes)
-    return f_insert(tirp_op.Max(dst, src, axes, accum, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Max(dst, src, axes, accum, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def min(
@@ -521,8 +524,8 @@ def min(
     axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """
     Min all elements in src and store to dst.
@@ -546,20 +549,21 @@ def min(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
     axes = _wrap_elem_in_tuple(axes)
-    return f_insert(tirp_op.Min(dst, src, axes, accum, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Min(dst, src, axes, accum, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def reciprocal(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Reciprocal all elements in src and store to dst.
 
@@ -576,19 +580,20 @@ def reciprocal(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
-    return f_insert(tirp_op.Reciprocal(dst, src, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Reciprocal(dst, src, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def memset(
     dst: Union[BufferRegion, Buffer],
     value: PrimExpr,
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Set all elements in dst to value.
 
@@ -605,10 +610,11 @@ def memset(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
-    return f_insert(tirp_op.Memset(dst, value, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Memset(dst, value, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def maximum(
@@ -616,8 +622,8 @@ def maximum(
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Maximum all elements in src1 and src2 and store to dst.
 
@@ -637,14 +643,15 @@ def maximum(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(tirp_op.Maximum(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Maximum(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def minimum(
@@ -652,8 +659,8 @@ def minimum(
     src1: Union[BufferRegion, Buffer, FloatImm],
     src2: Union[BufferRegion, Buffer, FloatImm],
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Minimum all elements in src1 and src2 and store to dst.
 
@@ -673,14 +680,15 @@ def minimum(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     if isinstance(src1, Buffer):
         src1 = _to_region(src1)
     if isinstance(src2, Buffer):
         src2 = _to_region(src2)
-    return f_insert(tirp_op.Minimum(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Minimum(dst, src1, src2, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def exp(
@@ -689,8 +697,8 @@ def exp(
     bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
     scale: Optional[FloatImm] = None,
     workspace: Dict[str, Buffer] = None,
-    config: Dict[str, Any] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Exponentiate all elements in src and store to dst.
 
@@ -713,17 +721,18 @@ def exp(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
+    config = kwargs or {}
     dst = _to_region(dst)
     src = _to_region(src)
     if bias is not None and isinstance(bias, Buffer):
         bias = _to_region(bias)
-    return f_insert(tirp_op.Exp(dst, src, bias, scale, workspace=workspace, config=config, dispatch=dispatch))
+    return f_insert(
+        tirp_op.Exp(dst, src, bias, scale, workspace=workspace, config=config, dispatch=dispatch)
+    )
 
 
 def compose_op(
-    workspace: Dict[str, Buffer] = None, config: Dict[str, Any] = None
+    workspace: Dict[str, Buffer] = None, dispatch: Optional[str] = None, **kwargs
 ) -> frame.ComposeOpFrame:
     """Compose a TIRp op.
 
@@ -739,9 +748,8 @@ def compose_op(
     """
     if workspace is None:
         workspace = {}
-    if config is None:
-        config = {}
-    return _ffi_api.ComposeOp(workspace, config)  # pylint: disable=no-member
+    config = kwargs or {}
+    return _ffi_api.ComposeOp(workspace, config, dispatch)  # pylint: disable=no-member
 
 
 def tvm_kernel_replace_point():
@@ -757,9 +765,9 @@ def binary_reduce(
     binary_op: Union[str, Op],
     reduce_op: Union[str, Op],
     reduce_axes: Union[int, Tuple[int]] = -1,
-    workspace: Dict[str, Buffer] = {},
-    config: Dict[str, Any] = {},
+    workspace: Dict[str, Buffer] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Combine a binary operation with a reduction operation.
 
@@ -805,6 +813,7 @@ def binary_reduce(
     if isinstance(reduce_op, str):
         reduce_op = tirp_op.get_tirp_op(reduce_op)
 
+    config = kwargs or {}
     return f_insert(
         tirp_op.BinaryReduce(
             binary_output,
@@ -830,9 +839,9 @@ def unary_reduce(
     bias: Optional[Union[BufferRegion, Buffer, FloatImm]] = None,
     scale: Optional[FloatImm] = None,
     reduce_axes: Union[int, Tuple[int]] = -1,
-    workspace: Dict[str, Buffer] = {},
-    config: Dict[str, Any] = {},
+    workspace: Dict[str, Buffer] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Combine a unary operation with a reduction operation.
 
@@ -882,6 +891,7 @@ def unary_reduce(
     if isinstance(reduce_op, str):
         reduce_op = tirp_op.get_tirp_op(reduce_op)
 
+    config = kwargs or {}
     return f_insert(
         tirp_op.UnaryReduce(
             unary_output,
@@ -907,9 +917,9 @@ def binary_chain(
     op0: Union[str, Op],
     op1: Union[str, Op],
     reverse1: bool = False,
-    workspace: Dict[str, Buffer] = {},
-    config: Dict[str, Any] = {},
+    workspace: Dict[str, Buffer] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Chain multiple binary operations together.
 
@@ -960,6 +970,7 @@ def binary_chain(
     if isinstance(op1, str):
         op1 = tirp_op.get_tirp_op(op1)
 
+    config = kwargs or {}
     return f_insert(
         tirp_op.BinaryChain(
             output,
@@ -982,9 +993,9 @@ def reduce_negate(
     reduce_op: Union[str, Op],
     reduce_axes: Union[int, Tuple[int]] = -1,
     accum: bool = False,
-    workspace: Dict[str, Buffer] = {},
-    config: Dict[str, Any] = {},
+    workspace: Dict[str, Buffer] = None,
     dispatch: Optional[str] = None,
+    **kwargs,
 ):
     """Negate the result of a reduction operation.
 
@@ -1018,6 +1029,9 @@ def reduce_negate(
     if isinstance(reduce_op, str):
         reduce_op = tirp_op.get_tirp_op(reduce_op)
 
+    if workspace is None:
+        workspace = {}
+    config = kwargs or {}
     return f_insert(
         tirp_op.ReduceNegate(
             output,

@@ -250,14 +250,9 @@ Pass LowerTIRpScheduleOps() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
     Target target = ResolveTarget(f);
     auto* n = f.CopyOnWrite();
-    int max_try = 100;
-    while (!NoOpCallVerifier::Verify(n->body, false)) {
-      n->body = TIRpOpScheduler::LowerOpCalls(n->body, target);
-      if (max_try == 0) {
-        LOG(FATAL) << "Failed to lower the TIRp program after " << 100 << " tries: " << f;
-        break;
-      }
-      max_try--;
+    n->body = TIRpOpScheduler::LowerOpCalls(n->body, target);
+    if (!NoOpCallVerifier::Verify(n->body, false)) {
+      LOG(FATAL) << "Failed to lower the TIRp program: " << f;
     }
     return f;
   };

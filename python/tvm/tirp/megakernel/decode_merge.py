@@ -133,7 +133,7 @@ class DecodeMergeTile(Tile):
                                     tx_start : tx_start + self.vec_size,
                                 ],
                                 evt,
-                                config={"vec_len": self.vec_size},
+                                vec_len=self.vec_size,
                             )
                         evt.commit()
 
@@ -189,7 +189,7 @@ class DecodeMergeTile(Tile):
                                     tx_start : tx_start + self.vec_size,
                                 ],
                                 evt,
-                                config={"vec_len": self.vec_size},
+                                vec_len=self.vec_size,
                             )
                         evt.commit()
                     evt.wait(0)

@@ -697,10 +697,12 @@ ElseFrame Else() {
 }
 
 ComposeOpFrame ComposeOp(ffi::Map<ffi::String, Buffer> workspace,
-                         ffi::Map<ffi::String, ffi::Any> config) {
+                         ffi::Map<ffi::String, ffi::Any> config,
+                         ffi::Optional<ffi::String> dispatch) {
   ObjectPtr<ComposeOpFrameNode> n = ffi::make_object<ComposeOpFrameNode>();
   n->workspace = workspace;
   n->config = config;
+  n->dispatch = dispatch;
   return ComposeOpFrame(n);
 }
 
