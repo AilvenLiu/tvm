@@ -195,12 +195,12 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     inst_repr = inst_gen.find_max_inst_size_from_one_region(B_buffer_region, [rhs_f_dim])
     inst_repr = inst_gen.fit_inst_tile_to_region(inst_repr, C_buffer_region, [acc_f_dim])
     inst_repr.bound_inst_size(512, analyzer)
-    rhs_f = T.var("int32", "rhs_f")
-    lhs_f = T.var("int32", "lhs_f")
-    p = T.var("int32", "p")
-    reduction_b = T.var("int32", "reduction_b")
-    lhs_b = T.var("int32", "lhs_b")
-    rhs_b = T.var("int32", "rhs_b")
+    rhs_f = T.Var("rhs_f", "int32")
+    lhs_f = T.Var("lhs_f", "int32")
+    p = T.Var("p", "int32")
+    reduction_b = T.Var("reduction_b", "int32")
+    lhs_b = T.Var("lhs_b", "int32")
+    rhs_b = T.Var("rhs_b", "int32")
     lhs_f_size = C.layout.size("P")
     inst_gen.bind_inst_iter(
         B_buffer_region, rhs_f, inst_repr.size, inst_repr.stride, is_free_dim=True

@@ -54,11 +54,11 @@ def transpose_schedule(
 
     inst_repr_dst, inst_repr_src = inst_gen.find_max_inst_size_transpose(dst_region, src_region)
 
-    lhs_f = T.var("int32", name="lhs_F")
-    lhs_p = T.var("int32", name="lhs_P")
-    dst_f = T.var("int32", name="dst_F")
-    b_var = T.var("int32", name="B")
-    extend_b = T.var("int32", name="extend_B")
+    lhs_f = T.Var("lhs_F", "int32")
+    lhs_p = T.Var("lhs_P", "int32")
+    dst_f = T.Var("dst_F", "int32")
+    b_var = T.Var("B", "int32")
+    extend_b = T.Var("extend_B", "int32")
     p_size = src_region.buffer.layout.size("P")
     lhs_f_size = dst_region.buffer.layout.size("P")
     rhs_f_size = p_size
@@ -273,9 +273,9 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
             "max_inst_size" not in op.config
         ), "max_inst_size is not supported for load/store"
 
-    p_var = T.var("int32", name="P")
-    f_var = T.var("int32", name="F")
-    b_var = T.var("int32", name="B")
+    p_var = T.Var("P", "int32")
+    f_var = T.Var("F", "int32")
+    b_var = T.Var("B", "int32")
     if src_to_dst:
         from_region, to_region = src_region, dst_region
     else:

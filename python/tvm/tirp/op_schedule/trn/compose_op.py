@@ -105,10 +105,10 @@ def binary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         binary_input1, binary_input2 = binary_input2, binary_input1
 
     # Generate intermediate buffer for reduction if needed
-    p_var = T.var("int32", "P")
-    f_var = T.var("int32", "F")
-    reduction_b_var = T.var("int32", "rB")
-    spatial_b_var = T.var("int32", "sB")
+    p_var = T.Var("P", "int32")
+    f_var = T.Var("F", "int32")
+    reduction_b_var = T.Var("rB", "int32")
+    spatial_b_var = T.Var("sB", "int32")
     p_size = binary_output.buffer.layout.size("P")
     inst_gen.bind_inst_iter(binary_output, p_var, p_size, 1, False)
     inst_gen.bind_inst_iter(binary_output, f_var, inst_repr.size, inst_repr.stride, True)
@@ -219,10 +219,10 @@ def unary_reduce_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     inst_size_limit = op.config.get("max_inst_size", None)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
 
-    p_var = T.var("int32", "P")
-    f_var = T.var("int32", "F")
-    reduction_b_var = T.var("int32", "rB")
-    spatial_b_var = T.var("int32", "sB")
+    p_var = T.Var("P", "int32")
+    f_var = T.Var("F", "int32")
+    reduction_b_var = T.Var("rB", "int32")
+    spatial_b_var = T.Var("sB", "int32")
     p_size = unary_output.buffer.layout.size("P")
     inst_gen.bind_inst_iter(unary_output, p_var, p_size, 1, False)
     inst_gen.bind_inst_iter(unary_output, f_var, inst_repr.size, inst_repr.stride, True)
@@ -333,9 +333,9 @@ def binary_chain_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     if reverse[0]:
         srcs[0], srcs[1] = srcs[1], srcs[0]
 
-    p_var = T.var("int32", name="P")
-    b_var = T.var("int32", name="B")
-    f_var = T.var("int32", name="F")
+    p_var = T.Var("P", "int32")
+    b_var = T.Var("B", "int32")
+    f_var = T.Var("F", "int32")
     p_size = output.buffer.layout.size("P")
     inst_size_limit = op.config.get("max_inst_size", 512)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)

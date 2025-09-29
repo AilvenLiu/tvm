@@ -127,10 +127,10 @@ def reduction_trn(
 
     # Get partition size and extents
     p_size = src.layout.size("P")
-    f_var = T.var("int32", "F")
-    p_var = T.var("int32", "P")
-    spatial_b_var = T.var("int32", "sB")
-    reduction_b_var = T.var("int32", "rB")
+    f_var = T.Var("F", "int32")
+    p_var = T.Var("P", "int32")
+    spatial_b_var = T.Var("sB", "int32")
+    reduction_b_var = T.Var("rB", "int32")
     inst_gen.bind_inst_iter(src_buffer_region, f_var, inst_repr.size, inst_repr.stride, True)
     inst_gen.bind_inst_iter(src_buffer_region, p_var, p_size, 1, False)
     reduction_b_extent = inst_gen.fill_in_block_dim(src_buffer_region, reduction_b_var, axes)

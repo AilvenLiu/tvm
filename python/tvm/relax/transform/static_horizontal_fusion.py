@@ -394,7 +394,8 @@ class _Rewriter(PyExprMutator):
                     ).tir_buffer
             out_sinfo.extend(self.flatten_sinfo(call.struct_info))
         for e in self.event_buffers:
-            event_tensor_var = T.var("handle", name=e.name_hint)
+            # Create a handle-typed Var without using deprecated T.var
+            event_tensor_var = T.Var(e.name_hint, dtype=T.handle().type_annotation)
             new_buffer_map[event_tensor_var] = self.event_buffers[e]
             new_tir_params.append(event_tensor_var)
             new_relax_params.append(e)

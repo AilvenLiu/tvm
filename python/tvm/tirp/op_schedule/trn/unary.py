@@ -153,9 +153,9 @@ def generate_unary_func(
     inst_size_limit = config.get("max_inst_size", 512)
     inst_repr.bound_inst_size(inst_size_limit, analyzer)
 
-    f_var = T.var("int32", "F")
-    p_var = T.var("int32", "P")
-    b_var = T.var("int32", "B")
+    f_var = T.Var("F", "int32")
+    p_var = T.Var("P", "int32")
+    b_var = T.Var("B", "int32")
     inst_gen.bind_inst_iter(dst_buffer_region, f_var, inst_repr.size, inst_repr.stride, True)
     inst_gen.bind_inst_iter(dst_buffer_region, p_var, p_size, 1, False)
     b_extent = inst_gen.fill_in_block_dim(dst_buffer_region, b_var)

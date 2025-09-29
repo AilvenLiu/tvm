@@ -99,9 +99,9 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     inst_repr = inst_gen.restrict_inst_to_one_dim(inst_repr)
     inst_repr.bound_inst_size(op.config.get("max_inst_size", 512), analyzer)
 
-    p_var = T.var("int32", name="p")
-    b_var = T.var("int32", name="b")
-    f_var = T.var("int32", name="f")
+    p_var = T.Var("p", "int32")
+    b_var = T.Var("b", "int32")
+    f_var = T.Var("f", "int32")
     p_size = dst.buffer.layout.size("P")
     inst_gen.bind_inst_iter(dst, f_var, inst_repr.size, inst_repr.stride, True)
     inst_gen.bind_inst_iter(dst, p_var, p_size, 1, False)
