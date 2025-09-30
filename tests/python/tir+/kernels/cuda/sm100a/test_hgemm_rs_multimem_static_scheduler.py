@@ -418,10 +418,10 @@ def test_hgemm_rs():
                         profiler_buffer,
                         write_stride=PROFILER_WRITE_STRIDE,
                         num_groups=NUM_GROUPS,
+                        profiler_enabled=PROFILER_ON,
                     )
                 )
-                if PROFILER_ON:
-                    profiler.init(wg_id)
+                profiler.init(wg_id)
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
@@ -444,8 +444,7 @@ def test_hgemm_rs():
                 while task_id < MAX_TASKS and task_smem[task_id, 2] != JobType.END.value:
                     # GEMM
                     if task_smem[task_id, 2] == JobType.GEMM.value:
-                        if PROFILER_ON:
-                            profiler.start(ProfileEventType.GEMM, tid == 0)
+                        profiler.start(ProfileEventType.GEMM, tid == 0)
                         with T.cta():
                             T.block_attr({"tirp.scope_partition": True})
                             with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
@@ -517,16 +516,14 @@ def test_hgemm_rs():
                                     if tid % 128 == 0:
                                         T.nvshmem.signal_op(sem.sem.ptr_to([comm_m_idx_local, n_idx]), 1, "add", signal_rank)
                                 mma2ld_pipe.advance()
-                        if PROFILER_ON:
-                            profiler.end(ProfileEventType.GEMM, tid == 0)
+                        profiler.end(ProfileEventType.GEMM, tid == 0)
 
                     elif task_smem[task_id, 2] == JobType.RS.value:
                         T.tvm_storage_sync("shared")
                         m_idx = task_smem[task_id, 0]
                         n_idx = task_smem[task_id, 1]
                         sem.semaphore_wait(m_idx, n_idx)
-                        if PROFILER_ON:
-                            profiler.start(ProfileEventType.RS, tid == 0)
+                        profiler.start(ProfileEventType.RS, tid == 0)
                         offset = tid
                         while True:
                             if offset < TILE_M * TILE_N // 8:
@@ -541,8 +538,7 @@ def test_hgemm_rs():
                                 offset += NUM_THREADS
                             else:
                                 break
-                        if PROFILER_ON:
-                            profiler.end(ProfileEventType.RS, tid == 0)
+                        profiler.end(ProfileEventType.RS, tid == 0)
                     task_id += 1
 
                 # dealloc TMEM

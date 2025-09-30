@@ -183,6 +183,10 @@ class CudaProfiler:
 
     Stores repeated arguments used by timer_init/start/end/finalize so users can
     call concise methods in kernels. Intended to mirror Pipeline/TileScheduler helpers.
+
+    When ``profiler_enabled`` is False (or a false-y PrimExpr), calls to
+    ``init/start/end/finalize`` become no-ops. This allows constructing a
+    profiler unconditionally and eliminating external ``if PROFILER_ON:`` guards.
     """
 
     def __init__(
@@ -191,11 +195,19 @@ class CudaProfiler:
         write_stride: int,
         num_groups: int,
         default_leader: Union[None, tvm.tir.PrimExpr, bool] = None,
+        profiler_enabled: Union[bool, tvm.tir.PrimExpr] = True,
     ):
         self.buffer = profiler_buffer
         self.write_stride = write_stride
         self.num_groups = num_groups
         self.default_leader = default_leader
+        # Accept either a Python bool or a PrimExpr; normalize simple bools to T.bool
+        # so we can use it uniformly inside macros for conditional emission.
+        if isinstance(profiler_enabled, (bool, np.bool_)):
+            self.profiler_enabled = T.bool(bool(profiler_enabled))
+        else:
+            # Assume PrimExpr-like input; use as-is
+            self.profiler_enabled = profiler_enabled  # type: ignore[assignment]
 
         self.profiler_tag = T.alloc_buffer(
             [1], "uint64", scope="local", align=8, name="profiler_tag"
@@ -206,6 +218,8 @@ class CudaProfiler:
 
     def _leader(self, leader: Union[None, tvm.tir.PrimExpr, bool]):
         if leader is not None:
+            if isinstance(leader, (bool, np.bool_)):
+                return T.bool(bool(leader))
             return leader
         if self.default_leader is not None:
             return self.default_leader
@@ -213,42 +227,46 @@ class CudaProfiler:
 
     @T.macro
     def init(self, group_id: tvm.tir.PrimExpr):
-        T.timer_init_cuda(
-            self.buffer.data,
-            self.profiler_tag.data,
-            self.profiler_write_offset.data,
-            self.num_groups,
-            group_id,
-        )
+        if self.profiler_enabled:
+            T.timer_init_cuda(
+                self.buffer.data,
+                self.profiler_tag.data,
+                self.profiler_write_offset.data,
+                self.num_groups,
+                group_id,
+            )
 
     @T.macro
     def start(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
-        T.timer_start_cuda(
-            event_type,
-            self.buffer.data,
-            self.profiler_tag.data,
-            self.profiler_write_offset.data,
-            self.write_stride,
-            self._leader(leader),
-        )
+        if self.profiler_enabled:
+            T.timer_start_cuda(
+                event_type,
+                self.buffer.data,
+                self.profiler_tag.data,
+                self.profiler_write_offset.data,
+                self.write_stride,
+                self._leader(leader),
+            )
 
     @T.macro
     def end(self, event_type: Enum, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
-        T.timer_end_cuda(
-            event_type,
-            self.buffer.data,
-            self.profiler_tag.data,
-            self.profiler_write_offset.data,
-            self.write_stride,
-            self._leader(leader),
-        )
+        if self.profiler_enabled:
+            T.timer_end_cuda(
+                event_type,
+                self.buffer.data,
+                self.profiler_tag.data,
+                self.profiler_write_offset.data,
+                self.write_stride,
+                self._leader(leader),
+            )
 
     @T.macro
     def finalize(self, leader: Union[None, tvm.tir.PrimExpr, bool] = None):
-        T.timer_finalize_cuda(
-            self.buffer.data,
-            self.profiler_tag.data,
-            self.profiler_write_offset.data,
-            self.write_stride,
-            self._leader(leader),
-        )
+        if self.profiler_enabled:
+            T.timer_finalize_cuda(
+                self.buffer.data,
+                self.profiler_tag.data,
+                self.profiler_write_offset.data,
+                self.write_stride,
+                self._leader(leader),
+            )

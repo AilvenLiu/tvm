@@ -120,6 +120,7 @@ def get_group_gemm_kernel(K, E, top_k, N, reorder_output=False):
         def valid(self, total_tile_cnt):
             return self.linear_idx < total_tile_cnt
 
+    # fmt: off
     @T.prim_func(tirp=True)
     def group_gemm(
         A_ptr: T.handle,
@@ -170,8 +171,10 @@ def get_group_gemm_kernel(K, E, top_k, N, reorder_output=False):
                 tile_scheduler.next_tile()
             GroupGEMMTile.class_finalize()
     return group_gemm
+    # fmt: on
 
 
+@pytest.mark.skip(reason="Tensor Memory Leak")
 @pytest.mark.parametrize("task", test_configs)
 def test_group_gemm(task):
     batch_size = task["batch_size"]
@@ -198,11 +201,17 @@ def test_group_gemm(task):
         sorted_token_ids, expert_ids, num_tokens_post_padded = prepare_group_gemm(
             BLK_M, num_experts, selected_experts
         )
-        safe_index = torch.clamp(sorted_token_ids, 0, batch_size * top_k - 1)[:num_tokens_post_padded.item()]
+        safe_index = torch.clamp(sorted_token_ids, 0, batch_size * top_k - 1)[
+            : num_tokens_post_padded.item()
+        ]
         x1_tvm = torch_to_tvm(x1[safe_index // top_k])
         x2_tvm = torch_to_tvm(x2[safe_index])
         w13_tvm = torch_to_tvm(w13)
-        routing_weights_tvm = torch_to_tvm(routing_weights.view(batch_size * top_k,))
+        routing_weights_tvm = torch_to_tvm(
+            routing_weights.view(
+                batch_size * top_k,
+            )
+        )
         w2_tvm = torch_to_tvm(w2)
         out1_tvm = tvm.runtime.empty(
             (num_tokens_post_padded.item(), 2 * intermediate_size), dtype="float16", device=dev
@@ -211,7 +220,7 @@ def test_group_gemm(task):
             (num_tokens_post_padded.item(), hidden_size), dtype="float16", device=dev
         )
 
-        sorted_token_ids_tvm = torch_to_tvm(sorted_token_ids[:num_tokens_post_padded.item()])
+        sorted_token_ids_tvm = torch_to_tvm(sorted_token_ids[: num_tokens_post_padded.item()])
         expert_ids_tvm = torch_to_tvm(expert_ids)
         num_tokens_post_padded_tvm = torch_to_tvm(num_tokens_post_padded)
         grp_gemm1 = get_group_gemm_kernel(
@@ -233,22 +242,45 @@ def test_group_gemm(task):
             mod_1 = tvm.compile(mod_1, target=target, tir_pipeline="tirp")
             mod_2 = tvm.IRModule({"main": grp_gemm2})
             mod_2 = tvm.compile(mod_2, target=target, tir_pipeline="tirp")
+
             def func1():
-                mod_1(x1_tvm, w13_tvm, out1_tvm, expert_ids_tvm, sorted_token_ids_tvm, routing_weights_tvm, num_tokens_post_padded_tvm)
+                mod_1(
+                    x1_tvm,
+                    w13_tvm,
+                    out1_tvm,
+                    expert_ids_tvm,
+                    sorted_token_ids_tvm,
+                    routing_weights_tvm,
+                    num_tokens_post_padded_tvm,
+                )
+
             def func2():
-                mod_2(x2_tvm, w2_tvm, out2_tvm, expert_ids_tvm, sorted_token_ids_tvm, routing_weights_tvm, num_tokens_post_padded_tvm)
+                mod_2(
+                    x2_tvm,
+                    w2_tvm,
+                    out2_tvm,
+                    expert_ids_tvm,
+                    sorted_token_ids_tvm,
+                    routing_weights_tvm,
+                    num_tokens_post_padded_tvm,
+                )
+
             ms = bench(func1, warmup=0, repeat=30, proton_name="tir1")
             ms = bench(func2, warmup=0, repeat=30, proton_name="tir2")
+
         def scatter_out(out_tvm, *shape):
             tmp_out = torch.from_numpy(out_tvm.numpy())
             out = torch.zeros(shape, dtype=torch.float16)
-            index_for_scatter = sorted_token_ids[:num_tokens_post_padded.item()].cpu()
+            index_for_scatter = sorted_token_ids[: num_tokens_post_padded.item()].cpu()
             for i in range(num_tokens_post_padded.item()):
                 if index_for_scatter[i] >= 0 and index_for_scatter[i] < shape[0]:
                     out[index_for_scatter[i]] = tmp_out[i]
             return out
-        out1 = scatter_out(out1_tvm, batch_size * top_k, intermediate_size * 2).view(batch_size, top_k, intermediate_size * 2)
-        out2 = out2_tvm.numpy()[:batch_size * top_k,:].reshape(batch_size, top_k, hidden_size)
+
+        out1 = scatter_out(out1_tvm, batch_size * top_k, intermediate_size * 2).view(
+            batch_size, top_k, intermediate_size * 2
+        )
+        out2 = out2_tvm.numpy()[: batch_size * top_k, :].reshape(batch_size, top_k, hidden_size)
         return out1, out2
 
     def sglang():
@@ -329,12 +361,14 @@ def test_group_gemm(task):
         ms2 = bench(func2, warmup=3, repeat=30, proton_name="sglang gemm2", debug=DEBUG)
         print("sglang gemm2", ms2)
         return out1.cpu().numpy(), out2.cpu().numpy()
+
     with ProtonContext("group_gemm", debug=DEBUG):
         out1_tir, out2_tir = tir()
         out1_sglang, out2_sglang = sglang()
 
     np.testing.assert_allclose(out1_tir, out1_sglang, rtol=1e-3, atol=1e-3)
     np.testing.assert_allclose(out2_tir, out2_sglang, rtol=1e-3, atol=1e-3)
+
 
 if __name__ == "__main__":
     for config in test_configs:

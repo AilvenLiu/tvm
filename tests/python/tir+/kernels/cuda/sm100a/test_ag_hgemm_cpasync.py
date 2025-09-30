@@ -592,12 +592,12 @@ def test_ag_hgemm():
                         profiler_buffer,
                         write_stride=PROFILER_WRITE_STRIDE,
                         num_groups=NUM_GROUPS,
+                        profiler_enabled=PROFILER_ON,
                     )
                 )
 
                 # initialize
-                if PROFILER_ON:
-                    profiler.init(warp_id_in_cta)
+                profiler.init(warp_id_in_cta)
                 tma2mma = T.meta_var(BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True))
                 mma2tma = T.meta_var(BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False))
                 mma2ld = T.meta_var(BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True))
@@ -651,8 +651,7 @@ def test_ag_hgemm():
                 with T.cta():
                     while tile_scheduler.valid():
                         if tile_scheduler.fetched_task_type[0] == TaskType.GEMM.value:
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.GEMM, tid == 0)
+                            profiler.start(ProfileEventType.GEMM, tid == 0)
                             with T.cta():
                                 m_idx = T.meta_var(tile_scheduler.fetched_task_idx0[0])
                                 n_idx = T.meta_var(tile_scheduler.fetched_task_idx1[0])
@@ -758,8 +757,7 @@ def test_ag_hgemm():
                                             wb_event.wait(0)
                                         T.ptx.bar.sync(wg_id, 128)
 
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.GEMM, tid == 0)
+                            profiler.end(ProfileEventType.GEMM, tid == 0)
 
                         tile_scheduler.next_tile(cbx, bx, rank, warp_id_in_cta, lane_id)
 

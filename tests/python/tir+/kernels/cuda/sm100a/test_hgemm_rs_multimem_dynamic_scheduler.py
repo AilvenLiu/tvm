@@ -695,12 +695,12 @@ def test_hgemm_rs():
                         profiler_buffer,
                         write_stride=PROFILER_WRITE_STRIDE,
                         num_groups=NUM_GROUPS,
+                        profiler_enabled=PROFILER_ON,
                     )
                 )
 
                 # initialize
-                if PROFILER_ON:
-                    profiler.init(warp_id_in_cta)
+                profiler.init(warp_id_in_cta)
                 tma2mma = T.meta_var(BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True))
                 mma2tma = T.meta_var(BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False))
                 mma2ld = T.meta_var(BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True))
@@ -730,8 +730,7 @@ def test_hgemm_rs():
                 with T.cta():
                     while tile_scheduler.valid():
                         if tile_scheduler.fetched_task_type[0] == TaskType.RS.value:
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.RS, tid == 0)
+                            profiler.start(ProfileEventType.RS, tid == 0)
                             m_idx = T.meta_var(tile_scheduler.fetched_task_idx0[0])
                             n_idx = T.meta_var(tile_scheduler.fetched_task_idx1[0])
                             offset = tid
@@ -748,12 +747,10 @@ def test_hgemm_rs():
                                     offset += NUM_THREADS
                                 else:
                                     break
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.RS, tid == 0)
+                            profiler.end(ProfileEventType.RS, tid == 0)
 
                         elif tile_scheduler.fetched_task_type[0] == TaskType.GEMM.value:
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.GEMM, tid == 0)
+                            profiler.start(ProfileEventType.GEMM, tid == 0)
                             with T.cta():
                                 m_idx = T.meta_var(tile_scheduler.fetched_task_idx0[0])
                                 n_idx = T.meta_var(tile_scheduler.fetched_task_idx1[0])
@@ -891,8 +888,7 @@ def test_hgemm_rs():
                                     signal_rank = T.meta_var(comm_m_idx // (LOCAL_M // TILE_M))
                                     sem.semaphore_notify(signal_rank, tid, comm_m_idx_local, n_idx, rs_queue)
 
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.GEMM, tid == 0)
+                            profiler.end(ProfileEventType.GEMM, tid == 0)
 
                         tile_scheduler.next_tile(cbx, bx, rank, warp_id_in_cta, lane_id)
 

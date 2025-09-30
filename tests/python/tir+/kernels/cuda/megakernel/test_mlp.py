@@ -140,6 +140,7 @@ class MegaKernel:
                         profiler_buffer,
                         write_stride=PROFILER_WRITE_STRIDE,
                         num_groups=NUM_GROUPS,
+                        profiler_enabled=PROFILER_ON,
                     )
                 )
 
@@ -150,8 +151,7 @@ class MegaKernel:
                     lane_id = T.thread_id([32], parent="warp")
                     buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
                     pool = T.meta_var(Tp.PoolAllocator(buf.data))
-                    if PROFILER_ON:
-                        profiler.init(warp_id)
+                    profiler.init(warp_id)
                     self.device_init_all(pool)
                     self.class_init_all(pool)
                     # initialize event tensors
@@ -166,8 +166,7 @@ class MegaKernel:
                     tile_scheduler.init(bx, tid)
                     while tile_scheduler.valid():
                         if tile_scheduler.task_type == JobType.GEMM_GATE_UP_PROJ.value:
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.GEMM_GATE_UP_PROJ, lane_id == 0)
+                            profiler.start(ProfileEventType.GEMM_GATE_UP_PROJ, lane_id == 0)
                             gemm_gate_up_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             if wg_id == 0:
                                 T.ptx.bar.sync(1, 128)
@@ -176,46 +175,37 @@ class MegaKernel:
                                         evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx-INTERMEDIATE_SIZE//GemmTile.BLK_N)
                                     else:
                                         evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx)
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.GEMM_GATE_UP_PROJ, lane_id == 0)
+                            profiler.end(ProfileEventType.GEMM_GATE_UP_PROJ, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
                             evt_gate_up_proj.semaphore_wait(tile_scheduler.m_idx)
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
+                            profiler.start(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_down_proj.semaphore_notify(tile_scheduler.m_idx // (INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR))
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
+                            profiler.end(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
                             evt_down_proj.semaphore_wait(tile_scheduler.k_idx)
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
+                            profiler.start(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
                             gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             if wg_id == 0:
                                 T.ptx.bar.sync(1, 128)
                                 if tid == 0:
                                     evt_down_proj_reduce.semaphore_notify(tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N))
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
+                            profiler.end(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.DOWN_PROJ_REDUCE.value:
                             evt_down_proj_reduce.semaphore_wait(tile_scheduler.n_idx)
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.DOWN_PROJ_REDUCE, lane_id == 0)
+                            profiler.start(ProfileEventType.DOWN_PROJ_REDUCE, lane_id == 0)
                             down_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             T.tvm_storage_sync("shared")
                             if tid == 0:
                                 evt_add_rms_norm.semaphore_notify(tile_scheduler.m_idx)
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.DOWN_PROJ_REDUCE, lane_id == 0)
+                            profiler.end(ProfileEventType.DOWN_PROJ_REDUCE, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
                             evt_add_rms_norm.semaphore_wait(tile_scheduler.m_idx // down_proj_reduce_tile.M_TILE)
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.MLP_ADD_RMS_NORM, lane_id == 0)
+                            profiler.start(ProfileEventType.MLP_ADD_RMS_NORM, lane_id == 0)
                             add_rms_norm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.MLP_ADD_RMS_NORM, lane_id == 0)
+                            profiler.end(ProfileEventType.MLP_ADD_RMS_NORM, lane_id == 0)
                         tile_scheduler.next_tile()
                     self.class_finalize_all()
         return mega_kernel_static
@@ -280,6 +270,7 @@ class MegaKernel:
                         profiler_buffer,
                         write_stride=PROFILER_WRITE_STRIDE,
                         num_groups=NUM_GROUPS,
+                        profiler_enabled=PROFILER_ON,
                     )
                 )
                 with T.cta():
@@ -289,8 +280,7 @@ class MegaKernel:
                     lane_id = T.thread_id([32], parent="warp")
                     buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
                     pool = T.meta_var(Tp.PoolAllocator(buf.data))
-                    if PROFILER_ON:
-                        profiler.init(warp_id)
+                    profiler.init(warp_id)
                     self.device_init_all(pool)
                     self.class_init_all(pool)
                     # initialize event tensors
@@ -308,12 +298,10 @@ class MegaKernel:
                     tile_scheduler.init(warp_id)
                     while tile_scheduler.valid():
                         if tile_scheduler.task_type == JobType.GEMM_GATE_UP_PROJ.value:
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.GEMM_GATE_UP_PROJ, lane_id == 0)
+                            profiler.start(ProfileEventType.GEMM_GATE_UP_PROJ, lane_id == 0)
                             gemm_gate_up_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.GEMM_GATE_UP_PROJ, lane_id == 0)
-                                profiler.start(ProfileEventType.PUSH, lane_id == 0)
+                            profiler.end(ProfileEventType.GEMM_GATE_UP_PROJ, lane_id == 0)
+                            profiler.start(ProfileEventType.PUSH, lane_id == 0)
                             if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
                                 offset = T.meta_var(tile_scheduler.n_idx-INTERMEDIATE_SIZE//GemmTile.BLK_N)
                                 tile_scheduler.push_task(
@@ -325,67 +313,52 @@ class MegaKernel:
                                     JobType.SPLIT_SILU_MULTIPLY.value, tile_scheduler.n_idx, 0, 0, 
                                     warp_id, evt_gate_up_proj, tile_scheduler.n_idx, use_barrier=False
                                 )
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.PUSH, lane_id == 0)
+                            profiler.end(ProfileEventType.PUSH, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
+                            profiler.start(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
-                                profiler.start(ProfileEventType.PUSH, lane_id == 0)
+                            profiler.end(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
+                            profiler.start(ProfileEventType.PUSH, lane_id == 0)
                             offset = T.meta_var(tile_scheduler.m_idx // (INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR))
                             tile_scheduler.push_tasks_along_dim(
                                 JobType.GEMM_DOWN_PROJ.value, 0, 0, offset, HIDDEN_SIZE // GemmTile.BLK_N, 1, 
                                 warp_id, lane_id, evt_down_proj, offset
                             )
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.PUSH, lane_id == 0)
+                            profiler.end(ProfileEventType.PUSH, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
+                            profiler.start(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
                             gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
-                                profiler.start(ProfileEventType.PUSH, lane_id == 0)
+                            profiler.end(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
+                            profiler.start(ProfileEventType.PUSH, lane_id == 0)
                             tile_scheduler.push_tasks_along_dim(
                                 JobType.DOWN_PROJ_REDUCE.value, 0, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0, down_proj_reduce_tile.M_split, 0, 
                                 warp_id, lane_id, evt_down_proj_reduce, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), use_barrier=False
                             )
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.PUSH, lane_id == 0)
+                            profiler.end(ProfileEventType.PUSH, lane_id == 0)
                         elif tile_scheduler.task_type == JobType.DOWN_PROJ_REDUCE.value:
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.DOWN_PROJ_REDUCE, tid == 0)
+                            profiler.start(ProfileEventType.DOWN_PROJ_REDUCE, tid == 0)
                             down_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.DOWN_PROJ_REDUCE, tid == 0)
-                                profiler.start(ProfileEventType.PUSH, tid == 0)
+                            profiler.end(ProfileEventType.DOWN_PROJ_REDUCE, tid == 0)
+                            profiler.start(ProfileEventType.PUSH, tid == 0)
                             tile_scheduler.push_tasks_along_dim(
                                 JobType.MLP_ADD_RMS_NORM.value, tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE, 0, 0, 
                                 T.min(down_proj_reduce_tile.M_TILE, batch_size - tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE), 0, 
                                 warp_id, lane_id, evt_add_rms_norm, tile_scheduler.m_idx
                             )
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.PUSH, tid == 0)
+                            profiler.end(ProfileEventType.PUSH, tid == 0)
                         elif tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
-                            if PROFILER_ON:
-                                profiler.start(ProfileEventType.MLP_ADD_RMS_NORM, tid == 0)
+                            profiler.start(ProfileEventType.MLP_ADD_RMS_NORM, tid == 0)
                             add_rms_norm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.MLP_ADD_RMS_NORM, tid == 0)
-                                profiler.start(ProfileEventType.PUSH, tid == 0)
+                            profiler.end(ProfileEventType.MLP_ADD_RMS_NORM, tid == 0)
+                            profiler.start(ProfileEventType.PUSH, tid == 0)
                             tile_scheduler.push_tasks_along_dim(
                                 JobType.END.value, 0, 0, 0, KernelConfig.SM_NUMBER, 0, 
                                 warp_id, lane_id, evt_end, 0
                             )
-                            if PROFILER_ON:
-                                profiler.end(ProfileEventType.PUSH, tid == 0)
-                        if PROFILER_ON:
-                            profiler.start(ProfileEventType.FETCH, lane_id == 0)
+                            profiler.end(ProfileEventType.PUSH, tid == 0)
+                        profiler.start(ProfileEventType.FETCH, lane_id == 0)
                         tile_scheduler.next_tile(warp_id)
-                        if PROFILER_ON:
-                            profiler.end(ProfileEventType.FETCH, lane_id == 0)
+                        profiler.end(ProfileEventType.FETCH, lane_id == 0)
                     self.class_finalize_all()
 
         return mega_kernel_dynamic
@@ -530,10 +503,9 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                     arg_dict["etensor_add_rms_norm"], device=tvm_dev
                 )
                 tvm_arg_dict["residual"] = tvm.runtime.tensor(arg_dict["residual"], device=tvm_dev)
-                if PROFILER_ON:
-                    tvm_arg_dict["profiler_buffer"] = tvm.runtime.tensor(
-                        arg_dict["profiler_buffer"], device=tvm_dev
-                    )
+                tvm_arg_dict["profiler_buffer"] = tvm.runtime.tensor(
+                    arg_dict["profiler_buffer"], device=tvm_dev
+                )
                 mod_mlp_static(
                     tvm_arg_dict["input"],
                     tvm_arg_dict["W_gate_up"],
@@ -592,10 +564,9 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                 tvm_arg_dict["queue_head"] = tvm.runtime.tensor(exec_queue.head, tvm_dev)
                 tvm_arg_dict["queue_tail"] = tvm.runtime.tensor(exec_queue.tail, tvm_dev)
                 tvm_arg_dict["residual"] = tvm.runtime.tensor(arg_dict["residual"], device=tvm_dev)
-                if PROFILER_ON:
-                    tvm_arg_dict["profiler_buffer"] = tvm.runtime.tensor(
-                        arg_dict["profiler_buffer"], device=tvm_dev
-                    )
+                tvm_arg_dict["profiler_buffer"] = tvm.runtime.tensor(
+                    arg_dict["profiler_buffer"], device=tvm_dev
+                )
                 tvm_arg_dict["actual_order"] = tvm.runtime.tensor(
                     arg_dict["actual_order"], device=tvm_dev
                 )

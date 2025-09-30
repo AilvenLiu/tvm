@@ -251,8 +251,12 @@ def get_hgemm_kernel(dim_n, dim_k):
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def hgemm(A_ptr: T.handle, B: T.Buffer((N, K), b_type), partial_sum_ptr: T.handle):
-        # profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64")):
+    def hgemm(
+        A_ptr: T.handle,
+        B: T.Buffer((N, K), b_type),
+        partial_sum_ptr: T.handle,
+        profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
+    ):
         M = T.int32()
         A = T.match_buffer(A_ptr, [M, K], a_type)
         partial_sum = T.match_buffer(partial_sum_ptr, [TILE_K_NUM, M, N], "float32")
@@ -281,14 +285,14 @@ def get_hgemm_kernel(dim_n, dim_k):
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
                 descI = T.local_cell("uint32")
-                if PROFILER_ON:
-                    profiler = T.meta_var(
-                        CudaProfiler(
-                            profiler_buffer,
-                            write_stride=PROFILER_WRITE_STRIDE,
-                            num_groups=NUM_GROUPS,
-                        )
+                profiler = T.meta_var(
+                    CudaProfiler(
+                        profiler_buffer,
+                        write_stride=PROFILER_WRITE_STRIDE,
+                        num_groups=NUM_GROUPS,
+                        profiler_enabled=PROFILER_ON,
                     )
+                )
                 # initialize
                 tma2mma_bar = T.meta_var(BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True))
                 mma2tma_bar = T.meta_var(BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))
@@ -338,8 +342,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                     T.block_attr({"tirp.scope_partition": True})
                     with T.warpgroup()[1:2]:
                         if warp_id == 3: 
-                            if PROFILER_ON:
-                                profiler.init(0)
+                            profiler.init(0)
                             phase[0] = 0
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx)
@@ -354,33 +357,27 @@ def get_hgemm_kernel(dim_n, dim_k):
 
                                     @T.macro
                                     def tma_load(is_remain, ks):
-                                        if PROFILER_ON:
-                                            profiler.start(ProfileEventType.WAIT, lane_id == 0)
+                                        profiler.start(ProfileEventType.WAIT, lane_id == 0)
                                         mma2tma_bar.wait(ks, phase[0])
-                                        if PROFILER_ON:
-                                            profiler.end(ProfileEventType.WAIT, lane_id == 0)
-                                            profiler.start(ProfileEventType.IssueTMA, lane_id == 0)
+                                        profiler.end(ProfileEventType.WAIT, lane_id == 0)
+                                        profiler.start(ProfileEventType.IssueTMA, lane_id == 0)
                                         Tp.copy_async(A_smem[ks, :, :], A[m_st : m_st + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=CTA_GROUP, cache_hint="evict_last")
                                         Tp.copy_async(B_smem[ks, :, :], B[n_st : n_st + BLK_N, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=CTA_GROUP, cache_hint="evict_first")
                                         tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
-                                        if PROFILER_ON:
-                                            profiler.end(ProfileEventType.IssueTMA, lane_id == 0)
+                                        profiler.end(ProfileEventType.IssueTMA, lane_id == 0)
 
                                     @T.macro
                                     def tma_load_epilogue(ks):
-                                        if PROFILER_ON:
-                                            profiler.start(ProfileEventType.WAIT, lane_id == 0)
+                                        profiler.start(ProfileEventType.WAIT, lane_id == 0)
                                         mma2tma_bar.wait(ks, phase[0])
-                                        if PROFILER_ON:
-                                            profiler.end(ProfileEventType.WAIT, lane_id == 0)
+                                        profiler.end(ProfileEventType.WAIT, lane_id == 0)
                                         tma2mma_bar.arrive_only(ks)
 
                                     paritioned_loop(tma_load, skip, tma_load_epilogue)
                                 tile_scheduler.next_tile()
                         
                         elif warp_id == 0:
-                            if PROFILER_ON:
-                                profiler.init(1)
+                            profiler.init(1)
                             tmem_idx = T.local_cell("int32", "tmem_idx")
                             tmem_phase = T.local_cell("int32", "tmem_phase")
                             T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI), "float32", a_type, b_type, MMA_N, MMA_M, MMA_K, False, False, CTA_GROUP)
@@ -401,8 +398,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                     def mma(is_remain, ks):
                                         # wait tma and sf-transpose arrival
                                         tma2mma_bar.wait(ks, phase[0])
-                                        if PROFILER_ON:
-                                            profiler.start(ProfileEventType.IssueMMA, lane_id == 0)
+                                        profiler.start(ProfileEventType.IssueMMA, lane_id == 0)
                                         T.ptx.tcgen05.fence.after_thread_sync()
                                         # issue mma
                                         for ki in T.unroll(BLK_K // MMA_K):
@@ -415,8 +411,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                             else:
                                                 T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_M, descB, descA, descI, False, CTA_GROUP, True)
                                         mma2tma_bar.arrive(ks)
-                                        if PROFILER_ON:
-                                            profiler.end(ProfileEventType.IssueMMA, lane_id == 0)
+                                        profiler.end(ProfileEventType.IssueMMA, lane_id == 0)
 
                                     @T.macro
                                     def mma_epilogue1():
@@ -433,8 +428,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                 tile_scheduler.next_tile()
                                     
                     with T.warpgroup()[0:1]:
-                        if PROFILER_ON:
-                            profiler.init(2)
+                        profiler.init(2)
                         T.cuda.trap_when_assert_failed(tmem_addr == 0)
                         tmem_idx = T.local_cell("int32", "tmem_idx")
                         tmem_phase = T.local_cell("int32", "tmem_phase")
@@ -458,8 +452,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                     if lane_id == 0 and warp_id == 0:
                                         T.ptx.cp_async.bulk.wait_group(TMEM_PIPE_DEPTH - 1)
                                     T.ptx.bar.sync(10, 128)
-                                if PROFILER_ON:
-                                    profiler.start(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)
+                                profiler.start(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)
 
                                 # tmem -> rf (ld) -> smem
                                 for ki in T.unroll(EPI_TILE // TMEM_LD_SIZE):
@@ -470,8 +463,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                             
                                     for vec in range(TMEM_LD_SIZE):
                                         D_smem[stage, ki * TMEM_LD_SIZE + vec,  warp_id * 32 + lane_id] = reg[vec]
-                                if PROFILER_ON:
-                                    profiler.end(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)
+                                profiler.end(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)
                                 # the tmem can be overwritten
                                 if ko == MMA_M // EPI_TILE - 1:
                                     T.ptx.tcgen05.fence.before_thread_sync()
@@ -479,16 +471,14 @@ def get_hgemm_kernel(dim_n, dim_k):
 
                                 T.ptx.fence.proxy(scope="shared")
                                 T.ptx.bar.sync(10, 128)
-                                if PROFILER_ON:
-                                    profiler.start(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
+                                profiler.start(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
                                 # smem -> gmem
                                 with T.thread()[lane_id == 0 and warp_id == 0]:
                                     m_start = T.meta_var(m_idx * BLK_M + ko * EPI_TILE)
                                     n_start = T.meta_var(n_idx * BLK_N)
                                     Tp.copy_async(partial_sum[k_idx, m_start : m_start + EPI_TILE, n_start : n_start + BLK_N], D_smem[stage, :, :], evt=wb_event, cache_hint="evict_last")
                                     wb_event.commit()
-                                if PROFILER_ON:
-                                    profiler.end(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
+                                profiler.end(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
                             with T.thread()[lane_id == 0 and warp_id == 0]:
                                 wb_event.wait(0)
                             T.ptx.bar.sync(10, 128)
@@ -560,9 +550,9 @@ def test_hgemm_1consumer_1cta_swap_splitk(batch_size):
         partial_sum_tvm = tvm.runtime.tensor(
             np.zeros((TILE_K_NUM, batch_size, N), dtype=np.float32), device=DEV
         )
-        if PROFILER_ON:
-            profiler_buffer = np.zeros((PROFILER_BUFFER_SIZE,), dtype=np.uint64)
-            profiler_buffer_tvm = tvm.runtime.tensor(profiler_buffer, DEV)
+        # Always allocate profiler buffer; it is unused when disabled
+        profiler_buffer = np.zeros((PROFILER_BUFFER_SIZE,), dtype=np.uint64)
+        profiler_buffer_tvm = tvm.runtime.tensor(profiler_buffer, DEV)
         target = tvm.target.Target("cuda")
         with target:
             mod_hgemm = tvm.ir.IRModule({"main": hgemm})
@@ -571,10 +561,7 @@ def test_hgemm_1consumer_1cta_swap_splitk(batch_size):
             mod_reduce = tvm.compile(mod_reduce, target=target, tir_pipeline="tirp")
 
             def func():
-                if PROFILER_ON:
-                    mod_hgemm(A_tvm, B_tvm, partial_sum_tvm, profiler_buffer_tvm)
-                else:
-                    mod_hgemm(A_tvm, B_tvm, partial_sum_tvm)
+                mod_hgemm(A_tvm, B_tvm, partial_sum_tvm, profiler_buffer_tvm)
                 mod_reduce(partial_sum_tvm, C_tvm)
 
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
