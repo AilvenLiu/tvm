@@ -5,8 +5,11 @@ import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.expr import Var
+from tvm.tir import PrimExpr
 
 def ceildiv(a, b):
+    if isinstance(a, PrimExpr) or isinstance(b, PrimExpr):
+        return T.truncdiv(a + b - 1, b)
     return (a + b - 1) // b
 
 
