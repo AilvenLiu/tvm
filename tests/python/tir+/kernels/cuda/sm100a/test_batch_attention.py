@@ -861,8 +861,6 @@ __device__ __forceinline__ float {func_name}() {{
             def get_lse(self):
                 return self.m[0] + ptx_log2(self.d[0])
 
-        # Removed warp_sync helper; use T.cuda.warp_sync() directly at call sites.
-
         # fmt: off
         @T.prim_func(tirp=True)
         def batch_attention_merge(

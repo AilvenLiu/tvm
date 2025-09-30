@@ -196,15 +196,6 @@ __forceinline__ __device__ void warp_broadcast(int32_t* rem, int32_t* task_type,
 }}
 """
 
-trap_when_assert_fail = """
-__forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
-    do {{
-        if (not (cond))
-            asm("trap;");
-    }} while (0);
-}}
-"""
-
 
 class Barriers:
 
@@ -428,6 +419,7 @@ class GEMMMPMCQueue(MPMCQueue):
             fetched_task_type[0] = -1
 
 
+# fmt: off
 @T.macro
 def consumer_fetch(
     sch_pipe,
@@ -447,12 +439,9 @@ def consumer_fetch(
         fetched_task_idx1.ptr_to([0]),
         source_code=unpack_values,
     )
-    T.ptx.mbarrier.arrive(
-        sch_pipe.mbar_c2p.ptr_to([sch_pipe.idx, 0]),
-        cta_id=0,
-        pred=True,
-    )
+    T.ptx.mbarrier.arrive(sch_pipe.mbar_c2p.ptr_to([sch_pipe.idx, 0]), cta_id=0, pred=True)
     sch_pipe.p2c_phase = sch_pipe.p2c_phase ^ 1
+# fmt: on
 
 
 class SingleDynamicTileScheduler:
@@ -473,6 +462,7 @@ class SingleDynamicTileScheduler:
         self.packed_value = packed_value
         IRBuilder.current().name("packed_value", self.packed_value)
 
+    # fmt: off
     @T.macro
     def _fetch_from_queue(
         self,
@@ -486,15 +476,7 @@ class SingleDynamicTileScheduler:
         if warp_id_in_cta == 11 and lane_id == 0:
             if cbx == 0:
                 self.sch_pipe.producer_wait(0)
-                self.queue.dequeue(
-                    self.fetched_task_type,
-                    self.fetched_task_idx0,
-                    self.fetched_task_idx1,
-                    self.sem,
-                    cbx,
-                    bx,
-                    rank,
-                )
+                self.queue.dequeue(self.fetched_task_type, self.fetched_task_idx0, self.fetched_task_idx1, self.sem, cbx, bx, rank)
                 T.cuda.func_call(
                     "pack_values",
                     self.rs_rem[0],
@@ -505,27 +487,12 @@ class SingleDynamicTileScheduler:
                     source_code=pack_values,
                 )
                 # T.cuda.thread_fence()
-                T.ptx.mbarrier.arrive(
-                    self.sch_pipe.mbar_p2c.ptr_to([self.sch_pipe.idx, 0]),
-                    cta_id=0,
-                    pred=True,
-                )
-                T.ptx.mbarrier.arrive(
-                    self.sch_pipe.mbar_p2c.ptr_to([self.sch_pipe.idx, 0]),
-                    cta_id=1,
-                    pred=True,
-                )
+                T.ptx.mbarrier.arrive(self.sch_pipe.mbar_p2c.ptr_to([self.sch_pipe.idx, 0]), cta_id=0, pred=True)
+                T.ptx.mbarrier.arrive(self.sch_pipe.mbar_p2c.ptr_to([self.sch_pipe.idx, 0]), cta_id=1, pred=True)
                 self.sch_pipe.c2p_phase = self.sch_pipe.c2p_phase ^ 1
         if ENABLE_WARP_BROADCAST:
             if lane_id == 0:
-                consumer_fetch(
-                    self.sch_pipe,
-                    self.packed_value,
-                    self.rs_rem,
-                    self.fetched_task_type,
-                    self.fetched_task_idx0,
-                    self.fetched_task_idx1,
-                )
+                consumer_fetch(self.sch_pipe, self.packed_value, self.rs_rem, self.fetched_task_type, self.fetched_task_idx0, self.fetched_task_idx1)
             T.cuda.func_call(
                 "warp_broadcast",
                 self.rs_rem.ptr_to([0]),
@@ -535,52 +502,25 @@ class SingleDynamicTileScheduler:
                 source_code=warp_broadcast,
             )
         else:
-            consumer_fetch(
-                self.sch_pipe,
-                self.packed_value,
-                self.rs_rem,
-                self.fetched_task_type,
-                self.fetched_task_idx0,
-                self.fetched_task_idx1,
-            )
+            consumer_fetch(self.sch_pipe, self.packed_value, self.rs_rem, self.fetched_task_type, self.fetched_task_idx0, self.fetched_task_idx1)
 
     @T.macro
-    def init(
-        self,
-        cbx,
-        bx,
-        rank,
-        warp_id_in_cta,
-        lane_id,
-    ):
+    def init(self, cbx, bx, rank, warp_id_in_cta, lane_id):
         self.rs_rem[0] = -1
-        self._fetch_from_queue(
-            cbx,
-            bx,
-            rank,
-            warp_id_in_cta,
-            lane_id,
-        )
+        self._fetch_from_queue(cbx, bx, rank, warp_id_in_cta, lane_id)
 
     @T.macro
-    def next_tile(
-        self,
-        cbx,
-        bx,
-        rank,
-        warp_id_in_cta,
-        lane_id,
-    ):
-        self._fetch_from_queue(
-            cbx,
-            bx,
-            rank,
-            warp_id_in_cta,
-            lane_id,
-        )
+    def next_tile(self, cbx, bx, rank, warp_id_in_cta, lane_id):
+        self._fetch_from_queue(cbx, bx, rank, warp_id_in_cta, lane_id)
 
     def valid(self):
         return tvm.tir.any(self.fetched_task_type[0] >= 0, self.rs_rem[0] >= 0)
+    # fmt: on
+
+
+@T.macro
+def skip():
+    pass
 
 
 @pytest.mark.skip()
@@ -637,7 +577,7 @@ def test_ag_hgemm():
                 descI = T.local_cell("uint32")
                 phase = T.alloc_buffer((1,), "int32", scope="local")
                 phase_tmem = T.alloc_buffer((1,), "int32", scope="local")
-                stage = T.local_cell("int32", name="stage")
+                stage = T.local_cell("int32")
 
                 # ag + gemm
                 sem = T.meta_var(Semaphore(cnt=1, buffer=semaphore))
@@ -687,6 +627,26 @@ def test_ag_hgemm():
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
                 tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)
+                
+                @T.macro
+                def paritioned_loop(main_loop, epilogue1, epilogue2):
+                    for ko in T.serial(PIPE_CYCLE):
+                        for ks in T.unroll(PIPELINE_DEPTH):
+                            stage = ko * PIPELINE_DEPTH + ks
+                            main_loop(False, ks)
+                        phase[0] = phase[0] ^ 1
+                    if PIPE_REMAIN_NUM > 0:
+                        # last remained loop
+                        for ks in T.unroll(PIPE_REMAIN_NUM):
+                            stage = PIPE_CYCLE * PIPELINE_DEPTH + ks
+                            main_loop(True, ks)
+                        epilogue1()
+                        # for unaligned cases
+                        for ks in T.unroll(PIPE_REMAIN_NUM, PIPELINE_DEPTH):
+                            epilogue2(ks)
+                        phase[0] = phase[0] ^ 1
+                    else:
+                        epilogue1()
 
                 with T.cta():
                     while tile_scheduler.valid():
@@ -703,52 +663,33 @@ def test_ag_hgemm():
                                     if warp_id == 3: 
                                         # GMEM -> SMEM  (tma)
                                         with T.thread()[T.ptx.elect_sync()]:
-                                            for ko in T.serial(PIPE_CYCLE):
-                                                for ks in T.unroll(PIPELINE_DEPTH):
-                                                    stage = ko * PIPELINE_DEPTH + ks
-                                                    mma2tma.wait(ks, 0, phase[0])
-                                                    if rank * LOCAL_GEMM_M_CLUSTERS <= m_idx and m_idx < (rank + 1) * LOCAL_GEMM_M_CLUSTERS:
-                                                        m_start0 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
-                                                        m_start1 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
-                                                        Tp.copy_async(A_smem[ks, 0, :, :], A[m_start0 : m_start0 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                        Tp.copy_async(A_smem[ks, 1, :, :], A[m_start1 : m_start1 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                    else:
-                                                        m_start0 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
-                                                        m_start1 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
-                                                        Tp.copy_async(A_smem[ks, 0, :, :], ag_out[m_start0 : m_start0 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                        Tp.copy_async(A_smem[ks, 1, :, :], ag_out[m_start1 : m_start1 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                    n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
-                                                    Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                            n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
 
-                                                    if cbx == 0:
-                                                        tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
-                                                phase[0] = phase[0] ^ 1
-                                            if PIPE_REMAIN_NUM > 0:
-                                                # last remained loop
-                                                for ks in T.unroll(PIPE_REMAIN_NUM):
-                                                    stage = PIPE_CYCLE * PIPELINE_DEPTH + ks
-                                                    mma2tma.wait(ks, 0, phase[0])
-                                                    if rank * LOCAL_GEMM_M_CLUSTERS <= m_idx and m_idx < (rank + 1) * LOCAL_GEMM_M_CLUSTERS:
-                                                        m_start0 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
-                                                        m_start1 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
-                                                        Tp.copy_async(A_smem[ks, 0, :, :], ag_out[m_start0 : m_start0 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                        Tp.copy_async(A_smem[ks, 1, :, :], ag_out[m_start1 : m_start1 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                    else:
-                                                        m_start0 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
-                                                        m_start1 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
-                                                        Tp.copy_async(A_smem[ks, 0, :, :], ag_out[m_start0 : m_start0 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                        Tp.copy_async(A_smem[ks, 1, :, :], ag_out[m_start1 : m_start1 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                    n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
-                                                    Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                            @T.macro
+                                            def tma_load(is_remain, ks):
+                                                stage_k = T.meta_var(stage * BLK_K)
+                                                mma2tma.wait(ks, 0, phase[0])
+                                                if rank * LOCAL_GEMM_M_CLUSTERS <= m_idx and m_idx < (rank + 1) * LOCAL_GEMM_M_CLUSTERS:
+                                                    m_start0 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
+                                                    m_start1 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
+                                                    Tp.copy_async(A_smem[ks, 0, :, :], A[m_start0 : m_start0 + BLK_M, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                    Tp.copy_async(A_smem[ks, 1, :, :], A[m_start1 : m_start1 + BLK_M, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                else:
+                                                    m_start0 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
+                                                    m_start1 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
+                                                    Tp.copy_async(A_smem[ks, 0, :, :], ag_out[m_start0 : m_start0 + BLK_M, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                    Tp.copy_async(A_smem[ks, 1, :, :], ag_out[m_start1 : m_start1 + BLK_M, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                if cbx == 0:
+                                                    tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
 
-                                                    if cbx == 0:
-                                                        tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
-                                                # for unaligned cases
-                                                for ks in T.unroll(PIPE_REMAIN_NUM, PIPELINE_DEPTH):
-                                                    mma2tma.wait(ks, 0, phase[0])
-                                                    if cbx == 0:
-                                                        tma2mma.arrive_only(ks)
-                                                phase[0] = phase[0] ^ 1
+                                            @T.macro
+                                            def tma_load_epilogue(ks):
+                                                mma2tma.wait(ks, 0, phase[0])
+                                                if cbx == 0:
+                                                    tma2mma.arrive_only(ks)
+
+                                            paritioned_loop(tma_load, skip, tma_load_epilogue)
                             
                                     elif warp_id < 2 and cbx == 0:
                                         with T.thread():
@@ -756,54 +697,34 @@ def test_ag_hgemm():
                                                 ld2mma.wait(0, warp_id, phase_tmem[0])
                                                 T.ptx.tcgen05.fence.after_thread_sync()
 
-                                                for ko in T.serial(PIPE_CYCLE):
-                                                    for ks in T.unroll(PIPELINE_DEPTH):
-                                                        stage = ko * PIPELINE_DEPTH + ks
+                                                @T.macro
+                                                def mma(is_remain, ks):
+                                                    # wait tma
+                                                    tma2mma.wait(ks, 0, phase[0])
+                                                    for ki in T.unroll(BLK_K // MMA_K):
+                                                        T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]), 
+                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
+                                                        T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
+                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
+                                                        
+                                                        if (stage == 0 and ki == 0) and ((not is_remain) or (is_remain and PIPE_CYCLE == 0)):
+                                                            T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB, 
+                                                                                descI, False, CTA_GROUP, False)
+                                                        else:
+                                                            T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB, 
+                                                                                descI, False, CTA_GROUP, True)
+                                                    mma2tma.arrive(ks)
 
-                                                        # wait tma
-                                                        tma2mma.wait(ks, 0, phase[0])
-                                                        for ki in T.unroll(BLK_K // MMA_K):
-                                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]), 
-                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
-                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                            
-                                                            if stage == 0 and ki == 0:
-                                                                T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB, 
-                                                                                    descI, False, CTA_GROUP, False)
-                                                            else:
-                                                                T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB, 
-                                                                                    descI, False, CTA_GROUP, True)
-                                                    
-                                                        mma2tma.arrive(ks)
-                                                    phase[0] = phase[0] ^ 1
-                                                if PIPE_REMAIN_NUM > 0:
-                                                    # last remained loop
-                                                    for ks in T.unroll(PIPE_REMAIN_NUM):
-                                                        # wait tma
-                                                        tma2mma.wait(ks, 0, phase[0])
-                                                        for ki in T.unroll(BLK_K // MMA_K):
-                                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]), 
-                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
-                                                                                                ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                            
-                                                            if PIPE_CYCLE == 0 and ks == 0 and ki == 0:
-                                                                T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB, 
-                                                                                    descI, False, CTA_GROUP, False)
-                                                            else:
-                                                                T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB, 
-                                                                                    descI, False, CTA_GROUP, True)
-                                                    
-                                                        mma2tma.arrive(ks)
+                                                @T.macro
+                                                def mma_epilogue1():
                                                     mma2ld.arrive(warp_id)
-                                                    # for unaligned cases   
-                                                    for ks in T.unroll(PIPE_REMAIN_NUM, PIPELINE_DEPTH):
-                                                        tma2mma.wait(ks, 0, phase[0])
-                                                        mma2tma.arrive(ks)
-                                                    phase[0] = phase[0] ^ 1
-                                                else:
-                                                    mma2ld.arrive(warp_id)
+
+                                                @T.macro
+                                                def mma_epilogue2(ks):
+                                                    tma2mma.wait(ks, 0, phase[0])
+                                                    mma2tma.arrive(ks)
+
+                                                paritioned_loop(mma, mma_epilogue1, mma_epilogue2)
                                                 phase_tmem[0] = phase_tmem[0] ^ 1
 
                                 with T.warpgroup()[0:NUM_CONSUMER]:

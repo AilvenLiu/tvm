@@ -176,18 +176,6 @@ class BarLD2MMA(Barriers):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
 
-# Removed warp_sync macro; use T.cuda.warp_sync() directly at call sites.
-
-
-# Removed make_runtime_instr_desc macro; use T.cuda.runtime_instr_desc(desc, sf_id)
-
-
-# Removed trap_when_assert_failed macro; use T.cuda.trap_when_assert_failed(cond)
-
-
-# Removed float22half2 macro; use T.cuda.float22half2(dst, src)
-
-
 @T.macro
 def skip():
     pass

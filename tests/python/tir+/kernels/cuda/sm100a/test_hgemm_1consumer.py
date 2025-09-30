@@ -70,6 +70,11 @@ def flops(ms):
     return M * N * K * 2 / (ms * 1e-3)
 
 
+@T.macro
+def skip():
+    pass
+
+
 TILE_GROUPS_ROW_SIZE = 16
 assert M % (BLK_M * CTA_GROUP) == 0
 assert N % (BLK_N * CTA_GROUP) == 0
@@ -87,9 +92,9 @@ class TileScheduler:
 
     @T.macro
     def update_current_m_n_idx(self, linear_idx):
-        TILE_GROUPS_NUM = TILE_M_NUM // TILE_GROUPS_ROW_SIZE
-        TILE_GROUPS_SIZE = TILE_GROUPS_ROW_SIZE * TILE_N_NUM
-        TILE_FINAL_ROWS = TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE)
+        TILE_GROUPS_NUM = T.meta_var(TILE_M_NUM // TILE_GROUPS_ROW_SIZE)
+        TILE_GROUPS_SIZE = T.meta_var(TILE_GROUPS_ROW_SIZE * TILE_N_NUM)
+        TILE_FINAL_ROWS = T.meta_var(TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE))
         if linear_idx < TILE_GROUPS_NUM * TILE_GROUPS_SIZE and TILE_GROUPS_NUM > 0:
             self.m_idx = linear_idx // TILE_GROUPS_SIZE * TILE_GROUPS_ROW_SIZE + (
                 linear_idx % TILE_GROUPS_ROW_SIZE
@@ -168,15 +173,6 @@ class BarLD2MMA(Barriers):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
 
-# Removed warp_sync macro; use T.cuda.warp_sync() directly at call sites.
-
-
-# Removed trap_when_assert_failed macro; use T.cuda.trap_when_assert_failed(cond)
-
-
-# Removed float22half2 macro; use T.cuda.float22half2(dst, src)
-
-
 def prepare_data():
     import torch
 
@@ -188,7 +184,7 @@ def prepare_data():
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
-def test():
+def test_hgemm_1consumer():
 
     A_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
@@ -223,11 +219,11 @@ def test():
                                         elem_offset=1024 // F16_BYTES + SMEM_PIPE_DEPTH * BLK_M * BLK_K)
                 D_smem = T.decl_buffer((TMEM_PIPE_DEPTH, BLK_M, EPI_TILE), d_type, buf.data, layout=D_layout,
                                         elem_offset=1024 // F16_BYTES + SMEM_PIPE_DEPTH * (BLK_M + BLK_N) * BLK_K)
-               
+
                 # alloc local memory
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                 reg_fp16 = T.alloc_buffer((TMEM_LD_SIZE,), d_type, scope="local")
-                stage = T.local_cell("int32", name="stage")
+                stage = T.local_cell("int32")
                 phase = T.alloc_buffer((1, ), "int32", scope="local")
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
@@ -262,6 +258,26 @@ def test():
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
 
+                @T.macro
+                def paritioned_loop(main_loop, epilogue1, epilogue2):
+                    for ko in T.serial(PIPE_CIRCLE_NUM):
+                        for ks in T.unroll(SMEM_PIPE_DEPTH):
+                            stage = ko * SMEM_PIPE_DEPTH + ks
+                            main_loop(False, ks)
+                        phase[0] = phase[0] ^ 1
+                    if PIPE_REMAIN_NUM > 0:
+                        # last remained loop
+                        for ks in T.unroll(PIPE_REMAIN_NUM):
+                            stage = PIPE_CIRCLE_NUM * SMEM_PIPE_DEPTH + ks
+                            main_loop(True, ks)
+                        epilogue1()
+                        # for unaligned cases
+                        for ks in T.unroll(PIPE_REMAIN_NUM, SMEM_PIPE_DEPTH):
+                            epilogue2(ks)
+                        phase[0] = phase[0] ^ 1
+                    else:
+                        epilogue1()
+
                 with T.cta():
                     T.block_attr({"tirp.scope_partition": True})
                     with T.warpgroup()[1:2]:
@@ -273,36 +289,24 @@ def test():
                                 m_start = T.meta_var((m_idx * CTA_GROUP + cbx) * BLK_M)
                                 n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
                                 with T.thread()[T.ptx.elect_sync()]:
-                                    # main inner tma loop
-                                    for ko in T.serial(PIPE_CIRCLE_NUM):
-                                        for ks in T.unroll(SMEM_PIPE_DEPTH):
-                                            # GMEM -> SMEM  (tma)    
-                                            stage = T.meta_var(ko * SMEM_PIPE_DEPTH + ks)
-                                            mma2tma_bar.wait(ks, phase[0])
-                                            Tp.copy_async(A_smem[ks, :, :], A[m_start : m_start + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                            Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                            if cbx == 0:
-                                                tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
-                                        phase[0] = phase[0] ^ 1
+                                    k_start = T.meta_var(stage * BLK_K)
 
-                                    if PIPE_REMAIN_NUM > 0:
-                                        # last remained loop
-                                        for ks in T.unroll(PIPE_REMAIN_NUM):
-                                            # GMEM -> SMEM  (tma)    
-                                            stage = PIPE_CIRCLE_NUM * SMEM_PIPE_DEPTH + ks
-                                            mma2tma_bar.wait(ks, phase[0])
-                                            Tp.copy_async(A_smem[ks, :, :], A[m_start : m_start + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                            Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
-                                            if cbx == 0:
-                                                tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
-                                        
-                                        # for unaligned cases   
-                                        for ks in T.unroll(PIPE_REMAIN_NUM, SMEM_PIPE_DEPTH):
-                                            mma2tma_bar.wait(ks, phase[0])
-                                            if cbx == 0:
-                                                tma2mma_bar.arrive_only(ks)
-                                    
-                                        phase[0] = phase[0] ^ 1
+                                    @T.macro
+                                    def tma_load(is_remain, ks):
+                                        # GMEM -> SMEM  (tma)
+                                        mma2tma_bar.wait(ks, phase[0])
+                                        Tp.copy_async(A_smem[ks, :, :], A[m_start : m_start + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
+                                        Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
+                                        if cbx == 0:
+                                            tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
+
+                                    @T.macro
+                                    def tma_load_epilogue(ks):
+                                        mma2tma_bar.wait(ks, phase[0])
+                                        if cbx == 0:
+                                            tma2mma_bar.arrive_only(ks)
+
+                                    paritioned_loop(tma_load, skip, tma_load_epilogue)
                                 tile_scheduler.next_tile()
                         
                         elif warp_id == 0:
@@ -322,60 +326,34 @@ def test():
                                         ld2mma_bar.wait(tmem_idx, tmem_phase)
                                         T.ptx.tcgen05.fence.after_thread_sync()
 
-                                        # main inner mma loop
-                                        for ko in T.serial(PIPE_CIRCLE_NUM):
-                                            for ks in T.unroll(SMEM_PIPE_DEPTH):
-                                            
-                                                # wait tma and sf-transpose arrival
-                                                tma2mma_bar.wait(ks, phase[0])
-                                                T.ptx.tcgen05.fence.after_thread_sync()
-
-                                                # issue mma                         
-                                                for ki in T.unroll(BLK_K // MMA_K):
-                                                    T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]), 
+                                        @T.macro
+                                        def mma(is_remain, ks):
+                                            # wait tma and sf-transpose arrival
+                                            tma2mma_bar.wait(ks, phase[0])
+                                            T.ptx.tcgen05.fence.after_thread_sync()
+                                            # issue mma
+                                            for ki in T.unroll(BLK_K // MMA_K):
+                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]), 
                                                                                         ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                    T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
-                                                                                        ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)          
-                                                                
-                                                    if ko == 0 and ks == 0 and ki == 0:
-                                                        T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descA, descB, descI, False, CTA_GROUP, False)
-                                                    else:
-                                                        T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descA, descB, descI, False, CTA_GROUP, True)
-                                                mma2tma_bar.arrive(ks)
-                                            phase[0] = phase[0] ^ 1
-
-                                        if PIPE_REMAIN_NUM > 0:
-                                            # last remained loop
-                                            for ks in T.unroll(PIPE_REMAIN_NUM):
-
-                                                # wait tma and sf-transpose arrival
-                                                tma2mma_bar.wait(ks, phase[0])
-                                                T.ptx.tcgen05.fence.after_thread_sync()
-
-                                                # issue mma                        
-                                                for ki in T.unroll(BLK_K // MMA_K):
-                                                    T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]), 
+                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
                                                                                         ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                    T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
-                                                                                        ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)                            
-                                                    if PIPE_CIRCLE_NUM == 0 and ks == 0 and ki == 0:
-                                                        T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descA, descB, descI, False, CTA_GROUP, True)
-                                                    else:
-                                                        T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descA, descB, descI, False, CTA_GROUP, True)
-                                                mma2tma_bar.arrive(ks)
+                                                if (stage == 0 and ks == 0 and ki == 0) and ((not is_remain) or (is_remain and PIPE_CIRCLE_NUM == 0)):
+                                                    T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descA, descB, descI, False, CTA_GROUP, False)
+                                                else:
+                                                    T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descA, descB, descI, False, CTA_GROUP, True)
+                                            mma2tma_bar.arrive(ks)
 
+                                        @T.macro
+                                        def mma_epilogue1():
                                             # ensure that all mma is issued
                                             mma2ld_bar.arrive(tmem_idx)
 
-                                            # for unaligned cases   
-                                            for ks in T.unroll(PIPE_REMAIN_NUM, SMEM_PIPE_DEPTH):
-                                                tma2mma_bar.wait(ks, phase[0])
-                                                mma2tma_bar.arrive(ks)
-                                            
-                                            phase[0] = phase[0] ^ 1
-                                        else:
-                                            # ensure that all mma is issued
-                                            mma2ld_bar.arrive(tmem_idx)
+                                        @T.macro
+                                        def mma_epilogue2(ks):
+                                            tma2mma_bar.wait(ks, phase[0])
+                                            mma2tma_bar.arrive(ks)
+
+                                        paritioned_loop(mma, mma_epilogue1, mma_epilogue2)
 
                                     tile_scheduler.next_tile()
                                     
@@ -486,4 +464,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    test_hgemm_1consumer()
