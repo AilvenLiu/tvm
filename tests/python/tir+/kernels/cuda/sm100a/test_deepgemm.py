@@ -300,7 +300,7 @@ def prepare_data():
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
-def test():
+def test_deepgemm():
     A_layout = T.ComposeLayout(
         T.SwizzleLayout(4, 3, 3, swizzle_inner=True),
         T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_M, BLK_K), (BLK_M * BLK_K, BLK_K, 1))),
@@ -361,7 +361,6 @@ def test():
                 descI = T.local_cell("uint32")
 
                 phase = T.local_cell("int32")
-                tx_cnt = T.local_cell("int32")
 
                 # initialize
                 tma2trans_bar = T.meta_var(Barriers(buf.data, 6, SMEM_PIPE_DEPTH, True))
@@ -371,7 +370,7 @@ def test():
                 ld2mma_bar = T.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
                 tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
 
-                tma2trans_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma2trans_bar.mbar, phase.buffer, tx_cnt.buffer], shape=[SMEM_PIPE_DEPTH])
+                tma2trans_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma2trans_bar.mbar, None, None], shape=[SMEM_PIPE_DEPTH])
                 wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
                 tma2trans_event.init(1)
 
@@ -383,7 +382,7 @@ def test():
 
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=1)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
                     warp_sync()
 
                 # sync
@@ -434,12 +433,14 @@ def test():
                                     if stage % 4 == 0:
                                         Tp.copy_async(SFA_smem_2d[ks, :], SFA[stage // 4, m_start: m_start + BLK_M], evt=tma2trans_event[ks])
                                         Tp.copy_async(SFB_smem_2d[ks, 0:BLK_N * CTA_GROUP], SFB[stage // 4, n_start_sf: n_start_sf + BLK_N * CTA_GROUP], evt=tma2trans_event[ks])
-                                    tma2trans_event[ks].commit()
+                                    AB_bytes = T.meta_var(BLK_M * BLK_K * F8_BYTES + BLK_N * BLK_K * F8_BYTES)
+                                    SFAB_bytes = T.meta_var((BLK_N * CTA_GROUP + BLK_M) * F32_BYTES)
+                                    tma2trans_event[ks].commit(tx_cnt=T.if_then_else(stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
 
                                 @T.macro
                                 def tma_load_epilogue(ks):
                                     mma2tma_bar.wait(ks, phase)
-                                    tma2trans_event[ks].commit()
+                                    tma2trans_event[ks].commit(tx_cnt=0)
 
                                 paritioned_loop(tma_load, skip, tma_load_epilogue)
                                 tile_scheduler.next_tile()
@@ -455,7 +456,7 @@ def test():
                                 @T.macro
                                 def transpose(ks):
                                     # wait for sf has been prepared
-                                    tma2trans_event[ks].wait()
+                                    tma2trans_event[ks].wait(phase=phase)
                                     if stage % 4 == 0:
                                         for ki in T.unroll(0, BLK_SFA // 128):
                                             for vec in T.vectorized(4):
@@ -477,7 +478,7 @@ def test():
 
                                 @T.macro
                                 def transpose_epilogue(ks):
-                                    tma2trans_event[ks].wait()
+                                    tma2trans_event[ks].wait(phase=phase)
                                     trans2mma_bar.arrive(ks)
 
                                 paritioned_loop(transpose, skip, transpose_epilogue)
@@ -616,8 +617,8 @@ def test():
                                 
                 # dealloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
-                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=1)
+                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=2)
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
@@ -647,4 +648,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    test_deepgemm()

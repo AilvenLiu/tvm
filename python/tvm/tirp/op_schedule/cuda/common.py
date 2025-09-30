@@ -170,6 +170,9 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
                         inner_impl()
 
             return macro_or_prim_func(impl, need_macro=macro)
+    elif exec_scope.name == "thread":
+        # already a single thread, just return the inner_impl
+        return macro_or_prim_func(inner_impl, need_macro=macro)
     else:
         raise ValueError(
             f"Currently exec scope {exec_scope} is not supported to select a single thread within"

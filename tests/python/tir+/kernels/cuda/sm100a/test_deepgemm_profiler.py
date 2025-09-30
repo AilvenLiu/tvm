@@ -329,7 +329,7 @@ def prepare_data():
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
-def test():
+def test_deepgemm_profiler():
 
     A_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
@@ -431,7 +431,7 @@ def test():
 
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=1)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
                     warp_sync()
                 
                 # sync
@@ -461,16 +461,16 @@ def test():
                                         if T.ptx.elect_sync():
                                             profiler.start(ProfileEventType.IssueTMA, True)
                                             T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0]), tma2trans_bar.mbar.ptr_to([ks]),
-                                                                        A_tensor_map, stage * BLK_K, (m_idx * CTA_GROUP + cbx) * BLK_M, cta_group=1)
+                                                                        A_tensor_map, stage * BLK_K, (m_idx * CTA_GROUP + cbx) * BLK_M, cta_group=2)
                                             T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma2trans_bar.mbar.ptr_to([ks]),
-                                                                        B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=1)
+                                                                        B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
                                             if stage % 4 == 0:
                                                 T.ptx.cp_async.bulk.tensor.g2c(2, SFA_smem.ptr_to([ks, 0, 0]),
                                                                             tma2trans_bar.mbar.ptr_to([ks]),
-                                                                            SFA_tensor_map, (m_idx * CTA_GROUP + cbx) * BLK_M, stage // 4, cta_group=1)
+                                                                            SFA_tensor_map, (m_idx * CTA_GROUP + cbx) * BLK_M, stage // 4, cta_group=2)
                                                 T.ptx.cp_async.bulk.tensor.g2c(2, SFB_smem.ptr_to([ks, 0, 0]),
                                                                             tma2trans_bar.mbar.ptr_to([ks]),
-                                                                            SFB_tensor_map, n_idx * CTA_GROUP * BLK_N, stage // 4, cta_group=1)
+                                                                            SFB_tensor_map, n_idx * CTA_GROUP * BLK_N, stage // 4, cta_group=2)
                                             profiler.end(ProfileEventType.IssueTMA, True)
                                             
                                         if T.ptx.elect_sync(): 
@@ -492,16 +492,16 @@ def test():
                                         if T.ptx.elect_sync():
                                             profiler.start(ProfileEventType.IssueTMA, True)
                                             T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0]), tma2trans_bar.mbar.ptr_to([ks]),
-                                                                        A_tensor_map, stage * BLK_K, (m_idx * CTA_GROUP + cbx) * BLK_M, cta_group=1)
+                                                                        A_tensor_map, stage * BLK_K, (m_idx * CTA_GROUP + cbx) * BLK_M, cta_group=2)
                                             T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma2trans_bar.mbar.ptr_to([ks]),
-                                                                        B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=1)
+                                                                        B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
                                             if stage % 4 == 0:
                                                 T.ptx.cp_async.bulk.tensor.g2c(2, SFA_smem.ptr_to([ks, 0, 0]),
                                                                             tma2trans_bar.mbar.ptr_to([ks]),
-                                                                            SFA_tensor_map, (m_idx * CTA_GROUP + cbx) * BLK_M, stage // 4, cta_group=1)
+                                                                            SFA_tensor_map, (m_idx * CTA_GROUP + cbx) * BLK_M, stage // 4, cta_group=2)
                                                 T.ptx.cp_async.bulk.tensor.g2c(2, SFB_smem.ptr_to([ks, 0, 0]),
                                                                             tma2trans_bar.mbar.ptr_to([ks]),
-                                                                            SFB_tensor_map, n_idx * CTA_GROUP * BLK_N, stage // 4, cta_group=1)
+                                                                            SFB_tensor_map, n_idx * CTA_GROUP * BLK_N, stage // 4, cta_group=2)
                                             profiler.end(ProfileEventType.IssueTMA, True)
 
                                         if T.ptx.elect_sync():    
@@ -730,10 +730,10 @@ def test():
 
                                     tile_scheduler.next_tile()
                                     
-                        with T.warpgroup()[0:1]:
-                            trap_when_assert_failed(tmem_addr == 0)
-                            tmem_idx = T.local_cell("int32", "tmem_idx")
-                            tmem_phase = T.local_cell("int32", "tmem_phase")
+                    with T.warpgroup()[0:1]:
+                        trap_when_assert_failed(tmem_addr == 0)
+                        tmem_idx = T.local_cell("int32", "tmem_idx")
+                        tmem_phase = T.local_cell("int32", "tmem_phase")
                         phase[0] = 0
                         profiler.init(3)
                         while tile_scheduler.valid():
@@ -765,8 +765,8 @@ def test():
                                 profiler.start(ProfileEventType.TMEMLD, warp_id == 0 and lane_id == 0)
                                 for ki in T.unroll(EPI_TILE // TMEM_LD_SIZE):
                                     T.ptx.tcgen05.ld(0 + tmem_idx * MMA_N + ko * EPI_TILE, 
-                                                     warp_id * 32, ki * TMEM_LD_SIZE, "32x32b", 
-                                                     TMEM_LD_SIZE, False, *[reg[j] for j in range(TMEM_LD_SIZE)])
+                                                        warp_id * 32, ki * TMEM_LD_SIZE, "32x32b", 
+                                                        TMEM_LD_SIZE, False, *[reg[j] for j in range(TMEM_LD_SIZE)])
                                     T.ptx.tcgen05.wait.ld()
                                     
                                     for vec in range(TMEM_LD_SIZE // 2):
@@ -797,11 +797,11 @@ def test():
                         if lane_id == 0 and warp_id == 0:
                             T.ptx.cp_async.bulk.wait_group(0)
                         T.ptx.bar.sync(10, 128)
-                                
+
                 # dealloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
-                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=1)
+                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=2)
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
@@ -830,4 +830,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    test_deepgemm_profiler()

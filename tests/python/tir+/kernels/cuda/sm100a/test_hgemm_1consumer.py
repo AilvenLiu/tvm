@@ -5,6 +5,8 @@ import tvm
 import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.script import tir as T
+from tvm.script import tirp as Tp
+from tvm.tir.event import EventImpl
 from tvm.tirp.bench.utils import ProtonContext, bench
 
 # cluster: [2, 1], cta_num = 2
@@ -240,16 +242,6 @@ def test():
     @T.prim_func(tirp=True)
     def hgemm(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), 
                 D: T.Buffer((M, N), d_type)):
-        
-        A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, a_type, 2, A.data,
-                      K, M, K * F16_BYTES, BLK_K, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, b_type, 2, B.data, 
-                      K, N, K * F16_BYTES, BLK_K, BLK_N, 1, 1, 0, SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", D_tensor_map, d_type, 2, D.data,
-                      N, M, N * F16_BYTES, EPI_TILE, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
         with T.kernel():
             cbx, cby = T.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
             bx = T.cta_id([SM_NUMBER], parent="kernel")
@@ -290,6 +282,10 @@ def test():
                 ptr: T.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret("handle", T.ptx.map_shared_rank(tma2mma_bar.mbar.ptr_to([0]), 0))
                 tma_finished = T.decl_buffer([SMEM_PIPE_DEPTH], "uint64", data=ptr, scope="shared")
 
+                # define events
+                tma_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma_finished, None, None], shape=[SMEM_PIPE_DEPTH])
+                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
+
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
@@ -309,17 +305,17 @@ def test():
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx)
                                 n_idx = T.meta_var(tile_scheduler.n_idx)
-                                if T.ptx.elect_sync():
+                                m_start = T.meta_var((m_idx * CTA_GROUP + cbx) * BLK_M)
+                                n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
+                                with T.thread()[T.ptx.elect_sync()]:
                                     # main inner tma loop
                                     for ko in T.serial(PIPE_CIRCLE_NUM):
                                         for ks in T.unroll(SMEM_PIPE_DEPTH):
                                             # GMEM -> SMEM  (tma)    
-                                            stage = (ko * SMEM_PIPE_DEPTH + ks)
+                                            stage = T.meta_var(ko * SMEM_PIPE_DEPTH + ks)
                                             mma2tma_bar.wait(ks, phase[0])
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                        A_tensor_map, stage * BLK_K, (m_idx * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                        B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
+                                            Tp.copy_async(A_smem[ks, :, :], A[m_start : m_start + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                            Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
                                             if cbx == 0:
                                                 tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
                                         phase[0] = phase[0] ^ 1
@@ -330,10 +326,8 @@ def test():
                                             # GMEM -> SMEM  (tma)    
                                             stage = PIPE_CIRCLE_NUM * SMEM_PIPE_DEPTH + ks
                                             mma2tma_bar.wait(ks, phase[0])
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                        A_tensor_map, stage * BLK_K, (m_idx * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                        B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
+                                            Tp.copy_async(A_smem[ks, :, :], A[m_start : m_start + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                            Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
                                             if cbx == 0:
                                                 tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
                                         
@@ -469,16 +463,16 @@ def test():
                                 T.ptx.bar.sync(10, 128)
                                     
                                 # smem -> gmem
-                                if lane_id == 0 and warp_id == 0:
-                                    T.ptx.cp_async.bulk.tensor.s2g(2, D_smem.ptr_to([stage, 0, 0]), 
-                                                                D_tensor_map, n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE,
-                                                                (m_idx * CTA_GROUP + cbx) * BLK_M)
-                                    T.ptx.cp_async.bulk.commit_group()
+                                with T.thread()[lane_id == 0 and warp_id == 0]:
+                                    m_start = T.meta_var((m_idx * CTA_GROUP + cbx) * BLK_M)
+                                    n_start = T.meta_var(n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE)
+                                    Tp.copy_async(D[m_start : m_start + BLK_M, n_start : n_start + EPI_TILE], D_smem[stage, :, :], evt=wb_event)
+                                    wb_event.commit()
 
                             tile_scheduler.next_tile()
 
-                        if lane_id == 0 and warp_id == 0:
-                            T.ptx.cp_async.bulk.wait_group(0)
+                        with T.thread()[lane_id == 0 and warp_id == 0]:
+                            wb_event.wait(0)
                         T.ptx.bar.sync(10, 128)
                                 
                 # dealloc TMEM

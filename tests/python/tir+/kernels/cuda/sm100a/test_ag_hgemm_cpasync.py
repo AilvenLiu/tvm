@@ -28,6 +28,8 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
+from tvm.script import tirp as Tp
+from tvm.tir.event import EventImpl
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
 
@@ -325,8 +327,7 @@ class Pipeline:
 
 
 def int_var(name: str, scope="local", dtype="int32", align=4):
-    buf = T.alloc_buffer([1], dtype, scope=scope, align=align)
-    IRBuilder.current().name(name, buf)
+    buf = T.alloc_buffer([1], dtype, scope=scope, align=align, name=name)
     return buf
 
 
@@ -334,8 +335,7 @@ class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
         self.sem = buffer
-        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4)
-        IRBuilder.current().name("semaphore_state", self.state)
+        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4, name="semaphore_state")
 
     @T.macro
     def semaphore_wait(self, *coord):
@@ -609,14 +609,6 @@ def test_ag_hgemm():
     def test_mma_ss_tma_2sm_persistent(A: T.Buffer((LOCAL_M, K), a_type), B: T.Buffer((LOCAL_N, K), b_type), ag_out: T.Buffer((M, K), a_type),
                                        semaphore: T.Buffer((WORLD_SIZE,), "uint64"), out: T.Buffer((M, LOCAL_N), d_type), profiler_buffer: T.Buffer((PROFILER_BUFFER_SIZE,), "uint64"),
                                        gemm_task_types: T.Buffer((CAPACITY,), "int32"), gemm_task_idxs: T.Buffer((CAPACITY, 2), "int32"), gemm_head: T.Buffer((1,), "int32"), gemm_tail: T.Buffer((1,), "int32")):
-        A_local_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", A_local_tensor_map, a_type, 2, A.data, K, LOCAL_M, K * F16_BYTES, BLK_K, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, a_type, 2, ag_out.data, K, M, K * F16_BYTES, BLK_K, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, b_type, 2, B.data, K, LOCAL_N, K * F16_BYTES, BLK_K, BLK_N, 1, 1, 0, SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", D_tensor_map, d_type, 2, out.data, LOCAL_N, M, LOCAL_N * F16_BYTES, EPI_TILE, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
         with T.kernel():
             cbx, cby = T.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
             bx = T.cta_id([SM_NUMBER], parent="kernel")
@@ -681,9 +673,13 @@ def test_ag_hgemm():
                 sch_pipe.init(c2p_thread_count=C2P_THREAD_COUNT, p2c_thread_count=1)
                 T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
 
+                # define events
+                tma_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma_finished, None, None], shape=[PIPELINE_DEPTH])
+                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
+
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=1)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
@@ -706,23 +702,23 @@ def test_ag_hgemm():
                                     T.ptx.setmaxnreg(False, 56)
                                     if warp_id == 3: 
                                         # GMEM -> SMEM  (tma)
-                                        if T.ptx.elect_sync():
+                                        with T.thread()[T.ptx.elect_sync()]:
                                             for ko in T.serial(PIPE_CYCLE):
                                                 for ks in T.unroll(PIPELINE_DEPTH):
                                                     stage = ko * PIPELINE_DEPTH + ks
                                                     mma2tma.wait(ks, 0, phase[0])
                                                     if rank * LOCAL_GEMM_M_CLUSTERS <= m_idx and m_idx < (rank + 1) * LOCAL_GEMM_M_CLUSTERS:
-                                                        T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                        A_local_tensor_map, stage * BLK_K, ((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                        T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                        A_local_tensor_map, stage * BLK_K, ((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)
+                                                        m_start0 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
+                                                        m_start1 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
+                                                        Tp.copy_async(A_smem[ks, 0, :, :], A[m_start0 : m_start0 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                        Tp.copy_async(A_smem[ks, 1, :, :], A[m_start1 : m_start1 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
                                                     else:
-                                                        T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                        A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                        T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                        A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                    T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                    B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
+                                                        m_start0 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
+                                                        m_start1 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
+                                                        Tp.copy_async(A_smem[ks, 0, :, :], ag_out[m_start0 : m_start0 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                        Tp.copy_async(A_smem[ks, 1, :, :], ag_out[m_start1 : m_start1 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                    n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
+                                                    Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
 
                                                     if cbx == 0:
                                                         tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
@@ -733,17 +729,17 @@ def test_ag_hgemm():
                                                     stage = PIPE_CYCLE * PIPELINE_DEPTH + ks
                                                     mma2tma.wait(ks, 0, phase[0])
                                                     if rank * LOCAL_GEMM_M_CLUSTERS <= m_idx and m_idx < (rank + 1) * LOCAL_GEMM_M_CLUSTERS:
-                                                        T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                        A_local_tensor_map, stage * BLK_K, ((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                        T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                        A_local_tensor_map, stage * BLK_K, ((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)
+                                                        m_start0 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
+                                                        m_start1 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
+                                                        Tp.copy_async(A_smem[ks, 0, :, :], ag_out[m_start0 : m_start0 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                        Tp.copy_async(A_smem[ks, 1, :, :], ag_out[m_start1 : m_start1 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
                                                     else:
-                                                        T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                        A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                        T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                        A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                                    T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                                    B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
+                                                        m_start0 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
+                                                        m_start1 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
+                                                        Tp.copy_async(A_smem[ks, 0, :, :], ag_out[m_start0 : m_start0 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                        Tp.copy_async(A_smem[ks, 1, :, :], ag_out[m_start1 : m_start1 + BLK_M, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                    n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
+                                                    Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage * BLK_K : stage * BLK_K + BLK_K], evt=tma_event[ks], cta_group=2)
 
                                                     if cbx == 0:
                                                         tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
@@ -837,12 +833,12 @@ def test_ag_hgemm():
                                         T.ptx.bar.sync(wg_id, 128)
                                         T.ptx.fence.proxy(scope="shared")
                                         # st to gmem
-                                        if lane_id == 0 and warp_id == 0:
-                                            T.ptx.cp_async.bulk.tensor.s2g(2, D_smem.ptr_to([wg_id, 0, 0]), 
-                                                                        D_tensor_map, n_idx * BLK_N * CTA_GROUP + i * EPI_TILE,
-                                                                        (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)
-                                            T.ptx.cp_async.bulk.commit_group()
-                                            T.ptx.cp_async.bulk.wait_group(0)
+                                        with T.thread()[lane_id == 0 and warp_id == 0]:
+                                            m_st = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)
+                                            n_st = T.meta_var(n_idx * BLK_N * CTA_GROUP + i * EPI_TILE)
+                                            Tp.copy_async(out[m_st : m_st + BLK_M, n_st : n_st + EPI_TILE], D_smem[wg_id, :, :], evt=wb_event)
+                                            wb_event.commit()
+                                            wb_event.wait(0)
                                         T.ptx.bar.sync(wg_id, 128)
 
                             if PROFILER_ON:
@@ -852,8 +848,8 @@ def test_ag_hgemm():
 
                 # dealloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
-                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=1)
+                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=2)
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
@@ -981,7 +977,7 @@ def test_ag_hgemm():
         target = tvm.target.Target("cuda")
         path = tmpdir + "/test.so"
         mod = tvm.compile(test_mma_ss_tma_2sm_persistent, target=target, tir_pipeline="tirp")
-        print(mod.mod.imports[0].inspect_source())
+        # print(mod.mod.imports[0].inspect_source())
         mod.export_library(path)
 
         print("Begin kernel execution...")

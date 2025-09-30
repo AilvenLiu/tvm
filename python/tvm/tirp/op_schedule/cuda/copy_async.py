@@ -112,9 +112,6 @@ def copy_tma_impl(
 
     * **global → shared**  ⇒  ``cp_async.bulk.tensor.g2c``
     * **shared → global**  ⇒  ``cp_async.bulk.tensor.s2g``
-
-    If neither pattern matches, the function returns *None* so that other
-    schedule rules may attempt to handle the copy.
     """
     # ---------------------------------------------------------------------
     # Identify direction & basic legality checks
@@ -138,6 +135,8 @@ def copy_tma_impl(
             f"Unsupported combination of src and dst scopes: src={src_scope} dst={dst_scope}"
         )
 
+    rank = len(g_buf.shape)
+
     # For now, we require that the global side layout is trivial.
     # TODO(bohan): support strided global memory in the future.
     if not g_buf.layout.is_trivial():
@@ -155,13 +154,13 @@ def copy_tma_impl(
         """Return a map from *a*'s logical axes to *b*'s axes ignoring unit dims."""
         a_nu = [(i, e) for i, e in enumerate(a_ext) if e != 1]
         b_nu = [(i, e) for i, e in enumerate(b_ext) if e != 1]
-        axis_map = [-1] * rank
+        axis_map = dict()
         for (ai, _), (bi, _) in zip(a_nu, b_nu):
             axis_map[ai] = bi
         return axis_map
 
     # Map *global axis* → *shared axis*
-    axis_map = dim_match(g_ext, s_ext, len(g_buf.shape))
+    axis_map = dim_match(g_ext, s_ext, rank)
 
     # ---------------------------------------------------------------------
     # Determine swizzle mode for the *shared* side (if any)
@@ -181,97 +180,61 @@ def copy_tma_impl(
             SwizzleMode.SWIZZLE_32B_ATOM,
         ):
             swizzle_atom = tma_atom_layout(s_buf.dtype, mode)
-            atom_shape = tma_atom_shape(s_buf.dtype, mode, s_buf.shape)
-            outer = swizzle_atom.is_tile_inner(s_buf.layout, s_buf.shape, atom_shape)
-            if outer is None:
+            atom_shape_shared = tma_atom_shape(s_buf.dtype, mode, s_buf.shape)
+            atom_shape_global = tma_atom_shape(s_buf.dtype, mode, g_buf.shape)
+            outer_shared = swizzle_atom.is_tile_inner(s_buf.layout, s_buf.shape, atom_shape_shared)
+            if outer_shared is None:
                 continue
 
             # Check the region is compatible with the atom shape.
-            if not tma_atom_compatible(s_buf.shape, s_st, s_ext, atom_shape):
+            if not tma_atom_compatible(s_buf.shape, s_st, s_ext, atom_shape_shared):
                 continue
 
             # Swizzle mode selected
             swizzle_mode = mode
-            outer_shape = [s // a for s, a in zip(s_buf.shape, atom_shape)]
-            outer, seps = outer.normalize().group_by_shape(outer_shape)
+            outer_shape_shared = [s // a for s, a in zip(s_buf.shape, atom_shape_shared)]
+            outer_shared, seps = outer_shared.normalize().group_by_shape(outer_shape_shared)
 
-            # -------------- iterator derivation (mostly unchanged) ----------
-            def derive_iters(outer, seps):
-                iters_ = list(enumerate(outer.shard))
-                iter_ranges_ = [0] * len(iters_)
-                for i in range(len(seps) - 1):
-                    st_i, ext_i = s_st[i], s_ext[i]
-                    for j in reversed(range(seps[i], seps[i + 1])):
-                        if st_i % outer.shard[j].extent == 0:
-                            iter_ranges_[j] = outer.shard[j].extent
-                            st_i //= outer.shard[j].extent
-                            ext_i //= outer.shard[j].extent
-                        else:
-                            # Region falls within a partial tile
-                            iter_ranges_[j] = ext_i
-                            break
-                return iters_, iter_ranges_
+            # copy box could be enlarged in this case
+            box_dim = copy.copy(atom_shape_global)
+            if outer_shared.shard[seps[-2] - 1].stride == 1:
+                enlarge_factor = outer_shared.shard[seps[-2] - 1].extent
+                if s_st[-2] % enlarge_factor == 0 and s_ext[-2] % enlarge_factor == 0:
+                    # exactly multiple of enlarge_factor
+                    box_dim[-2] *= enlarge_factor
+                elif s_st[-2] // enlarge_factor == s_ext[-2] // enlarge_factor:
+                    # completely within a enlarge_factor
+                    box_dim[-2] = s_ext[-2]
 
-            iters, iter_ranges = derive_iters(outer, seps)
-
-            # -------- derive box_dim (how many atoms per cp.async) ----------
-            if outer.shard[seps[-2] - 1].stride == 1:
-                box_dim = copy.copy(atom_shape)
-                box_dim[-2] *= outer.shard[seps[-2] - 1].extent
-                iters.pop(seps[-2] - 1)
-                iter_ranges.pop(seps[-2] - 1)
-            else:
-                box_dim = atom_shape
-
-            # Convert box_dim to *global* axis order for tensor‑map encode.
-            box_dim_global = [1] * len(g_buf.shape)
-            for i in range(len(g_buf.shape)):
-                if axis_map[i] != -1:
-                    box_dim_global[i] = box_dim[axis_map[i]]
-            box_dim = box_dim_global
+            # iterator over global space, each element is a box in global space
+            iters_global = [(g_st[i], g_ext[i] // box_dim[i]) for i in range(rank)]
             break  # swizzle mode found
 
         if swizzle_mode is None:
             raise ValueError(
-                "No valid swizzle mode found for TMA copy. Shared layout is " f"{s_buf.layout}"
+                "No valid swizzle mode found for TMA copy. Shared layout is "
+                f"{s_buf.layout} and global layout is {g_buf.layout}"
             )
     # ---------------------------------------------------------------------
     # Launch configuration & common symbols
     # ---------------------------------------------------------------------
-    if sctx.target.arch == "sm_100a":
-        cta_group = 1
-    else:
-        cta_group = -1
+    cta_group = op_call.config.get("cta_group", None)
+    if cta_group is None:
+        cta_group = 1 if sctx.target.arch == "sm_100a" else -1
 
     tensor_map = T.Var(g_buf.data.name + "_tensormap", dtype=T.handle("tensormap").type_annotation)
 
     # ---------------------------------------------------------------------
-    # Coordinate helpers (captures *axis_map*)
+    # Coordinate helpers
     # ---------------------------------------------------------------------
-    def make_global_coord(shared_coord):
-        """Project *shared_coord* → global‑space coord (apply inverse map)."""
-        coord = copy.copy(g_st)
-        for g_ax in range(len(g_buf.shape)):
-            s_ax = axis_map[g_ax]
-            if s_ax != -1:
-                coord[g_ax] += shared_coord[s_ax] - s_st[s_ax]
-        return coord
+    def make_global_coord(lvs):
+        return [g_st[i] + lvs[i] * box_dim[i] for i in range(rank)]
 
-    def make_shared_coord(st, lvs):
-        if isinstance(lvs, tvm.tir.Var):
-            lvs = [lvs]
-        lv_shuffled = [0] * len(outer.shard)
-        for (idx, data_iter), lv in zip(iters, lvs):
-            lv_shuffled[idx] = lv
-        coord = copy.copy(st)
-        for i in range(len(s_buf.shape)):
-            grouped_shape = [outer.shard[j].extent for j in range(seps[i], seps[i + 1])]
-            grouped_outer = TileLayout(grouped_shape)
-            coord[i] += grouped_outer.apply(
-                *lv_shuffled[seps[i] : seps[i + 1]], shape=grouped_shape
-            )["m"]
-            coord[i] *= atom_shape[i]
-        return coord
+    def make_shared_coord(lvs):
+        shared_coord = copy.copy(s_st)
+        for g_axis, s_axis in axis_map.items():
+            shared_coord[s_axis] += lvs[g_axis] * box_dim[g_axis]
+        return shared_coord
 
     if direction == "g2s":
         mbar, phase, tx_cnt = evt.get_state()
@@ -292,8 +255,6 @@ def copy_tma_impl(
             * tvm.DataType(s_buf.dtype).bits
             // 8
         )
-
-    rank = len(g_buf.shape)
 
     # fmt: off
     @T.macro
@@ -320,15 +281,16 @@ def copy_tma_impl(
                     s_buf.ptr_to(s_st),
                     tensor_map,
                     *reversed(g_st),
+                    cache_hint=op_call.config.get("cache_hint", ""),
                 )
         else:
             if direction == "g2s":
                 if tx_cnt is not None:
                     tx_cnt[*evt.indices] += total_bytes()
-            for lvs in T.grid(*iter_ranges):
+            for lvs in T.grid(*[it[1] for it in iters_global]):
                 if direction == "g2s":
-                    s_coord = T.meta_var(make_shared_coord(s_st, lvs))
-                    g_coord = T.meta_var(make_global_coord(s_coord))
+                    g_coord = T.meta_var(make_global_coord(lvs))
+                    s_coord = T.meta_var(make_shared_coord(lvs))
                     T.ptx.cp_async.bulk.tensor.g2c(
                         rank,
                         s_buf.ptr_to(s_coord),
@@ -339,13 +301,14 @@ def copy_tma_impl(
                         cache_hint=op_call.config.get("cache_hint", ""),
                     )
                 else:
-                    s_coord = T.meta_var(make_shared_coord(s_st, lvs))
-                    g_coord = T.meta_var(make_global_coord(s_coord))
+                    g_coord = T.meta_var(make_global_coord(lvs))
+                    s_coord = T.meta_var(make_shared_coord(lvs))
                     T.ptx.cp_async.bulk.tensor.s2g(
                         rank,
                         s_buf.ptr_to(s_coord),
                         tensor_map,
                         *reversed(g_coord),
+                        cache_hint=op_call.config.get("cache_hint", ""),
                     )
     
     impl = thread_selector(sctx, inner_impl)
@@ -354,9 +317,9 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     # Host‑side tensor‑map creation
     # ---------------------------------------------------------------------
-    element_strides = [1] * len(g_buf.shape)
+    element_strides = [1] * rank
     dtype_bytes = tvm.DataType(g_buf.dtype).bits // 8
-    g_strides = [g_buf.layout.shard[i].stride * dtype_bytes for i in range(len(g_buf.shape))]
+    g_strides = [shard.stride * dtype_bytes for shard in TileLayout(shard=list(g_buf.shape)).shard]
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def create_tensor_map():
@@ -365,7 +328,7 @@ def copy_tma_impl(
                 "runtime.cuTensorMapEncodeTiled",
                 tensor_map,
                 g_buf.dtype,
-                len(g_buf.shape),
+                rank,
                 g_buf.data,
                 *reversed(g_buf.shape),
                 *reversed(g_strides[:-1]),

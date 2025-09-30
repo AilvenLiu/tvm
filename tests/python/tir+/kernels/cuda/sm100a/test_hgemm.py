@@ -3,6 +3,8 @@ import numpy as np
 import tvm
 import tvm.testing
 from tvm.ir.type import PointerType, PrimType
+from tvm.script import tirp as Tp
+from tvm.tir.event import EventImpl
 from tvm.script import ir_builder as IRBuilder
 from tvm.script import tir as T
 from tvm.tirp.bench.utils import ProtonContext, bench
@@ -117,16 +119,16 @@ class TileScheduler:
 
     @T.macro
     def update_current_m_n_idx(self, linear_idx):
-        TILE_GROUPS_NUM = TILE_M_NUM // TILE_GROUPS_ROW_SIZE
-        TILE_GROUPS_SIZE = TILE_GROUPS_ROW_SIZE * TILE_N_NUM
-        TILE_FINAL_ROWS = TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE)
+        TILE_GROUPS_NUM = T.meta_var(TILE_M_NUM // TILE_GROUPS_ROW_SIZE)
+        TILE_GROUPS_SIZE = T.meta_var(TILE_GROUPS_ROW_SIZE * TILE_N_NUM)
+        TILE_FINAL_ROWS = T.meta_var(TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE))
         if linear_idx < TILE_GROUPS_NUM * TILE_GROUPS_SIZE and TILE_GROUPS_NUM > 0:
             self.m_idx = linear_idx // TILE_GROUPS_SIZE * TILE_GROUPS_ROW_SIZE + (
                 linear_idx % TILE_GROUPS_ROW_SIZE
             )
             self.n_idx = (linear_idx % TILE_GROUPS_SIZE) // TILE_GROUPS_ROW_SIZE
         elif TILE_FINAL_ROWS > 0:
-            remainder_idx = linear_idx - TILE_GROUPS_SIZE * TILE_GROUPS_NUM
+            remainder_idx = T.meta_var(linear_idx - TILE_GROUPS_SIZE * TILE_GROUPS_NUM)
             self.m_idx = TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE + remainder_idx % TILE_FINAL_ROWS
             self.n_idx = remainder_idx // TILE_FINAL_ROWS
 
@@ -209,7 +211,7 @@ def prepare_data():
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
-def test():
+def test_hgemm():
 
     A_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
@@ -234,15 +236,6 @@ def test():
         A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), D: T.Buffer((M, N), d_type)
     ):
         # fmt: off
-        A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, a_type, 2, A.data,
-                      K, M, K * F16_BYTES, BLK_K, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, b_type, 2, B.data, 
-                      K, N, K * F16_BYTES, BLK_K, BLK_N, 1, 1, 0, SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", D_tensor_map, d_type, 2, D.data,
-                      N, M, N * F16_BYTES, EPI_TILE, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
         with T.kernel():
             cbx, cby = T.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
             bx = T.cta_id([SM_NUMBER], parent="kernel")
@@ -283,6 +276,12 @@ def test():
                 ptr: T.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret("handle", T.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))
                 tma_finished = T.decl_buffer([PIPELINE_DEPTH], "uint64", data=ptr, scope="shared")
 
+                # Define events
+                tma_event = Tp.alloc_semaphore_event_tensor(
+                    EventImpl.kTMALoad, state=[tma_finished, None, None], shape=[PIPELINE_DEPTH]
+                )
+                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
+
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
@@ -304,17 +303,19 @@ def test():
                                 n_idx = T.meta_var(tile_scheduler.n_idx)
 
                                 # GMEM -> SMEM  (tma)
-                                if T.ptx.elect_sync():
+                                with T.thread(parent="warp")[T.ptx.elect_sync()]:
                                     for ko in T.serial(PIPE_CYCLE):
                                         for ks in T.unroll(PIPELINE_DEPTH):
                                             stage = ko * PIPELINE_DEPTH + ks
                                             mma2tma.wait(ks, 0, phase[0])
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                            A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                            A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                            B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
+                                            k_start = T.meta_var(stage * BLK_K)
+                                            # two A tiles for consumers
+                                            m_start0 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
+                                            m_start1 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
+                                            n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
+                                            Tp.copy_async(A_smem[ks, 0, :, :], A[m_start0 : m_start0 + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
+                                            Tp.copy_async(A_smem[ks, 1, :, :], A[m_start1 : m_start1 + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
+                                            Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
 
                                             if cbx == 0:
                                                 tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
@@ -324,12 +325,12 @@ def test():
                                         for ks in T.unroll(PIPE_REMAIN_NUM):
                                             stage = PIPE_CYCLE * PIPELINE_DEPTH + ks
                                             mma2tma.wait(ks, 0, phase[0])
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                            A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 1, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                            A_tensor_map, stage * BLK_K, (m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M, cta_group=2)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma_finished.ptr_to([ks]),
-                                                                            B_tensor_map, stage * BLK_K, (n_idx * CTA_GROUP + cbx) * BLK_N, cta_group=2)
+                                            m_start0 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
+                                            m_start1 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_N)
+                                            n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
+                                            Tp.copy_async(A_smem[ks, 0, :, :], A[m_start0 : m_start0 + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
+                                            Tp.copy_async(A_smem[ks, 1, :, :], A[m_start1 : m_start1 + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
+                                            Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
 
                                             if cbx == 0:
                                                 tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
@@ -432,13 +433,13 @@ def test():
                                         D_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
                                 T.ptx.bar.sync(wg_id, 128)
                                 T.ptx.fence.proxy(scope="shared")
-                                # st to gmem
-                                if lane_id == 0 and warp_id == 0:
-                                    T.ptx.cp_async.bulk.tensor.s2g(2, D_smem.ptr_to([wg_id, 0, 0]), 
-                                                                D_tensor_map, n_idx * BLK_N * CTA_GROUP + i * EPI_TILE,
-                                                                (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)
-                                    T.ptx.cp_async.bulk.commit_group()
-                                    T.ptx.cp_async.bulk.wait_group(0)
+                                # st to gmem via event
+                                with T.thread()[lane_id == 0 and warp_id == 0]:
+                                    m_start = (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M
+                                    n_start = n_idx * BLK_N * CTA_GROUP + i * EPI_TILE
+                                    Tp.copy_async(D[m_start : m_start + BLK_M, n_start : n_start + EPI_TILE], D_smem[wg_id, :, :], evt=wb_event)
+                                    wb_event.commit()
+                                    wb_event.wait(0)
                                 T.ptx.bar.sync(wg_id, 128)
                             tile_scheduler.next_tile()
 
@@ -526,4 +527,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    test_hgemm()

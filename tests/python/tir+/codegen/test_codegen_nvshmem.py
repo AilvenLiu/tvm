@@ -67,7 +67,7 @@ def create_nvshmem_array(sess, shape, dtype, init_data_fn=None, zero_out=True):
 
 
 @pytest.mark.skip(reason="nvshmem doesn't work with pytest")
-def test():
+def test_codegen_nvshmem():
     def _test_func():
         ############ setup ############
         sess = di.ProcessSession(num_workers=NUM_WORKERS)
@@ -305,4 +305,4 @@ def test():
 
 
 if __name__ == "__main__":
-    test()
+    test_codegen_nvshmem()

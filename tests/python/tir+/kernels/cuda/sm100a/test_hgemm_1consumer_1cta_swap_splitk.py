@@ -9,6 +9,8 @@ import tvm
 import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.script import tir as T
+from tvm.script import tirp as Tp
+from tvm.tir.event import EventImpl
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
 
@@ -290,15 +292,6 @@ def get_hgemm_kernel(dim_n, dim_k):
         M = T.int32()
         A = T.match_buffer(A_ptr, [M, K], a_type)
         partial_sum = T.match_buffer(partial_sum_ptr, [TILE_K_NUM, M, N], "float32")
-        A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        B_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        partial_sum_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, a_type, 2, A.data,
-                      K, M, K * F16_BYTES, BLK_K, BLK_M, 1, 1, 0, SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", B_tensor_map, b_type, 2, B.data, 
-                      K, N, K * F16_BYTES, BLK_K, BLK_N, 1, 1, 0, SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", partial_sum_tensor_map, "float32", 3, partial_sum.data,
-                      N, M, TILE_K_NUM, N * F32_BYTES, N * M * F32_BYTES, MMA_N, EPI_TILE, 1, 1, 1, 1, 0, 0, 0, 0)
         with T.kernel():
             # cbx, cby = T.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
             bx = T.cta_id([SM_NUMBER], parent="kernel")
@@ -348,6 +341,10 @@ def get_hgemm_kernel(dim_n, dim_k):
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=1)
                     warp_sync()
                 
+                # define events
+                tma_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma2mma_bar.mbar, None, None], shape=[SMEM_PIPE_DEPTH])
+                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
+                
                 # sync
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
@@ -364,23 +361,23 @@ def get_hgemm_kernel(dim_n, dim_k):
                                 m_idx = T.meta_var(tile_scheduler.m_idx)
                                 n_idx = T.meta_var(tile_scheduler.n_idx)
                                 k_idx = T.meta_var(tile_scheduler.k_idx)
-                                if T.ptx.elect_sync():
+                                with T.thread()[T.ptx.elect_sync()]:
                                     # main inner tma loop
-                                    k_offset = k_idx * TILE_K
+                                    k_offset = T.meta_var(k_idx * TILE_K)
+                                    m_st = T.meta_var(m_idx * BLK_M)
+                                    n_st = T.meta_var(n_idx * BLK_N)
                                     for ko in T.serial(PIPE_CIRCLE_NUM):
                                         for ks in T.unroll(SMEM_PIPE_DEPTH):
                                             # GMEM -> SMEM  (tma)    
-                                            stage = (ko * SMEM_PIPE_DEPTH + ks)
+                                            stage = T.meta_var(ko * SMEM_PIPE_DEPTH + ks)
                                             if PROFILER_ON:
                                                 profiler.start(ProfileEventType.WAIT, lane_id == 0)
                                             mma2tma_bar.wait(ks, phase[0])
                                             if PROFILER_ON:
                                                 profiler.end(ProfileEventType.WAIT, lane_id == 0)
                                                 profiler.start(ProfileEventType.IssueTMA, lane_id == 0)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0]), tma2mma_bar.mbar.ptr_to([ks]),
-                                                                        A_tensor_map, stage * BLK_K + k_offset, m_idx * BLK_M, cta_group=CTA_GROUP, cache_hint="evict_last")
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma2mma_bar.mbar.ptr_to([ks]),
-                                                                        B_tensor_map, stage * BLK_K + k_offset, n_idx * BLK_N, cta_group=CTA_GROUP, cache_hint="evict_first")
+                                            Tp.copy_async(A_smem[ks, :, :], A[m_st : m_st + BLK_M, stage * BLK_K + k_offset : stage * BLK_K + k_offset + BLK_K], evt=tma_event[ks], cta_group=CTA_GROUP, cache_hint="evict_last")
+                                            Tp.copy_async(B_smem[ks, :, :], B[n_st : n_st + BLK_N, stage * BLK_K + k_offset : stage * BLK_K + k_offset + BLK_K], evt=tma_event[ks], cta_group=CTA_GROUP, cache_hint="evict_first")
                                             tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
                                             if PROFILER_ON:
                                                 profiler.end(ProfileEventType.IssueTMA, lane_id == 0)
@@ -390,17 +387,15 @@ def get_hgemm_kernel(dim_n, dim_k):
                                         # last remained loop
                                         for ks in T.unroll(PIPE_REMAIN_NUM):
                                             # GMEM -> SMEM  (tma)    
-                                            stage = PIPE_CIRCLE_NUM * SMEM_PIPE_DEPTH + ks
+                                            stage = T.meta_var(PIPE_CIRCLE_NUM * SMEM_PIPE_DEPTH + ks)
                                             if PROFILER_ON:
                                                 profiler.start(ProfileEventType.WAIT, lane_id == 0)
                                             mma2tma_bar.wait(ks, phase[0])
                                             if PROFILER_ON:
                                                 profiler.end(ProfileEventType.WAIT, lane_id == 0)
                                                 profiler.start(ProfileEventType.IssueTMA, lane_id == 0)
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, A_smem.ptr_to([ks, 0, 0]), tma2mma_bar.mbar.ptr_to([ks]),
-                                                                        A_tensor_map, stage * BLK_K + k_offset, m_idx * BLK_M, cta_group=CTA_GROUP, cache_hint="evict_last")
-                                            T.ptx.cp_async.bulk.tensor.g2c(2, B_smem.ptr_to([ks, 0, 0]), tma2mma_bar.mbar.ptr_to([ks]),
-                                                                        B_tensor_map, stage * BLK_K + k_offset, n_idx * BLK_N, cta_group=CTA_GROUP, cache_hint="evict_first")
+                                            Tp.copy_async(A_smem[ks, :, :], A[m_st : m_st + BLK_M, stage * BLK_K + k_offset : stage * BLK_K + k_offset + BLK_K], evt=tma_event[ks], cta_group=CTA_GROUP, cache_hint="evict_last")
+                                            Tp.copy_async(B_smem[ks, :, :], B[n_st : n_st + BLK_N, stage * BLK_K + k_offset : stage * BLK_K + k_offset + BLK_K], evt=tma_event[ks], cta_group=CTA_GROUP, cache_hint="evict_first")
                                             tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
                                             if PROFILER_ON:
                                                 profiler.end(ProfileEventType.IssueTMA, lane_id == 0)
@@ -546,15 +541,15 @@ def get_hgemm_kernel(dim_n, dim_k):
                                 if PROFILER_ON:
                                     profiler.start(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
                                 # smem -> gmem
-                                if lane_id == 0 and warp_id == 0:
-                                    T.ptx.cp_async.bulk.tensor.s2g(3, D_smem.ptr_to([stage, 0, 0]), 
-                                                                partial_sum_tensor_map, n_idx* BLK_N,
-                                                                m_idx * BLK_M + ko * EPI_TILE, k_idx, cache_hint="evict_last")
-                                    T.ptx.cp_async.bulk.commit_group()
+                                with T.thread()[lane_id == 0 and warp_id == 0]:
+                                    m_start = T.meta_var(m_idx * BLK_M + ko * EPI_TILE)
+                                    n_start = T.meta_var(n_idx * BLK_N)
+                                    Tp.copy_async(partial_sum[k_idx, m_start : m_start + EPI_TILE, n_start : n_start + BLK_N], D_smem[stage, :, :], evt=wb_event, cache_hint="evict_last")
+                                    wb_event.commit()
                                 if PROFILER_ON:
                                     profiler.end(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
-                            if lane_id == 0 and warp_id == 0:
-                                T.ptx.cp_async.bulk.wait_group(0)
+                            with T.thread()[lane_id == 0 and warp_id == 0]:
+                                wb_event.wait(0)
                             T.ptx.bar.sync(10, 128)
                             tile_scheduler.next_tile()
                       
