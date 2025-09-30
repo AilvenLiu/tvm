@@ -124,11 +124,11 @@ class TopkSoftmaxTile(Tile):
                     thread_row_in_warp = T.meta_var(lane_id // self.THREADS_PER_ROW)
                     thread_row = T.meta_var(warp_base_row + thread_row_in_warp)
 
-                    if thread_row < self.num_tokens:
-                        thread_group_idx = T.meta_var(lane_id % self.THREADS_PER_ROW)
-                        first_elt_read_by_thread = T.meta_var(thread_group_idx * self.ELTS_PER_LDG)
-                        thread_read_ptr_offset = T.meta_var(thread_row * self.ELTS_PER_ROW + first_elt_read_by_thread)
+                    thread_group_idx = T.meta_var(lane_id % self.THREADS_PER_ROW)
+                    first_elt_read_by_thread = T.meta_var(thread_group_idx * self.ELTS_PER_LDG)
+                    thread_read_ptr_offset = T.meta_var(thread_row * self.ELTS_PER_ROW + first_elt_read_by_thread)
 
+                    if thread_row < self.num_tokens:
                         # copy global to reg
                         for ii in T.unroll(self.LDG_PER_THREAD):
                             thread_read_ptr_offset1 = T.meta_var(thread_read_ptr_offset + ii * self.THREADS_PER_ROW * self.ELTS_PER_LDG)
@@ -137,94 +137,98 @@ class TopkSoftmaxTile(Tile):
                                 idx0 = T.meta_var(thread_read_ptr_offset2 // self.num_experts)
                                 idx1 = T.meta_var(thread_read_ptr_offset2 % self.num_experts)
                                 self.row_chunk_temp[ii * self.ELTS_PER_LDG + vec] = gating_output[idx0, idx1]
-                        # max reduce within thread
-                        self.thread_max[0] = self.row_chunk_temp[0]
-                        for ii in T.unroll(1, self.VPT):
-                            self.thread_max[0] = T.max(self.thread_max[0], self.row_chunk_temp[ii])
-
-                        # max reduce within thread group
-                        # now, thread_max in all threads have the max within the row
-                        for kr in T.unroll(find_power_of_two(self.THREADS_PER_ROW // 2) + 1):
-                            self.thread_max[0] = T.max(self.thread_max[0], T.tvm_warp_shuffle_xor(
-                                0xFFFFFFFF, self.thread_max[0], (self.THREADS_PER_ROW // 2) >> kr, self.THREADS_PER_ROW, 32
-                            ))
-
-                        # take exp and compute local sum
-                        self.row_sum[0] = 0
+                    else:
                         for ii in T.unroll(self.VPT):
-                            self.row_chunk[ii] = T.exp(T.Cast("float32", self.row_chunk_temp[ii]) - T.Cast("float32", self.thread_max[0]))
-                            self.row_sum[0] += self.row_chunk[ii]
+                            self.row_chunk_temp[ii] = 0.0
 
-                        # sum reduce within thread group
-                        # now, all threads have the sum within the row
-                        for kr in T.unroll(find_power_of_two(self.THREADS_PER_ROW // 2) + 1):
-                            self.row_sum[0] = self.row_sum[0] + T.tvm_warp_shuffle_xor(
-                                0xFFFFFFFF, self.row_sum[0], (self.THREADS_PER_ROW // 2) >> kr, self.THREADS_PER_ROW, 32
+                    # max reduce within thread
+                    self.thread_max[0] = self.row_chunk_temp[0]
+                    for ii in T.unroll(1, self.VPT):
+                        self.thread_max[0] = T.max(self.thread_max[0], self.row_chunk_temp[ii])
+
+                    # max reduce within thread group
+                    # now, thread_max in all threads have the max within the row
+                    for kr in T.unroll(find_power_of_two(self.THREADS_PER_ROW // 2) + 1):
+                        self.thread_max[0] = T.max(self.thread_max[0], T.tvm_warp_shuffle_xor(
+                            0xFFFFFFFF, self.thread_max[0], (self.THREADS_PER_ROW // 2) >> kr, self.THREADS_PER_ROW, 32
+                        ))
+
+                    # take exp and compute local sum
+                    self.row_sum[0] = 0
+                    for ii in T.unroll(self.VPT):
+                        self.row_chunk[ii] = T.exp(T.Cast("float32", self.row_chunk_temp[ii]) - T.Cast("float32", self.thread_max[0]))
+                        self.row_sum[0] += self.row_chunk[ii]
+
+                    # sum reduce within thread group
+                    # now, all threads have the sum within the row
+                    for kr in T.unroll(find_power_of_two(self.THREADS_PER_ROW // 2) + 1):
+                        self.row_sum[0] = self.row_sum[0] + T.tvm_warp_shuffle_xor(
+                            0xFFFFFFFF, self.row_sum[0], (self.THREADS_PER_ROW // 2) >> kr, self.THREADS_PER_ROW, 32
+                        )
+
+                    # scale the rows
+                    self.reciprocal_row_sum[0] = 1.0 / self.row_sum[0]
+                    for ii in T.unroll(self.VPT):
+                        self.row_chunk[ii] = self.row_chunk[ii] * self.reciprocal_row_sum[0]
+
+                    # now, start to find topk elements in each row
+                    start_col = T.meta_var(first_elt_read_by_thread)
+                    self.row_sum_for_renormalize[0] = 0
+
+                    for k_idx in T.serial(self.topk):
+                        # first step, each thread does local argmax
+                        self.max_val[0] = self.row_chunk[0]
+                        self.expert[0] = start_col
+                        self.col[0] = start_col
+                        for ldg in T.unroll(self.LDG_PER_THREAD):
+                            for ii in T.unroll(self.ELTS_PER_LDG):
+                                val = T.meta_var(self.row_chunk[ldg * self.ELTS_PER_LDG + ii])
+                                if val > self.max_val[0]:
+                                    self.max_val[0] = val
+                                    self.expert[0] = self.col[0] + ii
+                            self.col[0] = self.col[0] + self.COLS_PER_GROUP_LDG
+
+                        # second step, perform argmax reduce among threads
+                        for ki in T.unroll(find_power_of_two(self.THREADS_PER_ROW // 2) + 1):
+                            other_max = T.tvm_warp_shuffle_xor(
+                                0xFFFFFFFF, self.max_val[0], (self.THREADS_PER_ROW // 2) >> ki, self.THREADS_PER_ROW, 32
                             )
+                            other_expert = T.tvm_warp_shuffle_xor(
+                                0xFFFFFFFF, self.expert[0], (self.THREADS_PER_ROW // 2) >> ki, self.THREADS_PER_ROW, 32
+                            )
+                            if (other_max > self.max_val[0]) or (other_max == self.max_val[0]) and (other_expert < self.expert[0]):
+                                self.max_val[0] = other_max
+                                self.expert[0] = other_expert
 
-                        # scale the rows
-                        self.reciprocal_row_sum[0] = 1.0 / self.row_sum[0]
-                        for ii in T.unroll(self.VPT):
-                            self.row_chunk[ii] = self.row_chunk[ii] * self.reciprocal_row_sum[0]
+                        # write max to global memory
+                        if thread_group_idx == 0 and thread_row < self.num_tokens:
+                            start_expert = T.meta_var(0)
+                            end_expert = T.meta_var(self.num_experts)
+                            should_process_row = T.meta_var(T.bool((self.expert[0] >= start_expert) and (self.expert[0] < end_expert)))
+                            idx = T.meta_var(self.topk * thread_row + k_idx)
+                            idx0 = T.meta_var(idx // self.topk)
+                            idx1 = T.meta_var(idx % self.topk)
+                            topk_weights[idx0, idx1] = self.max_val[0]
+                            topk_indices[idx0, idx1] = T.if_then_else(should_process_row, self.expert[0] - start_expert, self.num_experts)
+                            self.row_sum_for_renormalize[0] = self.row_sum_for_renormalize[0] + self.max_val[0]
 
-                        # now, start to find topk elements in each row
-                        start_col = T.meta_var(first_elt_read_by_thread)
-                        self.row_sum_for_renormalize[0] = 0
+                        # clear value in thread
+                        if k_idx + 1 < self.topk:
+                            ldg_group_for_expert = T.meta_var(self.expert[0] // self.COLS_PER_GROUP_LDG)
+                            thread_to_clear_in_group = T.meta_var((self.expert[0] // self.ELTS_PER_LDG) % self.THREADS_PER_ROW)
+                            if thread_group_idx == thread_to_clear_in_group:
+                                offset_for_expert = T.meta_var(self.expert[0] % self.ELTS_PER_LDG)
+                                idx = T.meta_var(ldg_group_for_expert * self.ELTS_PER_LDG + offset_for_expert)
+                                self.row_chunk[idx] = -10000.0
 
-                        for k_idx in T.serial(self.topk):
-                            # first step, each thread does local argmax
-                            self.max_val[0] = self.row_chunk[0]
-                            self.expert[0] = start_col
-                            self.col[0] = start_col
-                            for ldg in T.unroll(self.LDG_PER_THREAD):
-                                for ii in T.unroll(self.ELTS_PER_LDG):
-                                    val = T.meta_var(self.row_chunk[ldg * self.ELTS_PER_LDG + ii])
-                                    if val > self.max_val[0]:
-                                        self.max_val[0] = val
-                                        self.expert[0] = self.col[0] + ii
-                                self.col[0] = self.col[0] + self.COLS_PER_GROUP_LDG
-
-                            # second step, perform argmax reduce among threads
-                            for ki in T.unroll(find_power_of_two(self.THREADS_PER_ROW // 2) + 1):
-                                other_max = T.tvm_warp_shuffle_xor(
-                                    0xFFFFFFFF, self.max_val[0], (self.THREADS_PER_ROW // 2) >> ki, self.THREADS_PER_ROW, 32
-                                )
-                                other_expert = T.tvm_warp_shuffle_xor(
-                                    0xFFFFFFFF, self.expert[0], (self.THREADS_PER_ROW // 2) >> ki, self.THREADS_PER_ROW, 32
-                                )
-                                if (other_max > self.max_val[0]) or (other_max == self.max_val[0]) and (other_expert < self.expert[0]):
-                                    self.max_val[0] = other_max
-                                    self.expert[0] = other_expert
-
-                            # write max to global memory
-                            if thread_group_idx == 0:
-                                start_expert = T.meta_var(0)
-                                end_expert = T.meta_var(self.num_experts)
-                                should_process_row = T.meta_var(T.bool((self.expert[0] >= start_expert) and (self.expert[0] < end_expert)))
-                                idx = T.meta_var(self.topk * thread_row + k_idx)
-                                idx0 = T.meta_var(idx // self.topk)
-                                idx1 = T.meta_var(idx % self.topk)
-                                topk_weights[idx0, idx1] = self.max_val[0]
-                                topk_indices[idx0, idx1] = T.if_then_else(should_process_row, self.expert[0] - start_expert, self.num_experts)
-                                self.row_sum_for_renormalize[0] = self.row_sum_for_renormalize[0] + self.max_val[0]
-
-                            # clear value in thread
-                            if k_idx + 1 < self.topk:
-                                ldg_group_for_expert = T.meta_var(self.expert[0] // self.COLS_PER_GROUP_LDG)
-                                thread_to_clear_in_group = T.meta_var((self.expert[0] // self.ELTS_PER_LDG) % self.THREADS_PER_ROW)
-                                if thread_group_idx == thread_to_clear_in_group:
-                                    offset_for_expert = T.meta_var(self.expert[0] % self.ELTS_PER_LDG)
-                                    idx = T.meta_var(ldg_group_for_expert * self.ELTS_PER_LDG + offset_for_expert)
-                                    self.row_chunk[idx] = -10000.0
-
-                        # handle renormalize of top k weights
-                        if renormalize and thread_group_idx == 0:
-                            row_sum_for_renormalize_inv = T.meta_var(1.0 / self.row_sum_for_renormalize[0])
-                            for k_idx in T.unroll(self.topk):
-                                idx = T.meta_var(self.topk * thread_row + k_idx)
-                                idx0 = T.meta_var(idx // self.topk)
-                                idx1 = T.meta_var(idx % self.topk)
-                                topk_weights[idx0, idx1] = topk_weights[idx0, idx1] * row_sum_for_renormalize_inv
+                    # handle renormalize of top k weights
+                    if renormalize and thread_group_idx == 0 and thread_row < self.num_tokens:
+                        row_sum_for_renormalize_inv = T.meta_var(1.0 / self.row_sum_for_renormalize[0])
+                        for k_idx in T.unroll(self.topk):
+                            idx = T.meta_var(self.topk * thread_row + k_idx)
+                            idx0 = T.meta_var(idx // self.topk)
+                            idx1 = T.meta_var(idx % self.topk)
+                            topk_weights[idx0, idx1] = topk_weights[idx0, idx1] * row_sum_for_renormalize_inv
 
                     self.token_idx[0] += self.PERSISTENT_SM_NUMBER * self.ROWS_PER_CTA
     # fmt: on
