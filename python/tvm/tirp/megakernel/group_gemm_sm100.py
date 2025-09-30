@@ -30,9 +30,9 @@ class GroupGEMMTile(GemmTile):
             1,
             BLK_M,
             MMA_M,
-            "float16" if not reorder_output else "float32",
-            prefetch_on,
-            profiler_on,
+            out_type="float16" if not reorder_output else "float32",
+            prefetch_on=prefetch_on,
+            profiler_on=profiler_on,
         )
         self.num_experts = num_experts
         self.top_k = top_k

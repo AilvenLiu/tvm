@@ -100,7 +100,7 @@ class GemmTile(Tile):
     # idx of current gemm tile (no matter which shape it is)
     tile_idx = None
 
-    def __init__(self, N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, out_type=None, prefetch_on=False, profiler_on=False):
+    def __init__(self, N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, out_type=None, use_tma_reduce=False, prefetch_on=False, profiler_on=False):
         super().__init__()
         self.BLK_M = BLK_M
         self.MMA_M = MMA_M
@@ -108,11 +108,14 @@ class GemmTile(Tile):
         self.K = K
         self.a_type = a_type
         self.b_type = b_type
+        assert a_type == "float16", "only float16 is supported for now"
+        assert b_type == "float16", "only float16 is supported for now"
         if out_type is None:
             self.out_type = "float32" if split_k_factor > 1 else "float16"
         else:
             self.out_type = out_type
         self.split_k_factor = split_k_factor
+        self.use_tma_reduce = use_tma_reduce
         self.prefetch_on = prefetch_on
         self.profiler_on = profiler_on
         self.TILE_K = ceildiv(ceildiv(self.K, self.split_k_factor), self.BLK_K) * self.BLK_K
@@ -222,8 +225,12 @@ class GemmTile(Tile):
         T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 2, self.B.data, 
                       self.K, self.N, self.K * F16_BYTES, self.BLK_K, self.BLK_N, 1, 1, 0, self.SWIZZLE, 0, 0)
         if self.split_k_factor > 1:
-            T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 3, self.output.data, 
-                          self.N, self.M, self.split_k_factor, self.N * F32_BYTES, self.N * self.M * F32_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 1, 1, 0, 0, 0, 0)
+            if not self.use_tma_reduce:
+                T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 3, self.output.data, 
+                            self.N, self.M, self.split_k_factor, self.N * F32_BYTES, self.N * self.M * F32_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 1, 1, 0, 0, 0, 0)
+            else:
+                T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data, 
+                          self.N, self.M, self.N * F32_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)   
         else:
             T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data, 
                           self.N, self.M, self.N * F16_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
@@ -333,15 +340,26 @@ class GemmTile(Tile):
                 # smem -> gmem
                 if tid_in_wg == 0:
                     if self.split_k_factor > 1:
-                        T.ptx.cp_async.bulk.tensor.s2g(
-                            3,
-                            self.output_smem.ptr_to([self.stage, 0, 0]),
-                            self.output_tensor_map,
-                            n_idx * self.BLK_N,
-                            m_idx * self.BLK_M + ko * self.EPI_TILE,
-                            k_idx,
-                            cache_hint="evict_last",
-                        )
+                        if not self.use_tma_reduce:
+                            T.ptx.cp_async.bulk.tensor.s2g(
+                                3,
+                                self.output_smem.ptr_to([self.stage, 0, 0]),
+                                self.output_tensor_map,
+                                n_idx * self.BLK_N,
+                                m_idx * self.BLK_M + ko * self.EPI_TILE,
+                                k_idx,
+                                cache_hint="evict_last",
+                            )
+                        else:
+                            T.ptx.cp_async.bulk.tensor.s2g_reduce(
+                                2,
+                                self.output_smem.ptr_to([self.stage, 0, 0]),
+                                self.output_tensor_map,
+                                n_idx * self.BLK_N,
+                                m_idx * self.BLK_M + ko * self.EPI_TILE,
+                                cache_hint="evict_last",
+                                red_op="add"
+                            )
                     else:
                         T.ptx.cp_async.bulk.tensor.s2g(
                             2,
@@ -565,7 +583,7 @@ class GemmTile(Tile):
                                                 descI,
                                                 False,
                                                 KernelConfig.CTA_GROUP,
-                                                True,
+                                                False,
                                             )
                                         else:
                                             T.ptx.tcgen05.mma(

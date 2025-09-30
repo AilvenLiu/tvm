@@ -443,7 +443,8 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
     INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE 
     NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS 
     NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS 
-
+    GATING_SPLIT_K_FACTOR = 4
+    
     NUM_EXPERTS = 128
     NUM_EXPERTS_PER_TOK = 8
     MOE_BLK_M = 32
@@ -454,7 +455,8 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
             (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
         )
     central_queue = []
-    central_queue.append((0, 0, 0, JobType.MOE_GATING.value))
+    for k_idx in range(GATING_SPLIT_K_FACTOR):
+        central_queue.append((0, 0, k_idx, JobType.MOE_GATING.value))
     for m_idx in range(KernelConfig.SM_NUMBER):
         central_queue.append((m_idx, 0, 0, JobType.MOE_TOPK_SOFTMAX.value))
     central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
@@ -644,15 +646,16 @@ def generate_event_tensor_moe(batch_size, WORLD_SIZE):
     INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE
     NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS
     NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS
-
     NUM_EXPERTS = 128
     NUM_EXPERTS_PER_TOK = 8
     MOE_BLK_M = 32
+    GATING_SPLIT_K_FACTOR = 4
+
     DEV = tvm.cuda(0)
     base = 1 << 16
     factor = base + 1
 
-    etensor_gating = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
+    etensor_gating = tvm.runtime.tensor(np.full((1,), factor * GATING_SPLIT_K_FACTOR, dtype=np.int32), device=DEV)
     etensor_topk_softmax = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
     etensor_moe_align = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
     etensor_count_and_sort = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
