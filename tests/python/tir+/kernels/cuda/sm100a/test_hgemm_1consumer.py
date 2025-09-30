@@ -168,48 +168,13 @@ class BarLD2MMA(Barriers):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
 
-@T.macro
-def warp_sync():
-    T.cuda.func_call(
-        "sync_warp",
-        source_code=f"""
-__forceinline__ __device__ void sync_warp() {{
-    __syncwarp();
-}}
-    """,
-    )
+# Removed warp_sync macro; use T.cuda.warp_sync() directly at call sites.
 
 
-@T.macro
-def trap_when_assert_failed(cond):
-    T.cuda.func_call(
-        "trap_when_assert_fail",
-        cond,
-        source_code=f"""
-__forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
-    do {{
-        if (not (cond))
-            asm("trap;");
-    }} while (0);
-}}
-    """,
-    )
+# Removed trap_when_assert_failed macro; use T.cuda.trap_when_assert_failed(cond)
 
 
-@T.macro
-def float22half2(dst, src):
-    T.cuda.func_call(
-        "float22half2",
-        dst,
-        src,
-        source_code=f"""
-__forceinline__ __device__ void float22half2(void* dst, void* src) {{
-    half2* dst_p = (half2*) dst;
-    float2* src_p = (float2*) src;
-    *dst_p = __float22half2_rn(*src_p);
-}}
-    """,
-    )
+# Removed float22half2 macro; use T.cuda.float22half2(dst, src)
 
 
 def prepare_data():
@@ -289,7 +254,7 @@ def test():
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
-                    warp_sync()
+                    T.cuda.warp_sync()
                 
                 # sync
                 T.ptx.fence.proxy("shared")
@@ -415,7 +380,7 @@ def test():
                                     tile_scheduler.next_tile()
                                     
                     with T.warpgroup()[0:1]:
-                        trap_when_assert_failed(tmem_addr == 0)
+                        T.cuda.trap_when_assert_failed(tmem_addr == 0)
                         tmem_idx = T.local_cell("int32", "tmem_idx")
                         tmem_phase = T.local_cell("int32", "tmem_phase")
                         phase[0] = 0
@@ -450,7 +415,7 @@ def test():
                                     T.ptx.tcgen05.wait.ld()
                                     
                                     for vec in range(TMEM_LD_SIZE // 2):
-                                        float22half2(T.address_of(reg_fp16[vec * 2]), T.address_of(reg[vec * 2]))
+                                        T.cuda.float22half2(T.address_of(reg_fp16[vec * 2]), T.address_of(reg[vec * 2]))
                                     for vec in T.vectorized(TMEM_LD_SIZE):
                                         D_smem[stage, warp_id * 32 + lane_id, ki * TMEM_LD_SIZE + vec] = reg_fp16[vec]
                             

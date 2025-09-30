@@ -232,46 +232,11 @@ def get_hgemm_kernel(dim_n, dim_k):
         def arrive(self, idx):
             T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
-    @T.macro
-    def warp_sync():
-        T.cuda.func_call(
-            "sync_warp",
-            source_code=f"""
-    __forceinline__ __device__ void sync_warp() {{
-        __syncwarp();
-    }}
-        """,
-        )
+    # Removed warp_sync macro; use T.cuda.warp_sync() directly at call sites.
 
-    @T.macro
-    def trap_when_assert_failed(cond):
-        T.cuda.func_call(
-            "trap_when_assert_fail",
-            cond,
-            source_code=f"""
-    __forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
-        do {{
-            if (not (cond))
-                asm("trap;");
-        }} while (0);
-    }}
-        """,
-        )
+    # Removed trap_when_assert_failed macro; use T.cuda.trap_when_assert_failed(cond)
 
-    @T.macro
-    def float22half2(dst, src):
-        T.cuda.func_call(
-            "float22half2",
-            dst,
-            src,
-            source_code=f"""
-    __forceinline__ __device__ void float22half2(void* dst, void* src) {{
-        half2* dst_p = (half2*) dst;
-        float2* src_p = (float2*) src;
-        *dst_p = __float22half2_rn(*src_p);
-    }}
-        """,
-        )
+    # Removed float22half2 macro; use T.cuda.float22half2(dst, src)
 
     A_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
@@ -339,7 +304,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=1)
-                    warp_sync()
+                    T.cuda.warp_sync()
                 
                 # define events
                 tma_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma2mma_bar.mbar, None, None], shape=[SMEM_PIPE_DEPTH])
@@ -494,7 +459,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                     with T.warpgroup()[0:1]:
                         if PROFILER_ON:
                             profiler.init(2)
-                        trap_when_assert_failed(tmem_addr == 0)
+                        T.cuda.trap_when_assert_failed(tmem_addr == 0)
                         tmem_idx = T.local_cell("int32", "tmem_idx")
                         tmem_phase = T.local_cell("int32", "tmem_phase")
                         phase[0] = 0
@@ -595,7 +560,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                         for kv in T.unroll(VEC_SIZE):
                             vec_32[kv] += tmp[kv]
                     for kv in T.unroll(VEC_SIZE // 2):
-                        float22half2(T.address_of(vec_16[kv * 2]), T.address_of(vec_32[kv * 2]))
+                        T.cuda.float22half2(T.address_of(vec_16[kv * 2]), T.address_of(vec_32[kv * 2]))
                         # vec_16[kv] = T.cast(vec_32[kv], "float16")
                     for kv in T.vectorized(VEC_SIZE):
                         D[m_idx, n_idx + kv] = vec_16[kv]                    

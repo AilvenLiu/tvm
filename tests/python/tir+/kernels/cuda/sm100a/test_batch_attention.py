@@ -861,14 +861,7 @@ __device__ __forceinline__ float {func_name}() {{
             def get_lse(self):
                 return self.m[0] + ptx_log2(self.d[0])
 
-        def warp_sync():
-            func_name = "tvm_builtin_warp_sync"
-            source_code = f"""
-__device__ __forceinline__ void {func_name}() {{
-    __syncwarp();
-}}
-"""
-            return T.cuda.func_call(func_name, source_code=source_code)
+        # Removed warp_sync helper; use T.cuda.warp_sync() directly at call sites.
 
         # fmt: off
         @T.prim_func(tirp=True)
@@ -908,7 +901,7 @@ __device__ __forceinline__ void {func_name}() {{
                     i = int_var(worker_id[0])
                     while i[0] < num_qo_len_local[0] * KV_HEADS:
                         with T.thread():
-                            warp_sync()
+                            T.cuda.warp_sync()
                             packed_qo_idx = int_var(T.floordiv(i[0], KV_HEADS))
                             kv_head_idx = int_var(T.floormod(i[0], KV_HEADS))
                             qo_head_idx = int_var(T.floormod(packed_qo_idx[0], GQA_GROUP_SIZE))
@@ -940,9 +933,9 @@ __device__ __forceinline__ void {func_name}() {{
                                             partial_lse_buf[partial_idx_to_offset(it * BDY + ty[0] * BDX + tx[0])],
                                             T.float32(0)
                                         )
-                                        warp_sync()
+                                        T.cuda.warp_sync()
                                     T.ptx.cp_async.wait_group(NUM_SMEM_STAGES - 1)
-                                    warp_sync()
+                                    T.cuda.warp_sync()
 
                                     v = T.alloc_local([VEC_SIZE], "float32")
                                     cast_load(v, VEC_SIZE, v_smem, warp_id, it % NUM_SMEM_STAGES, ty[0], tx[0] * VEC_SIZE)
@@ -950,7 +943,7 @@ __device__ __forceinline__ void {func_name}() {{
                                     if it * BDY + ty[0] < num_index_sets[0]:
                                         s = float_var(s_smem[warp_id, (it % BDX) * BDY + ty[0]])
                                         state.merge(v, s[0], 1)
-                                    warp_sync()
+                                    T.cuda.warp_sync()
 
                                     T.ptx.cp_async(
                                         v_smem.ptr_to([warp_id, (it % NUM_SMEM_STAGES), ty[0], tx[0] * VEC_SIZE]),
@@ -961,14 +954,14 @@ __device__ __forceinline__ void {func_name}() {{
                                     T.ptx.cp_async.commit_group()
 
                             T.ptx.cp_async.wait_group(0)
-                            warp_sync()
+                            T.cuda.warp_sync()
 
                             @T.macro
                             def warp_sync_state():
                                 cast_store(state.o, VEC_SIZE, v_smem, warp_id, 0, ty[0], tx[0] * VEC_SIZE)
                                 s_smem[warp_id, ty[0]] = state.get_lse()
                                 state.init()
-                                warp_sync()
+                                T.cuda.warp_sync()
 
                                 for it in T.unroll(BDY):
                                     with T.thread():

@@ -59,32 +59,10 @@ assert PIPELINE_DEPTH == 4
 DEBUG = False
 
 
-@T.macro
-def warp_sync():
-    T.cuda.func_call(
-        "sync_warp",
-        source_code=f"""
-__forceinline__ __device__ void sync_warp() {{
-    __syncwarp();
-}}
-    """,
-    )
 
 
-@T.macro
-def trap_when_assert_failed(cond):
-    T.cuda.func_call(
-        "trap_when_assert_fail",
-        cond,
-        source_code=f"""
-__forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
-    do {{
-        if (not (cond))
-            asm("trap;");
-    }} while (0);
-}}
-    """,
-    )
+
+# Removed trap_when_assert_failed macro; use T.cuda.trap_when_assert_failed(cond)
 
 
 def get_source(func: tvm.tir.PrimFunc) -> str:
@@ -408,7 +386,7 @@ def test_hgemm():
 
                     with T.warpgroup()[0:NUM_CONSUMER]:
                         T.ptx.setmaxnreg(True, 224)
-                        trap_when_assert_failed(tmem_addr == 0)
+                        T.cuda.trap_when_assert_failed(tmem_addr == 0)
                         phase_tmem = T.alloc_buffer((1,), "int32", scope="local")
                         phase_tmem[0] = 0
                         while tile_scheduler.valid():

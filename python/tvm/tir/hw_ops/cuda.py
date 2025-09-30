@@ -3454,6 +3454,108 @@ __forceinline__ __device__ void {func_name}() {{
     return cuda_func_call(func_name, source_code=source_code)
 
 
+@register_codegen("cuda_warp_sync")
+def codegen_cuda_warp_sync():
+    func_name = "tvm_builtin_cuda_warp_sync"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}() {{
+    __syncwarp();
+}}
+"""
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("cuda_block_sync")
+def codegen_cuda_block_sync():
+    func_name = "tvm_builtin_cuda_block_sync"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}() {{
+    __syncthreads();
+}}
+"""
+    return cuda_func_call(func_name, source_code=source_code)
+
+
+@register_codegen("cuda_grid_sync")
+def codegen_cuda_grid_sync():
+    func_name = "tvm_builtin_cuda_grid_sync"
+    source_code = f"""
+namespace cg = cooperative_groups;
+__forceinline__ __device__ void {func_name}() {{
+    cg::this_grid().sync();
+}}
+"""
+    return cuda_func_call(func_name, source_code=source_code), ["cooperative_groups"]
+
+
+@register_codegen("cuda_float22half2")
+def codegen_cuda_float22half2(dst, src):
+    func_name = "tvm_builtin_cuda_float22half2"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(void* dst, void* src) {{
+    half2* dst_p = (half2*) dst;
+    float2* src_p = (float2*) src;
+    *dst_p = __float22half2_rn(*src_p);
+}}
+"""
+    return cuda_func_call(func_name, dst, src, source_code=source_code)
+
+
+@register_codegen("cuda_trap_when_assert_failed")
+def codegen_cuda_trap_when_assert_failed(cond):
+    func_name = "tvm_builtin_cuda_trap_when_assert_failed"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(bool cond) {{
+    do {{
+        if (not (cond))
+            asm("trap;");
+    }} while (0);
+}}
+"""
+    return cuda_func_call(func_name, cond, source_code=source_code)
+
+
+@register_codegen("cuda_runtime_instr_desc")
+def codegen_cuda_runtime_instr_desc(desc, sf_id):
+    func_name = "tvm_builtin_cuda_runtime_instr_desc"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(uint32_t* desc, const uint32_t& sf_id) {{
+    *desc = (*desc & ~0x60000030) | ((sf_id << 29) | (sf_id << 4));
+}}
+"""
+    return cuda_func_call(func_name, desc, sf_id, source_code=source_code)
+
+
+@register_codegen("cuda_half8tofloat8")
+def codegen_cuda_half8tofloat8(src_addr, dst_addr):
+    func_name = "tvm_builtin_cuda_half8tofloat8"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(void* src_addr, void* dst_addr) {{
+    half2* source = (half2*) src_addr;
+    float2* dest = (float2*) dst_addr;
+    for (int i = 0; i < 4; i++) {{
+        dest[i] = __half22float2(source[i]);
+    }}
+}}
+"""
+    return cuda_func_call(func_name, src_addr, dst_addr, source_code=source_code)
+
+
+@register_codegen("cuda_float8tohalf8")
+def codegen_cuda_float8tohalf8(src_addr, dst_addr):
+    func_name = "tvm_builtin_cuda_float8tohalf8"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(void* src_addr, void* dst_addr) {{
+    float2* source = (float2*) src_addr;
+    half2* dest = (half2*) dst_addr;
+    for (int i = 0; i < 4; i++) {{
+        dest[i] = __float22half2_rn(source[i]);
+    }}
+}}
+"""
+    return cuda_func_call(func_name, src_addr, dst_addr, source_code=source_code)
+
+
 @register_codegen("cuda_syncthreads_and")
 def codegen_cuda_syncthreads_and(predicate):
     func_name = "tvm_builtin_cuda_syncthreads_and"

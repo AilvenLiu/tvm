@@ -169,6 +169,9 @@ def test_printer_ptx_mbarrier():
 def test_printer_cuda_more():
     p = tir.Var("p", "handle")
     _assert_print(tir.op.cuda_thread_fence(), "T.cuda.thread_fence()")
+    _assert_print(tir.op.cuda_warp_sync(), "T.cuda.warp_sync()")
+    _assert_print(tir.op.cuda_block_sync(), "T.cuda.block_sync()")
+    _assert_print(tir.op.cuda_grid_sync(), "T.cuda.grid_sync()")
     _assert_print(tir.op.cuda_syncthreads_and(1), "T.cuda.syncthreads_and(1)")
     _assert_print(tir.op.cuda_syncthreads_or(1), "T.cuda.syncthreads_or(1)")
     _assert_print(tir.op.cuda_nano_sleep(100), "T.cuda.nano_sleep(100)")

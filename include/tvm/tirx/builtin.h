@@ -842,6 +842,46 @@ TVM_DLL const Op& cuda_atomic_add();
 TVM_DLL const Op& cuda_thread_fence();
 
 /*!
+ * \brief tvm intrinsic for cuda warp sync instruction
+ */
+TVM_DLL const Op& cuda_warp_sync();
+
+/*!
+ * \brief tvm intrinsic for cuda block-wide sync (syncthreads)
+ */
+TVM_DLL const Op& cuda_block_sync();
+
+/*!
+ * \brief tvm intrinsic for cuda grid-wide sync (cooperative groups)
+ */
+TVM_DLL const Op& cuda_grid_sync();
+
+/*!
+ * \brief tvm intrinsic for a helper converting float2 to half2 with rounding
+ */
+TVM_DLL const Op& cuda_float22half2();
+
+/*!
+ * \brief tvm intrinsic to trap when an assertion failed (cond == false)
+ */
+TVM_DLL const Op& cuda_trap_when_assert_failed();
+
+/*!
+ * \brief tvm intrinsic to modify runtime instruction descriptor
+ */
+TVM_DLL const Op& cuda_runtime_instr_desc();
+
+/*!
+ * \brief tvm intrinsic to convert 8 half2 lanes to 8 float2 lanes
+ */
+TVM_DLL const Op& cuda_half8tofloat8();
+
+/*!
+ * \brief tvm intrinsic to convert 8 float2 lanes to 8 half2 lanes with rounding
+ */
+TVM_DLL const Op& cuda_float8tohalf8();
+
+/*!
  * \brief tvm intrinsic for cuda syncthreads_and instruction
  */
 TVM_DLL const Op& cuda_syncthreads_and();

@@ -2935,6 +2935,131 @@ def cuda_func_call(func_name, *args, source_code, return_type="void"):
     return call_intrin(return_type, "tir.cuda_func_call", func_name, *args, source_code)
 
 
+def cuda_warp_sync():
+    """TVM intrinsic to synchronize threads within the current warp.
+
+    This lowers to a CUDA `__syncwarp()` call.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_warp_sync")
+
+def cuda_block_sync():
+    """TVM intrinsic to call CUDA syncthreads (block-wide barrier)
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_block_sync")
+
+
+def cuda_grid_sync():
+    """TVM intrinsic to call CUDA grid-wide sync (cooperative groups)
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_grid_sync")
+
+def cuda_float22half2(dst, src):
+    """TVM intrinsic to convert float2 to half2 with rounding
+
+    Parameters
+    ----------
+    dst : PrimExpr
+        Destination pointer.
+
+    src : PrimExpr
+        Source pointer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_float22half2", dst, src)
+
+
+def cuda_trap_when_assert_failed(cond):
+    """TVM intrinsic to trap when assertion failed (cond == false)
+
+    Parameters
+    ----------
+    cond : PrimExpr
+        Condition to check.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_trap_when_assert_failed", cond)
+
+
+def cuda_runtime_instr_desc(desc, sf_id):
+    """TVM intrinsic to update runtime instruction descriptor
+
+    Parameters
+    ----------
+    desc : PrimExpr
+        Pointer to the descriptor (uint32*).
+
+    sf_id : PrimExpr
+        The subfragment id.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_runtime_instr_desc", desc, sf_id)
+
+
+def cuda_half8tofloat8(src_addr, dst_addr):
+    """TVM intrinsic to convert 8 half2s to 8 float2s
+
+    Parameters
+    ----------
+    src_addr : PrimExpr
+        Source pointer.
+
+    dst_addr : PrimExpr
+        Destination pointer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_half8tofloat8", src_addr, dst_addr)
+
+
+def cuda_float8tohalf8(src_addr, dst_addr):
+    """TVM intrinsic to convert 8 float2s to 8 half2s
+
+    Parameters
+    ----------
+    src_addr : PrimExpr
+        Source pointer.
+
+    dst_addr : PrimExpr
+        Destination pointer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_float8tohalf8", src_addr, dst_addr)
+
+
 def tvm_load_matrix_sync(fragment, m, n, k, index, buffer_ptr, stride, layout):
     """TVM intrinsic for tensor core load operators
 
@@ -5349,6 +5474,17 @@ def cuda_thread_fence():
         The call expression.
     """
     return call_intrin("", "tir.cuda_thread_fence")
+
+
+def cuda_warp_sync():
+    """TVM intrinsic to call cuda warp sync instruction
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_warp_sync")
 
 
 def cuda_syncthreads_and(cond):

@@ -599,17 +599,17 @@ class ReduceScatter:
                                         load_pipe.idx, m_in_smem, n_in_smem * 8 + j
                                     ]
                                 if rank > 0:
-                                    T.cuda.func_call("half8tofloat8", reg_fp16.data, reg_fp32_tmp.data, source_code=half8tofloat8)
+                                    T.cuda.half8tofloat8(reg_fp16.data, reg_fp32_tmp.data)
                                     for j in T.vectorized(8):
                                         reg_fp32[i, j] += reg_fp32_tmp[j]
                                 else:
-                                    T.cuda.func_call("half8tofloat8", reg_fp16.data, reg_fp32.ptr_to([i, 0]), source_code=half8tofloat8)
+                                    T.cuda.half8tofloat8(reg_fp16.data, reg_fp32.ptr_to([i, 0]))
                             load_pipe.consumer_release(0)
                             load_pipe.advance()
                         for i in range(BLK_M_RS * BLK_N_RS // 8 // 128):
                             m_in_smem = T.meta_var((i * 128 + tid_in_wg) // (BLK_N_RS // 8))
                             n_in_smem = T.meta_var((i * 128 + tid_in_wg) % (BLK_N_RS // 8))
-                            T.cuda.func_call("float8tohalf8", reg_fp32.ptr_to([i, 0]), reg_fp16.data, source_code=float8tohalf8)
+                            T.cuda.float8tohalf8(reg_fp32.ptr_to([i, 0]), reg_fp16.data)
                             for j in T.vectorized(8):
                                 output_smem[m_in_smem, n_in_smem * 8 + j] = reg_fp16[j]
                         T.ptx.bar.sync(1, 128)

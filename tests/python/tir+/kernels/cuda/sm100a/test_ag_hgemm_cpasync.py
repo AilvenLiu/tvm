@@ -808,11 +808,7 @@ def test_ag_hgemm():
 
                                 with T.warpgroup()[0:NUM_CONSUMER]:
                                     T.ptx.setmaxnreg(True, 224)
-                                    T.cuda.func_call(
-                                        "trap_when_assert_fail",
-                                        tmem_addr == 0,
-                                        source_code=trap_when_assert_fail,
-                                    )
+                                    T.cuda.trap_when_assert_failed(tmem_addr == 0)
                                     mma2ld.wait(0, wg_id, phase_tmem[0])
                                     phase_tmem[0] = phase_tmem[0] ^ 1
                                     T.ptx.tcgen05.fence.after_thread_sync()
