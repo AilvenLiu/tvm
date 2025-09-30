@@ -74,7 +74,7 @@ __forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t valu
 # notes: The following applies to decrement=False. The logic for True is similar. 
 #        For semaphore with expected count = expected_cnt, we set it actual count = expected_cnt * (base + 1).
 #        Here base >= expected_cnt is the power of 2 (for efficiency mod in the following and giving convenience for decrement=True).
-#        By default, the base will be set to 1 << 20.
+#        By default, the base will be set to 1 << 16.
 #        That means the semaphore will take in two args: Semaphore(expected_cnt, base). For decrement=True, we can set semaphore value in generation.
 #        In dynamic scheduling, the semaphore will be notified for two times.
 #        The first one happens after the prefetch of the tile but before the corresponding semaphore wait,
@@ -85,7 +85,7 @@ __forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t valu
 #        For semaphore wait, we can still use the condition value == expected_cnt * (base + 1) to distinguish. 
 
 class Semaphore:
-    def __init__(self, expected_cnt, buffer, base=(1 << 20), decrement=False, use_nvshmem=False, debug=False):
+    def __init__(self, expected_cnt, buffer, base=(1 << 16), decrement=False, use_nvshmem=False, debug=False):
         self.expected_cnt = expected_cnt
         self.base = base
         self.decrement = decrement

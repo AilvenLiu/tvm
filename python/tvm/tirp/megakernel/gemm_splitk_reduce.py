@@ -53,3 +53,35 @@ class SplitKReduceTile(Tile):
                 for kv in T.vectorized(self.VEC_SIZE):
                     output[thread_m_idx, thread_n_idx + kv] = self.vec_16[kv]
                 self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS
+
+class MOETopKReduceTile(SplitKReduceTile):
+    def __init__(self, M, N, dtype, top_k):
+        super().__init__(M, N, dtype, top_k)
+
+
+    @T.macro
+    def run(self, m_idx, n_idx, k_idx, input, output):
+        with T.cta():
+            self._alloc_local()
+            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            self.idx = tid * self.VEC_SIZE
+            while (
+                self.idx < self.M_TILE * self.N_TILE
+                and m_idx * self.M_TILE + self.idx // self.N_TILE < self.M
+            ):
+                thread_m_idx = T.meta_var(m_idx * self.M_TILE + self.idx // self.N_TILE)
+                thread_n_idx = T.meta_var(n_idx * self.N_TILE + self.idx % self.N_TILE)
+                for kv in T.unroll(self.VEC_SIZE):
+                    self.vec_32[kv] = 0.0
+                for kt in T.serial(self.split_k_factor):
+                    for kv in T.vectorized(self.VEC_SIZE):
+                        self.tmp[kv] = input[thread_m_idx, kt, thread_n_idx + kv]
+                    for kv in T.unroll(self.VEC_SIZE):
+                        self.vec_32[kv] += self.tmp[kv]
+                for kv in T.unroll(self.VEC_SIZE // 2):
+                    float22half2(
+                        T.address_of(self.vec_16[kv * 2]), T.address_of(self.vec_32[kv * 2])
+                    )
+                for kv in T.vectorized(self.VEC_SIZE):
+                    output[thread_m_idx, thread_n_idx + kv] = self.vec_16[kv]
+                self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS

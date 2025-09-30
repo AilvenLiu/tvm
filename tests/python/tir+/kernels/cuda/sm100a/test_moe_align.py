@@ -12,9 +12,23 @@ from tvm.tirp.megakernel.common import SmemManager, KernelConfig
 
 from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
 
+
 NUM_EXPERTS = 128
 TOPK = 8
-BLOCK_SIZE = 16
+BLOCK_SIZE = 32
+HIDDEN_SIZE = 2048
+
+test_configs = [
+    {
+        "num_tokens": b,
+        "hidden_size": HIDDEN_SIZE,
+        "num_experts": NUM_EXPERTS,
+        "top_k": TOPK,
+        "pad_sorted_token_ids": pad_sorted_token_ids,
+    }
+    for b in [128, 64, 32, 16, 8, 4, 2, 1]
+    for pad_sorted_token_ids in [True, False]
+]
 
 
 def get_moe_align_kernel(pad_sorted_token_ids):
@@ -37,9 +51,8 @@ def get_moe_align_kernel(pad_sorted_token_ids):
             bx = T.cta_id([1], parent="kernel")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-            pool = T.meta_var(Tp.PoolAllocator(buf.data))
-            smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, pool))
-            smem_manager.set_tile(moe_align_tile.__class__)
+            smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+            smem_manager.set_tile(moe_align_tile)
             moe_align_tile.init(smem_manager)
             smem_manager.init()
             topk_ids_flattened = topk_ids.view(-1)
@@ -53,20 +66,34 @@ def count_and_sort_expert_tokens_kernel(
     topk_ids_ptr: T.handle,
     sorted_token_ids_ptr: T.handle,
     cumsum_buffer: T.Buffer((NUM_EXPERTS + 1,), "int32"),
+    data_ptr: T.handle,
+    reordered_data_ptr: T.handle,
 ):
     num_tokens = T.int32()
     topk_ids = T.match_buffer(topk_ids_ptr, (num_tokens, TOPK), dtype="int64")
     max_num_tokens_padded = T.int32()
     sorted_token_ids = T.match_buffer(sorted_token_ids_ptr, (max_num_tokens_padded,), dtype="int32")
-    count_and_sort_tile = T.meta_var(CountAndSortExpertTokens(num_tokens * TOPK))
+    data = T.match_buffer(data_ptr, (num_tokens, HIDDEN_SIZE), dtype="float16")
+    reordered_data = T.match_buffer(reordered_data_ptr, (max_num_tokens_padded, HIDDEN_SIZE), dtype="float16")
+    count_and_sort_tile = T.meta_var(CountAndSortExpertTokens(num_tokens * TOPK, HIDDEN_SIZE, TOPK))
     with T.kernel():
         bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
         tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
         topk_ids_flattened = topk_ids.view(-1)
-        count_and_sort_tile.run(bx, 0, 0, topk_ids_flattened, sorted_token_ids, cumsum_buffer)
+        buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+        smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+        smem_manager.set_tile(count_and_sort_tile)
+        count_and_sort_tile.init(smem_manager)
+        smem_manager.init()
+        count_and_sort_tile.run(bx, 0, 0, topk_ids_flattened, sorted_token_ids, cumsum_buffer, data, reordered_data)
 
-
-def test(num_tokens, num_experts, topk, pad_sorted_token_ids):
+@pytest.mark.parametrize("task", test_configs)
+def test_moe_align(task):
+    num_tokens = task["num_tokens"]
+    num_experts = task["num_experts"]
+    topk = task["top_k"]
+    hidden_size = task["hidden_size"]
+    pad_sorted_token_ids = task["pad_sorted_token_ids"]
     topk_ids = torch.argsort(torch.rand(num_tokens, num_experts), dim=1)[:, :topk]
     max_num_tokens_padded = topk_ids.numel() + num_experts * (BLOCK_SIZE - 1)
     sorted_ids = torch.empty((max_num_tokens_padded,), dtype=torch.int32)
@@ -83,6 +110,9 @@ def test(num_tokens, num_experts, topk, pad_sorted_token_ids):
     expert_ids_tvm = tvm.runtime.tensor(expert_ids.numpy(), device=dev)
     num_tokens_post_pad_tvm = tvm.runtime.tensor(num_tokens_post_pad.numpy(), device=dev)
     cumsum_buffer_tvm = tvm.runtime.tensor(cumsum_buffer.numpy(), device=dev)
+    data = torch.randn(num_tokens, hidden_size, dtype=torch.float16)
+    data_tvm = tvm.runtime.tensor(data.numpy(), device=dev)
+    reordered_data_tvm = tvm.runtime.empty((max_num_tokens_padded, hidden_size), dtype="float16", device=dev)
 
     def tir():
         target = tvm.target.Target("cuda")
@@ -104,7 +134,7 @@ def test(num_tokens, num_experts, topk, pad_sorted_token_ids):
                     cumsum_buffer_tvm,
                 )
                 mod["count_and_sort_expert_tokens_kernel"](
-                    topk_ids_tvm, sorted_ids_tvm, cumsum_buffer_tvm
+                    topk_ids_tvm, sorted_ids_tvm, cumsum_buffer_tvm, data_tvm, reordered_data_tvm
                 )
 
             ms = bench(func, warmup=10, repeat=30, proton_name="tir")
@@ -146,11 +176,18 @@ def test(num_tokens, num_experts, topk, pad_sorted_token_ids):
     ].sort()[0]
     tvm.testing.assert_allclose(
         selected_sorted_ids_std.cpu().numpy(), selected_sorted_ids_tvm.cpu().numpy()
-    )
+    ) 
+
+    index = torch.from_numpy(sorted_ids_tvm.numpy())[:num_tokens_post_pad_std.item()].cpu()
+    mask = (index >= 0) & (index < num_tokens * topk)
+    zeros = torch.zeros(1, data.shape[1], dtype=data.dtype, device=data.device)
+    padded_data = torch.cat([data, zeros], dim=0)
+    safe_index = torch.where(mask, index // topk, num_tokens)
+    reordered_data_std = padded_data[safe_index]
+    tvm.testing.assert_allclose(reordered_data_tvm.numpy()[:num_tokens_post_pad_std.item(), :], reordered_data_std.cpu().numpy())
 
 
 if __name__ == "__main__":
     torch.random.manual_seed(42)
-    for batch_size in [1, 16, 64, 128, 4096]:
-        for pad_sorted_token_ids in [True, False]:
-            test(batch_size, NUM_EXPERTS, TOPK, pad_sorted_token_ids)
+    for task in test_configs:
+        test_moe_align(task)

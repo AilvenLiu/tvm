@@ -27,20 +27,15 @@ class JobType(Enum):
     DOWN_PROJ_REDUCE = 13
     GEMM_DOWN_PROJ = 14
     SPLIT_SILU_MULTIPLY = 15
-    GEMM_GATE_UP_PROJ = 16
-
-    # the following are not used now
-    GEMM_QKV_REDUCE = 17
-    RMSNORM = 18
-    ROPE = 19
-    APPEND_KV = 20
-    BATCH_DECODE_NO_SPLIT = 21
-    BATCH_DECODE_SPLIT = 22
-    DECODE_MERGE = 23
-    K_RMSNORM_ROPE_APPEND_KV = 24
-    Q_RMSNORM_ROPE = 25
-    V_APPEND_KV = 26
-    
+    GEMM_GATE_UP_PROJ = 16 
+    MOE_GATING = 17
+    MOE_TOPK_SOFTMAX = 18
+    MOE_ALIGN = 19
+    MOE_COUNT_AND_SORT = 20
+    MOE_GROUP_GEMM_GATE_UP = 21
+    MOE_SILU_MULTIPLY = 22
+    MOE_GROUP_GEMM_DOWN = 23
+    MOE_TOPK_REDUCE = 24
     # end
     END = 31
     
@@ -142,7 +137,6 @@ class Tile:
 
     def run(self, m_idx, n_idx, k_idx):
         raise NotImplementedError("run is not implemented")
-
 
 
 class Barriers:
@@ -297,7 +291,7 @@ __forceinline__ __device__ void block_fence() {{
   __threadfence_block();
 }}
 """)
-    
+
 @T.macro
 def grid_sync():
     cta_id = T.cluster_id([KernelConfig.SM_NUMBER], parent="kernel")
@@ -309,8 +303,8 @@ __forceinline__ __device__ void grid_sync() {{
   g.sync();
 }}
 """)
-    
-    
+
+
 @T.macro
 def trap_when_assert_failed(cond):
     T.cuda.func_call(
@@ -378,7 +372,14 @@ class ProfileEventType(Enum):
     Q_REDUCE_RMSNORM_ROPE = 34
     K_REDUCE_RMSNORM_ROPE_APPEND = 35
     V_REDUCE_APPEND = 36
-    TOPK_SOFTMAX = 37
+    MOE_GATING = 37
+    TOPK_SOFTMAX = 38
+    MOE_ALIGN = 39
+    COUNT_AND_SORT = 40
+    GROUP_GEMM_GATE_UP = 41
+    SILU_MUL = 42
+    GROUP_GEMM_DOWN = 43
+    TOPK_REDUCE = 44
 
 
 event_type_names = [
@@ -419,7 +420,14 @@ event_type_names = [
     "Q_REDUCE_RMSNORM_ROPE",
     "K_REDUCE_RMSNORM_ROPE_APPEND",
     "V_REDUCE_APPEND",
-    "TOPK_SOFTMAX"
+    "MOE_GATING",
+    "TOPK_SOFTMAX",
+    "MOE_ALIGN",
+    "COUNT_AND_SORT",
+    "GROUP_GEMM_GATE_UP",
+    "SILU_MUL",
+    "GROUP_GEMM_DOWN",
+    "TOPK_REDUCE",
 ]
 
 
@@ -462,7 +470,7 @@ class SmemManager:
     #         "exclusive" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will be exclusive on corresponding pages
     #         "shared" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will share the corresponding pages
     #         "persistent" -> persistent smem, cannot be wait / arrive
-    def alloc(self, shape, dtype="float32", strides=None, scope="global", align=0, buffer_type="",
+    def alloc(self, shape, dtype="float32", strides=None, scope="shared.dyn", align=0, buffer_type="",
               axis_separators=None, layout="default", split=1, method: Literal["shared", "exclusive", "persistent"]="shared"):
         if method == "persistent":
             offset = self.pool_allocator.offset
@@ -676,5 +684,4 @@ class SmemManager:
     @T.macro
     def arrive_chunk(self, chunk_id):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([chunk_id]))
-            
             

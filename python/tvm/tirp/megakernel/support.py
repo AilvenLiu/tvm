@@ -28,11 +28,12 @@ from tvm.script import tir as T
 from tvm.tirp.megakernel.allreduce import AllreduceTile
 from tvm.tirp.megakernel.common import KernelConfig, pack_into_32bit
 from tvm.tirp.megakernel.gemm import GemmTile
-from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
-from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
+from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile, MOETopKReduceTile
+from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile, SiluMultiplyMOETile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
 from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler, MPMCQueueHost
 from tvm.tirp.megakernel.decode_merge import DecodeMergeTile
+from tvm.tirp.megakernel.group_gemm_sm100 import GroupGEMMTile
 from tvm.tirp.megakernel.common import event_type_names
 from tvm.tirp.bench.utils import export_to_perfetto_trace
 
@@ -261,7 +262,7 @@ def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_t
         tvm.runtime.tensor(np.array(inverse_indptr, dtype=np.int32), DEV), 
         tvm.runtime.tensor(np.array(inverse_indices, dtype=np.int32), DEV)
     )
-        
+
 
 def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Literal["static", "dynamic"]):
     """The execution queue generation function for layer testing use."""
@@ -425,6 +426,75 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
     else:
         raise ValueError(f"Unsupported scheduler: {scheduler}")
 
+def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"]):
+    # todo: change to config dict
+    VOCAB_SIZE = 151936
+    MAX_POSITION_EMBEDDINGS = 40960
+    HIDDEN_SIZE = 2048
+    FULL_INTERMEDIATE_SIZE = 768
+    NUM_HIDDEN_LAYERS = 64
+    FULL_NUM_ATTENTION_HEADS = 32
+    FULL_NUM_KEY_VALUE_HEADS = 4
+    HEAD_DIM = 128
+    RMS_NORM_EPS = 1e-6
+    ROPE_THETA = 1000000
+    MAX_PAGE_NUM = 8192
+    PAGE_SIZE = 16
+    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE 
+    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS 
+    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS 
+
+    NUM_EXPERTS = 128
+    NUM_EXPERTS_PER_TOK = 8
+    MOE_BLK_M = 32
+
+    assert scheduler == "static", "dynamic scheduler is not supported for moe"
+    torch.cuda.nvtx.range_push("generate_exec_queue")
+    exec_queue = np.zeros(
+            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
+        )
+    central_queue = []
+    central_queue.append((0, 0, 0, JobType.MOE_GATING.value))
+    for m_idx in range(KernelConfig.SM_NUMBER):
+        central_queue.append((m_idx, 0, 0, JobType.MOE_TOPK_SOFTMAX.value))
+    central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
+    for m_idx in range(KernelConfig.SM_NUMBER):
+        central_queue.append((m_idx, 0, 0, JobType.MOE_COUNT_AND_SORT.value))
+    max_num_tokens_padded = batch_size * NUM_EXPERTS_PER_TOK + NUM_EXPERTS * (MOE_BLK_M - 1)
+    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
+        for n_idx in range(INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N):
+            central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_GATE_UP.value))
+    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
+        for n_idx in range(INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE):
+            central_queue.append((m_idx, n_idx, 0, JobType.MOE_SILU_MULTIPLY.value))
+    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
+        for n_idx in range(HIDDEN_SIZE // GroupGEMMTile.BLK_N):
+            central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
+    m_split_topk_reduce = min(
+        batch_size,
+        ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT),
+    )
+    m_tile_topk_reduce = ceildiv(batch_size, m_split_topk_reduce)
+    m_split_topk_reduce = ceildiv(batch_size, m_tile_topk_reduce)
+    for m_idx in range(m_split_topk_reduce):
+        for n_idx in range(HIDDEN_SIZE // MOETopKReduceTile.N_UNIT):
+            central_queue.append((m_idx, n_idx, 0, JobType.MOE_TOPK_REDUCE.value))
+
+    tile_idx = 0
+    while len(central_queue) > 0:
+        for bx in range(KernelConfig.SM_NUMBER):
+            if len(central_queue) > 0:
+                exec_queue[bx, tile_idx] = pack_into_32bit(*central_queue.pop(0))
+            else:
+                exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value)
+        tile_idx += 1
+    for bx in range(KernelConfig.SM_NUMBER):
+        exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value)
+    DEV = tvm.cuda(0)
+    ret = tvm.runtime.tensor(exec_queue, device=DEV)
+    torch.cuda.nvtx.range_pop()
+    return ret
+
 
 def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORLD_SIZE):
     """The event tensor generation function for layer testing use."""
@@ -433,7 +503,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
     NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS // WORLD_SIZE
     DEV = tvm.cuda(0)
     qkv_h_d = (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM
-    base = 1 << 20
+    base = 1 << 16
     max_int_32 = 2147483647
     
     # static event tensor
@@ -554,6 +624,60 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
         etensor_down_proj_reduce,
         etensor_down_proj_allreduce,
         etensor_mlp_add_rms_norm,
+        etensor_end,
+    )
+
+def generate_event_tensor_moe(batch_size, WORLD_SIZE):
+    # todo: change to config dict
+    VOCAB_SIZE = 151936
+    MAX_POSITION_EMBEDDINGS = 40960
+    HIDDEN_SIZE = 2048
+    FULL_INTERMEDIATE_SIZE = 768
+    NUM_HIDDEN_LAYERS = 64
+    FULL_NUM_ATTENTION_HEADS = 32
+    FULL_NUM_KEY_VALUE_HEADS = 4
+    HEAD_DIM = 128
+    RMS_NORM_EPS = 1e-6
+    ROPE_THETA = 1000000
+    MAX_PAGE_NUM = 8192
+    PAGE_SIZE = 16
+    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE
+    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS
+    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS
+
+    NUM_EXPERTS = 128
+    NUM_EXPERTS_PER_TOK = 8
+    MOE_BLK_M = 32
+    DEV = tvm.cuda(0)
+    base = 1 << 16
+    factor = base + 1
+
+    etensor_gating = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
+    etensor_topk_softmax = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
+    etensor_moe_align = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
+    etensor_count_and_sort = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
+    max_num_tokens_padded = batch_size * NUM_EXPERTS_PER_TOK + NUM_EXPERTS * (MOE_BLK_M - 1)
+    etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((max_num_tokens_padded // MOE_BLK_M,),  factor * INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
+    etensor_silu_mul = tvm.runtime.tensor(
+        np.full(
+            (max_num_tokens_padded // MOE_BLK_M,),
+            factor * INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE,
+            dtype=np.int32,
+        ),
+        device=DEV,
+    )
+    etensor_group_gemm_down = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * HIDDEN_SIZE // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
+    etensor_topk_reduce = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
+    etensor_end = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
+    return (
+        etensor_gating,
+        etensor_topk_softmax,
+        etensor_moe_align,
+        etensor_count_and_sort,
+        etensor_group_gemm_gate_up,
+        etensor_silu_mul,
+        etensor_group_gemm_down,
+        etensor_topk_reduce,
         etensor_end,
     )
 

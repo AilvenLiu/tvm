@@ -1,6 +1,8 @@
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 
+from tvm.tir.event import EventImpl
+
 from .common import F32_BYTES, F16_BYTES, KernelConfig, SmemManager, Tile, ceildiv, float22half2
 
 def next_power_of_two(x):
@@ -8,7 +10,7 @@ def next_power_of_two(x):
 
 class MOEAlignTile(Tile):
 
-    def __init__(self, num_experts, numel, block_size, input_dtype="int32", pad_sorted_token_ids=False):
+    def __init__(self, num_experts, numel, block_size, pad_sorted_token_ids=False):
         super().__init__()
         self.num_experts = num_experts
         self.scan_size = next_power_of_two(num_experts)
@@ -25,10 +27,9 @@ class MOEAlignTile(Tile):
         self.warp_sums = smem_manager.alloc([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], "int32").buffer
         self.s_total_tokens_post_pad = smem_manager.alloc([1], "int32").buffer
 
-
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
-    
+
     @T.macro
     def warp_exclusive_scan(self, v, output, mask=0xffffffff):
         # offset = T.alloc_cell("int32", name="offset")
@@ -66,6 +67,7 @@ class MOEAlignTile(Tile):
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            self.smem_manager.wait_all("cta")
             if tid < self.num_experts:
                 self.shared_counts[tid] = 0
             T.tvm_storage_sync("shared")
@@ -131,23 +133,67 @@ class MOEAlignTile(Tile):
                     for vec in T.vectorized(VEC_SIZE):
                         out_ptr[idx[0] + vec] = fill_vec[vec]
                     idx[0] += VEC_SIZE * KernelConfig.NUM_THREADS
+            self.smem_manager.arrive_all("cta")
+            self.smem_manager.advance()
 
 class CountAndSortExpertTokens(Tile):
-    
-    def __init__(self, numel):
+
+    VEC_SIZE = 16 // F16_BYTES 
+    PIPE_DEPTH = 8
+
+    def __init__(self, numel, hidden_size, topk):
         super().__init__()
         self.numel = numel # numel = num_tokens * num_experts
-    
+        self.hidden_size = hidden_size
+        assert self.hidden_size <= KernelConfig.NUM_THREADS * self.VEC_SIZE
+        self.topk = topk
+
+    def _alloc_buffer(self, smem_manager: SmemManager):
+        self.smem_manager = smem_manager
+        self.s_rank_post_pad = smem_manager.alloc([KernelConfig.NUM_THREADS], "int64").buffer
+        self.fetched_data = smem_manager.alloc([self.PIPE_DEPTH, KernelConfig.NUM_THREADS, self.VEC_SIZE], "float16").buffer
+
+    def init(self, smem_manager: SmemManager):
+        self._alloc_buffer(smem_manager)
+
     @T.macro
-    def run(self, m_idx, n_idx, k_idx, topk_ids, sorted_token_ids, cumsum_buffer):
+    def run(self, m_idx, n_idx, k_idx, topk_ids, sorted_token_ids, cumsum_buffer, data, reordered_data):
         idx = T.alloc_local([1], "int32", name="idx")
+        cnt = T.alloc_local([1], "int32", name="cnt")
+        col_idx = T.alloc_local([1], "int32", name="col_idx")
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            idx[0] = m_idx * KernelConfig.NUM_THREADS + tid
-            while idx[0] < self.numel:
-                expert_id = topk_ids[idx[0]]
+            evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
+            process_token_idx = m_idx + tid * KernelConfig.SM_NUMBER
+            self.smem_manager.wait_all("cta")
+            if process_token_idx < self.numel:
+                expert_id = topk_ids[process_token_idx]
                 rank_post_pad = T.cuda.atomic_add(T.address_of(cumsum_buffer[expert_id]), 1)
-                sorted_token_ids[rank_post_pad] = idx[0]
-                idx[0] += KernelConfig.NUM_THREADS * KernelConfig.SM_NUMBER
-
-
+                sorted_token_ids[rank_post_pad] = process_token_idx
+                self.s_rank_post_pad[tid] = rank_post_pad
+            idx[0] = m_idx
+            T.tvm_storage_sync("shared")
+            col_idx[0] = tid * self.VEC_SIZE
+            for i in T.unroll(self.PIPE_DEPTH - 1):
+                with T.thread():
+                    if idx[0] < self.numel and col_idx[0] < self.hidden_size:
+                        Tp.copy_async(self.fetched_data[i, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], evt, vec_len=self.VEC_SIZE)
+                    evt.commit()
+                idx[0] += KernelConfig.SM_NUMBER
+            cnt[0] = 0
+            while idx[0] < self.numel + (self.PIPE_DEPTH - 1) * KernelConfig.SM_NUMBER:
+                with T.thread():
+                    if idx[0] < self.numel and col_idx[0] < self.hidden_size:
+                        cp_pipe_idx = T.meta_var((idx[0] // KernelConfig.SM_NUMBER) % self.PIPE_DEPTH)
+                        Tp.copy_async(self.fetched_data[cp_pipe_idx, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], evt, vec_len=self.VEC_SIZE)
+                    evt.commit()
+                    evt.wait(self.PIPE_DEPTH - 1)
+                    rank_post_pad = self.s_rank_post_pad[cnt[0]]
+                    pipe_idx = T.meta_var(cnt[0] % self.PIPE_DEPTH)
+                    if col_idx[0] < self.hidden_size:
+                        for vec in T.vectorized(self.VEC_SIZE):
+                            reordered_data[rank_post_pad, col_idx[0] + vec] = self.fetched_data[pipe_idx, tid, vec]
+                    idx[0] += KernelConfig.SM_NUMBER
+                    cnt[0] += 1
+            self.smem_manager.arrive_all("cta")
+            self.smem_manager.advance()

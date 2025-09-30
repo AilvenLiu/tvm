@@ -33,7 +33,7 @@ __forceinline__ __device__ void* nvshmem_get_ptr(void* ptr, int32_t pe) {
 
 
 class Semaphore:
-    def __init__(self, expected_cnt, buffer, decrement=False, base=(1 << 20), use_nvshmem=False):
+    def __init__(self, expected_cnt, buffer, decrement=False, base=(1 << 16), use_nvshmem=False):
         self.expected_cnt = expected_cnt
         self.base = base
         self.sem = buffer

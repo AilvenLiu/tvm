@@ -109,14 +109,13 @@ class TopkSoftmaxTile(Tile):
 
     # fmt: off
     @T.macro
-    def run(self, gating_output, topk_weights, topk_indices, renormalize=False):
+    def run(self, m_idx, n_idx, k_idx, gating_output, topk_weights, topk_indices, renormalize=False):
         with T.cta():
-            bx = T.cta_id([self.PERSISTENT_SM_NUMBER], parent="kernel")
             warp_id_in_cta = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
             lane_id = T.thread_id([self.bdx], parent="warp")
 
             with T.thread():
-                self.token_idx[0] = bx * self.ROWS_PER_CTA
+                self.token_idx[0] = m_idx * self.ROWS_PER_CTA
 
                 while self.token_idx[0] < self.num_tokens:
                     cta_base_row = T.meta_var(self.token_idx[0])

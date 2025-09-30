@@ -63,7 +63,7 @@ class TopkSoftmaxKernel:
                     self.device_init_all()
 
                     # TODO: initialize event tensors & tile scheduler
-                    self.run_tile(self.topk_softmax_tile, gating_output_global, topk_weights_global, topk_indices_global)
+                    self.run_tile(self.topk_softmax_tile, bx, 0, 0, gating_output_global, topk_weights_global, topk_indices_global)
         # fmt: on
         return main
 

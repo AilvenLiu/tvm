@@ -57,7 +57,7 @@ constexpr const int kStaticTileSchedulerMaxTasks = 128;
 constexpr const int kDyanmicTileSchedulerMaxTasks = 8192;
 
 constexpr const int kMaxTotalNumWorks = 65536;
-constexpr const int kSemaphoreBase = (1 << 20);
+constexpr const int kSemaphoreBase = (1 << 16);
 constexpr const int kMaxSemaphore = 2147483647;
 
 enum class JobType : int32_t {
