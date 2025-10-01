@@ -449,44 +449,51 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
     NUM_EXPERTS_PER_TOK = 8
     MOE_BLK_M = 32
 
-    assert scheduler == "static", "dynamic scheduler is not supported for moe"
+    
     torch.cuda.nvtx.range_push("generate_exec_queue")
-    exec_queue = np.zeros(
-            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
-        )
-    central_queue = []
-    for k_idx in range(GATING_SPLIT_K_FACTOR):
-        central_queue.append((0, 0, k_idx, JobType.MOE_GATING.value))
-    for m_idx in range(KernelConfig.SM_NUMBER):
-        central_queue.append((m_idx, 0, 0, JobType.MOE_TOPK_SOFTMAX.value))
-    central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
-    for m_idx in range(KernelConfig.SM_NUMBER):
-        central_queue.append((m_idx, 0, 0, JobType.MOE_COUNT_AND_SORT.value))
-    max_num_tokens_padded = batch_size * NUM_EXPERTS_PER_TOK + NUM_EXPERTS * (MOE_BLK_M - 1)
-    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
-        for n_idx in range(INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N):
-            central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_GATE_UP.value))
-    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
-        for n_idx in range(INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE):
-            central_queue.append((m_idx, n_idx, 0, JobType.MOE_SILU_MULTIPLY.value))
-    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
-        for n_idx in range(HIDDEN_SIZE // GroupGEMMTile.BLK_N):
-            central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
+    if scheduler == "static":
+        exec_queue = np.zeros(
+                (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
+            )
+        central_queue = []
+        for k_idx in range(GATING_SPLIT_K_FACTOR):
+            central_queue.append((0, 0, k_idx, JobType.MOE_GATING.value))
+        for m_idx in range(KernelConfig.SM_NUMBER):
+            central_queue.append((m_idx, 0, 0, JobType.MOE_TOPK_SOFTMAX.value))
+        central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
+        for m_idx in range(KernelConfig.SM_NUMBER):
+            central_queue.append((m_idx, 0, 0, JobType.MOE_COUNT_AND_SORT.value))
+        max_num_tokens_padded = batch_size * NUM_EXPERTS_PER_TOK + NUM_EXPERTS * (MOE_BLK_M - 1)
+        for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
+            for n_idx in range(INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N):
+                central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_GATE_UP.value))
+        for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
+            for n_idx in range(INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE):
+                central_queue.append((m_idx, n_idx, 0, JobType.MOE_SILU_MULTIPLY.value))
+        for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
+            for n_idx in range(HIDDEN_SIZE // GroupGEMMTile.BLK_N):
+                central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
 
-    tile_idx = 0
-    while len(central_queue) > 0:
+        tile_idx = 0
+        while len(central_queue) > 0:
+            for bx in range(KernelConfig.SM_NUMBER):
+                if len(central_queue) > 0:
+                    exec_queue[bx, tile_idx] = pack_into_32bit(*central_queue.pop(0))
+                else:
+                    exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value)
+            tile_idx += 1
         for bx in range(KernelConfig.SM_NUMBER):
-            if len(central_queue) > 0:
-                exec_queue[bx, tile_idx] = pack_into_32bit(*central_queue.pop(0))
-            else:
-                exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value)
-        tile_idx += 1
-    for bx in range(KernelConfig.SM_NUMBER):
-        exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value)
-    DEV = tvm.cuda(0)
-    ret = tvm.runtime.tensor(exec_queue, device=DEV)
-    torch.cuda.nvtx.range_pop()
-    return ret
+            exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value)
+        DEV = tvm.cuda(0)
+        ret = tvm.runtime.tensor(exec_queue, device=DEV)
+        torch.cuda.nvtx.range_pop()
+        return ret
+    elif scheduler == "dynamic":
+        exec_queue = MPMCQueueHost(DynamicTileScheduler.MAX_TASKS)
+        for k in range(GATING_SPLIT_K_FACTOR):
+            exec_queue.enqueue(JobType.MOE_GATING.value, 0, 0, k)
+        torch.cuda.nvtx.range_pop()
+        return exec_queue
 
 
 def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORLD_SIZE):
