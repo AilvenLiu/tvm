@@ -31,14 +31,16 @@ class JobType(Enum):
     GEMM_DOWN_PROJ = 14
     SPLIT_SILU_MULTIPLY = 15
     GEMM_GATE_UP_PROJ = 16 
-    MOE_GATING = 17
-    MOE_TOPK_SOFTMAX = 18
-    MOE_ALIGN = 19
-    MOE_COUNT_AND_SORT = 20
-    MOE_GROUP_GEMM_GATE_UP = 21
-    MOE_SILU_MULTIPLY = 22
-    MOE_GROUP_GEMM_DOWN = 23
-    MOE_TOPK_REDUCE = 24
+    GATE_UP_SILU = 17
+    MOE_GATING = 18
+    MOE_TOPK_SOFTMAX = 19
+    MOE_ALIGN = 20
+    MOE_COUNT_AND_SORT = 21
+    MOE_GROUP_GEMM_GATE_UP = 22
+    MOE_SILU_MULTIPLY = 23
+    MOE_GROUP_GEMM_DOWN = 24
+    MOE_TOPK_REDUCE = 25
+
     # end
     END = 31
     
@@ -112,6 +114,7 @@ def find_power_of_two(n):
 
 
 class Tile:
+    need_init = True
 
     @classmethod
     def class_init(cls, smem_manager):
@@ -375,14 +378,16 @@ class ProfileEventType(Enum):
     Q_REDUCE_RMSNORM_ROPE = 34
     K_REDUCE_RMSNORM_ROPE_APPEND = 35
     V_REDUCE_APPEND = 36
-    MOE_GATING = 37
-    TOPK_SOFTMAX = 38
-    MOE_ALIGN = 39
-    COUNT_AND_SORT = 40
-    GROUP_GEMM_GATE_UP = 41
-    SILU_MUL = 42
-    GROUP_GEMM_DOWN = 43
-    TOPK_REDUCE = 44
+    GATE_UP_SILU = 37
+    MOE_GATING = 38
+    TOPK_SOFTMAX = 39
+    MOE_ALIGN = 40
+    COUNT_AND_SORT = 41
+    GROUP_GEMM_GATE_UP = 42
+    SILU_MUL = 43
+    GROUP_GEMM_DOWN = 44
+    TOPK_REDUCE = 45
+    
 
 
 event_type_names = [
@@ -423,6 +428,7 @@ event_type_names = [
     "Q_REDUCE_RMSNORM_ROPE",
     "K_REDUCE_RMSNORM_ROPE_APPEND",
     "V_REDUCE_APPEND",
+    "GATE_UP_SILU",
     "MOE_GATING",
     "TOPK_SOFTMAX",
     "MOE_ALIGN",

@@ -23,14 +23,13 @@ from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler
 from tvm.tirp.megakernel.gemm import GemmTile
 from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
 from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyTile
+from tvm.tirp.megakernel.gate_up_silu import GateUpSiluTile
 from tvm.tirp.megakernel.reduce_rms_norm_rope_q import SplitKReduceRMSnormRopeQTile
 from tvm.tirp.megakernel.reduce_rms_norm_rope_append_k import SplitKReduceRMSnormRopeAppendKTile
 from tvm.tirp.megakernel.reduce_append_v import SplitKReduceAppendVTile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
 from tvm.tirp.megakernel import static_scheduler, dynamic_scheduler
 from tvm.tirp.megakernel.support import generate_event_tensor, generate_exec_queue, get_inverse_plan_info
-
-# TODO: fix abnormal slowness of batch-attn on the first tile
 
 
 class MegaKernel:
@@ -87,15 +86,16 @@ class MegaKernel:
         self.attn_tile = self._add_tile(BatchAttnTile(self.PAGE_SIZE, self.NUM_ATTENTION_HEADS, self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM), ProfileEventType.BATCH_ATTENTION)
         self.merge_tile = self._add_tile(BatchMergeTile(self.HEAD_DIM, self.NUM_KEY_VALUE_HEADS, self.NUM_ATTENTION_HEADS), ProfileEventType.BATCH_ATTENTION_MERGE)
         self.o_proj_tile = self._add_tile(GemmTile(self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM, "float16", "float16", self.SPLIT_O_PROJECT, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GEMM_O_PROJ)
-        self.o_allreduce_tile = self._add_tile(AllreduceTile(self.world_size), ProfileEventType.O_ALLREDUCE)
         self.o_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.SPLIT_O_PROJECT), ProfileEventType.GEMM_O_REDUCE)
+        self.o_allreduce_tile = self._add_tile(AllreduceTile(self.world_size), ProfileEventType.O_ALLREDUCE, predicate=self.world_size > 1)
         self.attn_add_rms_tile = self._add_tile(AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), ProfileEventType.ATTN_ADD_RMS_NORM)
-        self.gemm_gate_up_proj_tile = self._add_tile(GemmTile(self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE, "float16", "float16", self.GATE_UP_PROJ_SPLIT_K_FACTOR, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GEMM_GATE_UP_PROJ)
-        self.silu_multiply_tile = self._add_tile(SiluMultiplyTile(batch_size, self.INTERMEDIATE_SIZE, "float16"), ProfileEventType.SPLIT_SILU_MULTIPLY)
+        self.gate_up_silu_tile = self._add_tile(GateUpSiluTile(self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE, "float16", "float16", self.GATE_UP_PROJ_SPLIT_K_FACTOR, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GATE_UP_SILU, predicate=self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1)
+        self.gemm_gate_up_proj_tile = self._add_tile(GemmTile(self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE, "float16", "float16", self.GATE_UP_PROJ_SPLIT_K_FACTOR, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GEMM_GATE_UP_PROJ, predicate=self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1)
+        self.silu_multiply_tile = self._add_tile(SiluMultiplyTile(batch_size, self.INTERMEDIATE_SIZE, "float16"), ProfileEventType.SPLIT_SILU_MULTIPLY, predicate=self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1)
+        self.gemm_gate_up_proj_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.INTERMEDIATE_SIZE * 2, "float16", self.GATE_UP_PROJ_SPLIT_K_FACTOR), ProfileEventType.GATE_UP_PROJ_REDUCE, predicate=self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1)
         self.gemm_down_proj_tile = self._add_tile(GemmTile(self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE, "float16", "float16", self.DOWN_PROJ_SPLIT_K_FACTOR, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GEMM_DOWN_PROJ)
-        self.gemm_gate_up_proj_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.INTERMEDIATE_SIZE * 2, "float16", self.GATE_UP_PROJ_SPLIT_K_FACTOR), ProfileEventType.GATE_UP_PROJ_REDUCE)
         self.down_proj_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.DOWN_PROJ_SPLIT_K_FACTOR), ProfileEventType.DOWN_PROJ_REDUCE)
-        self.down_proj_allreduce_tile = self._add_tile(AllreduceTile(self.world_size), ProfileEventType.DOWN_PROJ_ALLREDUCE)
+        self.down_proj_allreduce_tile = self._add_tile(AllreduceTile(self.world_size), ProfileEventType.DOWN_PROJ_ALLREDUCE, predicate=self.world_size > 1)
         self.mlp_add_rms_norm_tile = self._add_tile(AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), ProfileEventType.MLP_ADD_RMS_NORM)
         
 
@@ -134,7 +134,7 @@ class MegaKernel:
 
     @T.macro
     def run_tile(self, tile, *args):
-        event_type = T.meta_var(self.tile_attr[tile])
+        event_type = T.meta_var(self.tile_attr[tile][0])
         self.smem_manager.enter_tile_runtime(tile)
         with T.cta():
             lane_id = T.thread_id([32], parent="warp")
@@ -155,28 +155,32 @@ class MegaKernel:
             if self.profiler_on:
                 self.profiler.end(ProfileEventType.PREFETCH, lane_id == 0)
 
-    def _add_tile(self, tile, profiler_event_type):
-        self.tile_attr[tile] = profiler_event_type
+    def _add_tile(self, tile, profiler_event_type, predicate=True):
+        self.tile_attr[tile] = (profiler_event_type, predicate)
         self.class_list.add(tile.__class__)
         return tile
 
     def host_init_all(self):
-        for tile in self.tile_attr.keys():
-            tile.host_init()
+        for tile, (_, predicate) in self.tile_attr.items():
+            if predicate:
+                tile.host_init()
 
     def class_init_all(self, smem_manager: SmemManager):
         for cls in self.class_list:
-            smem_manager.set_tile(cls)
-            cls.class_init(smem_manager)
+            if cls.need_init:
+                smem_manager.set_tile(cls)
+                cls.class_init(smem_manager)
 
     def class_finalize_all(self):
         for cls in self.class_list:
-            cls.class_finalize()
+            if cls.need_init:
+                cls.class_finalize()
 
     def device_init_all(self, smem_manager: SmemManager):
-        for tile in self.tile_attr.keys():
-            smem_manager.set_tile(tile)
-            tile.init(smem_manager)
+        for tile, (_, predicate) in self.tile_attr.items():
+            if predicate:
+                smem_manager.set_tile(tile)
+                tile.init(smem_manager)
             
     # fmt: off
     @T.macro
@@ -270,7 +274,10 @@ class MegaKernel:
         
         self.qkv_proj_tile.set_tensor_map(A_tensor_map_qkv_proj, B_tensor_map_qkv_proj, D_tensor_map_qkv_proj, hidden_state_global, qkv_proj_weight_global, partial_qkv_global)
         self.o_proj_tile.set_tensor_map(A_tensor_map_o_proj, B_tensor_map_o_proj, D_tensor_map_o_proj, o_global.view(-1,self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer, o_proj_weight_global, partial_o_global)
-        self.gemm_gate_up_proj_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj, hidden_state_attn_mlp_global, gate_up_weight_global, out_gate_up_proj_global if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1 else partial_out_gate_up_proj_global)
+        if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
+            self.gate_up_silu_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj, hidden_state_attn_mlp_global, gate_up_weight_global, out_silu_multiply_global)
+        else:
+            self.gemm_gate_up_proj_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj, hidden_state_attn_mlp_global, gate_up_weight_global, partial_out_gate_up_proj_global)
         self.gemm_down_proj_tile.set_tensor_map(A_tensor_map_down_proj, B_tensor_map_down_proj, D_tensor_map_down_proj, out_silu_multiply_global, down_weight_global, partial_sum_down_proj_global)
 
         self.host_init_all()
@@ -563,13 +570,24 @@ class MegaKernel:
                         if issubclass(Scheduler, DynamicTileScheduler):
                             if tid == 0:
                                 evt_attn_mlp.semaphore_notify(0, pre_notify=True)
-                            self.tile_scheduler.push_task(
-                                evt_attn_mlp, 1,
-                                lambda trigger_idx: (
-                                    -1, ceildiv(self.INTERMEDIATE_SIZE * 2, GemmTile.BLK_N) * self.GATE_UP_PROJ_SPLIT_K_FACTOR,
-                                    lambda push_idx: (JobType.GEMM_GATE_UP_PROJ.value, 0, push_idx // self.GATE_UP_PROJ_SPLIT_K_FACTOR, push_idx % self.GATE_UP_PROJ_SPLIT_K_FACTOR)
-                                ), "cta", "cta"
-                            )  
+                            if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
+                                self.tile_scheduler.push_task(
+                                    evt_attn_mlp, 1,
+                                    lambda trigger_idx: (
+                                        -1, self.INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N,
+                                        lambda push_idx: (JobType.GATE_UP_SILU.value, 0, push_idx, 0)
+                                    ), "cta", "cta"
+                                )  
+                            else:
+                                self.tile_scheduler.push_task(
+                                    evt_attn_mlp, 1,
+                                    lambda trigger_idx: (
+                                        -1, self.INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N * self.GATE_UP_PROJ_SPLIT_K_FACTOR,
+                                        lambda push_idx: (JobType.GEMM_GATE_UP_PROJ.value, 0, ((push_idx // 2) // self.GATE_UP_PROJ_SPLIT_K_FACTOR 
+                                                                                                + (push_idx % 2) * self.INTERMEDIATE_SIZE // GemmTile.BLK_N),
+                                                                                                (push_idx // 2) % self.GATE_UP_PROJ_SPLIT_K_FACTOR)
+                                    ), "cta", "cta"
+                                )  
                         if self.world_size == 1:
                             evt_attn_add_rms.semaphore_wait(self.tile_scheduler.m_idx // self.o_reduce_tile.M_TILE)
                         else:
@@ -579,31 +597,10 @@ class MegaKernel:
                         if tid == 0:
                             evt_attn_mlp.semaphore_notify(0)
                     elif self.tile_scheduler.task_type == JobType.GEMM_GATE_UP_PROJ.value:
-                        self.run_tile_prefetch(self.gemm_gate_up_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
-                        if issubclass(Scheduler, DynamicTileScheduler):
-                            if wg_id == 0:
-                                if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
-                                    if self.tile_scheduler.n_idx >= self.INTERMEDIATE_SIZE // GemmTile.BLK_N:
-                                        if tid == 0:
-                                            evt_gate_up_proj.semaphore_notify(self.tile_scheduler.n_idx - self.INTERMEDIATE_SIZE // GemmTile.BLK_N, pre_notify=True)
-                                        self.tile_scheduler.push_task(
-                                            evt_gate_up_proj, 1,
-                                            lambda trigger_idx: (
-                                                -1, 1,
-                                                lambda push_idx: (JobType.SPLIT_SILU_MULTIPLY.value, self.tile_scheduler.n_idx - self.INTERMEDIATE_SIZE // GemmTile.BLK_N, 0, 0)
-                                            ), "thread", "thread"
-                                        )
-                                    else:
-                                        if tid == 0:
-                                            evt_gate_up_proj.semaphore_notify(self.tile_scheduler.n_idx, pre_notify=True)
-                                        self.tile_scheduler.push_task(
-                                            evt_gate_up_proj, 1,
-                                            lambda trigger_idx: (
-                                                -1, 1,
-                                                lambda push_idx: (JobType.SPLIT_SILU_MULTIPLY.value, self.tile_scheduler.n_idx, 0, 0)
-                                            ), "thread", "thread"
-                                        )
-                                else:
+                        if self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1:
+                            self.run_tile_prefetch(self.gemm_gate_up_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+                            if issubclass(Scheduler, DynamicTileScheduler):
+                                if wg_id == 0:
                                     if tid == 0:
                                         evt_gate_up_proj_reduce.semaphore_notify(self.tile_scheduler.n_idx, pre_notify=True)
                                     self.tile_scheduler.push_task(
@@ -613,20 +610,33 @@ class MegaKernel:
                                             lambda push_idx: (JobType.GATE_UP_PROJ_REDUCE.value, push_idx, self.tile_scheduler.n_idx, 0)
                                         ), "warpgroup", "warpgroup"
                                     )
-                        evt_attn_mlp.semaphore_wait_warp(0)
-                        self.run_tile(self.gemm_gate_up_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
-                        if wg_id == 0:
-                            T.ptx.bar.sync(1, 128)
-                            if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
-                                if self.tile_scheduler.n_idx >= self.INTERMEDIATE_SIZE // GemmTile.BLK_N:
-                                    if tid == 0:
-                                        evt_gate_up_proj.semaphore_notify(self.tile_scheduler.n_idx - self.INTERMEDIATE_SIZE // GemmTile.BLK_N)
-                                else:
-                                    if tid == 0:
-                                        evt_gate_up_proj.semaphore_notify(self.tile_scheduler.n_idx)
-                            else:
+                            evt_attn_mlp.semaphore_wait_warp(0)
+                            self.run_tile(self.gemm_gate_up_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+                            if wg_id == 0:
+                                T.ptx.bar.sync(1, 128)
                                 if tid == 0:
                                     evt_gate_up_proj_reduce.semaphore_notify(self.tile_scheduler.n_idx)
+                    elif self.tile_scheduler.task_type == JobType.GATE_UP_SILU.value:
+                        if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
+                            range_start = self.tile_scheduler.n_idx * GateUpSiluTile.BLK_N // 2 // self.gemm_down_proj_tile.TILE_K
+                            range_end = ((self.tile_scheduler.n_idx + 1) * GateUpSiluTile.BLK_N // 2 - 1) // self.gemm_down_proj_tile.TILE_K
+                            if issubclass(Scheduler, DynamicTileScheduler):
+                                if tid <= range_end - range_start:
+                                    evt_down_proj.semaphore_notify(range_start + tid, pre_notify=True)
+                                self.tile_scheduler.push_task(
+                                    evt_down_proj, range_end - range_start + 1,
+                                    lambda trigger_idx: (
+                                        -1, ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
+                                        lambda push_idx: (JobType.GEMM_DOWN_PROJ.value, 0, push_idx, range_start + trigger_idx)
+                                    ), "warp", "warpgroup"
+                                )
+                            self.run_tile_prefetch(self.gate_up_silu_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+                            evt_attn_mlp.semaphore_wait_warp(0)
+                            self.run_tile(self.gate_up_silu_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+                            if wg_id == 0:
+                                T.ptx.bar.sync(1, 128)
+                                if tid <= range_end - range_start:
+                                    evt_down_proj.semaphore_notify(range_start + tid)
                     elif self.tile_scheduler.task_type == JobType.GATE_UP_PROJ_REDUCE.value:
                         if self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1:
                             if issubclass(Scheduler, DynamicTileScheduler):
@@ -660,23 +670,24 @@ class MegaKernel:
                                 if tid == 0:
                                     evt_gate_up_proj.semaphore_notify(self.tile_scheduler.n_idx)
                     elif self.tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
-                        range_start = self.tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // self.gemm_down_proj_tile.TILE_K
-                        range_end = ((self.tile_scheduler.m_idx + 1) * SiluMultiplyTile.TILE_SIZE - 1) // self.gemm_down_proj_tile.TILE_K
-                        if issubclass(Scheduler, DynamicTileScheduler):
+                        if self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1:
+                            range_start = self.tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // self.gemm_down_proj_tile.TILE_K
+                            range_end = ((self.tile_scheduler.m_idx + 1) * SiluMultiplyTile.TILE_SIZE - 1) // self.gemm_down_proj_tile.TILE_K
+                            if issubclass(Scheduler, DynamicTileScheduler):
+                                if tid <= range_end - range_start:
+                                    evt_down_proj.semaphore_notify(range_start + tid, pre_notify=True)
+                                self.tile_scheduler.push_task(
+                                    evt_down_proj, range_end - range_start + 1,
+                                    lambda trigger_idx: (
+                                        -1, ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
+                                        lambda push_idx: (JobType.GEMM_DOWN_PROJ.value, 0, push_idx, range_start + trigger_idx)
+                                    ), "warp", "cta"
+                                )
+                            evt_gate_up_proj.semaphore_wait_warp(self.tile_scheduler.m_idx)
+                            self.run_tile(self.silu_multiply_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, out_gate_up_proj_global, out_silu_multiply_global, self.tile_scheduler)
+                            T.tvm_storage_sync("shared")
                             if tid <= range_end - range_start:
-                                evt_down_proj.semaphore_notify(range_start + tid, pre_notify=True)
-                            self.tile_scheduler.push_task(
-                                evt_down_proj, range_end - range_start + 1,
-                                lambda trigger_idx: (
-                                    -1, ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
-                                    lambda push_idx: (JobType.GEMM_DOWN_PROJ.value, 0, push_idx, range_start + trigger_idx)
-                                ), "warp", "cta"
-                            )
-                        evt_gate_up_proj.semaphore_wait_warp(self.tile_scheduler.m_idx)
-                        self.run_tile(self.silu_multiply_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, out_gate_up_proj_global, out_silu_multiply_global, self.tile_scheduler)
-                        T.tvm_storage_sync("shared")
-                        if tid <= range_end - range_start:
-                            evt_down_proj.semaphore_notify(range_start + tid)
+                                evt_down_proj.semaphore_notify(range_start + tid)
                     elif self.tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
                         self.run_tile_prefetch(self.gemm_down_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                         if issubclass(Scheduler, DynamicTileScheduler):
@@ -763,9 +774,6 @@ class MegaKernel:
                         else:
                             evt_add_rms_norm.semaphore_wait(self.tile_scheduler.m_idx // self.down_proj_allreduce_tile.M_TILE)
                         self.run_tile(self.mlp_add_rms_norm_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, output_global, residual_global, mlp_add_rms_weight_global)
-                        if issubclass(Scheduler, DynamicTileScheduler):
-                            if tid == 0:
-                                evt_end.semaphore_notify(0)
                     else:
                         trap_when_assert_failed(False)
                     smem_manager.exit_tile_runtime()
@@ -1496,6 +1504,19 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
         tvm_arg_dict = {}
         target = tvm.target.Target("cuda")
 
+        # preprocess the buffer used in the tir kernel
+        if mk.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
+            # reorder the gate_up_weight for the fusion of gate_up projection and silu
+            new_order_indices = np.stack(
+                (
+                    np.arange(mk.INTERMEDIATE_SIZE).reshape(-1, 16),
+                    np.arange(mk.INTERMEDIATE_SIZE, mk.INTERMEDIATE_SIZE * 2).reshape(-1, 16)
+                ), axis=1
+            ).reshape(-1)      
+            if mk.world_size > 1:      
+                gate_up_weight = arg_dict["gate_up_weight"][:, new_order_indices, :]
+            else:
+                gate_up_weight = arg_dict["gate_up_weight"][new_order_indices, :]
         tvm_arg_dict["o_partial_attn"] = tvm.runtime.tensor(
             np.zeros([mk.MAX_NUM_KV_SPLITS * mk.NUM_KEY_VALUE_HEADS * mk.HEAD_DIM], dtype=np.float32),
             DEV,
@@ -1535,7 +1556,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
             # exec_queue = generate_exec_queue_static(
             #     batch_size,
             #     arg_dict["attn_task_num"].item(),
-            #     1,
+            #     mk.world_size,
             #     mk.NUM_ATTENTION_HEADS,
             #     mk.NUM_KEY_VALUE_HEADS,
             #     mk.HEAD_DIM,
@@ -1564,6 +1585,8 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
         for key, value in arg_dict.items():
             tvm_arg_dict[key] = tvm.runtime.tensor(value, device=DEV)
         tvm_arg_dict["append_pos"] = tvm.runtime.tensor(append_pos, device=DEV)
+        if mk.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
+            tvm_arg_dict["gate_up_weight"] = tvm.runtime.tensor(gate_up_weight, device=DEV)
         for i in range(REPEAT):
             tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"], device=DEV)
             # generate event tensor
@@ -1657,7 +1680,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                 rt_mod = sess.load_vm_module(path)
                 sess._sync_all()
 
-
+        # run
         with target:
             iter = 0
             
@@ -1815,7 +1838,8 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                         work_arg_dict[f"profiler_buffer"],
                     )
                     iter += 1
-                    
+                 
+            # post process   
             if mk.world_size == 1:         
                 ms = bench(func, warmup=1, repeat=10, proton_name=f"tir-{scheduler}")
                 print(f"TIR time: {ms:.3f} ms")
@@ -2001,9 +2025,9 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
         output_std1, residual_std1 = std(arg_dict, use_prefill=True, mk=mega_kernel_wrapper)
         output_std2, residual_std2 = std(arg_dict, use_prefill=False, mk=mega_kernel_wrapper)
 
-        # this assert fails on latest flashinfer version
-        # np.testing.assert_allclose(output_std1, output_std2, rtol=1e-3, atol=1e-2)
-        # np.testing.assert_allclose(residual_std1, residual_std2, rtol=1e-3, atol=1e-2)
+        # this assert will fail on latest flashinfer version
+        np.testing.assert_allclose(output_std1, output_std2, rtol=1e-3, atol=1e-2)
+        np.testing.assert_allclose(residual_std1, residual_std2, rtol=1e-3, atol=1e-2)
         if mega_kernel_static["main"] is not None:
             np.testing.assert_allclose(output_tir_static, output_std1, rtol=1e-3, atol=1e-2)
             np.testing.assert_allclose(residual_tir_static, residual_std1, rtol=1e-3, atol=1e-2)

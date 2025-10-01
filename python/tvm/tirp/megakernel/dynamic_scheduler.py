@@ -56,8 +56,13 @@ __forceinline__ __device__ void stg(int32_t v, void* dst_addr, int32_t pe) {
 atomic_add_system = """
 __forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t value, int32_t pe) {
     if (pe >= 0) {
-        void* ptr = nvshmem_ptr(addr, pe);
-        return atomicAdd((int32_t*)ptr, value);
+        int32_t* ptr = (int32_t*)(nvshmem_ptr(addr, pe));
+        int32_t old_value;
+        asm volatile ("atom.release.gpu.global.add.u32 %0, [%1], %2;"
+                     : "=r"(old_value)
+                     : "l"(ptr), "r"(value)
+                     : "memory");
+        return old_value;
     }
     else {
         return atomicAdd(addr, value);

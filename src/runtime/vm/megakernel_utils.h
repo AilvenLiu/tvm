@@ -78,18 +78,7 @@ enum class JobType : int32_t {
   kGemmDownProj = 14,
   kSplitSiluMultiply = 15,
   kGemmGateUpProj = 16,
-
-  // the following are not used now
-  kGemmQKVReduce = 17,
-  kRMSNorm = 18,
-  kRope = 19,
-  kAppendKV = 20,
-  kBatchDecodeNoSplit = 21,
-  kBatchDecodeSplit = 22,
-  kDecodeMerge = 23,
-  kKRMSNormRopeAppendKV = 24,
-  kQRMSNormRope = 25,
-  kVAppendKV = 26,
+  kGateUpSilu = 17,
   
   // end
   kEnd = 31,

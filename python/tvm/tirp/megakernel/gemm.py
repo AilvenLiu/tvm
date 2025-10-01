@@ -1,6 +1,5 @@
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import CudaProfiler
 
 from tvm.tirp.megakernel.common import (

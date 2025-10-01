@@ -83,12 +83,6 @@ class SiluMultiplyTile(Tile):
                 self.smem_manager.arrive_all("cta")
                 self.smem_manager.advance()
 
-                # TODO: prefetch
-                # if isinstance(tile_scheduler, DynamicTileScheduler):
-                # if self.prefetch_round > 0:
-                #     if tid // 32 == tile_scheduler.scheduler_warp:
-                #         tile_scheduler.prefetch()
-
 class SiluMultiplyMOETile(SiluMultiplyTile):
     
     TILE_SIZE = 768

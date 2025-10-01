@@ -49,9 +49,11 @@ def test(args):
     # model config
     TP_SIZE = args.tp_size
     NUM_HIDDEN_LAYERS = 64
-    LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
+    # notes: "/raid/catalyst/models/Qwen3-32B-q0f16-MLC" is the weights converted directly from huggingface
+    #        "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" is the weights converted with interwoven gate_up_weight
+    LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" if TP_SIZE == 1 else "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
     MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/Qwen3-32B-q0f16-tp{TP_SIZE}.so"
-    MEGA_LIB_PATH = f"{Path('~/megalib').expanduser()}/Qwen3-32B-q0f16-MLC-tp{TP_SIZE}-profiler{'on' if PROFILER_ON else 'off'}.so"  # NOTE: update this path
+    MEGA_LIB_PATH = f"{Path('~/megalib').expanduser()}/Qwen3-32B-q0f16-MLC-{args.scheduler}-tp{TP_SIZE}-profiler{'on' if PROFILER_ON else 'off'}.so"  # NOTE: update this path
     DEBUG_PATH = Path("~/qwen3-mg-debug").expanduser()  # NOTE: update this path
 
     # LOAD_WEIGHTS = None  # generate weights
@@ -88,7 +90,7 @@ def test(args):
         dtype="float32",
         max_batch_size=256,
         weight_block_size=None,
-        kwargs={},
+        kwargs={"megakernel": True},
     )
 
     def init_disco_session():
@@ -508,7 +510,7 @@ def test(args):
                             compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
 
                 @T.prim_func(private=True)
-                def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
+                def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle, profiler_buffer_ptr: T.handle):
                     pass
 
                 @T.prim_func(private=True)
@@ -779,8 +781,9 @@ def test(args):
 
                         # permute_dims4 = R.permute_dims(lm_head_weight1, axes=None)
                         # lv4: R.Tensor((batch_size, 151936), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
-                        rs4 = R.call_tir(cls.hgemm, (o_layer63[0], lm_head_weight1), out_sinfo=R.Tensor((tile_k_num, batch_size, 151936), dtype="float32"))
-                        lv4 = R.call_tir(cls.reduce, (rs4,), out_sinfo=R.Tensor((batch_size, 151936), dtype="float16"))
+                        rs4 = R.call_tir(cls.hgemm, (o_layer63[0], lm_head_weight1),
+                                         out_sinfo=[R.Tensor((tile_k_num, batch_size, 151936), dtype="float32"), R.Tensor([T.int64(2e6)], dtype="uint64")])
+                        lv4 = R.call_tir(cls.reduce, (rs4[0],), out_sinfo=R.Tensor((batch_size, 151936), dtype="float16"))
 
                         lv4_rs = R.reshape(lv4, (batch_size, 1, 151936))
                         astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, 151936), dtype="float32"))
@@ -1006,7 +1009,7 @@ def test(args):
                             compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
 
                 @T.prim_func(private=True)
-                def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
+                def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle, profiler_buffer_ptr: T.handle):
                     pass
 
                 @T.prim_func(private=True)
@@ -1268,8 +1271,9 @@ def test(args):
 
                         # permute_dims4 = R.permute_dims(lm_head_weight1, axes=None)
                         # lv4: R.Tensor((batch_size, 151936), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
-                        rs4 = R.call_tir(cls.hgemm, (o_layer63[0], lm_head_weight1), out_sinfo=R.Tensor((tile_k_num, batch_size, 151936), dtype="float32"))
-                        lv4 = R.call_tir(cls.reduce, (rs4,), out_sinfo=R.Tensor((batch_size, 151936), dtype="float16"))
+                        rs4 = R.call_tir(cls.hgemm, (o_layer63[0], lm_head_weight1),
+                                         out_sinfo=[R.Tensor((tile_k_num, batch_size, 151936), dtype="float32"), R.Tensor([T.int64(2e6)], dtype="uint64")])
+                        lv4 = R.call_tir(cls.reduce, (rs4[0],), out_sinfo=R.Tensor((batch_size, 151936), dtype="float16"))
 
                         lv4_rs = R.reshape(lv4, (batch_size, 1, 151936))
                         astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, 151936), dtype="float32"))

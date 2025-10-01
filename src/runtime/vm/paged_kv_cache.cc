@@ -1394,6 +1394,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       int split_qkv_project = megakernel::kSplitQKVProject[tp_size];
       int split_o_project = megakernel::kSplitOProject[tp_size];
       int down_proj_split_k_factor = megakernel::kDownProjSplitKFactor[tp_size];
+      int gate_up_proj_factor = megakernel::kGateUpProjSplitKFactor[tp_size];
       TVM_FFI_ICHECK_NE(split_qkv_project, -1);
       TVM_FFI_ICHECK_NE(split_o_project, -1);
       TVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
@@ -1440,8 +1441,8 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
         for (int i = 0; i < megakernel::kNumSM; ++i) {
           int cnt = (i < remain) ? unit + num : num;
-          CHECK_LE(cnt, megakernel::kSemaphoreBase);
-          CHECK_LT(cnt * (megakernel::kSemaphoreBase + 1), megakernel::kMaxSemaphore);
+          TVM_FFI_ICHECK_LE(cnt, megakernel::kSemaphoreBase);
+          TVM_FFI_ICHECK_LT(cnt * (megakernel::kSemaphoreBase + 1), megakernel::kMaxSemaphore);
           etensor_notify_attn_host_.set(layer_id * megakernel::kNumSM + i,
                                         cnt * (megakernel::kSemaphoreBase + 1));
         }
@@ -1500,9 +1501,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       }
       for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
         for (int i = 0; i < split_o_project; ++i) {
-          CHECK_LE(etensor_o_proj_host_[layer_id * split_o_project + i],
+          TVM_FFI_ICHECK_LE(etensor_o_proj_host_[layer_id * split_o_project + i],
                    megakernel::kSemaphoreBase);
-          CHECK_LT(etensor_o_proj_host_[layer_id * split_o_project + i] *
+          TVM_FFI_ICHECK_LT(etensor_o_proj_host_[layer_id * split_o_project + i] *
                        (megakernel::kSemaphoreBase + 1),
                    megakernel::kMaxSemaphore);
           etensor_o_proj_host_.set(layer_id * split_o_project + i,
@@ -1517,27 +1518,47 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
           (ceildiv(ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, down_proj_split_k_factor),
                    megakernel::kGemmTileBlkK) *
            megakernel::kGemmTileBlkK);
-      for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
-        for (int m = 0;
-             m < megakernel::kIntermediateSizeTP1 / tp_size / megakernel::kSiluMultiplyTileTileSize;
-             ++m) {
-          int range_start = m * megakernel::kSiluMultiplyTileTileSize / down_proj_tile_k;
-          int range_end = ((m + 1) * megakernel::kSiluMultiplyTileTileSize - 1) / down_proj_tile_k;
-          for (int i = range_start; i <= range_end; ++i) {
-            TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
-            TVM_FFI_ICHECK_LT(i, down_proj_split_k_factor)
-                << "Index " << i << " out of bounds " << down_proj_split_k_factor;
-            etensor_down_proj_host_.set(
-                layer_id * down_proj_split_k_factor + i,
-                etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] + 1);
+      if (gate_up_proj_factor == 1) {
+        for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+          for (int m = 0;
+               m < (megakernel::kIntermediateSizeTP1 / tp_size) * 2 / megakernel::kGemmTileBlkN;
+               ++m) {
+            int range_start = m * megakernel::kGemmTileBlkN / 2 / down_proj_tile_k;
+            int range_end = ((m + 1) * megakernel::kGemmTileBlkN / 2 - 1) / down_proj_tile_k;
+            for (int i = range_start; i <= range_end; ++i) {
+              TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
+              TVM_FFI_ICHECK_LT(i, down_proj_split_k_factor)
+                  << "Index " << i << " out of bounds " << down_proj_split_k_factor;
+              etensor_down_proj_host_.set(
+                  layer_id * down_proj_split_k_factor + i,
+                  etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] + 1);
+            }
+          }
+        }
+      } else {
+        for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
+          for (int m = 0; m < megakernel::kIntermediateSizeTP1 / tp_size /
+                                  megakernel::kSiluMultiplyTileTileSize;
+               ++m) {
+            int range_start = m * megakernel::kSiluMultiplyTileTileSize / down_proj_tile_k;
+            int range_end =
+                ((m + 1) * megakernel::kSiluMultiplyTileTileSize - 1) / down_proj_tile_k;
+            for (int i = range_start; i <= range_end; ++i) {
+              TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
+              TVM_FFI_ICHECK_LT(i, down_proj_split_k_factor)
+                  << "Index " << i << " out of bounds " << down_proj_split_k_factor;
+              etensor_down_proj_host_.set(
+                  layer_id * down_proj_split_k_factor + i,
+                  etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] + 1);
+            }
           }
         }
       }
       for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
         for (int i = 0; i < down_proj_split_k_factor; ++i) {
-          CHECK_LE(etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i],
+          TVM_FFI_ICHECK_LE(etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i],
                    megakernel::kSemaphoreBase);
-          CHECK_LT(etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] *
+          TVM_FFI_ICHECK_LT(etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] *
                        (megakernel::kSemaphoreBase + 1),
                    megakernel::kMaxSemaphore);
           etensor_down_proj_host_.set(
@@ -1563,9 +1584,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     }
     for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
       for (int i = 0; i < cur_batch_size_ * num_kv_heads_; ++i) {
-        CHECK_LE(etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ + i],
+        TVM_FFI_ICHECK_LE(etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ + i],
                  megakernel::kSemaphoreBase);
-        CHECK_LT(etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ + i] *
+        TVM_FFI_ICHECK_LT(etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ + i] *
                      (megakernel::kSemaphoreBase + 1),
                  megakernel::kMaxSemaphore);
         etensor_attn_merge_host_.set(

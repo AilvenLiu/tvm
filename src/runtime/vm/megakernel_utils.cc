@@ -162,12 +162,19 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size, i
     f_push_task(m_idx, -1, -1, JobType::kAttnAddRMSNorm);
   }
 
-  for (int n_idx = 0; n_idx < ceildiv(kIntermediateSizeTP1 / tp_size * 2, kGemmTileBlkN); ++n_idx) {
-    for (int k_idx = 0; k_idx < gate_up_proj_split_k_factor; ++k_idx) {
-      f_push_task(0, n_idx, k_idx, JobType::kGemmGateUpProj);
+  if (gate_up_proj_split_k_factor == 1) {
+    CHECK_EQ((kIntermediateSizeTP1 / tp_size) % kGemmTileBlkN, 0);
+    for (int n_idx = 0; n_idx < 2 * (kIntermediateSizeTP1 / tp_size) / kGemmTileBlkN; ++n_idx) {
+      f_push_task(0, n_idx, 0, JobType::kGateUpSilu);
     }
-  }
-  if (gate_up_proj_split_k_factor > 1) {
+  } else {
+    CHECK_EQ((kIntermediateSizeTP1 / tp_size) % kGemmTileBlkN, 0);
+    for (int n_idx = 0; n_idx < (kIntermediateSizeTP1 / tp_size) / kGemmTileBlkN; ++n_idx) {
+      for (int k_idx = 0; k_idx < gate_up_proj_split_k_factor; ++k_idx) {
+        f_push_task(0, n_idx, k_idx, JobType::kGemmGateUpProj);
+        f_push_task(0, n_idx + (kIntermediateSizeTP1 / tp_size) / kGemmTileBlkN, k_idx, JobType::kGemmGateUpProj);
+      }
+    }
     int32_t m_split_gate_up_proj_reduce = std::min(
         batch_size, kNumSM / (kIntermediateSizeTP1 / tp_size * 2 / kSplitKReduceTileNUnit));
     int32_t m_tile_gate_up_proj_reduce = ceildiv(batch_size, m_split_gate_up_proj_reduce);
@@ -178,12 +185,12 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size, i
         f_push_task(m_idx, n_idx, 0, JobType::kGateUpProjReduce);
       }
     }
+    for (int n_idx = 0; n_idx < ceildiv(kIntermediateSizeTP1 / tp_size, kSiluMultiplyTileTileSize);
+        ++n_idx) {
+      f_push_task(n_idx, 0, 0, JobType::kSplitSiluMultiply);
+    }
   }
 
-  for (int n_idx = 0; n_idx < ceildiv(kIntermediateSizeTP1 / tp_size, kSiluMultiplyTileTileSize);
-       ++n_idx) {
-    f_push_task(n_idx, 0, 0, JobType::kSplitSiluMultiply);
-  }
 
   for (int n_idx = 0; n_idx < ceildiv(kHiddenSize, kGemmTileBlkN); ++n_idx) {
     for (int k_idx = 0; k_idx < down_proj_split_k_factor; ++k_idx) {
