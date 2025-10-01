@@ -37,6 +37,12 @@ from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_config import (
     try_get_optimal_moe_config,
 )
+from sglang.srt.layers.moe.fused_moe_triton.fused_moe import (
+    fused_moe as fused_moe_triton,
+)
+from sglang.srt.layers.moe.topk import StandardTopKOutput
+from sglang.srt.layers.moe import MoeRunnerConfig
+import flashinfer.fused_moe as fused_moe
 from triton import language as tl
 
 # TODO: fix abnormal slowness of batch-attn on the first tile
@@ -650,6 +656,23 @@ class MegaKernel:
         return module
 
 
+def fused_moe_sglang(
+    hidden_states,
+    w13,
+    w2,
+    router_logits,
+    routing_weights,
+    selected_experts,
+):
+    topk_output = StandardTopKOutput(
+        topk_weights=routing_weights,
+        topk_ids=selected_experts,
+        router_logits=router_logits,
+    )
+    moe_config = MoeRunnerConfig(inplace=False)
+    return fused_moe_triton(hidden_states, w13, w2, topk_output, moe_config)
+
+
 arg_dict = {}
 
 
@@ -704,6 +727,9 @@ def prepare_data(batch_size, mk: MegaKernel):
     for i in range(mk.NUM_EXPERTS):
         torch.nn.init.xavier_normal_(arg_dict["grp_gate_up_weight"][i], gain=1.0)
     arg_dict["grp_gate_up_weight"] = arg_dict["grp_gate_up_weight"].cpu()
+    w1 = arg_dict["grp_gate_up_weight"]
+    arg_dict["grp_up_gate_weight"] = torch.cat((w1[:, mk.INTERMEDIATE_SIZE:, :], w1[:, :mk.INTERMEDIATE_SIZE, :]), dim=1).contiguous()
+
     arg_dict["grp_down_weight"] = _correct_weight_tensor_view(
         torch.zeros(
             (mk.world_size, mk.NUM_EXPERTS, mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE),
@@ -1009,6 +1035,59 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
         print(f"std time: {ms:.3f} ms")
         return output
 
+    def flashinfer(arg_dict):
+        torch_dev = torch.device("cuda")
+        std_arg_dict = {}
+        for key, value in arg_dict.items():
+            std_arg_dict[key] = value.clone().to(torch_dev)
+        output = torch.zeros_like(std_arg_dict["hidden_state"])
+        def func():
+            gating_output = std_arg_dict["hidden_state"] @ std_arg_dict["gate_weight"].T
+            topk_softmax(
+                gating_output=gating_output,
+                topk_weights=std_arg_dict["topk_weights"],
+                topk_ids=std_arg_dict["topk_indices"],
+            )
+            return fused_moe.cutlass_fused_moe(
+                std_arg_dict["hidden_state"],
+                std_arg_dict["topk_indices"].to(torch.int),
+                std_arg_dict["topk_weights"],
+                std_arg_dict["grp_up_gate_weight"],
+                std_arg_dict["grp_down_weight"],
+                std_arg_dict["hidden_state"].dtype,
+                quant_scales=[],
+                output=output,
+            )
+        ms = bench(func, warmup=10, repeat=30, proton_name=f"flashinfer")
+        print(f"flashinfer time: {ms:.3f} ms")
+        return output.cpu().numpy()
+    
+    def sglang_fused(arg_dict):
+        torch_dev = torch.device("cuda")
+        std_arg_dict = {}
+        for key, value in arg_dict.items():
+            std_arg_dict[key] = value.clone().to(torch_dev)
+        output = torch.zeros_like(std_arg_dict["hidden_state"])
+        def func():
+            gating_output = std_arg_dict["hidden_state"] @ std_arg_dict["gate_weight"].T
+            topk_softmax(
+                gating_output=gating_output,
+                topk_weights=std_arg_dict["topk_weights"],
+                topk_ids=std_arg_dict["topk_indices"],
+            )
+            return fused_moe_sglang(
+                std_arg_dict["hidden_state"],
+                std_arg_dict["grp_gate_up_weight"],
+                std_arg_dict["grp_down_weight"],
+                gating_output,
+                std_arg_dict["topk_weights"],
+                std_arg_dict["topk_indices"].to(torch.int),
+            )
+        output = func()
+        ms = bench(func, warmup=10, repeat=30, proton_name=f"sglang_fused")
+        print(f"sglang_fused time: {ms:.3f} ms")
+        return output.cpu().numpy()
+
     def run():
         if mega_kernel_static["main"] is not None:
             output1_tir_static = tir(arg_dict, mega_kernel_wrapper, "static")
@@ -1017,7 +1096,10 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
             output1_tir_dynamic = tir(arg_dict, mega_kernel_wrapper, "dynamic")
             print("dynamic tir finish", flush=True)
         output1_std = std(arg_dict, mk=mega_kernel_wrapper)
-
+        output1_flashinfer = flashinfer(arg_dict)
+        np.testing.assert_allclose(output1_flashinfer, output1_std, rtol=1e-3, atol=1e-2)
+        output1_sglang_fused = sglang_fused(arg_dict)
+        np.testing.assert_allclose(output1_sglang_fused, output1_std, rtol=1e-3, atol=1e-2)
         if mega_kernel_static["main"] is not None:
             # std and tir might choose different experts because slight difference in gating output
             try:
