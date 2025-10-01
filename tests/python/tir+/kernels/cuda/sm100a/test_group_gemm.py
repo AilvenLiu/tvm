@@ -90,7 +90,7 @@ def gen_input(batch_size, hidden_size, num_experts, top_k, intermediate_size):
     )
 
 
-def get_group_gemm_kernel(K, E, top_k, N, reorder_output=False):
+def get_group_gemm_kernel(K, E, top_k, N, acc_output=False):
 
     class TileScheduler:
 
@@ -145,7 +145,7 @@ def get_group_gemm_kernel(K, E, top_k, N, reorder_output=False):
         C_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         group_gemm_tile = T.meta_var(
             GroupGEMMTile(
-                N, K, E, top_k,"float16", "float16", BLK_M, BLK_M, reorder_output, False, False
+                N, K, E, top_k,"float16", "float16", BLK_M, BLK_M, acc_output, False, False
             )
         )
         group_gemm_tile.set_tensor_map(A_tensor_map, B_tensor_map, C_tensor_map, A, B, C)
@@ -228,14 +228,14 @@ def test_group_gemm(task):
             num_experts,
             top_k,
             intermediate_size * 2,
-            reorder_output=False,
+            acc_output=False,
         )
         grp_gemm2 = get_group_gemm_kernel(
             intermediate_size,
             num_experts,
             top_k,
             hidden_size,
-            reorder_output=True,
+            acc_output=True,
         )
         with target:
             mod_1 = tvm.IRModule({"main": grp_gemm1})
@@ -267,21 +267,34 @@ def test_group_gemm(task):
 
             ms = bench(func1, warmup=0, repeat=30, proton_name="tir1")
             ms = bench(func2, warmup=0, repeat=30, proton_name="tir2")
+            # reset out2 to get the correct result
+            out2_tvm = tvm.runtime.empty(
+                (num_tokens_post_padded.item(), hidden_size), dtype="float16", device=dev
+            )
+            mod_2(
+                x2_tvm,
+                w2_tvm,
+                out2_tvm,
+                expert_ids_tvm,
+                sorted_token_ids_tvm,
+                routing_weights_tvm,
+                num_tokens_post_padded_tvm,
+            )
 
-        def scatter_out(out_tvm, *shape):
-            tmp_out = torch.from_numpy(out_tvm.numpy())
-            out = torch.zeros(shape, dtype=torch.float16)
-            index_for_scatter = sorted_token_ids[: num_tokens_post_padded.item()].cpu()
-            for i in range(num_tokens_post_padded.item()):
-                if index_for_scatter[i] >= 0 and index_for_scatter[i] < shape[0]:
-                    out[index_for_scatter[i]] = tmp_out[i]
-            return out
+            def scatter_out(out_tvm, *shape):
+                tmp_out = torch.from_numpy(out_tvm.numpy())
+                out = torch.zeros(shape, dtype=torch.float16)
+                index_for_scatter = sorted_token_ids[: num_tokens_post_padded.item()].cpu()
+                for i in range(num_tokens_post_padded.item()):
+                    if index_for_scatter[i] >= 0 and index_for_scatter[i] < shape[0]:
+                        out[index_for_scatter[i]] = tmp_out[i]
+                return out
 
-        out1 = scatter_out(out1_tvm, batch_size * top_k, intermediate_size * 2).view(
-            batch_size, top_k, intermediate_size * 2
-        )
-        out2 = out2_tvm.numpy()[: batch_size * top_k, :].reshape(batch_size, top_k, hidden_size)
-        return out1, out2
+            out1 = scatter_out(out1_tvm, batch_size * top_k, intermediate_size * 2).view(
+                batch_size, top_k, intermediate_size * 2
+            )
+            out2 = out2_tvm.numpy()[: batch_size, :]
+            return out1, out2
 
     def sglang():
         def get_config(batch_size):
@@ -360,14 +373,14 @@ def test_group_gemm(task):
 
         ms2 = bench(func2, warmup=3, repeat=30, proton_name="sglang gemm2", debug=DEBUG)
         print("sglang gemm2", ms2)
-        return out1.cpu().numpy(), out2.cpu().numpy()
+        return out1.cpu().numpy(), out2.sum(dim=1).cpu().numpy()
 
     with ProtonContext("group_gemm", debug=DEBUG):
         out1_tir, out2_tir = tir()
         out1_sglang, out2_sglang = sglang()
 
     np.testing.assert_allclose(out1_tir, out1_sglang, rtol=1e-3, atol=1e-3)
-    np.testing.assert_allclose(out2_tir, out2_sglang, rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(out2_tir, out2_sglang, rtol=2e-2, atol=2e-2)
 
 
 if __name__ == "__main__":

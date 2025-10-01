@@ -472,15 +472,6 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
     for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
         for n_idx in range(HIDDEN_SIZE // GroupGEMMTile.BLK_N):
             central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
-    m_split_topk_reduce = min(
-        batch_size,
-        ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT),
-    )
-    m_tile_topk_reduce = ceildiv(batch_size, m_split_topk_reduce)
-    m_split_topk_reduce = ceildiv(batch_size, m_tile_topk_reduce)
-    for m_idx in range(m_split_topk_reduce):
-        for n_idx in range(HIDDEN_SIZE // MOETopKReduceTile.N_UNIT):
-            central_queue.append((m_idx, n_idx, 0, JobType.MOE_TOPK_REDUCE.value))
 
     tile_idx = 0
     while len(central_queue) > 0:
@@ -670,7 +661,6 @@ def generate_event_tensor_moe(batch_size, WORLD_SIZE):
         device=DEV,
     )
     etensor_group_gemm_down = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * HIDDEN_SIZE // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
-    etensor_topk_reduce = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
     etensor_end = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
     return (
         etensor_gating,
@@ -680,7 +670,6 @@ def generate_event_tensor_moe(batch_size, WORLD_SIZE):
         etensor_group_gemm_gate_up,
         etensor_silu_mul,
         etensor_group_gemm_down,
-        etensor_topk_reduce,
         etensor_end,
     )
 

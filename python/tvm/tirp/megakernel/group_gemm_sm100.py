@@ -6,6 +6,17 @@ from tvm.tirp.megakernel.common import ceildiv, F16_BYTES, F32_BYTES, KernelConf
 from tvm.tirp.megakernel.gemm import GemmTile, trap_when_assert_failed, float22half2
 
 
+red = """
+__forceinline__ __device__ void red_f16_v4(half* address, half* reg) {
+    uint16_t* h_reg = (uint16_t*) reg;
+    asm volatile("red.global.v4.f16.add.noftz [%0], {%1, %2, %3, %4};"
+                 :
+                 : "l"(address), "h"(h_reg[0]), "h"(h_reg[1]), "h"(h_reg[2]), "h"(h_reg[3])
+                 : "memory");
+}
+
+"""
+
 class GroupGEMMTile(GemmTile):
 
     def __init__(
@@ -18,7 +29,7 @@ class GroupGEMMTile(GemmTile):
         b_type,
         BLK_M,
         MMA_M,
-        reorder_output=False,
+        acc_output=False,
         prefetch_on=False,
         profiler_on=False,
     ):
@@ -30,14 +41,14 @@ class GroupGEMMTile(GemmTile):
             1,
             BLK_M,
             MMA_M,
-            out_type="float16" if not reorder_output else "float32",
+            out_type="float16" if not acc_output else "float32",
             prefetch_on=prefetch_on,
             profiler_on=profiler_on,
         )
         self.num_experts = num_experts
         self.top_k = top_k
-        self.reorder_output = reorder_output
-        self.VEC_LEN = 16 // F16_BYTES
+        self.acc_output = acc_output
+        self.VEC_LEN = 16 // F32_BYTES
 
     @T.macro
     def host_init(self):
@@ -45,7 +56,7 @@ class GroupGEMMTile(GemmTile):
                       self.K, self.M, self.K * F16_BYTES, self.BLK_K, self.BLK_M, 1, 1, 0, self.SWIZZLE, 0, 0)
         T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 3, self.B.data, 
                       self.K, self.N, self.num_experts, self.K * F16_BYTES, self.K * self.N * F16_BYTES, self.BLK_K, self.BLK_N, 1, 1, 1, 1, 0, self.SWIZZLE, 0, 0)
-        if not self.reorder_output:
+        if not self.acc_output:
             T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data, 
                             self.N, self.M, self.N * F16_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
 
@@ -75,7 +86,7 @@ class GroupGEMMTile(GemmTile):
 
     @T.macro
     def _consumer_wg(self, m_idx, n_idx, k_idx):
-        if not self.reorder_output:
+        if not self.acc_output:
             GemmTile._consumer_wg(self, m_idx, n_idx, k_idx)
         else:
             with T.cta():
@@ -135,10 +146,13 @@ class GroupGEMMTile(GemmTile):
                             continue
                         routing_weight = self.routing_weights[reordered_row_idx]
                         # TODO: vectorize this
+                        o_reg_f32 = T.alloc_buffer([self.VEC_LEN], "float32", scope="local")
+                        o_reg_f16 = T.alloc_buffer([self.VEC_LEN], "float16", scope="local")
                         for v in range(self.VEC_LEN):
-                            self.output[reordered_row_idx, n_idx * self.BLK_N + col_idx + v] = T.cast(
-                                self.output_smem[self.stage, row_idx, col_idx + v] *routing_weight, "float16"
-                            )
+                            o_reg_f32[v] = self.output_smem[self.stage, row_idx, col_idx + v]
+                        for v in T.unroll(self.VEC_LEN):
+                            o_reg_f16[v] = T.cast(o_reg_f32[v] * routing_weight, "float16")
+                        T.cuda.func_call("red_f16_v4", T.address_of(self.output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), T.address_of(o_reg_f16[0]), source_code=red)
                 T.ptx.bar.sync(10, 128)
                 self.tile_idx += 1
                 if warp_id == 0:

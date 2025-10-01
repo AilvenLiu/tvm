@@ -89,7 +89,7 @@ class MegaKernel:
         self.count_and_sort_expert_tokens = self._add_tile(CountAndSortExpertTokens(numel, self.HIDDEN_SIZE, self.NUM_EXPERTS_PER_TOK), ProfileEventType.COUNT_AND_SORT)
         self.group_gemm_gate_up = self._add_tile(GroupGEMMTile(self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE, self.NUM_EXPERTS, self.NUM_EXPERTS_PER_TOK, "float16", "float16", self.MOE_BLK_M, self.MOE_BLK_M), ProfileEventType.GROUP_GEMM_GATE_UP)
         self.silu_mul = self._add_tile(SiluMultiplyMOETile(batch_size, self.INTERMEDIATE_SIZE, numel, self.MOE_BLK_M, "float16"), ProfileEventType.SILU_MUL) # TODO: check if this is correct
-        self.group_gemm_down = self._add_tile(GroupGEMMTile(self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE, self.NUM_EXPERTS, self.NUM_EXPERTS_PER_TOK, "float16", "float16", self.MOE_BLK_M, self.MOE_BLK_M, reorder_output=True), ProfileEventType.GROUP_GEMM_DOWN)
+        self.group_gemm_down = self._add_tile(GroupGEMMTile(self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE, self.NUM_EXPERTS, self.NUM_EXPERTS_PER_TOK, "float16", "float16", self.MOE_BLK_M, self.MOE_BLK_M, acc_output=True), ProfileEventType.GROUP_GEMM_DOWN)
         self.topk_reduce = self._add_tile(MOETopKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.NUM_EXPERTS_PER_TOK), ProfileEventType.TOPK_REDUCE)
 
     def _init_profiler(self, profiler_buffer):
@@ -208,7 +208,6 @@ class MegaKernel:
         reordered_hidden_state_global,
         gate_up_output_global,
         silu_mul_output_global,
-        down_output_global,
         topk_reduce_output_global,
         etensor_gating_global,
         etensor_topk_softmax_global,
@@ -217,7 +216,6 @@ class MegaKernel:
         etensor_group_gemm_gate_up_global,
         etensor_silu_mul_global,
         etensor_group_gemm_down_global,
-        etensor_topk_reduce_global,
         profiler_buffer,
         exec_queue,
         exec_task,
@@ -242,7 +240,7 @@ class MegaKernel:
         
         self.gate.set_tensor_map(A_tensor_map_gate, B_tensor_map_gate, D_tensor_map_gate, hidden_state_global, gate_weight_global, gating_output_global)
         self.group_gemm_gate_up.set_tensor_map(A_tensor_map_grp_gate_up, B_tensor_map_grp_gate_up, D_tensor_map_grp_gate_up, reordered_hidden_state_global, grp_gate_up_weight_global, gate_up_output_global)
-        self.group_gemm_down.set_tensor_map(A_tensor_map_grp_down, B_tensor_map_grp_down, D_tensor_map_grp_down, silu_mul_output_global, grp_down_weight_global, down_output_global)
+        self.group_gemm_down.set_tensor_map(A_tensor_map_grp_down, B_tensor_map_grp_down, D_tensor_map_grp_down, silu_mul_output_global, grp_down_weight_global, topk_reduce_output_global)
 
         self.host_init_all()
 
@@ -271,7 +269,6 @@ class MegaKernel:
                 evt_group_gemm_gate_up = T.meta_var(Semaphore(-1, etensor_group_gemm_gate_up_global, decrement=True, use_nvshmem=self.world_size > 1))
                 evt_silu_mul = T.meta_var(Semaphore(-1, etensor_silu_mul_global, decrement=True, use_nvshmem=self.world_size > 1))
                 evt_group_gemm_down = T.meta_var(Semaphore(-1, etensor_group_gemm_down_global, decrement=True, use_nvshmem=self.world_size > 1))
-                evt_topk_reduce = T.meta_var(Semaphore(-1, etensor_topk_reduce_global, decrement=True, use_nvshmem=self.world_size > 1))
 
                 # initialize tile scheduler and smem_manager
                 self.init_tile_scheduler(issubclass(Scheduler, StaticTileScheduler), smem_manager, exec_queue, exec_task, exec_head, exec_tail)
@@ -322,19 +319,8 @@ class MegaKernel:
                         evt_silu_mul.semaphore_wait_warp(self.tile_scheduler.m_idx)
                         if self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_BLK_M:
                             self.run_tile(self.group_gemm_down, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, self.profiler)
-                        if wg_id == 0:
-                            T.ptx.bar.sync(1, 128)
-                            if tid == 0:
-                                evt_group_gemm_down.semaphore_notify(0)
-                    elif self.tile_scheduler.task_type == JobType.MOE_TOPK_REDUCE.value:
-                        evt_group_gemm_down.semaphore_wait(0)
-                        down_output_3d = down_output_global.view(-1, self.NUM_EXPERTS_PER_TOK, self.HIDDEN_SIZE)
-                        self.run_tile(self.topk_reduce, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, down_output_3d, topk_reduce_output_global)
                     smem_manager.exit_tile_runtime()
                     self.tile_scheduler.next_tile()
-                    
-                if self.profiler_on:
-                    T.timer_finalize_cuda(profiler_buffer.data, profiler_tag.data, profiler_write_offset.data, self.PROFILER_WRITE_STRIDE, lane_id == 0)
                 self.class_finalize_all()
 
     # fmt: on
@@ -366,7 +352,6 @@ class MegaKernel:
             reordered_hidden_state_ptr: T.handle, # intermediate
             gate_up_output_ptr: T.handle, # intermediate
             silu_mul_output_ptr: T.handle, # intermediate
-            down_output_ptr: T.handle, # intermediate
             topk_reduce_output_ptr: T.handle, # intermediate
             
             
@@ -378,7 +363,6 @@ class MegaKernel:
             etensor_group_gemm_gate_up_ptr: T.handle,
             etensor_silu_mul_ptr: T.handle,
             etensor_group_gemm_down_ptr: T.handle,
-            etensor_topk_reduce_ptr: T.handle,
 
             # execution queue
             exec_queue_ptr: T.handle,
@@ -413,7 +397,6 @@ class MegaKernel:
             reordered_hidden_state_global = T.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
             gate_up_output_global = T.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
             silu_mul_output_global = T.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
-            down_output_global = T.match_buffer(down_output_ptr, [batch_size * self.NUM_EXPERTS_PER_TOK, self.HIDDEN_SIZE], "float16", scope="global")
             topk_reduce_output_global = T.match_buffer(topk_reduce_output_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
 
             # event tensor
@@ -425,7 +408,6 @@ class MegaKernel:
             etensor_group_gemm_gate_up_global = T.match_buffer(etensor_group_gemm_gate_up_ptr, [max_blocks_padded], "int32", scope="global")
             etensor_silu_mul_global = T.match_buffer(etensor_silu_mul_ptr, [max_blocks_padded], "int32", scope="global")
             etensor_group_gemm_down_global = T.match_buffer(etensor_group_gemm_down_ptr, [1], "int32", scope="global")
-            etensor_topk_reduce_global = T.match_buffer(etensor_topk_reduce_ptr, [1], "int32", scope="global")
             
             # exec queue
             exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
@@ -435,10 +417,10 @@ class MegaKernel:
                 self.fused_body(
                     batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,
                     gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global,
-                    cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, down_output_global, topk_reduce_output_global,
+                    cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
                     etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global,
-                    etensor_topk_reduce_global, profiler_buffer, exec_queue, None, None, None, BLK_M, 
+                    profiler_buffer, exec_queue, None, None, None, BLK_M, 
                     static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
                 )
                 
@@ -726,7 +708,6 @@ def prepare_data(batch_size, mk: MegaKernel):
     arg_dict["reordered_hidden_state"] = torch.zeros((max_num_tokens_padded, mk.HIDDEN_SIZE), dtype=torch.float16)
     arg_dict["gate_up_output"] = torch.zeros((max_num_tokens_padded, mk.INTERMEDIATE_SIZE * 2), dtype=torch.float16)
     arg_dict["silu_mul_output"] = torch.zeros((max_num_tokens_padded, mk.INTERMEDIATE_SIZE), dtype=torch.float16)
-    arg_dict["down_output"] = torch.zeros((batch_size * mk.NUM_EXPERTS_PER_TOK, mk.HIDDEN_SIZE), dtype=torch.float16)
     arg_dict["topk_reduce_output"] = torch.zeros((batch_size, mk.HIDDEN_SIZE), dtype=torch.float16)
     
     # weight initialization
@@ -793,6 +774,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
             tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"], device=DEV)
             # initial tensor must be 0
             tvm_arg_dict[f"gating_output_{i}"] = tvm.runtime.tensor(arg_dict["gating_output"], device=DEV)
+            tvm_arg_dict[f"topk_reduce_output_{i}"] = tvm.runtime.tensor(arg_dict["topk_reduce_output"], device=DEV)
             # generate event tensor
             (
                 tvm_arg_dict[f"etensor_gating_{i}"],
@@ -802,7 +784,6 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                 tvm_arg_dict[f"etensor_group_gemm_gate_up_{i}"],
                 tvm_arg_dict[f"etensor_silu_mul_{i}"],
                 tvm_arg_dict[f"etensor_group_gemm_down_{i}"],
-                tvm_arg_dict[f"etensor_topk_reduce_{i}"],
                 _
             ) = generate_event_tensor_moe(batch_size, mk.world_size)
         tvm_arg_dict[f"profiler_buffer"] = tvm.runtime.tensor(
@@ -839,8 +820,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                         work_arg_dict["reordered_hidden_state"],
                         work_arg_dict["gate_up_output"],
                         work_arg_dict["silu_mul_output"],
-                        work_arg_dict["down_output"],
-                        work_arg_dict["topk_reduce_output"],
+                        work_arg_dict[f"topk_reduce_output_{iter}"],
                         # event tensor
                         work_arg_dict[f"etensor_gating_{iter}"],
                         work_arg_dict[f"etensor_topk_softmax_{iter}"],
@@ -849,7 +829,6 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                         work_arg_dict[f"etensor_group_gemm_gate_up_{iter}"],
                         work_arg_dict[f"etensor_silu_mul_{iter}"],
                         work_arg_dict[f"etensor_group_gemm_down_{iter}"],
-                        work_arg_dict[f"etensor_topk_reduce_{iter}"],
                         # exec queue
                         work_arg_dict["exec_queue"],
                         work_arg_dict[f"profiler_buffer"],
@@ -960,7 +939,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                 #     batch_size * mk.NUM_EXPERTS_PER_TOK,
                 #     mk.INTERMEDIATE_SIZE,
                 # )
-                return tvm_arg_dict["topk_reduce_output"].numpy()
+                return tvm_arg_dict["topk_reduce_output_0"].numpy()
             else:
                 for i in range(REPEAT):
                     func()
