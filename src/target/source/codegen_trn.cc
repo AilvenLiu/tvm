@@ -23,6 +23,7 @@
 #include "codegen_trn.h"
 
 #include <tvm/tir/transform.h>
+#include <tvm/tir/expr.h>
 
 #include <algorithm>
 #include <sstream>
@@ -210,17 +211,26 @@ void CodeGenTrainium::VisitStmt_(const AllocateNode* op) {
   }
   auto allocated_addr = op->annotations.Get(tir::attr::buffer_allocated_addr);
   ICHECK(allocated_addr.has_value());
-  Array<IntImm> addr = Downcast<Array<IntImm>>(allocated_addr.value());
+  Array<PrimExpr> addr = Downcast<Array<PrimExpr>>(allocated_addr.value());
   if (addr.empty()) {
     stream << GetStorageScopeStr(scope) << ")\n";
   } else {
     if (scope == "trn.psum") {
       ICHECK(addr.size() == 2);
-      stream << "ncc.psum.mod_alloc(base_bank=" << addr[0] << ", base_addr=" << addr[1];
+      ICHECK(addr[0]->IsInstance<IntImmNode>())
+          << "allocated_addr[0] must be a constant integer, got: " << addr[0];
+      ICHECK(addr[1]->IsInstance<IntImmNode>())
+          << "allocated_addr[1] must be a constant integer, got: " << addr[1];
+      int64_t base_bank = Downcast<IntImm>(addr[0])->value;
+      int64_t base_addr = Downcast<IntImm>(addr[1])->value;
+      stream << "ncc.psum.mod_alloc(base_bank=" << base_bank << ", base_addr=" << base_addr;
       stream << ", num_bank_tiles=(" << op->extents[0] << ",)))\n";
     } else {
       ICHECK(addr.size() == 1);
-      stream << "ncc.sbuf.mod_alloc(base_addr=" << addr[0] << "))\n";
+      ICHECK(addr[0]->IsInstance<IntImmNode>())
+          << "allocated_addr[0] must be a constant integer, got: " << addr[0];
+      int64_t base_addr = Downcast<IntImm>(addr[0])->value;
+      stream << "ncc.sbuf.mod_alloc(base_addr=" << base_addr << "))\n";
     }
   }
   this->PrintStmt(op->body);

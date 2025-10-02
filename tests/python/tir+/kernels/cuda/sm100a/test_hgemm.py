@@ -388,7 +388,7 @@ def test_hgemm():
 
                             # the tmem can be overwritten by the next tile
                             ld2mma.arrive(wg_id)
-                            # # RF -> GMEM
+                            # RF -> GMEM
                             for i in T.unroll(NUM_CONSUMER * BLK_N // EPI_TILE):
                                 for it in T.unroll(EPI_TILE // 8):
                                     for vec in T.vectorized(8):

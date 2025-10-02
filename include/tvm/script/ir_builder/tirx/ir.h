@@ -64,7 +64,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   int offset_factor, ffi::String buffer_type,
                   ffi::Optional<ffi::Array<IntImm>> axis_separators,
                   ffi::Optional<TLayout> layout = std::nullopt,
-                  ffi::Array<Integer> allocated_addr = {});
+                  ffi::Array<PrimExpr> allocated_addr = {});
 
 /*!
  * \brief The primitive function statement.
@@ -220,7 +220,7 @@ ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
     PrimExpr elem_offset = PrimExpr(), ffi::String storage_scope = "", int align = -1,
     int offset_factor = 0, ffi::String buffer_type = "default",
     ffi::Optional<ffi::Array<IntImm>> axis_separators = std::nullopt,
-    ffi::Optional<TLayout> layout = std::nullopt, ffi::Array<Integer> allocated_addr = {});
+    ffi::Optional<TLayout> layout = std::nullopt, ffi::Array<PrimExpr> allocated_addr = {});
 
 namespace axis {
 /*!
@@ -423,7 +423,8 @@ DeclBufferFrame DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Stri
                            ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                            int offset_factor, ffi::String buffer_type,
                            ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                           ffi::Optional<TLayout> layout = std::nullopt);
+                           ffi::Optional<TLayout> layout = std::nullopt,
+                           ffi::Optional<PrimExpr> allocated_addr = std::nullopt);
 
 /*!
  * \brief Statement-level buffer allocation (creates an AllocBuffer IR node).

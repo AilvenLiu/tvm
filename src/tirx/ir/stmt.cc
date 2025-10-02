@@ -270,6 +270,19 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 // DeclBuffer
 DeclBuffer::DeclBuffer(Buffer buffer, Span span) {
+  // Enforce storage scope rules for DeclBuffer.
+  std::string scope = static_cast<std::string>(buffer.scope());
+  if (scope.empty()) {
+    scope = "global";
+  }
+  if (scope == "tmem") {
+    ICHECK_EQ(buffer->allocated_addr.size(), 1U)
+        << "ValueError: For `tmem` scope, DeclBuffer requires exactly one `allocated_addr` "
+           "PrimExpr";
+  } else if (scope == "global" || scope == "shared" || scope == "shared.dyn" || scope == "local") {
+    ICHECK(buffer->allocated_addr.empty())
+        << "ValueError: For `" << scope << "` scope, DeclBuffer does not accept `allocated_addr`";
+  }
   ObjectPtr<DeclBufferNode> node = ffi::make_object<DeclBufferNode>();
   node->buffer = std::move(buffer);
   node->span = std::move(span);
@@ -573,6 +586,18 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 // AllocBuffer
 AllocBuffer::AllocBuffer(Buffer buffer, Stmt body, Span span) {
+  // Enforce storage scope rules for AllocBuffer
+  std::string scope = static_cast<std::string>(buffer.scope());
+  if (scope.empty()) {
+    scope = "global";
+  }
+  if (scope == "tmem") {
+    LOG(FATAL) << "ValueError: AllocBuffer is not allowed for storage scope `tmem`";
+  }
+  if (scope == "global" || scope == "shared" || scope == "shared.dyn" || scope == "local") {
+    ICHECK(buffer->allocated_addr.empty())
+        << "ValueError: For `" << scope << "` scope, AllocBuffer does not accept `allocated_addr`";
+  }
   ObjectPtr<AllocBufferNode> node = ffi::make_object<AllocBufferNode>();
   node->buffer = std::move(buffer);
   node->body = std::move(body);

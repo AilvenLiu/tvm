@@ -48,7 +48,7 @@ Buffer BufferDecl(ffi::Array<PrimExpr> shape, DataType dtype, ffi::String buffer
                   ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope, int align,
                   int offset_factor, ffi::String buffer_type,
                   ffi::Optional<ffi::Array<IntImm>> axis_separators, ffi::Optional<TLayout> layout,
-                  ffi::Array<Integer> allocated_addr) {
+                  ffi::Array<PrimExpr> allocated_addr) {
   TVM_FFI_CHECK(buffer_type == "auto" || buffer_type == "default" || buffer_type.empty())
       << "ValueError: `buffer_type` must be `auto` or `default` or empty";
   if (!allocated_addr.empty()) {
@@ -380,7 +380,18 @@ ffi::Variant<Buffer, AllocBufferFrame> SBlockAllocBuffer(
     ffi::Array<PrimExpr> shape, DataType dtype, ffi::Optional<Var> data, ffi::Array<PrimExpr> strides,
     PrimExpr elem_offset, ffi::String storage_scope, int align, int offset_factor,
     ffi::String buffer_type_str, ffi::Optional<ffi::Array<IntImm>> axis_separators,
-    ffi::Optional<TLayout> layout, ffi::Array<Integer> allocated_addr) {
+    ffi::Optional<TLayout> layout, ffi::Array<PrimExpr> allocated_addr) {
+  std::string scope = static_cast<std::string>(storage_scope);
+  if (scope.empty()) {
+    scope = "global";
+  }
+  if (scope == "tmem") {
+    TVM_FFI_THROW(InternalError) << "ValueError: T.alloc_buffer is not allowed for storage scope `tmem`";
+  }
+  if (scope == "global" || scope == "shared" || scope == "shared.dyn" || scope == "local") {
+    TVM_FFI_ICHECK(allocated_addr.empty()) << "ValueError: For `" << scope
+                                   << "` scope, T.alloc_buffer does not accept `allocated_addr`";
+  }
   Buffer buffer = BufferDecl(shape, dtype, "", std::nullopt, strides, std::nullopt, storage_scope,
                              align, 0, buffer_type_str, axis_separators, layout, allocated_addr);
   IRBuilder builder = IRBuilder::Current();
@@ -789,11 +800,39 @@ DeclBufferFrame DeclBuffer(ffi::Array<PrimExpr> shape, DataType dtype, ffi::Stri
                            ffi::Optional<PrimExpr> elem_offset, ffi::String storage_scope,
                            int align, int offset_factor, ffi::String buffer_type,
                            ffi::Optional<ffi::Array<IntImm>> axis_separators,
-                           ffi::Optional<TLayout> layout) {
+                           ffi::Optional<TLayout> layout, ffi::Optional<PrimExpr> allocated_addr) {
+  std::string scope = static_cast<std::string>(storage_scope);
+  if (scope.empty()) {
+    scope = "global";
+  }
+
+  // Enforce rules for T.decl_buffer based on storage scope
+  ffi::Array<PrimExpr> allocated_addr_arr;
+  if (scope == "tmem") {
+    TVM_FFI_ICHECK(!data.defined())
+        << "ValueError: For `tmem` scope, T.decl_buffer accepts only `allocated_addr`";
+    TVM_FFI_ICHECK(allocated_addr.defined())
+        << "ValueError: For `tmem` scope, T.decl_buffer requires `allocated_addr` (PrimExpr)";
+    allocated_addr_arr = ffi::Array<PrimExpr>({allocated_addr.value()});
+  } else if (scope == "global" || scope == "shared" || scope == "shared.dyn" || scope == "local") {
+    TVM_FFI_ICHECK(!allocated_addr.defined()) << "ValueError: For `" << scope
+                                      << "` scope, T.decl_buffer does not accept `allocated_addr`";
+    allocated_addr_arr = ffi::Array<PrimExpr>();
+  } else {
+    // Other scopes: fall back to provided value if any
+    if (allocated_addr.defined()) {
+      allocated_addr_arr = ffi::Array<PrimExpr>({allocated_addr.value()});
+    } else {
+      allocated_addr_arr = ffi::Array<PrimExpr>();
+    }
+  }
+
   ObjectPtr<DeclBufferFrameNode> n = ffi::make_object<DeclBufferFrameNode>();
-  n->buffer = BufferDecl(shape, dtype, buffer_name, data, strides, elem_offset, storage_scope, align,
-                         offset_factor, buffer_type, axis_separators, layout);
-  n->allocated = data.defined();
+  n->buffer =
+      BufferDecl(shape, dtype, buffer_name, data, strides, elem_offset, storage_scope, align,
+                 offset_factor, buffer_type, axis_separators, layout, allocated_addr_arr);
+  // For tmem, even without `data`, we should not emit an Allocate node.
+  n->allocated = (scope == "tmem") || data.defined();
   return DeclBufferFrame(n);
 }
 
@@ -839,7 +878,7 @@ TVM_STATIC_IR_FUNCTOR(Namer, vtable)
       tvm::tirx::BufferNode* buffer =
           const_cast<tvm::tirx::BufferNode*>(node.as<tvm::tirx::BufferNode>());
       buffer->name = name;
-      Namer::Name(buffer->data, name);
+      Namer::Name(buffer->data, name + "_ptr");
       int n = buffer->strides.size();
       for (int i = 0; i < n; ++i) {
         PrimExpr e = buffer->strides[i];
@@ -1098,7 +1137,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](PrimExpr a, PrimExpr b) -> PrimExpr { return tvm::max(a, b); });
 }
 
-TVM_FFI_STATIC_INIT_BLOCK(){
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("script.ir_builder.tir.AddToParent", AddToParent);
 }

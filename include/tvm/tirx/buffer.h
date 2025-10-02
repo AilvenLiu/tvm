@@ -117,7 +117,7 @@ class BufferNode : public Object {
    * The address might be multi-dimensional based on its scope.
    * For example, trn.psum takes 2D address, representing (bank, offset).
    */
-  ffi::Array<Integer> allocated_addr;
+  ffi::Array<PrimExpr> allocated_addr;
 
   /*! \brief constructor */
   BufferNode() {}
@@ -176,7 +176,7 @@ class Buffer : public ObjectRef {
                  PrimExpr elem_offset, ffi::String name, int data_alignment, int offset_factor,
                  BufferType buffer_type, ffi::Array<IntImm> axis_separators = {},
                  Span span = Span(), ffi::Optional<TLayout> layout = std::nullopt,
-                 ffi::Array<Integer> allocated_addr = {});
+                 ffi::Array<PrimExpr> allocated_addr = {});
 
   /*!
    * \brief Return a new buffer that is equivalent with current one
@@ -251,7 +251,7 @@ class Buffer : public ObjectRef {
   /*!
    * \brief Return a new buffer with the allocated address.
    */
-  TVM_DLL Buffer with_allocated_addr(ffi::Array<Integer> allocated_addr) const;
+  TVM_DLL Buffer with_allocated_addr(ffi::Array<PrimExpr> allocated_addr) const;
 
   /*!
    * \brief Return true if the buffer is a cell.

@@ -386,7 +386,7 @@ def test_deepgemm():
 
                                 paritioned_loop(tma_load, skip, tma_load_epilogue)
                                 tile_scheduler.next_tile()
-                        
+
                         with T.warp(parent="warpgroup")[warp_id == 2]:
                             # transpose
                             phase = 0

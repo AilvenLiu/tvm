@@ -221,5 +221,39 @@ def test_copy_g2l_l2g_vec_load(task, dtype):
         np.testing.assert_allclose(B_ref, B.numpy())
 
 
+def test_copy_tmem2reg():
+    # fmt: off
+    @T.prim_func(tirp=True)
+    def copy_sync(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (128, 128), "float16")
+        B = T.match_buffer(B_ptr, (128, 128), "float16")
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            wg_id = T.warpgroup_id([1], parent="cta")
+            warp_id = T.warp_id([4], parent="warpgroup")
+            lane_id = T.thread_id([32], parent="warp")
+
+            tmem_addr = T.alloc_shared([1], "uint32")
+
+            with T.warpgroup()[0:1]:
+                with T.warp()[0:1]:
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=512, cta_group=1)
+
+                T.tvm_storage_sync("shared")
+
+                A_tmem = T.decl_buffer((128, 128), "float16", scope="tmem", allocated_addr=tmem_addr[0],
+                                        layout=TileLayout(([128, 128], [(1, "TCol"), (1, "TLane")])))
+
+                with T.warp()[0:1]:
+                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
+                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=512, cta_group=1)
+    # fmt: on
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": copy_sync})
+        mod.show()
+
+
 if __name__ == "__main__":
     tvm.testing.main()

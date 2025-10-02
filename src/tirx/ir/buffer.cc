@@ -565,7 +565,7 @@ PrimExpr Buffer::access_ptr(int access_mask, DataType ptr_type, int content_lane
 Buffer::Buffer(Var data, DataType dtype, ffi::Array<PrimExpr> shape, ffi::Array<PrimExpr> strides,
                PrimExpr elem_offset, ffi::String name, int data_alignment, int offset_factor,
                BufferType buffer_type, ffi::Array<IntImm> axis_separators, Span span,
-               ffi::Optional<TLayout> layout, ffi::Array<Integer> allocated_addr) {
+               ffi::Optional<TLayout> layout, ffi::Array<PrimExpr> allocated_addr) {
   DataType storage_dtype = dtype;
   // specially handle bool
   if (storage_dtype == DataType::Bool()) {
@@ -648,7 +648,7 @@ tirx::Buffer BufferWithOffsetAlignment(ffi::Array<PrimExpr> shape, DataType dtyp
                       offset_factor, buffer_type);
 }
 
-Buffer Buffer::with_allocated_addr(ffi::Array<Integer> allocated_addr) const {
+Buffer Buffer::with_allocated_addr(ffi::Array<PrimExpr> allocated_addr) const {
   Buffer output = *this;
   auto writer = output.CopyOnWrite();
   writer->allocated_addr = std::move(allocated_addr);
