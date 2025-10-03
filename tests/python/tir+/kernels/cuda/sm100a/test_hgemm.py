@@ -265,7 +265,7 @@ def test_hgemm():
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
                 

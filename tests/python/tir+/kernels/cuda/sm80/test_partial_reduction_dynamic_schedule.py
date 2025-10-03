@@ -100,7 +100,7 @@ def test_partial_reduction():
         def _fetch_from_queue(self):
           with T.thread()[0:1]:
             self.queue.dequeue(self.fetched_task_type, self.fetched_task_idx)
-          T.tvm_storage_sync("shared")
+          T.cuda.cta_sync()
             
         @T.macro
         def init(self, linear_init):
@@ -122,7 +122,7 @@ def test_partial_reduction():
         @T.macro 
         def semaphore_notify(self, *coord):
             with T.thread():
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
                 with T.thread()[0:1]:
                     # add 1 because atomic_add returns the old value
                     self.state[0] = T.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1) + 1

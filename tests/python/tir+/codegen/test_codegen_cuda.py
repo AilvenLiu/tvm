@@ -247,7 +247,7 @@ def test_ptx_ldmatrix(trans, num):
             with T.thread()[tx == 0]:
                 for i, j in T.grid(16, 16):
                     A_shared[i, j] = A[i, j]
-            T.tvm_storage_sync("shared")
+            T.cuda.cta_sync()
             with T.thread():
                 A_local = T.alloc_local([8], "float16")
                 A_local[0] = -1.0

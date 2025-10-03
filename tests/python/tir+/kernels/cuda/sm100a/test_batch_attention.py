@@ -265,7 +265,7 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
 
         def scope_sync(wg_id):
             return T.ptx.bar.sync(wg_id, 128)
-            # return T.tvm_storage_sync("shared")
+            # return T.cuda.cta_sync()
 
         def m16k16_row_sum_f16f16f32(C_ptr, A_ptr):
             func_name = "m16k16_rowsum_f16f16f32"

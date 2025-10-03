@@ -277,7 +277,7 @@ def test_hgemm_ampere():
                     T.ptx.cp_async.commit_group()
 
                     T.ptx.cp_async.wait_group(2)
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
                     loadFragA(fragA, 0, SA, 0, 0, tx, tz)
                     loadFragB(fragB, 0, SB, 0, 0, tx, ty)
@@ -301,7 +301,7 @@ def test_hgemm_ampere():
 
                         T.ptx.cp_async.commit_group()
                         T.ptx.cp_async.wait_group(2)
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
 
                         next_slice = (ko + 1) % 4
                         loadFragA(fragA, 0, SA, next_slice, 0, tx, tz)
@@ -320,7 +320,7 @@ def test_hgemm_ampere():
                                 )
 
                     store_accum_to_shared(tz, ty, tx, C_smem, Accum)
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
                     store_shared_to_global(tz, ty, tx, bx, by, C, C_smem)
 
     np.random.seed(0)

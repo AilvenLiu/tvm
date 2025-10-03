@@ -389,10 +389,14 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_thread_fence)
 TIR_DEFINE_BUILTIN_FUNC(cuda_warp_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
-TIR_DEFINE_BUILTIN_FUNC(cuda_block_sync)
+TIR_DEFINE_BUILTIN_FUNC(cuda_cta_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(cuda_grid_sync)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+// Cluster-wide sync (CUDA thread block clusters)
+TIR_DEFINE_BUILTIN_FUNC(cuda_cluster_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
 TIR_DEFINE_BUILTIN_FUNC(cuda_float22half2)

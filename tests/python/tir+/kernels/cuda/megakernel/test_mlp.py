@@ -180,7 +180,7 @@ class MegaKernel:
                             evt_gate_up_proj.semaphore_wait(tile_scheduler.m_idx)
                             profiler.start(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
                             silu_multiply_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx, tile_scheduler)
-                            T.tvm_storage_sync("shared")
+                            T.cuda.cta_sync()
                             if tid == 0:
                                 evt_down_proj.semaphore_notify(tile_scheduler.m_idx // (INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR))
                             profiler.end(ProfileEventType.SPLIT_SILU_MULTIPLY, lane_id == 0)
@@ -197,7 +197,7 @@ class MegaKernel:
                             evt_down_proj_reduce.semaphore_wait(tile_scheduler.n_idx)
                             profiler.start(ProfileEventType.DOWN_PROJ_REDUCE, lane_id == 0)
                             down_proj_reduce_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
-                            T.tvm_storage_sync("shared")
+                            T.cuda.cta_sync()
                             if tid == 0:
                                 evt_add_rms_norm.semaphore_notify(tile_scheduler.m_idx)
                             profiler.end(ProfileEventType.DOWN_PROJ_REDUCE, lane_id == 0)

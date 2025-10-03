@@ -546,7 +546,7 @@ def test_fp16_fused_attn():
                     consumer_v.init(0, 0)
                     q_phase = 0
                     # sync to make sure everything is initialized and visible
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
                     bar_Q_ptr = T.meta_var(bar_Q.ptr_to([0]))
                     q_idx = T.meta_var(tile_scheduler.q_idx)

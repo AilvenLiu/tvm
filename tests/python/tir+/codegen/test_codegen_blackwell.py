@@ -52,7 +52,7 @@ def test_tmem_alloc_dealloc_relinquish():
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
                 # dealloc TMEM
                 with T.warp()[0:1]:
@@ -115,7 +115,7 @@ def test_tcgen05_ld_st_roundtrip():
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
                 with T.thread():
                     # GMEM -> RF
@@ -125,11 +125,11 @@ def test_tcgen05_ld_st_roundtrip():
                     for i in range(WIDTH):
                         T.ptx.tcgen05.st(tmem_addr, warp_id * 32, i, "32x32b", REPEAT_NUM, False, reg[i])
                     T.ptx.tcgen05.wait.st()
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
                     # reset RF
                     for i in range(WIDTH):
                         reg[i] = 0.0
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
                     # TMEM -> RF
                     T.ptx.tcgen05.fence.after_thread_sync()
                     for i in range(WIDTH):
@@ -193,13 +193,13 @@ def test_tcgen05_cp_ld_roundtrip():
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
                 # GMEM -> SMEM
                 with T.cta():
                     Tp.copy(A_smem[:, :], A[:, :])
                 T.ptx.fence.proxy("shared")
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
                 with T.thread():
                     # reset RF
@@ -215,7 +215,7 @@ def test_tcgen05_cp_ld_roundtrip():
                         T.ptx.tcgen05.commit(bar.data, cta_group)
                     T.ptx.mbarrier.try_wait(bar.data, phase[0])
                     phase[0] = phase[0] ^ 1
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
                     # TMEM -> RF (ld)
                     T.ptx.tcgen05.fence.after_thread_sync()
                     for i in range(WIDTH):
@@ -321,7 +321,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
                 # reset RF
                 with T.thread():
@@ -333,7 +333,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                     Tp.copy(A_smem[:, :], A[:, :])
                     Tp.copy(B_smem[:, :], B[:, :])
                 T.ptx.fence.proxy("shared")
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
                 with T.thread():
                     # MMA
@@ -351,7 +351,7 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
                         T.ptx.tcgen05.commit(bar.data, cta_group)
                     T.ptx.mbarrier.try_wait(bar.data, phase[0])
                     phase[0] = phase[0] ^ 1
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
                     # TMEM -> RF
                     T.ptx.tcgen05.fence.after_thread_sync()

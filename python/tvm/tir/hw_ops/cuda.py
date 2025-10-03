@@ -3465,9 +3465,9 @@ __forceinline__ __device__ void {func_name}() {{
     return cuda_func_call(func_name, source_code=source_code)
 
 
-@register_codegen("cuda_block_sync")
-def codegen_cuda_block_sync():
-    func_name = "tvm_builtin_cuda_block_sync"
+@register_codegen("cuda_cta_sync")
+def codegen_cuda_cta_sync():
+    func_name = "tvm_builtin_cuda_cta_sync"
     source_code = f"""
 __forceinline__ __device__ void {func_name}() {{
     __syncthreads();
@@ -3480,12 +3480,24 @@ __forceinline__ __device__ void {func_name}() {{
 def codegen_cuda_grid_sync():
     func_name = "tvm_builtin_cuda_grid_sync"
     source_code = f"""
-namespace cg = cooperative_groups;
 __forceinline__ __device__ void {func_name}() {{
+    namespace cg = cooperative_groups;
     cg::this_grid().sync();
 }}
 """
     return cuda_func_call(func_name, source_code=source_code), ["cooperative_groups"]
+
+
+@register_codegen("cuda_cluster_sync")
+def codegen_cuda_cluster_sync():
+    func_name = "tvm_builtin_cuda_cluster_sync"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}() {{
+    asm("barrier.cluster.arrive.aligned;");
+    asm("barrier.cluster.wait.aligned;");
+}}
+"""
+    return cuda_func_call(func_name, source_code=source_code)
 
 
 @register_codegen("cuda_float22half2")

@@ -98,7 +98,7 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                         for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
                             sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
                         sum_sq_smem[ty] = sum_sq[0]
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
                         # reduce sum through different warps
                         if ty == 0:
                             if tx < bdy:
@@ -108,7 +108,7 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                             for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
                                 sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)
                             sum_sq_smem[0] = sum_sq[0]
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
                         # rms norm
                         rms_norm[0] = T.rsqrt(sum_sq_smem[0] * inv_hidden_size + EPS)
 
@@ -127,7 +127,7 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                             if st < hidden_size:
                                 Tp.copy(residual_global[idx[0], st:st + vec_size], residual_smem[st:st + vec_size], vec_len=vec_size)
 
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
                         idx[0] += SM_COUNT
     # fmt: on
     return fused_add_rmsnorm

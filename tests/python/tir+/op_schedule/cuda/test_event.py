@@ -110,7 +110,7 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
                 Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event)
                 event.commit()
                 event.wait(0)
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
                 Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
 
@@ -235,12 +235,12 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
                     event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
                     event[0].init(1)
                     T.ptx.fence.proxy("shared")
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
                     Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0], cache_hint=cache_hint)
                     event[0].commit()
                     event[0].wait()
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
                     Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
@@ -364,7 +364,7 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len, phase_manag
                         phase[0] = 0
 
                     T.ptx.fence.proxy("shared")
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
                     for stage in range(n):
                         Tp.copy_async(A_smem[*r_smem], A[*r_gmem(stage)], event[0])
@@ -381,7 +381,7 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len, phase_manag
                             phase[0] = phase[0] ^ 1
 
                         T.ptx.fence.proxy("shared")
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
 
                         Tp.copy(B[*r_gmem(stage)], A_smem[*r_smem])
     # fmt: on
@@ -491,7 +491,7 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
                         Tp.copy_async(B[*r_gmem(stage)], A_smem[*r_smem], evt, cache_hint=cache_hint)
                         evt.commit()
                         evt.wait(0)
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
     # fmt: on
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
     target = tvm.target.Target("cuda")
@@ -580,12 +580,12 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3, c
                     event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, None])
                     event[0].init(1)
                     T.ptx.fence.proxy("shared")
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
                     Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0], cache_hint=cache_hint)
                     event[0].commit(tx_cnt=total_bytes)
                     event[0].wait()
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
                     Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on

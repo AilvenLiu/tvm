@@ -94,7 +94,7 @@ def test_dispatch_combine(world_size=8):
             @T.macro
             def signal(self):
                 with T.thread():
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
                     with T.thread()[0:1]:
                         T.cuda.atomic_add(self.sem.access_ptr("rw", offset=0), 1)
                     T.cuda.thread_fence()
@@ -114,7 +114,7 @@ def test_dispatch_combine(world_size=8):
                 idx = T.meta_var(k * N_WARPS_DISPATCH * 32 + tid)
                 if idx < N_EXPERTS:
                     smem_buf[idx] = 0
-            T.tvm_storage_sync("shared")
+            T.cuda.cta_sync()
 
         @T.macro
         def warp_count(lane_id, dst_expert, count, send_experts):
@@ -247,7 +247,7 @@ def test_dispatch_combine(world_size=8):
                     smem_token_st[tid] = T.cuda.atomic_add(
                         recv_num_total.access_ptr("rw", offset=0), T.uint32(num_recv_tokens)
                     )
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
         @T.macro
         def thread_compute_meta(
@@ -314,7 +314,7 @@ def test_dispatch_combine(world_size=8):
                                 recv_tokens[meta_expert, meta_offset, idx + vec] = buf_recv[
                                     meta_expert, meta_group, meta_token, idx + vec
                                 ]
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
         @T.macro
         def thread_prepare_buf_back(
@@ -341,7 +341,7 @@ def test_dispatch_combine(world_size=8):
                                 buf_send_new[token_idx, idx + vec] = send_tokens[
                                     expert, offset, idx + vec
                                 ]
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
         @T.macro
         def warp_dispatch_dp(

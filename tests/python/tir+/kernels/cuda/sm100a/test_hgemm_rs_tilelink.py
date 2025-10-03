@@ -451,7 +451,7 @@ def test_hgemm_rs():
                     with T.warp()[0:1]:
                         T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=cta_group)
                     T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, trans_a=False, trans_b=False, n_cta_groups=cta_group)
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
                     # reset RF
                     with T.cta():
                         T.block_attr({"tirp.scope_partition": True})
@@ -560,7 +560,7 @@ def test_hgemm_rs():
                     n_clusters = T.meta_var((N + BLK_N - 1) // BLK_N)
                     rs_tile_scheduler = T.meta_var(RSTileScheduler("rs_tile_scheduler", m_clusters=m_clusters, n_clusters=n_clusters, group_size=GROUP_SIZE * 4))
                     load_pipe.init(c2p_thread_count=256)
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
                     for stage in range(WORLD_SIZE):
                         rs_tile_scheduler.init(bx - GEMM_SMS)
                         if stage != 0:

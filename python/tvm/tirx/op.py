@@ -2947,7 +2947,8 @@ def cuda_warp_sync():
     """
     return call_intrin("", "tir.cuda_warp_sync")
 
-def cuda_block_sync():
+
+def cuda_cta_sync():
     """TVM intrinsic to call CUDA syncthreads (block-wide barrier)
 
     Returns
@@ -2955,7 +2956,7 @@ def cuda_block_sync():
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_block_sync")
+    return call_intrin("", "tir.cuda_cta_sync")
 
 
 def cuda_grid_sync():
@@ -2967,6 +2968,18 @@ def cuda_grid_sync():
         The call expression.
     """
     return call_intrin("", "tir.cuda_grid_sync")
+
+
+def cuda_cluster_sync():
+    """TVM intrinsic to call CUDA cluster-wide barrier sync
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_cluster_sync")
+
 
 def cuda_float22half2(dst, src):
     """TVM intrinsic to convert float2 to half2 with rounding

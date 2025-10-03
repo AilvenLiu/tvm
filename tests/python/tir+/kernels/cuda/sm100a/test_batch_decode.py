@@ -476,7 +476,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     epi_md[tz, ty, kb, 0] = m[kb, 0]
                                     epi_md[tz, ty, kb, 1] = d[kb, 0]
                             T.ptx.fence.proxy("shared")
-                            T.tvm_storage_sync("shared")
+                            T.cuda.cta_sync()
                             # merge o through different tz
                             if tz == 0:
                                 for kb in T.unroll(HEAD_PER_CTA):

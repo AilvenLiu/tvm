@@ -623,7 +623,7 @@ def test_ag_hgemm():
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
                 tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)

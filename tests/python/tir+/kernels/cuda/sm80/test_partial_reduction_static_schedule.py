@@ -129,7 +129,7 @@ def test_partial_reduction():
         @T.macro 
         def semaphore_notify(self, *coord):
             with T.thread():
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
                 with T.thread()[0:1]:
                     T.cuda.atomic_add(self.sem.access_ptr("rw", offset=self.sem.elem_offset_of(coord)), 1)
                 T.cuda.thread_fence()

@@ -29,7 +29,7 @@ def test_roundtrip_tir_namespaces_minimal():
     def func(a_ptr: T.handle) -> None:
         A = T.match_buffer(a_ptr, (2, 2), "float16")
         T.ptx.wgmma.commit_group()
-        T.ptx.barrier.cluster.arrive()
+        T.cuda.cluster_sync()
         T.ptx.cp_async.wait_group(0)
         T.ptx.fence.proxy("async")
         T.cuda.printf("ok")

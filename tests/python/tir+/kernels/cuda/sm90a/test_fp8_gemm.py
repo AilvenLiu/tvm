@@ -104,7 +104,7 @@ def test_fp8_gemm_hopper_no_ws():
 
     @T.macro
     def r2S(warp_id, lane_id, C_smem: tvm.tir.Buffer, accum, accum_half, n_tile):
-        T.tvm_storage_sync("shared")
+        T.cuda.cta_sync()
         for st_tile in T.serial(4):
             for i in T.serial(8):
                 accum_half[i] = accum[n_tile * 32 + st_tile * 8 + i]
@@ -116,7 +116,7 @@ def test_fp8_gemm_hopper_no_ws():
     @T.macro
     def s2G(warp_id, lane_id, C_smem: tvm.tir.Buffer, C_map, m_idx, n_idx, n_tile):
         T.ptx.fence.proxy("shared")
-        T.tvm_storage_sync("shared")
+        T.cuda.cta_sync()
         with T.thread()[warp_id == 0 and lane_id == 0]:
             T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([n_tile % STAGES_EPI, 0, 0]), C_map, n_idx * BLK_N + n_tile * 64, m_idx * BLK_M)
             T.ptx.cp_async.bulk.commit_group()
@@ -124,7 +124,7 @@ def test_fp8_gemm_hopper_no_ws():
 
     @T.macro
     def write_epilogue(warp_id, lane_id, m_idx, n_idx, C_smem: tvm.tir.Buffer, C_map, accum, accum_half):
-        T.tvm_storage_sync("shared")
+        T.cuda.cta_sync()
         for n_tile in T.serial(BLK_N // 64):
             if n_tile != 0:
                 # s2G for the previous stage
@@ -184,14 +184,14 @@ def test_fp8_gemm_hopper_no_ws():
                         with T.thread()[tid == 0]:
                             for i in range(STAGES_TMA):
                                 T.ptx.mbarrier.init(bars.ptr_to([i]), 1)
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
                         # initialize the index
                         tma_index = 0
                         mma_index = 0
                         # initialize the accumulators
                         for i in range(128):
                             accum[i] = 0
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
 
                         m_idx = T.meta_var(tile_scheduler.m_idx)
                         n_idx = T.meta_var(tile_scheduler.n_idx)
@@ -214,7 +214,7 @@ def test_fp8_gemm_hopper_no_ws():
                                 T.ptx.wgmma.wait_group(0)
                             else:
                                 T.ptx.wgmma.wait_group(STAGES_WGMMA - 1)
-                            T.tvm_storage_sync("shared")
+                            T.cuda.cta_sync()
                             # load the next tile
                             if tma_index < k_tile_count:
                                 tma_load(tid, m_idx, n_idx, tma_index, A_smem, B_smem, A_map, B_map, bars)

@@ -316,7 +316,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                 # sync
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -489,7 +489,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
                     T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=1)
 
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
     # fmt: on
 
     VEC_SIZE = math.gcd(16 // F32_BYTES, N)

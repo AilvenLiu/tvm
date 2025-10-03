@@ -88,15 +88,71 @@ class MegaKernel:
     def set_tiles(self, batch_size, BLK_M):
         self.tile_attr = {}
         self.class_list = set()
-        self.gate = self._add_tile(GemmTile(self.NUM_EXPERTS, self.HIDDEN_SIZE, "float16", "float16", self.GATING_SPLIT_K_FACTOR, BLK_M, BLK_M, use_tma_reduce=True), ProfileEventType.MOE_GATING)
-        self.topk_softmax = self._add_tile(TopkSoftmaxTile(self.NUM_EXPERTS, batch_size, self.NUM_EXPERTS_PER_TOK, dtype="float32"), ProfileEventType.TOPK_SOFTMAX)
+        self.gate = self._add_tile(
+            GemmTile(
+                self.NUM_EXPERTS,
+                self.HIDDEN_SIZE,
+                "float16",
+                "float16",
+                self.GATING_SPLIT_K_FACTOR,
+                BLK_M,
+                BLK_M,
+                use_tma_reduce=True,
+            ),
+            ProfileEventType.MOE_GATING,
+        )
+        self.topk_softmax = self._add_tile(
+            TopkSoftmaxTile(
+                self.NUM_EXPERTS, batch_size, self.NUM_EXPERTS_PER_TOK, dtype="float32"
+            ),
+            ProfileEventType.TOPK_SOFTMAX,
+        )
         numel = self.NUM_EXPERTS_PER_TOK * batch_size
-        self.align = self._add_tile(MOEAlignTile(self.NUM_EXPERTS, numel, self.MOE_BLK_M, pad_sorted_token_ids=True), ProfileEventType.MOE_ALIGN)
-        self.count_and_sort_expert_tokens = self._add_tile(CountAndSortExpertTokens(numel, self.HIDDEN_SIZE, self.NUM_EXPERTS_PER_TOK), ProfileEventType.COUNT_AND_SORT)
-        self.group_gemm_gate_up = self._add_tile(GroupGEMMTile(self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE, self.NUM_EXPERTS, self.NUM_EXPERTS_PER_TOK, "float16", "float16", self.MOE_BLK_M, self.MOE_BLK_M), ProfileEventType.GROUP_GEMM_GATE_UP)
-        self.silu_mul = self._add_tile(SiluMultiplyMOETile(batch_size, self.INTERMEDIATE_SIZE, numel, self.MOE_BLK_M, "float16"), ProfileEventType.SILU_MUL) # TODO: check if this is correct
-        self.group_gemm_down = self._add_tile(GroupGEMMTile(self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE, self.NUM_EXPERTS, self.NUM_EXPERTS_PER_TOK, "float16", "float16", self.MOE_BLK_M, self.MOE_BLK_M, acc_output=True), ProfileEventType.GROUP_GEMM_DOWN)
-        self.topk_reduce = self._add_tile(MOETopKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.NUM_EXPERTS_PER_TOK), ProfileEventType.TOPK_REDUCE)
+        self.align = self._add_tile(
+            MOEAlignTile(self.NUM_EXPERTS, numel, self.MOE_BLK_M, pad_sorted_token_ids=True),
+            ProfileEventType.MOE_ALIGN,
+        )
+        self.count_and_sort_expert_tokens = self._add_tile(
+            CountAndSortExpertTokens(numel, self.HIDDEN_SIZE, self.NUM_EXPERTS_PER_TOK),
+            ProfileEventType.COUNT_AND_SORT,
+        )
+        self.group_gemm_gate_up = self._add_tile(
+            GroupGEMMTile(
+                self.INTERMEDIATE_SIZE * 2,
+                self.HIDDEN_SIZE,
+                self.NUM_EXPERTS,
+                self.NUM_EXPERTS_PER_TOK,
+                "float16",
+                "float16",
+                self.MOE_BLK_M,
+                self.MOE_BLK_M,
+            ),
+            ProfileEventType.GROUP_GEMM_GATE_UP,
+        )
+        self.silu_mul = self._add_tile(
+            SiluMultiplyMOETile(
+                batch_size, self.INTERMEDIATE_SIZE, numel, self.MOE_BLK_M, "float16"
+            ),
+            ProfileEventType.SILU_MUL,
+        )  # TODO: check if this is correct
+        self.group_gemm_down = self._add_tile(
+            GroupGEMMTile(
+                self.HIDDEN_SIZE,
+                self.INTERMEDIATE_SIZE,
+                self.NUM_EXPERTS,
+                self.NUM_EXPERTS_PER_TOK,
+                "float16",
+                "float16",
+                self.MOE_BLK_M,
+                self.MOE_BLK_M,
+                acc_output=True,
+            ),
+            ProfileEventType.GROUP_GEMM_DOWN,
+        )
+        self.topk_reduce = self._add_tile(
+            MOETopKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.NUM_EXPERTS_PER_TOK),
+            ProfileEventType.TOPK_REDUCE,
+        )
 
     def _init_profiler(self, profiler_buffer):
         if self.profiler_on:
@@ -313,7 +369,7 @@ class MegaKernel:
                                 )  
                         evt_gating.semaphore_wait(0)
                         self.run_tile(self.topk_softmax, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gating_output_global, topk_weights_global, topk_indices_global)
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
                         if tid == 0:
                             evt_topk_softmax.semaphore_notify(0)
                     elif self.tile_scheduler.task_type == JobType.MOE_ALIGN.value:
@@ -329,7 +385,7 @@ class MegaKernel:
                             )  
                         evt_topk_softmax.semaphore_wait(0)
                         self.run_tile(self.align, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global)
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
                         if tid == 0:
                             if issubclass(Scheduler, DynamicTileScheduler):
                                 etensor_end[0] = (evt_end.base + 1) * (num_tokens_post_pad_global[0] // self.MOE_BLK_M) * (self.HIDDEN_SIZE // GroupGEMMTile.BLK_N)
@@ -348,7 +404,7 @@ class MegaKernel:
                             )  
                         evt_moe_align.semaphore_wait(0)
                         self.run_tile(self.count_and_sort_expert_tokens, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global)
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
                         if tid == 0:
                             evt_count_and_sort.semaphore_notify(0)
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_GATE_UP.value:
@@ -383,7 +439,7 @@ class MegaKernel:
                         evt_group_gemm_gate_up.semaphore_wait(self.tile_scheduler.m_idx)
                         if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_BLK_M:
                             self.run_tile(self.silu_mul, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gate_up_output_global, silu_mul_output_global, sorted_token_ids_global)
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
                         if tid == 0:
                             evt_silu_mul.semaphore_notify(self.tile_scheduler.m_idx)
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_DOWN.value:
@@ -693,18 +749,30 @@ def prepare_data(batch_size, mk: MegaKernel):
     arg_dict["residual"] = torch.randn((batch_size, mk.HIDDEN_SIZE), dtype=torch.float16)
     # intermediate buffer
     arg_dict["gating_output"] = torch.zeros((batch_size, mk.NUM_EXPERTS), dtype=torch.float32)
-    arg_dict["topk_weights"] = torch.zeros((batch_size, mk.NUM_EXPERTS_PER_TOK), dtype=torch.float32)
+    arg_dict["topk_weights"] = torch.zeros(
+        (batch_size, mk.NUM_EXPERTS_PER_TOK), dtype=torch.float32
+    )
     arg_dict["topk_indices"] = torch.zeros((batch_size, mk.NUM_EXPERTS_PER_TOK), dtype=torch.int32)
-    max_num_tokens_padded = batch_size * mk.NUM_EXPERTS_PER_TOK + mk.NUM_EXPERTS * (mk.MOE_BLK_M - 1)
+    max_num_tokens_padded = batch_size * mk.NUM_EXPERTS_PER_TOK + mk.NUM_EXPERTS * (
+        mk.MOE_BLK_M - 1
+    )
     arg_dict["sorted_token_ids"] = torch.zeros((max_num_tokens_padded,), dtype=torch.int32)
-    arg_dict["expert_ids"] = torch.zeros((max_num_tokens_padded // mk.MOE_BLK_M,), dtype=torch.int32)
+    arg_dict["expert_ids"] = torch.zeros(
+        (max_num_tokens_padded // mk.MOE_BLK_M,), dtype=torch.int32
+    )
     arg_dict["num_tokens_post_pad"] = torch.zeros((1,), dtype=torch.int32)
-    arg_dict["cumsum_buffer"] = torch.zeros((mk.NUM_EXPERTS+1,), dtype=torch.int32)
-    arg_dict["reordered_hidden_state"] = torch.zeros((max_num_tokens_padded, mk.HIDDEN_SIZE), dtype=torch.float16)
-    arg_dict["gate_up_output"] = torch.zeros((max_num_tokens_padded, mk.INTERMEDIATE_SIZE * 2), dtype=torch.float16)
-    arg_dict["silu_mul_output"] = torch.zeros((max_num_tokens_padded, mk.INTERMEDIATE_SIZE), dtype=torch.float16)
+    arg_dict["cumsum_buffer"] = torch.zeros((mk.NUM_EXPERTS + 1,), dtype=torch.int32)
+    arg_dict["reordered_hidden_state"] = torch.zeros(
+        (max_num_tokens_padded, mk.HIDDEN_SIZE), dtype=torch.float16
+    )
+    arg_dict["gate_up_output"] = torch.zeros(
+        (max_num_tokens_padded, mk.INTERMEDIATE_SIZE * 2), dtype=torch.float16
+    )
+    arg_dict["silu_mul_output"] = torch.zeros(
+        (max_num_tokens_padded, mk.INTERMEDIATE_SIZE), dtype=torch.float16
+    )
     arg_dict["topk_reduce_output"] = torch.zeros((batch_size, mk.HIDDEN_SIZE), dtype=torch.float16)
-    
+
     # weight initialization
     if not hasattr(prepare_data, "weight_initialized"):
         prepare_data.weight_initialized = True
@@ -712,7 +780,7 @@ def prepare_data(batch_size, mk: MegaKernel):
         return arg_dict
     arg_dict["gate_weight"] = _correct_weight_tensor_view(
         torch.zeros(
-            (mk.world_size,mk.NUM_EXPERTS, mk.HIDDEN_SIZE),
+            (mk.world_size, mk.NUM_EXPERTS, mk.HIDDEN_SIZE),
             dtype=torch.float16,
         ).cuda()
     )
@@ -728,13 +796,15 @@ def prepare_data(batch_size, mk: MegaKernel):
         torch.nn.init.xavier_normal_(arg_dict["grp_gate_up_weight"][i], gain=1.0)
     arg_dict["grp_gate_up_weight"] = arg_dict["grp_gate_up_weight"].cpu()
     w1 = arg_dict["grp_gate_up_weight"]
-    arg_dict["grp_up_gate_weight"] = torch.cat((w1[:, mk.INTERMEDIATE_SIZE:, :], w1[:, :mk.INTERMEDIATE_SIZE, :]), dim=1).contiguous()
+    arg_dict["grp_up_gate_weight"] = torch.cat(
+        (w1[:, mk.INTERMEDIATE_SIZE :, :], w1[:, : mk.INTERMEDIATE_SIZE, :]), dim=1
+    ).contiguous()
 
     arg_dict["grp_down_weight"] = _correct_weight_tensor_view(
         torch.zeros(
             (mk.world_size, mk.NUM_EXPERTS, mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE),
             dtype=torch.float16,
-        ).cuda()    
+        ).cuda()
     )
     for i in range(mk.NUM_EXPERTS):
         torch.nn.init.xavier_normal_(arg_dict["grp_down_weight"][i], gain=1.0)
@@ -755,10 +825,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
         target = tvm.target.Target("cuda")
         if scheduler == "static":
             # static schedule
-            exec_queue = generate_exec_queue_moe(
-                batch_size,
-                "static"
-            )
+            exec_queue = generate_exec_queue_moe(batch_size, "static")
             tvm_arg_dict[f"exec_queue"] = tvm.runtime.tensor(exec_queue, DEV)
         else:
             exec_queue = generate_exec_queue_moe(batch_size, "dynamic")
@@ -770,13 +837,19 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
         for key, value in arg_dict.items():
             tvm_arg_dict[key] = tvm.runtime.tensor(value, device=DEV)
 
-        tvm_arg_dict["output"] = tvm.runtime.tensor(np.zeros((batch_size, mk.HIDDEN_SIZE), dtype=np.float16), device=DEV)
+        tvm_arg_dict["output"] = tvm.runtime.tensor(
+            np.zeros((batch_size, mk.HIDDEN_SIZE), dtype=np.float16), device=DEV
+        )
 
         for i in range(REPEAT):
             tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"], device=DEV)
             # initial tensor must be 0
-            tvm_arg_dict[f"gating_output_{i}"] = tvm.runtime.tensor(arg_dict["gating_output"], device=DEV)
-            tvm_arg_dict[f"topk_reduce_output_{i}"] = tvm.runtime.tensor(arg_dict["topk_reduce_output"], device=DEV)
+            tvm_arg_dict[f"gating_output_{i}"] = tvm.runtime.tensor(
+                arg_dict["gating_output"], device=DEV
+            )
+            tvm_arg_dict[f"topk_reduce_output_{i}"] = tvm.runtime.tensor(
+                arg_dict["topk_reduce_output"], device=DEV
+            )
             # generate event tensor
             (
                 tvm_arg_dict[f"etensor_gating_{i}"],
@@ -800,6 +873,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
             if scheduler == "static":
                 kernel = mega_kernel_static["main"]
                 work_arg_dict = tvm_arg_dict
+
                 def func():
                     nonlocal iter
                     kernel(
@@ -839,7 +913,8 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
 
             else:
                 kernel = mega_kernel_dynamic["main"]
-                work_arg_dict = tvm_arg_dict 
+                work_arg_dict = tvm_arg_dict
+
                 def func():
                     nonlocal iter
                     kernel(
@@ -956,11 +1031,16 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
             )
 
             out1 = torch.empty(
-                (batch_size, mk.NUM_EXPERTS_PER_TOK, 2 * mk.INTERMEDIATE_SIZE), dtype=torch.float16, device="cuda"
+                (batch_size, mk.NUM_EXPERTS_PER_TOK, 2 * mk.INTERMEDIATE_SIZE),
+                dtype=torch.float16,
+                device="cuda",
             )
             out2 = torch.empty(
-                (batch_size, mk.NUM_EXPERTS_PER_TOK, mk.HIDDEN_SIZE), dtype=torch.float16, device="cuda"
+                (batch_size, mk.NUM_EXPERTS_PER_TOK, mk.HIDDEN_SIZE),
+                dtype=torch.float16,
+                device="cuda",
             )
+
             def get_config(batch_size):
                 get_config_func = functools.partial(
                     try_get_optimal_moe_config,
@@ -1003,7 +1083,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                 per_channel_quant=False,
                 block_shape=None,
             )
-            silu_mul_out = flashinfer.activation.silu_and_mul(out1.view(-1, 2 * mk.INTERMEDIATE_SIZE))
+            silu_mul_out = flashinfer.activation.silu_and_mul(
+                out1.view(-1, 2 * mk.INTERMEDIATE_SIZE)
+            )
             invoke_fused_moe_kernel(
                 silu_mul_out,
                 std_arg_dict["grp_down_weight"],
@@ -1030,6 +1112,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
             )
             ret = out2.sum(dim=1)
             return ret.cpu().numpy()
+
         output = func()
         ms = bench(func, warmup=10, repeat=30, proton_name=f"std")
         print(f"std time: {ms:.3f} ms")
@@ -1041,6 +1124,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
         for key, value in arg_dict.items():
             std_arg_dict[key] = value.clone().to(torch_dev)
         output = torch.zeros_like(std_arg_dict["hidden_state"])
+
         def func():
             gating_output = std_arg_dict["hidden_state"] @ std_arg_dict["gate_weight"].T
             topk_softmax(
@@ -1058,16 +1142,18 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                 quant_scales=[],
                 output=output,
             )
+
         ms = bench(func, warmup=10, repeat=30, proton_name=f"flashinfer")
         print(f"flashinfer time: {ms:.3f} ms")
         return output.cpu().numpy()
-    
+
     def sglang_fused(arg_dict):
         torch_dev = torch.device("cuda")
         std_arg_dict = {}
         for key, value in arg_dict.items():
             std_arg_dict[key] = value.clone().to(torch_dev)
         output = torch.zeros_like(std_arg_dict["hidden_state"])
+
         def func():
             gating_output = std_arg_dict["hidden_state"] @ std_arg_dict["gate_weight"].T
             topk_softmax(
@@ -1083,6 +1169,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                 std_arg_dict["topk_weights"],
                 std_arg_dict["topk_indices"].to(torch.int),
             )
+
         output = func()
         ms = bench(func, warmup=10, repeat=30, proton_name=f"sglang_fused")
         print(f"sglang_fused time: {ms:.3f} ms")

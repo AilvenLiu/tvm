@@ -439,7 +439,7 @@ def test_hgemm_rs():
                         idx = T.meta_var(k * NUM_THREADS + tid)
                         if idx < MAX_TASKS * 3:
                             task_smem[idx // 3, idx % 3] = exec_queue[bx, idx // 3, idx % 3]
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
                 while task_id < MAX_TASKS and task_smem[task_id, 2] != JobType.END.value:
                     # GEMM
@@ -519,7 +519,7 @@ def test_hgemm_rs():
                         profiler.end(ProfileEventType.GEMM, tid == 0)
 
                     elif task_smem[task_id, 2] == JobType.RS.value:
-                        T.tvm_storage_sync("shared")
+                        T.cuda.cta_sync()
                         m_idx = task_smem[task_id, 0]
                         n_idx = task_smem[task_id, 1]
                         sem.semaphore_wait(m_idx, n_idx)

@@ -849,7 +849,7 @@ TVM_DLL const Op& cuda_warp_sync();
 /*!
  * \brief tvm intrinsic for cuda block-wide sync (syncthreads)
  */
-TVM_DLL const Op& cuda_block_sync();
+TVM_DLL const Op& cuda_cta_sync();
 
 /*!
  * \brief tvm intrinsic for cuda grid-wide sync (cooperative groups)

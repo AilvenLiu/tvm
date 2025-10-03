@@ -88,7 +88,7 @@ def test_layernorm(dtype):
                 Tp.copy_async(x_smem[:, 0, :], inp[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], event)
                 Tp.copy_async(resid_smem[:, 0, :], inp_resid[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], event)
                 event.commit()
-                T.tvm_storage_sync("shared")
+                T.cuda.cta_sync()
 
                 # main loop
                 n_loops = T.meta_var(T.ceildiv(N_PER_TILE, NUM_WORKERS))
@@ -102,7 +102,7 @@ def test_layernorm(dtype):
                         Tp.copy_async(resid_smem[:, 1, :], inp_resid[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], event)
                         event.commit()
                     event.wait(0)
-                    T.tvm_storage_sync("shared")
+                    T.cuda.cta_sync()
 
                     # store residual
                     Tp.add(resid_smem[:, 0, :], resid_smem[:, 0, :], x_smem[:, 0, :])
