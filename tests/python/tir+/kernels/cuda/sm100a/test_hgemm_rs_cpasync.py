@@ -30,6 +30,7 @@ from tvm.script import ir as I
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
+from tvm.tirp.tile_scheduler import RankAwareGroupMajorTileScheduler
 
 
 class ProfileEventType(Enum):
@@ -92,61 +93,6 @@ BLK_M_RS = 128
 NUM_GROUPS = 5
 PROFILER_BUFFER_SIZE = int(1e7)
 PROFILER_WRITE_STRIDE = SM_COUNT * NUM_GROUPS
-
-
-class TileScheduler:
-    def __init__(self, prefix: str, m_clusters: int, n_clusters: int):
-        self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-        self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-        self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-        self.m_clusters = m_clusters
-        self.n_clusters = n_clusters
-        self.my_rank = T.nvshmem.my_pe()
-        assert self.m_clusters % WORLD_SIZE == 0
-
-    @T.macro
-    def update_current_m_n_idx(self, linear_idx):
-        remote_m_clusters = self.m_clusters - self.m_clusters // WORLD_SIZE
-        group_rows = ((remote_m_clusters) // GROUP_SIZE) * GROUP_SIZE
-        final_rows = remote_m_clusters - group_rows
-        group_repeat = GROUP_SIZE * self.n_clusters
-        # FIXME: use group_rows > 0 to avoid constant folding bug
-        if linear_idx < group_rows * self.n_clusters and group_rows > 0:
-            self.m_idx = (
-                linear_idx // group_repeat * GROUP_SIZE
-                + (linear_idx % GROUP_SIZE)
-                + (self.my_rank + 1) * self.m_clusters // WORLD_SIZE
-            ) % self.m_clusters
-            self.n_idx = linear_idx % group_repeat // GROUP_SIZE
-        elif linear_idx < remote_m_clusters * self.n_clusters:
-            remainder_idx = linear_idx - group_rows * self.n_clusters
-            self.m_idx = (
-                group_rows
-                + remainder_idx % final_rows
-                + (self.my_rank + 1) * self.m_clusters // WORLD_SIZE
-            ) % self.m_clusters
-            self.n_idx = remainder_idx // final_rows
-        else:
-            remainder_idx = linear_idx - remote_m_clusters * self.n_clusters
-            self.m_idx = (
-                remote_m_clusters
-                + remainder_idx % (self.m_clusters // WORLD_SIZE)
-                + (self.my_rank + 1) * self.m_clusters // WORLD_SIZE
-            ) % self.m_clusters
-            self.n_idx = remainder_idx // (self.m_clusters // WORLD_SIZE)
-
-    @T.macro
-    def init(self, linear_init):
-        self.linear_idx = linear_init
-        self.update_current_m_n_idx(linear_init)
-
-    @T.macro
-    def next_tile(self, stride: int):
-        self.linear_idx = self.linear_idx + stride
-        self.update_current_m_n_idx(self.linear_idx)
-
-    def valid(self):
-        return self.linear_idx < self.m_clusters * self.n_clusters
 
 
 atomic_add_system_uint64 = f"""
@@ -384,7 +330,7 @@ class ReduceScatter:
                     tma_finished = T.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
                     m_clusters = T.meta_var((M + BLK_M - 1) // BLK_M // CLUSTER_M // NUM_CONSUMER)
                     n_clusters = T.meta_var((N + BLK_N - 1) // BLK_N // CLUSTER_N)
-                    gemm_tile_scheduler = T.meta_var(TileScheduler("gemm_tile_scheduler", m_clusters=m_clusters, n_clusters=n_clusters))
+                    gemm_tile_scheduler = T.meta_var(RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE))
                     gemm_tile_scheduler.init(bx//2)
                     # alloc TMEM
                     with T.warp()[0:1]:
@@ -562,7 +508,7 @@ class ReduceScatter:
                 iter = 0
                 load_pipe.init(c2p_thread_count=128)
                 tile_id = T.meta_var(iter * SM_COUNT + bx)
-                T.cuda.cta_sync()
+                T.tvm_storage_sync("shared")
                 if warp_id == 0 and wg_id == 0:
                     while tile_id < LOCAL_M // BLK_M_RS * N // BLK_N_RS:
                         m_idx = T.meta_var(tile_id // (N // BLK_N_RS))

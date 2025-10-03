@@ -22,6 +22,7 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tirp.bench.utils import bench, ProtonContext, export_to_perfetto_trace, CudaProfiler
+from tvm.tirp.tile_scheduler import IndexedTripleTileScheduler
 
 
 class ProfileEventType(Enum):
@@ -125,41 +126,7 @@ def test_fp16_fused_attn():
         O_LOAD_READY = 2
         EPILOGUE = 3
 
-    class TileScheduler:
-        def __init__(self, prefix: str, b_indices, h_indices, q_indices, tiles_indptr):
-            self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-            self.linear_lim = T.local_cell("int32", name=prefix + "_linear_lim")
-            self.b_indices = b_indices
-            self.h_indices = h_indices
-            self.q_indices = q_indices
-            self.tiles_indptr = tiles_indptr
-            self.q_idx = T.local_cell("int32", name=prefix + "_q_idx")
-            self.h_idx = T.local_cell("int32", name=prefix + "_h_idx")
-            self.b_idx = T.local_cell("int32", name=prefix + "_b_idx")
-            IRBuilder.current().name(prefix + "_b_indices", self.b_indices)
-            IRBuilder.current().name(prefix + "_h_indices", self.h_indices)
-            IRBuilder.current().name(prefix + "_q_indices", self.q_indices)
-            IRBuilder.current().name(prefix + "_tiles_indptr", self.tiles_indptr)
-
-        @T.macro
-        def get_block_coord(self):
-            self.q_idx = self.q_indices[self.linear_idx]
-            self.h_idx = self.h_indices[self.linear_idx]
-            self.b_idx = self.b_indices[self.linear_idx]
-
-        @T.macro
-        def init(self, sm):
-            self.linear_idx = self.tiles_indptr[sm]
-            self.linear_lim = self.tiles_indptr[sm + 1]
-            self.get_block_coord()
-
-        @T.macro
-        def next_tile(self):
-            self.linear_idx = self.linear_idx + 1
-            self.get_block_coord()
-            
-        def valid(self):
-            return self.linear_idx < self.linear_lim
+    
 
     class Pipeline:
         def __init__(self, full, empty, bytes):
@@ -494,7 +461,7 @@ def test_fp16_fused_attn():
 
                 with T.thread():
                     # tile scheduler
-                    tile_scheduler = T.meta_var(TileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr))
+                    tile_scheduler = T.meta_var(IndexedTripleTileScheduler("tile_scheduler", b_indices, h_indices, q_indices, tiles_indptr))
                     # pipeline
                     pipeline_k = T.meta_var(Pipeline(full_k, empty_k, TMA_BYTES_K))
                     pipeline_v = T.meta_var(Pipeline(full_v, empty_v, TMA_BYTES_V))

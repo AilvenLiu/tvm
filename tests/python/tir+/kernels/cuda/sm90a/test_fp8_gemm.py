@@ -23,6 +23,7 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tirp.bench.utils import ProtonContext, bench
+from tvm.tirp.tile_scheduler import GroupMajor2D
 
 
 @tvm.testing.requires_cuda_compute_version(9, exact=True)
@@ -46,36 +47,8 @@ def test_fp8_gemm_hopper_no_ws():
     WG_SIZE = 128
     TMA_BYTES = BLK_M * BLK_K * f8_bytes + BLK_K * BLK_N * f8_bytes
 
-    class TileScheduler:
-        m_blocks = (M + BLK_M - 1) // BLK_M
-        n_blocks = (N + BLK_N - 1) // BLK_N
-
-        def __init__(self, prefix: str):
-            self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-            self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-            self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-
-        def get_current_m_n_idx(self, linear_idx):
-            group_row_outer = linear_idx // (GROUP_SIZE * self.n_blocks)
-            group_row_inner = linear_idx % GROUP_SIZE
-            row = group_row_outer * GROUP_SIZE + group_row_inner
-            col = linear_idx // GROUP_SIZE % self.n_blocks
-            return row, col
-
-        @T.macro
-        def init(self, linear_init):
-            self.linear_idx = linear_init
-            self.m_idx = self.get_current_m_n_idx(linear_init)[0]
-            self.n_idx = self.get_current_m_n_idx(linear_init)[1]
-
-        @T.macro
-        def next_tile(self):
-            self.linear_idx = self.linear_idx + SM_COUNT
-            self.m_idx = self.get_current_m_n_idx(self.linear_idx)[0]
-            self.n_idx = self.get_current_m_n_idx(self.linear_idx)[1]
-
-        def valid(self):
-            return self.linear_idx < self.m_blocks * self.n_blocks
+    m_blocks = (M + BLK_M - 1) // BLK_M
+    n_blocks = (N + BLK_N - 1) // BLK_N
 
     # fmt: off
     @T.macro
@@ -174,7 +147,15 @@ def test_fp8_gemm_hopper_no_ws():
                     accum = T.alloc_buffer([128], "float32", scope="local")
                     accum_half = T.alloc_buffer([8], "float16", scope="local")
                     # tile scheduler
-                    tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
+                    tile_scheduler = T.meta_var(
+                        GroupMajor2D(
+                            "tile_scheduler",
+                            m_tiles=m_blocks,
+                            n_tiles=n_blocks,
+                            group_rows=GROUP_SIZE,
+                            step=SM_COUNT,
+                        )
+                    )
 
                     # initialize the tile scheduler
                     tile_scheduler.init(bx)

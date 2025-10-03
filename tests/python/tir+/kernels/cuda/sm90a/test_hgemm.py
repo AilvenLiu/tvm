@@ -21,6 +21,7 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tirp.bench.utils import ProtonContext, bench
+from tvm.tirp.tile_scheduler import GroupMajor2D
 
 
 @tvm.testing.requires_cuda_compute_version(9, exact=True)
@@ -48,43 +49,7 @@ def test_hgemm_hopper_ws_cooperative():
     def ceildiv(a, b):
         return (a + b - 1) // b
 
-    class TileScheduler:
-        m_blocks = ceildiv(ceildiv(M, BLK_M), CLUSTER_M) * CLUSTER_M
-        n_blocks = ceildiv(ceildiv(N, BLK_N), CLUSTER_N) * CLUSTER_N
-
-        def __init__(self, prefix: str):
-            self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-            self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-            self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-
-        def get_current_m_n_idx(self, linear_idx):
-            clusters_per_row = self.n_blocks // CLUSTER_N
-
-            div_cluster_x = linear_idx // CLUSTER_M
-            mod_cluster_x = linear_idx % CLUSTER_M
-            div_cluster_xy = div_cluster_x // CLUSTER_N
-            mod_cluster_xy = div_cluster_x % CLUSTER_N
-
-            group_row_outer = div_cluster_xy // (GROUP_SIZE * clusters_per_row)
-            group_row_inner = div_cluster_xy % GROUP_SIZE
-            cluster_row = group_row_outer * GROUP_SIZE + group_row_inner
-            cluster_col = div_cluster_xy // GROUP_SIZE % clusters_per_row
-            return cluster_row * CLUSTER_M + mod_cluster_x, cluster_col * CLUSTER_N + mod_cluster_xy
-
-        @T.macro
-        def init(self, linear_init):
-            self.linear_idx = linear_init
-            self.m_idx = self.get_current_m_n_idx(linear_init)[0]
-            self.n_idx = self.get_current_m_n_idx(linear_init)[1]
-
-        @T.macro
-        def next_tile(self):
-            self.linear_idx = self.linear_idx + SM_COUNT
-            self.m_idx = self.get_current_m_n_idx(self.linear_idx)[0]
-            self.n_idx = self.get_current_m_n_idx(self.linear_idx)[1]
-
-        def valid(self):
-            return self.linear_idx < self.m_blocks * self.n_blocks
+    
 
     class PipelineState:
         def __init__(self, prefix: str):
@@ -171,7 +136,19 @@ def test_hgemm_hopper_ws_cooperative():
 
                 with T.thread():
                     # work tile info
-                    tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
+                    m_blocks = ceildiv(ceildiv(M, BLK_M), CLUSTER_M) * CLUSTER_M
+                    n_blocks = ceildiv(ceildiv(N, BLK_N), CLUSTER_N) * CLUSTER_N
+                    tile_scheduler = T.meta_var(
+                        GroupMajor2D(
+                            "tile_scheduler",
+                            m_tiles=m_blocks,
+                            n_tiles=n_blocks,
+                            group_rows=GROUP_SIZE,
+                            step=SM_COUNT,
+                            inner_m=CLUSTER_M,
+                            inner_n=CLUSTER_N,
+                        )
+                    )
                     # produer pipelinen states
                     producer = T.meta_var(PipelineState("producer"))
                     # consumer pipeline states
@@ -209,8 +186,7 @@ def test_hgemm_hopper_ws_cooperative():
                     # fence the barrier init, the memory ordering is visble across the cluster
                     T.ptx.fence.mbarrier_init()
                     # cluster synchronization
-                    T.ptx.barrier.cluster.arrive("relaxed", aligned=True)
-                    T.ptx.barrier.cluster.wait(aligned=True)
+                    T.cuda.cluster_sync()
 
                     k_tile_count = T.meta_var((K + BLK_K - 1) // BLK_K)
                     with T.warpgroup()[0:1]:
@@ -380,36 +356,7 @@ def test_hgemm_hopper_no_ws():
     WG_SIZE = 128
     TMA_BYTES = BLK_M * BLK_K * f16_bytes + BLK_K * BLK_N * f16_bytes
 
-    class TileScheduler:
-        m_blocks = (M + BLK_M - 1) // BLK_M
-        n_blocks = (N + BLK_N - 1) // BLK_N
-
-        def __init__(self, prefix: str):
-            self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-            self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-            self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-
-        def get_current_m_n_idx(self, linear_idx):
-            group_row_outer = linear_idx // (GROUP_SIZE * self.n_blocks)
-            group_row_inner = linear_idx % GROUP_SIZE
-            row = group_row_outer * GROUP_SIZE + group_row_inner
-            col = linear_idx // GROUP_SIZE % self.n_blocks
-            return row, col
-
-        @T.macro
-        def init(self, linear_init):
-            self.linear_idx = linear_init
-            self.m_idx = self.get_current_m_n_idx(linear_init)[0]
-            self.n_idx = self.get_current_m_n_idx(linear_init)[1]
-
-        @T.macro
-        def next_tile(self):
-            self.linear_idx = self.linear_idx + SM_COUNT
-            self.m_idx = self.get_current_m_n_idx(self.linear_idx)[0]
-            self.n_idx = self.get_current_m_n_idx(self.linear_idx)[1]
-
-        def valid(self):
-            return self.linear_idx < self.m_blocks * self.n_blocks
+    
 
     # fmt: off
     @T.macro
@@ -510,7 +457,19 @@ def test_hgemm_hopper_no_ws():
                     # temp accum
                     accum_half = T.alloc_buffer([8], "float16", scope="local")
                     # tile scheduler
-                    tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
+                    m_blocks = ceildiv(ceildiv(M, BLK_M), CLUSTER_M) * CLUSTER_M
+                    n_blocks = ceildiv(ceildiv(N, BLK_N), CLUSTER_N) * CLUSTER_N
+                    tile_scheduler = T.meta_var(
+                        GroupMajor2D(
+                            "tile_scheduler",
+                            m_tiles=m_blocks,
+                            n_tiles=n_blocks,
+                            group_rows=GROUP_SIZE,
+                            step=SM_COUNT,
+                            inner_m=CLUSTER_M,
+                            inner_n=CLUSTER_N,
+                        )
+                    )
 
                     # initialize the tile scheduler
                     tile_scheduler.init(bx)

@@ -11,6 +11,7 @@ from tvm.script import tirp as Tp
 from tvm.tirp.bench.utils import ProtonContext, bench
 from tvm.tirp.megakernel.group_gemm_sm100 import GroupGEMMTile
 from tvm.tirp.megakernel.common import SmemManager, KernelConfig, ceildiv
+from tvm.tirp.tile_scheduler import GroupMajor2D
 
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
 from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
@@ -92,34 +93,6 @@ def gen_input(batch_size, hidden_size, num_experts, top_k, intermediate_size):
 
 def get_group_gemm_kernel(K, E, top_k, N, acc_output=False):
 
-    class TileScheduler:
-
-        N_TILE_CNT = ceildiv(N, GroupGEMMTile.BLK_N)
-
-        def __init__(self, worker_cnt):
-            self.m_idx = T.local_cell("int32", name="m_idx")
-            self.n_idx = T.local_cell("int32", name="n_idx")
-            self.linear_idx = T.local_cell("int32", name="linear_idx")
-            self.worker_cnt = worker_cnt
-
-        @T.macro
-        def get_current_m_n_idx(self, linear_idx):
-            self.m_idx = T.floordiv(linear_idx, self.N_TILE_CNT)
-            self.n_idx = T.floormod(linear_idx, self.N_TILE_CNT)
-
-        @T.macro
-        def init(self, linear_init):
-            self.linear_idx = linear_init
-            self.get_current_m_n_idx(linear_init)
-
-        @T.macro
-        def next_tile(self):
-            self.linear_idx = self.linear_idx + self.worker_cnt
-            self.get_current_m_n_idx(self.linear_idx)
-
-        def valid(self, total_tile_cnt):
-            return self.linear_idx < total_tile_cnt
-
     # fmt: off
     @T.prim_func(tirp=True)
     def group_gemm(
@@ -162,10 +135,12 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False):
             smem_manager.pool_allocator.move_base_to(16384*14) # FIXME: this should be fixed in smem manager
             smem_manager.set_tile(group_gemm_tile.__class__)
             GroupGEMMTile.class_init(smem_manager)
-            tile_scheduler = T.meta_var(TileScheduler(cta_cnt))
+            M_TILE_CNT = T.meta_var(ceildiv(num_tokens_post_padded[0], BLK_M))
+            N_TILE_CNT = ceildiv(N, GroupGEMMTile.BLK_N)
+            tile_scheduler = T.meta_var(GroupMajor2D("sched", M_TILE_CNT, N_TILE_CNT, 1, step=cta_cnt))
             tile_scheduler.init(bx)
             smem_manager.init()
-            while tile_scheduler.valid(ceildiv(num_tokens_post_padded[0], BLK_M) * tile_scheduler.N_TILE_CNT):
+            while tile_scheduler.valid():
                 smem_manager.enter_tile_runtime(group_gemm_tile)
                 group_gemm_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, 0, expert_ids, routing_weights, sorted_token_ids, None)
                 tile_scheduler.next_tile()
@@ -293,7 +268,7 @@ def test_group_gemm(task):
             out1 = scatter_out(out1_tvm, batch_size * top_k, intermediate_size * 2).view(
                 batch_size, top_k, intermediate_size * 2
             )
-            out2 = out2_tvm.numpy()[: batch_size, :]
+            out2 = out2_tvm.numpy()[:batch_size, :]
             return out1, out2
 
     def sglang():

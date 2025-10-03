@@ -29,6 +29,7 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
+from tvm.tirp.tile_scheduler import GroupMajor2D
 
 
 def _get_source(func: tvm.tir.PrimFunc) -> str:
@@ -80,41 +81,7 @@ TMEM_LD_SIZE = 128
 CLUSTER_M, CLUSTER_N = 2, 1
 
 
-class TileScheduler:
-    m_clusters = (M + BLK_M - 1) // BLK_M // CLUSTER_M // NUM_CONSUMER
-    n_clusters = (N + BLK_N - 1) // BLK_N // CLUSTER_N
-
-    def __init__(self, prefix: str):
-        self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-        self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-        self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-
-    @T.macro
-    def update_current_m_n_idx(self, linear_idx):
-        group_rows = (self.m_clusters // GROUP_SIZE) * GROUP_SIZE
-        final_rows = self.m_clusters - group_rows
-        group_repeat = GROUP_SIZE * self.n_clusters
-        # FIXME: use group_rows > 0 to avoid constant folding bug
-        if linear_idx < group_rows * self.n_clusters and group_rows > 0:
-            self.m_idx = linear_idx // group_repeat * GROUP_SIZE + (linear_idx % GROUP_SIZE)
-            self.n_idx = linear_idx % group_repeat // GROUP_SIZE
-        elif final_rows > 0:
-            remainder_idx = linear_idx - group_rows * self.n_clusters
-            self.m_idx = group_rows + remainder_idx % final_rows
-            self.n_idx = remainder_idx // final_rows
-
-    @T.macro
-    def init(self, linear_init):
-        self.linear_idx = linear_init
-        self.update_current_m_n_idx(linear_init)
-
-    @T.macro
-    def next_tile(self):
-        self.linear_idx = self.linear_idx + SM_COUNT // 2
-        self.update_current_m_n_idx(self.linear_idx)
-
-    def valid(self):
-        return self.linear_idx < self.m_clusters * self.n_clusters
+    
 
 
 class Pipeline:
@@ -286,7 +253,15 @@ def test_tcgen05_mma_ss_tma():
                 tma2mma_pipe.init(c2p_thread_count=NUM_CONSUMER)
                 ptr: T.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret("handle", T.ptx.map_shared_rank(tma2mma_pipe.mbar_p2c.ptr_to([0, 0]), 0))
                 tma_finished = T.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
-                tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
+                tile_scheduler = T.meta_var(
+                    GroupMajor2D(
+                        "tile_scheduler",
+                        m_tiles=M_CLUSTERS,
+                        n_tiles=N_CLUSTERS,
+                        group_rows=GROUP_SIZE,
+                        step=SM_COUNT // 2,
+                    )
+                )
                 tile_scheduler.init(bx//2)
                 # alloc TMEM
                 with T.warp()[0:1]:
@@ -426,3 +401,5 @@ def test_tcgen05_mma_ss_tma():
 
 if __name__ == "__main__":
     test_tcgen05_mma_ss_tma()
+M_CLUSTERS = (M + BLK_M - 1) // BLK_M // CLUSTER_M // NUM_CONSUMER
+N_CLUSTERS = (N + BLK_N - 1) // BLK_N // CLUSTER_N

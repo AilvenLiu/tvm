@@ -29,6 +29,7 @@ from tvm.runtime import disco as di
 from tvm.script import tir as T
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
+from tvm.tirp.tile_scheduler import RankAwareGroupMajorTileScheduler, GroupMajor2D
 
 
 class ProfileEventType(Enum):
@@ -97,101 +98,6 @@ PROFILER_BUFFER_SIZE = int(1e6)
 PROFILER_WRITE_STRIDE = SM_COUNT * NUM_GROUPS
 
 
-class GemmTileScheduler:
-    def __init__(self, prefix: str, m_clusters: int, n_clusters: int, group_size: int):
-        self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-        self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-        self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-        self.m_clusters = m_clusters
-        self.n_clusters = n_clusters
-        self.my_rank = T.nvshmem.my_pe()
-        assert self.m_clusters % WORLD_SIZE == 0
-        self.group_size = group_size
-
-    @T.macro
-    def update_current_m_n_idx(self, linear_idx):
-        remote_m_clusters = self.m_clusters - self.m_clusters // WORLD_SIZE
-        group_rows = ((remote_m_clusters) // self.group_size) * self.group_size
-        final_rows = remote_m_clusters - group_rows
-        group_repeat = self.group_size * self.n_clusters
-        # FIXME: use group_rows > 0 to avoid constant folding bug
-        if linear_idx < group_rows * self.n_clusters and group_rows > 0:
-            self.m_idx = (
-                linear_idx // group_repeat * self.group_size
-                + (linear_idx % self.group_size)
-                + (self.my_rank + 1) * self.m_clusters // WORLD_SIZE
-            ) % self.m_clusters
-            self.n_idx = linear_idx % group_repeat // self.group_size
-        elif linear_idx < remote_m_clusters * self.n_clusters:
-            remainder_idx = linear_idx - group_rows * self.n_clusters
-            self.m_idx = (
-                group_rows
-                + remainder_idx % final_rows
-                + (self.my_rank + 1) * self.m_clusters // WORLD_SIZE
-            ) % self.m_clusters
-            self.n_idx = remainder_idx // final_rows
-        else:
-            remainder_idx = linear_idx - remote_m_clusters * self.n_clusters
-            self.m_idx = (
-                remote_m_clusters
-                + remainder_idx % (self.m_clusters // WORLD_SIZE)
-                + (self.my_rank + 1) * self.m_clusters // WORLD_SIZE
-            ) % self.m_clusters
-            self.n_idx = remainder_idx // (self.m_clusters // WORLD_SIZE)
-
-    @T.macro
-    def init(self, linear_init):
-        self.linear_idx = linear_init
-        self.update_current_m_n_idx(linear_init)
-
-    @T.macro
-    def next_tile(self, stride: int):
-        self.linear_idx = self.linear_idx + stride
-        self.update_current_m_n_idx(self.linear_idx)
-
-    def valid(self):
-        return self.linear_idx < self.m_clusters * self.n_clusters
-
-
-class RSTileScheduler:
-    def __init__(self, prefix: str, m_clusters: int, n_clusters: int, group_size: int):
-        self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-        self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-        self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-        self.m_clusters = m_clusters
-        self.n_clusters = n_clusters
-        self.group_size = group_size
-
-    @T.macro
-    def update_current_m_n_idx(self, linear_idx):
-        group_rows = (self.m_clusters // self.group_size) * self.group_size
-        final_rows = self.m_clusters - group_rows
-        group_repeat = self.group_size * self.n_clusters
-        # FIXME: use group_rows > 0 to avoid constant folding bug
-        if linear_idx < group_rows * self.n_clusters and group_rows > 0:
-            self.m_idx = linear_idx // group_repeat * self.group_size + (
-                linear_idx % self.group_size
-            )
-            self.n_idx = linear_idx % group_repeat // self.group_size
-        elif final_rows > 0:
-            remainder_idx = linear_idx - group_rows * self.n_clusters
-            self.m_idx = group_rows + remainder_idx % final_rows
-            self.n_idx = remainder_idx // final_rows
-
-    @T.macro
-    def init(self, linear_init):
-        self.linear_idx = linear_init
-        self.update_current_m_n_idx(linear_init)
-
-    @T.macro
-    def next_tile(self, stride: int):
-        self.linear_idx = self.linear_idx + stride
-        self.update_current_m_n_idx(self.linear_idx)
-
-    def valid(self):
-        return self.linear_idx < self.m_clusters * self.n_clusters
-
-
 wait_str = """
 __forceinline__ __device__ void wait(void* sem_addr, int value) {
     int state = -1;
@@ -213,8 +119,7 @@ class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
         self.sem = buffer
-        self.state = T.alloc_buffer([1], "int32", scope="local", align=4)
-        IRBuilder.current().name("semaphore_state", self.state)
+        self.state = T.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
 
     @T.macro
     def semaphore_wait(self, *coord):
@@ -445,7 +350,7 @@ def test_hgemm_rs():
                     tma_finished = T.decl_buffer([PIPE_DEPTH], "uint64", data=ptr, scope="shared")
                     m_clusters = T.meta_var((M + BLK_M - 1) // BLK_M // CLUSTER_M // NUM_CONSUMER)
                     n_clusters = T.meta_var((N + BLK_N - 1) // BLK_N // CLUSTER_N)
-                    gemm_tile_scheduler = T.meta_var(GemmTileScheduler("gemm_tile_scheduler", m_clusters=m_clusters, n_clusters=n_clusters, group_size=GROUP_SIZE))
+                    gemm_tile_scheduler = T.meta_var(RankAwareGroupMajorTileScheduler("gemm_tile_scheduler", m_clusters, n_clusters, GROUP_SIZE, WORLD_SIZE))
                     gemm_tile_scheduler.init(bx//2)
                     # alloc TMEM
                     with T.warp()[0:1]:
@@ -535,8 +440,7 @@ def test_hgemm_rs():
                                 sem.semaphore_notify(cbx, wg_id, tid, m_idx, n_idx) # notify a single tile
                                 mma2ld_pipe.advance()
                                 gemm_tile_scheduler.next_tile(stride=GEMM_SMS // 2)
-                    T.ptx.barrier.cluster.arrive(aligned=True)
-                    T.ptx.barrier.cluster.wait(aligned=True)
+                    T.cuda.cluster_sync()
                     # dealloc TMEM
                     with T.warp()[0:1]:
                         T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
@@ -558,7 +462,7 @@ def test_hgemm_rs():
                     dst_rank = T.meta_var((rank + WORLD_SIZE - 1) % WORLD_SIZE)
                     m_clusters = T.meta_var((LOCAL_M + BLK_M - 1) // BLK_M)
                     n_clusters = T.meta_var((N + BLK_N - 1) // BLK_N)
-                    rs_tile_scheduler = T.meta_var(RSTileScheduler("rs_tile_scheduler", m_clusters=m_clusters, n_clusters=n_clusters, group_size=GROUP_SIZE * 4))
+                    rs_tile_scheduler = T.meta_var(GroupMajor2D("rs_tile_scheduler", m_tiles=m_clusters, n_tiles=n_clusters, group_rows=GROUP_SIZE * 4, step=RS_SMS))
                     load_pipe.init(c2p_thread_count=256)
                     T.cuda.cta_sync()
                     for stage in range(WORLD_SIZE):
@@ -589,7 +493,7 @@ def test_hgemm_rs():
                                                 T.ptx.mbarrier.arrive.expect_tx(load_pipe.mbar_p2c.ptr_to([load_pipe.idx, 0]), RS_BLK_M * RS_BLK_N * 2)
                                             load_pipe.advance()
                                         profiler.end(ProfileEventType.LOAD, tid_in_wg == 0)
-                                rs_tile_scheduler.next_tile(stride=RS_SMS)
+                                rs_tile_scheduler.next_tile()
                         else:
                             while rs_tile_scheduler.valid():
                                 m_idx = T.meta_var(rs_tile_scheduler.m_idx)
@@ -635,7 +539,7 @@ def test_hgemm_rs():
                                     load_pipe.consumer_release(0)
                                     load_pipe.advance()
                                 profiler.end(ProfileEventType.ACCUM, tid_in_wg == 0)
-                                rs_tile_scheduler.next_tile(stride=RS_SMS)
+                                rs_tile_scheduler.next_tile()
                             T.ptx.bar.sync(1, 256)
                             flag_addr = T.meta_var(sig_addr.access_ptr("w", offset=sig_addr.elem_offset_of([stage, bx - GEMM_SMS])))
                             if tid == 0 :
@@ -788,14 +692,14 @@ def test_hgemm_rs():
 
     print("Results all correct.")
 
-    # profiler results
-    for rank in range(WORLD_SIZE):
-        if rank == 7:
-            export_to_perfetto_trace(
-                res_dict["profiler_buffer_host"].numpy()[rank],
-                f"hgemm-RS-rank{rank}.perfetto-trace",
-                event_type_names,
-            )
+    # # profiler results
+    # for rank in range(WORLD_SIZE):
+    #     if rank == 7:
+    #         export_to_perfetto_trace(
+    #             res_dict["profiler_buffer_host"].numpy()[rank],
+    #             f"hgemm-RS-rank{rank}.perfetto-trace",
+    #             event_type_names,
+    #         )
 
 
 if __name__ == "__main__":

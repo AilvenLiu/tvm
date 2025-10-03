@@ -8,6 +8,7 @@ from tvm.tir.event import EventImpl
 from tvm.script import ir_builder as IRBuilder
 from tvm.script import tir as T
 from tvm.tirp.bench.utils import ProtonContext, bench
+from tvm.tirp.tile_scheduler import GroupMajor2D
 from tvm.tirp.bench.CuTeDSL.dense_gemm_persistent import run
 
 # cluster: [2, 1], cta_num = 2
@@ -87,40 +88,7 @@ TILE_M_NUM = M // (NUM_CONSUMER * BLK_M * CTA_GROUP)
 TILE_N_NUM = N // (BLK_N * CTA_GROUP)
 
 
-class TileScheduler:
-
-    def __init__(self, prefix: str):
-        self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-        self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-        self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-
-    @T.macro
-    def update_current_m_n_idx(self, linear_idx):
-        TILE_GROUPS_NUM = T.meta_var(TILE_M_NUM // TILE_GROUPS_ROW_SIZE)
-        TILE_GROUPS_SIZE = T.meta_var(TILE_GROUPS_ROW_SIZE * TILE_N_NUM)
-        TILE_FINAL_ROWS = T.meta_var(TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE))
-        if linear_idx < TILE_GROUPS_NUM * TILE_GROUPS_SIZE and TILE_GROUPS_NUM > 0:
-            self.m_idx = linear_idx // TILE_GROUPS_SIZE * TILE_GROUPS_ROW_SIZE + (
-                linear_idx % TILE_GROUPS_ROW_SIZE
-            )
-            self.n_idx = (linear_idx % TILE_GROUPS_SIZE) // TILE_GROUPS_ROW_SIZE
-        elif TILE_FINAL_ROWS > 0:
-            remainder_idx = T.meta_var(linear_idx - TILE_GROUPS_SIZE * TILE_GROUPS_NUM)
-            self.m_idx = TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE + remainder_idx % TILE_FINAL_ROWS
-            self.n_idx = remainder_idx // TILE_FINAL_ROWS
-
-    @T.macro
-    def init(self, linear_init):
-        self.linear_idx = linear_init
-        self.update_current_m_n_idx(linear_init)
-
-    @T.macro
-    def next_tile(self):
-        self.linear_idx = self.linear_idx + SM_NUMBER // 2
-        self.update_current_m_n_idx(self.linear_idx)
-
-    def valid(self):
-        return self.linear_idx < TILE_M_NUM * TILE_N_NUM
+    
 
 
 class Barriers:
@@ -244,7 +212,15 @@ def test_hgemm():
                 mma2tma = T.meta_var(BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False))
                 mma2ld = T.meta_var(BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True))
                 ld2mma = T.meta_var(BarLD2MMA(buf.data, 4 + 2 * PIPELINE_DEPTH + NUM_CONSUMER, 1, NUM_CONSUMER, is_p2c=False))
-                tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
+                tile_scheduler = T.meta_var(
+                    GroupMajor2D(
+                        "tile_scheduler",
+                        m_tiles=TILE_M_NUM,
+                        n_tiles=TILE_N_NUM,
+                        group_rows=TILE_GROUPS_ROW_SIZE,
+                        step=SM_NUMBER // 2,
+                    )
+                )
                 tma2mma.init(1)
                 mma2tma.init(NUM_CONSUMER)
                 mma2ld.init(1)
@@ -263,8 +239,7 @@ def test_hgemm():
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
 
-                T.ptx.barrier.cluster.arrive()
-                T.ptx.barrier.cluster.wait()
+                T.cuda.cluster_sync()
                 T.cuda.cta_sync()
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
@@ -410,8 +385,7 @@ def test_hgemm():
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)
                     T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=2)
                 
-                T.ptx.barrier.cluster.arrive()
-                T.ptx.barrier.cluster.wait()
+                T.cuda.cluster_sync()
 
     A_bf16, B_bf16, C_bf16 = prepare_data()
 

@@ -111,8 +111,7 @@ class Semaphore:
     def __init__(self, cnt, buffer):
         self.cnt = cnt
         self.sem = buffer
-        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4)
-        IRBuilder.current().name("semaphore_state", self.state)
+        self.state = T.alloc_buffer([1], "uint64", scope="local", align=4, name="semaphore_state")
 
     @T.macro
     def semaphore_wait(self, *coord):

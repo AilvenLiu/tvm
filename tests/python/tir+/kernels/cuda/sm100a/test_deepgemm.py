@@ -6,6 +6,7 @@ import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
+from tvm.tirp.tile_scheduler import GroupMajor2D
 from tvm.tirp.bench.utils import bench
 
 # can get 3250 TFLOPs on a single B200 with (m, n, k) = (8192, 8064, 8192), which is aligned to DeepSeek's
@@ -89,43 +90,7 @@ TILE_M_NUM = M // (BLK_M * CTA_GROUP)
 TILE_N_NUM = N // (BLK_N * CTA_GROUP)
 
 
-class TileScheduler:
-
-    def __init__(self, prefix: str):
-        self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-        self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-        self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-        self.tile_idx = T.local_cell("int32", name="tile_idx")
-
-    @T.macro
-    def update_current_m_n_idx(self, linear_idx):
-        TILE_GROUPS_NUM = TILE_M_NUM // TILE_GROUPS_ROW_SIZE
-        TILE_GROUPS_SIZE = TILE_GROUPS_ROW_SIZE * TILE_N_NUM
-        TILE_FINAL_ROWS = TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE)
-        if linear_idx < TILE_GROUPS_NUM * TILE_GROUPS_SIZE and TILE_GROUPS_NUM > 0:
-            self.m_idx = linear_idx // TILE_GROUPS_SIZE * TILE_GROUPS_ROW_SIZE + (
-                linear_idx % TILE_GROUPS_ROW_SIZE
-            )
-            self.n_idx = (linear_idx % TILE_GROUPS_SIZE) // TILE_GROUPS_ROW_SIZE
-        elif TILE_FINAL_ROWS > 0:
-            remainder_idx = linear_idx - TILE_GROUPS_SIZE * TILE_GROUPS_NUM
-            self.m_idx = TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE + remainder_idx % TILE_FINAL_ROWS
-            self.n_idx = remainder_idx // TILE_FINAL_ROWS
-
-    @T.macro
-    def init(self, linear_init):
-        self.linear_idx = linear_init
-        self.tile_idx = 0
-        self.update_current_m_n_idx(linear_init)
-
-    @T.macro
-    def next_tile(self):
-        self.linear_idx = self.linear_idx + SM_NUMBER // 2
-        self.tile_idx += 1
-        self.update_current_m_n_idx(self.linear_idx)
-
-    def valid(self):
-        return self.linear_idx < TILE_M_NUM * TILE_N_NUM
+    
 
 
 class Barriers:
@@ -310,7 +275,7 @@ def test_deepgemm():
                 mma2tma_bar = T.meta_var(BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))
                 mma2ld_bar = T.meta_var(BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True))
                 ld2mma_bar = T.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
-                tile_scheduler = T.meta_var(TileScheduler("tile_scheduler"))
+                tile_scheduler = T.meta_var(GroupMajor2D("tile_scheduler", m_tiles=TILE_M_NUM, n_tiles=TILE_N_NUM, group_rows=TILE_GROUPS_ROW_SIZE, step=SM_NUMBER // 2))
 
                 tma2trans_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma2trans_bar.mbar, None, None], shape=[SMEM_PIPE_DEPTH])
                 wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
@@ -330,8 +295,7 @@ def test_deepgemm():
                 # sync
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
-                T.ptx.barrier.cluster.arrive()
-                T.ptx.barrier.cluster.wait()
+                T.cuda.cluster_sync()
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -562,8 +526,7 @@ def test_deepgemm():
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)
                     T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=2)
 
-                T.ptx.barrier.cluster.arrive()
-                T.ptx.barrier.cluster.wait()
+                T.cuda.cluster_sync()
 
     # fmt: on
 

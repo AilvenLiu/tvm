@@ -33,7 +33,7 @@ import tvm
 from tvm.tirp.bench.utils import bench, ProtonContext
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-
+from tvm.tirp.tile_scheduler import GroupMajor2D
 
 test_configs = [
     {
@@ -43,7 +43,6 @@ test_configs = [
         "top_k": 8,  # Top-K
         "intermediate_size": 768,  # N
     },
-
 ]
 
 DEBUG = False
@@ -251,30 +250,6 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
 """
         return T.cuda.func_call(func_name, dst_ptr, src_ptr, source_code=source_code)
 
-    class TileScheduler:
-        def __init__(self):
-            self.m_idx = T.local_cell("int32", name="m_idx")
-            self.n_idx = T.local_cell("int32", name="n_idx")
-            self.linear_idx = T.local_cell("int32", name="linear_idx")
-
-        @T.macro
-        def get_current_m_n_idx(self, linear_idx):
-            self.m_idx = T.floordiv(linear_idx, N_TILE_CNT)
-            self.n_idx = T.floormod(linear_idx, N_TILE_CNT)
-
-        @T.macro
-        def init(self, linear_init):
-            self.linear_idx = linear_init
-            self.get_current_m_n_idx(linear_init)
-
-        @T.macro
-        def next_tile(self, worker_cnt):
-            self.linear_idx = self.linear_idx + worker_cnt
-            self.get_current_m_n_idx(self.linear_idx)
-
-        def valid(self, total_tile_cnt):
-            return self.linear_idx < total_tile_cnt
-
     # fmt: off
 
     @T.prim_func(tirp=True)
@@ -466,14 +441,15 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     scope_sync()
                     write_C_to_gmem()
 
-                scheduler = T.meta_var(TileScheduler())
+                M_TILE_CNT = T.meta_var(ceildiv(num_tokens_post_padded[0], BLK_M))
+                scheduler = T.meta_var(GroupMajor2D("sched", M_TILE_CNT, N_TILE_CNT, 1, step=cta_cnt * 2))
                 scheduler.init(bx * 2 + wg_id)
                 m_idx = T.meta_var(scheduler.m_idx)
                 n_idx = T.meta_var(scheduler.n_idx)
 
-                while scheduler.valid(ceildiv(num_tokens_post_padded[0], BLK_M) * N_TILE_CNT):
+                while scheduler.valid():
                     compute_tile(m_idx, n_idx)
-                    scheduler.next_tile(cta_cnt * 2)
+                    scheduler.next_tile()
     # fmt: on
     return group_gemm
 
@@ -513,7 +489,9 @@ def test_group_gemm(task):
         out1_tvm = tvm.runtime.empty(
             (batch_size, top_k, 2 * intermediate_size), dtype="float16", device=dev
         )
-        out2_tvm = tvm.runtime.empty((batch_size * top_k, 1, hidden_size), dtype="float16", device=dev)
+        out2_tvm = tvm.runtime.empty(
+            (batch_size * top_k, 1, hidden_size), dtype="float16", device=dev
+        )
 
         def get_config(batch_size):
             config = {

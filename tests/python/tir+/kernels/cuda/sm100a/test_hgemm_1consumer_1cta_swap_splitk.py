@@ -13,6 +13,7 @@ from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
+from tvm.tirp.tile_scheduler import GroupMajor3D
 
 # cluster: [2, 1], cta_num = 2
 # warpgroup:
@@ -108,49 +109,7 @@ def get_hgemm_kernel(dim_n, dim_k):
     assert N % (BLK_N * CTA_GROUP) == 0
     TILE_N_NUM = ceildiv(N, BLK_N * CTA_GROUP)
 
-    class TileScheduler:
-
-        def __init__(self, prefix: str, M):
-            self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-            self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-            self.k_idx = T.local_cell("int32", name=prefix + "_k_idx")
-            self.linear_idx = T.local_cell("int32", name=prefix + "_linear_idx")
-            self.tile_idx = T.local_cell("int32", name="tile_idx")
-            self.TILE_M_NUM = ceildiv(M, BLK_M * CTA_GROUP)
-
-        @T.macro
-        def update_current_m_n_idx(self, linear_idx):
-            TILE_GROUPS_NUM = self.TILE_M_NUM // TILE_GROUPS_ROW_SIZE
-            TILE_GROUPS_SIZE = TILE_GROUPS_ROW_SIZE * TILE_N_NUM * TILE_K_NUM
-            TILE_FINAL_ROWS = self.TILE_M_NUM - (TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE)
-            if linear_idx < TILE_GROUPS_NUM * TILE_GROUPS_SIZE and TILE_GROUPS_NUM > 0:
-                self.m_idx = linear_idx // TILE_GROUPS_SIZE * TILE_GROUPS_ROW_SIZE + (
-                    linear_idx % TILE_GROUPS_ROW_SIZE
-                )
-                self.n_idx = (linear_idx // TILE_GROUPS_ROW_SIZE) % TILE_N_NUM
-                self.k_idx = (linear_idx % TILE_GROUPS_SIZE) // (TILE_GROUPS_ROW_SIZE * TILE_N_NUM)
-            elif TILE_FINAL_ROWS > 0:
-                remainder_idx = linear_idx - TILE_GROUPS_SIZE * TILE_GROUPS_NUM
-                self.m_idx = (
-                    TILE_GROUPS_NUM * TILE_GROUPS_ROW_SIZE + remainder_idx % TILE_FINAL_ROWS
-                )
-                self.n_idx = (remainder_idx // TILE_FINAL_ROWS) % TILE_N_NUM
-                self.k_idx = remainder_idx // (TILE_FINAL_ROWS * TILE_N_NUM)
-
-        @T.macro
-        def init(self, linear_init):
-            self.linear_idx = linear_init
-            self.tile_idx = 0
-            self.update_current_m_n_idx(linear_init)
-
-        @T.macro
-        def next_tile(self):
-            self.linear_idx = self.linear_idx + SM_NUMBER
-            self.tile_idx += 1
-            self.update_current_m_n_idx(self.linear_idx)
-
-        def valid(self):
-            return self.linear_idx < self.TILE_M_NUM * TILE_N_NUM * TILE_K_NUM
+    
 
     atomic_add_system_uint64 = f"""
     __forceinline__ __device__ void atomic_add_system_uint64(uint64_t* addr, uint64_t value) {{
@@ -298,7 +257,17 @@ def get_hgemm_kernel(dim_n, dim_k):
                 mma2tma_bar = T.meta_var(BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))
                 mma2ld_bar = T.meta_var(BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True))
                 ld2mma_bar = T.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
-                tile_scheduler = T.meta_var(TileScheduler("tile_scheduler", M))
+                m_tiles_expr = T.truncdiv(M + BLK_M * CTA_GROUP - 1, BLK_M * CTA_GROUP)
+                tile_scheduler = T.meta_var(
+                    GroupMajor3D(
+                        "tile_scheduler",
+                        m_tiles=m_tiles_expr,
+                        n_tiles=TILE_N_NUM,
+                        k_tiles=TILE_K_NUM,
+                        group_rows=TILE_GROUPS_ROW_SIZE,
+                        step=SM_NUMBER,
+                    )
+                )
                 tma2mma_bar.init(1)
                 mma2ld_bar.init(1)
                 mma2tma_bar.init(1)
