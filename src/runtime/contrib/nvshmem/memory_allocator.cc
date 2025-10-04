@@ -76,11 +76,10 @@ class NVSHMEMAllocator final : public PooledAllocator {
   void* DeviceAllocDataSpace(Device dev, size_t size, size_t alignment,
                              DLDataType type_hint) final {
     TVM_FFI_ICHECK_EQ(dev.device_type, DLDeviceType::kDLCUDA)
-        << "nvshmem can only allocate CUDA device memory space.";
-    TVM_FFI_ICHECK(type_hint.code == DLDataTypeCode::kDLInt ||
-                   type_hint.code == DLDataTypeCode::kDLUInt ||
-                   type_hint.code == DLDataTypeCode::kDLFloat)
-        << "nvshmem can only allocate tensor with int, usingned int or float data types.";
+        << "nvshmem can only allocate cuda device memory space.";
+    TVM_FFI_ICHECK(type_hint.code == DLDataTypeCode::kDLInt || type_hint.code == DLDataTypeCode::kDLUInt ||
+           type_hint.code == DLDataTypeCode::kDLFloat || type_hint.code == DLDataTypeCode::kDLBfloat)
+        << "nvshmem can only allocate tensor with int, usingned int, float, or bfloat data types.";
     return nvshmem_align(alignment, size);
   }
 

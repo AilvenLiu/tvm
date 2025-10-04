@@ -387,6 +387,11 @@ class ProfileEventType(Enum):
     SILU_MUL = 43
     GROUP_GEMM_DOWN = 44
     TOPK_REDUCE = 45
+    EP_DISPATCH_PRECOMPUTE = 46
+    EP_DISPATCH_SEND = 47
+    EP_DISPATCH_RECV = 48
+    EP_COMBINE_SEND = 49
+    EP_COMBINE_RECV = 50
     
 
 
@@ -437,6 +442,11 @@ event_type_names = [
     "SILU_MUL",
     "GROUP_GEMM_DOWN",
     "TOPK_REDUCE",
+    "EP_DISPATCH_PRECOMPUTE",
+    "EP_DISPATCH_SEND",
+    "EP_DISPATCH_RECV",
+    "EP_COMBINE_SEND",
+    "EP_COMBINE_RECV",
 ]
 
 

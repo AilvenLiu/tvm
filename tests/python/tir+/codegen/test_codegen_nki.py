@@ -75,21 +75,21 @@ import neuronxcc.nki.compiler as ncc
 @nki.compiler.enable_stack_allocator
 @nki.compiler.skip_middle_end_transformations
 @baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
-def func_kernel(A, B: nt.mutable_tensor, ):
-  B_buffer = B.reshape([65536])
-  A_buffer = A.reshape([65536])
-  A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
-  B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=2048))
+def func_kernel(A_ptr, B_ptr: nt.mutable_tensor, ):
+  B_ptr_buffer = B_ptr.reshape([65536])
+  A_ptr_buffer = A_ptr.reshape([65536])
+  A_sbuf_ptr = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
+  B_sbuf_ptr = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=2048))
   i = nl.arange(128)
   j = nl.arange(512)
-  A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[((i[:, None, ] * 512) + j[None, :, ])])
+  A_sbuf_ptr[i[:, None, ], j[None, :, ]] = nl.load(A_ptr_buffer[((i[:, None, ] * 512) + j[None, :, ])])
   i_1 = nl.arange(128)
   j_1 = nl.arange(512)
-  B_sbuf[i_1[:, None, ], j_1[None, :, ]] = nisa.tensor_scalar(A_sbuf[i_1[:, None, ], j_1[None, :, ]], operand0=1.000000e+00, op0=nki.language.add, reverse0=False)
+  B_sbuf_ptr[i_1[:, None, ], j_1[None, :, ]] = nisa.tensor_scalar(A_sbuf_ptr[i_1[:, None, ], j_1[None, :, ]], operand0=1.000000e+00, op0=nki.language.add, reverse0=False)
   i_2 = nl.arange(128)
   j_2 = nl.arange(512)
-  nl.store(B_buffer[((i_2[:, None, ] * 512) + j_2[None, :, ])], B_sbuf[i_2[:, None, ], j_2[None, :, ]])
-  return B
+  nl.store(B_ptr_buffer[((i_2[:, None, ] * 512) + j_2[None, :, ])], B_sbuf_ptr[i_2[:, None, ], j_2[None, :, ]])
+  return B_ptr
   """
     assert compare_strings_ignore_whitespace(src, expected)
 
@@ -131,22 +131,22 @@ import neuronxcc.nki.compiler as ncc
 @nki.compiler.enable_stack_allocator
 @nki.compiler.skip_middle_end_transformations
 @baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
-def func_kernel(A, B: nt.mutable_tensor, ):
-  B_buffer = B.reshape([262144])
-  A_buffer = A.reshape([262144])
-  A_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
-  B_sbuf = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=2048))
+def func_kernel(A_ptr, B_ptr: nt.mutable_tensor, ):
+  B_ptr_buffer = B_ptr.reshape([262144])
+  A_ptr_buffer = A_ptr.reshape([262144])
+  A_sbuf_ptr = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
+  B_sbuf_ptr = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=2048))
   for k in nl.sequential_range(4, body_no_reorder=True):
     i = nl.arange(128)
     j = nl.arange(512)
-    A_sbuf[i[:, None, ], j[None, :, ]] = nl.load(A_buffer[(((i[:, None, ] * 2048) + (k * 512)) + j[None, :, ])])
+    A_sbuf_ptr[i[:, None, ], j[None, :, ]] = nl.load(A_ptr_buffer[(((i[:, None, ] * 2048) + (k * 512)) + j[None, :, ])])
     i_1 = nl.arange(128)
     j_1 = nl.arange(512)
-    B_sbuf[i_1[:, None, ], j_1[None, :, ]] = nisa.tensor_scalar(A_sbuf[i_1[:, None, ], j_1[None, :, ]], operand0=1.000000e+00, op0=nki.language.add, reverse0=False)
+    B_sbuf_ptr[i_1[:, None, ], j_1[None, :, ]] = nisa.tensor_scalar(A_sbuf_ptr[i_1[:, None, ], j_1[None, :, ]], operand0=1.000000e+00, op0=nki.language.add, reverse0=False)
     i_2 = nl.arange(128)
     j_2 = nl.arange(512)
-    nl.store(B_buffer[(((i_2[:, None, ] * 2048) + (k * 512)) + j_2[None, :, ])], B_sbuf[i_2[:, None, ], j_2[None, :, ]])
-  return B"""
+    nl.store(B_ptr_buffer[(((i_2[:, None, ] * 2048) + (k * 512)) + j_2[None, :, ])], B_sbuf_ptr[i_2[:, None, ], j_2[None, :, ]])
+  return B_ptr"""
     assert compare_strings_ignore_whitespace(src, expected)
 
 
@@ -288,51 +288,51 @@ import neuronxcc.nki.compiler as ncc
 @nki.compiler.enable_stack_allocator
 @nki.compiler.skip_middle_end_transformations
 @baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
-def func_kernel(lhsT, rhs, result: nt.mutable_tensor, ):
-  result_buffer = result.reshape([8388608])
-  rhs_buffer = rhs.reshape([2097152])
-  lhsT_buffer = lhsT.reshape([4194304])
-  result_tiles = nl.ndarray(shape=[128, 2, 16, 1, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
-  rhs_tiles = nl.ndarray(shape=[128, 8, 512], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=65536))
-  lhsT_tiles = nl.ndarray(shape=[128, 8, 2048], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=73728))
-  res_tile = nl.ndarray(shape=[1, nl.par_dim(128), 512], dtype=np.float32, buffer=nl.psum)
-  result_packed = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=106496))
+def func_kernel(lhsT_ptr, rhs_ptr, result_ptr: nt.mutable_tensor, ):
+  result_ptr_buffer = result_ptr.reshape([8388608])
+  rhs_ptr_buffer = rhs_ptr.reshape([2097152])
+  lhsT_ptr_buffer = lhsT_ptr.reshape([4194304])
+  result_tiles_ptr = nl.ndarray(shape=[128, 2, 16, 1, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
+  rhs_tiles_ptr = nl.ndarray(shape=[128, 8, 512], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=65536))
+  lhsT_tiles_ptr = nl.ndarray(shape=[128, 8, 2048], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=73728))
+  res_tile_ptr = nl.ndarray(shape=[1, nl.par_dim(128), 512], dtype=np.float32, buffer=nl.psum)
+  result_packed_ptr = nl.ndarray(shape=[128, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=106496))
   for n in nl.sequential_range(4, body_no_reorder=True):
     i0 = nl.arange(128)
     i1 = nl.arange(2)
     i2 = nl.arange(16)
     i4 = nl.arange(512)
-    result_tiles[i0[:, None, None, None, ], i1[None, :, None, None, ], i2[None, None, :, None, ], 0, i4[None, None, None, :, ]] = 0.000000e+00
+    result_tiles_ptr[i0[:, None, None, None, ], i1[None, :, None, None, ], i2[None, None, :, None, ], 0, i4[None, None, None, :, ]] = 0.000000e+00
     for bk_r in nl.sequential_range(8):
       i = nl.arange(128)
       j = nl.arange(512)
-      rhs_tiles[i[:, None, ], bk_r, j[None, :, ]] = nl.load(rhs_buffer[((((bk_r * 262144) + (i[:, None, ] * 2048)) + (n * 512)) + j[None, :, ])])
+      rhs_tiles_ptr[i[:, None, ], bk_r, j[None, :, ]] = nl.load(rhs_ptr_buffer[((((bk_r * 262144) + (i[:, None, ] * 2048)) + (n * 512)) + j[None, :, ])])
     for m in nl.sequential_range(2):
       for bk_l in nl.sequential_range(8):
         i_1 = nl.arange(128)
         j_1 = nl.arange(2048)
-        lhsT_tiles[i_1[:, None, ], bk_l, j_1[None, :, ]] = nl.load(lhsT_buffer[((((bk_l * 524288) + (i_1[:, None, ] * 4096)) + (m * 2048)) + j_1[None, :, ])])
+        lhsT_tiles_ptr[i_1[:, None, ], bk_l, j_1[None, :, ]] = nl.load(lhsT_ptr_buffer[((((bk_l * 524288) + (i_1[:, None, ] * 4096)) + (m * 2048)) + j_1[None, :, ])])
       for bm in nl.sequential_range(16):
         i_2 = nl.arange(128)
         j_2 = nl.arange(512)
-        res_tile[0, i_2[:, None, ], j_2[None, :, ]] = 0.000000e+00
+        res_tile_ptr[0, i_2[:, None, ], j_2[None, :, ]] = 0.000000e+00
         for bk in nl.sequential_range(8):
           i_3 = nl.arange(128)
           j_3 = nl.arange(512)
           k = nl.arange(128)
-          res_tile[0, i_3[:, None, ], j_3[None, :, ]] += nisa.nc_matmul(lhsT_tiles[k[:, None, ], bk, ((bm * 128) + i_3[None, :, ])],rhs_tiles[k[:, None, ], bk, j_3[None, :, ]])
+          res_tile_ptr[0, i_3[:, None, ], j_3[None, :, ]] += nisa.nc_matmul(lhsT_tiles_ptr[k[:, None, ], bk, ((bm * 128) + i_3[None, :, ])],rhs_tiles_ptr[k[:, None, ], bk, j_3[None, :, ]])
         i_4 = nl.arange(128)
         j_4 = nl.arange(512)
-        result_tiles[i_4[:, None, ], m, bm, 0, j_4[None, :, ]] = nisa.tensor_tensor(result_tiles[i_4[:, None, ], m, bm, 0, j_4[None, :, ]], res_tile[0, i_4[:, None, ], j_4[None, :, ]], op=nki.language.add)
+        result_tiles_ptr[i_4[:, None, ], m, bm, 0, j_4[None, :, ]] = nisa.tensor_tensor(result_tiles_ptr[i_4[:, None, ], m, bm, 0, j_4[None, :, ]], res_tile_ptr[0, i_4[:, None, ], j_4[None, :, ]], op=nki.language.add)
     for m_1 in nl.sequential_range(2):
       for bm_1 in nl.sequential_range(16):
         i_5 = nl.arange(128)
         j_5 = nl.arange(512)
-        result_packed[i_5[:, None, ], j_5[None, :, ]] = nisa.tensor_copy(result_tiles[i_5[:, None, ], m_1, bm_1, 0, j_5[None, :, ]])
+        result_packed_ptr[i_5[:, None, ], j_5[None, :, ]] = nisa.tensor_copy(result_tiles_ptr[i_5[:, None, ], m_1, bm_1, 0, j_5[None, :, ]])
         i_6 = nl.arange(128)
         j_6 = nl.arange(512)
-        nl.store(result_buffer[(((((m_1 * 4194304) + (bm_1 * 262144)) + (i_6[:, None, ] * 2048)) + (n * 512)) + j_6[None, :, ])], result_packed[i_6[:, None, ], j_6[None, :, ]])
-  return result"""
+        nl.store(result_ptr_buffer[(((((m_1 * 4194304) + (bm_1 * 262144)) + (i_6[:, None, ] * 2048)) + (n * 512)) + j_6[None, :, ])], result_packed_ptr[i_6[:, None, ], j_6[None, :, ]])
+  return result_ptr"""
     assert compare_strings_ignore_whitespace(src, expected)
 
 
