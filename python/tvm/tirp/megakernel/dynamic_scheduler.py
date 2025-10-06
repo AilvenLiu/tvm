@@ -344,7 +344,7 @@ class MPMCQueue:
 
 class DynamicTileScheduler:
 
-    MAX_TASKS = 8192
+    MAX_TASKS = 32768
     scheduler_warp = 7
 
     def __init__(

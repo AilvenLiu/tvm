@@ -99,14 +99,6 @@ class GateUpSiluTile(GemmTile):
             method="exclusive",
         ).buffer
 
-    def _alloc_local(self, m_idx):
-        # alloc local memory
-        self.reg = T.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
-        self.reg_fp16 = T.alloc_buffer((self.TMEM_LD_SIZE,), "float16", scope="local", name="reg_fp16")
-        self.tmem_idx = T.local_cell("int32", name="tmem_idx")
-        self.tmem_phase = T.local_cell("int32", name="tmem_phase")
-        self.stage = T.local_cell("int32", name="stage")
-
     @T.macro
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)

@@ -59,7 +59,7 @@ class MOEAlignTile(Tile):
                                   """, return_type="int32")
 
     @T.macro
-    def run(self, m_idx, n_idx, k_idx, topk_ids, sorted_token_ids, expert_ids, total_tokens_post_pad, cumsum_buffer):
+    def run(self, m_idx, n_idx, k_idx, topk_ids, sorted_token_ids, expert_ids, total_tokens_post_pad, cumsum_buffer, num_valid_tokens=None):
         idx = T.alloc_local([1], "int32", name="idx")
         pre = T.alloc_local([1], "int32", name="pre")
         sum_val = T.alloc_local([1], "int32", name="sum_val")
@@ -121,6 +121,12 @@ class MOEAlignTile(Tile):
                         else:
                             right[0] = mid
                 expert_ids[idx[0]] = left[0] - 1 # TODO: the reference expert use left - 2
+                if num_valid_tokens is not None:
+                    if idx[0] < cumsum_buffer[left[0]] // self.block_size- 1:
+                        num_valid_tokens[idx[0]] = self.block_size
+                    else:
+                        num_valid_tokens[idx[0]] = (self.shared_counts[left[0]-1] - 1) % self.block_size + 1
+                     
                 idx[0] += KernelConfig.NUM_THREADS
             if self.pad_sorted_token_ids:
                 VEC_SIZE = 4

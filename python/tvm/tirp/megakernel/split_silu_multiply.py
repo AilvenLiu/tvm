@@ -142,6 +142,8 @@ class SiluMultiplyMOETile(SiluMultiplyTile):
                     if sorted_token_ids[token_idx_write] < self.numel:
                         for kv in T.vectorized(self.VEC_SIZE):
                             output[token_idx_write, offset_imme_write + kv] = self.vec1[kv]
+                    else:
+                        break
                     self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS
 
                 self.smem_manager.arrive_all("cta")

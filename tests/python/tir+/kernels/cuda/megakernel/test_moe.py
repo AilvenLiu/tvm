@@ -70,7 +70,7 @@ class MegaKernel:
     NUM_TASK_ARGS = 10
     MAX_TOTAL_NUM_WORKERS = 65536
     MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)
-    MOE_BLK_M = 32
+    MOE_M_PAD_SIZE = 128
 
     NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
     PROFILER_BUFFER_SIZE = int(1e7)
@@ -85,7 +85,7 @@ class MegaKernel:
         self.class_list = set()
         self.profiler_on = profiler_on
 
-    def set_tiles(self, batch_size, BLK_M):
+    def set_tiles(self, batch_size, low_batch):
         self.tile_attr = {}
         self.class_list = set()
         self.gate = self._add_tile(
@@ -95,8 +95,8 @@ class MegaKernel:
                 "float16",
                 "float16",
                 self.GATING_SPLIT_K_FACTOR,
-                BLK_M,
-                BLK_M,
+                128,
+                128,
                 use_tma_reduce=True,
             ),
             ProfileEventType.MOE_GATING,
@@ -109,7 +109,7 @@ class MegaKernel:
         )
         numel = self.NUM_EXPERTS_PER_TOK * batch_size
         self.align = self._add_tile(
-            MOEAlignTile(self.NUM_EXPERTS, numel, self.MOE_BLK_M, pad_sorted_token_ids=True),
+            MOEAlignTile(self.NUM_EXPERTS, numel, self.MOE_M_PAD_SIZE, pad_sorted_token_ids=True),
             ProfileEventType.MOE_ALIGN,
         )
         self.count_and_sort_expert_tokens = self._add_tile(
@@ -122,16 +122,16 @@ class MegaKernel:
                 self.HIDDEN_SIZE,
                 self.NUM_EXPERTS,
                 self.NUM_EXPERTS_PER_TOK,
+                numel,
                 "float16",
                 "float16",
-                self.MOE_BLK_M,
-                self.MOE_BLK_M,
+                low_batch=low_batch,
             ),
             ProfileEventType.GROUP_GEMM_GATE_UP,
         )
         self.silu_mul = self._add_tile(
             SiluMultiplyMOETile(
-                batch_size, self.INTERMEDIATE_SIZE, numel, self.MOE_BLK_M, "float16"
+                batch_size, self.INTERMEDIATE_SIZE, numel, self.MOE_M_PAD_SIZE, "float16"
             ),
             ProfileEventType.SILU_MUL,
         )  # TODO: check if this is correct
@@ -141,11 +141,11 @@ class MegaKernel:
                 self.INTERMEDIATE_SIZE,
                 self.NUM_EXPERTS,
                 self.NUM_EXPERTS_PER_TOK,
+                numel,
                 "float16",
                 "float16",
-                self.MOE_BLK_M,
-                self.MOE_BLK_M,
                 acc_output=True,
+                low_batch=low_batch,
             ),
             ProfileEventType.GROUP_GEMM_DOWN,
         )
@@ -227,8 +227,8 @@ class MegaKernel:
 
     def _add_tile(self, tile, profiler_event_type):
         self.tile_attr[tile] = profiler_event_type
-        base_class = GemmTile if isinstance(tile, GroupGEMMTile) else tile.__class__
-        self.class_list.add(base_class)
+        subclass = GroupGEMMTile if isinstance(tile, GemmTile) else tile.__class__
+        self.class_list.add(subclass)
         return tile
 
     def host_init_all(self):
@@ -265,6 +265,7 @@ class MegaKernel:
         topk_indices_global,
         sorted_token_ids_global,
         expert_ids_global,
+        num_valid_tokens_global,
         num_tokens_post_pad_global,
         cumsum_buffer_global,
         reordered_hidden_state_global,
@@ -284,26 +285,34 @@ class MegaKernel:
         exec_task,
         exec_head,
         exec_tail,
-        BLK_M,
+        low_batch,
         Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]],
         Scheduler: Type[Union[static_scheduler.StaticTileScheduler, dynamic_scheduler.DynamicTileScheduler]],
     ):
         A_tensor_map_gate: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map_gate: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         D_tensor_map_gate: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_grp_gate_up: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        A_tensor_map_grp_gate_up_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        A_tensor_map_grp_gate_up_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        A_tensor_map_grp_gate_up_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map_grp_gate_up: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_grp_gate_up: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        A_tensor_map_grp_down: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        D_tensor_map_grp_gate_up_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        D_tensor_map_grp_gate_up_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        D_tensor_map_grp_gate_up_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        A_tensor_map_grp_down_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        A_tensor_map_grp_down_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        A_tensor_map_grp_down_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_tensor_map_grp_down: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
-        D_tensor_map_grp_down: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        D_tensor_map_grp_down_128: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        D_tensor_map_grp_down_64: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
+        D_tensor_map_grp_down_32: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
 
         # initialize tile
-        self.set_tiles(batch_size, BLK_M)
+        self.set_tiles(batch_size, low_batch)
         
         self.gate.set_tensor_map(A_tensor_map_gate, B_tensor_map_gate, D_tensor_map_gate, hidden_state_global, gate_weight_global, gating_output_global)
-        self.group_gemm_gate_up.set_tensor_map(A_tensor_map_grp_gate_up, B_tensor_map_grp_gate_up, D_tensor_map_grp_gate_up, reordered_hidden_state_global, grp_gate_up_weight_global, gate_up_output_global)
-        self.group_gemm_down.set_tensor_map(A_tensor_map_grp_down, B_tensor_map_grp_down, D_tensor_map_grp_down, silu_mul_output_global, grp_down_weight_global, topk_reduce_output_global)
+        self.group_gemm_gate_up.set_tensor_map([A_tensor_map_grp_gate_up_128, A_tensor_map_grp_gate_up_64, A_tensor_map_grp_gate_up_32], B_tensor_map_grp_gate_up, [D_tensor_map_grp_gate_up_128, D_tensor_map_grp_gate_up_64, D_tensor_map_grp_gate_up_32], reordered_hidden_state_global, grp_gate_up_weight_global, gate_up_output_global)
+        self.group_gemm_down.set_tensor_map([A_tensor_map_grp_down_128, A_tensor_map_grp_down_64, A_tensor_map_grp_down_32], B_tensor_map_grp_down, [D_tensor_map_grp_down_128, D_tensor_map_grp_down_64, D_tensor_map_grp_down_32], silu_mul_output_global, grp_down_weight_global, topk_reduce_output_global)
 
         self.host_init_all()
 
@@ -384,11 +393,11 @@ class MegaKernel:
                                 ), "cta", "cta"
                             )  
                         evt_topk_softmax.semaphore_wait(0)
-                        self.run_tile(self.align, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global)
+                        self.run_tile(self.align, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global)
                         T.cuda.cta_sync()
                         if tid == 0:
                             if issubclass(Scheduler, DynamicTileScheduler):
-                                etensor_end[0] = (evt_end.base + 1) * (num_tokens_post_pad_global[0] // self.MOE_BLK_M) * (self.HIDDEN_SIZE // GroupGEMMTile.BLK_N)
+                                etensor_end[0] = (evt_end.base + 1) * (num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE) * (self.HIDDEN_SIZE // GroupGEMMTile.BLK_N)
                             evt_moe_align.semaphore_notify(0)
                     elif self.tile_scheduler.task_type == JobType.MOE_COUNT_AND_SORT.value:
                         if issubclass(Scheduler, DynamicTileScheduler):
@@ -398,7 +407,7 @@ class MegaKernel:
                             self.tile_scheduler.push_task(
                                 evt_count_and_sort, 1,
                                 lambda trigger_idx: (
-                                    -1, num_tokens_post_pad_global[0] // self.MOE_BLK_M * n_axis_len,
+                                    -1, num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE * n_axis_len,
                                     lambda push_idx: (JobType.MOE_GROUP_GEMM_GATE_UP.value, push_idx // n_axis_len, push_idx % n_axis_len, 0)
                                 ), "cta", "cta"
                             )  
@@ -419,8 +428,8 @@ class MegaKernel:
                                 ), "warp", "warp"
                             )  
                         evt_count_and_sort.semaphore_wait_warp(0)
-                        if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_BLK_M:
-                            self.run_tile(self.group_gemm_gate_up, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, self.profiler)
+                        if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
+                            self.run_tile(self.group_gemm_gate_up, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
                         if wg_id == 0:
                             T.ptx.bar.sync(1, 128)
                             if tid == 0:
@@ -437,7 +446,7 @@ class MegaKernel:
                                 ), "warp", "warp"
                             )  
                         evt_group_gemm_gate_up.semaphore_wait(self.tile_scheduler.m_idx)
-                        if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_BLK_M:
+                        if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
                             self.run_tile(self.silu_mul, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gate_up_output_global, silu_mul_output_global, sorted_token_ids_global)
                         T.cuda.cta_sync()
                         if tid == 0:
@@ -454,8 +463,8 @@ class MegaKernel:
                                 ), "warp", "warp"
                             )  
                         evt_silu_mul.semaphore_wait_warp(self.tile_scheduler.m_idx)
-                        if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_BLK_M:
-                            self.run_tile(self.group_gemm_down, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, self.profiler)
+                        if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
+                            self.run_tile(self.group_gemm_down, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
                     smem_manager.exit_tile_runtime()
                     self.tile_scheduler.next_tile()
                 if self.profiler_on:
@@ -486,6 +495,7 @@ class MegaKernel:
             topk_indices_ptr: T.handle, # intermediate
             sorted_token_ids_ptr: T.handle, # intermediate
             expert_ids_ptr: T.handle, # intermediate
+            num_valid_tokens_ptr: T.handle, # intermediate
             num_tokens_post_pad_ptr: T.handle, # intermediate
             cumsum_buffer_ptr: T.handle, # intermediate
             reordered_hidden_state_ptr: T.handle, # intermediate
@@ -530,7 +540,8 @@ class MegaKernel:
             topk_indices_global = T.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")
             max_num_tokens_padded = T.int32()
             sorted_token_ids_global = T.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")
-            expert_ids_global = T.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_BLK_M], "int32", scope="global")
+            expert_ids_global = T.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
+            num_valid_tokens_global = T.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
             num_tokens_post_pad_global = T.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")
             cumsum_buffer_global = T.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")
             reordered_hidden_state_global = T.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
@@ -552,23 +563,24 @@ class MegaKernel:
             exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
             
             @T.macro
-            def run(BLK_M):
+            def run(low_batch, dynamic_gemm_size):
+                num_valid_tokens = T.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
                 self.fused_body(
                     batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,
-                    gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global,
+                    gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_valid_tokens, num_tokens_post_pad_global,
                     cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
                     etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global,
-                    None, profiler_buffer, exec_queue, None, None, None, BLK_M, 
+                    None, profiler_buffer, exec_queue, None, None, None, low_batch, 
                     static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
                 )
                 
-            if batch_size <= 32:
-                run(32)
-            elif batch_size <= 64:
-                run(64)
+            if batch_size >= 2048:
+                run(low_batch=False, dynamic_gemm_size=True)
+            elif batch_size >= 512:
+                run(low_batch=True, dynamic_gemm_size=True)
             else:
-                run(128)
+                run(low_batch=True, dynamic_gemm_size=False)
             # fmt: on
         return main
 
@@ -592,6 +604,7 @@ class MegaKernel:
             topk_indices_ptr: T.handle, # intermediate
             sorted_token_ids_ptr: T.handle, # intermediate
             expert_ids_ptr: T.handle, # intermediate
+            num_valid_tokens_ptr: T.handle, # intermediate
             num_tokens_post_pad_ptr: T.handle, # intermediate
             cumsum_buffer_ptr: T.handle, # intermediate
             reordered_hidden_state_ptr: T.handle, # intermediate
@@ -639,7 +652,8 @@ class MegaKernel:
             topk_indices_global = T.match_buffer(topk_indices_ptr, [batch_size, self.NUM_EXPERTS_PER_TOK], "int32", scope="global")
             max_num_tokens_padded = T.int32()
             sorted_token_ids_global = T.match_buffer(sorted_token_ids_ptr, [max_num_tokens_padded], "int32", scope="global")
-            expert_ids_global = T.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_BLK_M], "int32", scope="global")
+            expert_ids_global = T.match_buffer(expert_ids_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
+            num_valid_tokens_global = T.match_buffer(num_valid_tokens_ptr, [max_num_tokens_padded // self.MOE_M_PAD_SIZE], "int32", scope="global")
             num_tokens_post_pad_global = T.match_buffer(num_tokens_post_pad_ptr, [1], "int32", scope="global")
             cumsum_buffer_global = T.match_buffer(cumsum_buffer_ptr, [self.NUM_EXPERTS + 1], "int32", scope="global")
             reordered_hidden_state_global = T.match_buffer(reordered_hidden_state_ptr, [max_num_tokens_padded, self.HIDDEN_SIZE], "float16", scope="global")
@@ -665,23 +679,24 @@ class MegaKernel:
             queue_tail_global = T.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
 
             @T.macro
-            def run(BLK_M):
+            def run(low_batch, dynamic_gemm_size):
+                num_valid_tokens = T.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
                 self.fused_body(
                     batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,
-                    gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global,
+                    gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global, expert_ids_global, num_valid_tokens, num_tokens_post_pad_global,
                     cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
                     etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global,
-                    etensor_end_global, profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, BLK_M, 
+                    etensor_end_global, profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, low_batch, 
                     dynamic_scheduler.Semaphore, dynamic_scheduler.DynamicTileScheduler
                 )
 
-            if batch_size <= 32:
-                run(32)
-            elif batch_size <= 64:
-                run(64)
+            if batch_size >= 2048:
+                run(low_batch=False, dynamic_gemm_size=True)
+            elif batch_size >= 512:
+                run(low_batch=True, dynamic_gemm_size=True)
             else:
-                run(128)
+                run(low_batch=True, dynamic_gemm_size=False)
             # fmt: on
         return main
 
@@ -754,11 +769,12 @@ def prepare_data(batch_size, mk: MegaKernel):
     )
     arg_dict["topk_indices"] = torch.zeros((batch_size, mk.NUM_EXPERTS_PER_TOK), dtype=torch.int32)
     max_num_tokens_padded = batch_size * mk.NUM_EXPERTS_PER_TOK + mk.NUM_EXPERTS * (
-        mk.MOE_BLK_M - 1
+        mk.MOE_M_PAD_SIZE - 1
     )
     arg_dict["sorted_token_ids"] = torch.zeros((max_num_tokens_padded,), dtype=torch.int32)
     arg_dict["expert_ids"] = torch.zeros(
-        (max_num_tokens_padded // mk.MOE_BLK_M,), dtype=torch.int32
+        (max_num_tokens_padded // mk.MOE_M_PAD_SIZE,), dtype=torch.int32)
+    arg_dict["num_valid_tokens"] = torch.zeros((max_num_tokens_padded // mk.MOE_M_PAD_SIZE,), dtype=torch.int32
     )
     arg_dict["num_tokens_post_pad"] = torch.zeros((1,), dtype=torch.int32)
     arg_dict["cumsum_buffer"] = torch.zeros((mk.NUM_EXPERTS + 1,), dtype=torch.int32)
@@ -891,6 +907,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                         work_arg_dict["topk_indices"],
                         work_arg_dict["sorted_token_ids"],
                         work_arg_dict["expert_ids"],
+                        work_arg_dict["num_valid_tokens"],
                         work_arg_dict["num_tokens_post_pad"],
                         work_arg_dict["cumsum_buffer"],
                         work_arg_dict["reordered_hidden_state"],
@@ -932,6 +949,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                         work_arg_dict["topk_indices"],
                         work_arg_dict["sorted_token_ids"],
                         work_arg_dict["expert_ids"],
+                        work_arg_dict["num_valid_tokens"],
                         work_arg_dict["num_tokens_post_pad"],
                         work_arg_dict["cumsum_buffer"],
                         work_arg_dict["reordered_hidden_state"],

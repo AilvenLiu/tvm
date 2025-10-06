@@ -454,7 +454,7 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
     
     NUM_EXPERTS = 128
     NUM_EXPERTS_PER_TOK = 8
-    MOE_BLK_M = 32
+    MOE_BLK_M = 128
 
     
     torch.cuda.nvtx.range_push("generate_exec_queue")
@@ -463,8 +463,10 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
                 (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
             )
         central_queue = []
-        for k_idx in range(GATING_SPLIT_K_FACTOR):
-            central_queue.append((0, 0, k_idx, JobType.MOE_GATING.value))
+        gating_blk_m = 128
+        for m_idx in range(ceildiv(batch_size, gating_blk_m)):
+            for k_idx in range(GATING_SPLIT_K_FACTOR):
+                central_queue.append((m_idx, 0, k_idx, JobType.MOE_GATING.value))
         for m_idx in range(KernelConfig.SM_NUMBER):
             central_queue.append((m_idx, 0, 0, JobType.MOE_TOPK_SOFTMAX.value))
         central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
@@ -482,6 +484,7 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
                 central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
 
         tile_idx = 0
+        
         while len(central_queue) > 0:
             for bx in range(KernelConfig.SM_NUMBER):
                 if len(central_queue) > 0:
@@ -497,8 +500,10 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
         return ret
     elif scheduler == "dynamic":
         exec_queue = MPMCQueueHost(DynamicTileScheduler.MAX_TASKS)
-        for k in range(GATING_SPLIT_K_FACTOR):
-            exec_queue.enqueue(JobType.MOE_GATING.value, 0, 0, k)
+        gating_blk_m = 128 
+        for m in range(ceildiv(batch_size, gating_blk_m)):
+            for k in range(GATING_SPLIT_K_FACTOR):
+                exec_queue.enqueue(JobType.MOE_GATING.value, m, 0, k)
         torch.cuda.nvtx.range_pop()
         return exec_queue
 
@@ -660,14 +665,15 @@ def generate_event_tensor_moe(batch_size, WORLD_SIZE):
     NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS
     NUM_EXPERTS = 128
     NUM_EXPERTS_PER_TOK = 8
-    MOE_BLK_M = 32
+    MOE_BLK_M = 128
     GATING_SPLIT_K_FACTOR = 4
 
     DEV = tvm.cuda(0)
     base = 1 << 16
     factor = base + 1
 
-    etensor_gating = tvm.runtime.tensor(np.full((1,), factor * GATING_SPLIT_K_FACTOR, dtype=np.int32), device=DEV)
+    gating_blk_m = 128 
+    etensor_gating = tvm.runtime.tensor(np.full((1,), factor * GATING_SPLIT_K_FACTOR * ceildiv(batch_size, gating_blk_m), dtype=np.int32), device=DEV)
     etensor_topk_softmax = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
     etensor_moe_align = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
     etensor_count_and_sort = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
