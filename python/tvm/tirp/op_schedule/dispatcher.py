@@ -48,10 +48,11 @@ class Predicate:
 
     name: str
     fn: Callable[[OpCall, ScheduleContext], Any]
+    kwargs: Dict[str, Any]
 
     def evaluate(self, op_call: OpCall, sctx: ScheduleContext) -> Tuple[bool, Optional[str]]:
         try:
-            out = self.fn(op_call, sctx)
+            out = self.fn(op_call, sctx, **self.kwargs)
             if isinstance(out, tuple):
                 ok, reason = out
                 return bool(ok), (str(reason) if not ok and reason is not None else None)
@@ -62,10 +63,10 @@ class Predicate:
             return False, f"predicate exception: {type(e).__name__}: {e}"
 
 
-def predicate(name: str, fn: Callable[[OpCall, ScheduleContext], Any]) -> Predicate:
+def predicate(name: str, fn: Callable[[OpCall, ScheduleContext], Any], **kwargs) -> Predicate:
     """Wrap a callable into a named predicate."""
 
-    return Predicate(name=name, fn=fn)
+    return Predicate(name=name, fn=fn, kwargs=kwargs)
 
 
 def fail(reason: str) -> None:
@@ -198,7 +199,9 @@ def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                     msg += f" — {reason}"
                 pred_msgs.append(msg)
         if not pred_ok:
-            failures.append(f"- variant={case.variant} (prio={case.priority}): " + "; ".join(pred_msgs))
+            failures.append(
+                f"- variant={case.variant} (prio={case.priority}): " + "; ".join(pred_msgs)
+            )
             continue
 
         # run impl
@@ -208,18 +211,14 @@ def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                 return res
             failures.append(f"- variant={case.variant} (prio={case.priority}): impl returned None")
         except DispatchFail as e:
-            failures.append(
-                f"- variant={case.variant} (prio={case.priority}): declined — {str(e)}"
-            )
+            failures.append(f"- variant={case.variant} (prio={case.priority}): declined — {str(e)}")
         except Exception as e:  # keep searching other variants
             msg = f"- variant={case.variant} (prio={case.priority}): exception — {type(e).__name__}: {e}"
             failures.append(msg)
 
     # no success
     if trace or strict:
-        header = (
-            f"TIRp schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
-        )
+        header = f"TIRp schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
         report = "\n".join([header, *failures])
         if trace:
             print(report)

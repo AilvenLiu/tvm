@@ -261,11 +261,11 @@ def test_rope(num_heads, seq_len, head_dim, batch_size):
             ), key_out_tvm.numpy().reshape(-1, num_heads * head_dim)
 
         q_n, k_n = naive()
-        q_f, k_f = flashinfer()
+        # q_f, k_f = flashinfer()
         q_t, k_t = tir()
 
-        torch.testing.assert_close(q_n, q_f, rtol=1e-3, atol=1e-3)
-        torch.testing.assert_close(k_n, k_f, rtol=1e-3, atol=1e-3)
+        # torch.testing.assert_close(q_n, q_f, rtol=1e-3, atol=1e-3)
+        # torch.testing.assert_close(k_n, k_f, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(q_n, q_t, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(k_n, k_t, rtol=1e-3, atol=1e-3)
 

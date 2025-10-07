@@ -260,9 +260,11 @@ def test_roundtrip_buffer_view_get3():
             with T.cta():
                 A = T.alloc_buffer([8, 8], dtype="float32", scope="local")
                 A_f16 = A.view("float16")
+                A_f64 = A.view("float64")
 
                 with T.thread():
                     A_f16[0, 0] = T.float16(0)
+                    A_f64[0, 0] = T.float64(0)
 
     # fmt: on
     code = test.script()

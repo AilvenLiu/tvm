@@ -16,12 +16,15 @@
 # under the License.
 
 """Implementation of copy operator schedules."""
-from typing import Optional
+from typing import Optional, Tuple, Iterable
 
+from tvm.arith import Analyzer
 import tvm
 from tvm.script import tir as T
 from tvm.tir import Buffer, BufferRegion, PrimFunc
+from tvm.tir.layout import TileLayout
 from tvm.tir.stmt import OpCall
+from tvm.runtime import DataType
 from tvm.tirp.op_schedule import (
     ScheduleContext,
     register_dispatch,
@@ -112,25 +115,46 @@ def copy_default_impl(
 # ---------------------------------------------------------------------------
 
 
-def _scope_allowed(op_call: OpCall, sctx: ScheduleContext):
+DEFAULT_ALLOWED_PAIRS: Tuple[Tuple[str, str], ...] = (
+    ("global", "shared*"),
+    ("shared*", "global"),
+    ("global", "local"),
+    ("local", "global"),
+    ("shared*", "local"),
+    ("local", "shared*"),
+)
+
+
+def _match_scope(scope: str, pattern: str) -> bool:
+    """Glob-lite: 'shared*' => prefix match; otherwise exact."""
+    if pattern.endswith("*"):
+        return scope.startswith(pattern[:-1])
+    return scope == pattern
+
+
+def _scope_allowed(
+    op_call: OpCall,
+    sctx: ScheduleContext,
+    allowed_pairs: Iterable[Tuple[str, str]] = DEFAULT_ALLOWED_PAIRS,
+):
     dst_buffer_region, src_buffer_region = op_call.args[:2]
-    src: Buffer = src_buffer_region.buffer
-    dst: Buffer = dst_buffer_region.buffer
-    cond = (
-        (src.scope() == "global" and dst.scope().startswith("shared"))
-        or (src.scope().startswith("shared") and dst.scope() == "global")
-        or (src.scope() == "global" and dst.scope() == "local")
-        or (src.scope() == "local" and dst.scope() == "global")
-        or (src.scope().startswith("shared") and dst.scope() == "local")
-        or (dst.scope().startswith("shared") and src.scope() == "local")
+    src_scope = src_buffer_region.buffer.scope()
+    dst_scope = dst_buffer_region.buffer.scope()
+
+    ok = any(
+        _match_scope(src_scope, src_pat) and _match_scope(dst_scope, dst_pat)
+        for src_pat, dst_pat in allowed_pairs
     )
-    if not cond:
-        return False, f"unsupported memory scopes src={src.scope()} dst={dst.scope()}"
+    if not ok:
+        allowed_str = ", ".join(f"{a}->{b}" for a, b in allowed_pairs)
+        return False, (
+            f"unsupported memory scopes src={src_scope} dst={dst_scope}; " f"allowed: {allowed_str}"
+        )
     return True, None
 
 
-def _exec_scope_ok(op_call: OpCall, sctx: ScheduleContext):
-    ok = sctx.exec_scope.name in ("cta", "thread")
+def _exec_scope_ok(op_call: OpCall, sctx: ScheduleContext, expected_scopes: list[str]):
+    ok = sctx.exec_scope.name in expected_scopes
     return (ok, None if ok else f"unsupported exec_scope {sctx.exec_scope.name}")
 
 
@@ -170,8 +194,8 @@ def _vec_len_possible(op_call: OpCall, sctx: ScheduleContext):
     priority=10,
     when=[
         predicate("validate_copy_op", _is_valid_copy),
-        predicate("scope", _scope_allowed),
-        predicate("exec_scope", _exec_scope_ok),
+        predicate("storage_scope", _scope_allowed),
+        predicate("exec_scope", _exec_scope_ok, expected_scopes=["cta", "thread"]),
         predicate("vec_len", _vec_len_possible),
     ],
 )
@@ -185,8 +209,106 @@ def copy_schedule_vec_load(op_call: OpCall, sctx: ScheduleContext) -> Optional[P
     "cuda",
     variant="default",
     priority=0,
-    when=[predicate("validate_copy_op", _is_valid_copy), predicate("exec_scope", _exec_scope_ok)],
+    when=[
+        predicate("validate_copy_op", _is_valid_copy),
+        predicate("exec_scope", _exec_scope_ok, expected_scopes=["cta", "thread"]),
+    ],
 )
 def copy_schedule_default(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     # Conservative scalar fallback
     return copy_default_impl(op_call, sctx)
+
+
+def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    dst_buffer_region, src_buffer_region = op_call.args[:2]
+    dst: Buffer = dst_buffer_region.buffer
+    src: Buffer = src_buffer_region.buffer
+
+    assert src.layout is not None
+    assert dst.layout is not None
+
+    analyzer = Analyzer()
+    elem_size = DataType(src.dtype).bits
+    elem_per_32b = 32 // elem_size
+    assert len(dst.shape) == len(src.shape) == 2
+    # 128xWIDTH -> 128xWIDTH
+    assert analyzer.can_prove_equal(src.shape[0], 128)
+    assert analyzer.can_prove_equal(dst.shape[0], 128)
+    assert analyzer.can_prove_equal(src.shape[1], dst.shape[1])
+
+    # Check width is valid for 32x32b, and determine num
+    width = src.shape[1]
+    candidates = [1, 2, 4, 8, 16, 32, 64, 128]
+
+    if not analyzer.can_prove_equal(tvm.tir.floormod(width, elem_per_32b), 0):
+        raise ValueError(f"Width {width} is not valid for tcgen05.ld/st with shape 32x32b")
+
+    num = None
+    for n in candidates:
+        if analyzer.can_prove_equal(tvm.tir.floordiv(width, elem_per_32b), n):
+            num = n
+            break
+    else:
+        raise ValueError(f"Width {width} is not valid for tcgen05.ld/st with shape 32x32b")
+
+    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
+    # [0:128, 0:WIDTH] -> [0:128, 0:WIDTH]
+    src_st, src_extent = get_st_extent(src_buffer_region)
+    dst_st, dst_extent = get_st_extent(dst_buffer_region)
+    assert analyzer.can_prove_equal(src_extent[0], 128)
+    assert analyzer.can_prove_equal(dst_extent[0], 128)
+    assert analyzer.can_prove_equal(src_st[0], 0)
+    assert analyzer.can_prove_equal(src_st[1], 0)
+    assert analyzer.can_prove_equal(dst_st[0], 0)
+    assert analyzer.can_prove_equal(dst_st[1], 0)
+
+    # tmem layout (128, WIDTH):(1@TCol, 1@TLane)
+    tmem_layout = TileLayout(([128, width], [(1, "TCol"), (1, "TLane")])).normalize()
+
+    # local layout
+    local_layout = TileLayout(([128, width], [(1, "tid_in_wg"), (1, "m")])).normalize()
+
+    if src.scope() == "tmem" and dst.scope() == "local":
+        direction = "tmem2local"
+        assert src.allocated_addr is not None
+        tvm.ir.assert_structural_equal(src.layout.normalize(), tmem_layout)
+        tvm.ir.assert_structural_equal(dst.layout.normalize(), local_layout)
+    elif src.scope() == "local" and dst.scope() == "tmem":
+        direction = "local2tmem"
+        assert dst.allocated_addr is not None
+        tvm.ir.assert_structural_equal(src.layout.normalize(), local_layout)
+        tvm.ir.assert_structural_equal(dst.layout.normalize(), tmem_layout)
+    else:
+        raise ValueError(f"Unsupported src scope {src.scope()} and dst scope {dst.scope()}")
+
+    # fmt: off
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def impl():
+        with T.warp():
+            if direction == "tmem2local":
+                dst_local = dst.view(num * elem_per_32b, layout=TileLayout([num * elem_per_32b]))
+                dst_32b = dst_local.view("uint32")
+                T.ptx.tcgen05.ld(src.allocated_addr[0], 0, 0, "32x32b", num, False, *[dst_32b[i] for i in range(num)])
+            elif direction == "local2tmem":
+                src_local = src.view(num * elem_per_32b, layout=TileLayout([num * elem_per_32b]))
+                src_32b = src_local.view("uint32")
+                T.ptx.tcgen05.st(dst.allocated_addr[0], 0, 0, "32x32b", num, False, *[src_32b[i] for i in range(num)])
+    # fmt: on
+    return impl
+
+
+@register_dispatch(
+    "copy",
+    "cuda",
+    variant="tmem<->local",
+    priority=10,
+    when=[
+        predicate("validate_copy_op", _is_valid_copy),
+        predicate("exec_scope", _exec_scope_ok, expected_scopes=["warpgroup"]),
+        predicate(
+            "storage_scope", _scope_allowed, allowed_pairs=[("tmem", "local"), ("local", "tmem")]
+        ),
+    ],
+)
+def copy_schedule_tmem_local(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return copy_tmem_local_impl(op_call, sctx)

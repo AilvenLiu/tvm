@@ -307,11 +307,15 @@ class Buffer(Object, Scriptable):
             cast_dtype = tvm.DataType(args[0])
             cur_dtype = tvm.DataType(self.dtype)
             if cast_dtype.bits > cur_dtype.bits:
+                # cast up
+                assert cast_dtype.bits % cur_dtype.bits == 0
                 layout = self.layout.pack(cast_dtype.bits // cur_dtype.bits)
                 shape = [s for s in self.shape[:-1]] + [
-                    self.shape[-1] // (cur_dtype.bits // cast_dtype.bits)
+                    self.shape[-1] // (cast_dtype.bits // cur_dtype.bits)
                 ]
             else:
+                # cast down
+                assert cur_dtype.bits % cast_dtype.bits == 0
                 layout = self.layout.unpack(cur_dtype.bits // cast_dtype.bits)
                 shape = [s for s in self.shape[:-1]] + [
                     self.shape[-1] * (cur_dtype.bits // cast_dtype.bits)
