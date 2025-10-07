@@ -24,7 +24,7 @@ from functools import reduce
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T, tirp as Tp
 from tvm.tir import BufferRegion, PrimFunc, FloatImm
-from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tirp.op_schedule import ScheduleContext, fail
 from tvm.tir.stmt import OpCall
 from .common import (
     init_analyzer,
@@ -209,7 +209,7 @@ def unary_trn(
     """Schedule unary operation on Trainium."""
     # Check execution environment
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
-        return None
+        fail("requires Trainium target and kernel exec_scope")
 
     # Extract operation arguments
     dst_buffer_region, _src = op.args
@@ -258,7 +258,7 @@ def unary_with_bias_scale_trn(
     """Schedule unary operation with bias and scale on Trainium."""
     # Check execution environment
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
-        return None
+        fail("requires Trainium target and kernel exec_scope")
 
     # Extract operation arguments with defaults
     dst_buffer_region, src_buffer_region, _bias, scale = op.args

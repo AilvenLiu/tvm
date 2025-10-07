@@ -27,6 +27,7 @@ from tvm.tirp.op_schedule import (
     ScheduleContext,
     register_dispatch,
     predicate,
+    fail,
 )
 from tvm.tirp.operator.op import Select
 from .common import (
@@ -40,7 +41,7 @@ from .common import (
 def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Generate schedule for select operation on Trainium."""
     if sctx.exec_scope.name != "kernel":
-        return None
+        fail("requires kernel exec_scope for TRN select")
 
     op = OpCall.downcast(op)
     assert isinstance(op, Select), f"{op} is not a Select"
@@ -144,5 +145,5 @@ def select_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         )
     ],
 )
-def select_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def select_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return select_trn(op, sctx)

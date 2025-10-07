@@ -47,17 +47,11 @@ class _DummySctx:
         self.exec_scope = _DummyExecScope(exec_scope)
 
 
-def test_dispatch_prints_predicate_reasons(monkeypatch, capsys):
+def test_dispatch_prints_predicate_reasons():
     """Validate TRACE mode prints per-variant predicate failure reasons."""
     _import_and_register()
     from tvm.ir import Op
     from tvm.tirp.op_schedule.dispatcher import run_dispatch
-
-    # Enable TRACE and focus on TRN copy only
-    monkeypatch.setenv("TVM_TIRP_SCHED_TRACE", "1")
-    monkeypatch.setenv("TVM_TIRP_SCHED_TRACE_TARGET", "trn")
-    # Filter matches the full op name used by dispatcher
-    monkeypatch.setenv("TVM_TIRP_SCHED_TRACE_FILTER", "tirp.copy")
 
     class _OpCall:
         def __init__(self, op):
@@ -68,25 +62,48 @@ def test_dispatch_prints_predicate_reasons(monkeypatch, capsys):
     op_call = _OpCall(Op.get("tirp.copy"))
     sctx = _DummySctx(target_kind="trn", exec_scope="warp")  # intentionally wrong
 
-    res = run_dispatch(op_call, sctx)
-    assert res is None
+    with pytest.raises(RuntimeError) as e:
+        run_dispatch(op_call, sctx)
 
-    out = capsys.readouterr().out
-    # Header + per-variant reason must be printed
+    out = str(e.value)
+    print(out)
+    # Header + per-variant reason must be printed in table format
     assert "TIRp schedule dispatch failed: op=tirp.copy target=trn" in out
-    assert "variant=default" in out
+    assert "Variant" in out  # table header present
+    assert "default" in out  # variant name present
     assert "rejected: exec_scope" in out
+    # opcall object IR should be printed in the table
+    assert "opcall:" in out
 
 
-def test_dispatch_raises_with_aggregated_reasons(monkeypatch):
-    """Validate STRICT mode raises aggregated error message with reasons."""
+def test_dispatch_forced_variant_missing_table_and_message():
     _import_and_register()
     from tvm.ir import Op
     from tvm.tirp.op_schedule.dispatcher import run_dispatch
 
-    # Enable STRICT and TRACE to exercise both code paths
-    monkeypatch.setenv("TVM_TIRP_SCHED_TRACE", "1")
-    monkeypatch.setenv("TVM_TIRP_SCHED_STRICT", "1")
+    class _OpCall:
+        def __init__(self, op):
+            self.op = op
+            self.dispatch = "__nonexistent__"
+            self.args = []
+
+    op_call = _OpCall(Op.get("tirp.copy"))
+    sctx = _DummySctx(target_kind="trn", exec_scope="kernel")
+
+    with pytest.raises(RuntimeError) as e:
+        run_dispatch(op_call, sctx)
+
+    msg = str(e.value)
+    print(msg)
+    assert "TIRp schedule dispatch failed: op=tirp.copy target=trn" in msg
+    assert "no variant named '__nonexistent__' is registered" in msg
+
+
+def test_dispatch_raises_with_aggregated_reasons():
+    """Validate STRICT mode raises aggregated error message with reasons."""
+    _import_and_register()
+    from tvm.ir import Op
+    from tvm.tirp.op_schedule.dispatcher import run_dispatch
 
     class _OpCall:
         def __init__(self, op):
@@ -101,6 +118,39 @@ def test_dispatch_raises_with_aggregated_reasons(monkeypatch):
         run_dispatch(op_call, sctx)
 
     msg = str(e.value)
+    print(msg)
     assert "TIRp schedule dispatch failed: op=tirp.compose_op target=trn" in msg
-    assert "variant=default" in msg
+    assert "default" in msg
     assert "exception — NotImplementedError" in msg
+    # opcall content and backtrace should be included inside the table
+    assert "opcall:" in msg
+    assert "Traceback (most recent call last):" in msg
+
+
+def test_dispatch_prints_real_opcall_ir():
+    """Create a real OpCall via BufferRegions and ensure its IR is in the table."""
+    _import_and_register()
+    import tvm
+    from tvm.ir import Op
+    from tvm.tir.buffer import decl_buffer
+    from tvm.tir.stmt import OpCall
+    from tvm.tirp.op_schedule.dispatcher import run_dispatch
+
+    # Build a real TIRp OpCall: tirp.copy(A[0:64], B[0:64])
+    A = decl_buffer((64,), "float32", scope="global")
+    B = decl_buffer((64,), "float32", scope="shared")
+    real_opcall = OpCall(A[0:64], B[0:64], op=Op.get("tirp.copy"), workspace={}, config={})
+
+    # Force predicate rejection to trigger formatted error with opcall IR
+    sctx = _DummySctx(target_kind="trn", exec_scope="warp")
+    with pytest.raises(RuntimeError) as e:
+        run_dispatch(real_opcall, sctx)
+
+    out = str(e.value)
+    print(out)
+    # Verify header and that the opcall IR is included in the table
+    assert "TIRp schedule dispatch failed: op=tirp.copy target=trn" in out
+    assert "Variant" in out
+    assert "opcall:" in out
+    # IR should mention the operator name
+    assert "tirp.copy" in out

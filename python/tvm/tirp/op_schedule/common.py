@@ -78,7 +78,7 @@ def register_unary_binary_schedule(
                 )
             ],
         )
-        def _dispatch_variant(op: OpCall, sctx: ScheduleContext, _cand=candidate, _ty=op_type):
+        def _dispatch_variant(op: OpCall, sctx: ScheduleContext, _cand=candidate, _ty=op_type) -> PrimFunc:
             return _cand(op, _ty, sctx)
 
     return None

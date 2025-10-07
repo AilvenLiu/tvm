@@ -56,7 +56,9 @@ def target_event_impl(op_name: str, exp_impl: EventImpl):
             impl = event.get_impl()
 
             if impl != exp_impl:
-                return None
+                raise RuntimeError(
+                    f"event impl mismatch: expected {exp_impl}, got {impl}"
+                )
 
             return fn(*args, **kwargs)
 
@@ -219,7 +221,7 @@ def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event initialization."""
     if sctx.exec_scope.name not in ["cta", "thread"]:
-        return None
+        raise RuntimeError(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     @T.prim_func(tirp=True, check_well_formed=False)
     def func():
@@ -232,7 +234,7 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event commit."""
     if sctx.exec_scope.name not in ["cta", "thread"]:
-        return None
+        raise RuntimeError(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     @T.prim_func(tirp=True, check_well_formed=False)
     def func():
@@ -245,7 +247,7 @@ def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event wait."""
     if sctx.exec_scope.name not in ["cta", "thread"]:
-        return None
+        raise RuntimeError(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     n_groups = op.args[1]
 
@@ -261,7 +263,7 @@ def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event initialization."""
     if sctx.exec_scope.name != "kernel":
-        return None
+        raise RuntimeError(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     evt, expected_count = op.args
     sem, state = evt.get_state()
@@ -291,7 +293,7 @@ def event_init(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event commit."""
     if sctx.exec_scope.name != "cta":
-        return None
+        raise RuntimeError(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     evt = op.args[0]
     assert isinstance(evt, SemaphoreEventTensorItem)
@@ -310,7 +312,7 @@ def event_commit(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 def event_wait(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule event wait."""
     if sctx.exec_scope.name != "cta":
-        return None
+        raise RuntimeError(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     evt = op.args[0]
     assert isinstance(evt, SemaphoreEventTensorItem)
@@ -360,7 +362,7 @@ def _register_event_dispatch_table(op_name: str, table):
             priority=10,
             when=[predicate("event_impl", _event_impl_predicate(impl))],
         )
-        def _dispatch(op: OpCall, sctx: ScheduleContext, _fn=fn, _impl=impl):
+        def _dispatch(op: OpCall, sctx: ScheduleContext, _fn=fn, _impl=impl) -> PrimFunc:
             # predicate handled by wrapper; explicit predicate gives clearer reason
             return _fn(op, sctx)
 

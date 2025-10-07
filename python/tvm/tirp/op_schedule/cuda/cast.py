@@ -29,6 +29,7 @@ from tvm.tirp.op_schedule import (
     ScheduleContext,
     register_dispatch,
     predicate,
+    fail,
 )
 
 from .common import get_indices, get_st_extent, get_vec_len, target_cuda
@@ -75,7 +76,7 @@ def cast_thread_wise_impl(
 ) -> Optional[PrimFunc]:
 
     if sctx.exec_scope.name != "thread":
-        return None
+        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
@@ -90,7 +91,7 @@ def cast_thread_wise_impl(
 
     intrinsic_name = cuda_intrinsic_dict.get((src.dtype, dst.dtype), None)
     if intrinsic_name is None:
-        return None
+        fail(f"unsupported CUDA cast intrinsic for {src.dtype} -> {dst.dtype}")
 
     src_dtypex2 = dtypex2_dict[src.dtype]
     dst_dtypex2 = dtypex2_dict[dst.dtype]
@@ -145,5 +146,5 @@ __forceinline__ __device__ void {func_name}(void* dst, void* src) {{
         ),
     ],
 )
-def cast_dispatch_thread_wise(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def cast_dispatch_thread_wise(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return cast_thread_wise_impl(op_call.args[0], op_call.args[1], sctx)

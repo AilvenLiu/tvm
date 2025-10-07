@@ -29,7 +29,7 @@ from tvm.script import tir as T
 from tvm.tir import Buffer, BufferRegion, PrimExpr, PrimFunc
 from tvm.tir.exec_scope import ExecScopeSlice
 from tvm.tir.stmt import OpCall
-from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tirp.op_schedule import ScheduleContext, fail
 
 
 def get_st_extent(buffer_region: BufferRegion):
@@ -278,7 +278,7 @@ def copy_vec_load_impl(
         or (src.scope().startswith("shared") and dst.scope() == "local")
         or (dst.scope().startswith("shared") and src.scope() == "local")
     ):
-        return None
+        fail(f"unsupported memory scopes src={src.scope()} dst={dst.scope()}")
 
     # Thread and vectorization setup
     if sctx.exec_scope.name == "cta":
@@ -287,7 +287,7 @@ def copy_vec_load_impl(
     elif sctx.exec_scope.name == "thread":
         tx = 1
     else:
-        return None
+        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     elem_size = DataType(src.dtype).bits  # in bits
     vec_len = op_call.config.get("vec_len", None)
@@ -299,13 +299,13 @@ def copy_vec_load_impl(
             thread_cnt=tx,
         )
     if vec_len is None:
-        return None
+        fail("no valid vector length; check alignment/extents/thread-count")
 
     # cp-size (the size of data in bytes) can only be 4, 8 and 16 for cp.async
     if inst_type == CopyInstType.CP_ASYNC:
         cp_size = vec_len * elem_size // 8  # in bytes
         if cp_size not in [4, 8, 16]:
-            return None
+            fail("invalid cp.async cp_size; expected 4, 8 or 16 bytes")
 
     src_st, src_extent = get_st_extent(src_buffer_region)
     dst_st, dst_extent = get_st_extent(dst_buffer_region)
@@ -350,5 +350,5 @@ def copy_vec_load_impl(
                     T.evaluate(T.ptx.cp_async(dst.ptr_to([*dst_indices]), src.ptr_to([*src_indices]), cp_size))
         # fmt: on
     else:
-        return None
+        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
     return impl

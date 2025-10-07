@@ -63,9 +63,9 @@ def f_op_scheduler(op_call: OpCall, sctx: ScheduleContext):
         try:
             res = run_dispatch(op_call, sctx)
         except Exception:
-            # propagate exceptions (STRICT mode or unexpected error)
+            # propagate exceptions from dispatcher
             raise
         if res is not None:
             return res
-    # No matching case; return None to indicate no replacement
+    # Dispatcher reports errors on failure; unreachable on success
     return None

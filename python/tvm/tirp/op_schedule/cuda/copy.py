@@ -105,7 +105,7 @@ def copy_default_impl(
             copy(dst, src)
         # fmt: on
     else:
-        return None
+        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     return impl
 
@@ -199,7 +199,7 @@ def _vec_len_possible(op_call: OpCall, sctx: ScheduleContext):
         predicate("vec_len", _vec_len_possible),
     ],
 )
-def copy_schedule_vec_load(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def copy_schedule_vec_load(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     # Delegate to the fast vectorized path
     return copy_vec_load_impl(op_call, sctx, CopyInstType.NORMAL)
 
@@ -214,7 +214,7 @@ def copy_schedule_vec_load(op_call: OpCall, sctx: ScheduleContext) -> Optional[P
         predicate("exec_scope", _exec_scope_ok, expected_scopes=["cta", "thread"]),
     ],
 )
-def copy_schedule_default(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def copy_schedule_default(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     # Conservative scalar fallback
     return copy_default_impl(op_call, sctx)
 

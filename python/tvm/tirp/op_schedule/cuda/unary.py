@@ -25,7 +25,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, OpCall, PrimFunc
 from tvm.tir.expr import FloatImm
-from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tirp.op_schedule import ScheduleContext, fail
 
 from ..common import MapOpType
 from .common import get_indices
@@ -53,7 +53,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
 
     # Check CUDA and CTA context, and supported op types.
     if sctx.exec_scope.name != "cta":
-        return None
+        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     dst, src = _dst.buffer, _src.buffer
     dst_region, src_region = _dst.region, _src.region
@@ -73,7 +73,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
         and src.scope().startswith("shared")
         and src.dtype == dtype
     ):
-        return None
+        fail("unsupported layout/scope/dtype for shared-memory unary map")
 
     analyzer = Analyzer()
     num_elements = functools.reduce(operator.mul, src_extent, 1)
@@ -81,7 +81,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
         len(src_extent) == len(dst_extent)
         and all(analyzer.can_prove_equal(s, d) for s, d in zip(src_extent, dst_extent))
     ):
-        return None
+        fail("shape mismatch between src and dst for unary map")
 
     thread_cnt = sctx.launch_params["threadIdx.x"].dom.extent
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
@@ -89,7 +89,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl(
     # Define operation lambda.
     op_func = unary_op_table.get(unary_op)
     if op_func is None:
-        return None
+        fail(f"unsupported unary op: {unary_op}")
 
     @T.prim_func(tirp=True)
     def impl():
@@ -116,7 +116,7 @@ def unary_map_cuda_shared_nd_sync_cta_impl_with_bias_scale(
     _scale: Optional[FloatImm] = op.args[3]
 
     if _bias is not None or _scale is not None:
-        return None
+        fail("bias/scale not supported for shared-memory unary map")
     return unary_map_cuda_shared_nd_sync_cta_impl(op, unary_op, sctx)
 
 
@@ -156,12 +156,12 @@ def unary_map_cuda_warp_logical_view_nd_impl(
             sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"],
         ]
     ):
-        return None
+        fail("unsupported layout/scope or exec_scope for local tensor unary map")
 
     # get unary op
     op_func = unary_op_table.get(unary_op)
     if op_func is None:
-        return None
+        fail(f"unsupported unary op: {unary_op}")
 
     # no slicing allowed, since op is on local tensor
     analyzer = Analyzer()
@@ -175,7 +175,7 @@ def unary_map_cuda_warp_logical_view_nd_impl(
             all(analyzer.can_prove_equal(s, d) for s, d in zip(dst_start, ref_start)),
         ]
     ):
-        return None
+        fail("slicing not supported for local tensor unary map; expect full-shape buffers")
 
     # layout check
     if any(
@@ -187,7 +187,7 @@ def unary_map_cuda_warp_logical_view_nd_impl(
             dst.layout.is_swizzle(),
         ]
     ):
-        return None
+        fail("layout mismatch or swizzle not supported for local tensor unary map")
 
     LOCAL_LEN = src.layout.size()
     src_local_shape = dst_local_shape = (LOCAL_LEN,)
@@ -216,7 +216,7 @@ def unary_map_cuda_warp_logical_view_nd_impl_with_bias_scale(
     _scale: Optional[FloatImm] = op.args[3]
 
     if _bias is not None or _scale is not None:
-        return None
+        fail("bias/scale not supported for local tensor unary map")
     return unary_map_cuda_warp_logical_view_nd_impl(op, unary_op, sctx)
 
 
@@ -239,4 +239,4 @@ def unary_cuda_impl(
             return unary_map_cuda_warp_logical_view_nd_impl_with_bias_scale(op, unary_op, sctx)
         return unary_map_cuda_warp_logical_view_nd_impl(op, unary_op, sctx)
 
-    return None
+    fail("unsupported buffer scope for unary op")

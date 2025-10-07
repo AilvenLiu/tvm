@@ -30,7 +30,7 @@ from tvm.ir import Range
 from tvm.tir import BufferRegion, Buffer, PrimFunc, Var, PrimExpr
 from tvm.tir.stmt import OpCall
 from tvm.tir.expr_functor import ExprMutator
-from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tirp.op_schedule import ScheduleContext, fail
 from tvm.tir.layout import Iter
 from math import gcd
 from functools import reduce
@@ -250,7 +250,7 @@ def target_trn(fn: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
             ), "The target_cuda() needs to annotate a function with signature (op_call, sctx)"
             sctx = args[1]
         if not sctx.is_trn():
-            return None
+            fail("target is not Trainium")
         return fn(*args, **kwargs)
 
     return wrapper

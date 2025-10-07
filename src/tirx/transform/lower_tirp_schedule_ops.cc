@@ -159,25 +159,21 @@ class TIRpOpScheduler : public StmtExprMutator {
     static auto f_op_scheduler_ = ffi::Function::GetGlobal("tirp.f_op_scheduler");
     ICHECK(f_op_scheduler_.has_value()) << "Internal Error: tirp.f_op_scheduler is not registered";
     PrimFunc res = f_op_scheduler_.value()(ffi::GetRef<tirp::OpCall>(op), sctx).cast<PrimFunc>();
-    if (res.defined()) {
-      // Implementation found, handle callbacks
-      if (auto bufs = sctx->callbacks.Get(tirp::callback::kPrivateAlloc)) {
-        auto buf_list = bufs.value().as<Array<Buffer>>().value();
-        alloc_buffers_.insert(alloc_buffers_.end(), buf_list.begin(), buf_list.end());
-      }
-      if (auto stmts = sctx->callbacks.Get(tirp::callback::kDeviceInitStmt)) {
-        auto stmt_list = stmts.value().as<Array<Stmt>>().value();
-        device_init_stmts_.insert(device_init_stmts_.end(), stmt_list.begin(), stmt_list.end());
-      }
-      if (auto stmts = sctx->callbacks.Get(tirp::callback::kHostInitStmt)) {
-        auto stmt_list = stmts.value().as<Array<Stmt>>().value();
-        host_init_stmts_.insert(host_init_stmts_.end(), stmt_list.begin(), stmt_list.end());
-      }
-      return res->body;
-    } else {
-      // No implementation found, it could be some deferred scheduling such as pipeline
-      return StmtExprMutator::VisitStmt_(op);
+    ICHECK(res.defined()) << "TIRp scheduler did not return a PrimFunc";
+    // Implementation found, handle callbacks
+    if (auto bufs = sctx->callbacks.Get(tirp::callback::kPrivateAlloc)) {
+      auto buf_list = bufs.value().as<Array<Buffer>>().value();
+      alloc_buffers_.insert(alloc_buffers_.end(), buf_list.begin(), buf_list.end());
     }
+    if (auto stmts = sctx->callbacks.Get(tirp::callback::kDeviceInitStmt)) {
+      auto stmt_list = stmts.value().as<Array<Stmt>>().value();
+      device_init_stmts_.insert(device_init_stmts_.end(), stmt_list.begin(), stmt_list.end());
+    }
+    if (auto stmts = sctx->callbacks.Get(tirp::callback::kHostInitStmt)) {
+      auto stmt_list = stmts.value().as<Array<Stmt>>().value();
+      host_init_stmts_.insert(host_init_stmts_.end(), stmt_list.begin(), stmt_list.end());
+    }
+    return res->body;
   }
 
   ffi::Map<Var, Range> var_range_map_;
@@ -190,6 +186,8 @@ class TIRpOpScheduler : public StmtExprMutator {
 
   bool is_first_block_{true};
   bool is_first_thread_attr_{true};
+
+  // No failure aggregation; pass surfaces per-op exceptions
 };
 
 class ScopeMerger : public StmtExprMutator {

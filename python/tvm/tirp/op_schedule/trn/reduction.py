@@ -24,7 +24,7 @@ from functools import reduce
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
-from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tirp.op_schedule import ScheduleContext, fail
 from tvm.tir.stmt import OpCall
 from .common import (
     init_analyzer,
@@ -92,7 +92,7 @@ def reduction_trn(
         Optional[PrimFunc]: The scheduled function, or None if not applicable.
     """
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
-        return None
+        fail("requires Trainium target and kernel exec_scope")
 
     dst_buffer_region, src_buffer_region, axes, accum = op.args[:4]
     assert not accum, "Accumulation is not supported for reduction on Trainium"

@@ -413,7 +413,7 @@ def compose_op_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         )
     ],
 )
-def binary_reduce_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def binary_reduce_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return binary_reduce_trn(op, sctx)
 
 
@@ -432,7 +432,7 @@ def binary_reduce_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[Pr
         )
     ],
 )
-def unary_reduce_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def unary_reduce_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return unary_reduce_trn(op, sctx)
 
 
@@ -451,7 +451,7 @@ def unary_reduce_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[Pri
         )
     ],
 )
-def binary_chain_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def binary_chain_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return binary_chain_trn(op, sctx)
 
 
@@ -470,7 +470,7 @@ def binary_chain_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[Pri
         )
     ],
 )
-def reduce_negate_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def reduce_negate_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return reduce_negate_trn(op, sctx)
 
 
@@ -489,5 +489,5 @@ def reduce_negate_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[Pr
         )
     ],
 )
-def compose_op_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def compose_op_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return compose_op_trn(op, sctx)

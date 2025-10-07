@@ -28,6 +28,7 @@ from tvm.tirp.op_schedule import (
     ScheduleContext,
     register_dispatch,
     predicate,
+    fail,
 )
 from tvm.tir.stmt import OpCall
 from .common import (
@@ -113,7 +114,7 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule GEMM operation on Trainium."""
     # Basic validation checks
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
-        return None
+        fail("requires Trainium target and kernel exec_scope")
 
     # Extract arguments
     (
@@ -296,5 +297,5 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         )
     ],
 )
-def gemm_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def gemm_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return matmul_trn(op, sctx)

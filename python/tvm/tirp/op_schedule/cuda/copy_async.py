@@ -377,7 +377,7 @@ def _is_tma_event(op: OpCall, sctx: ScheduleContext):
         predicate("event", _is_cp_async_event),
     ],
 )
-def copy_async_dispatch_cp_async(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def copy_async_dispatch_cp_async(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return copy_vec_load_impl(op, sctx, CopyInstType.CP_ASYNC)
 
 
@@ -394,5 +394,5 @@ def copy_async_dispatch_cp_async(op: OpCall, sctx: ScheduleContext) -> Optional[
         predicate("event", _is_tma_event),
     ],
 )
-def copy_async_dispatch_tma(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def copy_async_dispatch_tma(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return copy_tma_impl(op, sctx)

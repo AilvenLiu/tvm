@@ -17,13 +17,13 @@
 """Rich dispatcher for TIRp operator schedules.
 
 This module adds a structured dispatch table with predicates and
-debug/strict reporting.
+deterministic failure reporting via exceptions.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
+import traceback
 from typing import Callable, Dict, List, Optional, Tuple, Any
 
 from tvm.ir import Op
@@ -80,7 +80,8 @@ class DispatchCase:
     variant: str
     priority: int
     preds: List[Predicate]
-    impl: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]
+    # Impl must either return a PrimFunc or raise DispatchFail
+    impl: Callable[[OpCall, ScheduleContext], PrimFunc]
 
 
 # Keyed by (Op, target_kind)
@@ -98,15 +99,27 @@ def register_dispatch(
     """Decorator to add a dispatch case for an op/target pair.
 
     Cases with higher priority run earlier. When list predicates must all pass.
-    The impl should return a PrimFunc on success, or None to decline.
-    Use `fail("reason")` to add structured decline reasons.
+    The impl must return a PrimFunc on success, and must NOT return None.
+    To decline handling, raise `fail("reason")` (or `DispatchFail`).
     """
 
     op = get_tirp_op(op_name)
 
-    def decorator(impl: Callable[[OpCall, ScheduleContext], Optional[PrimFunc]]):
+    def decorator(impl: Callable[[OpCall, ScheduleContext], Any]):
+        # Wrap impl to forbid returning None; require raise-or-PrimFunc
+        def wrapped_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
+            res = impl(op_call, sctx)
+            if res is None:
+                # Enforce raise-or-PrimFunc contract for schedule implementations
+                raise DispatchFail(
+                    "impl returned None; schedule must return PrimFunc or raise fail()"
+                )
+            return res  # type: ignore[return-value]
+
         cases = _DISPATCH_TABLE.setdefault((op, target_kind), [])
-        cases.append(DispatchCase(variant=variant, priority=priority, preds=when or [], impl=impl))
+        cases.append(
+            DispatchCase(variant=variant, priority=priority, preds=when or [], impl=wrapped_impl)
+        )
         return impl
 
     return decorator
@@ -125,66 +138,128 @@ def list_registered_schedules() -> Dict[str, Dict[str, List[str]]]:
     return out
 
 
-def _env_truthy(name: str) -> bool:
-    val = os.environ.get(name, "0").strip().lower()
-    return val in ("1", "true", "yes", "on")
+def _format_opcall(op_call: OpCall) -> str:
+    """Return a readable representation of the failing opcall."""
+    # Prefer TVMScript or IR text printer if available on this object
+    try:
+        script_method = getattr(op_call, "script", None)
+        if callable(script_method):
+            try:
+                return str(script_method())
+            except TypeError:
+                # Some versions may require keyword args; fall back safely
+                return str(script_method())
+        astext_method = getattr(op_call, "astext", None)
+        if callable(astext_method):
+            return str(astext_method())
+    except Exception:
+        pass
+    try:
+        s = str(op_call)
+        # constrain extremely long single-line prints from repr
+        return s
+    except Exception:
+        pass
+    try:
+        args_len = len(getattr(op_call, "args", []))
+    except Exception:
+        args_len = -1
+    try:
+        op_name = op_call.op.name  # type: ignore[attr-defined]
+    except Exception:
+        op_name = "<unknown-op>"
+    return f"op={op_name}, args={args_len}"
 
 
-def _match_trace_filter(op_call: OpCall, sctx: ScheduleContext) -> bool:
-    ops = os.environ.get("TVM_TIRP_SCHED_TRACE_FILTER", "").strip()
-    if ops:
-        allow = {x.strip() for x in ops.split(",") if x.strip()}
-        if op_call.op.name not in allow:
-            return False
-    tgt = os.environ.get("TVM_TIRP_SCHED_TRACE_TARGET", "").strip()
-    if tgt and str(sctx.target.kind) != tgt:
-        return False
-    return True
+def _format_failure_table(
+    header: str,
+    rows: List[Tuple[str, List[str]]],
+) -> str:
+    """Format failures into a readable ASCII table.
+
+    Parameters
+    ----------
+    header : str
+        The header line describing the op/target
+    rows : List[Tuple[str, str, Optional[str]]]
+        Each row is (variant_label, error_summary, traceback_str)
+
+    Returns
+    -------
+    str
+        The formatted report string
+    """
+    # Compute column widths
+    variant_header = "Variant"
+    error_header = "Error"
+    variant_col_w = (
+        max(len(variant_header), *(len(v) for (v, _) in rows)) if rows else len(variant_header)
+    )
+    # Error column width needs to consider multi-line cells
+    if rows:
+        error_col_w = max(
+            len(error_header), *(max(len(line) for line in errs) for (_, errs) in rows)
+        )
+    else:
+        error_col_w = len(error_header)
+
+    def hline(sep: str = "+") -> str:
+        return f"{sep}{'-' * (variant_col_w + 2)}{sep}{'-' * (error_col_w + 2)}{sep}"
+
+    lines: List[str] = [header]
+    if not rows:
+        # No rows; keep the header only
+        return "\n".join(lines)
+
+    # Table header
+    lines.append(hline("+"))
+    lines.append(f"| {variant_header.ljust(variant_col_w)} | {error_header.ljust(error_col_w)} |")
+    lines.append(hline("+"))
+
+    # Rows (support multi-line Error column)
+    for variant, errs in rows:
+        if not errs:
+            errs = [""]
+        for i, err_line in enumerate(errs):
+            v_text = variant if i == 0 else ""
+            lines.append(f"| {v_text.ljust(variant_col_w)} | {err_line.ljust(error_col_w)} |")
+    lines.append(hline("+"))
+
+    return "\n".join(lines)
 
 
 def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
-    """Run structured dispatch if cases exist; return PrimFunc or None.
+    """Run structured dispatch.
 
-    If `TVM_TIRP_SCHED_TRACE=1`, prints a detailed report when all cases fail.
-    If `TVM_TIRP_SCHED_STRICT=1`, raises an aggregated error when all cases fail.
+    Returns a PrimFunc on success. Otherwise, raises RuntimeError with
+    an aggregated reason report.
     """
 
     key = (op_call.op, str(sctx.target.kind))
     cases = _DISPATCH_TABLE.get(key)
     if not cases:
-        # No registered variants; honor TRACE/STRICT for visibility
-        trace = _env_truthy("TVM_TIRP_SCHED_TRACE") and _match_trace_filter(op_call, sctx)
-        strict = _env_truthy("TVM_TIRP_SCHED_STRICT")
-        if trace or strict:
-            header = (
-                f"TIRp schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
-            )
-            report = "\n".join([header, "- no registered variants for this op/target"])
-            if trace:
-                print(report)
-            if strict:
-                raise RuntimeError(report)
-        return None
+        header = f"TIRp schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
+        report = _format_failure_table(header, [])
+        # Append a simple reason when there are no variants at all
+        report = "\n".join([report, "no registered variants for this op/target"])
+        raise RuntimeError(report)
 
-    trace = _env_truthy("TVM_TIRP_SCHED_TRACE") and _match_trace_filter(op_call, sctx)
-    strict = _env_truthy("TVM_TIRP_SCHED_STRICT")
-
-    failures: List[str] = []
+    # Collect structured failure rows: (variant_label, error_lines)
+    # error_lines: [summary, traceback lines...]
+    failure_rows: List[Tuple[str, List[str]]] = []
+    last_exception: Optional[BaseException] = None
 
     # If explicit dispatch is set, filter to that variant only
     forced_variant = getattr(op_call, "dispatch", None)
     if forced_variant is not None:
         cases = [c for c in cases if c.variant == forced_variant]
         if not cases:
-            msg = (
+            msg_header = (
                 f"TIRp schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
-                f"\n- no variant named '{forced_variant}' is registered"
             )
-            if _env_truthy("TVM_TIRP_SCHED_TRACE") and _match_trace_filter(op_call, sctx):
-                print(msg)
-            if _env_truthy("TVM_TIRP_SCHED_STRICT"):
-                raise RuntimeError(msg)
-            return None
+            table = _format_failure_table(msg_header, [])
+            msg = "\n".join([table, f"no variant named '{forced_variant}' is registered"])
+            raise RuntimeError(msg)
 
     for case in sorted(cases, key=lambda c: (-c.priority, c.variant)):
         # evaluate predicates
@@ -199,29 +274,47 @@ def run_dispatch(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
                     msg += f" — {reason}"
                 pred_msgs.append(msg)
         if not pred_ok:
-            failures.append(
-                f"- variant={case.variant} (prio={case.priority}): " + "; ".join(pred_msgs)
+            # Include the offending OpCall IR in the error cell
+            op_str = _format_opcall(op_call)
+            op_lines = [line.rstrip("\n") for line in str(op_str).splitlines()] if op_str else []
+            failure_rows.append(
+                (
+                    f"{case.variant} (prio={case.priority})",
+                    ["; ".join(pred_msgs), "opcall:", *op_lines],
+                )
             )
             continue
 
         # run impl
         try:
             res = case.impl(op_call, sctx)
-            if res is not None:
-                return res
-            failures.append(f"- variant={case.variant} (prio={case.priority}): impl returned None")
+            # Defensive check in case a legacy impl bypassed the wrapper
+            if res is None:  # pragma: no cover - legacy guard
+                raise DispatchFail("impl returned None (legacy behavior not allowed)")
+            return res
         except DispatchFail as e:
-            failures.append(f"- variant={case.variant} (prio={case.priority}): declined — {str(e)}")
+            op_str = _format_opcall(op_call)
+            op_lines = [line.rstrip("\n") for line in str(op_str).splitlines()] if op_str else []
+            failure_rows.append(
+                (
+                    f"{case.variant} (prio={case.priority})",
+                    [f"declined — {str(e)}", "opcall:", *op_lines],
+                )
+            )
         except Exception as e:  # keep searching other variants
-            msg = f"- variant={case.variant} (prio={case.priority}): exception — {type(e).__name__}: {e}"
-            failures.append(msg)
+            exc_summary = f"exception — {type(e).__name__}: {e}"
+            tb_str = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+            # Expand traceback into lines
+            tb_lines = [line.rstrip("\n") for line in tb_str.splitlines()]
+            op_str = _format_opcall(op_call)
+            op_lines = [line.rstrip("\n") for line in str(op_str).splitlines()] if op_str else []
+            error_lines = [exc_summary, "opcall:", *op_lines, *tb_lines]
+            failure_rows.append((f"{case.variant} (prio={case.priority})", error_lines))
+            last_exception = e
 
     # no success
-    if trace or strict:
-        header = f"TIRp schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
-        report = "\n".join([header, *failures])
-        if trace:
-            print(report)
-        if strict:
-            raise RuntimeError(report)
-    return None
+    header = f"TIRp schedule dispatch failed: op={op_call.op.name} target={sctx.target.kind}"
+    report = _format_failure_table(header, failure_rows)
+    if last_exception is not None:
+        raise RuntimeError(report) from last_exception
+    raise RuntimeError(report)

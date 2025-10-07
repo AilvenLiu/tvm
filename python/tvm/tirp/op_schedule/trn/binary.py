@@ -25,7 +25,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc, FloatImm
 from tvm.tir.stmt import OpCall
-from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tirp.op_schedule import ScheduleContext, fail
 
 from .common import (
     get_ewise_dim_map,
@@ -242,7 +242,7 @@ def binary_trn(
 ) -> Optional[PrimFunc]:
     """Generate a binary operation schedule for Trainium."""
     if not (sctx.is_trn() and sctx.exec_scope.name == "kernel"):
-        return None
+        fail("requires Trainium target and kernel exec_scope")
 
     assert binary_op in binary_map_ops, f"Unsupported binary operation {binary_op}"
 

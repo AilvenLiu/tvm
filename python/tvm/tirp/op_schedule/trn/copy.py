@@ -30,6 +30,7 @@ from tvm.tirp.op_schedule import (
     ScheduleContext,
     register_dispatch,
     predicate,
+    fail,
 )
 
 from .common import (
@@ -206,7 +207,7 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     """Schedule copy operation between global and shared memory on CUDA."""
     # Basic validation checks
     if sctx.exec_scope.name != "kernel":
-        return None
+        fail("requires kernel exec_scope for TRN copy")
 
     dst_region, src_region = op.args
     src, dst = src_region.buffer, dst_region.buffer
@@ -240,7 +241,7 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     )
 
     if not dims_match:
-        return None
+        fail("shape mismatch between src and dst for TRN copy")
 
     dim_map = get_ewise_dim_map(src_region, dst_region, analyzer)
     inst_gen = InstructionGenerator([src_region, dst_region], analyzer)
@@ -317,5 +318,5 @@ def copy_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
         )
     ],
 )
-def copy_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def copy_trn_dispatch(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return copy_trn(op, sctx)

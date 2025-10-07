@@ -25,7 +25,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.stmt import OpCall
-from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tirp.op_schedule import ScheduleContext, fail
 
 from ..common import ReduceOpType, register_unary_binary_schedule
 from .common import target_cuda
@@ -60,14 +60,14 @@ def reduction_cuda_shared_nd_sync_cta_impl(
 
     # Basic validation checks
     if sctx.exec_scope.name != "cta":
-        return None
+        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     thread_cnt = sctx.launch_params["threadIdx.x"].dom.extent
     threads_per_warp = 32
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
     if not (thread_cnt >= threads_per_warp and thread_cnt % threads_per_warp == 0):
-        return None
+        fail("threadIdx.x must be >=32 and multiple of warp size")
 
     dst, src = dst_buffer_region.buffer, src_buffer_region.buffer
     src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
@@ -85,7 +85,7 @@ def reduction_cuda_shared_nd_sync_cta_impl(
             len(src_region) >= len(dst_region),
         ]
     ):
-        return None
+        fail("unsupported buffer scopes or region ranks for shared reduction")
 
     analyzer = Analyzer()
     spatial_dims = -1
@@ -94,21 +94,21 @@ def reduction_cuda_shared_nd_sync_cta_impl(
         for i in range(len(dst_extent)):
             if src_extent[i] != dst_extent[i]:
                 if dst_extent[i] != 1:
-                    return None
+                    fail("dst trailing dims must be 1s beyond spatial dims")
                 if not functools.reduce(operator.mul, dst_extent[i:], 1) == 1:
-                    return None
+                    fail("dst trailing dims beyond spatial must be 1s")
                 else:
                     spatial_dims = i
                     break
         if spatial_dims == -1:
-            return None
+            fail("no reduction dims detected; not a reduction")
 
     else:
         spatial_dims = len(dst_extent)
         if not all(
             analyzer.can_prove_equal(s, d) for s, d in zip(src_extent[:spatial_dims], dst_extent)
         ):
-            return None
+            fail("dst must match src prefix dims for reduction")
 
     assert spatial_dims > 0 and spatial_dims < len(src_extent)
 
@@ -118,7 +118,7 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     # get reduce op
     op_func = reduce_op_table.get(reduce_op)
     if op_func is None:
-        return None
+        fail(f"unsupported reduce op: {reduce_op}")
 
     # get init value if not accum
     init_value = reduce_default_value_table(dtype).get(reduce_op)
@@ -206,7 +206,7 @@ def reduction_cuda_warp_logical_view_impl(
             sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"],
         ]
     ):
-        return None
+        fail("unsupported layout/scope or exec_scope for local reduction")
 
     # no slicing allowed
     if not all(
@@ -218,7 +218,7 @@ def reduction_cuda_warp_logical_view_impl(
             dst_region[0].extent == dst.shape[0] and dst_region[1].extent == dst.shape[1],
         ]
     ):
-        return None
+        fail("slicing not supported for local reduction; expect full buffers")
 
     # check for WGMMA layout
     if any(
@@ -231,10 +231,10 @@ def reduction_cuda_warp_logical_view_impl(
             dst.shape[1] != 4,
         ]
     ):
-        return None
+        fail("shape/layout unsupported for local reduction (expect 16xN to 16x4)")
 
     if src.layout.is_swizzle() or dst.layout.is_swizzle():
-        return None
+        fail("swizzle layout unsupported for local reduction")
 
     atom = T.TileLayout(shard=([1, 2], [2, 1]))
     warp_layout = T.TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
@@ -247,7 +247,7 @@ def reduction_cuda_warp_logical_view_impl(
     # get reduce op
     op_func = reduce_op_table.get(reduce_op)
     if op_func is None:
-        return None
+        fail(f"unsupported reduce op: {reduce_op}")
 
     # get init value if not accum
     init_value = reduce_default_value_table(dtype).get(reduce_op)
@@ -256,11 +256,11 @@ def reduction_cuda_warp_logical_view_impl(
     # provided that src and dst are same-shaped buffer
     if src.shape[1] == 4:
         if red_warp_atom.is_tile_inner(src.layout.normalize(), (64,), (32,)) is None:
-            return None
+            fail("src layout not compatible with ROW_RED tile for shuffle-only reduction")
         if red_warp_atom.is_tile_inner(dst.layout.normalize(), (64,), (32,)) is None:
-            return None
+            fail("dst layout not compatible with ROW_RED tile for shuffle-only reduction")
         if shuffle is False:
-            return None
+            fail("thread_reduce (shuffle) must be enabled for this reduction case")
 
         num_rows = 2
         local_shape = (num_rows,)
@@ -286,9 +286,9 @@ def reduction_cuda_warp_logical_view_impl(
     # src and dst are different-shaped buffer
     src_tile_outer = warp_atom.is_tile_inner(src.layout, src.shape, [8, 8])
     if src_tile_outer is None:
-        return None
+        fail("src layout not compatible with WGMMA tile for reduction")
     if red_warp_atom.is_tile_inner(dst.layout.normalize(), (64,), (32,)) is None:
-        return None
+        fail("dst layout not compatible with ROW_RED tile for reduction")
 
     num_rows = 2
     src_local_shape = (num_rows, src_tile_outer.size())
@@ -337,7 +337,7 @@ def reduction_cuda_impl(
         return reduction_cuda_warp_logical_view_impl(
             dst_buffer_region, src_buffer_region, accum, reduce_op, config, sctx
         )
-    return None
+    fail("unsupported buffer scope for reduction")
 
 
 for op_name_, op_type_ in {

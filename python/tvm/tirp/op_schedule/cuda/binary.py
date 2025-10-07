@@ -26,7 +26,7 @@ from tvm.error import InternalError
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, OpCall, PrimFunc
 from tvm.tir.expr import FloatImm
-from tvm.tirp.op_schedule import ScheduleContext
+from tvm.tirp.op_schedule import ScheduleContext, fail
 
 from ..common import MapOpType
 from .common import get_indices
@@ -70,16 +70,16 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
     _src2: Union[BufferRegion, FloatImm] = op.args[2]
 
     if sctx.exec_scope.name != "cta":
-        return None
+        fail(f"unsupported exec_scope {sctx.exec_scope.name}")
 
     CONST = None
     # Ensure at least one source is not a constant.
     if isinstance(_src1, FloatImm) and isinstance(_src2, FloatImm):
-        return None
+        fail("both inputs are constants; unsupported for binary map")
     # If src1 is constant, swap (only allowed for ADD and MUL).
     if isinstance(_src1, FloatImm):
         if binary_op not in (MapOpType.ADD, MapOpType.MUL):
-            return None
+            fail("commutativity required to swap constant as lhs")
         _src1, _src2 = _src2, _src1
     if isinstance(_src2, FloatImm):
         CONST = _src2
@@ -115,7 +115,7 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
         and src1.dtype == dtype
         and ((src2.dtype == dtype) if src2 else (CONST.dtype == dtype))
     ):
-        return None
+        fail("unsupported layout/scope/dtype for shared-memory binary map")
 
     analyzer = Analyzer()
     num_elements = functools.reduce(operator.mul, dst_extent, 1)
@@ -125,7 +125,7 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
         src2_num = functools.reduce(operator.mul, src2_extent, 1)
         if num_elements < src2_num:
             if binary_op not in (MapOpType.ADD, MapOpType.MUL):
-                return None
+                fail("non-commutative op cannot broadcast second source")
             # Swap src1 and src2.
             _src1, _src2 = _src2, _src1
             src1, src2 = src2, src1
@@ -140,20 +140,20 @@ def binary_map_cuda_shared_nd_sync_cta_impl(
         len(dst_non1) == len(src1_non1)
         and all(analyzer.can_prove_equal(s, d) for s, d in zip(src1_non1, dst_non1))
     ):
-        return None
+        fail("shape mismatch between dst and src1 for binary map")
 
     # For buffer src2, ensure it is broadcastable to src1.
     if CONST is None:
         for i in range(1, len(src2_extent) + 1):
             if src2_extent[-i] not in (1, src1_extent[-i]):
-                return None
+                fail("src2 not broadcastable to src1 for binary map")
 
     thread_cnt = sctx.launch_params["threadIdx.x"].dom.extent
     assert "threadIdx.y" not in sctx.launch_params and "threadIdx.z" not in sctx.launch_params
 
     op_func = binary_op_table.get(binary_op)
     if op_func is None:
-        return None
+        fail(f"unsupported binary op: {binary_op}")
 
     if CONST is not None:
 
@@ -225,11 +225,11 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     # Ensure at least one source is not a constant.
     CONST = None
     if isinstance(_src1, FloatImm) and isinstance(_src2, FloatImm):
-        return None
+        fail("both inputs are constants; unsupported for binary map")
     # If src1 is constant, swap (only allowed for ADD and MUL).
     if isinstance(_src1, FloatImm):
         if binary_op not in (MapOpType.ADD, MapOpType.MUL):
-            return None
+            fail("commutativity required to swap constant as lhs")
         _src1, _src2 = _src2, _src1
     if isinstance(_src2, FloatImm):
         CONST = _src2
@@ -266,12 +266,12 @@ def binary_map_cuda_warp_logical_view_nd_impl(
             sctx.exec_scope.name in ["warp", "warpgroup", "cta", "cluster"],
         ]
     ):
-        return None
+        fail("unsupported layout/scope/dtype or exec_scope for local logical-view binary map")
 
     # get binary op
     op_func = binary_op_table.get(binary_op)
     if op_func is None:
-        return None
+        fail(f"unsupported binary op: {binary_op}")
 
     # no slicing allowed, since op is on local tensor
     analyzer = Analyzer()
@@ -291,7 +291,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
             dst_region[0].extent == dst.shape[0] and dst_region[1].extent == dst.shape[1],
         ]
     ):
-        return None
+        fail("unsupported layout/scope/dtype or exec_scope for local logical-view binary map")
 
     # For non-constant second source, switch broadcasting if needed.
     analyzer = Analyzer()
@@ -300,7 +300,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
         src2_num = functools.reduce(operator.mul, src2_extent, 1)
         if src1_num < src2_num:
             if binary_op not in (MapOpType.ADD, MapOpType.MUL):
-                return None
+                fail("non-commutative op cannot broadcast second source")
             # Swap src1 and src2.
             _src1, _src2 = _src2, _src1
             src1, src2 = src2, src1
@@ -314,9 +314,9 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     if CONST is None:
         for i in range(1, len(src2_extent) + 1):
             if src1_extent[-i] != dst_extent[-i]:
-                return None
+                fail("src1 does not match dst extent in binary map")
             if src2_extent[-i] not in (4, src1_extent[-i]):
-                return None
+                fail("src2 not broadcastable to src1 for binary map")
             if src2_extent[-i] == 4 and src1_extent[-i] != 4:
                 BROADCAST = True
 
@@ -337,7 +337,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
             dst.layout.is_swizzle(),
         ]
     ):
-        return None
+        fail("basic shape/layout check failed for logical-view binary map")
 
     # layout check:
     # (dst, src1, src2) layout must adhere to one of the five cases below:
@@ -376,7 +376,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
         elif check_row_red(dst) and check_row_red(src1):
             num_cols = 1
         else:
-            return None
+            fail("layout check failed for const binary map case")
 
         src1_local_shape = dst_local_shape = (num_rows, num_cols)
 
@@ -396,7 +396,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     if BROADCAST:
         # check for case 2
         if not (check_wgmma(dst) and check_wgmma(src1) and check_row_red(src2)):
-            return None
+            fail("layout check failed for broadcast binary map case")
 
         num_rows = 2
         src1_local_shape = dst_local_shape = (num_rows, check_wgmma(src1).size())
@@ -423,7 +423,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
     elif check_row_red(dst) and check_row_red(src1) and check_row_red(src2):
         num_cols = 1
     else:
-        return None
+        fail("layout check failed for binary map (WGMMA/ROW_RED)")
 
     src1_local_shape = src2_local_shape = dst_local_shape = (num_rows, num_cols)
 
@@ -457,4 +457,4 @@ def binary_cuda_impl(
     elif dst_buffer_region.buffer.scope() == "local":
         return binary_map_cuda_warp_logical_view_nd_impl(op, binary_op, sctx)
 
-    return None
+    fail("unsupported buffer scope for binary op")
