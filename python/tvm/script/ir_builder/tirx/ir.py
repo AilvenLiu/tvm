@@ -2513,6 +2513,7 @@ class CUDANamespace:
     def __init__(self):
         self.atomic_add = _op_wrapper(_tir_op.cuda_atomic_add)
         self.thread_fence = _op_wrapper(_tir_op.cuda_thread_fence)
+        self.warpgroup_sync = _op_wrapper(_tir_op.cuda_warpgroup_sync)
         self.warp_sync = _op_wrapper(_tir_op.cuda_warp_sync)
         self.cta_sync = _op_wrapper(_tir_op.cuda_cta_sync)
         self.grid_sync = _op_wrapper(_tir_op.cuda_grid_sync)

@@ -373,7 +373,7 @@ def test_hgemm():
                                 for it in T.unroll(EPI_TILE // 8):
                                     for vec in T.vectorized(8):
                                         D_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
-                                T.ptx.bar.sync(wg_id, 128)
+                                T.cuda.warpgroup_sync(wg_id)
                                 T.ptx.fence.proxy(scope="shared")
                                 # st to gmem via event
                                 with T.thread()[lane_id == 0 and warp_id == 0]:
@@ -382,7 +382,7 @@ def test_hgemm():
                                     Tp.copy_async(D[m_start : m_start + BLK_M, n_start : n_start + EPI_TILE], D_smem[wg_id, :, :], evt=wb_event)
                                     wb_event.commit()
                                     wb_event.wait(0)
-                                T.ptx.bar.sync(wg_id, 128)
+                                T.cuda.warpgroup_sync(wg_id)
                             tile_scheduler.next_tile()
 
                 # dealloc TMEM

@@ -110,8 +110,6 @@ def get_hgemm_kernel(dim_n, dim_k):
     assert N % (BLK_N * CTA_GROUP) == 0
     TILE_N_NUM = ceildiv(N, BLK_N * CTA_GROUP)
 
-    
-
     atomic_add_system_uint64 = f"""
     __forceinline__ __device__ void atomic_add_system_uint64(uint64_t* addr, uint64_t value) {{
         asm volatile("red.async.release.global.gpu.add.u64 [%0], %1;" ::"l"(addr), "l"(value)
@@ -425,7 +423,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                 if ko >= TMEM_PIPE_DEPTH:
                                     if lane_id == 0 and warp_id == 0:
                                         T.ptx.cp_async.bulk.wait_group(TMEM_PIPE_DEPTH - 1)
-                                    T.ptx.bar.sync(10, 128)
+                                    T.cuda.warpgroup_sync(10)
                                 profiler.start(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)
 
                                 # tmem -> rf (ld) -> smem
@@ -441,7 +439,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                     ld2mma_bar.arrive(tmem_idx)
 
                                 T.ptx.fence.proxy(scope="shared")
-                                T.ptx.bar.sync(10, 128)
+                                T.cuda.warpgroup_sync(10)
                                 profiler.start(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
                                 # smem -> gmem
                                 with T.thread()[lane_id == 0 and warp_id == 0]:
@@ -452,7 +450,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                 profiler.end(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
                             with T.thread()[lane_id == 0 and warp_id == 0]:
                                 wb_event.wait(0)
-                            T.ptx.bar.sync(10, 128)
+                            T.cuda.warpgroup_sync(10)
                             tile_scheduler.next_tile()
                       
                 # dealloc TMEM

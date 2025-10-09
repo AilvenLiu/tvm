@@ -878,7 +878,7 @@ def test_hgemm_rs():
                                         for it in T.unroll(EPI_TILE // 8):
                                             for vec in T.vectorized(8):
                                                 D_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
-                                        T.ptx.bar.sync(wg_id, 128)
+                                        T.cuda.warpgroup_sync(wg_id)
                                         T.ptx.fence.proxy(scope="shared")
                                         # st to gmem
                                         if lane_id == 0 and warp_id == 0:
@@ -887,7 +887,7 @@ def test_hgemm_rs():
                                                                         (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)
                                             T.ptx.cp_async.bulk.commit_group()
                                             T.ptx.cp_async.bulk.wait_group(0)
-                                        T.ptx.bar.sync(wg_id, 128)
+                                        T.cuda.warpgroup_sync(wg_id)
                                     # notify RS ready
                                     comm_m_idx = T.meta_var(m_idx * 2 + wg_id)
                                     comm_m_idx_local = T.meta_var(comm_m_idx % (LOCAL_M // TILE_M))

@@ -264,7 +264,7 @@ def get_batch_attention_kernel(qo_heads, kv_heads, head_dim, page_size):
             return (offset ^ 0x4) + step_size * row_stride
 
         def scope_sync(wg_id):
-            return T.ptx.bar.sync(wg_id, 128)
+            return T.cuda.warpgroup_sync(wg_id)
             # return T.cuda.cta_sync()
 
         def m16k16_row_sum_f16f16f32(C_ptr, A_ptr):

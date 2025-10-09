@@ -84,9 +84,6 @@ TILE_M_NUM = M // (BLK_M * CTA_GROUP)
 TILE_N_NUM = N // (BLK_N * CTA_GROUP)
 
 
-    
-
-
 class Barriers:
 
     def __init__(self, shared_buffer_base, shared_buffer_offs, pipe_depth, is_p2c):
@@ -340,7 +337,7 @@ def test_hgemm_1consumer():
                             # flush previous tma
                             if lane_id == 0 and warp_id == 0:
                                 T.ptx.cp_async.bulk.wait_group(0)
-                            T.ptx.bar.sync(10, 128)
+                            T.cuda.warpgroup_sync(10)
                             # wait for the completion of all the mma of the same tile
                             mma2ld_bar.wait(tmem_idx, tmem_phase)
                             T.ptx.tcgen05.fence.after_thread_sync()
@@ -352,7 +349,7 @@ def test_hgemm_1consumer():
                                 if ko >= TMEM_PIPE_DEPTH:
                                     if lane_id == 0 and warp_id == 0:
                                         T.ptx.cp_async.bulk.wait_group(TMEM_PIPE_DEPTH - 1)
-                                    T.ptx.bar.sync(10, 128)
+                                    T.cuda.warpgroup_sync(10)
 
                                 # tmem -> rf (ld) -> smem
                                 for ki in T.unroll(EPI_TILE // TMEM_LD_SIZE):
@@ -369,7 +366,7 @@ def test_hgemm_1consumer():
                                     ld2mma_bar.arrive(tmem_idx)
 
                                 T.ptx.fence.proxy(scope="shared")
-                                T.ptx.bar.sync(10, 128)
+                                T.cuda.warpgroup_sync(10)
                                     
                                 # smem -> gmem
                                 with T.thread()[lane_id == 0 and warp_id == 0]:
@@ -382,7 +379,7 @@ def test_hgemm_1consumer():
 
                         with T.thread()[lane_id == 0 and warp_id == 0]:
                             wb_event.wait(0)
-                        T.ptx.bar.sync(10, 128)
+                        T.cuda.warpgroup_sync(10)
                                 
                 # dealloc TMEM
                 with T.warp()[0:1]:

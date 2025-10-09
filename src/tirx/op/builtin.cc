@@ -386,6 +386,9 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_atomic_add)
 TIR_DEFINE_BUILTIN_FUNC(cuda_thread_fence)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(cuda_warpgroup_sync)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(cuda_warp_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

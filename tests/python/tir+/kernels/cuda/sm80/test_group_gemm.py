@@ -288,7 +288,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
 
             @T.macro
             def scope_sync():
-                T.ptx.bar.sync(wg_id, 128)
+                T.cuda.warpgroup_sync(wg_id)
 
             with T.thread():
                 @T.macro

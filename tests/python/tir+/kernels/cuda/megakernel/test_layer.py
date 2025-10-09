@@ -351,7 +351,7 @@ class MegaKernel:
                                 )
                         self.run_tile(self.qkv_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                         if wg_id == 0:
-                            T.ptx.bar.sync(1, 128)
+                            T.cuda.warpgroup_sync(1)
                             if tid == 0:
                                 evt_qkv_partial.semaphore_notify(self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile)
                     elif self.tile_scheduler.task_type == JobType.Q_REDUCE_RMS_ROPE.value:
@@ -512,7 +512,7 @@ class MegaKernel:
                         evt_o_proj.semaphore_wait_warp(self.tile_scheduler.k_idx)
                         self.run_tile(self.o_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                         if wg_id == 0:
-                            T.ptx.bar.sync(1, 128)
+                            T.cuda.warpgroup_sync(1)
                             if tid == 0:
                                 evt_o_partial.semaphore_notify(self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT))
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
@@ -613,7 +613,7 @@ class MegaKernel:
                             evt_attn_mlp.semaphore_wait_warp(0)
                             self.run_tile(self.gemm_gate_up_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                             if wg_id == 0:
-                                T.ptx.bar.sync(1, 128)
+                                T.cuda.warpgroup_sync(1)
                                 if tid == 0:
                                     evt_gate_up_proj_reduce.semaphore_notify(self.tile_scheduler.n_idx)
                     elif self.tile_scheduler.task_type == JobType.GATE_UP_SILU.value:
@@ -634,7 +634,7 @@ class MegaKernel:
                             evt_attn_mlp.semaphore_wait_warp(0)
                             self.run_tile(self.gate_up_silu_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                             if wg_id == 0:
-                                T.ptx.bar.sync(1, 128)
+                                T.cuda.warpgroup_sync(1)
                                 if tid <= range_end - range_start:
                                     evt_down_proj.semaphore_notify(range_start + tid)
                     elif self.tile_scheduler.task_type == JobType.GATE_UP_PROJ_REDUCE.value:
@@ -704,7 +704,7 @@ class MegaKernel:
                         evt_down_proj.semaphore_wait_warp(self.tile_scheduler.k_idx)
                         self.run_tile(self.gemm_down_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                         if wg_id == 0:
-                            T.ptx.bar.sync(1, 128)
+                            T.cuda.warpgroup_sync(1)
                             if tid == 0:
                                 evt_down_proj_reduce.semaphore_notify(self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N))
                     elif self.tile_scheduler.task_type == JobType.DOWN_PROJ_REDUCE.value:

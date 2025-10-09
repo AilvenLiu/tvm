@@ -362,7 +362,7 @@ class MegaKernel:
                             )  
                         self.run_tile(self.gate, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                         if wg_id == 0:
-                            T.ptx.bar.sync(1, 128)
+                            T.cuda.warpgroup_sync(1)
                             if tid == 0:
                                 evt_gating.semaphore_notify(0)
                     elif self.tile_scheduler.task_type == JobType.MOE_TOPK_SOFTMAX.value:
@@ -431,7 +431,7 @@ class MegaKernel:
                         if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
                             self.run_tile(self.group_gemm_gate_up, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
                         if wg_id == 0:
-                            T.ptx.bar.sync(1, 128)
+                            T.cuda.warpgroup_sync(1)
                             if tid == 0:
                                 evt_group_gemm_gate_up.semaphore_notify(self.tile_scheduler.m_idx)
                     elif self.tile_scheduler.task_type == JobType.MOE_SILU_MULTIPLY.value:

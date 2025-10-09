@@ -415,13 +415,13 @@ class ReduceScatter:
                                     for it in range(EPI_TILE // 8):
                                         for vec in T.vectorized(8):
                                             C_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
-                                    T.ptx.bar.sync(wg_id+1, 128)
+                                    T.cuda.warpgroup_sync(wg_id+1)
                                     T.ptx.fence.proxy(scope="shared")
                                     if lane_id == 0 and warp_id == 0:
                                         T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, n_idx * BLK_N + i * EPI_TILE, (m_idx * 4 + wg_id * 2 + cbx) * BLK_M)
                                         T.ptx.cp_async.bulk.commit_group()
                                         T.ptx.cp_async.bulk.wait_group(0)
-                                    T.ptx.bar.sync(wg_id+1, 128)
+                                    T.cuda.warpgroup_sync(wg_id+1)
                                 # notify RS ready
                                 comm_m_idx = T.meta_var(m_idx * 4 + wg_id * 2 + cbx)
                                 signal_rank = T.meta_var(comm_m_idx // (LOCAL_M // BLK_M))
@@ -564,7 +564,7 @@ class ReduceScatter:
                             T.cuda.float8tohalf8(reg_fp32.ptr_to([i, 0]), reg_fp16.data)
                             for j in T.vectorized(8):
                                 output_smem[m_in_smem, n_in_smem * 8 + j] = reg_fp16[j]
-                        T.ptx.bar.sync(1, 128)
+                        T.cuda.warpgroup_sync(1)
                         T.ptx.fence.proxy(scope="shared")
                         if tid_in_wg == 0:
                             T.ptx.cp_async.bulk.tensor.s2g(
@@ -576,7 +576,7 @@ class ReduceScatter:
                             )
                             T.ptx.cp_async.bulk.commit_group()
                             T.ptx.cp_async.bulk.wait_group(0)
-                        T.ptx.bar.sync(1, 128)
+                        T.cuda.warpgroup_sync(1)
                         iter += 1
 # fmt: on
 

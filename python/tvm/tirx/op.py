@@ -5516,6 +5516,26 @@ def cuda_warp_sync():
     return call_intrin("", "tir.cuda_warp_sync")
 
 
+def cuda_warpgroup_sync(bar_no):
+    """TVM intrinsic to synchronize a CUDA warpgroup via a named barrier.
+
+    Parameters
+    ----------
+    bar_no : PrimExpr
+        The named barrier id to use for the warpgroup.
+
+    Notes
+    -----
+    Synchronizes 128 threads in a warpgroup using `bar.sync bar_no, 128`.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_warpgroup_sync", bar_no)
+
+
 def cuda_syncthreads_and(cond):
     """TVM intrinsic to call cuda syncthreads_and instruction
 

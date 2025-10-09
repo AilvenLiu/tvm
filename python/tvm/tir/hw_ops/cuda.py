@@ -3465,6 +3465,17 @@ __forceinline__ __device__ void {func_name}() {{
     return cuda_func_call(func_name, source_code=source_code)
 
 
+@register_codegen("cuda_warpgroup_sync")
+def codegen_cuda_warpgroup_sync(name_bar_id):
+    func_name = "tvm_builtin_cuda_warpgroup_sync"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(int name_bar_id) {{
+    asm volatile("bar.sync %0, 128;" : : "r"(name_bar_id));
+}}
+"""
+    return cuda_func_call(func_name, name_bar_id, source_code=source_code)
+
+
 @register_codegen("cuda_cta_sync")
 def codegen_cuda_cta_sync():
     func_name = "tvm_builtin_cuda_cta_sync"

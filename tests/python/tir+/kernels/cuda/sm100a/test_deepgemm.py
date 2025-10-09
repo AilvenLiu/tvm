@@ -479,7 +479,7 @@ def test_deepgemm():
 
                             # flush previous tma
                             wb_event.wait(0)
-                            T.ptx.bar.sync(10, 128)
+                            T.cuda.warpgroup_sync(10)
                             # wait for the completion of all the mma of the same tile
                             mma2ld_bar.wait(tmem_idx, tmem_phase)
                             T.ptx.tcgen05.fence.after_thread_sync()
@@ -490,7 +490,7 @@ def test_deepgemm():
                                 # wait the smem to be free
                                 if ko >= TMEM_PIPE_DEPTH:
                                     wb_event.wait(TMEM_PIPE_DEPTH - 1)
-                                    T.ptx.bar.sync(10, 128)
+                                    T.cuda.warpgroup_sync(10)
 
                                 # tmem -> rf (ld) -> smem
                                 for ki in T.unroll(EPI_TILE // TMEM_LD_SIZE):
@@ -507,7 +507,7 @@ def test_deepgemm():
                                     ld2mma_bar.arrive(tmem_idx)
 
                                 T.ptx.fence.proxy(scope="shared")
-                                T.ptx.bar.sync(10, 128)
+                                T.cuda.warpgroup_sync(10)
                                     
                                 # smem -> gmem
                                 m_start = (m_idx * CTA_GROUP + cbx) * BLK_M
@@ -518,7 +518,7 @@ def test_deepgemm():
                             tile_scheduler.next_tile()
 
                         wb_event.wait()
-                        T.ptx.bar.sync(10, 128)
+                        T.cuda.warpgroup_sync(10)
                                 
                 # dealloc TMEM
                 with T.warp()[0:1]:

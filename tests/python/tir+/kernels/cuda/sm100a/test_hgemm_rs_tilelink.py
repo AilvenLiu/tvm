@@ -435,13 +435,13 @@ def test_hgemm_rs():
                                     for it in range(EPI_TILE // 8):
                                         for vec in T.vectorized(8):
                                             C_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
-                                    T.ptx.bar.sync(wg_id+1, 128)
+                                    T.cuda.warpgroup_sync(wg_id+1)
                                     T.ptx.fence.proxy(scope="shared")
                                     if lane_id == 0 and warp_id == 0:
                                         T.ptx.cp_async.bulk.tensor.s2g(2, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, n_idx * BLK_N + i * EPI_TILE, (m_idx * 4 + wg_id * 2 + cbx) * BLK_M)
                                         T.ptx.cp_async.bulk.commit_group()
                                         T.ptx.cp_async.bulk.wait_group(0)
-                                    T.ptx.bar.sync(wg_id+1, 128)
+                                    T.cuda.warpgroup_sync(wg_id+1)
                                 # notify RS ready
                                 sem.semaphore_notify(cbx, wg_id, tid, m_idx, n_idx) # notify a single tile
                                 mma2ld_pipe.advance()

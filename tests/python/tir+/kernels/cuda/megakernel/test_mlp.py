@@ -169,7 +169,7 @@ class MegaKernel:
                             profiler.start(ProfileEventType.GEMM_GATE_UP_PROJ, lane_id == 0)
                             gemm_gate_up_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             if wg_id == 0:
-                                T.ptx.bar.sync(1, 128)
+                                T.cuda.warpgroup_sync(1)
                                 if tid == 0:
                                     if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
                                         evt_gate_up_proj.semaphore_notify(tile_scheduler.n_idx-INTERMEDIATE_SIZE//GemmTile.BLK_N)
@@ -189,7 +189,7 @@ class MegaKernel:
                             profiler.start(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
                             gemm_down_proj_tile.run(tile_scheduler.m_idx, tile_scheduler.n_idx, tile_scheduler.k_idx)
                             if wg_id == 0:
-                                T.ptx.bar.sync(1, 128)
+                                T.cuda.warpgroup_sync(1)
                                 if tid == 0:
                                     evt_down_proj_reduce.semaphore_notify(tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N))
                             profiler.end(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)

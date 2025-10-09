@@ -504,13 +504,13 @@ def test_hgemm_rs():
                                     for it in range(EPI_TILE // 8):
                                         for vec in T.vectorized(8):
                                             C_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
-                                    T.ptx.bar.sync(wg_id+1, 128)
+                                    T.cuda.warpgroup_sync(wg_id+1)
                                     T.ptx.fence.proxy(scope="shared")
                                     if lane_id == 0 and warp_id == 0:
                                         T.ptx.cp_async.bulk.tensor.s2g(4, C_smem.ptr_to([wg_id, 0, 0]), C_tensor_map, i * EPI_TILE, 0, n_idx, m_idx * 4 + wg_id * 2 + cbx)
                                         T.ptx.cp_async.bulk.commit_group()
                                         T.ptx.cp_async.bulk.wait_group(0)
-                                    T.ptx.bar.sync(wg_id+1, 128)
+                                    T.cuda.warpgroup_sync(wg_id+1)
                                 # notify RS ready
                                 comm_m_idx = T.meta_var(m_idx * 4 + wg_id * 2 + cbx)
                                 comm_m_idx_local = T.meta_var(comm_m_idx % (LOCAL_M // TILE_M))
