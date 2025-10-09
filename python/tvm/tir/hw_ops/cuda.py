@@ -3500,6 +3500,17 @@ __forceinline__ __device__ void {func_name}() {{
     return cuda_func_call(func_name, source_code=source_code)
 
 
+@register_codegen("cuda_half2float")
+def codegen_cuda_half2float(src):
+    func_name = "tvm_builtin_cuda_half2float"
+    source_code = f"""
+__forceinline__ __device__ float {func_name}(half src) {{
+    return __half2float(src);
+}}
+"""
+    return cuda_func_call(func_name, src, source_code=source_code, return_type="float32")
+
+
 @register_codegen("cuda_float22half2")
 def codegen_cuda_float22half2(dst, src):
     func_name = "tvm_builtin_cuda_float22half2"

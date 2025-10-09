@@ -2981,6 +2981,22 @@ def cuda_cluster_sync():
     return call_intrin("", "tir.cuda_cluster_sync")
 
 
+def cuda_half2float(src):
+    """TVM intrinsic to convert half to float
+
+    Parameters
+    ----------
+    src : PrimExpr
+        Source pointer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_half2float", src)
+
+
 def cuda_float22half2(dst, src):
     """TVM intrinsic to convert float2 to half2 with rounding
 

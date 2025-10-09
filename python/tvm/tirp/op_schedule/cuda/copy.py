@@ -224,20 +224,31 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
 
-    assert src.layout is not None
-    assert dst.layout is not None
+    if src.scope() == "tmem" and dst.scope() == "local":
+        direction = "tmem2local"
+        tmem_region, local_region = src_buffer_region, dst_buffer_region
+    elif src.scope() == "local" and dst.scope() == "tmem":
+        direction = "local2tmem"
+        local_region, tmem_region = src_buffer_region, dst_buffer_region
+    else:
+        raise ValueError(f"Unsupported src scope {src.scope()} and dst scope {dst.scope()}")
+
+    tmem_buf, local_buf = tmem_region.buffer, local_region.buffer
+
+    assert tmem_buf.layout is not None
+    assert local_buf.layout is not None
+    assert tmem_buf.dtype == local_buf.dtype
 
     analyzer = Analyzer()
-    elem_size = DataType(src.dtype).bits
+    elem_size = DataType(local_buf.dtype).bits
     elem_per_32b = 32 // elem_size
-    assert len(dst.shape) == len(src.shape) == 2
-    # 128xWIDTH -> 128xWIDTH
-    assert analyzer.can_prove_equal(src.shape[0], 128)
-    assert analyzer.can_prove_equal(dst.shape[0], 128)
-    assert analyzer.can_prove_equal(src.shape[1], dst.shape[1])
+    assert len(local_buf.shape) == len(tmem_buf.shape) == 2
+    # local: 128xWIDTH <-> tmem: 128xSHAPE[1]
+    assert analyzer.can_prove_equal(local_buf.shape[0], 128)
+    assert analyzer.can_prove_equal(tmem_buf.shape[0], 128)
 
     # Check width is valid for 32x32b, and determine num
-    width = src.shape[1]
+    width = local_buf.shape[1]
     candidates = [1, 2, 4, 8, 16, 32, 64, 128]
 
     if not analyzer.can_prove_equal(tvm.tir.floormod(width, elem_per_32b), 0):
@@ -251,48 +262,43 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
     else:
         raise ValueError(f"Width {width} is not valid for tcgen05.ld/st with shape 32x32b")
 
-    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
-    # [0:128, 0:WIDTH] -> [0:128, 0:WIDTH]
-    src_st, src_extent = get_st_extent(src_buffer_region)
-    dst_st, dst_extent = get_st_extent(dst_buffer_region)
-    assert analyzer.can_prove_equal(src_extent[0], 128)
-    assert analyzer.can_prove_equal(dst_extent[0], 128)
-    assert analyzer.can_prove_equal(src_st[0], 0)
-    assert analyzer.can_prove_equal(src_st[1], 0)
-    assert analyzer.can_prove_equal(dst_st[0], 0)
-    assert analyzer.can_prove_equal(dst_st[1], 0)
-
+    tmem_st, tmem_extent = get_st_extent(tmem_region)
+    local_st, local_extent = get_st_extent(local_region)
     # tmem layout (128, WIDTH):(1@TCol, 1@TLane)
-    tmem_layout = TileLayout(([128, width], [(1, "TCol"), (1, "TLane")])).normalize()
-
+    tmem_layout = TileLayout(([128, tmem_buf.shape[1]], [(1, "TCol"), (1, "TLane")])).normalize()
     # local layout
     local_layout = TileLayout(([128, width], [(1, "tid_in_wg"), (1, "m")])).normalize()
 
-    if src.scope() == "tmem" and dst.scope() == "local":
-        direction = "tmem2local"
-        assert src.allocated_addr is not None
-        tvm.ir.assert_structural_equal(src.layout.normalize(), tmem_layout)
-        tvm.ir.assert_structural_equal(dst.layout.normalize(), local_layout)
-    elif src.scope() == "local" and dst.scope() == "tmem":
-        direction = "local2tmem"
-        assert dst.allocated_addr is not None
-        tvm.ir.assert_structural_equal(src.layout.normalize(), local_layout)
-        tvm.ir.assert_structural_equal(dst.layout.normalize(), tmem_layout)
-    else:
-        raise ValueError(f"Unsupported src scope {src.scope()} and dst scope {dst.scope()}")
+    # tmem allocated addr is not None
+    assert tmem_buf.allocated_addr is not None
+    tvm.ir.assert_structural_equal(tmem_buf.layout.normalize(), tmem_layout)
+    tvm.ir.assert_structural_equal(local_buf.layout.normalize(), local_layout)
+    # local: [0:128, 0:WIDTH] <-> tmem: [0:128, st:st+WIDTH]
+    assert analyzer.can_prove_equal(tmem_st[0], 0)
+    assert analyzer.can_prove_equal(tmem_extent[0], 128)
+
+    assert analyzer.can_prove_equal(local_st[0], 0)
+    assert analyzer.can_prove_equal(local_extent[0], 128)
+
+    offset = tmem_st[1]
+    assert analyzer.can_prove_equal(tvm.tir.floormod(offset, elem_per_32b), 0)
+    offset_32b = tvm.tir.floordiv(offset, elem_per_32b)
+    assert analyzer.can_prove_equal(tmem_extent[1], width)
+
+    assert analyzer.can_prove_equal(local_st[1], 0)
+    assert analyzer.can_prove_equal(local_extent[1], width)
+
+    op = T.ptx.tcgen05.ld if direction == "tmem2local" else T.ptx.tcgen05.st
+    wait_op = T.ptx.tcgen05.wait.ld if direction == "tmem2local" else T.ptx.tcgen05.wait.st
 
     # fmt: off
     @T.prim_func(tirp=True, check_well_formed=False)
     def impl():
         with T.warp():
-            if direction == "tmem2local":
-                dst_local = dst.view(num * elem_per_32b, layout=TileLayout([num * elem_per_32b]))
-                dst_32b = dst_local.view("uint32")
-                T.ptx.tcgen05.ld(src.allocated_addr[0], 0, 0, "32x32b", num, False, *[dst_32b[i] for i in range(num)])
-            elif direction == "local2tmem":
-                src_local = src.view(num * elem_per_32b, layout=TileLayout([num * elem_per_32b]))
-                src_32b = src_local.view("uint32")
-                T.ptx.tcgen05.st(dst.allocated_addr[0], 0, 0, "32x32b", num, False, *[src_32b[i] for i in range(num)])
+            local_storage = local_buf.view(num * elem_per_32b, layout=TileLayout([num * elem_per_32b]))
+            local_32b = local_storage.view("uint32")
+            op(tmem_buf.allocated_addr[0], 0, offset_32b, "32x32b", num, False, *[local_32b[i] for i in range(num)])
+            wait_op()
     # fmt: on
     return impl
 

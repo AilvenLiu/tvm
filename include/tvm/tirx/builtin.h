@@ -857,6 +857,11 @@ TVM_DLL const Op& cuda_cta_sync();
 TVM_DLL const Op& cuda_grid_sync();
 
 /*!
+ * \brief tvm intrinsic for cuda half to float conversion
+ */
+TVM_DLL const Op& cuda_half2float();
+
+/*!
  * \brief tvm intrinsic for a helper converting float2 to half2 with rounding
  */
 TVM_DLL const Op& cuda_float22half2();

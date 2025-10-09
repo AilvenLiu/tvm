@@ -30,6 +30,7 @@ from tvm.runtime import disco as di
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
+from tvm.tir.layout import TileLayout
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
 
@@ -570,8 +571,6 @@ def test_ag_hgemm():
                                         elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * (NUM_CONSUMER * BLK_M + BLK_N) * BLK_K)
 
                 # alloc local memory
-                reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
                 descI = T.local_cell("uint32")
@@ -627,6 +626,9 @@ def test_ag_hgemm():
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
                 tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)
+
+                T.cuda.trap_when_assert_failed(tmem_addr == 0)
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
                 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -728,16 +730,20 @@ def test_ag_hgemm():
 
                                 with T.warpgroup()[0:NUM_CONSUMER]:
                                     T.ptx.setmaxnreg(True, 224)
-                                    T.cuda.trap_when_assert_failed(tmem_addr == 0)
+
+                                    reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
+                                    reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
+                                    reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
+
                                     mma2ld.wait(0, wg_id, phase_tmem[0])
                                     phase_tmem[0] = phase_tmem[0] ^ 1
                                     T.ptx.tcgen05.fence.after_thread_sync()
                                     # TMEM -> RF (ld)
                                     for i in T.unroll(MMA_N // TMEM_LD_SIZE): # load (MMA_M // 2, MMA_N)
-                                        T.ptx.tcgen05.ld(wg_id * MMA_N, warp_id * 32, i * TMEM_LD_SIZE, "32x32b", TMEM_LD_SIZE, False, *[reg[j] for j in range(TMEM_LD_SIZE)])
-                                        T.ptx.tcgen05.wait.ld()
-                                        for j in range(TMEM_LD_SIZE):
-                                            reg_fp16[i * TMEM_LD_SIZE + j] = T.cast(reg[j], "float16")
+                                        col_st = T.meta_var(wg_id * MMA_N + i * TMEM_LD_SIZE)
+                                        Tp.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
+                                        with T.thread():
+                                            Tp.cast(reg_fp16[i * TMEM_LD_SIZE : (i + 1) * TMEM_LD_SIZE], reg[:])
 
                                     # the tmem can be overwritten by the next tile
                                     ld2mma.arrive(wg_id)

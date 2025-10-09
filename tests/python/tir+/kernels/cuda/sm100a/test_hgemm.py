@@ -5,6 +5,7 @@ import tvm.testing
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
+from tvm.tir.layout import TileLayout
 from tvm.script import ir_builder as IRBuilder
 from tvm.script import tir as T
 from tvm.tirp.bench.utils import ProtonContext, bench
@@ -200,6 +201,7 @@ def test_hgemm():
 
                 # alloc local memory
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
+                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
                 reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
@@ -243,6 +245,9 @@ def test_hgemm():
                 T.cuda.cta_sync()
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
+                T.cuda.trap_when_assert_failed(tmem_addr == 0)
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
+                                     layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
                 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -355,11 +360,11 @@ def test_hgemm():
                             phase_tmem[0] = phase_tmem[0] ^ 1
                             T.ptx.tcgen05.fence.after_thread_sync()
                             # TMEM -> RF (ld)
-                            for i in T.unroll(MMA_N // TMEM_LD_SIZE): # load (MMA_M // 2, MMA_N)
-                                T.ptx.tcgen05.ld(wg_id * MMA_N, warp_id * 32, i * TMEM_LD_SIZE, "32x32b", TMEM_LD_SIZE, False, *[reg[j] for j in range(TMEM_LD_SIZE)])
-                                T.ptx.tcgen05.wait.ld()
-                                for j in range(TMEM_LD_SIZE):
-                                    reg_fp16[i * TMEM_LD_SIZE + j] = T.cast(reg[j], "float16")
+                            for i in T.unroll(MMA_N // TMEM_LD_SIZE):  # load (MMA_M // 2, MMA_N)
+                                col_st = T.meta_var(wg_id * MMA_N + i * TMEM_LD_SIZE)
+                                Tp.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
+                                with T.thread():
+                                    Tp.cast(reg_fp16[i * TMEM_LD_SIZE : (i + 1) * TMEM_LD_SIZE], reg[:])
 
                             # the tmem can be overwritten by the next tile
                             ld2mma.arrive(wg_id)

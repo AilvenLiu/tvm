@@ -31,8 +31,10 @@ from tvm.ir.type import PointerType, PrimType
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
+from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
+from tvm.tir.layout import TileLayout
 
 
 class JobType(Enum):
@@ -395,6 +397,7 @@ def test_hgemm_rs():
                 B_smem = T.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)
                 C_smem = T.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH + BLK_K * BLK_N // 2 * PIPE_DEPTH, layout=D_layout)
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
+                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
                 reg_fp16 = T.alloc_buffer((BLK_N,), d_type, scope="local")
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
@@ -439,6 +442,9 @@ def test_hgemm_rs():
                         if idx < MAX_TASKS * 3:
                             task_smem[idx // 3, idx % 3] = exec_queue[bx, idx // 3, idx % 3]
                 T.cuda.cta_sync()
+                T.cuda.trap_when_assert_failed(tmem_addr == 0)
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
+                                     layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
 
                 while task_id < MAX_TASKS and task_smem[task_id, 2] != JobType.END.value:
                     # GEMM
@@ -488,10 +494,10 @@ def test_hgemm_rs():
                                 mma2ld_pipe.consumer_wait(0)
                                 # TMEM -> RF
                                 for i in range(BLK_N // TMEM_LD_SIZE):
-                                    T.ptx.tcgen05.ld(tmem_addr + wg_id * MMA_N, warp_id * 32, i * TMEM_LD_SIZE, "32x32b", TMEM_LD_SIZE, False, *[reg[j] for j in range(TMEM_LD_SIZE)])
-                                    T.ptx.tcgen05.wait.ld()
-                                    for j in range(TMEM_LD_SIZE):
-                                        reg_fp16[i * TMEM_LD_SIZE + j] = T.cast(reg[j], "float16")
+                                    col_st = T.meta_var(wg_id * MMA_N + i * TMEM_LD_SIZE)
+                                    Tp.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
+                                    with T.thread():
+                                        Tp.cast(reg_fp16[i * TMEM_LD_SIZE : (i + 1) * TMEM_LD_SIZE], reg[:])
                                 mma2ld_pipe.consumer_release(wg_id)
                                 # RF -> GMEM
                                 for i in range(BLK_N // EPI_TILE):

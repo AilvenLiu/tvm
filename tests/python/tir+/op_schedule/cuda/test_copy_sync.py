@@ -221,17 +221,34 @@ def test_copy_g2l_l2g_vec_load(task, dtype):
         np.testing.assert_allclose(B_ref, B.numpy())
 
 
-@pytest.mark.parametrize("width", [2, 4, 8, 16, 32, 64, 128])
-def test_copy_tmem2reg(width):
-    WIDTH = width
-    g_layout = TileLayout(shard=([128, WIDTH // 8, 8], [WIDTH, 8, 1]))
+@pytest.mark.parametrize("dtype", ["uint8", "float16", "float32"])
+@pytest.mark.parametrize("width_32b", [2, 4, 8, 16, 32, 64, 128])
+@pytest.mark.parametrize("offset_32b", [0, 3, 10])
+def test_copy_tmem2reg(dtype, width_32b, offset_32b):
+    def next_power_of_2(x):
+        """Return the smallest power of 2 greater than or equal to x."""
+        if x <= 1:
+            return 1
+        return 1 << (x - 1).bit_length()
+
+    bits = tvm.runtime.DataType(dtype).bits
+    if 128 % bits != 0 or 32 % bits != 0:
+        pytest.skip(f"dtype {dtype} is not supported")
+
+    WIDTH = width_32b * (32 // bits)
+    OFFSET = offset_32b * (32 // bits)
+    VEC_LEN = 128 // bits
+    if WIDTH % VEC_LEN != 0:
+        pytest.skip(f"dtype {dtype} + width {width_32b} is not supported")
+
+    g_layout = TileLayout(shard=([128, WIDTH // VEC_LEN, VEC_LEN], [WIDTH, VEC_LEN, 1]))
     local_view = TileLayout(shard=([128, WIDTH], [(1, "tid_in_wg"), (1, "m")]))
 
     # fmt: off
     @T.prim_func(tirp=True)
     def copy_sync(A_ptr: T.handle, B_ptr: T.handle) -> None:
-        A = T.match_buffer(A_ptr, (128, WIDTH), "float16")
-        B = T.match_buffer(B_ptr, (128, WIDTH), "float16")
+        A = T.match_buffer(A_ptr, (128, WIDTH), dtype)
+        B = T.match_buffer(B_ptr, (128, WIDTH), dtype)
         
         A_flat = A.view(-1)
         B_flat = B.view(-1)
@@ -247,52 +264,53 @@ def test_copy_tmem2reg(width):
 
             with T.warpgroup()[0:1]:
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=max(32, WIDTH), cta_group=1)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=max(32, next_power_of_2(offset_32b + width_32b)), cta_group=1)
 
                 T.tvm_storage_sync("shared")
 
-                tmem = T.decl_buffer((128, WIDTH), "float16", scope="tmem", allocated_addr=tmem_addr[0],
-                                     layout=TileLayout(([128, WIDTH], [(1, "TCol"), (1, "TLane")])))
+                tmem = T.decl_buffer((128, OFFSET + WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
+                                     layout=TileLayout(([128, OFFSET + WIDTH], [(1, "TCol"), (1, "TLane")])))
 
-                A_reg = T.alloc_local((WIDTH), "float16")
-                B_reg = T.alloc_local((WIDTH), "float16")
+                A_reg = T.alloc_local((WIDTH), dtype)
+                B_reg = T.alloc_local((WIDTH), dtype)
                 A_local = A_reg.view(128, WIDTH, layout=local_view) # collective view of the whole warpgroup
                 B_local = B_reg.view(128, WIDTH, layout=local_view) # collective view of the whole warpgroup
 
                 # A -> A_local
                 with T.thread():
+                    for i in range(WIDTH // VEC_LEN):
+                        g_offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
+                        Tp.copy(A_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN], A_flat[g_offset: g_offset + VEC_LEN])
                     for i in range(WIDTH):
-                        offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
-                        Tp.copy(A_reg[i * 8: i * 8 + 8], A_flat[offset: offset + 8])
-                    for i in range(WIDTH):
-                        B_reg[i] = T.float16(0)
+                        B_reg[i] = T.cast(0, dtype)
                 T.cuda.cta_sync()
 
                 # A_local -> tmem
-                Tp.copy(tmem[:, :], A_local[:, :])
+                Tp.copy(tmem[:, OFFSET: OFFSET + WIDTH], A_local[:, :])
                 T.cuda.cta_sync()
 
                 # tmem -> B_local
-                Tp.copy(B_local[:, :], tmem[:, :])
+                Tp.copy(B_local[:, :], tmem[:, OFFSET: OFFSET + WIDTH])
                 T.cuda.cta_sync()
 
                 # B_local -> B
                 with T.thread():
-                    for i in range(WIDTH):
-                        offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
-                        Tp.copy(B_flat[offset: offset + 8], B_reg[i * 8: i * 8 + 8])
+                    for i in range(WIDTH // VEC_LEN):
+                        g_offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
+                        Tp.copy(B_flat[g_offset: g_offset + VEC_LEN], B_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN])
 
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
-                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, WIDTH), cta_group=1)
+                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(offset_32b + width_32b)), cta_group=1)
     # fmt: on
+
     target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": copy_sync})
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         print(mod.mod.imports[0].inspect_source())
-        A_np = np.random.rand(128, WIDTH).astype("float16")
-        B_np = np.zeros((128, WIDTH), dtype="float16")
+        A_np = tvm.testing.generate_random_array(dtype, (128, WIDTH))
+        B_np = np.zeros((128, WIDTH), dtype=dtype)
         DEV = tvm.cuda(0)
         A = tvm.runtime.tensor(A_np, DEV)
         B = tvm.runtime.tensor(B_np, DEV)

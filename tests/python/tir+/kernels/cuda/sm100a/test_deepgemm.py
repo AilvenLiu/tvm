@@ -8,6 +8,7 @@ from tvm.script import tirp as Tp
 from tvm.tir.event import EventImpl
 from tvm.tirp.tile_scheduler import GroupMajor2D
 from tvm.tirp.bench.utils import bench
+from tvm.tir.layout import TileLayout
 
 # can get 3250 TFLOPs on a single B200 with (m, n, k) = (8192, 8064, 8192), which is aligned to DeepSeek's
 
@@ -88,9 +89,6 @@ assert M % (BLK_M * CTA_GROUP) == 0
 assert N % (BLK_N * CTA_GROUP) == 0
 TILE_M_NUM = M // (BLK_M * CTA_GROUP)
 TILE_N_NUM = N // (BLK_N * CTA_GROUP)
-
-
-    
 
 
 class Barriers:
@@ -259,6 +257,7 @@ def test_deepgemm():
 
                 # alloc local memory
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
+                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
                 reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
                 stage = T.local_cell("int32")
                 descA = T.local_cell("uint64")
@@ -296,6 +295,9 @@ def test_deepgemm():
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
                 T.cuda.cluster_sync()
+                T.cuda.trap_when_assert_failed(tmem_addr == 0)
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
+                                     layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -492,13 +494,10 @@ def test_deepgemm():
 
                                 # tmem -> rf (ld) -> smem
                                 for ki in T.unroll(EPI_TILE // TMEM_LD_SIZE):
-                                    T.ptx.tcgen05.ld(0 + tmem_idx * MMA_N + ko * EPI_TILE, 
-                                                     warp_id * 32, ki * TMEM_LD_SIZE, "32x32b", 
-                                                     TMEM_LD_SIZE, False, *[reg[j] for j in range(TMEM_LD_SIZE)])
-                                    T.ptx.tcgen05.wait.ld()
-                                    
-                                    for vec in range(TMEM_LD_SIZE // 2):
-                                            T.cuda.float22half2(T.address_of(reg_fp16[ki * TMEM_LD_SIZE + vec * 2]), T.address_of(reg[vec * 2]))
+                                    col_st = T.meta_var(tmem_idx * MMA_N + ko * EPI_TILE + ki * TMEM_LD_SIZE)
+                                    Tp.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
+                                    with T.thread():
+                                        Tp.cast(reg_fp16[ki * TMEM_LD_SIZE : (ki + 1) * TMEM_LD_SIZE], reg[:])
                                     for vec in T.vectorized(TMEM_LD_SIZE):
                                         D_smem[stage, warp_id * 32 + lane_id, ki * TMEM_LD_SIZE + vec] = reg_fp16[ki * TMEM_LD_SIZE + vec]
 

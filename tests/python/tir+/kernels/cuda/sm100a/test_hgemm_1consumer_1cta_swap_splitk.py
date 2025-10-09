@@ -14,6 +14,7 @@ from tvm.tir.event import EventImpl
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
 from tvm.tirp.tile_scheduler import GroupMajor3D
+from tvm.tir.layout import TileLayout
 
 # cluster: [2, 1], cta_num = 2
 # warpgroup:
@@ -239,6 +240,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                
                 # alloc local memory
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
+                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
                 stage = T.local_cell("int32")
                 phase = T.alloc_buffer((1, ), "int32", scope="local")
                 descA = T.local_cell("uint64")
@@ -286,6 +288,9 @@ def get_hgemm_kernel(dim_n, dim_k):
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
                 T.cuda.cta_sync()
+                T.cuda.trap_when_assert_failed(tmem_addr == 0)
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
+                                     layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -425,11 +430,8 @@ def get_hgemm_kernel(dim_n, dim_k):
 
                                 # tmem -> rf (ld) -> smem
                                 for ki in T.unroll(EPI_TILE // TMEM_LD_SIZE):
-                                    T.ptx.tcgen05.ld(0 + tmem_idx * MMA_M + ko * EPI_TILE, 
-                                                     warp_id * 32, ki * TMEM_LD_SIZE, "32x32b", 
-                                                     TMEM_LD_SIZE, False, *[reg[j] for j in range(TMEM_LD_SIZE)])
-                                    T.ptx.tcgen05.wait.ld()
-                            
+                                    col_st = T.meta_var(tmem_idx * MMA_M + ko * EPI_TILE + ki * TMEM_LD_SIZE)
+                                    Tp.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
                                     for vec in range(TMEM_LD_SIZE):
                                         D_smem[stage, ki * TMEM_LD_SIZE + vec,  warp_id * 32 + lane_id] = reg[vec]
                                 profiler.end(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)

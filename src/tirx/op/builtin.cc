@@ -399,6 +399,9 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_grid_sync)
 TIR_DEFINE_BUILTIN_FUNC(cuda_cluster_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(cuda_half2float)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(cuda_float22half2)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
