@@ -139,5 +139,5 @@ class GroupGEMMTile(Tile):
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
-            
-            
+
+

@@ -235,7 +235,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                         elem_offset=1024 // F16_BYTES + SMEM_PIPE_DEPTH * BLK_M * BLK_K)
                 D_smem = T.decl_buffer((TMEM_PIPE_DEPTH, EPI_TILE, MMA_N), "float32", buf.data, layout=D_layout,
                                         elem_offset=1024 // F32_BYTES + SMEM_PIPE_DEPTH * (BLK_M + BLK_N) * BLK_K // 2)
-               
+
                 # alloc local memory
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                 reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
@@ -277,11 +277,11 @@ def get_hgemm_kernel(dim_n, dim_k):
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=1)
                     T.cuda.warp_sync()
-                
+
                 # define events
                 tma_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma2mma_bar.mbar, None, None], shape=[SMEM_PIPE_DEPTH])
                 wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
-                
+
                 # sync
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
@@ -313,7 +313,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                 with T.cta():
                     T.block_attr({"tirp.scope_partition": True})
                     with T.warpgroup()[1:2]:
-                        if warp_id == 3: 
+                        if warp_id == 3:
                             profiler.init(0)
                             phase[0] = 0
                             while tile_scheduler.valid():
@@ -347,7 +347,7 @@ def get_hgemm_kernel(dim_n, dim_k):
 
                                     paritioned_loop(tma_load, skip, tma_load_epilogue)
                                 tile_scheduler.next_tile()
-                        
+
                         elif warp_id == 0:
                             profiler.init(1)
                             tmem_idx = T.local_cell("int32", "tmem_idx")
@@ -374,9 +374,9 @@ def get_hgemm_kernel(dim_n, dim_k):
                                         T.ptx.tcgen05.fence.after_thread_sync()
                                         # issue mma
                                         for ki in T.unroll(BLK_K // MMA_K):
-                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]), 
+                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]),
                                                                                 ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
+                                            T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
                                                                                 ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
                                             if (stage == 0 and ks == 0 and ki == 0) and ((not is_remain) or (is_remain and PIPE_CIRCLE_NUM == 0)):
                                                 T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_M, descB, descA, descI, False, CTA_GROUP, False)
@@ -398,7 +398,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                     paritioned_loop(mma, mma_epilogue1, mma_epilogue2)
 
                                 tile_scheduler.next_tile()
-                                    
+
                     with T.warpgroup()[0:1]:
                         profiler.init(2)
                         T.cuda.trap_when_assert_failed(tmem_addr == 0)
@@ -416,7 +416,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                             # wait for the completion of all the mma of the same tile
                             mma2ld_bar.wait(tmem_idx, tmem_phase)
                             T.ptx.tcgen05.fence.after_thread_sync()
-                            
+
                             for ko in T.unroll(MMA_M // EPI_TILE):
                                 stage = (tile_scheduler.tile_idx * MMA_M // EPI_TILE + ko) % TMEM_PIPE_DEPTH
                                 # wait the smem to be free
@@ -452,7 +452,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                                 wb_event.wait(0)
                             T.cuda.warpgroup_sync(10)
                             tile_scheduler.next_tile()
-                      
+
                 # dealloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
@@ -481,8 +481,8 @@ def get_hgemm_kernel(dim_n, dim_k):
                 idx = T.alloc_local([1], "int32")
                 vec_32 = T.alloc_local([VEC_SIZE], "float32")
                 tmp = T.alloc_local([VEC_SIZE], "float32")
-                vec_16 = T.alloc_local([VEC_SIZE], "float16") 
-                
+                vec_16 = T.alloc_local([VEC_SIZE], "float16")
+
                 idx[0] = bx * NUM_THREADS * VEC_SIZE + (ty * BDX + tx) * VEC_SIZE
                 while idx[0] < M * N:
                     m_idx = T.meta_var(idx[0] // N)
@@ -498,7 +498,7 @@ def get_hgemm_kernel(dim_n, dim_k):
                         T.cuda.float22half2(T.address_of(vec_16[kv * 2]), T.address_of(vec_32[kv * 2]))
                         # vec_16[kv] = T.cast(vec_32[kv], "float16")
                     for kv in T.vectorized(VEC_SIZE):
-                        D[m_idx, n_idx + kv] = vec_16[kv]                    
+                        D[m_idx, n_idx + kv] = vec_16[kv]
                     idx[0] += SM_NUMBER * NUM_THREADS * VEC_SIZE
     # fmt: on
     return hgemm, reduce, TILE_K_NUM

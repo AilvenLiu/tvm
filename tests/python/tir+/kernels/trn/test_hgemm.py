@@ -92,7 +92,7 @@ def test_gemm2(ssh_client):
             b_sbuf[iter_id % 3],
             B[(k) * BLOCK_K : (k + 1) * BLOCK_K, n * BLOCK_N : (n + 1) * BLOCK_N],
         )
-    # do not reuse memory load, and keep result_tiles small            
+    # do not reuse memory load, and keep result_tiles small
     @T.prim_func(tirp=True)
     def matmul2(A_ptr: T.handle, B_ptr: T.handle, C_ptr: T.handle):
         T.func_attr({"num_inputs": 2})

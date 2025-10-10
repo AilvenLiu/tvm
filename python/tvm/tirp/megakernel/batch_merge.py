@@ -130,7 +130,7 @@ class BatchMergeTile(Tile):
                 for i in T.unroll(self.vec_size):
                     self.o[i] = self.o[i] * ptx_exp2(m_prev[0] - self.m[0]) + other_o[i] * ptx_exp2(other_m - self.m[0])
         # fmt: on
-        
+
         # fmt: off
         @T.macro
         def normalize(self):
@@ -189,10 +189,10 @@ __syncwarp();
         with T.kernel():
             warp_id = T.warp_id([self.num_warps], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
-            
+
             with T.thread():
                 self.smem_manager.wait_all("cta")
-                
+
                 tx = int_var(name="tx", val=lane_id % self.bdx)
                 ty = int_var(name="ty", val=lane_id // self.bdx)
                 worker_id = int_var(name="worker_id", val=m_idx * self.num_warps + warp_id)

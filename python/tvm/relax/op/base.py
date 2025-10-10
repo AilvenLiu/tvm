@@ -299,7 +299,6 @@ def call_tir_device(
         tile_num = ShapeExpr(tile_num)
     if isinstance(tir_vars, list | tuple):
         tir_vars = ShapeExpr(tir_vars)
-
     return _ffi_api.call_tir_device(  # type: ignore
         gvar, args, out_sinfo, tile_num, in_events, out_events, in_deps, out_deps, tir_vars
     )

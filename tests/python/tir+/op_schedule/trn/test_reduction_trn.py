@@ -123,7 +123,7 @@ def test_reduction_in_loop():
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             for i in range(4):
                 Tp.sum(B_sbuf[:, i], A_sbuf[:, :, i], axes=-2)
-        
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "reduction"})

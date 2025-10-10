@@ -118,10 +118,10 @@ def test_lower_view_get():
                 atom = T.TileLayout(shard=([1, 2], [2, 1]))
                 tile = T.TileLayout(shard=([2, 2], [2, 1]))
                 warp_atom = atom.tile(L_LANE, (8, 4), (1, 2))
-                
+
                 A = T.alloc_buffer([4, 2], dtype="float32", scope="local", layout=atom.tile(tile, (2, 2), (1, 2)))
                 B_layout = warp_atom.tile(tile, (2, 2), (8, 8))
-                
+
                 # load in_buf into A
                 with T.warp():
                     # warp view of this load
@@ -300,7 +300,7 @@ def test_lower_tirp_dedup_cu_tensormap():
                 1, 1,
                 0, 0, 0, 0
             )
-        
+
         # Use site of map2, should be rewritten to map1
         with T.kernel():
             with T.cta():
@@ -538,7 +538,7 @@ def test_lower_tirp_keep_different_swizzle():
                         A_local = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
                         out_1[threadIdx_x * 2] = T.Cast("float32", A_local[0])
                         A_local_1 = T.decl_buffer((2,), "float16", data=A.data, scope="local", layout=None)
-                        out_1[threadIdx_x * 2 + 1] = T.Cast("float32", A_local_1[1])    
+                        out_1[threadIdx_x * 2 + 1] = T.Cast("float32", A_local_1[1])
     # fmt: on
 
     compare(before4_multi_view_get, after4_multi_view_get, LowerTIRp)
@@ -614,7 +614,7 @@ def test_lower_scope_id():
                         T.evaluate(clx + cly + clz)
                         T.evaluate(wg_id + warp_id + lane_id + tid_in_wg)
 
-    @T.prim_func(private=True, tirp=True)   
+    @T.prim_func(private=True, tirp=True)
     def after3() -> None:
         clusterCtaIdx_x = T.launch_thread("clusterCtaIdx.x", 2)
         blockIdx_z = T.launch_thread("blockIdx.z", 12)
@@ -651,7 +651,7 @@ def test_lower_scope_id2():
             bx, by, bz = T.cta_id([3, 4, 5], parent="kernel")
             warp_id = T.warp_id([8], parent="cta")
             tx = T.thread_id([256], parent="cta")
-            
+
             func(warp_id, tx)
     # fmt: on
 
@@ -1023,7 +1023,7 @@ def test_lower_cell_buffer():
                 event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[A.buffer], shape=[1])
                 T.evaluate(0)
     # fmt: on
-    
+
     # fmt: off
     @T.prim_func(private=True, tirp=True)
     def after():
@@ -1048,7 +1048,7 @@ def test_lower_alloc_decl_buffer_outside_of_parser():
         if val is not None:
             T.buffer_store(buf.buffer, val, 0)
         return buf
-    
+
     def int_var2(val):
         frame = T.alloc_local([1], "int32")
         frame.add_callback(partial(frame.__exit__, None, None, None))
@@ -1089,11 +1089,11 @@ def test_lower_alloc_decl_buffer_outside_of_parser():
                 A[0] = T.float16(1)
                 B[0] = T.float16(2)
                 C[0] = T.float16(3)
-                
+
                 D = T.alloc_local((1,), "int32", layout=None)
                 D = 1
                 D = D[0] + 1
-                
+
                 E = T.alloc_local((1,), "int32", layout=None)
                 E = 2
                 E = E[0] + 2

@@ -329,7 +329,7 @@ def test_hgemm_rs():
                         num_groups=NUM_GROUPS,
                     )
                 )
-                
+
                 reg_fp16 = T.alloc_buffer((BLK_N,), d_type, scope="local")
                 if bx < GEMM_SMS:
                     profiler.init(0)
@@ -402,7 +402,7 @@ def test_hgemm_rs():
                                                 # wait for tma load to finish
                                                 tma2mma_pipe.consumer_wait(0)
                                                 T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_A), A_smem.ptr_to([tma2mma_pipe.idx, warp_id, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_B), B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)    
+                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_B), B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
                                                 for ki in range(BLK_K // MMA_K):
                                                     descA = base_desc_A + ((ki * MMA_K * 2) >> 0x4)
                                                     descB = base_desc_B + ((ki * MMA_K * 2) >> 0x4)

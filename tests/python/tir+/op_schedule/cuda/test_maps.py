@@ -168,7 +168,7 @@ def test_binary_op_shared(input, op_type, operands_type, dtype):
     def binary_op_region_region(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, g_shape, dtype, layout=g_layout)
         B = T.match_buffer(B_ptr, g_shape, dtype, layout=g_layout)
-        
+
         with T.kernel():
             bx = T.cta_id([1], parent="kernel")
             tx = T.thread_id([thread_cnt], parent="cta")

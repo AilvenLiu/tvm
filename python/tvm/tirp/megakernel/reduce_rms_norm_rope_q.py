@@ -76,7 +76,7 @@ class SplitKReduceRMSnormRopeQTile(Tile):
                     half_dim = self.head_dim // 2
                     cache_stx = T.meta_var(st % half_dim)
                     self.pos[0] = rope_pos[batch_idx]
-                    
+
                     self.sum_sq[0] = 0.0
                     if batch_idx < self.batch_size and head_idx < self.qo_heads:
                         # reduce

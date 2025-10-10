@@ -382,7 +382,7 @@ class ReduceScatter:
                                                 # wait for tma load to finish
                                                 tma2mma_pipe.consumer_wait(0)
                                                 T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_A), A_smem.ptr_to([tma2mma_pipe.idx, warp_id, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_B), B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)    
+                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(base_desc_B), B_smem.ptr_to([tma2mma_pipe.idx, 0, 0]), ldo=ldo, sdo=sdo, swizzle=SWIZZLE)
                                                 for ki in range(BLK_K // MMA_K):
                                                     descA = base_desc_A + ((ki * MMA_K * 2) >> 0x4)
                                                     descB = base_desc_B + ((ki * MMA_K * 2) >> 0x4)
@@ -432,7 +432,7 @@ class ReduceScatter:
                         T.ptx.tcgen05.relinquish_alloc_permit(cta_group=cta_group)
                         T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=cta_group)
                     profiler.end(ProfileEventType.GEMM, lane_id == 0)
-                    
+
 
     @T.prim_func(tirp=True)
     def reduce_sum(

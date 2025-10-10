@@ -259,7 +259,7 @@ def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_t
 
     DEV = tvm.cuda(0)
     return (
-        tvm.runtime.tensor(np.array(inverse_indptr, dtype=np.int32), DEV), 
+        tvm.runtime.tensor(np.array(inverse_indptr, dtype=np.int32), DEV),
         tvm.runtime.tensor(np.array(inverse_indices, dtype=np.int32), DEV)
     )
 
@@ -269,7 +269,7 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
     INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE // WORLD_SIZE
     NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS // WORLD_SIZE
     NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS // WORLD_SIZE
-    
+
     torch.cuda.nvtx.range_push("generate_exec_queue")
     if scheduler == "static":
         exec_queue = np.zeros(
@@ -293,17 +293,17 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
         )
         m_tile = ceildiv(batch_size, m_split)
         m_split = ceildiv(batch_size, m_tile)
-        
+
         # q reduce + rmsnorm + rope
         for m_idx in range(m_split):
             for n_idx in range(NUM_ATTENTION_HEADS):
                 central_queue.append(pack_into_32bit(m_idx, n_idx, -1, JobType.Q_REDUCE_RMS_ROPE.value))
-                
+
         # k reduce + rmsnorm + rope + append
         for m_idx in range(m_split):
             for n_idx in range(NUM_KEY_VALUE_HEADS):
                 central_queue.append(pack_into_32bit(m_idx, n_idx, -1, JobType.K_REDUCE_RMS_ROPE_APPEND.value))
-                
+
         # v reduce + append
         for m_idx in range(m_split):
             for n_idx in range(NUM_KEY_VALUE_HEADS):
@@ -351,7 +351,7 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
         # add rmsnorm
         for m_idx in range(batch_size):
             central_queue.append(pack_into_32bit(m_idx, -1, -1, JobType.ATTN_ADD_RMS_NORM.value))
-            
+
         if GATE_UP_PROJ_SPLIT_K_FACTOR[WORLD_SIZE] == 1:
             # gate_up_silu
             assert INTERMEDIATE_SIZE % GateUpSiluTile.BLK_N == 0
@@ -447,16 +447,16 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
     ROPE_THETA = 1000000
     MAX_PAGE_NUM = 8192
     PAGE_SIZE = 16
-    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE 
-    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS 
-    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS 
+    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE
+    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS
+    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS
     GATING_SPLIT_K_FACTOR = 4
-    
+
     NUM_EXPERTS = 128
     NUM_EXPERTS_PER_TOK = 8
     MOE_BLK_M = 128
 
-    
+
     torch.cuda.nvtx.range_push("generate_exec_queue")
     if scheduler == "static":
         exec_queue = np.zeros(
@@ -484,7 +484,7 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
                 central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
 
         tile_idx = 0
-        
+
         while len(central_queue) > 0:
             for bx in range(KernelConfig.SM_NUMBER):
                 if len(central_queue) > 0:
@@ -500,7 +500,7 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
         return ret
     elif scheduler == "dynamic":
         exec_queue = MPMCQueueHost(DynamicTileScheduler.MAX_TASKS)
-        gating_blk_m = 128 
+        gating_blk_m = 128
         for m in range(ceildiv(batch_size, gating_blk_m)):
             for k in range(GATING_SPLIT_K_FACTOR):
                 exec_queue.enqueue(JobType.MOE_GATING.value, m, 0, k)
@@ -517,7 +517,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
     qkv_h_d = (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM
     base = 1 << 16
     max_int_32 = 2147483647
-    
+
     # static event tensor
     etensor_qkv_partial = tvm.runtime.tensor(np.zeros(ceildiv(qkv_h_d, SplitKReduceTile.N_UNIT), dtype=np.int32), device=DEV)
     etensor_o_partial = tvm.runtime.tensor(np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV)
@@ -530,7 +530,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
     etensor_down_proj_allreduce = tvm.runtime.tensor(np.zeros(HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV)
     etensor_mlp_add_rms_norm = tvm.runtime.tensor(np.zeros((batch_size,), dtype=np.int32), device=DEV)
     etensor_end = tvm.runtime.tensor(np.zeros(1, dtype=np.int32), device=DEV)
-    
+
     # dynamic event tensor
     etensor_notify_attn = np.zeros((KernelConfig.SM_NUMBER), dtype=np.int32)
     attn_tile_num = ceildiv(attn_task_num, KernelConfig.WG_NUMBER)
@@ -556,7 +556,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
     assert ((etensor_attn_merge <= base) & (etensor_attn_merge * (base + 1) < max_int_32)).all()
     etensor_attn_merge *= (base + 1)
     etensor_attn_merge = tvm.runtime.tensor(etensor_attn_merge, device=DEV)
-    
+
     etensor_o_proj = np.zeros(SPLIT_O_PROJECT[WORLD_SIZE], dtype=np.int32)
     o_proj_tile_k = (
         ceildiv(
@@ -609,7 +609,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
     assert ((etensor_o_proj <= base) & (etensor_o_proj * (base + 1) < max_int_32)).all()
     etensor_o_proj *= (base + 1)
     etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)
-    
+
     etensor_down_proj = np.zeros(DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE], dtype=np.int32)
     down_proj_tile_k = (ceildiv(ceildiv(INTERMEDIATE_SIZE, DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE]), GemmTile.BLK_K) * GemmTile.BLK_K)
     if GATE_UP_PROJ_SPLIT_K_FACTOR[WORLD_SIZE] == 1:
@@ -672,7 +672,7 @@ def generate_event_tensor_moe(batch_size, WORLD_SIZE):
     base = 1 << 16
     factor = base + 1
 
-    gating_blk_m = 128 
+    gating_blk_m = 128
     etensor_gating = tvm.runtime.tensor(np.full((1,), factor * GATING_SPLIT_K_FACTOR * ceildiv(batch_size, gating_blk_m), dtype=np.int32), device=DEV)
     etensor_topk_softmax = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
     etensor_moe_align = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
@@ -710,20 +710,20 @@ class ProfilerHandler:
         self.profiler_layer_id = [3, 47]
         self.dir_path = Path("~/qwen3-mg-debug").expanduser()
         self.file_name = "qwen3-model-mega"
-        
+
     def export_trace(self, profiler_buffer, rank):
         with self.lock:
             self.counter += 1
-            current_run = self.counter    
-        
-        if current_run == self.trigger_count:  
+            current_run = self.counter
+
+        if current_run == self.trigger_count:
             for layer_id in self.profiler_layer_id:
                 if rank == -1:
                     file_name = f"{self.dir_path}/{self.file_name}-layer{layer_id}.perfetto-trace"
                 else:
                     file_name = f"{self.dir_path}/{self.file_name}-layer{layer_id}-rank{rank}.perfetto-trace"
                 export_to_perfetto_trace(profiler_buffer[layer_id].numpy(), file_name, event_type_names)
-                print(f"Exported layer {layer_id} to {file_name}")                
+                print(f"Exported layer {layer_id} to {file_name}")
 
 profiler_handler = ProfilerHandler()
 

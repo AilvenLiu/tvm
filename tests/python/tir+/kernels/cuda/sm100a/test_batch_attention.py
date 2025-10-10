@@ -402,7 +402,7 @@ __device__ __forceinline__ float {func_name}() {{
                             kv_end = int_var(kv_end_buf[work_idx[0]])
                             kv_head_idx = int_var(kv_head_idx_buf[work_idx[0]])
                             len_kv_chunk = int_var(len_kv_chunk_buf[1])
-                            
+
                             kv_chunk_idx = int_var(ceildiv(kv_start[0], len_kv_chunk[0]))
                             num_kv_chunks = int_var(ceildiv(kv_len[0], len_kv_chunk[0]))
                             qo_packed_idx_base = int_var(packed_qo_start[0] + get_warp_idx_q(tid) * NUM_MMA_Q * 16)
@@ -415,7 +415,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 for i0, i1 in T.grid(NUM_MMA_Q, 2):
                                     m[i0, i1] = T.float32(-INF)
                                     d[i0, i1] = T.float32(0)
-                            
+
                             init_states()
 
                             @T.macro
@@ -432,16 +432,16 @@ __device__ __forceinline__ float {func_name}() {{
                                                 for mma_do in T.unroll(NUM_MMA_D_QK // 4):
                                                     T.ptx.cp_async(q_smem.ptr_to([q_smem_offset_w[0] * upcast_size("float16")]),
                                                                    # TODO: optimize the addr computation here
-                                                                   q_buf.ptr_to([q_indptr[0] + q[0], kv_head_idx[0] * GQA_GROUP_SIZE + r[0], (lane_id % 8 + mma_do * 8) * upcast_size("float16")]), cp_size=16, prefetch_size=128, 
+                                                                   q_buf.ptr_to([q_indptr[0] + q[0], kv_head_idx[0] * GQA_GROUP_SIZE + r[0], (lane_id % 8 + mma_do * 8) * upcast_size("float16")]), cp_size=16, prefetch_size=128,
                                                                    predicate=q[0] < qo_upperbound[0])
                                                     q_smem_offset_w[0] = advance_offset_by_column(8, q_smem_offset_w[0], mma_do)
                                             q_smem_offset_w[0] = advance_offset_by_row(4, UPCAST_STRIDE_Q, q_smem_offset_w[0]) - 2 * NUM_MMA_D_QK
-                            
+
                             load_q_global_smem()
 
                             kv_tile_idx = int_var(ceildiv(kv_end[0], CTA_TILE_KV) - 1 - (kv_start[0] // CTA_TILE_KV))
                             mast_tile_idx = int_var(kv_end[0] // CTA_TILE_KV - (kv_start[0] // CTA_TILE_KV))
-                            
+
                             block_iter_base = int_var(kv_indptr[0] * PAGE_SIZE + kv_start[0])
                             scope_sync(wg_id)
                             packed_kv_bound = int_var(kv_indptr[0] * PAGE_SIZE + kv_len[0])
@@ -451,7 +451,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 with T.thread():
                                     packed_block_iter_base = int_var(packed_block_iter_base_in)
                                     for i in T.unroll(NUM_MMA_KV * 4 // NUM_WARPS_Q):
-                                        packed_block_iter = int_var(packed_block_iter_base[0] + warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL 
+                                        packed_block_iter = int_var(packed_block_iter_base[0] + warp_id * KV_THR_LAYOUT_ROW + lane_id // KV_THR_LAYOUT_COL
                                                                     + KV_THR_LAYOUT_ROW * NUM_WARPS_Q * NUM_WARPS_KV * i)
                                         page_iter = int_var(T.floordiv(packed_block_iter[0], PAGE_SIZE))
                                         entry_idx = int_var(T.floormod(packed_block_iter[0], PAGE_SIZE))
@@ -598,7 +598,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 prefetch_offset(block_iter_base[0] + (kv_tile_idx[0] - 1) * CTA_TILE_KV)
                                 T.ptx.cp_async.wait_group(1)
                                 scope_sync(wg_id)
-                                
+
                                 compute_qk()
                                 if WITH_MASK:
                                     logits_mask()
@@ -608,14 +608,14 @@ __device__ __forceinline__ float {func_name}() {{
                                 page_produce_kv(False, kv_start[0] + (kv_tile_idx[0] - 1) * CTA_TILE_KV, k_smem_offset_w, k_smem)
                                 T.ptx.cp_async.commit_group()
                                 T.ptx.cp_async.wait_group(1)
-                                
+
                                 scope_sync(wg_id)
                                 compute_sfm_v()
                                 scope_sync(wg_id)
 
                                 page_produce_kv(True, kv_start[0] + (kv_tile_idx[0] - 1) * CTA_TILE_KV, v_smem_offset_w, v_smem)
                                 T.ptx.cp_async.commit_group()
-                            
+
                             prefetch_offset(block_iter_base[0] + kv_tile_idx[0] * CTA_TILE_KV)
                             page_produce_kv(False, kv_start[0] + kv_tile_idx[0] * CTA_TILE_KV, k_smem_offset_w, k_smem)
                             T.ptx.cp_async.commit_group()
@@ -625,11 +625,11 @@ __device__ __forceinline__ float {func_name}() {{
                             while kv_tile_idx[0] >= mast_tile_idx[0] and kv_tile_idx[0] > 0:
                                 loop_body(True)
                                 kv_tile_idx[0] -= 1
-                            
+
                             while kv_tile_idx[0] + 1 > NUM_STAGES:
                                 loop_body(False)
                                 kv_tile_idx[0] -= 1
-                            
+
                             T.ptx.cp_async.wait_group(0)
                             scope_sync(wg_id)
 
@@ -639,7 +639,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 update_mdo_states()
                                 compute_sfm_v()
                                 kv_tile_idx[0] -= 1
-                            
+
                             scope_sync(wg_id)
 
                             @T.macro
@@ -650,7 +650,7 @@ __device__ __forceinline__ float {func_name}() {{
                                         for j in T.unroll(2):
                                             if m[mma_q, j] != -INF:
                                                 m[mma_q, j] *= sm_scale[0]
-                            
+
                             @T.macro
                             def threadblock_sync_mdo_states():
                                 for mma_q in T.unroll(NUM_MMA_Q):
@@ -675,7 +675,7 @@ __device__ __forceinline__ float {func_name}() {{
                                                 d_new = float_var(1.0)
                                                 for i in T.unroll(NUM_WARPS_KV):
                                                     with T.thread():
-                                                        md = T.alloc_local([2], "float32") 
+                                                        md = T.alloc_local([2], "float32")
                                                         Tp.copy(md[:], cta_sync_md_smem[wg_id, i * NUM_WARPS_Q + get_warp_idx_q(tid), mma_q, j * 8 + lane_id // 4, :])
                                                         m_prev = float_var(m_new[0])
                                                         d_prev = float_var(d_new[0])
@@ -730,7 +730,7 @@ __device__ __forceinline__ float {func_name}() {{
                                 o_smem = T.meta_var(smem_o)
                                 warp_id_x = int_var(get_warp_idx_q(tid))
                                 warp_id_z = int_var(get_warp_idx_kv(tid))
-                                
+
                                 if warp_id_z[0] == 0:
                                     with T.thread():
                                         store_o_to_smem(o_smem)
@@ -785,7 +785,7 @@ __device__ __forceinline__ float {func_name}() {{
                                                     packed_qo_idx = int_var(qo_packed_idx_base[0] + lane_id // 4 + j * 8 + mma_q * 16)
                                                     q = int_var(T.floordiv(packed_qo_idx[0], GQA_GROUP_SIZE))
                                                     r = int_var(T.floormod(packed_qo_idx[0], GQA_GROUP_SIZE))
-                                                    if q[0] < qo_upperbound[0]:                                                    
+                                                    if q[0] < qo_upperbound[0]:
                                                         partial_lse_buf_offset = T.meta_var((o_indptr[0] + (packed_qo_idx[0] - packed_qo_start[0]) * num_kv_chunks[0] + kv_chunk_idx[0]) * KV_HEADS + kv_head_idx[0])
                                                         partial_lse_buf[partial_lse_buf_offset] = ptx_log2(d[mma_q, j]) + T.cast(m[mma_q, j], "float32")
 
@@ -849,7 +849,7 @@ __device__ __forceinline__ float {func_name}() {{
                     for i in T.unroll(self.vec_size):
                         self.o[i] = self.o[i] * ptx_exp2(m_prev[0] - self.m[0]) + other_o[i] * ptx_exp2(other_m - self.m[0])
             # fmt: on
-            
+
             # fmt: off
             @T.macro
             def normalize(self):
@@ -937,7 +937,7 @@ __device__ __forceinline__ float {func_name}() {{
 
                                     v = T.alloc_local([VEC_SIZE], "float32")
                                     cast_load(v, VEC_SIZE, v_smem, warp_id, it % NUM_SMEM_STAGES, ty[0], tx[0] * VEC_SIZE)
-                                    
+
                                     if it * BDY + ty[0] < num_index_sets[0]:
                                         s = float_var(s_smem[warp_id, (it % BDX) * BDY + ty[0]])
                                         state.merge(v, s[0], 1)

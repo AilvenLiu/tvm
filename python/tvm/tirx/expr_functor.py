@@ -100,15 +100,15 @@ class ExprFunctor:
         """
         if expr is None:
             return None
-        
+
         key = expr.__class__.__name__
         if key.endswith("Node"):
             key = key[:-4]  # Remove the "Node" suffix
-        
+
         key = "tir." + key
         if key in self._dispatch_map:
             return self._dispatch_map[key](expr)
-        
+
         return self.visit_expr_default_(expr)
 
     def visit_var_(self, op):
@@ -265,7 +265,7 @@ class ExprFunctor:
 
 class ExprVisitor(ExprFunctor):
     """A visitor over Expr.
-    
+
     This is a visitor that recursively traverses an expression. Subclasses can
     override the visit methods to customize the behavior.
     """
@@ -282,14 +282,14 @@ class ExprVisitor(ExprFunctor):
         """Visitor implementation for BufferLoad."""
         def _visit_indices(index):
             self.visit_expr(index)
-        
+
         _visit_array(op.indices, _visit_indices)
 
     def visit_producer_load_(self, op):
         """Visitor implementation for ProducerLoad."""
         def _visit_indices(index):
             self.visit_expr(index)
-        
+
         _visit_array(op.indices, _visit_indices)
 
     def visit_let_(self, op):
@@ -301,7 +301,7 @@ class ExprVisitor(ExprFunctor):
         """Visitor implementation for Call."""
         def _visit_arg(arg):
             self.visit_expr(arg)
-        
+
         _visit_array(op.args, _visit_arg)
 
     def _visit_binary_op(self, op):
@@ -394,17 +394,17 @@ class ExprVisitor(ExprFunctor):
         def _visit_iter_var(iv):
             self.visit_expr(iv.dom.min)
             self.visit_expr(iv.dom.extent)
-        
+
         def _visit_source(source):
             self.visit_expr(source)
-        
+
         _visit_array(op.axis, _visit_iter_var)
         _visit_array(op.source, _visit_source)
 
-                
+
         if op.init:
             _visit_array(op.init, _visit_source)
-        
+
         self.visit_expr(op.condition)
 
     def visit_cast_(self, op):
@@ -430,7 +430,7 @@ class ExprVisitor(ExprFunctor):
         """Visitor implementation for Shuffle."""
         def _visit_expr(expr):
             self.visit_expr(expr)
-        
+
         _visit_array(op.indices, _visit_expr)
         _visit_array(op.vectors, _visit_expr)
 
@@ -441,7 +441,7 @@ class ExprVisitor(ExprFunctor):
 
 class ExprMutator(ExprFunctor):
     """A mutator over Expr.
-    
+
     This is a mutator that recursively transforms an expression. Subclasses can
     override the visit methods to customize the behavior.
     """
@@ -457,7 +457,7 @@ class ExprMutator(ExprFunctor):
     def visit_buffer_load_(self, op):
         """Mutator implementation for BufferLoad."""
         indices = [self.visit_expr(index) for index in op.indices]
-        
+
         if all(old_index is new_index for old_index, new_index in zip(op.indices, indices)):
             return op
         else:
@@ -466,7 +466,7 @@ class ExprMutator(ExprFunctor):
     def visit_producer_load_(self, op):
         """Mutator implementation for ProducerLoad."""
         indices = [self.visit_expr(index) for index in op.indices]
-        
+
         if all(old_index is new_index for old_index, new_index in zip(op.indices, indices)):
             return op
         else:
@@ -477,7 +477,7 @@ class ExprMutator(ExprFunctor):
         var = self.visit_var_(op.var)
         value = self.visit_expr(op.value)
         body = self.visit_expr(op.body)
-        
+
         if var is op.var and value is op.value and body is op.body:
             return op
         else:
@@ -486,7 +486,7 @@ class ExprMutator(ExprFunctor):
     def visit_call_(self, op):
         """Mutator implementation for Call."""
         args = [self.visit_expr(arg) for arg in op.args]
-        
+
         if all(old_arg is new_arg for old_arg, new_arg in zip(op.args, args)):
             return op
         else:
@@ -496,7 +496,7 @@ class ExprMutator(ExprFunctor):
         """Helper to mutate binary operators."""
         a = self.visit_expr(op.a)
         b = self.visit_expr(op.b)
-        
+
         if a is op.a and b is op.b:
             return op
         else:
@@ -588,23 +588,23 @@ class ExprMutator(ExprFunctor):
             old_dom = iv.dom
             new_min = self.visit_expr(old_dom.min)
             new_extent = self.visit_expr(old_dom.extent)
-            
+
             if new_min is old_dom.min and new_extent is old_dom.extent:
                 return iv
             else:
                 new_dom = Range.FromMinExtent(new_min, new_extent)
                 return IterVar(new_dom, iv.var, iv.iter_type, iv.thread_tag)
-        
+
         axis = [_mutate_iter_var(iv) for iv in op.axis]
         source = [self.visit_expr(e) for e in op.source]
         init = [self.visit_expr(e) for e in op.init] if op.init else []
         condition = self.visit_expr(op.condition)
-        
+
         axis_unchanged = all(old_iv is new_iv for old_iv, new_iv in zip(op.axis, axis))
         source_unchanged = all(old_e is new_e for old_e, new_e in zip(op.source, source))
         init_unchanged = True if not op.init else all(old_e is new_e for old_e, new_e in zip(op.init, init))
         condition_unchanged = condition is op.condition
-        
+
         if axis_unchanged and source_unchanged and init_unchanged and condition_unchanged:
             return op
         else:
@@ -613,7 +613,7 @@ class ExprMutator(ExprFunctor):
     def visit_cast_(self, op):
         """Mutator implementation for Cast."""
         value = self.visit_expr(op.value)
-        
+
         if value is op.value:
             return op
         else:
@@ -622,7 +622,7 @@ class ExprMutator(ExprFunctor):
     def visit_not_(self, op):
         """Mutator implementation for Not."""
         a = self.visit_expr(op.a)
-        
+
         if a is op.a:
             return op
         else:
@@ -633,7 +633,7 @@ class ExprMutator(ExprFunctor):
         condition = self.visit_expr(op.condition)
         true_value = self.visit_expr(op.true_value)
         false_value = self.visit_expr(op.false_value)
-        
+
         if condition is op.condition and true_value is op.true_value and false_value is op.false_value:
             return op
         else:
@@ -644,7 +644,7 @@ class ExprMutator(ExprFunctor):
         base = self.visit_expr(op.base)
         stride = self.visit_expr(op.stride)
         lanes = self.visit_expr(op.lanes)
-        
+
         if base is op.base and stride is op.stride and lanes is op.lanes:
             return op
         else:
@@ -654,7 +654,7 @@ class ExprMutator(ExprFunctor):
         """Mutator implementation for Broadcast."""
         value = self.visit_expr(op.value)
         lanes = self.visit_expr(op.lanes)
-        
+
         if value is op.value and lanes is op.lanes:
             return op
         else:
@@ -663,11 +663,10 @@ class ExprMutator(ExprFunctor):
     def visit_shuffle_(self, op):
         """Mutator implementation for Shuffle."""
         vectors = [self.visit_expr(v) for v in op.vectors]
-        
+
         vectors_unchanged = all(old_v is new_v for old_v, new_v in zip(op.vectors, vectors))
-        
+
         if vectors_unchanged:
             return op
         else:
             return tvm.tirx.Shuffle(vectors, op.indices)
-        

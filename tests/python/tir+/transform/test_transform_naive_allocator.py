@@ -33,13 +33,13 @@ def test_one_alloc():
     dst_shape = [128, 512]
     dst_layout = TileLayout(([128, 512], [(1, "P"), (1, "F")]))
     # fmt: off
-    @T.prim_func(tirp=True) 
+    @T.prim_func(tirp=True)
     def copy(A_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, src_shape, "float32", layout=src_layout)
         with T.kernel():
             A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             Tp.copy(A_sbuf, A)
-            
+
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle) -> None:
         T.func_attr({"global_symbol": "copy"})
@@ -62,7 +62,7 @@ def test_two_alloc():
             A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
             B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
             Tp.copy(B_sbuf[0:256, :], A_sbuf)
-            
+
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle) -> None:
         T.func_attr({"global_symbol": "copy"})
@@ -85,7 +85,7 @@ def test_existing_alloc():
             A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF")
             B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[1])
             Tp.copy(B_sbuf[0:256, :], A_sbuf)
-            
+
     @T.prim_func(tirp=True)
     def expected(A_ptr: T.handle) -> None:
         T.func_attr({"global_symbol": "copy"})

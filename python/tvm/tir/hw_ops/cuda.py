@@ -203,28 +203,28 @@ using fp8_e4_t = __nv_fp8_e4m3;
 using fp8_e4x2_t = __nv_fp8x2_e4m3;
 using fp8_e4x4_t = __nv_fp8x4_e4m3;
 struct fp8_e4x8_t {
- fp8_e4_t data[8]; 
+ fp8_e4_t data[8];
 };
 struct fp8_e4x16_t {
- fp8_e4_t data[16]; 
+ fp8_e4_t data[16];
 };
 using fp8_e5_t = __nv_fp8_e5m2;
 using fp8_e5x2_t = __nv_fp8x2_e5m2;
 using fp8_e5x4_t = __nv_fp8x4_e5m2;
 struct fp8_e5x8_t {
- fp8_e5_t data[8]; 
+ fp8_e5_t data[8];
 };
 struct fp8_e5x16_t {
- fp8_e5_t data[16]; 
+ fp8_e5_t data[16];
 };
 using fp8_e8_t = __nv_fp8_e8m0;
 using fp8_e8x2_t = __nv_fp8x2_e8m0;
 using fp8_e8x4_t = __nv_fp8x4_e8m0;
 struct fp8_e8x8_t {
- fp8_e8_t data[8]; 
+ fp8_e8_t data[8];
 };
 struct fp8_e8x16_t {
- fp8_e8_t data[16]; 
+ fp8_e8_t data[16];
 };
 #endif // __CUDA_ARCH__ >= 890
 """
@@ -237,19 +237,19 @@ using fp6_e2_t = __nv_fp6_e2m3;
 using fp6_e2x2_t = __nv_fp6x2_e2m3;
 using fp6_e2x4_t = __nv_fp6x4_e2m3;
 struct fp6_e2x8_t {
- fp6_e2_t data[8]; 
+ fp6_e2_t data[8];
 };
 struct fp6_e2x16_t {
- fp6_e2_t data[16]; 
+ fp6_e2_t data[16];
 };
 using fp6_e3_t = __nv_fp6_e3m2;
 using fp6_e3x2_t = __nv_fp6x2_e3m2;
 using fp6_e3x4_t = __nv_fp6x4_e3m2;
 struct fp6_e3x8_t {
- fp6_e3_t data[8]; 
+ fp6_e3_t data[8];
 };
 struct fp6_e3x16_t {
- fp6_e3_t data[16]; 
+ fp6_e3_t data[16];
 };
 #endif // __CUDA_ARCH__ >= 1000
 """
@@ -262,10 +262,10 @@ using fp4_e2_t = __nv_fp4_e2m1;
 using fp4_e2x2_t = __nv_fp4x2_e2m1;
 using fp4_e2x4_t = __nv_fp4x4_e2m1;
 struct fp4_e2x8_t {
- fp4_e2_t data[8]; 
+ fp4_e2_t data[8];
 };
 struct fp4_e2x16_t {
- fp4_e2_t data[16]; 
+ fp4_e2_t data[16];
 };
 #endif // __CUDA_ARCH__ >= 800
 """
@@ -1109,7 +1109,7 @@ __forceinline__ __device__ void {func_name}(uint64_t* desc, void* addr, int ldo,
 
   uint32_t start_address = __cvta_generic_to_shared(addr);
   _desc.bitfield.start_address_ = static_cast<uint16_t>(start_address >> 4);
-  
+
   constexpr uint8_t base_offset = 0;
   _desc.bitfield.base_offset_ = base_offset;
 

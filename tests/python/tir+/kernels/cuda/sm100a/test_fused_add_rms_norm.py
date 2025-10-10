@@ -93,7 +93,7 @@ def get_fused_add_rmsnorm_kernel(hidden_size):
                                     x_vec[kv] = x_tmp[0] * weight_vec_f32[kv]
                                 Tp.copy(residual_smem[st:st + vec_size], residual_vec[:])
                                 Tp.copy(x_smem[st:st + vec_size], x_vec[:])
-                        
+
                         # warp reduce sum
                         for kr in T.unroll(find_power_of_two(bdx // 2) + 1):
                             sum_sq[0] = sum_sq[0] + T.tvm_warp_shuffle_xor(0xFFFFFFFF, sum_sq[0], (bdx // 2) >> kr, 32, 32)

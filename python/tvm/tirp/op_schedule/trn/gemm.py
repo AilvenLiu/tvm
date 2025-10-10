@@ -243,10 +243,10 @@ def matmul_trn(op: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
 
     # todo: generalize the process of generating composite matmul + another_op pattern
     # by generating TIR op and reusing existing dispatch rule
-    
+
     # we will support matmul + epilogue as a user-specified pattern
     # and a matmul fusion pass can help infer the pattern
-    
+
     acc_psum_shape = (max_psum_banks, p_size, largest_psum_per_bank)
     if "acc_psum" not in op.workspace:
         assert sctx.alloc_only, "Accumulation psum buffer must be specified in workspace. Run tvm.tirp.transform.PrivateBufferAlloc first."

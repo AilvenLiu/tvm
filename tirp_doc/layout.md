@@ -23,9 +23,9 @@ Managing tensor layouts in DL compilers poses challenges, primarily revolving ar
 We introduce Axe, aiming to provide a unified approach to to address the aforementioned challenges in tensor layout management. Specifically, we incoporate the following insights from our experience of developing kernels:
 
 - Distributed ML communuity has long been using GSPMD-style sharding to partition tensors across multiple devices, which many intra-kernel layouts (such as Tensor Core) can effectively adopt. Moreover, besides classical sharded (we use **D** to denote while papers like [Alpa](https://www.usenix.org/system/files/osdi22-zheng-lianmin.pdf) use **S**) and replicated (**R**) strategies we observe another sharding pattern where some parition is exclusively owned by a single device over some device dimension, which we use **O** to denote. Such paterns can be achieved by reducing over some device dimension, or having a logically unique tensor but physically allocated across devices due to SPMD restrictions.
-  
+
 - Thread hierarchy and special memory dimensions present similar properties, which layouts aim to map logical coordinates to. It can map to purely memory axes, or a combination of memory and thread axes, or even purely thread axes (and we can view it as a way of representing the cooperative thread group).
-  
+
 - There are two ways of modeling layouts: 1) mapping logical coordinates to thread/memory axes, and 2) mapping thread/memory axes to logical coordinates. Considering the replicated strategy(**R**), 1) might map to a set of values, but 2) is defined to be only a single value and naturally surjective. That's why CuTe and Triton use 2). But considering when **O** is used, some memory/thread axes should map to none, as well as the tradition of distributed ML community, Axe uses 1) but covers the functionality of 2) as well.
 
 ## Axe (Ours)
@@ -42,7 +42,7 @@ where we write $z@a$ for $(z, a) \in \mathbb{Z} \times A$.
 
 When the context is clear, we write $\sum_{i=0}^{n_A} z_i@a_i$ for $(z_0@a_0, z_1@a_1, \dots, z_i@a_i, \dots, z_{n_A}@a_{n_A})$.
 
-We define scalar multiplication, tuple addition and tuple multiplication as 
+We define scalar multiplication, tuple addition and tuple multiplication as
 
 $$
 \begin{align*}
@@ -60,7 +60,7 @@ $$
 
 Note that this effectively defines a vector space over $\mathbb{Z}$ with basis $A$.
 
-We also define a element-wise tuple product as 
+We also define a element-wise tuple product as
 
 $$
 \begin{align*}
@@ -80,7 +80,7 @@ A iter $I$ is a triple $(e, s, a)$, where
 
 We write $e_I, s_I, a_I$ for the extent, stride, and axis of iter $I$.
 
-**Associated Function:** 
+**Associated Function:**
 
 A iter $I$ can be associated with a function $f_I: \mathbb{Z} \to \mathbb{Z}A$, where $f_I(x)=(x*s)@a$.
 
@@ -94,7 +94,7 @@ A layout $L$ is a triple $(L_D, L_R, L_O)$ where
 
 Note that $L_R$ and $L_O$ can be empty, but $L_D$ cannot be empty.
 
-**Associated Function** 
+**Associated Function**
 
 We start from $L_D$ only, and then add $L_R$ and $L_O$ to it.
 
@@ -126,7 +126,7 @@ $$
 where $r \in [0, E_R), E_R = e_{J_0} \times e_{J_1} \times \dots \times e_{J_{n_R}}$. We enumerate all possible $r$ and get a set of points in $\mathbb{Z}A$. Then finally we have $f_L: [0, E_D) \to 2^{\mathbb{Z}A}$ defined as
 
 $$
-\begin{align*}  
+\begin{align*}
 f_L(x) &= \{f_{L_D}(x) + f_{L_R}(r) + f_{L_O}(o) \mid r \in [0, E_R)\} \\
 &= \{\sum_{i=0}^{n_D} (x_i * s_{I_i})@a_{I_i} + \sum_{i=0}^{n_R} (r_i * s_{J_i})@a_{J_i} + \sum_{i=0}^{n_O} (o_i * s_{K_i})@a_{K_i} \mid r \in [0, E_R)\}
 \end{align*}
@@ -140,13 +140,13 @@ Hence, when we write $f_L(x)$ for some $x$ in a compatible coordinate space, we 
 
 **Codomain size of $f_L$**
 
-For a given axis $a \in A$, enumerating $x$ along $[0, E_L)$ and get it into $f_L$ spans a set of values $\text{Vals}_{f_L, a}$ in $\mathbb{Z}$ over that axis. 
+For a given axis $a \in A$, enumerating $x$ along $[0, E_L)$ and get it into $f_L$ spans a set of values $\text{Vals}_{f_L, a}$ in $\mathbb{Z}$ over that axis.
 
 We define the codomain size of $f_L$ over that axis the the size of $max(\text{Vals}_{f_L, a}) - min(\text{Vals}_{f_L, a}) + 1$.
 
 If $L$ doesn't touch axis $a$, then $\text{Vals}_{f_L, a} = \emptyset$, and the codomain size of $f_L$ over that axis is defined as 0.
 
-The codomain size of $f_L$ is over all axes $a \in A$ can be written as a element in $\mathbb{Z}A$ as 
+The codomain size of $f_L$ is over all axes $a \in A$ can be written as a element in $\mathbb{Z}A$ as
 
 $$
 \text{cosize} (f_L) = \sum_{a \in A} \text{size}(\text{Vals}_{f_L, a})@a
@@ -182,7 +182,7 @@ Given a layout $L$ and a shape (which is a tuple of integers) $S$, we derive a n
 
 - $E_{L||S} = E_L$
 - $f_{L||S}(x) = f_L(x) \times S$ for all $x \in [0, E_L)$
-- There exists a strictly increasing integer sequence $P = 0, P_1, P_2, \dots, (n_D)_{L||S}$ with rank(S) + 1 elements such that 
+- There exists a strictly increasing integer sequence $P = 0, P_1, P_2, \dots, (n_D)_{L||S}$ with rank(S) + 1 elements such that
 $$
 \prod_{p=P_i}^{P_{i+1}-1} e_{({I_{L||S}})_{p}} = S_i \text{ for all } i \in [0, rank(S))
 $$
@@ -227,7 +227,7 @@ A **Linear Layout** is defined as a linear map between labeled vector spaces ove
 These layouts model the mapping between physical hardware resources (like registers, threads, and warps) and a logical tensor. The hardware resources and the tensor dimensions are treated as vector spaces over $\mathbb{F}_{2}$, and the layout itself is the linear function—represented by a matrix—that connects them.
 
 For instance, a layout `L` can be defined as a map from the hardware resources to the dimensions of a logical tensor:
-$L: Reg \times Thr \times Wrp \rightarrow \mathbb{F}_{2}^{n} \times \mathbb{F}_{2}^{m}$ 
+$L: Reg \times Thr \times Wrp \rightarrow \mathbb{F}_{2}^{n} \times \mathbb{F}_{2}^{m}$
 
 Here:
 * **Reg, Thr, Wrp**: Represent the vector spaces for registers, threads, and warps.
@@ -237,16 +237,16 @@ This approach allows complex mappings, such as data swizzling and broadcasting, 
 
 **Example**
 $$
-A = 
-\begin{array}{c|cc|ccccc|c} & \text{Reg} & & \text{Thr} & & & & & \text{Wrp} \\ 
-\hline j_0 & 0 & 0 & 1 & 0 & 0 & 0 & 0 & 0 
-\\ j_1 & 0 & 0 & 0 & 1 & 0 & 0 & 0 & 0 
-\\ j_2 & 0 & 0 & 0 & 0 & 1 & 0 & 0 & 0 
-\\ j_3 & 0 & 0 & 0 & 0 & 0 & 1 & 0 & 0 
-\\ i_0 & 1 & 0 & 0 & 0 & 0 & 0 & 0 & 0 
-\\ i_1 & 0 & 1 & 0 & 0 & 0 & 0 & 0 & 0 
-\\ i_2 & 0 & 0 & 0 & 0 & 0 & 0 & 1 & 0 
-\\ i_3 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 1 
+A =
+\begin{array}{c|cc|ccccc|c} & \text{Reg} & & \text{Thr} & & & & & \text{Wrp} \\
+\hline j_0 & 0 & 0 & 1 & 0 & 0 & 0 & 0 & 0
+\\ j_1 & 0 & 0 & 0 & 1 & 0 & 0 & 0 & 0
+\\ j_2 & 0 & 0 & 0 & 0 & 1 & 0 & 0 & 0
+\\ j_3 & 0 & 0 & 0 & 0 & 0 & 1 & 0 & 0
+\\ i_0 & 1 & 0 & 0 & 0 & 0 & 0 & 0 & 0
+\\ i_1 & 0 & 1 & 0 & 0 & 0 & 0 & 0 & 0
+\\ i_2 & 0 & 0 & 0 & 0 & 0 & 0 & 1 & 0
+\\ i_3 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 1
 \end{array}
 $$
 
@@ -290,7 +290,7 @@ A surjective (or "onto") linear layout $L: U \rightarrow V$ has a **right invers
 
 **Power-of-Two Shapes**
 
-Linear layouts are fundamentally designed for tensor dimensions and hardware resource counts (like threads per block) that are powers of two.  This is because the underlying mathematical model uses binary arithmetic on the bits of resource and tensor indices, which aligns naturally with power-of-two structures common in GPU programming. 
+Linear layouts are fundamentally designed for tensor dimensions and hardware resource counts (like threads per block) that are powers of two.  This is because the underlying mathematical model uses binary arithmetic on the bits of resource and tensor indices, which aligns naturally with power-of-two structures common in GPU programming.
 
 **Mitigation Strategy**
 
@@ -353,7 +353,7 @@ Composition creates a new layout, $A ○ B$, whose function $f_{A ○ B}$ is equ
     1.  For every mode $B_k$, the pair $\{S, B_k\}$ must be admissible for composition, which involves specific "left divisibility" rules.
     2.  The "intervals of definition" for each of these pairs must be disjoint to avoid collisions.
 * **Definition**: If admissible, the composition $A ○ B$ is defined as the concatenation of the individual compositions of $A$ with each mode of $B$
-   
+
 **Logical Division**
 
 Logical division is defined using the operations of composition and complementation.

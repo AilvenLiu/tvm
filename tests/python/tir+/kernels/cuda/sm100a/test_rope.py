@@ -30,14 +30,14 @@ def get_cos_sin_cache_kernel(rotary_dim, base):
     def cos_sin_cache(cos_sin_cache: T.handle):
         max_seq_len = T.int32()
         cos_sin_cache_global = T.match_buffer(cos_sin_cache, [max_seq_len, rotary_dim], "float32", scope="global")
-        
+
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")
             tx = T.thread_id([1024], parent="cta")
-            
+
             with T.thread():
                 idx = T.alloc_local([1], "int32")
-                
+
                 idx[0] = bx * 1024 + tx
                 while idx[0] < max_seq_len * rotary_dim:
                     row = T.meta_var(idx[0] // rotary_dim)
@@ -47,7 +47,7 @@ def get_cos_sin_cache_kernel(rotary_dim, base):
                         cos_sin_cache_global[row, col] = T.cos(T.float64(row) / T.pow(base, T.float64(col * 2) / T.float64(rotary_dim)))
                     else:
                         cos_sin_cache_global[row, col] = T.sin(T.float64(row) / T.pow(base, T.float64(col * 2 - rotary_dim) / T.float64(rotary_dim)))
-                    
+
                     idx[0] += SM_COUNT * 1024
     # fmt: on
 

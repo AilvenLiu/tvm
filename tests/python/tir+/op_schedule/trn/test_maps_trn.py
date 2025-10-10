@@ -161,7 +161,7 @@ def test_simple_binary(op_type, operands_type):
                 Tp_func(C_sbuf, const, A_sbuf)
             elif operands_type == "region_const":
                 Tp_func(C_sbuf, A_sbuf, const)
-                
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "binary"})
@@ -243,10 +243,10 @@ def test_binary_complex(op_type, operands_type):
                     Tp_func(C_sbuf_view[:, i, :], A_sbuf_view[:, i * 2, :], B_sbuf_view[:, 0, :])
                 elif operands_type == "region_broadcast_lhs":
                     Tp_func(C_sbuf_view[:, i, :, :], A_sbuf_view[:, i*2,:, :], B_sbuf_view[:, i, :, :])
-    
+
     f_extent = 128 if operands_type == "region_broadcast_lhs" else 512
     b_extent = 4 if operands_type == "region_broadcast_lhs" else 1
-    
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "binary"})
@@ -367,7 +367,7 @@ def test_unary_complex1():
         with T.kernel():
             A_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             Tp.memset(A_sbuf, T.float32(0.0))
-            
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "unary"})
@@ -377,7 +377,7 @@ def test_unary_complex1():
                 T.attr(0, "tensorized_nki_instruction", 1)
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
-                        T.nki.memset(A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0))       
+                        T.nki.memset(A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0))
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": unary})

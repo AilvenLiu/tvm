@@ -79,7 +79,7 @@ enum class JobType : int32_t {
   kSplitSiluMultiply = 15,
   kGemmGateUpProj = 16,
   kGateUpSilu = 17,
-  
+
   // end
   kEnd = 31,
 };

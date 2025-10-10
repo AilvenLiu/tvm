@@ -104,7 +104,7 @@ class AddRMSNormTile(Tile):
                 for kl in T.unroll(self.loop_inner):
                     self.sum_sq_smem[kl, warp_id_in_cta] = self.sum_sq[kl, 0]
                 T.tvm_storage_sync("shared")
-                
+
                 # reduce sum through different warps
                 if warp_id_in_cta == 0:
                     for kl in T.unroll(self.loop_inner):
@@ -148,7 +148,7 @@ class AddRMSNormTile(Tile):
                     for kl in T.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:
                             Tp.copy(output_buf[m_idx, st + kl * self.vec_size : st + kl * self.vec_size + self.vec_size], self.input_vec[kl, :])
-                
+
                 self.smem_manager.arrive_all("cta")
-                self.smem_manager.advance() 
+                self.smem_manager.advance()
     # fmt: on

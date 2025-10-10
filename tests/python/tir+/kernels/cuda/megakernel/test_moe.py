@@ -309,7 +309,7 @@ class MegaKernel:
 
         # initialize tile
         self.set_tiles(batch_size, low_batch)
-        
+
         self.gate.set_tensor_map(A_tensor_map_gate, B_tensor_map_gate, D_tensor_map_gate, hidden_state_global, gate_weight_global, gating_output_global)
         self.group_gemm_gate_up.set_tensor_map([A_tensor_map_grp_gate_up_128, A_tensor_map_grp_gate_up_64, A_tensor_map_grp_gate_up_32], B_tensor_map_grp_gate_up, [D_tensor_map_grp_gate_up_128, D_tensor_map_grp_gate_up_64, D_tensor_map_grp_gate_up_32], reordered_hidden_state_global, grp_gate_up_weight_global, gate_up_output_global)
         self.group_gemm_down.set_tensor_map([A_tensor_map_grp_down_128, A_tensor_map_grp_down_64, A_tensor_map_grp_down_32], B_tensor_map_grp_down, [D_tensor_map_grp_down_128, D_tensor_map_grp_down_64, D_tensor_map_grp_down_32], silu_mul_output_global, grp_down_weight_global, topk_reduce_output_global)
@@ -331,7 +331,7 @@ class MegaKernel:
                 smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
                 self.device_init_all(smem_manager)
                 self.class_init_all(smem_manager)
-                
+
 
                 # initialize event tensors
                 evt_gating = T.meta_var(Semaphore(-1, etensor_gating_global, decrement=True, use_nvshmem=self.world_size > 1))
@@ -359,7 +359,7 @@ class MegaKernel:
                                     -1, self.topk_softmax.PERSISTENT_SM_NUMBER,
                                     lambda push_idx: (JobType.MOE_TOPK_SOFTMAX.value, push_idx, 0, 0)
                                 ), "cta", "cta"
-                            )  
+                            )
                         self.run_tile(self.gate, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                         if wg_id == 0:
                             T.cuda.warpgroup_sync(1)
@@ -375,7 +375,7 @@ class MegaKernel:
                                         -1, 1,
                                         lambda push_idx: (JobType.MOE_ALIGN.value, 0, 0, 0)
                                     ), "thread", "thread"
-                                )  
+                                )
                         evt_gating.semaphore_wait(0)
                         self.run_tile(self.topk_softmax, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gating_output_global, topk_weights_global, topk_indices_global)
                         T.cuda.cta_sync()
@@ -391,7 +391,7 @@ class MegaKernel:
                                     -1, KernelConfig.SM_NUMBER,
                                     lambda push_idx: (JobType.MOE_COUNT_AND_SORT.value, push_idx, 0, 0)
                                 ), "cta", "cta"
-                            )  
+                            )
                         evt_topk_softmax.semaphore_wait(0)
                         self.run_tile(self.align, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global)
                         T.cuda.cta_sync()
@@ -410,7 +410,7 @@ class MegaKernel:
                                     -1, num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE * n_axis_len,
                                     lambda push_idx: (JobType.MOE_GROUP_GEMM_GATE_UP.value, push_idx // n_axis_len, push_idx % n_axis_len, 0)
                                 ), "cta", "cta"
-                            )  
+                            )
                         evt_moe_align.semaphore_wait(0)
                         self.run_tile(self.count_and_sort_expert_tokens, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global)
                         T.cuda.cta_sync()
@@ -426,7 +426,7 @@ class MegaKernel:
                                     -1, self.INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE,
                                     lambda push_idx: (JobType.MOE_SILU_MULTIPLY.value, self.tile_scheduler.m_idx, push_idx, 0)
                                 ), "warp", "warp"
-                            )  
+                            )
                         evt_count_and_sort.semaphore_wait_warp(0)
                         if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
                             self.run_tile(self.group_gemm_gate_up, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
@@ -444,7 +444,7 @@ class MegaKernel:
                                     -1, self.HIDDEN_SIZE // GroupGEMMTile.BLK_N,
                                     lambda push_idx: (JobType.MOE_GROUP_GEMM_DOWN.value, self.tile_scheduler.m_idx, push_idx, 0)
                                 ), "warp", "warp"
-                            )  
+                            )
                         evt_group_gemm_gate_up.semaphore_wait(self.tile_scheduler.m_idx)
                         if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
                             self.run_tile(self.silu_mul, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gate_up_output_global, silu_mul_output_global, sorted_token_ids_global)
@@ -461,7 +461,7 @@ class MegaKernel:
                                     -1, KernelConfig.SM_NUMBER,
                                     lambda push_idx: (JobType.END.value, 0, 0, 0)
                                 ), "warp", "warp"
-                            )  
+                            )
                         evt_silu_mul.semaphore_wait_warp(self.tile_scheduler.m_idx)
                         if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
                             self.run_tile(self.group_gemm_down, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
@@ -502,8 +502,8 @@ class MegaKernel:
             gate_up_output_ptr: T.handle, # intermediate
             silu_mul_output_ptr: T.handle, # intermediate
             topk_reduce_output_ptr: T.handle, # intermediate
-            
-            
+
+
             # event tensor
             etensor_gating_ptr: T.handle,
             etensor_topk_softmax_ptr: T.handle,
@@ -558,10 +558,10 @@ class MegaKernel:
             etensor_group_gemm_gate_up_global = T.match_buffer(etensor_group_gemm_gate_up_ptr, [max_blocks_padded], "int32", scope="global")
             etensor_silu_mul_global = T.match_buffer(etensor_silu_mul_ptr, [max_blocks_padded], "int32", scope="global")
             etensor_group_gemm_down_global = T.match_buffer(etensor_group_gemm_down_ptr, [1], "int32", scope="global")
-            
+
             # exec queue
             exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
-            
+
             @T.macro
             def run(low_batch, dynamic_gemm_size):
                 num_valid_tokens = T.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
@@ -571,10 +571,10 @@ class MegaKernel:
                     cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
                     etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global,
-                    None, profiler_buffer, exec_queue, None, None, None, low_batch, 
+                    None, profiler_buffer, exec_queue, None, None, None, low_batch,
                     static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
                 )
-                
+
             if batch_size >= 2048:
                 run(low_batch=False, dynamic_gemm_size=True)
             elif batch_size >= 512:
@@ -611,8 +611,8 @@ class MegaKernel:
             gate_up_output_ptr: T.handle, # intermediate
             silu_mul_output_ptr: T.handle, # intermediate
             topk_reduce_output_ptr: T.handle, # intermediate
-            
-            
+
+
             # event tensor
             etensor_gating_ptr: T.handle,
             etensor_topk_softmax_ptr: T.handle,
@@ -671,7 +671,7 @@ class MegaKernel:
             etensor_silu_mul_global = T.match_buffer(etensor_silu_mul_ptr, [max_blocks_padded], "int32", scope="global")
             etensor_group_gemm_down_global = T.match_buffer(etensor_group_gemm_down_ptr, [1], "int32", scope="global")
             etensor_end_global = T.match_buffer(etensor_end_ptr, [1], "int32", scope="global")
-            
+
 
             # exec queue
             queue_tasks_global = T.match_buffer(queue_tasks_ptr, [DynamicTileScheduler.MAX_TASKS], "int32", scope="global", offset_factor=1)
@@ -687,7 +687,7 @@ class MegaKernel:
                     cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
                     etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global,
-                    etensor_end_global, profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, low_batch, 
+                    etensor_end_global, profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, low_batch,
                     dynamic_scheduler.Semaphore, dynamic_scheduler.DynamicTileScheduler
                 )
 

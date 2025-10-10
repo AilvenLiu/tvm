@@ -42,7 +42,7 @@ def get_moe_align_kernel(pad_sorted_token_ids):
         num_valid_tokens_ptr: T.handle,
         cumsum_buffer: T.Buffer((NUM_EXPERTS+1,), "int32"),
     ):
-        num_tokens = T.int32()    
+        num_tokens = T.int32()
         topk_ids = T.match_buffer(topk_ids_ptr, (num_tokens, TOPK), dtype="int64")
         max_num_tokens_padded = T.int32()
         sorted_token_ids = T.match_buffer(sorted_token_ids_ptr, (max_num_tokens_padded,), dtype="int32")
@@ -186,7 +186,7 @@ def test_moe_align(task):
     ].sort()[0]
     tvm.testing.assert_allclose(
         selected_sorted_ids_std.cpu().numpy(), selected_sorted_ids_tvm.cpu().numpy()
-    ) 
+    )
 
     index = torch.from_numpy(sorted_ids_tvm.numpy())[:num_tokens_post_pad_std.item()].cpu()
     mask = (index >= 0) & (index < num_tokens * topk)

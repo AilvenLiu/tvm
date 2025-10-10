@@ -618,7 +618,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
         @T.prim_func(tirp=True)
         def main(A_ptr: T.handle):
             A = T.match_buffer(A_ptr, shape, dtype="float32", align=16)
-            
+
             A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
             T.call_packed("runtime.cuTensorMapEncodeTiled", A_map, "float32", len(shape), A.data, *tma_args)
 
@@ -634,7 +634,7 @@ def test_cp_async_bulk_tensor_shared_to_global(inputs):
                             A_smem[i] = i
                     T.ptx.fence.proxy("shared")
                     T.cuda.cta_sync()
-                    
+
                     if tx == 0:
                         T.ptx.cp_async.bulk.tensor.s2g(len(shape), A_smem.access_ptr("r", offset=0), A_map, *coord)
                         T.ptx.cp_async.bulk.commit_group()
@@ -712,7 +712,7 @@ def test_wgmma_ss_nt():
                     B_smem = T.alloc_buffer(shapeB, in_dtype, scope="shared", align=1024)
                     bar = T.shared_cell("uint64")
                     phase = T.local_cell("int32")
-                    
+
                     descA = T.local_cell("uint64")
                     descB = T.local_cell("uint64")
                     C_local = T.alloc_buffer((C_elems,), out_dtype, scope="local")
@@ -736,19 +736,19 @@ def test_wgmma_ss_nt():
                     for i in T.serial(0, C_elems):
                         C_local[i] = T.Cast(out_dtype, get_init_value(out_dtype))
                         T.ptx.wgmma.noop_barrier(C_local[i])
-                    
+
                     # do wgmma
                     T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descA), A_smem.data, *A_encode_args)
                     T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.data, *B_encode_args)
                     T.ptx.wgmma.fence()
-                    T.ptx.wgmma.mma_async.ss(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False, 
+                    T.ptx.wgmma.mma_async.ss(M, N, K, in_dtype, out_dtype, transA, transB, 1.0, 1.0, False,
                                              descA, descB, *get_accum_list(C_local, C_elems))
                     T.ptx.wgmma.commit_group()
                     T.ptx.wgmma.wait_group(0)
-                    
+
                     for i in T.serial(0, C_elems):
                         T.ptx.wgmma.noop_barrier(C_local[i])
-                    
+
                     # store C_local to C
                     for i in T.serial(0, C_elems // 4):
                         row = T.meta_var((tx % 32) // 4 + (tx // 32) * 16)
@@ -871,7 +871,7 @@ def test_wgmma_rs_nt():
                     descB = T.local_cell("uint64")
                     A_local = T.alloc_buffer((A_elems,), in_dtype, scope="local")
                     C_local = T.alloc_buffer((C_elems,), out_dtype, scope="local")
-                    
+
                     A_elems_b32 = T.meta_var(A_elems // (32 // in_dtype_bits))
                     A_local_b32 = T.decl_buffer((A_elems_b32,), "uint32", data=A_local.data)
 
@@ -903,7 +903,7 @@ def test_wgmma_rs_nt():
                     for i in T.serial(0, A_elems_b32):
                         T.ptx.wgmma.noop_barrier(A_local_b32[i])
                     for i in T.serial(0, C_elems):
-                        T.ptx.wgmma.noop_barrier(C_local[i]) 
+                        T.ptx.wgmma.noop_barrier(C_local[i])
                     # do wgmma
                     T.ptx.wgmma.encode_matrix_descriptor(T.address_of(descB), B_smem.data, *B_encode_args)
                     T.ptx.wgmma.fence()

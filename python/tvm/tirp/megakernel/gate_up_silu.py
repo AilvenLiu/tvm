@@ -121,11 +121,11 @@ class GateUpSiluTile(GemmTile):
 
     @T.macro
     def host_init(self):
-        T.call_packed("runtime.cuTensorMapEncodeTiled", self.A_tensor_map, self.a_type, 2, self.A.data, 
+        T.call_packed("runtime.cuTensorMapEncodeTiled", self.A_tensor_map, self.a_type, 2, self.A.data,
                       self.K, self.M, self.K * F16_BYTES, self.BLK_K, self.BLK_M, 1, 1, 0, self.SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 2, self.B.data, 
+        T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 2, self.B.data,
                       self.K, self.N, self.K * F16_BYTES, self.BLK_K, self.BLK_N, 1, 1, 0, self.SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, "float16", 2, self.output.data, 
+        T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, "float16", 2, self.output.data,
                         self.N // 2, self.M, self.N // 2 * F16_BYTES, self.MMA_N // 2, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
 
 
@@ -169,7 +169,7 @@ class GateUpSiluTile(GemmTile):
                         *[self.reg[j] for j in range(self.TMEM_LD_SIZE)],
                     )
                     T.ptx.tcgen05.wait.ld()
-                    # for each warp, lane 0~15 holds the gate output, lane 16~31 holds the up output 
+                    # for each warp, lane 0~15 holds the gate output, lane 16~31 holds the up output
                     # TODO: may interleave the gate output between lane 0~15 and lane 16~31 to balance
                     if lane_id < 16:
                         for vec in T.unroll(self.TMEM_LD_SIZE):

@@ -242,12 +242,12 @@ def test_flash_attn(ssh_client, causal=True):
                     prev_output = T.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF")
                     scaled_output = T.alloc_buffer((BLOCK_Q, d), dtype="float16", scope="trn.sbuf", layout= "PF")
                     l_reciprocal = T.alloc_buffer((BLOCK_Q, 1), dtype="float32", scope="trn.sbuf", layout= "PF")
-                    
+
                     # load k and v
                     Tp.copy(k_loaded, k[block_kv * BLOCK_KV: (block_kv + 1) * BLOCK_KV, head, :])
                     Tp.copy(v_loaded, v[block_kv * BLOCK_KV: (block_kv + 1) * BLOCK_KV, head, :])
-                    
-                    
+
+
                     load_q(q_loaded, q, 0, head)
                     mm1(q_loaded, k_loaded, qk, mm1_dot_partial_max, mm1_dot_max, 0, block_kv)
                     update_running_max(running_max, mm1_dot_max, prev_running_max, scaling_factor, 0, block_kv)

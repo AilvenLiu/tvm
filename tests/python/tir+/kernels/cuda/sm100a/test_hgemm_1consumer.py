@@ -164,7 +164,7 @@ def test_hgemm_1consumer():
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def hgemm(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type), 
+    def hgemm(A: T.Buffer((M, K), a_type), B: T.Buffer((N, K), b_type),
                 D: T.Buffer((M, N), d_type)):
         with T.kernel():
             cbx, cby = T.cta_id([M_CLUSTER, N_CLUSTER], parent="cluster")
@@ -192,7 +192,7 @@ def test_hgemm_1consumer():
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
                 descI = T.local_cell("uint32")
-                
+
                 # initialize
                 tma2mma_bar = T.meta_var(BarTMA2MMA(buf.data, 6, SMEM_PIPE_DEPTH, True))
                 mma2tma_bar = T.meta_var(BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))
@@ -215,7 +215,7 @@ def test_hgemm_1consumer():
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
                     T.cuda.warp_sync()
-                
+
                 # sync
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
@@ -247,7 +247,7 @@ def test_hgemm_1consumer():
                 with T.cta():
                     T.block_attr({"tirp.scope_partition": True})
                     with T.warpgroup()[1:2]:
-                        if warp_id == 3: 
+                        if warp_id == 3:
                             phase[0] = 0
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx)
@@ -274,7 +274,7 @@ def test_hgemm_1consumer():
 
                                     paritioned_loop(tma_load, skip, tma_load_epilogue)
                                 tile_scheduler.next_tile()
-                        
+
                         elif warp_id == 0:
                             if cbx == 0:
                                 tmem_idx = T.local_cell("int32", "tmem_idx")
@@ -299,9 +299,9 @@ def test_hgemm_1consumer():
                                             T.ptx.tcgen05.fence.after_thread_sync()
                                             # issue mma
                                             for ki in T.unroll(BLK_K // MMA_K):
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]), 
+                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]),
                                                                                         ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
+                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
                                                                                         ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
                                                 if (stage == 0 and ks == 0 and ki == 0) and ((not is_remain) or (is_remain and PIPE_CIRCLE_NUM == 0)):
                                                     T.ptx.tcgen05.mma("float32", a_type, b_type, tmem_idx * MMA_N, descA, descB, descI, False, CTA_GROUP, False)
@@ -322,7 +322,7 @@ def test_hgemm_1consumer():
                                         paritioned_loop(mma, mma_epilogue1, mma_epilogue2)
 
                                     tile_scheduler.next_tile()
-                                    
+
                     with T.warpgroup()[0:1]:
                         T.cuda.trap_when_assert_failed(tmem_addr == 0)
                         tmem_idx = T.local_cell("int32", "tmem_idx")
@@ -341,10 +341,10 @@ def test_hgemm_1consumer():
                             # wait for the completion of all the mma of the same tile
                             mma2ld_bar.wait(tmem_idx, tmem_phase)
                             T.ptx.tcgen05.fence.after_thread_sync()
-                            
+
                             for ko in T.unroll(MMA_N // EPI_TILE):
                                 stage = (tile_scheduler.tile_idx * MMA_N // EPI_TILE + ko) % TMEM_PIPE_DEPTH
-                                
+
                                 # wait the smem to be free
                                 if ko >= TMEM_PIPE_DEPTH:
                                     if lane_id == 0 and warp_id == 0:
@@ -358,7 +358,7 @@ def test_hgemm_1consumer():
                                     with T.thread():
                                         Tp.cast(reg_fp16[:], reg[:])
                                         Tp.copy(D_smem[stage, warp_id * 32 + lane_id, ki * TMEM_LD_SIZE : (ki + 1) * TMEM_LD_SIZE], reg_fp16[:])
-                            
+
                                 # the tmem can be overwritten
                                 if ko == MMA_N // EPI_TILE - 1:
                                     T.ptx.tcgen05.fence.before_thread_sync()
@@ -366,7 +366,7 @@ def test_hgemm_1consumer():
 
                                 T.ptx.fence.proxy(scope="shared")
                                 T.cuda.warpgroup_sync(10)
-                                    
+
                                 # smem -> gmem
                                 with T.thread()[lane_id == 0 and warp_id == 0]:
                                     m_start = T.meta_var((m_idx * CTA_GROUP + cbx) * BLK_M)
@@ -379,7 +379,7 @@ def test_hgemm_1consumer():
                         with T.thread()[lane_id == 0 and warp_id == 0]:
                             wb_event.wait(0)
                         T.cuda.warpgroup_sync(10)
-                                
+
                 # dealloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)

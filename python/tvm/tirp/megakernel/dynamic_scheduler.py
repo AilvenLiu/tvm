@@ -76,7 +76,7 @@ __forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t valu
 }
 """
 
-# notes: The following applies to decrement=False. The logic for True is similar. 
+# notes: The following applies to decrement=False. The logic for True is similar.
 #        For semaphore with expected count = expected_cnt, we set it actual count = expected_cnt * (base + 1).
 #        Here base >= expected_cnt is the power of 2 (for efficiency mod in the following and giving convenience for decrement=True).
 #        By default, the base will be set to 1 << 16.
@@ -87,7 +87,7 @@ __forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t valu
 #        The second one happens after the tile running, which will atomic_add the semaphore value by base.
 #        The task pushing will happen after the first semaphore notify, which will be triggered by old_value % base == expected_cnt - 1.
 #        In this way, the tasks will be pre-push when the last tile has already been dispatched to the sm, which avoid the dead lock.
-#        For semaphore wait, we can still use the condition value == expected_cnt * (base + 1) to distinguish. 
+#        For semaphore wait, we can still use the condition value == expected_cnt * (base + 1) to distinguish.
 
 class Semaphore:
     def __init__(self, expected_cnt, buffer, base=(1 << 16), decrement=False, use_nvshmem=False, debug=False):
@@ -103,7 +103,7 @@ class Semaphore:
             self.atomic_add = atomic_add_system
         else:
             self.atomic_add = atomic_add
-            
+
         # cta-level interface
     @T.macro
     def semaphore_wait(self, *coord):
@@ -145,7 +145,7 @@ class Semaphore:
                             break
                         T.cuda.nano_sleep(40)
                 else:
-                    while 1:    
+                    while 1:
                         if lane_id == 0:
                             T.ptx.ld_global_acquire(
                                 self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
@@ -229,7 +229,7 @@ class MPMCQueue:
             self.stg = stg_local
             self.atomic_add = atomic_add
         self.debug = debug
-                 
+
     @T.macro
     def enqueue(self, rank, enqueue_num, func_push, level:Literal["thread", "warp", "warpgroup", "cta"]):
         if level == "thread":
@@ -290,7 +290,7 @@ class MPMCQueue:
                     elif level == "cta":
                         T.tvm_storage_sync("shared")
                     self.tail_r = self.tail_smem[scope_idx]
-                    
+
                 self.idx = tid_in_scope
                 while self.idx < enqueue_num:
                     self.masked_pos = (self.tail_r + self.idx) & self.mask
@@ -435,10 +435,10 @@ class DynamicTileScheduler:
             if self.profiler_on:
                 self.profiler.end(ProfileEventType.FETCH, lane_id == 0)
 
-    
+
     @T.macro
     def push_task(
-        self, evt: Semaphore, notify_num, func_trigger, 
+        self, evt: Semaphore, notify_num, func_trigger,
         push_level: Literal["thread", "warp", "warpgroup", "cta"],
         scope: Literal["thread", "warp", "warpgroup", "cta"],
         enqueue_thread = 0, enqueue_warp = 0, enqueue_wg = 0
@@ -449,9 +449,9 @@ class DynamicTileScheduler:
         #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
         # Notes: (rank, num_enqueue, func_push) = func_trigger(trigger_idx), rank=-1 for the local rank
         #        (task_type, m_idx, n_idx, k_idx) = func_push(push_idx)
-        
+
         max_notify_num_map = T.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
-        
+
         with T.cta():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
@@ -470,12 +470,12 @@ class DynamicTileScheduler:
                 self.profiler.start(ProfileEventType.PUSH, lane_id == 0)
             if scope == "thread":
                 if tid == enqueue_thread:
-                    if push_level == "thread": 
+                    if push_level == "thread":
                         if evt.is_triggered():
                             rank, num_enqueue, func_push = T.meta_var(func_trigger(0))
                             self.queue.enqueue(rank, num_enqueue, func_push, push_level)
                     else:
-                        assert False                        
+                        assert False
             elif scope == "warp":
                 if warp_id == enqueue_warp:
                     if push_level == "thread":
@@ -528,8 +528,8 @@ class DynamicTileScheduler:
                         evt.state[0] = self.semaphore_state[self.idx]
                         if evt.is_triggered():
                             rank, num_enqueue, func_push = T.meta_var(func_trigger(self.idx))
-                            self.queue.enqueue(rank, num_enqueue, func_push, push_level)  
-                        self.idx += stride_in_scope_map[scope][push_level]                       
+                            self.queue.enqueue(rank, num_enqueue, func_push, push_level)
+                        self.idx += stride_in_scope_map[scope][push_level]
                 else:
                     assert False
             else:

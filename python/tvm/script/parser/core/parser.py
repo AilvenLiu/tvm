@@ -683,7 +683,7 @@ class Parser(doc.NodeVisitor):
         if func is None:
             self.report_error(
                 node,
-                """The parser does not understand the decorator, 
+                """The parser does not understand the decorator,
                 or visit_FunctionDef is not implemented for the decorator with token: """
                 + token,
             )

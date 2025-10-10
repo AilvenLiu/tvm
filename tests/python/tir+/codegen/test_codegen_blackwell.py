@@ -297,8 +297,8 @@ def test_tcgen05_mma_ss_no_tma(swizzle):
 
     # fmt: off
     @T.prim_func(tirp=True)
-    def test_mma_ss_no_tma(A: T.Buffer((M, K), a_type, layout=T.TileLayout((M, K))), 
-                           B: T.Buffer((N, K), b_type, layout=T.TileLayout((N, K))), 
+    def test_mma_ss_no_tma(A: T.Buffer((M, K), a_type, layout=T.TileLayout((M, K))),
+                           B: T.Buffer((N, K), b_type, layout=T.TileLayout((N, K))),
                            C: T.Buffer((M, N), d_type)):
         with T.kernel():
             bx = T.cta_id([1], parent="kernel")

@@ -6,7 +6,7 @@ The vision is a holistic infrastructure where developers can express computation
 # 2. Target Kernels in LLM Workloads
 The framework is designed to target general GPU kernel programming. But we specifically focus on critical kernels that are computational bottlenecks in modern LLM inference and training. Key examples include:
 
-- **Flashinfer Kernels (Attention):** The attention mechanism is the core of the Transformer architecture. Kernels like Flashinfer and FlashAttention are crucial for optimizing this mechanism by avoiding the materialization of the large N x N attention matrix in global GPU memory. They use tiling, recomputation, and careful management of on-chip SRAM to achieve significant speedups and memory savings, which is essential for handling long sequences. 
+- **Flashinfer Kernels (Attention):** The attention mechanism is the core of the Transformer architecture. Kernels like Flashinfer and FlashAttention are crucial for optimizing this mechanism by avoiding the materialization of the large N x N attention matrix in global GPU memory. They use tiling, recomputation, and careful management of on-chip SRAM to achieve significant speedups and memory savings, which is essential for handling long sequences.
 
 - **GeMM (General Matrix-Matrix Multiplication), Grouped GeMM:** LLMs are fundamentally composed of massive linear and feed-forward layers, which are executed as GeMM operations. Performance of the entire model is heavily dependent on the efficiency of these kernels. Optimizations focus on maximizing the utilization of specialized hardware units like NVIDIA's Tensor Cores, managing data layouts, and tuning for specific matrix sizes and data types (e.g., FP16, INT8, FP8).
 

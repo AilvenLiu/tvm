@@ -84,7 +84,7 @@ class Semaphore:
                             break
                         T.cuda.nano_sleep(40)
                 else:
-                    while 1:    
+                    while 1:
                         if lane_id == 0:
                             T.ptx.ld_global_acquire(
                                 self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
@@ -92,7 +92,7 @@ class Semaphore:
                         if any_sync(0xffffffff, self.state[0] == 0):
                             break
                         T.cuda.nano_sleep(40)
-    
+
 
     @T.macro
     def semaphore_notify(self, *coord, rank=-1):

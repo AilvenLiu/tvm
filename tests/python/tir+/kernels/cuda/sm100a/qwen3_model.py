@@ -471,10 +471,10 @@ def get_qwen3_megakernel_mod():
             k_rope = R.reshape(k, (batch_size, 1, 8 // TP_SIZE, 128))
             # append
             append_position_map_rs = R.reshape(append_position_map, (batch_size, 1))
-            new_kv_data = R.call_tir_inplace(cls.append_paged_kv_cache, (kv_data[layer_id], k_rope, v, append_position_map_rs), [0], 
+            new_kv_data = R.call_tir_inplace(cls.append_paged_kv_cache, (kv_data[layer_id], k_rope, v, append_position_map_rs), [0],
                                                 out_sinfo=R.Tensor((max_page_num, 2, 8 // TP_SIZE, page_size, 128), dtype="float16"))
             # attention
-            o = R.call_tir(cls.decode, 
+            o = R.call_tir(cls.decode,
                             (q_rope, new_kv_data, lse_tvm, kv_indptr, kv_last_page_len, kv_indices, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size), out_sinfo=R.Tensor((batch_size, 64 // TP_SIZE, 128), dtype="float16"))
             reshape3 = R.reshape(o, (batch_size, 8192 // TP_SIZE))
             #########################################################
@@ -639,7 +639,7 @@ def get_qwen3_megakernel_mod():
         @T.prim_func(private=True)
         def cos_sin_cache(cos_sin_cache: T.handle):
             pass
-        
+
         @R.function
         def cos_sin_cache_func(max_seq_len_: R.Shape(["max_seq_len"])):
             max_seq_len = T.int64()
@@ -788,7 +788,7 @@ def get_qwen3_megakernel_mod():
 
                 lv4_rs = R.reshape(lv4, (batch_size, 1, 151936))
                 astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, 151936), dtype="float32"))
-                
+
                 gv1 = astype, paged_kv_cache
                 R.output(gv1)
             return gv1

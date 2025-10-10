@@ -31,7 +31,7 @@ def test_call_tir_device():
             with T.cta():
                 thread_id = T.thread_id([128], parent="cta")
                 Tp.fill(A[m*128:m*128+128], 0.)
-                
+
         @T.prim_func(tirp=True, private=True)
         def test2(A: T.Buffer((2048, 2048), "float32"), m: T.int32, n: T.int32):
             with T.cta():
@@ -46,7 +46,7 @@ def test_call_tir_device():
                 y = R.call_tir_device(cls.test2, [], R.Tensor((2048, 2048), "float32"), (16, 16), )
                 R.output(x, y)
             return x, y
-        
+
     @I.ir_module(tirp=True)
     class After:
         @T.prim_func(tirp=True, private=True)
@@ -74,10 +74,10 @@ def test_call_tir_device():
                 R.output(x, y)
             return x, y
 
-    
+
     mod = Before
     mod = relax.transform.LowerCallTIRDevice()(mod)
     tvm.ir.assert_structural_equal(mod, After)
-    
+
 if __name__ == "__main__":
     test_call_tir_device()

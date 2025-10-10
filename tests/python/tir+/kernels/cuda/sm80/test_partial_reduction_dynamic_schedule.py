@@ -44,11 +44,11 @@ def test_partial_reduction():
     def int_var(name: str, scope="local"):
         return T.alloc_buffer([1], "int32", align=4, scope=scope, name=name)
 
-    
+
     class TaskType(enum.Enum):
         PARTIAL = 0
         REDUCE = 1
-    
+
     class MPMCQueue:
         def __init__(self, capacity: int, task_types: T.Buffer, task_idxs: T.Buffer, head: T.Buffer, tail: T.Buffer, num_tot_tasks: int):
             if capacity & (capacity - 1):
@@ -89,37 +89,37 @@ def test_partial_reduction():
                 fetched_task_idx[i] = self.task_idxs[self.masked_pos[0], i]
             else:
               fetched_task_type[0] = -1
-        
+
     class DynamicTileScheduler:
         def __init__(self, queue: MPMCQueue):
             self.queue = queue
             self.fetched_task_type = int_var("fetched_task_type", scope="shared")
             self.fetched_task_idx = T.alloc_buffer([2], "int32", scope="shared", name="fetched_task_idx")
-            
+
         @T.macro
         def _fetch_from_queue(self):
           with T.thread()[0:1]:
             self.queue.dequeue(self.fetched_task_type, self.fetched_task_idx)
           T.cuda.cta_sync()
-            
+
         @T.macro
         def init(self, linear_init):
             self._fetch_from_queue()
-            
+
         @T.macro
         def next_tile(self):
             self._fetch_from_queue()
-            
+
         def valid(self):
             return self.fetched_task_type[0] >= 0
-            
+
     class Semaphore:
         def __init__(self, cnt: int, buffer: T.Buffer, queue: MPMCQueue):
             self.cnt = cnt
             self.sem = buffer
             self.state = int_var("state")
             self.queue = queue
-        @T.macro 
+        @T.macro
         def semaphore_notify(self, *coord):
             with T.thread():
                 T.cuda.cta_sync()
@@ -129,31 +129,31 @@ def test_partial_reduction():
                     if self.state[0] == self.cnt:
                         self.queue.enqueue(TaskType.REDUCE.value, coord[0], 0)
                 T.cuda.thread_fence()
-                
-    
+
+
     # reduction on N
     @T.prim_func(tirp=True)
     def partial_reduction_ref_stage1(A: T.handle, B: T.handle):
         A_ptr = T.match_buffer(A, (M, N), "float32")
         B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
-        
+
         with T.kernel():
             bx, by = T.cta_id([NUM_BLOCK_M, NUM_BLOCK_N], parent="kernel")
             tx = T.thread_id([1024], parent="cta")
-            
+
             with T.cta():
                 A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
                 B_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-                Tp.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])                
+                Tp.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])
                 Tp.sum(B_smem, A_smem)
                 Tp.copy(B_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by], B_smem)
-                
+
 
     @T.prim_func(tirp=True)
     def partial_reduction_ref_stage2(B: T.handle, C: T.handle):
         B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
         C_ptr = T.match_buffer(C, (M, 1), "float32")
-        
+
         with T.kernel():
             bx = T.cta_id([NUM_BLOCK_M], parent="kernel")
             tx = T.thread_id([1024], parent="cta")
@@ -163,11 +163,11 @@ def test_partial_reduction():
                 Tp.copy(B_smem, B_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, :])
                 Tp.sum(C_smem, B_smem)
                 Tp.copy(C_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, 0], C_smem)
-                
+
     TOTAL_SM_CNT = 132
     CAPACITY = 1024
     TASK_IDX_LEN = 2
-                
+
     @T.prim_func(tirp=True)
     def partial_reduction_fused(A: T.handle, B: T.handle, C: T.handle, semaphore: T.handle, task_types: T.handle, task_idxs: T.handle, head: T.handle, tail: T.handle):
         A_ptr = T.match_buffer(A, (M, N), "float32")
@@ -194,7 +194,7 @@ def test_partial_reduction():
                     if tile_scheduler.fetched_task_type[0] == TaskType.PARTIAL.value:
                         m_idx = T.meta_var(tile_scheduler.fetched_task_idx[0])
                         n_idx = T.meta_var(tile_scheduler.fetched_task_idx[1])
-                        Tp.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])                
+                        Tp.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])
                         Tp.sum(B_smem_1, A_smem)
                         Tp.copy(B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx], B_smem_1)
                         sem.semaphore_notify(m_idx)

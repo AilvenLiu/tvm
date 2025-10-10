@@ -110,7 +110,7 @@ class EPDispatchPrecomputeTile(Tile):
                         )
 
                 self.smem_manager.arrive_all("cta")
-                self.smem_manager.advance() 
+                self.smem_manager.advance()
     # fmt: on
 
 

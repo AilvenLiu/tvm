@@ -312,7 +312,7 @@ def test_deepgemm():
                             stage = PIPE_CIRCLE_NUM * SMEM_PIPE_DEPTH + ks
                             main_loop(ks)
                         epilogue1()
-                        # for unaligned cases   
+                        # for unaligned cases
                         for ks in T.unroll(PIPE_REMAIN_NUM, SMEM_PIPE_DEPTH):
                             epilogue2(ks)
                         phase = phase ^ 1
@@ -396,7 +396,7 @@ def test_deepgemm():
                             if cbx == 0:
                                 tmem_idx = T.local_cell("int32", "tmem_idx")
                                 tmem_phase = T.local_cell("int32", "tmem_phase")
-                                T.ptx.tcgen05.encode_instr_descriptor_block_scaled(T.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type, 
+                                T.ptx.tcgen05.encode_instr_descriptor_block_scaled(T.address_of(descI), "float32", a_type, b_type, sfa_type, sfb_type,
                                                                                     0, 0, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
                                 phase = 0
                                 while tile_scheduler.valid():
@@ -416,38 +416,38 @@ def test_deepgemm():
                                             trans2mma_bar.wait(ks, phase)
                                             T.ptx.tcgen05.fence.after_thread_sync()
 
-                                            # copy sf to tmem 
+                                            # copy sf to tmem
                                             if stage % 4 == 0:
                                                 for ki in T.unroll(0, BLK_SFA // 128):
                                                     T.ptx.tcgen05.encode_matrix_descriptor(
                                                         T.address_of(descSFA), SFA_smem.ptr_to([ks, ki * 4, 0]),
                                                         ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0
                                                     )
-                                                    T.ptx.tcgen05.cp(0, 0, SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32 + ki * 4, 
+                                                    T.ptx.tcgen05.cp(0, 0, SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32 + ki * 4,
                                                                         descSFA, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")
                                                 for ki in T.unroll(0, BLK_SFB // 128):
                                                     T.ptx.tcgen05.encode_matrix_descriptor(
                                                         T.address_of(descSFB), SFB_smem.ptr_to([ks, ki * 4, 0]),
                                                         ldo=16, sdo=8 * 4 * F32_BYTES // F128_BYTES, swizzle=0
                                                     )
-                                                    T.ptx.tcgen05.cp(0, 0, SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32 + ki * 4, 
+                                                    T.ptx.tcgen05.cp(0, 0, SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32 + ki * 4,
                                                                         descSFB, "32x128b", "uint32", "uint32", CTA_GROUP, "warpx4")
-                                            
-                                            # issue mma                         
+
+                                            # issue mma
                                             T.cuda.runtime_instr_desc(T.address_of(descI), stage % 4)
                                             for ki in T.unroll(BLK_K // MMA_K):
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]), 
+                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, 0, ki * MMA_K]),
                                                                                     ldo=1, sdo=8 * BLK_K * F8_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
-                                                                                    ldo=1, sdo=8 * BLK_K * F8_BYTES // F128_BYTES, swizzle=SWIZZLE)          
-                                                            
+                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
+                                                                                    ldo=1, sdo=8 * BLK_K * F8_BYTES // F128_BYTES, swizzle=SWIZZLE)
+
                                                 if stage == 0 and ki == 0:
-                                                    T.ptx.tcgen05.mma.block_scale("float32", a_type, b_type, sfa_type, sfb_type, tmem_idx * MMA_N, descA, descB, 
+                                                    T.ptx.tcgen05.mma.block_scale("float32", a_type, b_type, sfa_type, sfb_type, tmem_idx * MMA_N, descA, descB,
                                                                                     SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32,
                                                                                     SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32,
                                                                                     descI, False, CTA_GROUP, False)
                                                 else:
-                                                    T.ptx.tcgen05.mma.block_scale("float32", a_type, b_type, sfa_type, sfb_type, tmem_idx * MMA_N, descA, descB, 
+                                                    T.ptx.tcgen05.mma.block_scale("float32", a_type, b_type, sfa_type, sfb_type, tmem_idx * MMA_N, descA, descB,
                                                                                     SFA_TMEM_START_COL + tmem_idx * BLK_SFA // 32,
                                                                                     SFB_TMEM_START_COL + tmem_idx * BLK_SFB // 32,
                                                                                     descI, False, CTA_GROUP, True)
@@ -465,7 +465,7 @@ def test_deepgemm():
                                         paritioned_loop(mma, mma_epilogue1, mma_epilogue2)
 
                                     tile_scheduler.next_tile()
-                                    
+
                     with T.warpgroup()[wg_id == 0]:
                         T.cuda.trap_when_assert_failed(tmem_addr == 0)
                         tmem_idx = T.local_cell("int32", "tmem_idx")
@@ -483,10 +483,10 @@ def test_deepgemm():
                             # wait for the completion of all the mma of the same tile
                             mma2ld_bar.wait(tmem_idx, tmem_phase)
                             T.ptx.tcgen05.fence.after_thread_sync()
-                            
+
                             for ko in T.unroll(MMA_N // EPI_TILE):
                                 stage = (tile_scheduler.tile_idx * MMA_N // EPI_TILE + ko) % TMEM_PIPE_DEPTH
-                                
+
                                 # wait the smem to be free
                                 if ko >= TMEM_PIPE_DEPTH:
                                     wb_event.wait(TMEM_PIPE_DEPTH - 1)
@@ -508,7 +508,7 @@ def test_deepgemm():
 
                                 T.ptx.fence.proxy(scope="shared")
                                 T.cuda.warpgroup_sync(10)
-                                    
+
                                 # smem -> gmem
                                 m_start = (m_idx * CTA_GROUP + cbx) * BLK_M
                                 n_start = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
@@ -519,7 +519,7 @@ def test_deepgemm():
 
                         wb_event.wait()
                         T.cuda.warpgroup_sync(10)
-                                
+
                 # dealloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)

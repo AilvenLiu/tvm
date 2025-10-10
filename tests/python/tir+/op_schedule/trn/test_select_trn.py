@@ -41,7 +41,7 @@ def test_select():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             Tp.select(B_sbuf, A_sbuf, 0.0, lambda i, j: i < j)
-            
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "select"})
@@ -76,7 +76,7 @@ def test_select_in_loop():
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             for i in range(2):
                 Tp.select(B_sbuf, A_sbuf[i*16, :, :], 0.0, lambda a, b: (i+1)* a < b)
-    
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "select"})
@@ -108,8 +108,8 @@ def test_select_expr_affine():
         with T.kernel():
             A_sbuf = T.alloc_buffer(src_shape, "float32", scope="trn.sbuf", layout=src_layout)
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
-            Tp.select(B_sbuf, A_sbuf, 0.0, lambda i, j: i < j)           
-            
+            Tp.select(B_sbuf, A_sbuf, 0.0, lambda i, j: i < j)
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "select"})
@@ -142,8 +142,8 @@ def test_select_with_guard():
             B_sbuf = T.alloc_buffer(dst_shape, "float32", scope="trn.sbuf", layout=dst_layout)
             for i in range(4):
                 for j in range(4):
-                    Tp.select(B_sbuf[0: (i+1) * 128, 0: (j+1) * 128], A_sbuf[0: (i+1) * 128, 0: (j+1) * 128], 0.0, lambda a, b: a < b)  
-         
+                    Tp.select(B_sbuf[0: (i+1) * 128, 0: (j+1) * 128], A_sbuf[0: (i+1) * 128, 0: (j+1) * 128], 0.0, lambda a, b: a < b)
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "select"})
@@ -155,7 +155,7 @@ def test_select_with_guard():
                 for p_loop in T.serial(0, 128, annotations={"nki_dim":"P"}):
                     for f_loop in T.serial(0, 512, annotations={"nki_dim":"F"}):
                         if b_loop - i < 1 and f_loop < j * 128 + 128:
-                            T.nki.affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0))         
+                            T.nki.affine_select(B_sbuf[p_loop, b_loop * 512 + f_loop], b_loop * 128 + p_loop < f_loop, A_sbuf[p_loop, b_loop * 512 + f_loop], T.float32(0.0))
     # fmt: on
     with target:
         mod = tvm.IRModule({"main": select})

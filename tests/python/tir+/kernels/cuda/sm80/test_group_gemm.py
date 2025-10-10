@@ -292,7 +292,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
 
             with T.thread():
                 @T.macro
-                def compute_tile(m_idx, n_idx):     
+                def compute_tile(m_idx, n_idx):
                     # init states
                     s_frag = T.alloc_local([NUM_MMA_M, NUM_MMA_N, 8], "float32")
 
@@ -306,11 +306,11 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
 
                     # expert
                     eid = int_cell(expert_ids[m_idx])
-                    
+
                     M_rows_per_thread = T.meta_var(ceildiv(BLK_M, AB_THR_LAYOUT_ROW * WARP_COUNT))
                     N_rows_per_thread = T.meta_var(ceildiv(BLK_N, AB_THR_LAYOUT_ROW * WARP_COUNT))
 
-                    # prefetch global 
+                    # prefetch global
                     thr_local_A_offset = T.alloc_local([M_rows_per_thread], "int32")
                     thr_local_B_offset = T.alloc_local([N_rows_per_thread], "int32")
 
@@ -337,7 +337,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     smem_offset_B_w = int_cell(get_permuted_offset(UPCAST_STRIDE_K, warp_id * AB_THR_LAYOUT_ROW + lane_id // AB_THR_LAYOUT_COL, lane_id % AB_THR_LAYOUT_COL))
                     smem_offset_A_r = int_cell(get_permuted_offset(UPCAST_STRIDE_K, warp_id_m * NUM_MMA_M * 16 + lane_id % 16, lane_id // 16))
                     smem_offset_B_r = int_cell(get_permuted_offset(UPCAST_STRIDE_K, warp_id_n * NUM_MMA_N * 16 + 8 * (lane_id // 16) + lane_id % 8, lane_id % 16 // 8))
-                    
+
                     smem_offset_A_w += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
                     smem_offset_B_w += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
                     smem_offset_A_r += wg_id * (SMEM_SIZE // FP16_BYTES // VEC_LEN)
@@ -361,12 +361,12 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                             thr_local_B_offset[i] += BLK_K
                             smem_offset_B_w = advance_offset_by_row(AB_THR_LAYOUT_ROW * WARP_COUNT, UPCAST_STRIDE_K, smem_offset_B_w)
                         smem_offset_B_w -= N_rows_per_thread * AB_THR_LAYOUT_ROW * WARP_COUNT * UPCAST_STRIDE_K
-                        
+
                     @T.macro
                     def compute_gemm(stage):
                         a_frag = T.alloc_local([NUM_MMA_M, 8], "float16")
                         b_frag = T.alloc_local([8], "float16")
-                        
+
                         for mma_k in range(MMA_K):
                             for mma_m in range(NUM_MMA_M):
                                 T.ptx.ldmatrix(False, 4, ".b16", a_frag.ptr_to([mma_m, 0]), A_smem.ptr_to([stage * BLK_M * BLK_K + smem_offset_A_r * VEC_LEN]))
@@ -402,7 +402,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                         async_load_A_to_smem(stage)
                         async_load_B_to_smem(stage)
                         T.ptx.cp_async.commit_group()
-                    
+
                     # epilogue
                     T.ptx.cp_async.wait_group(0)
                     scope_sync()

@@ -629,7 +629,7 @@ def test_ag_hgemm():
 
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
                 tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
-                
+
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
                     for ko in T.serial(PIPE_CYCLE):
@@ -661,7 +661,7 @@ def test_ag_hgemm():
                                 T.block_attr({"tirp.scope_partition": True})
                                 with T.warpgroup()[NUM_CONSUMER:NUM_CONSUMER + 1]:
                                     T.ptx.setmaxnreg(False, 56)
-                                    if warp_id == 3: 
+                                    if warp_id == 3:
                                         # GMEM -> SMEM  (tma)
                                         with T.thread()[T.ptx.elect_sync()]:
                                             n_start = T.meta_var((n_idx * CTA_GROUP + cbx) * BLK_N)
@@ -691,7 +691,7 @@ def test_ag_hgemm():
                                                     tma2mma.arrive_only(ks)
 
                                             paritioned_loop(tma_load, skip, tma_load_epilogue)
-                            
+
                                     elif warp_id < 2 and cbx == 0:
                                         with T.thread():
                                             if T.ptx.elect_sync():
@@ -703,16 +703,16 @@ def test_ag_hgemm():
                                                     # wait tma
                                                     tma2mma.wait(ks, 0, phase[0])
                                                     for ki in T.unroll(BLK_K // MMA_K):
-                                                        T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]), 
+                                                        T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]),
                                                                                                 ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                        T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]), 
+                                                        T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
                                                                                                 ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                        
+
                                                         if (stage == 0 and ki == 0) and ((not is_remain) or (is_remain and PIPE_CYCLE == 0)):
-                                                            T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB, 
+                                                            T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,
                                                                                 descI, False, CTA_GROUP, False)
                                                         else:
-                                                            T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB, 
+                                                            T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,
                                                                                 descI, False, CTA_GROUP, True)
                                                     mma2tma.arrive(ks)
 

@@ -293,7 +293,7 @@ def get_qwen3_megakernel_mod():
         @T.prim_func(private=True)
         def rms_norm(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
             pass
-        
+
         @T.prim_func(private=True)
         def rms_norm1(input_ptr: T.handle, weight_ptr: T.handle, out_ptr: T.handle):
             pass
@@ -367,7 +367,7 @@ def get_qwen3_megakernel_mod():
         @T.prim_func(private=True)
         def hgemm1(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle):
             pass
-        
+
         @T.prim_func(private=True)
         def reduce1(partial_sum_ptr: T.handle, D_ptr: T.handle):
             pass
@@ -403,7 +403,7 @@ def get_qwen3_megakernel_mod():
         @T.prim_func(private=True)
         def reduce5(partial_sum_ptr: T.handle, D_ptr: T.handle):
             pass
-        
+
         @T.prim_func(private=True)
         def rope(q: T.handle, cos_sin_cache: T.handle, pos_ids: T.handle, q_rope: T.handle):
             pass
@@ -419,7 +419,7 @@ def get_qwen3_megakernel_mod():
         @T.prim_func(private=True)
         def cos_sin_cache(cos_sin_cache: T.handle):
             pass
-        
+
         @R.function
         def cos_sin_cache_func(cache: R.Tensor((MAX_SEQ_LEN, 128), dtype="float32")):
             cls = Module
@@ -446,13 +446,13 @@ def get_qwen3_megakernel_mod():
                 R.Tensor((5120,), dtype="float16"),
                 R.Tensor((151936, 5120), dtype="float16"),
             ),
-        ):    
+        ):
             batch_size = T.int64()
             new_batch_size = T.int64()
             total_page_num = T.int64()
             max_page_num = T.int64()
             page_size = T.int64()
-            
+
             R.func_attr({"num_input": 2})
             cls = Module
             with R.dataflow():
@@ -547,10 +547,10 @@ def get_qwen3_megakernel_mod():
                 k_rope = R.reshape(k, (batch_size, 1, 8, 128))
                 # append
                 append_position_map_rs = R.reshape(append_position_map, (batch_size, 1))
-                new_kv_data = R.call_tir_inplace(cls.append_paged_kv_cache, (kv_data[0], k_rope, v, append_position_map_rs), [0], 
+                new_kv_data = R.call_tir_inplace(cls.append_paged_kv_cache, (kv_data[0], k_rope, v, append_position_map_rs), [0],
                                                  out_sinfo=R.Tensor((max_page_num, 2, 8, page_size, 128), dtype="float16"))
                 # attention
-                o = R.call_tir(cls.decode, 
+                o = R.call_tir(cls.decode,
                                (q_rope, new_kv_data, plan_lse_tvm, kv_indptr, kv_last_page_len, kv_indices, plan_request_indices, plan_kv_tile_indices, plan_max_chunk_size), out_sinfo=R.Tensor((batch_size, 64, 128), dtype="float16"))
                 reshape3 = R.reshape(o, (batch_size, 8192))
                 #########################################################

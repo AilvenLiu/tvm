@@ -138,7 +138,7 @@ class GemmTile(Tile):
         self.profiler_on = profiler_on
         self.TILE_K = ceildiv(ceildiv(self.K, self.split_k_factor), self.BLK_K) * self.BLK_K
         self.PIPE_CIRCLE_NUM = (self.TILE_K // self.BLK_K) // self.SMEM_PIPE_DEPTH
-        self.PIPE_REMAIN_NUM = (self.TILE_K // self.BLK_K) % self.SMEM_PIPE_DEPTH 
+        self.PIPE_REMAIN_NUM = (self.TILE_K // self.BLK_K) % self.SMEM_PIPE_DEPTH
         self.M_pad_size = BLK_M
 
     def _alloc_buffer(self, smem_manager: SmemManager):
@@ -243,19 +243,19 @@ class GemmTile(Tile):
 
     @T.macro
     def host_init(self):
-        T.call_packed("runtime.cuTensorMapEncodeTiled", self.A_tensor_map, self.a_type, 2, self.A.data, 
+        T.call_packed("runtime.cuTensorMapEncodeTiled", self.A_tensor_map, self.a_type, 2, self.A.data,
                       self.K, self.M, self.K * F16_BYTES, self.BLK_K, self.BLK_M, 1, 1, 0, self.SWIZZLE, 0, 0)
-        T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 2, self.B.data, 
+        T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 2, self.B.data,
                       self.K, self.N, self.K * F16_BYTES, self.BLK_K, self.BLK_N, 1, 1, 0, self.SWIZZLE, 0, 0)
         if self.split_k_factor > 1:
             if not self.use_tma_reduce:
-                T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 3, self.output.data, 
+                T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 3, self.output.data,
                             self.N, self.M, self.split_k_factor, self.N * F32_BYTES, self.N * self.M * F32_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 1, 1, 0, 0, 0, 0)
             else:
-                T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data, 
-                          self.N, self.M, self.N * F32_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)   
+                T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data,
+                          self.N, self.M, self.N * F32_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
         else:
-            T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data, 
+            T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data,
                           self.N, self.M, self.N * F16_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
 
     # call by warp 7 (tmp load warp)
@@ -408,7 +408,7 @@ class GemmTile(Tile):
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            with T.cta():            
+            with T.cta():
                 T.block_attr({"tirp.scope_partition": True})
                 with T.warpgroup()[1:2]:
                     if warp_id == 3:
@@ -526,7 +526,7 @@ class GemmTile(Tile):
                                 for ks in T.unroll(self.SMEM_PIPE_DEPTH):
 
                                     # wait tma and sf-transpose arrival
-                                    if not self.wait_complete:  
+                                    if not self.wait_complete:
                                         self.tma2mma_bar.wait(ks, self.phase[0])
                                         # T.ptx.tcgen05.fence.after_thread_sync()
                                     if self.PIPE_REMAIN_NUM > 0 or ko != self.PIPE_REMAIN_NUM - 1 or ks != self.SMEM_PIPE_DEPTH - 1:
@@ -604,7 +604,7 @@ class GemmTile(Tile):
                                 for ks in T.unroll(self.PIPE_REMAIN_NUM):
 
                                     # wait tma and sf-transpose arrival
-                                    if not self.wait_complete:  
+                                    if not self.wait_complete:
                                         self.tma2mma_bar.wait(ks, self.phase[0])
                                         # T.ptx.tcgen05.fence.after_thread_sync()
                                     if ks != self.PIPE_REMAIN_NUM - 1:
@@ -688,7 +688,7 @@ class GemmTile(Tile):
                         for ks in T.unroll(self.SMEM_PIPE_DEPTH):
                             self.mma2tma_bar.wait(ks, self.phase[0])
                             self.smem_manager.arrive_specific(lane_id, self.B_smem, ks)
-                            self.smem_manager.arrive_specific(lane_id, self.A_smem, ks)   
+                            self.smem_manager.arrive_specific(lane_id, self.A_smem, ks)
 
                 with T.warpgroup()[0:1]:
                     self._consumer_wg(m_idx, n_idx, k_idx)

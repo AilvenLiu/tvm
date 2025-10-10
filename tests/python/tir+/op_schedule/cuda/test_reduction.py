@@ -93,7 +93,7 @@ def test_reduction_op_shared(input, op_type, dtype):
     def test_reduction(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, g_shape_a, dtype, layout=g_layout_a)
         B = T.match_buffer(B_ptr, g_shape_b, dtype, layout=g_layout_b)
-        
+
         with T.kernel():
             bx = T.cta_id([1], parent="kernel")
             tx = T.thread_id([thread_cnt], parent="cta")

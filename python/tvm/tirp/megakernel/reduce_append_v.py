@@ -34,9 +34,9 @@ class SplitKReduceAppendVTile(Tile):
         self.vec_32 = T.alloc_local([self.VEC_SIZE_16], "float32", name="vec_32")
         self.tmp = T.alloc_local([self.VEC_SIZE_16], "float32", name="tmp")
         self.vec_16 = T.alloc_local([self.VEC_SIZE_16], "float16", name="vec_16")
-            
 
-    
+
+
     # handle: [batch_size, h_tile * head_dim]
     # bdx, bdy = head_dim // VEC_SIZE_16, NUM_THREADS // bdx
     @T.macro
@@ -52,7 +52,7 @@ class SplitKReduceAppendVTile(Tile):
                 while self.idx < self.m_tile * self.h_tile and m_idx * self.m_tile + self.idx // self.h_tile < self.batch_size:
                     batch_idx = T.meta_var(m_idx * self.m_tile + self.idx // self.h_tile)
                     head_idx = T.meta_var(n_idx * self.h_tile + self.idx % self.h_tile)
-                    
+
                     if batch_idx < self.batch_size and head_idx < self.kv_heads:
                         # reduce
                         qkv_stx = T.meta_var((self.qo_heads + self.kv_heads + head_idx) * self.head_dim + tx * self.VEC_SIZE_16)

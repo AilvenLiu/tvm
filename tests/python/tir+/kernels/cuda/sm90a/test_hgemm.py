@@ -49,7 +49,7 @@ def test_hgemm_hopper_ws_cooperative():
     def ceildiv(a, b):
         return (a + b - 1) // b
 
-    
+
 
     class PipelineState:
         def __init__(self, prefix: str):
@@ -107,7 +107,7 @@ def test_hgemm_hopper_ws_cooperative():
         B = T.match_buffer(B_ptr, (K, N), "float16", scope="global", layout=T.TileLayout((K, N)))
         C = T.match_buffer(C_ptr, (M, N), "float32", scope="global", layout=T.TileLayout((M, N)))
 
-    
+
         A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         B_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         C_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
@@ -356,7 +356,7 @@ def test_hgemm_hopper_no_ws():
     WG_SIZE = 128
     TMA_BYTES = BLK_M * BLK_K * f16_bytes + BLK_K * BLK_N * f16_bytes
 
-    
+
 
     # fmt: off
     @T.macro

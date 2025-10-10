@@ -60,10 +60,10 @@ class GroupGEMMTile(GemmTile):
     def _init_A_and_output_tensor_maps(self, BLK_M):
         A_tensor_map = T.meta_var(self.A_tensor_maps[BLK_M])
         output_tensor_map = T.meta_var(self.output_tensor_maps[BLK_M])
-        T.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, self.a_type, 2, self.A.data, 
+        T.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, self.a_type, 2, self.A.data,
                       self.K, self.M, self.K * F16_BYTES, self.BLK_K, BLK_M, 1, 1, 0, self.SWIZZLE, 0, 0)
         if not self.acc_output:
-            T.call_packed("runtime.cuTensorMapEncodeTiled", output_tensor_map, self.out_type, 2, self.output.data, 
+            T.call_packed("runtime.cuTensorMapEncodeTiled", output_tensor_map, self.out_type, 2, self.output.data,
                         self.N, self.M, self.N * F16_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
 
     def _init_A_and_output_helper(self):
@@ -73,13 +73,13 @@ class GroupGEMMTile(GemmTile):
     @T.macro
     def host_init(self):
         self._init_A_and_output_helper()
-        T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 3, self.B.data, 
+        T.call_packed("runtime.cuTensorMapEncodeTiled", self.B_tensor_map, self.b_type, 3, self.B.data,
                       self.K, self.N, self.num_experts, self.K * F16_BYTES, self.K * self.N * F16_BYTES, self.BLK_K, self.BLK_N, 1, 1, 1, 1, 0, self.SWIZZLE, 0, 0)
 
-    def set_tensor_map(self, A_tensor_maps, B_tensor_map, output_tensor_maps, A, B, output):        
+    def set_tensor_map(self, A_tensor_maps, B_tensor_map, output_tensor_maps, A, B, output):
         assert len(A_tensor_maps) >= len(self.BLK_M_candidate)
         assert len(output_tensor_maps) >= len(self.BLK_M_candidate)
-        for i, BLK_M in enumerate(self.BLK_M_candidate[:len(A_tensor_maps)]):    
+        for i, BLK_M in enumerate(self.BLK_M_candidate[:len(A_tensor_maps)]):
             self.A_tensor_maps[BLK_M] = A_tensor_maps[i]
             self.output_tensor_maps[BLK_M] = output_tensor_maps[i]
         self.B_tensor_map = B_tensor_map
@@ -101,7 +101,7 @@ class GroupGEMMTile(GemmTile):
         self.eid = T.local_cell("int32", name="eid")
         T.buffer_store(self.eid.buffer, self.expert_ids[m_idx], 0)
 
-    @property   
+    @property
     def A_tensor_map(self):
         return self.A_tensor_maps[self.BLK_M]
 
@@ -123,7 +123,7 @@ class GroupGEMMTile(GemmTile):
             cta_group=KernelConfig.CTA_GROUP,
             cache_hint=cache_hint,
         )
-        
+
     @classmethod
     def class_init(cls, smem_manager: SmemManager):
         super().class_init(smem_manager)

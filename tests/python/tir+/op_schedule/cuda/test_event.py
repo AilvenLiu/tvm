@@ -97,7 +97,7 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
     def copy_async(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
         B = T.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
-        
+
         with T.kernel():
             bx = T.cta_id([1], parent="kernel")
             tx = T.thread_id([thread_cnt], parent="cta")
@@ -618,14 +618,14 @@ def test_kernel_sempaphore():
         with T.kernel():
             bx = T.cta_id([128], parent="kernel")
             tx = T.thread_id([128], parent="cta")
-            
+
             state = T.alloc_local((1,), "int32")
             evt = Tp.alloc_semaphore_event_tensor(EventImpl.kGlobalSemaphore, state=[sem, state], shape=[64])
 
             T.tvm_global_barrier_kinit()
             evt.init(1)
             T.tvm_storage_sync("global", True, 128)
-            
+
             with T.cta()[0:64]:
                 evt[bx].commit()
             with T.cta()[64:128]:

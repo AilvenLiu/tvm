@@ -374,7 +374,7 @@ def test_roundtrip_tensormap():
     def func1(A_ptr: T.handle):
         T.func_attr({"global_symbol": "func"})
         A = T.match_buffer(A_ptr, [128], "float32")
-    
+
         A_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
         T.call_packed("runtime.tensormap_init", A_map, A_ptr)
     # fmt: on
@@ -791,7 +791,7 @@ def test_macro():
 
                 two_add_and_mul(1)
                 two_add_and_mul(2)
-                
+
 
     @T.prim_func(tirp=True, private=True)
     def expected():
@@ -897,7 +897,7 @@ def test_range():
     def test():
         l = T.meta_var([i for i in range(10)])
         T.evaluate(l[3])
-        
+
     @T.prim_func(tirp=True, private=True)
     def expected():
         T.evaluate(3)

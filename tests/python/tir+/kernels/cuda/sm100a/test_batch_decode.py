@@ -251,9 +251,9 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
 
         # fmt: off
         @T.prim_func(tirp=True)
-        def decode_kernel(q_ptr: T.handle, kv_ptr: T.handle, lse_ptr: T.handle, kv_indptr: T.handle, kv_last_page_len: T.handle, 
+        def decode_kernel(q_ptr: T.handle, kv_ptr: T.handle, lse_ptr: T.handle, kv_indptr: T.handle, kv_last_page_len: T.handle,
                           kv_indices: T.handle, request_indices: T.handle, kv_tile_indices: T.handle, max_chunk_size: T.handle, o_ptr: T.handle):
-            
+
             batch_size = T.int32()
             max_page_num = T.int32()
             total_page_num = T.int32()
@@ -261,7 +261,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
             request_indices_global_elem_offset = T.int32()
             kv_tile_indices_global_elem_offset = T.int32()
             max_chunk_size_global_elem_offset = T.int32()
-            
+
             q_global = T.match_buffer(q_ptr, [batch_size, QO_HEADS, HEAD_DIM], "float16", scope="global")
             kv_global = T.match_buffer(kv_ptr, [max_page_num, 2, KV_HEADS, PAGE_SIZE, HEAD_DIM], "float16", scope="global")
             kv_indptr_global = T.match_buffer(kv_indptr, [batch_size + 1], "int32", scope="global", offset_factor=1)
@@ -312,7 +312,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                         cur = T.alloc_local([1], "int32")
                         evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
                         tx_start = T.meta_var(tx * VEC_SIZE)
-                        
+
                         @T.macro
                         def fetch_kv_offset(kt, kv_head_id_beg, offset):
                             token_id = T.meta_var(chunk_start_logical[0] + offset)
@@ -320,7 +320,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 p = T.meta_var(token_id // PAGE_SIZE)
                                 r = T.meta_var(token_id % PAGE_SIZE)
                                 indices[0] = T.cuda.ldg(kv_indices_global.ptr_to([p]), "int32")
-                                kv_offset[tz, tx, ty, kt] = (indices[0] * 2 * KV_HEADS * PAGE_SIZE * HEAD_DIM 
+                                kv_offset[tz, tx, ty, kt] = (indices[0] * 2 * KV_HEADS * PAGE_SIZE * HEAD_DIM
                                                                   + kv_head_id_beg * PAGE_SIZE * HEAD_DIM + r * HEAD_DIM)
                         @T.macro
                         def sync_blk():
@@ -328,7 +328,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 T.ptx.bar.sync(1 + tz, BDX * BDY)
                             else:
                                 T.ptx.bar.sync(1, BDX * BDY * BDZ)
-                            
+
                         cur[0] = bx
                         while cur[0] < new_batch_size * KV_HEADS // HEAD_PER_CTA:
                             new_batch_id = T.meta_var(cur[0] * HEAD_PER_CTA // KV_HEADS)
@@ -345,13 +345,13 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                             chunk_end_logical[0] = chunk_start_logical[0]
                             if SPLIT_KV:
                                 chunk_start_logical[0] += max_chunk_size_global[0] * kv_tile_indices_global[new_batch_id]
-                                chunk_end_logical[0] = T.min(chunk_start_logical[0] + max_chunk_size_global[0], 
-                                                            chunk_end_logical[0] + (kv_indptr_global[batch_idx[0] + 1] - kv_indptr_global[batch_idx[0]] - 1) * PAGE_SIZE 
+                                chunk_end_logical[0] = T.min(chunk_start_logical[0] + max_chunk_size_global[0],
+                                                            chunk_end_logical[0] + (kv_indptr_global[batch_idx[0] + 1] - kv_indptr_global[batch_idx[0]] - 1) * PAGE_SIZE
                                                             + kv_last_page_len_global[batch_idx[0]])
                             else:
                                 chunk_end_logical[0] += (kv_indptr_global[batch_idx[0] + 1] - kv_indptr_global[batch_idx[0]] - 1) * PAGE_SIZE + kv_last_page_len_global[batch_idx[0]]
                             chunk_size[0] = chunk_end_logical[0] - chunk_start_logical[0]
-                                
+
                             # fetch kv-offset
                             for kt in T.unroll(TILE_PER_BDX):
                                 fetch_kv_offset(kt, kv_head_id_beg, ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)
@@ -393,10 +393,10 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 # fetch new kv-offset
                                 if ((ki + PIPE_DEPTH) % BDX == 0):
                                     for kt in T.unroll(TILE_PER_BDX):
-                                        fetch_kv_offset(kt, kv_head_id_beg, 
+                                        fetch_kv_offset(kt, kv_head_id_beg,
                                                         (ki + PIPE_DEPTH) * TILE_PER_BDX * BDY * BDZ  + ((tx * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt)
                                     T.ptx.fence.proxy("shared")
-                            
+
                                 # compute qk
                                 evt.wait(2 * PIPE_DEPTH - 1) # wait for K
                                 sync_blk()
@@ -418,7 +418,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                             s[kb, kt] = T.float32('-inf')
                                         # update max value
                                         m[kb, 0] = T.max(m[kb, 0], s[kb, kt])
-                                        
+
                                 # update the sum for softmax
                                 if TILE_PER_BDX * BDY * tz < chunk_size[0]:
                                     for kb in T.unroll(HEAD_PER_CTA):
@@ -430,7 +430,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                         for kv in T.unroll(VEC_SIZE):
                                             o[kb, kv] = o[kb, kv] * o_scale
                                 sync_blk()
-                                
+
                                 # get kv-offset used in cp
                                 for kt in T.unroll(TILE_PER_BDX):
                                     kv_offset_cp[kt] = kv_offset[tz, (ki + PIPE_DEPTH) % BDX, ty, kt] + tx * VEC_SIZE
@@ -509,7 +509,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                         Tp.copy(o_global[new_batch_id, qo_head_id, tx_start:tx_start + VEC_SIZE], tmp[kb, :])
                                     if tx == 0:
                                         lse_global[new_batch_id, qo_head_id] = m[kb, 0] + T.log2(d[kb, 0])
-                            
+
                             cur[0] += SM_COUNT
         # fmt: on
         return decode_kernel
@@ -577,15 +577,15 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     Tp.copy(o_global[batch_idx[0], head_idx[0], tx_start:tx_start + VEC_SIZE], tmp[:])
                                     lse_global[batch_idx[0], head_idx[0]] = lse_tmp_global[new_beg_batch_idx[0], head_idx[0]]
                                 continue
-                                
+
                             # pipeline
                             for kp in T.unroll(PIPE_DEPTH):
                                 if kp * BDY + ty < num[0]:
-                                    Tp.copy_async(o_tmp_smem[kp, ty, tx_start:tx_start + VEC_SIZE], 
+                                    Tp.copy_async(o_tmp_smem[kp, ty, tx_start:tx_start + VEC_SIZE],
                                                   o_tmp_global[new_beg_batch_idx[0] + kp * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
                                                   evt, vec_len=VEC_SIZE)
                                 evt.commit()
-                            
+
                             # initialize the value
                             m[0] = T.float32('-inf')
                             d[0] = 1.0
@@ -609,7 +609,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 for kv in T.serial(VEC_SIZE):
                                     o_tmp[kv] = o_tmp_smem[ki % PIPE_DEPTH, ty, tx * VEC_SIZE + kv]
                                 if ki * BDY + ty < num[0]:
-                                    m_tmp[0] = lse_tmp_smem_use[ki % BDX, ty] 
+                                    m_tmp[0] = lse_tmp_smem_use[ki % BDX, ty]
                                     m[1] = m[0]
                                     d[1] = d[0]
                                     m[0] = T.max(m[1], m_tmp[0])
@@ -618,7 +618,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                         o[kv] = o[kv] * T.exp2(m[1] - m[0]) + o_tmp[kv] * T.exp2(m_tmp[0] - m[0])
                                 T.ptx.bar.sync(2, BDX * BDY)
                                 if (PIPE_DEPTH + ki) * BDY + ty < num[0]:
-                                    Tp.copy_async(o_tmp_smem[ki % PIPE_DEPTH, ty, tx_start:tx_start + VEC_SIZE], 
+                                    Tp.copy_async(o_tmp_smem[ki % PIPE_DEPTH, ty, tx_start:tx_start + VEC_SIZE],
                                                   o_tmp_global[new_beg_batch_idx[0] + (ki + PIPE_DEPTH) * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
                                                   evt, vec_len=VEC_SIZE)
                                 evt.commit()
@@ -649,10 +649,10 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     d[0] = d[1] * T.exp2(m[1] - m[0]) + T.exp2(m_tmp[0] - m[0])
                                     for kv in T.unroll(VEC_SIZE):
                                         o[kv] = o[kv] * T.exp2(m[1] - m[0]) + o_tmp[kv] * T.exp2(m_tmp[0] - m[0])
-                                          
+
                                 for kv in T.unroll(VEC_SIZE):
                                     o[kv] = o[kv] / d[0]
-                                
+
                                 # store to global mem
                                 Tp.cast(tmp[:], o[:])
                                 Tp.copy(o_global[batch_idx[0], head_idx[0], tx_start:tx_start + VEC_SIZE], tmp[:])

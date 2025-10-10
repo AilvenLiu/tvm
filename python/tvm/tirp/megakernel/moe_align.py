@@ -126,7 +126,7 @@ class MOEAlignTile(Tile):
                         num_valid_tokens[idx[0]] = self.block_size
                     else:
                         num_valid_tokens[idx[0]] = (self.shared_counts[left[0]-1] - 1) % self.block_size + 1
-                     
+
                 idx[0] += KernelConfig.NUM_THREADS
             if self.pad_sorted_token_ids:
                 VEC_SIZE = 4
@@ -144,7 +144,7 @@ class MOEAlignTile(Tile):
 
 class CountAndSortExpertTokens(Tile):
 
-    VEC_SIZE = 16 // F16_BYTES 
+    VEC_SIZE = 16 // F16_BYTES
     PIPE_DEPTH = 8
 
     def __init__(self, numel, hidden_size, topk):

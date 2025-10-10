@@ -41,7 +41,7 @@ def test_simple_gemm():
             B_sbuf = T.alloc_buffer((128, 128), "float32", scope="trn.sbuf", layout=B_layout)
             C_psum = T.alloc_buffer((128, 128), "float32", scope="trn.psum", layout=C_layout)
             Tp.gemm(C_psum, A_sbuf, B_sbuf, C_psum)
-            
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "gemm"})
@@ -120,7 +120,7 @@ def test_gemm_in_a_loop():
                         B_sbuf[512 * k : 512 * k + 512, :],
                         C_psum[256 * i : 256 * i + 256, :],
                     )
-                    
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "gemm"})
@@ -163,7 +163,7 @@ def test_gemm_with_stride():
                         B_sbuf[:, k, :],
                         C_psum[256 * i : 256 * i + 256, :],
                     )
-                    
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "gemm"})
@@ -207,7 +207,7 @@ def test_gemm_swap_lhs_rhs():
                         B_sbuf[512 * k : 512 * k + 512, :],
                         C_psum[256 * i : 256 * i + 256, :],
                     )
-                    
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "gemm"})
@@ -300,7 +300,7 @@ def test_gemm_different_shape():
                         B_sbuf[512 * k : 512 * k + 512, :],
                         C_psum[256 * i : 256 * i + 256, :],
                     )
-                    
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "gemm"})
@@ -335,7 +335,7 @@ def test_gemm_too_large_f_size():
             B_sbuf = T.alloc_buffer((128, 1024), "float32", scope="trn.sbuf", layout=B_layout)
             C_psum = T.alloc_buffer((256, 1024), "float32", scope="trn.psum", layout=C_layout)
             Tp.gemm(C_psum, A_sbuf, B_sbuf, C_psum)
-            
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "gemm"})
@@ -458,7 +458,7 @@ def test_gemm_transpose_AB():
                         transpose_A=True,
                         transpose_B=True,
                     )
-    
+
     @T.prim_func(tirp=True)
     def expected():
         T.func_attr({"global_symbol": "gemm"})
@@ -472,7 +472,7 @@ def test_gemm_transpose_AB():
                   for lhs_f_loop in T.serial(0, 128, annotations={"nki_dim":"lhs_F"}):
                     for rhs_f_loop in T.serial(0, 256, annotations={"nki_dim":"rhs_F"}):
                         T.nki.matmul(C_psum[i, lhs_f_loop, lhs_b_loop * 256 + rhs_f_loop], A_sbuf[p_loop, i * 2048 + lhs_b_loop * 1024 + k * 512 + reduction_b_loop * 128 + lhs_f_loop], B_sbuf[p_loop, k * 1024 + reduction_b_loop * 256 + rhs_f_loop], True)
- 
+
     #fmt: off
     with target:
         mod = tvm.IRModule({"main": gemm})

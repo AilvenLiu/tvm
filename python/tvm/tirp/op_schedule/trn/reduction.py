@@ -182,7 +182,7 @@ def reduction_trn(
                             inst_gen.set_bind_map(dst_buffer_region, {p_var: p_loop, spatial_b_var: b_loop})
                             if inst_gen.make_guard(src_buffer_region):
                                 dst_indices = T.meta_var(inst_gen.generate_indices(dst_buffer_region))
-                                T.evaluate(T.nki.tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))    
+                                T.evaluate(T.nki.tensorreduce(dst[dst_indices], intermediate_buffer[p_loop, f_loop], opcode, negate, -1))
         return two_stage_reduction
     # fmt: on
 

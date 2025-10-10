@@ -61,19 +61,19 @@ def get_fused_split_silu_multiply_kernel_cp_sync(out_dim):
     def fused_split_silu_multiply(input_cat_ptr: T.handle, output_ptr: T.handle):
         batch_size = T.int32()
 
-        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")    
+        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")
         output_global = T.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
 
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")
             tx, ty = T.thread_id([BDX, BDY], parent="cta")
             thread_id = T.meta_var(ty * BDX + tx)
-            
+
             with T.thread():
                 idx = T.alloc_local([1], "int32")
                 vec1 = T.alloc_local([VEC_SIZE], "float16")
                 vec2 = T.alloc_local([VEC_SIZE], "float16")
-                
+
                 idx[0] = bx * BDX * BDY + thread_id
                 while idx[0] * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
                     intermediate_idx = T.meta_var((idx[0] * VEC_SIZE) % INTERMEDIATE_SIZE)
@@ -105,13 +105,13 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
     def fused_split_silu_multiply(input_cat_ptr: T.handle, output_ptr: T.handle):
         batch_size = T.int32()
 
-        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")    
+        input_cat_global = T.match_buffer(input_cat_ptr, [batch_size, INTERMEDIATE_SIZE * 2], "float16", scope="global")
         output_global = T.match_buffer(output_ptr, [batch_size, INTERMEDIATE_SIZE], "float16", scope="global")
 
         with T.kernel():
             bx = T.cta_id([SM_COUNT], parent="kernel")
             tx = T.thread_id([THREAD_NUM], parent="cta")
-            
+
             with T.thread():
                 idx = T.alloc_local([1], "int32")
                 shared_buf = T.alloc_buffer([PIPE_DEPTH, 2, THREAD_NUM, VEC_SIZE], "float16", scope="shared.dyn")
@@ -128,7 +128,7 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
                         Tp.copy_async(shared_buf[idx[0], 1, tx, :], input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx:INTERMEDIATE_SIZE + intermediate_idx + VEC_SIZE], evt, vec_len=VEC_SIZE)
                     evt.commit()
                     idx[0] += 1
-                
+
                 idx[0] = 0
                 while real_idx * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
                     intermediate_idx = T.meta_var((real_idx * VEC_SIZE) % INTERMEDIATE_SIZE)

@@ -249,7 +249,7 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
     def copy_sync(A_ptr: T.handle, B_ptr: T.handle) -> None:
         A = T.match_buffer(A_ptr, (128, WIDTH), dtype)
         B = T.match_buffer(B_ptr, (128, WIDTH), dtype)
-        
+
         A_flat = A.view(-1)
         B_flat = B.view(-1)
 

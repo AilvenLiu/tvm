@@ -42,7 +42,7 @@ class Semaphore:
         self.cnt = cnt
         self.sem = buffer
         self.state = T.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
-        
+
     @T.macro
     def semaphore_wait(self, *coord):
         with T.thread():
@@ -51,8 +51,8 @@ class Semaphore:
                 if T.cuda.syncthreads_and(self.state[0] == self.cnt):
                     break
                 T.cuda.nano_sleep(40)
-                
-    @T.macro 
+
+    @T.macro
     def semaphore_notify(self, *coord):
         with T.thread():
             T.cuda.cta_sync()
@@ -65,25 +65,25 @@ class Semaphore:
 def partial_reduction_ref_stage1(A: T.handle, B: T.handle):
     A_ptr = T.match_buffer(A, (M, N), "float32")
     B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
-    
+
     with T.kernel():
         bx, by = T.cta_id([NUM_BLOCK_M, NUM_BLOCK_N], parent="kernel")
         tx = T.thread_id([1024], parent="cta")
-        
+
         with T.cta():
             A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
             B_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-            Tp.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])                
+            Tp.copy(A_smem, A_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by * BLOCK_N: (by + 1) * BLOCK_N])
             Tp.sum(B_smem, A_smem)
-            
+
             Tp.copy(B_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, by], B_smem)
-            
+
 
 @T.prim_func(tirp=True)
 def partial_reduction_ref_stage2(B: T.handle, C: T.handle):
     B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
     C_ptr = T.match_buffer(C, (M, 1), "float32")
-    
+
     with T.kernel():
         bx = T.cta_id([NUM_BLOCK_M], parent="kernel")
         tx = T.thread_id([1024], parent="cta")
@@ -93,11 +93,11 @@ def partial_reduction_ref_stage2(B: T.handle, C: T.handle):
             Tp.copy(B_smem, B_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, :])
             Tp.sum(C_smem, B_smem)
             Tp.copy(C_ptr[bx * BLOCK_M: (bx + 1) * BLOCK_M, 0], C_smem)
-            
+
 STAGE_1_SM_CNT = 116
 STAGE_2_SM_CNT = 16
 TOTAL_SM_CNT = STAGE_1_SM_CNT + STAGE_2_SM_CNT
-            
+
 class SpatialTileScheduler:
     def __init__(self, prefix: str, tile_num: Tuple[int, int], sm_cnt: int):
         self.tile_num = tile_num
@@ -105,12 +105,12 @@ class SpatialTileScheduler:
         self.m_idx = T.alloc_local([1], "int32", name=prefix + "_m_idx")
         self.n_idx = T.alloc_local([1], "int32", name=prefix + "_n_idx")
         self.linear_idx = T.alloc_local([1], "int32", name=prefix + "_linear_idx")
-        
+
     def get_current_m_n_idx(self, linear_idx):
         row = linear_idx // self.tile_num[1]
         col = linear_idx % self.tile_num[1]
         return row, col
-    
+
     @T.macro
     def init(self, linear_init):
         self.linear_idx[0] = linear_init
@@ -122,18 +122,18 @@ class SpatialTileScheduler:
         self.linear_idx[0] = self.linear_idx[0] + self.sm_cnt
         self.m_idx[0] = self.get_current_m_n_idx(self.linear_idx[0])[0]
         self.n_idx[0] = self.get_current_m_n_idx(self.linear_idx[0])[1]
-        
+
     def valid(self):
         return self.linear_idx[0] < functools.reduce(lambda x, y: x * y, self.tile_num)
 
-            
+
 @T.prim_func(tirp=True)
 def partial_reduction_fused(A: T.handle, B: T.handle, C: T.handle, semaphore: T.handle):
     A_ptr = T.match_buffer(A, (M, N), "float32")
     B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
     C_ptr = T.match_buffer(C, (M, 1), "float32")
     sem_ptr = T.match_buffer(semaphore, (NUM_BLOCK_M, ), "int32")
-    
+
     with T.kernel():
         bx = T.cta_id([TOTAL_SM_CNT], parent="kernel")
         tx = T.thread_id([1024], parent="cta")
@@ -146,7 +146,7 @@ def partial_reduction_fused(A: T.handle, B: T.handle, C: T.handle, semaphore: T.
             while stage1_scheduler.valid():
                 m_idx = T.meta_var(stage1_scheduler.m_idx[0])
                 n_idx = T.meta_var(stage1_scheduler.n_idx[0])
-                Tp.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])                
+                Tp.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])
                 Tp.sum(B_smem, A_smem)
                 Tp.copy(B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx], B_smem)
                 sem.semaphore_notify(m_idx)
@@ -164,7 +164,7 @@ def partial_reduction_fused(A: T.handle, B: T.handle, C: T.handle, semaphore: T.
                 Tp.copy(C_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, 0], C_smem)
                 stage2_scheduler.next_tile()
 
- 
+
 @T.prim_func(tirp=True)
 def partial_reduction_fused_event(A: T.handle, B: T.handle, C: T.handle, semaphore: T.handle):
     A_ptr = T.match_buffer(A, (M, N), "float32")
@@ -187,7 +187,7 @@ def partial_reduction_fused_event(A: T.handle, B: T.handle, C: T.handle, semapho
             while stage1_scheduler.valid():
                 m_idx = T.meta_var(stage1_scheduler.m_idx[0])
                 n_idx = T.meta_var(stage1_scheduler.n_idx[0])
-                Tp.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])                
+                Tp.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])
                 Tp.sum(B_smem, A_smem)
                 Tp.copy(B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx], B_smem)
                 sem[m_idx].commit()
@@ -203,7 +203,7 @@ def partial_reduction_fused_event(A: T.handle, B: T.handle, C: T.handle, semapho
                 Tp.copy(B_smem, B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, :])
                 Tp.sum(C_smem, B_smem)
                 Tp.copy(C_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, 0], C_smem)
-                stage2_scheduler.next_tile()                
+                stage2_scheduler.next_tile()
 # fmt: on
 
 

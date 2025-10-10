@@ -308,7 +308,7 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
                 A_local = T.alloc_local([8], a_type)
                 B_local = T.alloc_local([4], b_type)
                 C_local = T.alloc_local([4], c_type)
-                
+
                 @T.macro
                 def G2L(buf_local, buf_global, block_8x8, mode="row"):
                     if mode == "row":
@@ -338,13 +338,13 @@ def test_ptx_mma_half_m16n8k16(d_type, no_c_ptr):
                 G2L(C_local, C, 2)
 
                 if no_c_ptr:
-                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type, 
+                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]))
                 else:
-                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type, 
+                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))
 
-                L2G(D_local, D, 2)    
+                L2G(D_local, D, 2)
     # fmt: on
 
     src, mod = _get_source(main)
@@ -424,18 +424,18 @@ def test_ptx_mma_half_m16n8k8(d_type, no_c_ptr):
                             buf_global[row, col + j] = buf_local[i * 2 + j]
 
                 G2L(D_local, D, 2)
-                G2L(A_local, A, 2)  
+                G2L(A_local, A, 2)
                 G2L(B_local, B, 1, "col")
                 G2L(C_local, C, 2)
 
                 if no_c_ptr:
-                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type, 
+                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]))
                 else:
-                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type, 
+                    T.ptx.mma(shape, a_layout, b_layout, d_type, a_type, b_type, c_type,
                               D_local.ptr_to([0]), A_local.ptr_to([0]), B_local.ptr_to([0]), C_local.ptr_to([0]))
 
-                L2G(D_local, D, 2)    
+                L2G(D_local, D, 2)
     # fmt: on
 
     src, mod = _get_source(main)

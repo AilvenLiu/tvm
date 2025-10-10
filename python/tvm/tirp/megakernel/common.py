@@ -30,7 +30,7 @@ class JobType(Enum):
     DOWN_PROJ_REDUCE = 13
     GEMM_DOWN_PROJ = 14
     SPLIT_SILU_MULTIPLY = 15
-    GEMM_GATE_UP_PROJ = 16 
+    GEMM_GATE_UP_PROJ = 16
     GATE_UP_SILU = 17
     MOE_GATING = 18
     MOE_TOPK_SOFTMAX = 19
@@ -43,8 +43,8 @@ class JobType(Enum):
 
     # end
     END = 31
-    
-    
+
+
 # every task info in exec queue will be squashed into 32bit:
 # task_type: [0:5], m_idx: [5:18], n_idx: [18:27], k_idx: [27:32]
 MAX_TASK_TYPE = 1 << 5
@@ -72,7 +72,7 @@ __forceinline__ __device__ void unpack_from_32bit(int32_t task_info, int32_t* ta
     *k_idx_ptr = task_info >> 27;
 }
 """
-    
+
 @T.macro
 def unpack_from_32bit(task_info, task_type_ptr, m_idx_ptr, n_idx_ptr, k_idx_ptr):
     T.cuda.func_call(
@@ -84,7 +84,7 @@ def unpack_from_32bit(task_info, task_type_ptr, m_idx_ptr, n_idx_ptr, k_idx_ptr)
         k_idx_ptr,
         source_code=unpack_from_32bit_code,
     )
-    
+
 
 
 class KernelConfig:
@@ -259,11 +259,11 @@ def threadfence_block():
 __forceinline__ __device__ void threadfence_block() {
   __threadfence_block();
 }
-""")        
+""")
 
 def any_sync(mask, pred):
     return T.cuda.func_call(
-        "any_sync", mask, pred, source_code=f""" 
+        "any_sync", mask, pred, source_code=f"""
 __forceinline__ __device__ int any_sync(unsigned mask, int pred) {{
   return __any_sync(mask, pred);
 }}
@@ -281,7 +281,7 @@ __forceinline__ __device__ int syncthreads_or(int pred) {{
 
 def any_sync(mask, pred):
     return T.cuda.func_call(
-        "any_sync", mask, pred, source_code=f""" 
+        "any_sync", mask, pred, source_code=f"""
 __forceinline__ __device__ int any_sync(unsigned mask, int pred) {{
   return __any_sync(mask, pred);
 }}
@@ -324,7 +324,7 @@ __forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
     }} while (0);
 }}
     """,
-    )        
+    )
 
 def get_source(module: "tvm.ir.IRModule"):
     target = tvm.target.Target("cuda")
@@ -370,7 +370,7 @@ class ProfileEventType(Enum):
     PREFETCH = 26
     TMA = 27
     MMA = 28
-    ATTN_INIT = 29  
+    ATTN_INIT = 29
     ATTN_LOAD_Q = 30
     ATTN_LOOP_BODY = 31
     ATTN_COMPUTE_QKV = 32
@@ -392,7 +392,7 @@ class ProfileEventType(Enum):
     EP_DISPATCH_RECV = 48
     EP_COMBINE_SEND = 49
     EP_COMBINE_RECV = 50
-    
+
 
 
 event_type_names = [
@@ -470,7 +470,7 @@ class SmemManager:
         self.shared_count = self.alloc((1,), "int32", method="persistent").buffer
         self.cur_phase = T.alloc_local([1], "int32", layout="default", name="cur_phase")
         self.reg_count = T.alloc_local([1], "int32", layout="default", name="reg_count")
-        
+
     @T.macro
     def init(self):
         self.check_smem_well_formed(debug=False)
@@ -506,7 +506,7 @@ class SmemManager:
             self.persistent_bufs[buf.buffer] = (beg, end)
             self.persistent_offset = end
             self.pool_allocator.move_base_to(offset)
-        else:   
+        else:
             # check the validity of the method
             if method == "shared":
                 assert len(self.tiles[self.cur_tile_name][1]["exclusive"]) == 0, "Cannot use both shared and shared/exclusive methods at the same time"
@@ -524,7 +524,7 @@ class SmemManager:
                     for chunk_id in range(beg_chunk_id, end_chunk_id + 1):
                         self.tiles[self.cur_tile_name][2][chunk_id] += 1
         return buf
-    
+
     # call before kernel compilation
     def check_smem_well_formed(self, debug=False):
         for _, buf_info_dict, _ in self.tiles.values():
@@ -551,13 +551,13 @@ class SmemManager:
                     else:
                         beg_chunk_id = beg // self.chunk_size
                         end_chunk_id = (end - 1) // self.chunk_size
-                        checked_exclusive.append((beg_chunk_id, end_chunk_id))  
-            
+                        checked_exclusive.append((beg_chunk_id, end_chunk_id))
+
         # confirm that no overlap between persistent smem and other smem
         for (beg_persistent, end_persistent) in self.persistent_bufs.values():
             assert beg_persistent >= self.chunk_size * self.chunk_num and end_persistent <= self.smem_max_bytes
             for (_, beg, size, _) in self.bufs.values():
-                assert beg >= end_persistent or beg_persistent >= beg + size 
+                assert beg >= end_persistent or beg_persistent >= beg + size
         persistent_buf_list = list(self.persistent_bufs.values())
         for i in range(len(persistent_buf_list)):
             beg_i, end_i = persistent_buf_list[i]
@@ -566,7 +566,7 @@ class SmemManager:
                 assert beg_i >= end_j or beg_j >= end_i
         if debug:
             self._debug_print()
-                
+
     def _debug_print(self):
         for k, v in self.tiles.items():
             print(k, v)
@@ -581,24 +581,24 @@ class SmemManager:
         self.tiles[self.cur_tile_name] = [-1, {"exclusive": [], "shared": []}, [0 for _ in range(self.chunk_num)]]
         self.runtime_tile_chunk_count[self.cur_tile_name] = [[0 for _ in range(self.chunk_num)] for _ in range(2)] # wait count, arrival count
         self.pool_allocator.move_base_to(0)
-        
+
     def _assert_cond(self, cond):
         assert cond
 
     @T.macro
     def advance(self):
         self.cur_phase[0] = self.cur_phase[0] ^ 1
-        
+
     def enter_tile_runtime(self, cur_tile: Tile):
         self.cur_tile_name = str(cur_tile)
-        
+
     def exit_tile_runtime(self):
         self._check_runtime()
-        self.cur_tile_name = ""    
-        
+        self.cur_tile_name = ""
+
     def _check_runtime(self):
         pass # TODO: not support now
-    
+
     # wait all the chunks, call at the beginning of the task, cta level interface
     @T.macro
     def wait_all(self, level: Literal["cta", "warpgroup"] = "cta"):
@@ -618,7 +618,7 @@ class SmemManager:
                     if lane_id < self.chunk_num:
                         T.ptx.mbarrier.try_wait(self.mbar.ptr_to([lane_id]), self.cur_phase[0])
                 T.ptx.bar.sync(6 + wg_id, 128)
-                
+
     # wait the specific chunk, call before use the corresponding smem, warp-level interface
     @T.macro
     def wait_specific(self, lane_id, buffer, split_idx: int):
@@ -637,7 +637,7 @@ class SmemManager:
         # wait the mbarrier
         if lane_id < self.chunk_num and lane_id > self.tiles[str(cur_tile)][0]:
             T.ptx.mbarrier.try_wait(self.mbar.ptr_to([lane_id]), self.cur_phase[0])
-            
+
     # wait the specific chunk, thread-level interface
     @T.macro
     def wait_chunk(self, chunk_id):
@@ -676,8 +676,8 @@ class SmemManager:
                         self.reg_count[0] = T.cuda.atomic_add(T.address_of(self.shared_count[0]), 1) + 1
                         if self.reg_count[0] == KernelConfig.WG_NUMBER:
                             T.cuda.atomic_add(T.address_of(self.shared_count[0]), -KernelConfig.WG_NUMBER)
-                    self.reg_count[0] = T.tvm_warp_shuffle(0xffffffff, self.reg_count[0], 0, 32, 32)      
-                    if self.reg_count[0] == KernelConfig.WG_NUMBER:                       
+                    self.reg_count[0] = T.tvm_warp_shuffle(0xffffffff, self.reg_count[0], 0, 32, 32)
+                    if self.reg_count[0] == KernelConfig.WG_NUMBER:
                         if lane_id < self.chunk_num:
                             T.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
 
@@ -691,16 +691,15 @@ class SmemManager:
         end_chunk_id = (self.bufs[buffer][1] + self.bufs[buffer][2] // self.bufs[buffer][0] * (split_idx + 1) - 1) // self.chunk_size
         if lane_id >= beg_chunk_id and lane_id <= end_chunk_id:
             T.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
-    
+
     # arrive the unused chunk, call at the end of the task, warp level interface
     @T.macro
     def arrive_unused(self, lane_id, cur_tile: Tile):
         self._assert_cond(len(self.tiles[self.cur_tile_name][1]["shared"]) == 0) # must be exclusive
         if lane_id < self.chunk_num and lane_id > self.tiles[str(cur_tile)][0]:
             T.ptx.mbarrier.arrive(self.mbar.ptr_to([lane_id]))
-            
+
     # arrive the specific chunk, thread-level interface
     @T.macro
     def arrive_chunk(self, chunk_id):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([chunk_id]))
-            

@@ -454,7 +454,7 @@ def test(args):
                     profiler_buffer = R.builtin.alloc_tensor(R.shape([mk.PROFILER_BUFFER_SIZE]), dtype="uint64", runtime_device_index=0)
 
                     layer_res = R.call_tir_inplace(
-                        cls.layer_kernel, 
+                        cls.layer_kernel,
                         (
                             # input and output
                             input0, input1, output_tensor,
@@ -468,13 +468,13 @@ def test(args):
                             partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,
                             work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices, inverse_indptr, inverse_indices,
                             # intermediate buffer
-                            partital_qkv, qkv, o, o_partial_attn, lse_partial, partial_o, before_o_allreduce, 
-                            hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply, 
+                            partital_qkv, qkv, o, o_partial_attn, lse_partial, partial_o, before_o_allreduce,
+                            hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply,
                             partial_sum_down_proj, before_down_proj_allreduce,
                             # event tensor
-                            etensor_qkv_partial, etensor_notify_attn, etensor_attn_merge, etensor_o_proj, 
-                            etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm, 
-                            etensor_attn_mlp, etensor_gate_up_proj_reduce, etensor_gate_up_proj, etensor_down_proj, 
+                            etensor_qkv_partial, etensor_notify_attn, etensor_attn_merge, etensor_o_proj,
+                            etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm,
+                            etensor_attn_mlp, etensor_gate_up_proj_reduce, etensor_gate_up_proj, etensor_down_proj,
                             etensor_down_proj_reduce, etensor_down_proj_allreduce, etensor_mlp_add_rms_norm, etensor_end,
                             # execution queue
                             exec_queue, profiler_buffer
@@ -584,13 +584,13 @@ def test(args):
                     out_silu_multiply_ptr: T.handle, # intermediate
                     partial_sum_down_proj_ptr: T.handle, # intermediate
                     before_down_proj_allreduce_ptr: T.handle, # intermediate
-                    
+
                     # event tensor
-                    etensor_qkv_partial_ptr: T.handle, 
-                    etensor_notify_attn_ptr: T.handle, 
+                    etensor_qkv_partial_ptr: T.handle,
+                    etensor_notify_attn_ptr: T.handle,
                     etensor_attn_merge_ptr: T.handle,
-                    etensor_o_proj_ptr: T.handle, 
-                    etensor_o_partial_ptr: T.handle, 
+                    etensor_o_proj_ptr: T.handle,
+                    etensor_o_partial_ptr: T.handle,
                     etensor_o_allreduce_ptr: T.handle,
                     etensor_attn_add_rms_ptr: T.handle,
                     etensor_attn_mlp_ptr: T.handle,
@@ -656,7 +656,7 @@ def test(args):
                         )
                         (
                             kv_data_,
-                            page_kv_indptr, 
+                            page_kv_indptr,
                             page_kv_indices_,
                             page_kv_last_page_len,
                             append_pos,
@@ -787,7 +787,7 @@ def test(args):
 
                         lv4_rs = R.reshape(lv4, (batch_size, 1, 151936))
                         astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, 151936), dtype="float32"))
-                        
+
                         profiler = (
                             o_layer0[2], o_layer1[2], o_layer2[2], o_layer3[2], o_layer4[2], o_layer5[2],
                             o_layer6[2], o_layer7[2], o_layer8[2], o_layer9[2], o_layer10[2], o_layer11[2],
@@ -805,8 +805,8 @@ def test(args):
                         gv1 = astype, paged_kv_cache, profiler
                         R.output(gv1)
                     return gv1
-            
-                
+
+
                 @R.function(pure=False)
                 def batch_decode(
                     input_embeds: R.Tensor(("batch_size", 1, 5120), dtype="float16"),
@@ -953,7 +953,7 @@ def test(args):
 
 
                     layer_res = R.call_tir_inplace(
-                        cls.layer_kernel, 
+                        cls.layer_kernel,
                         (
                             # input and output
                             input0, input1, output_tensor,
@@ -967,13 +967,13 @@ def test(args):
                             partial_indptr, page_kv_indices, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx,
                             work_indptr, len_kv_chunk, num_qo_len, merge_indptr, merge_o_indices, inverse_indptr, inverse_indices,
                             # intermediate buffer
-                            partital_qkv, qkv, o, o_partial_attn, lse_partial, partial_o, before_o_allreduce, 
-                            hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply, 
+                            partital_qkv, qkv, o, o_partial_attn, lse_partial, partial_o, before_o_allreduce,
+                            hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply,
                             partial_sum_down_proj, before_down_proj_allreduce,
                             # event tensor
-                            etensor_qkv_partial, etensor_notify_attn, etensor_attn_merge, etensor_o_proj, 
-                            etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm, 
-                            etensor_attn_mlp, etensor_gate_up_proj_reduce, etensor_gate_up_proj, etensor_down_proj, 
+                            etensor_qkv_partial, etensor_notify_attn, etensor_attn_merge, etensor_o_proj,
+                            etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm,
+                            etensor_attn_mlp, etensor_gate_up_proj_reduce, etensor_gate_up_proj, etensor_down_proj,
                             etensor_down_proj_reduce, etensor_down_proj_allreduce, etensor_mlp_add_rms_norm, etensor_end,
                             # execution queue
                             queue_tasks, queue_head, queue_tail, profiler_buffer
@@ -1083,13 +1083,13 @@ def test(args):
                     out_silu_multiply_ptr: T.handle, # intermediate
                     partial_sum_down_proj_ptr: T.handle, # intermediate
                     before_down_proj_allreduce_ptr: T.handle, # intermediate
-                    
+
                     # event tensor
-                    etensor_qkv_partial_ptr: T.handle, 
-                    etensor_notify_attn_ptr: T.handle, 
+                    etensor_qkv_partial_ptr: T.handle,
+                    etensor_notify_attn_ptr: T.handle,
                     etensor_attn_merge_ptr: T.handle,
-                    etensor_o_proj_ptr: T.handle, 
-                    etensor_o_partial_ptr: T.handle, 
+                    etensor_o_proj_ptr: T.handle,
+                    etensor_o_partial_ptr: T.handle,
                     etensor_o_allreduce_ptr: T.handle,
                     etensor_attn_add_rms_ptr: T.handle,
                     etensor_attn_mlp_ptr: T.handle,
@@ -1157,7 +1157,7 @@ def test(args):
                         )
                         (
                             kv_data_,
-                            page_kv_indptr, 
+                            page_kv_indptr,
                             page_kv_indices_,
                             page_kv_last_page_len,
                             append_pos,
@@ -1277,7 +1277,7 @@ def test(args):
 
                         lv4_rs = R.reshape(lv4, (batch_size, 1, 151936))
                         astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, 151936), dtype="float32"))
-                        
+
                         profiler = (
                             o_layer0[2], o_layer1[2], o_layer2[2], o_layer3[2], o_layer4[2], o_layer5[2],
                             o_layer6[2], o_layer7[2], o_layer8[2], o_layer9[2], o_layer10[2], o_layer11[2],
@@ -1295,8 +1295,8 @@ def test(args):
                         gv1 = astype, paged_kv_cache, profiler
                         R.output(gv1)
                     return gv1
-            
-                
+
+
                 @R.function(pure=False)
                 def batch_decode(
                     input_embeds: R.Tensor(("batch_size", 1, 5120), dtype="float16"),

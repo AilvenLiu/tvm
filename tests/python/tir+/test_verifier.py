@@ -57,7 +57,7 @@ def test_root_scope():
                     with T.warp():
                         with T.thread():
                             pass
-    
+
     @T.prim_func(tirp=True, check_well_formed=False)
     def test6() -> None:
         with T.world():
@@ -117,7 +117,7 @@ def test_nested_scope():
                     with T.warp():
                         with T.thread():
                             pass
-                        
+
     @T.prim_func(tirp=True, check_well_formed=False)
     def test5() -> None:
         with T.kernel():
@@ -316,7 +316,7 @@ def test_scope_id_consistency():
                         T.evaluate(bx + by + bz)
                         T.evaluate(cbx + cby + cbz)
                         T.evaluate(clx + cly + clz)
-                        
+
     @T.prim_func(tirp=True, check_well_formed=False)
     def test6():
         with T.kernel():
@@ -329,7 +329,7 @@ def test_scope_id_consistency():
                         T.evaluate(bx + by + bz)
                         T.evaluate(cbx + cby + cbz)
                         T.evaluate(clx + cly + clz)
-    
+
     @T.prim_func(tirp=True, check_well_formed=False)
     def test7():
         with T.kernel():
@@ -428,14 +428,14 @@ def test_device_func():
         with T.cta():
             thread_id = T.thread_id([128], parent="cta")
             Tp.fill(A, 0.)
-            
+
     @T.prim_func(tirp=True, check_well_formed=False)
     def test2(A: T.Buffer((128,), "float32")):
         with T.kernel():
             cta_id = T.cta_id([128], parent="kernel")
             thread_id = T.thread_id([128], parent="cta")
             Tp.fill(A, 0.)
-            
+
     @T.prim_func(tirp=True, check_well_formed=False)
     def test3(A: T.Buffer((128,), "float32")):
         with T.cta():

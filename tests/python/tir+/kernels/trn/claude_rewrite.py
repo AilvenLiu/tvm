@@ -11,18 +11,18 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 def extract_output(text):
     start_tag = "<output_start>"
     end_tag = "<output_end>"
-    
+
     start_index = text.find(start_tag)
     if start_index == -1:
         return None  # Start tag not found
-    
+
     # Move past the start tag
     start_index += len(start_tag)
-    
+
     end_index = text.find(end_tag, start_index)
     if end_index == -1:
         return None  # End tag not found
-    
+
     # Extract the substring between tags
     return text[start_index:end_index]
 
@@ -47,8 +47,8 @@ def rewrite_program(program, func_name):
         max_tokens=30000,
         messages=[
             {"role": "user", "content": f"""
-            Below is a DSL program. For each psum tensor (variable allocated using nl.ndarray(..., buffer=ncc.psum.mod_alloc)), do the following things: 
-    1. Find out nisa.nc_matmul instructions that uses this tensor as output. For each appearance, calculate the tripcount by multipling the extent of all the spatial loops above it.     
+            Below is a DSL program. For each psum tensor (variable allocated using nl.ndarray(..., buffer=ncc.psum.mod_alloc)), do the following things:
+    1. Find out nisa.nc_matmul instructions that uses this tensor as output. For each appearance, calculate the tripcount by multipling the extent of all the spatial loops above it.
     We define spatial loop and reduction loop as follows (slightly different from normal understanding):
     Spatial loop: A loop that the matmul(producer) and consumer are both under it.
     Reduction loop: A loop that only the matmul(producer) is under it.
@@ -56,7 +56,7 @@ def rewrite_program(program, func_name):
     2. Give each matmul instruction that access this psum tensor an unique instruction id, and rewrite the psum tensor access (along with its consumer) to tensor[id, *original_indices]
     3.  rewrite the tensor allocation to nl.ndarray(shape=[total_num_write_instr, *original_shape], ..., buffer=ncc.psum.mod_alloc(..., num_bank_tiles=(1, 8))
 
-    For example, 
+    For example,
 
     ```
     a_psum = nl.ndarray(shape=(8, nl.par_dim(128), 512], buffer=ncc.psum.mod_alloc(base_bank=0, base_addr=0, num_bank_tiles=(8, ))
@@ -86,7 +86,7 @@ def rewrite_program(program, func_name):
     ```
     The tripcount of first matmul is 128, and the tripcount of second matmul is 4.
     So the unique id of the first matmul is 0-127, and the unique id of the second matmul is 128-131.
-    We would rewrite the program to 
+    We would rewrite the program to
     ```
     a_psum = nl.ndarray(shape=(132, 8, nl.par_dim(128), 512], buffer=ncc.psum.mod_alloc(base_bank=0, base_addr=0, num_bank_tiles=(1, 8, ))
 

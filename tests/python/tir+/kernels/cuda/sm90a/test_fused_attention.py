@@ -126,7 +126,7 @@ def test_fp16_fused_attn():
         O_LOAD_READY = 2
         EPILOGUE = 3
 
-    
+
 
     class Pipeline:
         def __init__(self, full, empty, bytes):
@@ -343,7 +343,7 @@ def test_fp16_fused_attn():
                     desc_K = desc_K + (2 * (WGMMA_QK_K) >> 4)
                 desc_Q = desc_Q + (2 * (-TMA_TILE + BLK_Q * TMA_TILE) >> 4)
                 desc_K = desc_K + (2 * (-TMA_TILE + BLK_KV * TMA_TILE) >> 4)
-                
+
         T.ptx.wgmma.commit_group()
         ptx_wgmma_noop_barrier(S_reg, S_REG_COUNT)
 
@@ -632,7 +632,7 @@ def test_fp16_fused_attn():
                                     n_masking_steps = 0 if not CAUSAL else ceildiv(BLK_Q, BLK_KV)
                                     kv_tile_idx_read = kv_tile_idx_read - 1
                                     # split out tiles of K and V that require masking
-                                    
+
                                     @T.macro
                                     def consumer_body(do_masking):
                                         pipeline_k.consumer_wait(consumer_k)

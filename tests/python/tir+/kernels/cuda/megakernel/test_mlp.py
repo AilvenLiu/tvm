@@ -305,12 +305,12 @@ class MegaKernel:
                             if tile_scheduler.n_idx >= INTERMEDIATE_SIZE // GemmTile.BLK_N:
                                 offset = T.meta_var(tile_scheduler.n_idx-INTERMEDIATE_SIZE//GemmTile.BLK_N)
                                 tile_scheduler.push_task(
-                                    JobType.SPLIT_SILU_MULTIPLY.value, offset, 0, 0, 
+                                    JobType.SPLIT_SILU_MULTIPLY.value, offset, 0, 0,
                                     warp_id, evt_gate_up_proj, offset, use_barrier=False
                                 )
                             else:
                                 tile_scheduler.push_task(
-                                    JobType.SPLIT_SILU_MULTIPLY.value, tile_scheduler.n_idx, 0, 0, 
+                                    JobType.SPLIT_SILU_MULTIPLY.value, tile_scheduler.n_idx, 0, 0,
                                     warp_id, evt_gate_up_proj, tile_scheduler.n_idx, use_barrier=False
                                 )
                             profiler.end(ProfileEventType.PUSH, lane_id == 0)
@@ -321,7 +321,7 @@ class MegaKernel:
                             profiler.start(ProfileEventType.PUSH, lane_id == 0)
                             offset = T.meta_var(tile_scheduler.m_idx // (INTERMEDIATE_SIZE//SiluMultiplyTile.TILE_SIZE // DOWN_PROJ_SPLIT_K_FACTOR))
                             tile_scheduler.push_tasks_along_dim(
-                                JobType.GEMM_DOWN_PROJ.value, 0, 0, offset, HIDDEN_SIZE // GemmTile.BLK_N, 1, 
+                                JobType.GEMM_DOWN_PROJ.value, 0, 0, offset, HIDDEN_SIZE // GemmTile.BLK_N, 1,
                                 warp_id, lane_id, evt_down_proj, offset
                             )
                             profiler.end(ProfileEventType.PUSH, lane_id == 0)
@@ -331,7 +331,7 @@ class MegaKernel:
                             profiler.end(ProfileEventType.GEMM_DOWN_PROJ, lane_id == 0)
                             profiler.start(ProfileEventType.PUSH, lane_id == 0)
                             tile_scheduler.push_tasks_along_dim(
-                                JobType.DOWN_PROJ_REDUCE.value, 0, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0, down_proj_reduce_tile.M_split, 0, 
+                                JobType.DOWN_PROJ_REDUCE.value, 0, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0, down_proj_reduce_tile.M_split, 0,
                                 warp_id, lane_id, evt_down_proj_reduce, tile_scheduler.n_idx // (down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), use_barrier=False
                             )
                             profiler.end(ProfileEventType.PUSH, lane_id == 0)
@@ -341,8 +341,8 @@ class MegaKernel:
                             profiler.end(ProfileEventType.DOWN_PROJ_REDUCE, tid == 0)
                             profiler.start(ProfileEventType.PUSH, tid == 0)
                             tile_scheduler.push_tasks_along_dim(
-                                JobType.MLP_ADD_RMS_NORM.value, tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE, 0, 0, 
-                                T.min(down_proj_reduce_tile.M_TILE, batch_size - tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE), 0, 
+                                JobType.MLP_ADD_RMS_NORM.value, tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE, 0, 0,
+                                T.min(down_proj_reduce_tile.M_TILE, batch_size - tile_scheduler.m_idx * down_proj_reduce_tile.M_TILE), 0,
                                 warp_id, lane_id, evt_add_rms_norm, tile_scheduler.m_idx
                             )
                             profiler.end(ProfileEventType.PUSH, tid == 0)
@@ -352,7 +352,7 @@ class MegaKernel:
                             profiler.end(ProfileEventType.MLP_ADD_RMS_NORM, tid == 0)
                             profiler.start(ProfileEventType.PUSH, tid == 0)
                             tile_scheduler.push_tasks_along_dim(
-                                JobType.END.value, 0, 0, 0, KernelConfig.SM_NUMBER, 0, 
+                                JobType.END.value, 0, 0, 0, KernelConfig.SM_NUMBER, 0,
                                 warp_id, lane_id, evt_end, 0
                             )
                             profiler.end(ProfileEventType.PUSH, tid == 0)

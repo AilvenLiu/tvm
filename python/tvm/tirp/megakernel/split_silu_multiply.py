@@ -31,16 +31,16 @@ class SiluMultiplyTile(Tile):
         self.vec1 = T.alloc_local([self.VEC_SIZE], self.dtype, name="vec1")
         self.vec2 = T.alloc_local([self.VEC_SIZE], self.dtype, name="vec2")
         self.idx = T.local_cell("int32", name="idx")
-        
+
     @T.macro
     def run(self, m_idx, n_idx, k_idx, input, output, tile_scheduler):
         with T.cta():
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")            
+            lane_id = T.thread_id([32], parent="warp")
             evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
             self._alloc_local()
-            with T.thread():              
+            with T.thread():
                 self.idx = tid * self.VEC_SIZE
 
                 self.smem_manager.wait_all("cta")
@@ -49,9 +49,9 @@ class SiluMultiplyTile(Tile):
                     token_idx = T.meta_var(self.idx // self.TILE_SIZE)
                     offset_imme = T.meta_var(m_idx * self.TILE_SIZE + self.idx % self.TILE_SIZE)
                     if self.idx < self.batch_size * self.TILE_SIZE:
-                        Tp.copy_async(self.buf[ki, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE], 
+                        Tp.copy_async(self.buf[ki, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE],
                                       evt, vec_len=self.VEC_SIZE)
-                        Tp.copy_async(self.buf[ki, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE], 
+                        Tp.copy_async(self.buf[ki, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE],
                                       evt, vec_len=self.VEC_SIZE)
                     evt.commit()
                     self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS
@@ -61,9 +61,9 @@ class SiluMultiplyTile(Tile):
                     offset_imme = T.meta_var(m_idx * self.TILE_SIZE + self.idx % self.TILE_SIZE)
                     if self.idx < self.batch_size * self.TILE_SIZE:
                         cp_pipe_idx = T.meta_var((self.idx // (self.VEC_SIZE * KernelConfig.NUM_THREADS)) % self.PIPE_DEPTH)
-                        Tp.copy_async(self.buf[cp_pipe_idx, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE], 
+                        Tp.copy_async(self.buf[cp_pipe_idx, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE],
                                       evt, vec_len=self.VEC_SIZE)
-                        Tp.copy_async(self.buf[cp_pipe_idx, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE], 
+                        Tp.copy_async(self.buf[cp_pipe_idx, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE],
                                       evt, vec_len=self.VEC_SIZE)
                     evt.commit()
                     evt.wait(self.PIPE_DEPTH - 1)
@@ -84,24 +84,24 @@ class SiluMultiplyTile(Tile):
                 self.smem_manager.advance()
 
 class SiluMultiplyMOETile(SiluMultiplyTile):
-    
+
     TILE_SIZE = 768
 
-    
+
     def __init__(self, batch_size, intermediate_size, numel, BLK_M, dtype):
         super().__init__(batch_size, intermediate_size, dtype)
         self.BLK_M = BLK_M
         self.numel = numel
-        
+
     @T.macro
     def run(self, m_idx, n_idx, k_idx, input, output, sorted_token_ids):
         with T.cta():
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")            
+            lane_id = T.thread_id([32], parent="warp")
             evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
             self._alloc_local()
-            with T.thread():              
+            with T.thread():
                 self.idx = tid * self.VEC_SIZE
 
                 self.smem_manager.wait_all("cta")
@@ -111,9 +111,9 @@ class SiluMultiplyMOETile(SiluMultiplyTile):
                     offset_imme = n_idx * self.TILE_SIZE + self.idx % self.TILE_SIZE
                     if self.idx < self.BLK_M * self.TILE_SIZE:
                         if sorted_token_ids[token_idx] < self.numel:
-                            Tp.copy_async(self.buf[ki, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE], 
+                            Tp.copy_async(self.buf[ki, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE],
                                         evt, vec_len=self.VEC_SIZE)
-                            Tp.copy_async(self.buf[ki, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE], 
+                            Tp.copy_async(self.buf[ki, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE],
                                         evt, vec_len=self.VEC_SIZE)
                     evt.commit()
                     self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS
@@ -124,9 +124,9 @@ class SiluMultiplyMOETile(SiluMultiplyTile):
                     if self.idx < self.BLK_M * self.TILE_SIZE:
                         if sorted_token_ids[token_idx] < self.numel:
                             cp_pipe_idx = T.meta_var((self.idx // (self.VEC_SIZE * KernelConfig.NUM_THREADS)) % self.PIPE_DEPTH)
-                            Tp.copy_async(self.buf[cp_pipe_idx, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE], 
+                            Tp.copy_async(self.buf[cp_pipe_idx, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE],
                                         evt, vec_len=self.VEC_SIZE)
-                            Tp.copy_async(self.buf[cp_pipe_idx, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE], 
+                            Tp.copy_async(self.buf[cp_pipe_idx, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE],
                                         evt, vec_len=self.VEC_SIZE)
                     evt.commit()
                     evt.wait(self.PIPE_DEPTH - 1)

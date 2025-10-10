@@ -55,7 +55,7 @@ def test_two_stage_reduction():
                 tx = T.thread_id([1024], parent="cta")
                 A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
                 B_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-                Tp.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])                
+                Tp.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])
                 Tp.sum(B_smem, A_smem)
 
                 Tp.copy(B_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n], B_smem)

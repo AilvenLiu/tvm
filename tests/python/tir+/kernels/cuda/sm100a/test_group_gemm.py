@@ -135,7 +135,7 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
 
             buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
-            smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))            
+            smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
             smem_manager.set_tile(group_gemm_tile)
             group_gemm_tile.init(smem_manager)
             smem_manager.pool_allocator.move_base_to(16384*14) # FIXME: this should be fixed in smem manager

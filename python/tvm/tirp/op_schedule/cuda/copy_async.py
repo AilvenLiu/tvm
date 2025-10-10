@@ -310,7 +310,7 @@ def copy_tma_impl(
                         *reversed(g_coord),
                         cache_hint=op_call.config.get("cache_hint", ""),
                     )
-    
+
     impl = thread_selector(sctx, inner_impl)
 
     # fmt: on
