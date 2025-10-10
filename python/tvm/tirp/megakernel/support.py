@@ -646,7 +646,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
         etensor_end,
     )
 
-def generate_event_tensor_moe(batch_size, WORLD_SIZE):
+def generate_event_tensor_moe(batch_size, WORLD_SIZE, unfused=False):
     # todo: change to config dict
     VOCAB_SIZE = 151936
     MAX_POSITION_EMBEDDINGS = 40960
@@ -678,15 +678,19 @@ def generate_event_tensor_moe(batch_size, WORLD_SIZE):
     etensor_moe_align = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
     etensor_count_and_sort = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
     max_num_tokens_padded = batch_size * NUM_EXPERTS_PER_TOK + NUM_EXPERTS * (MOE_BLK_M - 1)
-    etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((max_num_tokens_padded // MOE_BLK_M,),  factor * INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
-    etensor_silu_mul = tvm.runtime.tensor(
-        np.full(
-            (max_num_tokens_padded // MOE_BLK_M,),
-            factor * INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE,
-            dtype=np.int32,
-        ),
-        device=DEV,
-    )
+    if unfused:
+        etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
+        etensor_silu_mul = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE, dtype=np.int32), device=DEV)
+    else:
+        etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((max_num_tokens_padded // MOE_BLK_M,),  factor * INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
+        etensor_silu_mul = tvm.runtime.tensor(
+            np.full(
+                (max_num_tokens_padded // MOE_BLK_M,),
+                factor * INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE,
+                dtype=np.int32,
+            ),
+            device=DEV,
+        )
     etensor_group_gemm_down = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * HIDDEN_SIZE // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
     etensor_end = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
     return (

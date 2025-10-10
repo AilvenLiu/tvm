@@ -286,6 +286,7 @@ class MegaKernel:
         exec_head,
         exec_tail,
         low_batch,
+        unfused,
         Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]],
         Scheduler: Type[Union[static_scheduler.StaticTileScheduler, dynamic_scheduler.DynamicTileScheduler]],
     ):
@@ -433,7 +434,8 @@ class MegaKernel:
                         if wg_id == 0:
                             T.cuda.warpgroup_sync(1)
                             if tid == 0:
-                                evt_group_gemm_gate_up.semaphore_notify(self.tile_scheduler.m_idx)
+                                notify_idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
+                                evt_group_gemm_gate_up.semaphore_notify(notify_idx)
                     elif self.tile_scheduler.task_type == JobType.MOE_SILU_MULTIPLY.value:
                         if issubclass(Scheduler, DynamicTileScheduler):
                             if tid == 0:
@@ -445,12 +447,13 @@ class MegaKernel:
                                     lambda push_idx: (JobType.MOE_GROUP_GEMM_DOWN.value, self.tile_scheduler.m_idx, push_idx, 0)
                                 ), "warp", "warp"
                             )
-                        evt_group_gemm_gate_up.semaphore_wait(self.tile_scheduler.m_idx)
+                        notify_wait_idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
+                        evt_group_gemm_gate_up.semaphore_wait(notify_wait_idx)
                         if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
                             self.run_tile(self.silu_mul, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gate_up_output_global, silu_mul_output_global, sorted_token_ids_global)
                         T.cuda.cta_sync()
                         if tid == 0:
-                            evt_silu_mul.semaphore_notify(self.tile_scheduler.m_idx)
+                            evt_silu_mul.semaphore_notify(notify_wait_idx)
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_DOWN.value:
                         if issubclass(Scheduler, DynamicTileScheduler):
                             if tid == 0:
@@ -462,7 +465,8 @@ class MegaKernel:
                                     lambda push_idx: (JobType.END.value, 0, 0, 0)
                                 ), "warp", "warp"
                             )
-                        evt_silu_mul.semaphore_wait_warp(self.tile_scheduler.m_idx)
+                        wait_idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
+                        evt_silu_mul.semaphore_wait_warp(wait_idx)
                         if issubclass(Scheduler, DynamicTileScheduler) or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
                             self.run_tile(self.group_gemm_down, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
                     smem_manager.exit_tile_runtime()
@@ -475,7 +479,7 @@ class MegaKernel:
 
     # FIXME: change offset_factor to 0 can make performance better
     #       but it requires change on engine side
-    def _get_func_static(self):
+    def _get_func_static(self, unfused=False):
         # fmt: off
         @T.prim_func(tirp=True)
         def main(
@@ -571,7 +575,7 @@ class MegaKernel:
                     cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
                     etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global,
-                    None, profiler_buffer, exec_queue, None, None, None, low_batch,
+                    None, profiler_buffer, exec_queue, None, None, None, low_batch,unfused,
                     static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
                 )
 
@@ -687,7 +691,7 @@ class MegaKernel:
                     cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
                     etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global,
-                    etensor_end_global, profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, low_batch,
+                    etensor_end_global, profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, low_batch,False,
                     dynamic_scheduler.Semaphore, dynamic_scheduler.DynamicTileScheduler
                 )
 
@@ -700,15 +704,15 @@ class MegaKernel:
             # fmt: on
         return main
 
-    def get_func(self, scheduler: Literal["static", "dynamic"]):
-        if scheduler == "static":
-            return self._get_func_static()
+    def get_func(self, scheduler: Literal["static", "dynamic", "unfused"]):
+        if scheduler == "static" or scheduler == "unfused":
+            return self._get_func_static(unfused=scheduler == "unfused")
         elif scheduler == "dynamic":
             return self._get_func_dynamic()
         else:
             raise ValueError(f"Unsupported scheduler: {scheduler}")
 
-    def get_module(self, scheduler: Literal["static", "dynamic"]):
+    def get_module(self, scheduler: Literal["static", "dynamic", "unfused"]):
 
         @I.ir_module(tirp=True)
         class Module:
@@ -718,8 +722,8 @@ class MegaKernel:
                 pass
 
         module: tvm.IRModule = Module
-        if scheduler == "static":
-            module.update_func(module.get_global_var("main"), self._get_func_static())
+        if scheduler == "static" or scheduler == "unfused":
+            module.update_func(module.get_global_var("main"), self._get_func_static(unfused=scheduler == "unfused"))
         elif scheduler == "dynamic":
             module.update_func(module.get_global_var("main"), self._get_func_dynamic())
         else:
@@ -831,15 +835,15 @@ def prepare_data(batch_size, mk: MegaKernel):
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 @pytest.mark.skip
-def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrapper, sess):
+def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfused, mega_kernel_wrapper, sess):
     arg_dict = prepare_data(batch_size, mega_kernel_wrapper)
 
-    def tir(arg_dict, mk: MegaKernel, scheduler: Literal["static", "dynamic"]):
+    def tir(arg_dict, mk: MegaKernel, scheduler: Literal["static", "dynamic", "unfused"]):
         REPEAT = 100
         DEV = tvm.cuda(0)
         tvm_arg_dict = {}
         target = tvm.target.Target("cuda")
-        if scheduler == "static":
+        if scheduler == "static" or scheduler == "unfused":
             # static schedule
             exec_queue = generate_exec_queue_moe(batch_size, "static")
             tvm_arg_dict[f"exec_queue"] = tvm.runtime.tensor(exec_queue, DEV)
@@ -876,7 +880,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                 tvm_arg_dict[f"etensor_silu_mul_{i}"],
                 tvm_arg_dict[f"etensor_group_gemm_down_{i}"],
                 tvm_arg_dict[f"etensor_end_{i}"],
-            ) = generate_event_tensor_moe(batch_size, mk.world_size)
+            ) = generate_event_tensor_moe(batch_size, mk.world_size, unfused=scheduler == "unfused")
         tvm_arg_dict[f"profiler_buffer"] = tvm.runtime.tensor(
             np.zeros([mk.PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV
         )
@@ -886,8 +890,8 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
         with target:
             iter = 0
 
-            if scheduler == "static":
-                kernel = mega_kernel_static["main"]
+            if scheduler == "static" or scheduler == "unfused":
+                kernel = mega_kernel_static["main"] if scheduler == "static" else mega_kernel_unfused["main"]
                 work_arg_dict = tvm_arg_dict
 
                 def func():
@@ -1200,6 +1204,9 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
         if mega_kernel_dynamic["main"] is not None:
             output1_tir_dynamic = tir(arg_dict, mega_kernel_wrapper, "dynamic")
             print("dynamic tir finish", flush=True)
+        if mega_kernel_unfused["main"] is not None:
+            output1_tir_unfused = tir(arg_dict, mega_kernel_wrapper, "unfused")
+            print("unfused tir finish", flush=True)
         output1_std = std(arg_dict, mk=mega_kernel_wrapper)
         output1_flashinfer = flashinfer(arg_dict)
         np.testing.assert_allclose(output1_flashinfer, output1_std, rtol=1e-3, atol=1e-2)
@@ -1218,6 +1225,12 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_wrappe
                 print("dynamic pass", flush=True)
             except Exception as e:
                 print(e)
+        if mega_kernel_unfused["main"] is not None:
+            try:
+                np.testing.assert_allclose(output1_tir_unfused, output1_std, rtol=1e-3, atol=1e-2)
+                print("unfused pass", flush=True)
+            except Exception as e:
+                print(e)
 
     if mega_kernel_wrapper.world_size == 1:
         with ProtonContext("blackwell_moe"):
@@ -1233,8 +1246,8 @@ if __name__ == "__main__":
         "--scheduler",
         type=str,
         nargs="+",
-        default=["static", "dynamic"],
-        choices=["static", "dynamic", "none"],
+        default=["static", "dynamic", "unfused"],
+        choices=["static", "dynamic", "unfused", "none"],
         help="A list of test methods to run: 'static' or 'dynamic'.",
     )
     parser.add_argument(
@@ -1264,6 +1277,12 @@ if __name__ == "__main__":
         print(src)
     else:
         lib_dynamic = {"main": None}
+    if "unfused" in testing_scheduler:
+        mega_unfused_module = mega_kernel_wrapper.get_module("unfused")
+        src, lib_unfused = get_source(mega_unfused_module)
+        print(src)
+    else:
+        lib_unfused = {"main": None}
     if mega_kernel_wrapper.world_size > 1:
         devices = list(np.arange(mega_kernel_wrapper.world_size))
         sess = di.ProcessSession(num_workers=mega_kernel_wrapper.world_size)
@@ -1277,4 +1296,4 @@ if __name__ == "__main__":
         sess = None
     for batch_size in args.batch_size:
         print(f"batch_size: {batch_size}", flush=True)
-        test(batch_size, lib_static, lib_dynamic, mega_kernel_wrapper, sess)
+        test(batch_size, lib_static, lib_dynamic, lib_unfused, mega_kernel_wrapper, sess)
