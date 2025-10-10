@@ -412,9 +412,8 @@ class ReduceScatter:
                                 mma2ld_pipe.consumer_release(wg_id)
                                 # RF -> GMEM
                                 for i in range(BLK_N // EPI_TILE):
-                                    for it in range(EPI_TILE // 8):
-                                        for vec in T.vectorized(8):
-                                            C_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
+                                    with T.thread():
+                                        Tp.copy(C_smem[wg_id, warp_id * 32 + lane_id, :], reg_fp16[i * EPI_TILE : (i + 1) * EPI_TILE])
                                     T.cuda.warpgroup_sync(wg_id+1)
                                     T.ptx.fence.proxy(scope="shared")
                                     if lane_id == 0 and warp_id == 0:

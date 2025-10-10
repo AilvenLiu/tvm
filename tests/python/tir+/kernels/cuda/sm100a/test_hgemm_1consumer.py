@@ -356,9 +356,8 @@ def test_hgemm_1consumer():
                                     col_st = T.meta_var(tmem_idx * MMA_N + ko * EPI_TILE + ki * TMEM_LD_SIZE)
                                     Tp.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
                                     with T.thread():
-                                        Tp.cast(reg_fp16[0 : TMEM_LD_SIZE], reg[:])
-                                    for vec in T.vectorized(TMEM_LD_SIZE):
-                                        D_smem[stage, warp_id * 32 + lane_id, ki * TMEM_LD_SIZE + vec] = reg_fp16[vec]
+                                        Tp.cast(reg_fp16[:], reg[:])
+                                        Tp.copy(D_smem[stage, warp_id * 32 + lane_id, ki * TMEM_LD_SIZE : (ki + 1) * TMEM_LD_SIZE], reg_fp16[:])
                             
                                 # the tmem can be overwritten
                                 if ko == MMA_N // EPI_TILE - 1:

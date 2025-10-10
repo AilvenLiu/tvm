@@ -430,8 +430,8 @@ def get_hgemm_kernel(dim_n, dim_k):
                                 for ki in T.unroll(EPI_TILE // TMEM_LD_SIZE):
                                     col_st = T.meta_var(tmem_idx * MMA_M + ko * EPI_TILE + ki * TMEM_LD_SIZE)
                                     Tp.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
-                                    for vec in range(TMEM_LD_SIZE):
-                                        D_smem[stage, ki * TMEM_LD_SIZE + vec,  warp_id * 32 + lane_id] = reg[vec]
+                                    with T.thread():
+                                        Tp.copy(D_smem[stage, ki * TMEM_LD_SIZE : (ki + 1) * TMEM_LD_SIZE, warp_id * 32 + lane_id], reg[:])
                                 profiler.end(ProfileEventType.TMEMLD, lane_id == 0 and warp_id == 0)
                                 # the tmem can be overwritten
                                 if ko == MMA_M // EPI_TILE - 1:

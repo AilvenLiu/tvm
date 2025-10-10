@@ -749,9 +749,8 @@ def test_ag_hgemm():
                                     ld2mma.arrive(wg_id)
                                     # # RF -> GMEM
                                     for i in T.unroll(NUM_CONSUMER * BLK_N // EPI_TILE):
-                                        for it in T.unroll(EPI_TILE // 8):
-                                            for vec in T.vectorized(8):
-                                                D_smem[wg_id, warp_id * 32 + lane_id, it * 8 + vec] = reg_fp16[i * EPI_TILE + it * 8 + vec]
+                                        with T.thread():
+                                            Tp.copy(D_smem[wg_id, warp_id * 32 + lane_id, :], reg_fp16[i * EPI_TILE : (i + 1) * EPI_TILE])
                                         T.cuda.warpgroup_sync(wg_id)
                                         T.ptx.fence.proxy(scope="shared")
                                         # st to gmem

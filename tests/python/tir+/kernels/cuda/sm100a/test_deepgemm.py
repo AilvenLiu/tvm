@@ -497,9 +497,9 @@ def test_deepgemm():
                                     col_st = T.meta_var(tmem_idx * MMA_N + ko * EPI_TILE + ki * TMEM_LD_SIZE)
                                     Tp.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
                                     with T.thread():
-                                        Tp.cast(reg_fp16[ki * TMEM_LD_SIZE : (ki + 1) * TMEM_LD_SIZE], reg[:])
-                                    for vec in T.vectorized(TMEM_LD_SIZE):
-                                        D_smem[stage, warp_id * 32 + lane_id, ki * TMEM_LD_SIZE + vec] = reg_fp16[ki * TMEM_LD_SIZE + vec]
+                                        st = T.meta_var(ki * TMEM_LD_SIZE)
+                                        Tp.cast(reg_fp16[st : st + TMEM_LD_SIZE], reg[:])
+                                        Tp.copy(D_smem[stage, warp_id * 32 + lane_id, st : st + TMEM_LD_SIZE], reg_fp16[st : st + TMEM_LD_SIZE])
 
                                 # the tmem can be overwritten
                                 if ko == MMA_N // EPI_TILE - 1:
