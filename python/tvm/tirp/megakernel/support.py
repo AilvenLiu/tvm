@@ -433,6 +433,14 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
     else:
         raise ValueError(f"Unsupported scheduler: {scheduler}")
 
+
+def get_max_num_tokens_padded(batch_size, topk, num_experts, moe_blk_m):
+    if batch_size * topk < num_experts:
+        return batch_size * topk * moe_blk_m
+    else:
+        return (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m
+
+
 def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"]):
     # todo: change to config dict
     VOCAB_SIZE = 151936
@@ -472,7 +480,7 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
         central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
         for m_idx in range(KernelConfig.SM_NUMBER):
             central_queue.append((m_idx, 0, 0, JobType.MOE_COUNT_AND_SORT.value))
-        max_num_tokens_padded = batch_size * NUM_EXPERTS_PER_TOK + NUM_EXPERTS * (MOE_BLK_M - 1)
+        max_num_tokens_padded = get_max_num_tokens_padded(batch_size, NUM_EXPERTS_PER_TOK, NUM_EXPERTS, MOE_BLK_M)
         for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
             for n_idx in range(INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N):
                 central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_GATE_UP.value))
@@ -677,7 +685,7 @@ def generate_event_tensor_moe(batch_size, WORLD_SIZE, unfused=False):
     etensor_topk_softmax = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
     etensor_moe_align = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
     etensor_count_and_sort = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
-    max_num_tokens_padded = batch_size * NUM_EXPERTS_PER_TOK + NUM_EXPERTS * (MOE_BLK_M - 1)
+    max_num_tokens_padded = get_max_num_tokens_padded(batch_size, NUM_EXPERTS_PER_TOK, NUM_EXPERTS, MOE_BLK_M)
     if unfused:
         etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
         etensor_silu_mul = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE, dtype=np.int32), device=DEV)

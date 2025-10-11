@@ -30,6 +30,7 @@ from tvm.tirp.megakernel.support import (
     generate_event_tensor_moe,
     generate_exec_queue_moe,
     get_inverse_plan_info,
+    get_max_num_tokens_padded,
 )
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
 from sgl_kernel import topk_softmax
@@ -772,9 +773,7 @@ def prepare_data(batch_size, mk: MegaKernel):
         (batch_size, mk.NUM_EXPERTS_PER_TOK), dtype=torch.float32
     )
     arg_dict["topk_indices"] = torch.zeros((batch_size, mk.NUM_EXPERTS_PER_TOK), dtype=torch.int32)
-    max_num_tokens_padded = batch_size * mk.NUM_EXPERTS_PER_TOK + mk.NUM_EXPERTS * (
-        mk.MOE_M_PAD_SIZE - 1
-    )
+    max_num_tokens_padded = get_max_num_tokens_padded(batch_size, mk.NUM_EXPERTS_PER_TOK, mk.NUM_EXPERTS, mk.MOE_M_PAD_SIZE)
     arg_dict["sorted_token_ids"] = torch.zeros((max_num_tokens_padded,), dtype=torch.int32)
     arg_dict["expert_ids"] = torch.zeros(
         (max_num_tokens_padded // mk.MOE_M_PAD_SIZE,), dtype=torch.int32)
