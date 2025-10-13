@@ -103,33 +103,6 @@ inline IdDoc DefineBuffer(const tirx::Buffer& buffer, const Frame& frame, const 
 }
 
 /*!
- * \brief Defines a event in the IRDocsifier at the given frame,
- * and returns the corresponding IdDoc
- * \param event The event to define
- * \param frame The frame to define the event in
- * \param d The IRDocsifier
- * \return The IdDoc corresponding to the event
- */
-inline IdDoc DefineBulkEvent(const tirx::BulkGroupEvent& event, const Frame& frame,
-                             const IRDocsifier& d) {
-  return d->Define(event, frame, event->name.empty() ? "bulk_event" : event->name);
-}
-
-/*!
- * \brief Defines a event tensor in the IRDocsifier at the given frame,
- * and returns the corresponding IdDoc
- * \param event_tensor The event tensor to define
- * \param frame The frame to define the event tensor in
- * \param d The IRDocsifier
- * \return The IdDoc corresponding to the event tensor
- */
-inline IdDoc DefineSemaphoreEventTensor(const tirx::SemaphoreEventTensor& event_tensor,
-                                        const Frame& frame, const IRDocsifier& d) {
-  return d->Define(event_tensor, frame,
-                   event_tensor->name.empty() ? "sem_event_tensor" : event_tensor->name);
-}
-
-/*!
  * \brief Recursively process the body statements of a TIR fragment represented by a frame
  * \param stmt The body statement to process
  * \param p The object path
@@ -199,9 +172,7 @@ inline ffi::Optional<Frame> FindLowestVarDef(const ObjectRef& var, const IRDocsi
 inline std::string ReprPrintTIR(const ObjectRef& obj, const PrinterConfig& cfg) {
   IRDocsifier d(cfg);
   d->SetCommonPrefix(obj, [](const ObjectRef& obj) {
-    return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>() ||
-           obj->IsInstance<tirx::BulkGroupEventNode>() ||
-           obj->IsInstance<tirx::SemaphoreEventTensorNode>();
+    return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>();
   });
   With<TIRFrame> f(d, ObjectRef{nullptr});
   (*f)->AddDispatchToken(d, "tirx");
@@ -246,29 +217,6 @@ enum class BufferVarDefinition {
 ExprDoc BufferDecl(const tirx::Buffer& buffer, const ffi::String& method,
                    const ffi::Array<ExprDoc>& args, const AccessPath& p, const Frame& frame,
                    const IRDocsifier& d, BufferVarDefinition var_definitions);
-
-/*!
- * \brief Declare and define a event
- * \param event The event to be defined
- * \param method The method used to declare the event
- * \param p The object path
- * \param d The IRDocsifier
- * \return The ExprDoc corresponding to the event declaration
- */
-ExprDoc BulkGroupEventDecl(const tirx::BulkGroupEvent& event, const ffi::String& method,
-                           const AccessPath& p, const IRDocsifier& d);
-
-/*!
- * \brief Declare and define a event tensor
- * \param event_tensor The event tensor to be defined
- * \param method The method used to declare the event tensor
- * \param p The object path
- * \param d The IRDocsifier
- * \return The ExprDoc corresponding to the event tensor declaration
- */
-ExprDoc SemaphoreEventTensorDecl(const tirx::SemaphoreEventTensor& event_tensor,
-                                 const ffi::String& method, const AccessPath& p,
-                                 const IRDocsifier& d);
 
 /*!
  * \brief Declare and define a buffer as annotation

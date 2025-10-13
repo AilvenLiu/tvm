@@ -26,7 +26,6 @@
 
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/node/script_printer.h>
-#include <tvm/tirx/event.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/expr.h>
 #include <tvm/tirx/layout.h>
@@ -854,62 +853,6 @@ class AllocBuffer : public Stmt {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocBufferNode);
 };
 
-class AllocBulkGroupEventNode : public StmtNode {
- public:
-  /*! \brief The allocated bulk group event. */
-  BulkGroupEvent bulk_group_event;
-  /*! \brief The body of the alloc bulk group event. */
-  Stmt body;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<AllocBulkGroupEventNode>()
-        .def_ro("bulk_group_event", &AllocBulkGroupEventNode::bulk_group_event,
-                refl::AttachFieldFlag::SEqHashDef())
-        .def_ro("body", &AllocBulkGroupEventNode::body)
-        .def_ro("span", &AllocBulkGroupEventNode::span);
-  }
-
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.AllocBulkGroupEvent", AllocBulkGroupEventNode, StmtNode);
-};
-
-class AllocBulkGroupEvent : public Stmt {
- public:
-  TVM_DLL explicit AllocBulkGroupEvent(BulkGroupEvent bulk_group_event, Stmt body,
-                                       Span span = Span());
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(AllocBulkGroupEvent, Stmt, AllocBulkGroupEventNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocBulkGroupEventNode);
-};
-
-class AllocSemaphoreEventTensorNode : public StmtNode {
- public:
-  /*! \brief The allocated semaphore event tensor. */
-  SemaphoreEventTensor sem_event_tensor;
-  /*! \brief The body of the alloc semaphore event tensor. */
-  Stmt body;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<AllocSemaphoreEventTensorNode>()
-        .def_ro("sem_event_tensor", &AllocSemaphoreEventTensorNode::sem_event_tensor,
-                refl::AttachFieldFlag::SEqHashDef())
-        .def_ro("body", &AllocSemaphoreEventTensorNode::body)
-        .def_ro("span", &AllocSemaphoreEventTensorNode::span);
-  }
-
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.AllocSemaphoreEventTensor", AllocSemaphoreEventTensorNode,
-                                    StmtNode);
-};
-
-class AllocSemaphoreEventTensor : public Stmt {
- public:
-  TVM_DLL explicit AllocSemaphoreEventTensor(SemaphoreEventTensor sem_event_tensor, Stmt body,
-                                             Span span = Span());
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(AllocSemaphoreEventTensor, Stmt,
-                                             AllocSemaphoreEventTensorNode);
-  TVM_DEFINE_OBJECT_REF_COW_METHOD(AllocSemaphoreEventTensorNode);
-};
-
 /*!
  * \brief A block is a basic schedule unit in TIR.
  * \note SBlock's body is parameterized by iter vars.
@@ -1353,6 +1296,6 @@ inline const char* ForKind2String(ForKind t) {
   TVM_FFI_UNREACHABLE();
 }
 
-}  // namespace tirxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxx
 }  // namespace tvm
 #endif  // TVM_TIRX_STMT_H_

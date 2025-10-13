@@ -29,7 +29,6 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 from tvm.tir.layout import TileLayout
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
@@ -586,14 +585,7 @@ def test_ag_hgemm():
                 packed_value = T.decl_buffer([1,], "uint64", data=packed_ptr, scope="shared")
                 sch_pipe = T.meta_var(Pipeline(buf.data, 64 + 4, pipeline_depth=1, pipeline_num=1, p_single_cta=True, c_single_cta=False))
                 tile_scheduler = T.meta_var(SingleDynamicTileScheduler(gemm_queue, packed_value, sch_pipe, sem))
-                profiler = T.meta_var(
-                    CudaProfiler(
-                        profiler_buffer,
-                        write_stride=PROFILER_WRITE_STRIDE,
-                        num_groups=NUM_GROUPS,
-                        profiler_enabled=PROFILER_ON,
-                    )
-                )
+                profiler = T.meta_var(CudaProfiler(profiler_buffer, write_stride=PROFILER_WRITE_STRIDE, num_groups=NUM_GROUPS, profiler_enabled=PROFILER_ON))
 
                 # initialize
                 profiler.init(warp_id_in_cta)
@@ -612,13 +604,9 @@ def test_ag_hgemm():
                 sch_pipe.init(c2p_thread_count=C2P_THREAD_COUNT, p2c_thread_count=1)
                 T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
 
-                # define events
-                tma_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma_finished, None, None], shape=[PIPELINE_DEPTH])
-                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
-
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()
@@ -628,7 +616,7 @@ def test_ag_hgemm():
                 tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)
 
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
-                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TLane"), (1, "TCol")])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -668,19 +656,20 @@ def test_ag_hgemm():
 
                                             @T.macro
                                             def tma_load(is_remain, ks):
+                                                tma_copy = T.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([ks]), "cta_group": CTA_GROUP})
                                                 stage_k = T.meta_var(stage * BLK_K)
                                                 mma2tma.wait(ks, 0, phase[0])
                                                 if rank * LOCAL_GEMM_M_CLUSTERS <= m_idx and m_idx < (rank + 1) * LOCAL_GEMM_M_CLUSTERS:
                                                     m_start0 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
                                                     m_start1 = T.meta_var(((m_idx % LOCAL_GEMM_M_CLUSTERS) * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
-                                                    Tp.copy_async(A_smem[ks, 0, :, :], A[m_start0 : m_start0 + BLK_M, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                    Tp.copy_async(A_smem[ks, 1, :, :], A[m_start1 : m_start1 + BLK_M, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                    Tp.copy_async(A_smem[ks, 0, :, :], A[m_start0 : m_start0 + BLK_M, stage_k : stage_k + BLK_K], **tma_copy)
+                                                    Tp.copy_async(A_smem[ks, 1, :, :], A[m_start1 : m_start1 + BLK_M, stage_k : stage_k + BLK_K], **tma_copy)
                                                 else:
                                                     m_start0 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + cbx) * BLK_M)
                                                     m_start1 = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + CTA_GROUP + cbx) * BLK_M)
-                                                    Tp.copy_async(A_smem[ks, 0, :, :], ag_out[m_start0 : m_start0 + BLK_M, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                    Tp.copy_async(A_smem[ks, 1, :, :], ag_out[m_start1 : m_start1 + BLK_M, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
-                                                Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage_k : stage_k + BLK_K], evt=tma_event[ks], cta_group=2)
+                                                    Tp.copy_async(A_smem[ks, 0, :, :], ag_out[m_start0 : m_start0 + BLK_M, stage_k : stage_k + BLK_K], **tma_copy)
+                                                    Tp.copy_async(A_smem[ks, 1, :, :], ag_out[m_start1 : m_start1 + BLK_M, stage_k : stage_k + BLK_K], **tma_copy)
+                                                Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, stage_k : stage_k + BLK_K], **tma_copy)
                                                 if cbx == 0:
                                                     tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
 
@@ -757,9 +746,9 @@ def test_ag_hgemm():
                                         with T.thread()[lane_id == 0 and warp_id == 0]:
                                             m_st = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)
                                             n_st = T.meta_var(n_idx * BLK_N * CTA_GROUP + i * EPI_TILE)
-                                            Tp.copy_async(out[m_st : m_st + BLK_M, n_st : n_st + EPI_TILE], D_smem[wg_id, :, :], evt=wb_event)
-                                            wb_event.commit()
-                                            wb_event.wait(0)
+                                            Tp.copy_async(out[m_st : m_st + BLK_M, n_st : n_st + EPI_TILE], D_smem[wg_id, :, :], dispatch="tma")
+                                            T.ptx.cp_async.bulk.commit_group()
+                                            T.ptx.cp_async.bulk.wait_group(0)
                                         T.cuda.warpgroup_sync(wg_id)
 
                             profiler.end(ProfileEventType.GEMM, tid == 0)
@@ -768,8 +757,8 @@ def test_ag_hgemm():
 
                 # dealloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)
-                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=2)
+                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=CTA_GROUP)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=CTA_GROUP)
 
                 T.ptx.barrier.cluster.arrive()
                 T.ptx.barrier.cluster.wait()

@@ -32,7 +32,6 @@ from tvm.tirp.op_schedule import (
 )
 from .common import target_cuda
 from tvm.tir import BufferRegion
-from tvm.tir.event import SemaphoreEventTensor, EventImpl, BulkGroupEvent, SemaphoreEventTensorItem
 from .common import CopyInstType, copy_vec_load_impl, validate_copy_op, thread_selector
 from tvm.tir.layout import TileLayout, SwizzleLayout
 
@@ -116,7 +115,7 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
     # Identify direction & basic legality checks
     # ---------------------------------------------------------------------
-    dst_buffer_region, src_buffer_region, evt = op_call.args
+    dst_buffer_region, src_buffer_region = op_call.args
     src: "Buffer" = src_buffer_region.buffer
     dst: "Buffer" = dst_buffer_region.buffer
 
@@ -215,6 +214,7 @@ def copy_tma_impl(
                 "No valid swizzle mode found for TMA copy. Shared layout is "
                 f"{s_buf.layout} and global layout is {g_buf.layout}"
             )
+
     # ---------------------------------------------------------------------
     # Launch configuration & common symbols
     # ---------------------------------------------------------------------
@@ -237,24 +237,14 @@ def copy_tma_impl(
         return shared_coord
 
     if direction == "g2s":
-        mbar, phase, tx_cnt = evt.get_state()
-        assert isinstance(evt, SemaphoreEventTensorItem), "event must be a SemaphoreEventTensor"
+        # get mbar from config
+        mbar = op_call.config.get("mbar", None)
         if mbar is None:
-            # get mbar from config
-            mbar = op_call.config.get("mbar", None)
-            if mbar is None:
-                raise ValueError("mbar is neither in event state nor set in config")
+            raise ValueError("mbar is not set in config")
 
     # ---------------------------------------------------------------------
     # Device‑side TIR implementation
     # ---------------------------------------------------------------------
-
-    def total_bytes():
-        return (
-            functools.reduce(lambda acc, extent: acc * extent, s_ext, 1)
-            * tvm.DataType(s_buf.dtype).bits
-            // 8
-        )
 
     # fmt: off
     @T.macro
@@ -263,13 +253,10 @@ def copy_tma_impl(
         # make sure smem write is visible to tma proxy
         if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
             if direction == "g2s":
-                if tx_cnt is not None:
-                    tx_cnt[*evt.indices] += total_bytes()
                 T.ptx.cp_async.bulk.tensor.g2c(
                     rank,
                     s_buf.ptr_to(s_st),
-                    mbar.ptr_to(evt.indices)  # type: ignore
-                    if direction == "g2s" else 0,  # dummy when not needed
+                    mbar,
                     tensor_map,
                     *reversed(g_st),
                     cta_group=cta_group,
@@ -284,9 +271,6 @@ def copy_tma_impl(
                     cache_hint=op_call.config.get("cache_hint", ""),
                 )
         else:
-            if direction == "g2s":
-                if tx_cnt is not None:
-                    tx_cnt[*evt.indices] += total_bytes()
             for lvs in T.grid(*[it[1] for it in iters_global]):
                 if direction == "g2s":
                     g_coord = T.meta_var(make_global_coord(lvs))
@@ -294,7 +278,7 @@ def copy_tma_impl(
                     T.ptx.cp_async.bulk.tensor.g2c(
                         rank,
                         s_buf.ptr_to(s_coord),
-                        mbar.ptr_to(evt.indices),
+                        mbar,
                         tensor_map,
                         *reversed(g_coord),
                         cta_group=cta_group,
@@ -349,32 +333,16 @@ def copy_tma_impl(
     return impl
 
 
-def _is_cp_async_event(op: OpCall, sctx: ScheduleContext):
-    evt = op.args[2]
-    return (
-        isinstance(evt, BulkGroupEvent) and evt.get_impl() == EventImpl.kCpAsync
-    ), "event is not cp.async bulk"
-
-
-def _is_tma_event(op: OpCall, sctx: ScheduleContext):
-    evt = op.args[2]
-    return (
-        (isinstance(evt, BulkGroupEvent) and evt.get_impl() == EventImpl.kTMAStore)
-        or (isinstance(evt, SemaphoreEventTensorItem) and evt.get_impl() in [EventImpl.kTMALoad])
-    ), "event is not TMA (load/store)"
-
-
 @register_dispatch(
     "copy_async",
     "cuda",
-    variant="cp_async",
+    variant="non-bulk-copy",
     priority=20,
     when=[
         predicate(
             "validate_copy_op",
             lambda op, sctx: (validate_copy_op(op, sctx), "validate_copy_op failed"),
         ),
-        predicate("event", _is_cp_async_event),
     ],
 )
 def copy_async_dispatch_cp_async(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
@@ -391,7 +359,6 @@ def copy_async_dispatch_cp_async(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
             "validate_copy_op",
             lambda op, sctx: (validate_copy_op(op, sctx), "validate_copy_op failed"),
         ),
-        predicate("event", _is_tma_event),
     ],
 )
 def copy_async_dispatch_tma(op: OpCall, sctx: ScheduleContext) -> PrimFunc:

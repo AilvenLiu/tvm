@@ -42,7 +42,7 @@ from .stmt import (
 from .stmt import SeqStmt
 from .stmt import IfThenElse, Evaluate, stmt_seq, stmt_list
 from .stmt import BufferRegion, MatchBufferRegion, SBlock, SBlockRealize
-from .stmt import OpCall, AllocBuffer, AllocBulkGroupEvent, AllocSemaphoreEventTensor
+from .stmt import OpCall, AllocBuffer
 
 from .function import PrimFunc, TensorIntrin, IndexMap
 

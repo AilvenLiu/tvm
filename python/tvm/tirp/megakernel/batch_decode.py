@@ -3,7 +3,6 @@ from typing import Any, Dict
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
-from tvm.tir.event import EventImpl
 
 from .common import F16_BYTES, KernelConfig, SmemManager, Tile, ceildiv, exp2, find_power_of_two
 
@@ -22,7 +21,7 @@ class DecodeTile(Tile):
     # max_chunk_size_tvm: [1]
 
     @classmethod
-    def class_config_init(cls, problem_config: Dict[str, Any], use_device_call = False):
+    def class_config_init(cls, problem_config: Dict[str, Any], use_device_call=False):
         cls.use_device_call = use_device_call
         cls.loop_inner = 1
         cls.pipe_depth = 1
@@ -124,9 +123,7 @@ class DecodeTile(Tile):
         self.epi_o = smem_manager.alloc(
             [self.bdz, self.bdy, self.bdx, self.loop_inner, self.vec_size], "float32"
         ).buffer
-        self.epi_md = smem_manager.alloc(
-            [self.bdz, self.bdy, self.loop_inner, 2], "float32"
-        ).buffer
+        self.epi_md = smem_manager.alloc([self.bdz, self.bdy, self.loop_inner, 2], "float32").buffer
 
         # allocate the reg
         self.idx = T.alloc_local([1], "int32")
@@ -180,7 +177,6 @@ class DecodeTile(Tile):
             ty = T.meta_var((tid // self.bdx) % self.bdy)
             tz = T.meta_var(tid // (self.bdx * self.bdy))
 
-            evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
             tx_start = T.meta_var(tx * self.vec_size)
 
             @T.macro
@@ -279,10 +275,10 @@ class DecodeTile(Tile):
                                         kp, kb, tz, ty, kt, tx_start : tx_start + self.vec_size
                                     ],
                                     self.kv_cache_global[g_st : g_st + self.vec_size],
-                                    evt,
+                                    dispatch="non-bulk-copy",
                                     vec_len=self.vec_size,
                                 )
-                    evt.commit()
+                    T.ptx.cp_async.commit_group()
 
                     # fetch V
                     for kt in T.unroll(self.tile_per_bdx):
@@ -300,10 +296,10 @@ class DecodeTile(Tile):
                                         kp, kb, tz, ty, kt, tx_start : tx_start + self.vec_size
                                     ],
                                     self.kv_cache_global[g_st : g_st + self.vec_size],
-                                    evt,
+                                    dispatch="non-bulk-copy",
                                     vec_len=self.vec_size,
                                 )
-                    evt.commit()
+                    T.ptx.cp_async.commit_group()
 
                     # initilize the value
                     self.idx[0] = 0
@@ -334,7 +330,7 @@ class DecodeTile(Tile):
                             T.ptx.fence.proxy("shared")
 
                         # compute qk
-                        evt.wait(2 * self.pipe_depth - 1)  # wait for K
+                        T.ptx.cp_async.wait_group(2 * self.pipe_depth - 1)  # wait for K
                         _sync_blk()
                         for kb in T.unroll(self.loop_inner):
                             self.m[kb, 1] = self.m[kb, 0]
@@ -407,13 +403,13 @@ class DecodeTile(Tile):
                                             tx_start : tx_start + self.vec_size,
                                         ],
                                         self.kv_cache_global[g_st : g_st + self.vec_size],
-                                        evt,
+                                        dispatch="non-bulk-copy",
                                         vec_len=self.vec_size,
                                     )
-                        evt.commit()
+                        T.ptx.cp_async.commit_group()
 
                         # calculate softmax(qk)v
-                        evt.wait(2 * self.pipe_depth - 1)  # wait for V
+                        T.ptx.cp_async.wait_group(2 * self.pipe_depth - 1)  # wait for V
                         _sync_blk()
                         for kb in T.unroll(self.loop_inner):
                             for kt in T.unroll(self.tile_per_bdx * self.bdy):
@@ -456,13 +452,13 @@ class DecodeTile(Tile):
                                             tx_start : tx_start + self.vec_size,
                                         ],
                                         self.kv_cache_global[g_st : g_st + self.vec_size],
-                                        evt,
+                                        dispatch="non-bulk-copy",
                                         vec_len=self.vec_size,
                                     )
-                        evt.commit()
+                        T.ptx.cp_async.commit_group()
                         self.idx[0] = (self.idx[0] + 1) % self.pipe_depth
 
-                    evt.wait(0)
+                    T.ptx.cp_async.wait_group(0)
 
                     # prepare o,m,d in smem for merging
                     for kb in T.unroll(self.loop_inner):

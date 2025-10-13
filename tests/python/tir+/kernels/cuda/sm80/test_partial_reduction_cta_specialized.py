@@ -23,8 +23,6 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.script.ir_builder import IRBuilder
-from tvm.tir.event import EventImpl
 
 M = 1024
 N = 1024
@@ -165,48 +163,6 @@ def partial_reduction_fused(A: T.handle, B: T.handle, C: T.handle, semaphore: T.
                 stage2_scheduler.next_tile()
 
 
-@T.prim_func(tirp=True)
-def partial_reduction_fused_event(A: T.handle, B: T.handle, C: T.handle, semaphore: T.handle):
-    A_ptr = T.match_buffer(A, (M, N), "float32")
-    B_ptr = T.match_buffer(B, (M, NUM_BLOCK_N), "float32")
-    C_ptr = T.match_buffer(C, (M, 1), "float32")
-    sem_buf = T.match_buffer(semaphore, (NUM_BLOCK_M, ), scope="global", dtype="int32")
-
-    with T.kernel():
-        bx = T.cta_id([TOTAL_SM_CNT], parent="kernel")
-        tx = T.thread_id([1024], parent="cta")
-
-        state = T.alloc_local((1,), "int32")
-        sem = Tp.alloc_semaphore_event_tensor(EventImpl.kGlobalSemaphore, state=[sem_buf, state], shape=[NUM_BLOCK_M])
-
-        with T.cta()[0: STAGE_1_SM_CNT]:
-            A_smem = T.alloc_buffer([BLOCK_M, BLOCK_N], "float32", scope="shared")
-            B_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-            stage1_scheduler = T.meta_var(SpatialTileScheduler("stage1", (NUM_BLOCK_M, NUM_BLOCK_N), STAGE_1_SM_CNT))
-            stage1_scheduler.init(bx)
-            while stage1_scheduler.valid():
-                m_idx = T.meta_var(stage1_scheduler.m_idx[0])
-                n_idx = T.meta_var(stage1_scheduler.n_idx[0])
-                Tp.copy(A_smem, A_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx * BLOCK_N: (n_idx + 1) * BLOCK_N])
-                Tp.sum(B_smem, A_smem)
-                Tp.copy(B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, n_idx], B_smem)
-                sem[m_idx].commit()
-                stage1_scheduler.next_tile()
-        with T.cta()[STAGE_1_SM_CNT: TOTAL_SM_CNT]:
-            B_smem = T.alloc_buffer([BLOCK_M, NUM_BLOCK_N], "float32", scope="shared")
-            C_smem = T.alloc_buffer([BLOCK_M, 1], "float32", scope="shared")
-            stage2_scheduler = T.meta_var(SpatialTileScheduler("stage2", (NUM_BLOCK_M, 1), STAGE_2_SM_CNT))
-            stage2_scheduler.init(bx - STAGE_1_SM_CNT)
-            while stage2_scheduler.valid():
-                m_idx = T.meta_var(stage2_scheduler.m_idx[0])
-                sem[m_idx].wait()
-                Tp.copy(B_smem, B_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, :])
-                Tp.sum(C_smem, B_smem)
-                Tp.copy(C_ptr[m_idx * BLOCK_M: (m_idx + 1) * BLOCK_M, 0], C_smem)
-                stage2_scheduler.next_tile()
-# fmt: on
-
-
 @tvm.testing.requires_cuda_compute_version(8)
 def test_partial_reduction():
     A_np = np.random.randn(M, N).astype(np.float32)
@@ -238,38 +194,5 @@ def test_partial_reduction():
         tvm.testing.assert_allclose(ret_fused, ret_ref_stage_2, rtol=1e-3, atol=1e-3)
 
 
-@tvm.testing.requires_cuda_compute_version(8)
-def test_partial_reduction_event():
-    A_np = np.random.randn(M, N).astype(np.float32)
-    B_np = np.zeros((M, NUM_BLOCK_N), dtype=np.float32)
-    C_np = np.zeros((M, 1), dtype=np.float32)
-    DEV = tvm.cuda(0)
-    target = tvm.target.Target("cuda")
-
-    A_tvm = tvm.runtime.tensor(A_np, device=DEV)
-    B_tvm = tvm.runtime.tensor(B_np, device=DEV)
-    C_tvm = tvm.runtime.tensor(C_np, device=DEV)
-    C_tvm_fused = tvm.runtime.tensor(C_np, device=DEV)
-    # we initialize event on host instead of device because of Tp.fill not correctly implemented
-    sem_tvm = tvm.runtime.tensor(np.full((NUM_BLOCK_M,), NUM_BLOCK_N, dtype=np.int32), device=DEV)
-    with target:
-
-        ref_mod_stage_1 = tvm.IRModule({"main": partial_reduction_ref_stage1})
-        ref_mod_stage_1 = tvm.compile(ref_mod_stage_1, target=target, tir_pipeline="tirp")
-        ref_mod_stage_1(A_tvm, B_tvm)
-
-        ref_mod_stage_2 = tvm.IRModule({"main": partial_reduction_ref_stage2})
-        ref_mod_stage_2 = tvm.compile(ref_mod_stage_2, target=target, tir_pipeline="tirp")
-        ref_mod_stage_2(B_tvm, C_tvm)
-        ret_ref_stage_2 = C_tvm.numpy()
-
-        fused_mod = tvm.IRModule({"main": partial_reduction_fused_event})
-        fused_mod = tvm.compile(fused_mod, target=target, tir_pipeline="tirp")
-        fused_mod(A_tvm, B_tvm, C_tvm_fused, sem_tvm)
-        ret_fused = C_tvm_fused.numpy()
-        tvm.testing.assert_allclose(ret_fused, ret_ref_stage_2, rtol=1e-3, atol=1e-3)
-
-
 if __name__ == "__main__":
     test_partial_reduction()
-    test_partial_reduction_event()

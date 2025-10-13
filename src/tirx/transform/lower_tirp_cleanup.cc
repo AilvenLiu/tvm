@@ -123,50 +123,6 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     }
   }
 
-  Stmt VisitStmt_(const AllocBulkGroupEventNode* op) final {
-    auto mutate = ([this](BulkGroupEvent event) -> BulkGroupEvent {
-      auto* n = event.CopyOnWrite();
-      n->state.MutateByApply([this](ffi::Any state) -> ffi::Any { return VisitAny(state); });
-      if (n->state.same_as(event->state)) {
-        return event;
-      } else {
-        return ffi::GetRef<BulkGroupEvent>(n);
-      }
-    });
-    auto event = mutate(op->bulk_group_event);
-    auto body = VisitStmt(op->body);
-    if (event.same_as(op->bulk_group_event) && body.same_as(op->body)) {
-      return ffi::GetRef<Stmt>(op);
-    } else {
-      auto n = CopyOnWrite(op);
-      n->bulk_group_event = event;
-      n->body = body;
-      return Stmt(n);
-    }
-  }
-
-  Stmt VisitStmt_(const AllocSemaphoreEventTensorNode* op) final {
-    auto mutate = ([this](SemaphoreEventTensor event) -> SemaphoreEventTensor {
-      auto* n = event.CopyOnWrite();
-      n->state.MutateByApply([this](ffi::Any state) -> ffi::Any { return VisitAny(state); });
-      if (n->state.same_as(event->state)) {
-        return event;
-      } else {
-        return ffi::GetRef<SemaphoreEventTensor>(n);
-      }
-    });
-    auto event = mutate(op->sem_event_tensor);
-    auto body = VisitStmt(op->body);
-    if (event.same_as(op->sem_event_tensor) && body.same_as(op->body)) {
-      return ffi::GetRef<Stmt>(op);
-    } else {
-      auto n = CopyOnWrite(op);
-      n->sem_event_tensor = event;
-      n->body = body;
-      return Stmt(n);
-    }
-  }
-
   Stmt VisitStmt_(const DeclBufferNode* op) final {
     auto buffer = GetFlattenedBuffer(op->buffer);
 
@@ -373,16 +329,6 @@ class BufferOffsetRemover : public StmtExprMutator {
   std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_remap_;
 };
 
-class EventRemover : public StmtExprMutator {
- public:
-  static Stmt Remove(const Stmt& stmt) { return EventRemover()(stmt); }
-
- private:
-  Stmt VisitStmt_(const AllocBulkGroupEventNode* op) final { return VisitStmt(op->body); }
-
-  Stmt VisitStmt_(const AllocSemaphoreEventTensorNode* op) final { return VisitStmt(op->body); }
-};
-
 namespace {
 Target ResolveTarget(const PrimFunc& f) {
   auto target = f->GetAttr<Target>(tvm::attr::kTarget);
@@ -402,7 +348,6 @@ Pass LowerTIRpCleanup() {
     n->body = ScheduleContextRemover::Remove(n->body);
     std::tie(n->body, n->buffer_map) = LayoutApplier::Flatten(n->body, n->buffer_map, target);
     n->body = BufferOffsetRemover::Remove(n->body);
-    n->body = EventRemover::Remove(n->body);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tirx.LowerTIRpCleanup", {});

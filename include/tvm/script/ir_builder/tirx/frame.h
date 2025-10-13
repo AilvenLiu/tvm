@@ -21,7 +21,6 @@
 
 #include <tvm/script/ir_builder/base.h>
 #include <tvm/script/ir_builder/ir/frame.h>
-#include <tvm/tirx/event.h>
 #include <tvm/tirx/exec_scope.h>
 #include <tvm/tirx/stmt.h>
 
@@ -693,65 +692,7 @@ class AllocBufferFrame : public TIRFrame {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AllocBufferFrame, TIRFrame, AllocBufferFrameNode);
 };
 
-class AllocBulkGroupEventFrameNode : public TIRFrameNode {
- public:
-  /*! \brief The allocated bulk group event. */
-  tvm::tirx::BulkGroupEvent bulk_group_event;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<AllocBulkGroupEventFrameNode>().def_ro(
-        "bulk_group_event", &AllocBulkGroupEventFrameNode::bulk_group_event);
-  }
-
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.AllocBulkGroupEventFrame",
-                                    AllocBulkGroupEventFrameNode, TIRFrameNode);
-
- public:
-  void ExitWithScope() final;
-};
-
-class AllocBulkGroupEventFrame : public TIRFrame {
- public:
-  explicit AllocBulkGroupEventFrame(ObjectPtr<AllocBulkGroupEventFrameNode> data)
-      : TIRFrame(ffi::UnsafeInit{}) {
-    TVM_FFI_ICHECK(data != nullptr);
-    data_ = std::move(data);
-  }
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AllocBulkGroupEventFrame, TIRFrame,
-                                                AllocBulkGroupEventFrameNode);
-};
-
-class AllocSemaphoreEventTensorFrameNode : public TIRFrameNode {
- public:
-  /*! \brief The allocated semaphore event tensor. */
-  tvm::tirx::SemaphoreEventTensor sem_event_tensor;
-
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<AllocSemaphoreEventTensorFrameNode>().def_ro(
-        "sem_event_tensor", &AllocSemaphoreEventTensorFrameNode::sem_event_tensor,
-        refl::AttachFieldFlag::SEqHashDef());
-  }
-
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.AllocSemaphoreEventTensorFrame",
-                                    AllocSemaphoreEventTensorFrameNode, TIRFrameNode);
-
- public:
-  void ExitWithScope() final;
-};
-
-class AllocSemaphoreEventTensorFrame : public TIRFrame {
- public:
-  explicit AllocSemaphoreEventTensorFrame(ObjectPtr<AllocSemaphoreEventTensorFrameNode> data)
-      : TIRFrame(ffi::UnsafeInit{}) {
-    TVM_FFI_ICHECK(data != nullptr);
-    data_ = std::move(data);
-  }
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AllocSemaphoreEventTensorFrame, TIRFrame,
-                                                AllocSemaphoreEventTensorFrameNode);
-};
-}  // namespace tirxxx
+}  // namespace tirx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

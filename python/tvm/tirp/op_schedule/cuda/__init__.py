@@ -18,4 +18,3 @@
 from .copy import *
 from .maps import *
 from .reduction import *
-from .event import *

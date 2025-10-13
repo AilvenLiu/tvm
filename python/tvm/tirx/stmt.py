@@ -513,38 +513,6 @@ class AllocBuffer(Object, Scriptable):
         self.__init_handle_by_constructor__(_ffi_api.AllocBuffer, buffer, body, span)
 
 
-@tvm_ffi.register_object("tir.AllocBulkGroupEvent")
-class AllocBulkGroupEvent(Object, Scriptable):
-    """AllocBulkGroupEvent node.
-
-    Parameters
-    ----------
-    bulk_group_event : BulkGroupEvent
-        The bulk group event of the alloc bulk group event.
-    """
-
-    def __init__(self, bulk_group_event, body: Stmt, span: Optional[Span] = None) -> None:
-        self.__init_handle_by_constructor__(
-            _ffi_api.AllocBulkGroupEvent, bulk_group_event, body, span
-        )
-
-
-@tvm_ffi.register_object("tir.AllocSemaphoreEventTensor")
-class AllocSemaphoreEventTensor(Object, Scriptable):
-    """AllocSemaphoreEventTensor node.
-
-    Parameters
-    ----------
-    sem_event_tensor : SemaphoreEventTensor
-        The semaphore event tensor of the alloc semaphore event tensor.
-    """
-
-    def __init__(self, sem_event_tensor, body: Stmt, span: Optional[Span] = None) -> None:
-        self.__init_handle_by_constructor__(
-            _ffi_api.AllocSemaphoreEventTensor, sem_event_tensor, body, span
-        )
-
-
 @tvm_ffi.register_object("tir.SBlock")
 class SBlock(Stmt):
     """SBlock node.

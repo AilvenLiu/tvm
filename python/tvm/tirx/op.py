@@ -3780,13 +3780,13 @@ def ptx_cp_async_commit_group():
     return call_intrin("", "tir.ptx_cp_async_commit_group")
 
 
-def ptx_cp_async_wait_group(num):
+def ptx_cp_async_wait_group(num=0):
     """TVM intrinsic for ptx async copy wait
     https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#data-movement-and-conversion-instructions-cp-async-wait-group
 
     Parameters
     ----------
-    num : int
+    num : int, optional
         The number of the most recent uncommitted pending cp.async groups to wait.
 
     Returns
@@ -3968,7 +3968,7 @@ def ptx_cp_async_bulk_commit_group():
     return call_intrin("", "tir.ptx_cp_async_bulk_commit_group")
 
 
-def ptx_cp_async_bulk_wait_group(n, read=True):
+def ptx_cp_async_bulk_wait_group(n=0, read=True):
     """TVM intrinsic to call cp.async.bulk.tensor.wait_group
 
     Parameters

@@ -21,8 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import tvm.tirp.operator as tirp_op
 from tvm import DataType
 from tvm.ir import Op
-from tvm.tirx import Buffer, BufferRegion, PrimExpr, Var, event
-from tvm.tirx.event import BaseEvent
+from tvm.tirx import Buffer, BufferRegion, PrimExpr, Var
 from tvm.tirx.expr import FloatImm
 from tvm.tirx.predicate import Predicate
 
@@ -330,14 +329,13 @@ def copy(
 def copy_async(
     dst: Union[BufferRegion, Buffer],
     src: Union[BufferRegion, Buffer],
-    evt: BaseEvent,
     workspace: Dict[str, Buffer] = None,
     dispatch: Optional[str] = None,
     **kwargs,
 ):
     config = kwargs or {}
     return f_insert(
-        tirp_op.CopyAsync(dst, src, evt, workspace=workspace, config=config, dispatch=dispatch)
+        tirp_op.CopyAsync(dst, src, workspace=workspace, config=config, dispatch=dispatch)
     )
 
 
@@ -1078,16 +1076,6 @@ def select(
     return f_insert(tirp_op.Select(dst, true_value, false_value, pred))
 
 
-def alloc_bulk_group_event(impl: event.EventImpl, state: List[Any] = []) -> event.BulkGroupEvent:
-    return _ffi_api.AllocBulkGroupEvent(int(impl), state, "")
-
-
-def alloc_semaphore_event_tensor(
-    impl: event.EventImpl, state: List[Any] = [], shape: List[int] = (1,)
-) -> event.SemaphoreEventTensor:
-    return _ffi_api.AllocSemaphoreEventTensor(int(impl), state, shape, "")
-
-
 class PoolAllocator:
     def __init__(self, ptr: Var):
         self.ptr = ptr
@@ -1190,7 +1178,5 @@ __all__ = [
     "binary_chain",
     "reduce_negate",
     "select",
-    "alloc_bulk_group_event",
-    "alloc_semaphore_event_tensor",
     "PoolAllocator",
 ]

@@ -20,7 +20,6 @@ from tvm_ffi import register_object as _register_object
 
 from tvm.ir.expr import Range
 from tvm.tirx import Buffer, PrimExpr, Var
-from tvm.tirx.event import BulkGroupEvent, SemaphoreEventTensor
 
 from ..base import IRBuilderFrame
 from . import _ffi_api
@@ -145,17 +144,3 @@ class AllocBufferFrame(TIRFrame):
     def __enter__(self) -> Buffer:
         super().__enter__()
         return self.buffer
-
-
-@_register_object("script.ir_builder.tir.AllocBulkGroupEventFrame")
-class AllocBulkGroupEventFrame(TIRFrame):
-    def __enter__(self) -> BulkGroupEvent:
-        super().__enter__()
-        return self.bulk_group_event
-
-
-@_register_object("script.ir_builder.tir.AllocSemaphoreEventTensorFrame")
-class AllocSemaphoreEventTensorFrame(TIRFrame):
-    def __enter__(self) -> SemaphoreEventTensor:
-        super().__enter__()
-        return self.sem_event_tensor

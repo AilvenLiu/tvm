@@ -20,7 +20,6 @@ import pytest
 import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 from tvm.tirp.bench.utils import ProtonContext, bench
 
 
@@ -310,7 +309,6 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                         d_tmp = T.alloc_local([HEAD_PER_CTA, 1], "float32")
                         o_tmp = T.alloc_local([HEAD_PER_CTA, VEC_SIZE], "float32")
                         cur = T.alloc_local([1], "int32")
-                        evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
                         tx_start = T.meta_var(tx * VEC_SIZE)
 
                         @T.macro
@@ -368,18 +366,18 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     if ((kp * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
                                         for kb in T.unroll(HEAD_PER_CTA):
                                             g_st = T.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
-                                            Tp.copy_async(k_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], evt,
+                                            Tp.copy_async(k_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
                                                             vec_len=VEC_SIZE)
-                                evt.commit()
+                                T.ptx.cp_async.commit_group()
 
                                 # fetch V
                                 for kt in T.unroll(TILE_PER_BDX):
                                     if ((kp * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
                                         for kb in T.unroll(HEAD_PER_CTA):
                                             g_st = T.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
-                                            Tp.copy_async(v_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], evt,
+                                            Tp.copy_async(v_smem[kp, kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
                                                             vec_len=VEC_SIZE)
-                                evt.commit()
+                                T.ptx.cp_async.commit_group()
 
                             # initilize the value
                             idx[0] = 0
@@ -398,7 +396,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     T.ptx.fence.proxy("shared")
 
                                 # compute qk
-                                evt.wait(2 * PIPE_DEPTH - 1) # wait for K
+                                T.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for K
                                 sync_blk()
                                 for kb in T.unroll(HEAD_PER_CTA):
                                     m[kb, 1] = m[kb, 0]
@@ -440,12 +438,12 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     if (((ki + PIPE_DEPTH) * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
                                         for kb in T.unroll(HEAD_PER_CTA):
                                             g_st = T.meta_var(kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
-                                            Tp.copy_async(k_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], evt,
+                                            Tp.copy_async(k_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
                                                             vec_len=VEC_SIZE)
-                                evt.commit()
+                                T.ptx.cp_async.commit_group()
 
                                 # calculate softmax(qk)v
-                                evt.wait(2 * PIPE_DEPTH - 1) # wait for V
+                                T.ptx.cp_async.wait_group(2 * PIPE_DEPTH - 1) # wait for V
                                 sync_blk()
                                 for kt in T.unroll(TILE_PER_BDX * BDY):
                                     for kb in T.unroll(HEAD_PER_CTA):
@@ -460,12 +458,12 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     if (((ki + PIPE_DEPTH) * BDZ + tz) * BDY + ty) * TILE_PER_BDX + kt < chunk_size[0]:
                                         for kb in T.unroll(HEAD_PER_CTA):
                                             g_st = T.meta_var(KV_HEADS * PAGE_SIZE * HEAD_DIM + kv_offset_cp[kt] + kb * PAGE_SIZE * HEAD_DIM)
-                                            Tp.copy_async(v_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], evt,
+                                            Tp.copy_async(v_smem[idx[0], kb, tz, ty, kt, tx_start:tx_start + VEC_SIZE], kv_global_1d[g_st:g_st + VEC_SIZE], dispatch="non-bulk-copy",
                                                             vec_len=VEC_SIZE)
-                                evt.commit()
+                                T.ptx.cp_async.commit_group()
                                 idx[0] = (idx[0] + 1) % PIPE_DEPTH
 
-                            evt.wait(0)
+                            T.ptx.cp_async.wait_group(0)
 
                             # prepare o,m,d in smem for merging
                             for kb in T.unroll(HEAD_PER_CTA):
@@ -560,7 +558,6 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                         m_tmp = T.alloc_local([1], "float32")
                         o_tmp = T.alloc_local([VEC_SIZE], "float32")
 
-                        evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
                         tx_start = T.meta_var(tx * VEC_SIZE)
 
                         idx[0] = bx
@@ -583,8 +580,8 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 if kp * BDY + ty < num[0]:
                                     Tp.copy_async(o_tmp_smem[kp, ty, tx_start:tx_start + VEC_SIZE],
                                                   o_tmp_global[new_beg_batch_idx[0] + kp * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
-                                                  evt, vec_len=VEC_SIZE)
-                                evt.commit()
+                                                  dispatch="non-bulk-copy", vec_len=VEC_SIZE)
+                                T.ptx.cp_async.commit_group()
 
                             # initialize the value
                             m[0] = T.float32('-inf')
@@ -602,7 +599,7 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                     T.ptx.fence.proxy("shared")
                                     T.ptx.bar.sync(2, BDX * BDY)
 
-                                evt.wait(PIPE_DEPTH - 1)
+                                T.ptx.cp_async.wait_group(PIPE_DEPTH - 1)
                                 T.ptx.bar.sync(2, BDX * BDY)
                                 T.ptx.fence.proxy("shared")
 
@@ -620,9 +617,9 @@ def get_decode_kernel(plan_info: PlanInfo, page_size):
                                 if (PIPE_DEPTH + ki) * BDY + ty < num[0]:
                                     Tp.copy_async(o_tmp_smem[ki % PIPE_DEPTH, ty, tx_start:tx_start + VEC_SIZE],
                                                   o_tmp_global[new_beg_batch_idx[0] + (ki + PIPE_DEPTH) * BDY + ty, head_idx[0], tx_start:tx_start + VEC_SIZE],
-                                                  evt, vec_len=VEC_SIZE)
-                                evt.commit()
-                            evt.wait(0)
+                                                  dispatch="non-bulk-copy", vec_len=VEC_SIZE)
+                                T.ptx.cp_async.commit_group()
+                            T.ptx.cp_async.wait_group(0)
                             T.ptx.bar.sync(2, BDX * BDY)
                             # normalize
                             for kv in T.unroll(VEC_SIZE):

@@ -24,7 +24,6 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 from tvm.tir.layout import TileLayout
 from tvm.tirp.op_schedule.cuda.copy_async import (
     tma_atom_layout,
@@ -105,11 +104,9 @@ def test_copy_g2s_s2g_cta_vec_load(task, dtype):
             with T.cta():
                 A_smem = T.alloc_buffer(s_shape, dtype, scope="shared", layout=layoutS)
 
-                event = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
-                event.init()
-                Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event)
-                event.commit()
-                event.wait(0)
+                Tp.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="non-bulk-copy")
+                T.ptx.cp_async.commit_group()
+                T.ptx.cp_async.wait_group()
                 T.cuda.cta_sync()
                 Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
@@ -200,9 +197,7 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
     # Compute the shared layout using the provided swizzle length
     shared_layout = layoutS_fn(dtype, swizzle_len)
     if shared_layout is None:
-        # skip the test
-        # TODO(@bohan): box_dim must have each dim less than or equal to 256
-        return
+        pytest.skip(f"dtype {dtype} + swizzle_len {swizzle_len} is not supported")
 
     total_bytes = functools.reduce(lambda acc, region: acc * (region[1] - region[0]), s_region, 1)
     total_bytes = total_bytes * tvm.DataType(dtype).bits // 8
@@ -227,21 +222,21 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
             with T.thread():
                 dyn = T.alloc_buffer([smem_bytes + 8], "uint8", scope="shared.dyn")
                 A_smem = T.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
-                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8, layout=TileLayout((1,)))
-                phase = T.alloc_buffer([1], "int32", scope="local")
-                tx_cnt = T.alloc_buffer([1], "int32", scope="local")
+                mbarrier = T.decl_buffer([1], "uint64", dyn.data, byte_offset=smem_bytes // 8)
 
+                mbar_ptr = mbarrier.ptr_to([0])
+                with T.thread()[0:1]:
+                    T.ptx.mbarrier.init(mbar_ptr, 1)
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+
+                with T.thread()[0:1]:
+                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="tma", mbar=mbar_ptr, cache_hint=cache_hint)
+                    T.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
+
+                T.ptx.mbarrier.try_wait(mbar_ptr, 0)
+                T.cuda.cta_sync()
                 with T.cta():
-                    event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, tx_cnt])
-                    event[0].init(1)
-                    T.ptx.fence.proxy("shared")
-                    T.cuda.cta_sync()
-
-                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0], cache_hint=cache_hint)
-                    event[0].commit()
-                    event[0].wait()
-                    T.cuda.cta_sync()
-
                     Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
@@ -305,9 +300,7 @@ def test_copy_g2s_cta_tma_load(task, dtype, swizzle_len, cache_hint):
         ),
     ],
 )
-@pytest.mark.parametrize("phase_managed", [False, True])
-@pytest.mark.parametrize("tx_cnt_managed", [False, True])
-def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len, phase_managed, tx_cnt_managed):
+def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len):
     g_shape, s_shape, thread_cnt, layoutA, layoutB, layoutS_fn = task
     dev = tvm.cuda(0)
     n = g_shape[0]
@@ -315,9 +308,7 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len, phase_manag
     # Compute the shared layout using the provided swizzle length
     shared_layout = layoutS_fn(dtype, swizzle_len)
     if shared_layout is None:
-        # skip the test
-        # TODO(@bohan): box_dim must have each dim less than or equal to 256
-        return
+        pytest.skip(f"dtype {dtype} + swizzle_len {swizzle_len} is not supported")
 
     smem_bytes = functools.reduce(lambda acc, extent: acc * extent, s_shape, 1)
     smem_bytes = smem_bytes * tvm.DataType(dtype).bits // 8
@@ -328,13 +319,6 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len, phase_manag
         return [
             slice(stage, stage + 1),
             *[slice(0, g_shape[i]) for i in range(1, len(g_shape))],
-        ]
-
-    def get_state(phase_managed, tx_cnt_managed, mbarrier, phase, tx_cnt):
-        return [
-            mbarrier,
-            phase if phase_managed else None,
-            tx_cnt if tx_cnt_managed else None,
         ]
 
     # fmt: off
@@ -351,38 +335,26 @@ def test_copy_g2s_cta_tma_load_multi_phase(task, dtype, swizzle_len, phase_manag
             with T.thread():
                 dyn = T.alloc_buffer([smem_bytes + 8], "uint8", scope="shared.dyn")
                 A_smem = T.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
-                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8, layout=TileLayout((1,)))
-                phase = T.alloc_buffer([1], "int32", scope="local")
-                tx_cnt = T.alloc_buffer([1], "int32", scope="local")
+                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                phase = T.local_cell("int32")
 
-                with T.cta():
-                    state = T.meta_var(get_state(phase_managed, tx_cnt_managed, mbarrier, phase, tx_cnt))
-                    event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=state)
+                phase = 0
+                with T.thread()[0:1]:
+                    T.ptx.mbarrier.init(mbarrier.ptr_to([0]), 1)
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
 
-                    event[0].init(1)
-                    if not phase_managed:
-                        phase[0] = 0
+                for stage in range(n):
+                    with T.thread()[0:1]:
+                        Tp.copy_async(A_smem[*r_smem], A[*r_gmem(stage)], dispatch="tma", mbar=mbarrier.ptr_to([0]))
+                        T.ptx.mbarrier.arrive.expect_tx(mbarrier.ptr_to([0]), smem_bytes)
+
+                    T.ptx.mbarrier.try_wait(mbarrier.ptr_to([0]), phase)
+                    phase = phase ^ 1
 
                     T.ptx.fence.proxy("shared")
                     T.cuda.cta_sync()
-
-                    for stage in range(n):
-                        Tp.copy_async(A_smem[*r_smem], A[*r_gmem(stage)], event[0])
-
-                        if tx_cnt_managed:
-                            event[0].commit()
-                        else:
-                            event[0].commit(tx_cnt=smem_bytes)
-
-                        if phase_managed:
-                            event[0].wait()
-                        else:
-                            event[0].wait(phase=phase[0])
-                            phase[0] = phase[0] ^ 1
-
-                        T.ptx.fence.proxy("shared")
-                        T.cuda.cta_sync()
-
+                    with T.cta():
                         Tp.copy(B[*r_gmem(stage)], A_smem[*r_smem])
     # fmt: on
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
@@ -453,9 +425,7 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
     # Compute the shared layout using the provided swizzle length
     shared_layout = layoutS_fn(dtype, swizzle_len)
     if shared_layout is None:
-        # skip the test
-        # TODO(@bohan): box_dim must have each dim less than or equal to 256
-        return
+        pytest.skip(f"dtype {dtype} + swizzle_len {swizzle_len} is not supported")
 
     smem_bytes = functools.reduce(lambda acc, extent: acc * extent, s_shape, 1)
     smem_bytes = smem_bytes * tvm.DataType(dtype).bits // 8
@@ -482,16 +452,14 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
                 dyn = T.alloc_buffer([smem_bytes], "uint8", scope="shared.dyn")
                 A_smem = T.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
 
-                with T.cta():
-                    evt = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
-                    evt.init()
-                    for stage in range(n):
-                        Tp.copy(A_smem[*r_smem], A[*r_gmem(stage)])
-                        T.ptx.fence.proxy("shared")
-                        Tp.copy_async(B[*r_gmem(stage)], A_smem[*r_smem], evt, cache_hint=cache_hint)
-                        evt.commit()
-                        evt.wait(0)
-                        T.cuda.cta_sync()
+                for stage in range(n):
+                    Tp.copy(A_smem[*r_smem], A[*r_gmem(stage)])
+                    T.ptx.fence.proxy("shared")
+                    with T.thread()[0:1]:
+                        Tp.copy_async(B[*r_gmem(stage)], A_smem[*r_smem], dispatch="tma", cache_hint=cache_hint)
+                        T.ptx.cp_async.bulk.commit_group()
+                        T.ptx.cp_async.bulk.wait_group()
+                    T.cuda.cta_sync()
     # fmt: on
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
     target = tvm.target.Target("cuda")
@@ -542,7 +510,7 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
         ),
     ],
 )
-def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3, cache_hint=""):
+def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3):
     g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, layoutS_fn = task
     dev = tvm.cuda(0)
 
@@ -572,21 +540,22 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3, c
             with T.thread():
                 dyn = T.alloc_buffer([smem_bytes + 8], "uint8", scope="shared.dyn")
                 A_smem = T.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
-                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8, layout=TileLayout((1,)))
-                phase = T.alloc_buffer([1], "int32", scope="local")
-                tx_cnt = T.alloc_buffer([1], "int32", scope="local")
+                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                mbar_ptr = T.meta_var(mbarrier.ptr_to([0]))
 
+                with T.thread()[0:1]:
+                    T.ptx.mbarrier.init(mbar_ptr, 1)
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+
+                with T.thread()[0:1]:
+                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="tma", mbar=mbar_ptr)
+                    T.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
+                T.ptx.mbarrier.try_wait(mbar_ptr, 0)
+
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
                 with T.cta():
-                    event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[mbarrier, phase, None])
-                    event[0].init(1)
-                    T.ptx.fence.proxy("shared")
-                    T.cuda.cta_sync()
-
-                    Tp.copy_async(A_smem[*r_smem], A[*r_gmem], event[0], cache_hint=cache_hint)
-                    event[0].commit(tx_cnt=total_bytes)
-                    event[0].wait()
-                    T.cuda.cta_sync()
-
                     Tp.copy(B[*r_gmem], A_smem[*r_smem])
     # fmt: on
     np_dtype = tvm.testing.np_dtype_from_str(dtype)
@@ -608,38 +577,6 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3, c
         B_ref = np.zeros(g_shape, dtype=np_dtype)
         B_ref[*r_gmem] = A_np[*r_gmem]
         np.testing.assert_allclose(B_ref, B.numpy())
-
-
-def test_kernel_sempaphore():
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def gpu_semaphore_wait(semaphore: T.handle):
-        sem = T.match_buffer(semaphore, (64,), dtype="int32", scope="global")
-        with T.kernel():
-            bx = T.cta_id([128], parent="kernel")
-            tx = T.thread_id([128], parent="cta")
-
-            state = T.alloc_local((1,), "int32")
-            evt = Tp.alloc_semaphore_event_tensor(EventImpl.kGlobalSemaphore, state=[sem, state], shape=[64])
-
-            T.tvm_global_barrier_kinit()
-            evt.init(1)
-            T.tvm_storage_sync("global", True, 128)
-
-            with T.cta()[0:64]:
-                evt[bx].commit()
-            with T.cta()[64:128]:
-                evt[bx - 64].wait()
-    # fmt: on
-
-    target = tvm.target.Target("cuda")
-    with target:
-        mod = tvm.IRModule({"main": gpu_semaphore_wait})
-        mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
-        print(mod.mod.imports[0].inspect_source())
-        semaphore = tvm.runtime.tensor(np.full((64,), 2, dtype=np.int32), device=tvm.cuda(0))
-        mod(semaphore)
-        np.testing.assert_equal(semaphore.numpy(), np.full((64,), 0, dtype=np.int32))
 
 
 if __name__ == "__main__":

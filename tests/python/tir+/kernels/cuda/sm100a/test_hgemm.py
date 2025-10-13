@@ -4,9 +4,7 @@ import tvm
 import tvm.testing
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 from tvm.tir.layout import TileLayout
-from tvm.script import ir_builder as IRBuilder
 from tvm.script import tir as T
 from tvm.tirp.bench.utils import ProtonContext, bench
 from tvm.tirp.tile_scheduler import GroupMajor2D
@@ -155,7 +153,6 @@ def prepare_data():
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 def test_hgemm():
-
     A_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
         T.TileLayout(
@@ -197,54 +194,42 @@ def test_hgemm():
                                         elem_offset=1024 // F16_BYTES + PIPELINE_DEPTH * (NUM_CONSUMER * BLK_M + BLK_N) * BLK_K)
 
                 # alloc local memory
-                reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
-                reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
+                descI = T.local_cell("uint32")
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
-                descI = T.local_cell("uint32")
                 phase = T.alloc_buffer((1,), "int32", scope="local")
                 stage = T.local_cell("int32")
 
-                # initialize
+                # barriers
                 tma2mma = T.meta_var(BarTMA2MMA(buf.data, 4, PIPELINE_DEPTH, 1, is_p2c=True))
                 mma2tma = T.meta_var(BarMMA2TMA(buf.data, 4 + PIPELINE_DEPTH, PIPELINE_DEPTH, 1, is_p2c=False))
                 mma2ld = T.meta_var(BarMMA2LD(buf.data, 4 + 2 * PIPELINE_DEPTH, 1, NUM_CONSUMER, is_p2c=True))
                 ld2mma = T.meta_var(BarLD2MMA(buf.data, 4 + 2 * PIPELINE_DEPTH + NUM_CONSUMER, 1, NUM_CONSUMER, is_p2c=False))
-                tile_scheduler = T.meta_var(
-                    GroupMajor2D(
-                        "tile_scheduler",
-                        m_tiles=TILE_M_NUM,
-                        n_tiles=TILE_N_NUM,
-                        group_rows=TILE_GROUPS_ROW_SIZE,
-                        step=SM_NUMBER // 2,
-                    )
-                )
+
                 tma2mma.init(1)
                 mma2tma.init(NUM_CONSUMER)
                 mma2ld.init(1)
                 ld2mma.init(128 * NUM_CONSUMER)
-                tile_scheduler.init(bx // 2)
+
                 ptr: T.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret("handle", T.ptx.map_shared_rank(tma2mma.mbar.ptr_to([0, 0]), 0))
                 tma_finished = T.decl_buffer([PIPELINE_DEPTH], "uint64", data=ptr, scope="shared")
 
-                # Define events
-                tma_event = Tp.alloc_semaphore_event_tensor(
-                    EventImpl.kTMALoad, state=[tma_finished, None, None], shape=[PIPELINE_DEPTH]
-                )
-                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
+                # Tile scheduler
+                tile_scheduler = T.meta_var(GroupMajor2D("tile_scheduler", m_tiles=TILE_M_NUM, n_tiles=TILE_N_NUM, group_rows=TILE_GROUPS_ROW_SIZE, step=SM_NUMBER // 2))
+                tile_scheduler.init(bx // 2)
+                m_idx = T.meta_var(tile_scheduler.m_idx)
+                n_idx = T.meta_var(tile_scheduler.n_idx)
 
                 # alloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=CTA_GROUP)
 
                 T.cuda.cluster_sync()
                 T.cuda.cta_sync()
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
-                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
-                                     layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TLane"), (1, "TCol")])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -273,9 +258,6 @@ def test_hgemm():
                         if warp_id == 3:
                             phase[0] = 0
                             while tile_scheduler.valid():
-                                m_idx = T.meta_var(tile_scheduler.m_idx)
-                                n_idx = T.meta_var(tile_scheduler.n_idx)
-
                                 # GMEM -> SMEM  (tma)
                                 with T.thread(parent="warp")[T.ptx.elect_sync()]:
                                     # precompute base offsets; k_start depends on stage
@@ -286,10 +268,11 @@ def test_hgemm():
 
                                     @T.macro
                                     def tma_load(is_remain, ks):
+                                        tma_copy = T.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([ks]), "cta_group": CTA_GROUP})
                                         mma2tma.wait(ks, 0, phase[0])
-                                        Tp.copy_async(A_smem[ks, 0, :, :], A[m_start0 : m_start0 + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
-                                        Tp.copy_async(A_smem[ks, 1, :, :], A[m_start1 : m_start1 + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
-                                        Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
+                                        Tp.copy_async(A_smem[ks, 0, :, :], A[m_start0 : m_start0 + BLK_M, k_start : k_start + BLK_K], **tma_copy)
+                                        Tp.copy_async(A_smem[ks, 1, :, :], A[m_start1 : m_start1 + BLK_M, k_start : k_start + BLK_K], **tma_copy)
+                                        Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, k_start : k_start + BLK_K], **tma_copy)
                                         if cbx == 0:
                                             tma2mma.arrive(ks, NUM_CONSUMER * BLK_K * (BLK_M * NUM_CONSUMER + BLK_N) * F16_BYTES)
 
@@ -306,7 +289,9 @@ def test_hgemm():
                             phase_tmem = T.alloc_buffer((1,), "int32", scope="local")
                             phase_tmem[0] = 0
                             phase[0] = 0
+
                             T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
+
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx)
                                 n_idx = T.meta_var(tile_scheduler.n_idx)
@@ -347,12 +332,14 @@ def test_hgemm():
 
                     with T.warpgroup()[0:NUM_CONSUMER]:
                         T.ptx.setmaxnreg(True, 224)
-                        T.cuda.trap_when_assert_failed(tmem_addr == 0)
+
+                        reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
+                        reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
+                        reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
                         phase_tmem = T.alloc_buffer((1,), "int32", scope="local")
+
                         phase_tmem[0] = 0
                         while tile_scheduler.valid():
-                            m_idx = T.meta_var(tile_scheduler.m_idx)
-                            n_idx = T.meta_var(tile_scheduler.n_idx)
                             mma2ld.wait(0, wg_id, phase_tmem[0])
                             phase_tmem[0] = phase_tmem[0] ^ 1
                             T.ptx.tcgen05.fence.after_thread_sync()
@@ -375,16 +362,16 @@ def test_hgemm():
                                 with T.thread()[lane_id == 0 and warp_id == 0]:
                                     m_start = (m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M
                                     n_start = n_idx * BLK_N * CTA_GROUP + i * EPI_TILE
-                                    Tp.copy_async(D[m_start : m_start + BLK_M, n_start : n_start + EPI_TILE], D_smem[wg_id, :, :], evt=wb_event)
-                                    wb_event.commit()
-                                    wb_event.wait(0)
+                                    Tp.copy_async(D[m_start : m_start + BLK_M, n_start : n_start + EPI_TILE], D_smem[wg_id, :, :], dispatch="tma")
+                                    T.ptx.cp_async.bulk.commit_group()
+                                    T.ptx.cp_async.bulk.wait_group(0)
                                 T.cuda.warpgroup_sync(wg_id)
                             tile_scheduler.next_tile()
 
                 # dealloc TMEM
                 with T.warp()[0:1]:
-                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=2)
-                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=2)
+                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=CTA_GROUP)
+                    T.ptx.tcgen05.dealloc(tmem_addr, n_cols=N_COLS, cta_group=CTA_GROUP)
 
                 T.cuda.cluster_sync()
 

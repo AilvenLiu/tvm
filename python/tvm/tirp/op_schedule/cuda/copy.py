@@ -264,8 +264,8 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
 
     tmem_st, tmem_extent = get_st_extent(tmem_region)
     local_st, local_extent = get_st_extent(local_region)
-    # tmem layout (128, WIDTH):(1@TCol, 1@TLane)
-    tmem_layout = TileLayout(([128, tmem_buf.shape[1]], [(1, "TCol"), (1, "TLane")])).normalize()
+    # tmem layout (128, WIDTH):(1@TLane, 1@TCol)
+    tmem_layout = TileLayout(([128, tmem_buf.shape[1]], [(1, "TLane"), (1, "TCol")])).normalize()
     # local layout
     local_layout = TileLayout(([128, width], [(1, "tid_in_wg"), (1, "m")])).normalize()
 

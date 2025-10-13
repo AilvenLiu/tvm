@@ -22,7 +22,6 @@ import tvm.testing
 from tvm.ir import assert_structural_equal
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 
 
 def from_source(code):
@@ -171,29 +170,6 @@ def test_print_kwargs_schedule_op_full_code():
         "def test():\n"
         "    A = T.alloc_buffer((16,))\n"
         '    Tp.memset(A[0:16], T.float32(1.25), dispatch="v10", bar=7, foo=42)'
-    )
-    code = test.script()
-    assert code == expected
-    assert from_source(code).script() == code
-    assert_structural_equal(test, from_source(code))
-
-
-def test_print_kwargs_event_op_full_code():
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def test():
-        bulk_event = Tp.alloc_bulk_group_event(0, [])
-        bulk_event.commit(dispatch="c1", delay=3, mode="fast")
-        bulk_event.wait(2, dispatch="w2", timeout=5)
-    # fmt: on
-
-    expected = (
-        "# from tvm.script import tir as T\n\n"
-        "@T.prim_func(tirp=True)\n"
-        "def test():\n"
-        "    bulk_event = Tp.alloc_bulk_group_event(0, [])\n"
-        '    bulk_event.commit(dispatch="c1", delay=3, mode="fast")\n'
-        '    bulk_event.wait(2, dispatch="w2", timeout=5)'
     )
     code = test.script()
     assert code == expected
@@ -862,35 +838,6 @@ def test_list_comprehension():
     assert_structural_equal(test, from_source(code))
 
 
-def test_event():
-    # fmt: off
-    @T.prim_func(tirp=True)
-    def test():
-        with T.kernel():
-            with T.cta():
-                event_b = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
-                event_s_tensor = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, [], [10])
-
-                event_b.commit()
-                event_b.wait()
-                event_b.wait(1)
-
-                event_s_tensor.init(1)
-                event_s_tensor[0].commit()
-                event_s_tensor[0].wait()
-
-                A = T.alloc_buffer([10], "float32", scope="shared")
-                B = T.alloc_buffer([10], "float32", scope="shared")
-                Tp.copy_async(A[:], B[:], event_b)
-                Tp.copy_async(A[:], B[:], event_s_tensor[0])
-    # fmt: on
-
-    code = test.script()
-    print(code)
-    assert from_source(code).script() == code
-    assert_structural_equal(test, from_source(code))
-
-
 def test_range():
     # fmt: off
     @T.prim_func(tirp=True, private=True)
@@ -942,6 +889,20 @@ def test_buffer():
             pass
     # fmt: on
     code = test.script()
+    assert_structural_equal(test, from_source(code))
+
+
+def test_kwargs_op_call():
+    # fmt: off
+    @T.prim_func(tirp=True, private=True)
+    def test(A: T.Buffer((10, 10), "float32"), B: T.Buffer((10, 10), "float32")):
+        with T.kernel():
+            kwargs = T.meta_var({"dispatch": "tma", "cta_group": 2})
+            Tp.copy_async(A[:, :], B[:, :], **kwargs)
+    # fmt: on
+    code = test.script()
+    print(code)
+    assert from_source(code).script() == code
     assert_structural_equal(test, from_source(code))
 
 

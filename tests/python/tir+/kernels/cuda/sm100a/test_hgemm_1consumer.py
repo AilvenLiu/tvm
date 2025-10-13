@@ -1,4 +1,3 @@
-import ml_dtypes
 import numpy as np
 
 import tvm
@@ -6,7 +5,6 @@ import tvm.testing
 from tvm.ir import PointerType, PrimType
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 from tvm.tirp.bench.utils import ProtonContext, bench
 from tvm.tirp.tile_scheduler import GroupMajor2D
 from tvm.tir.layout import TileLayout
@@ -207,10 +205,6 @@ def test_hgemm_1consumer():
                 ptr: T.Var(name="ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret("handle", T.ptx.map_shared_rank(tma2mma_bar.mbar.ptr_to([0]), 0))
                 tma_finished = T.decl_buffer([SMEM_PIPE_DEPTH], "uint64", data=ptr, scope="shared")
 
-                # define events
-                tma_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma_finished, None, None], shape=[SMEM_PIPE_DEPTH])
-                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
-
                 # alloc TMEM
                 with T.warp()[0:1]:
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=2)
@@ -221,8 +215,7 @@ def test_hgemm_1consumer():
                 T.ptx.fence.mbarrier_init()
                 T.cuda.cluster_sync()
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
-                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
-                                     layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TLane"), (1, "TCol")])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -261,8 +254,9 @@ def test_hgemm_1consumer():
                                     def tma_load(is_remain, ks):
                                         # GMEM -> SMEM  (tma)
                                         mma2tma_bar.wait(ks, phase[0])
-                                        Tp.copy_async(A_smem[ks, :, :], A[m_start : m_start + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
-                                        Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=2)
+                                        tma_copy = T.meta_var({"dispatch": "tma", "mbar": tma_finished.ptr_to([ks]), "cta_group": CTA_GROUP})
+                                        Tp.copy_async(A_smem[ks, :, :], A[m_start : m_start + BLK_M, k_start : k_start + BLK_K], **tma_copy)
+                                        Tp.copy_async(B_smem[ks, :, :], B[n_start : n_start + BLK_N, k_start : k_start + BLK_K], **tma_copy)
                                         if cbx == 0:
                                             tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
 
@@ -371,13 +365,13 @@ def test_hgemm_1consumer():
                                 with T.thread()[lane_id == 0 and warp_id == 0]:
                                     m_start = T.meta_var((m_idx * CTA_GROUP + cbx) * BLK_M)
                                     n_start = T.meta_var(n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE)
-                                    Tp.copy_async(D[m_start : m_start + BLK_M, n_start : n_start + EPI_TILE], D_smem[stage, :, :], evt=wb_event)
-                                    wb_event.commit()
+                                    Tp.copy_async(D[m_start : m_start + BLK_M, n_start : n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")
+                                    T.ptx.cp_async.bulk.commit_group()
 
                             tile_scheduler.next_tile()
 
                         with T.thread()[lane_id == 0 and warp_id == 0]:
-                            wb_event.wait(0)
+                            T.ptx.cp_async.bulk.wait_group(0)
                         T.cuda.warpgroup_sync(10)
 
                 # dealloc TMEM

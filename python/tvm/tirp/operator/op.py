@@ -23,8 +23,6 @@ from tvm.tir.stmt import OpCall
 from tvm.tir import PrimExpr, BufferRegion, FloatImm, IntImm
 from tvm.ir import Op
 from tvm.tir.predicate import Predicate
-from tvm.tir import event
-from tvm.tir.event import BaseEvent
 
 
 def get_tirp_op(op_name: str):
@@ -260,14 +258,12 @@ class CopyAsync(OpCall):
     Args:
         dst: Destination buffer region
         src: Source buffer region
-        event: Event to be used for the copy
     """
 
     op = get_tirp_op("copy_async")
 
     dst = ArgProperty(0)
     src = ArgProperty(1)
-    event = ArgProperty(2)
 
     @property
     def srcs(self) -> List[PrimExpr]:
@@ -281,16 +277,13 @@ class CopyAsync(OpCall):
 
     def validate(self) -> None:
         """Validate that the operator has the correct number and types of arguments."""
-        assert len(self.args) == 3, f"{self} expects 3 arguments, got {len(self.args)}"
+        assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
         assert isinstance(
             self.dst, BufferRegion
         ), f"{self} expects BufferRegion as dst, got {self.dst}"
         assert isinstance(
             self.src, BufferRegion
         ), f"{self} expects BufferRegion as src, got {self.src}"
-        assert isinstance(
-            self.event, BaseEvent
-        ), f"{self} expects BaseEvent as event, got {self.event}"
 
 
 class Gemm(OpCall):
@@ -421,60 +414,6 @@ class Select(BinaryOp):
         assert isinstance(
             self.predicate, Predicate
         ), f"{self} expects Predicate as predicate, got {self.predicate}"
-
-
-class EventInit(OpCall):
-    """Initialize an event/event tensor."""
-
-    op = get_tirp_op("event_init")
-
-    event = ArgProperty(0)
-    expected_count = ArgProperty(1)
-
-    def validate(self) -> None:
-        """Validate that the operator has the correct number and types of arguments."""
-        if isinstance(self.event, (event.SemaphoreEventTensor, event.SemaphoreEventTensorItem)):
-            assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
-        elif isinstance(self.event, event.BulkGroupEvent):
-            assert len(self.args) == 1, f"{self} expects 1 argument, got {len(self.args)}"
-        else:
-            raise ValueError(
-                f"{self.event} expected to be SemaphoreEventTensor, SemaphoreEventTensorItem, or BulkGroupEvent, got {self.event}"
-            )
-
-
-class EventCommit(OpCall):
-    """Commit an event."""
-
-    op = get_tirp_op("event_commit")
-
-    event = ArgProperty(0)
-
-    def validate(self) -> None:
-        """Validate that the operator has the correct number and types of arguments."""
-        assert len(self.args) == 1, f"{self} expects 2 arguments, got {len(self.args)}"
-        assert isinstance(
-            self.event, event.BaseEvent
-        ), f"{self} expects BaseEvent as event, got {self.event}"
-
-
-class EventWait(OpCall):
-    """Wait for an event to be committed."""
-
-    op = get_tirp_op("event_wait")
-
-    event = ArgProperty(0)
-    n_groups = ArgProperty(1)
-
-    def validate(self) -> None:
-        """Validate that the operator has the correct number and types of arguments."""
-        if isinstance(self.event, event.BulkGroupEvent):
-            assert len(self.args) == 2, f"{self} expects 2 arguments, got {len(self.args)}"
-        else:
-            assert len(self.args) == 1, f"{self} expects 1 argument, got {len(self.args)}"
-        assert isinstance(
-            self.event, event.BaseEvent
-        ), f"{self} expects BaseEvent as event, got {self.event}"
 
 
 class KernelReplacePoint(OpCall):

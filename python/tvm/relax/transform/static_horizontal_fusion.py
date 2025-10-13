@@ -44,9 +44,7 @@ from tvm.tir import (
     Var,
 )
 from tvm.tir.analysis import verify_tirp_well_formed
-from tvm.tir.event import EventImpl, SemaphoreEventTensor, SemaphoreEventTensorItem
 from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
-from tvm.tirp.operator import EventCommit, EventWait
 from tvm.tirp.transform.common import BufferReplacer, seek_kernel_replace_point
 
 
@@ -124,37 +122,14 @@ class EventOpInserter(StmtExprMutator):
             T.buffer((1,), "int32", scope="local", buffer_name="event_state")
             for _ in self.out_event_bufs
         ]
-        # define event tensors
-        in_event_tensors = [
-            SemaphoreEventTensor(
-                EventImpl.kGlobalSemaphore, state=[buf, state_reg], shape=buf.shape
-            )
-            for buf, state_reg in zip(self.in_event_bufs, in_state_regs)
-        ]
-        out_event_tensors = [
-            SemaphoreEventTensor(
-                EventImpl.kGlobalSemaphore, state=[buf, state_reg], shape=buf.shape
-            )
-            for buf, state_reg in zip(self.out_event_bufs, out_state_regs)
-        ]
-        # only process root block
-        waits = [
-            EventWait(SemaphoreEventTensorItem(tensor, dep.map_indices(self.tile_idx)))
-            for tensor, dep in zip(in_event_tensors, self.in_deps)
-        ]
-        commits = [
-            EventCommit(SemaphoreEventTensorItem(tensor, dep.map_indices(self.tile_idx)))
-            for tensor, dep in zip(out_event_tensors, self.out_deps)
-        ]
 
-        new_body = SeqStmt(waits + [block.body] + commits)
         # Reconstruct the block with the new body, preserving all other attributes.
         return Block(
             block.iter_vars,
             block.reads,
             block.writes,
             block.name_hint,
-            new_body,
+            block.body,
             block.init,
             list(block.alloc_buffers) + in_state_regs + out_state_regs,
             block.match_buffers,

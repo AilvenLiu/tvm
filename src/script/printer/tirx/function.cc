@@ -47,7 +47,7 @@ bool IsSimpleBuffer(const tirx::Buffer& buf) {
     }
   }
   if (!buf->layout.defined() ||
-      !StructuralEqual()(buf->layout, tir::TileLayoutNode::DefaultLayout(buf->shape))) {
+      !StructuralEqual()(buf->layout, tirx::TileLayoutNode::DefaultLayout(buf->shape))) {
     return false;
   }
   if (!buf->allocated_addr.empty()) {
@@ -77,9 +77,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
       (*f)->AddDispatchToken(d, "tirx");
       IdDoc func_name = IdDoc(FindFunctionName(d, func).value_or("main"));
       d->SetCommonPrefix(func, [](const ObjectRef& obj) {
-        return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>() ||
-               obj->IsInstance<tirx::BulkGroupEventNode>() ||
-               obj->IsInstance<tirx::SemaphoreEventTensorNode>();
+        return obj->IsInstance<tirx::VarNode>() || obj->IsInstance<tirx::BufferNode>();
       });
       int n_args = func->params.size();
       std::unordered_map<const tirx::VarNode*, int> buffer_data_counter;

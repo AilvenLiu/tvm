@@ -160,10 +160,6 @@ void StmtVisitor::VisitStmt_(const tirp::OpCallNode* op) {
 
 void StmtVisitor::VisitStmt_(const AllocBufferNode* op) { this->VisitStmt(op->body); }
 
-void StmtVisitor::VisitStmt_(const AllocBulkGroupEventNode* op) { this->VisitStmt(op->body); }
-
-void StmtVisitor::VisitStmt_(const AllocSemaphoreEventTensorNode* op) { this->VisitStmt(op->body); }
-
 class StmtMutator::Internal {
  public:
   /*!
@@ -601,13 +597,6 @@ Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
       return this->VisitExpr(expr.value());
     } else if (auto stmt = e.as<Stmt>()) {
       return this->VisitStmt(stmt.value());
-    } else if (auto evt_item = e.as<SemaphoreEventTensorItemNode>()) {
-      auto indices = Internal::Mutate(this, evt_item->indices);
-      if (indices.same_as(evt_item->indices)) {
-        return e;
-      } else {
-        return SemaphoreEventTensorItem(evt_item->tensor, indices);
-      }
     }
     return e;
   };
@@ -622,28 +611,6 @@ Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
 }
 
 Stmt StmtMutator::VisitStmt_(const AllocBufferNode* op) {
-  Stmt body = this->VisitStmt(op->body);
-  if (body.same_as(op->body)) {
-    return ffi::GetRef<Stmt>(op);
-  } else {
-    auto n = CopyOnWrite(op);
-    n->body = std::move(body);
-    return Stmt(n);
-  }
-}
-
-Stmt StmtMutator::VisitStmt_(const AllocBulkGroupEventNode* op) {
-  Stmt body = this->VisitStmt(op->body);
-  if (body.same_as(op->body)) {
-    return ffi::GetRef<Stmt>(op);
-  } else {
-    auto n = CopyOnWrite(op);
-    n->body = std::move(body);
-    return Stmt(n);
-  }
-}
-
-Stmt StmtMutator::VisitStmt_(const AllocSemaphoreEventTensorNode* op) {
   Stmt body = this->VisitStmt(op->body);
   if (body.same_as(op->body)) {
     return ffi::GetRef<Stmt>(op);

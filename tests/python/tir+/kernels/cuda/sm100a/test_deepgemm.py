@@ -5,7 +5,6 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 from tvm.tirp.tile_scheduler import GroupMajor2D
 from tvm.tirp.bench.utils import bench
 from tvm.tir.layout import TileLayout
@@ -276,10 +275,7 @@ def test_deepgemm():
                 ld2mma_bar = T.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
                 tile_scheduler = T.meta_var(GroupMajor2D("tile_scheduler", m_tiles=TILE_M_NUM, n_tiles=TILE_N_NUM, group_rows=TILE_GROUPS_ROW_SIZE, step=SM_NUMBER // 2))
 
-                tma2trans_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma2trans_bar.mbar, None, None], shape=[SMEM_PIPE_DEPTH])
-                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
-                tma2trans_event.init(1)
-
+                tma2trans_bar.init(1)
                 trans2mma_bar.init(CTA_GROUP * 32)
                 mma2ld_bar.init(1)
                 mma2tma_bar.init(1)
@@ -296,8 +292,7 @@ def test_deepgemm():
                 T.ptx.fence.mbarrier_init()
                 T.cuda.cluster_sync()
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
-                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
-                                     layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TLane"), (1, "TCol")])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -336,19 +331,22 @@ def test_deepgemm():
                                 @T.macro
                                 def tma_load(ks):
                                     mma2tma_bar.wait(ks, phase)
-                                    Tp.copy_async(A_smem[ks, :, :], A[m_start: m_start + BLK_M, k_start: k_start + BLK_K], evt=tma2trans_event[ks])
-                                    Tp.copy_async(B_smem[ks, :, :], B[n_start: n_start + BLK_N, k_start: k_start + BLK_K], evt=tma2trans_event[ks])
-                                    if stage % 4 == 0:
-                                        Tp.copy_async(SFA_smem_2d[ks, :], SFA[stage // 4, m_start: m_start + BLK_M], evt=tma2trans_event[ks])
-                                        Tp.copy_async(SFB_smem_2d[ks, 0:BLK_N * CTA_GROUP], SFB[stage // 4, n_start_sf: n_start_sf + BLK_N * CTA_GROUP], evt=tma2trans_event[ks])
-                                    AB_bytes = T.meta_var(BLK_M * BLK_K * F8_BYTES + BLK_N * BLK_K * F8_BYTES)
-                                    SFAB_bytes = T.meta_var((BLK_N * CTA_GROUP + BLK_M) * F32_BYTES)
-                                    tma2trans_event[ks].commit(tx_cnt=T.if_then_else(stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
+                                    tma_copy = T.meta_var({"dispatch": "tma", "mbar": tma2trans_bar.mbar.ptr_to([ks]), "cta_group": CTA_GROUP})
+                                    with T.thread()[T.ptx.elect_sync()]:
+                                        Tp.copy_async(A_smem[ks, :, :], A[m_start: m_start + BLK_M, k_start: k_start + BLK_K], **tma_copy)
+                                        Tp.copy_async(B_smem[ks, :, :], B[n_start: n_start + BLK_N, k_start: k_start + BLK_K], **tma_copy)
+                                        if stage % 4 == 0:
+                                            Tp.copy_async(SFA_smem_2d[ks, :], SFA[stage // 4, m_start: m_start + BLK_M], **tma_copy)
+                                            Tp.copy_async(SFB_smem_2d[ks, 0:BLK_N * CTA_GROUP], SFB[stage // 4, n_start_sf: n_start_sf + BLK_N * CTA_GROUP], **tma_copy)
+                                        AB_bytes = T.meta_var(BLK_M * BLK_K * F8_BYTES + BLK_N * BLK_K * F8_BYTES)
+                                        SFAB_bytes = T.meta_var((BLK_N * CTA_GROUP + BLK_M) * F32_BYTES)
+                                        T.ptx.mbarrier.arrive.expect_tx(tma2trans_bar.mbar.ptr_to([ks]), T.if_then_else(stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
 
                                 @T.macro
                                 def tma_load_epilogue(ks):
                                     mma2tma_bar.wait(ks, phase)
-                                    tma2trans_event[ks].commit(tx_cnt=0)
+                                    with T.thread()[T.ptx.elect_sync()]:
+                                        T.ptx.mbarrier.arrive.expect_tx(tma2trans_bar.mbar.ptr_to([ks]), 0)
 
                                 paritioned_loop(tma_load, skip, tma_load_epilogue)
                                 tile_scheduler.next_tile()
@@ -364,7 +362,7 @@ def test_deepgemm():
                                 @T.macro
                                 def transpose(ks):
                                     # wait for sf has been prepared
-                                    tma2trans_event[ks].wait(phase=phase)
+                                    T.ptx.mbarrier.try_wait(tma2trans_bar.mbar.ptr_to([ks]), phase)
                                     if stage % 4 == 0:
                                         for ki in T.unroll(0, BLK_SFA // 128):
                                             for vec in T.vectorized(4):
@@ -386,7 +384,7 @@ def test_deepgemm():
 
                                 @T.macro
                                 def transpose_epilogue(ks):
-                                    tma2trans_event[ks].wait(phase=phase)
+                                    T.ptx.mbarrier.try_wait(tma2trans_bar.mbar.ptr_to([ks]), phase)
                                     trans2mma_bar.arrive(ks)
 
                                 paritioned_loop(transpose, skip, transpose_epilogue)
@@ -478,7 +476,7 @@ def test_deepgemm():
                             tmem_phase = (tile_scheduler.tile_idx // TMEM_PIPE_DEPTH) & 1
 
                             # flush previous tma
-                            wb_event.wait(0)
+                            T.ptx.cp_async.bulk.wait_group(0)
                             T.cuda.warpgroup_sync(10)
                             # wait for the completion of all the mma of the same tile
                             mma2ld_bar.wait(tmem_idx, tmem_phase)
@@ -489,7 +487,7 @@ def test_deepgemm():
 
                                 # wait the smem to be free
                                 if ko >= TMEM_PIPE_DEPTH:
-                                    wb_event.wait(TMEM_PIPE_DEPTH - 1)
+                                    T.ptx.cp_async.bulk.wait_group(TMEM_PIPE_DEPTH - 1)
                                     T.cuda.warpgroup_sync(10)
 
                                 # tmem -> rf (ld) -> smem
@@ -512,12 +510,12 @@ def test_deepgemm():
                                 # smem -> gmem
                                 m_start = (m_idx * CTA_GROUP + cbx) * BLK_M
                                 n_start = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
-                                Tp.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], evt=wb_event)
-                                wb_event.commit()
+                                Tp.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")
+                                T.ptx.cp_async.bulk.commit_group()
 
                             tile_scheduler.next_tile()
 
-                        wb_event.wait()
+                        T.ptx.cp_async.bulk.wait_group(0)
                         T.cuda.warpgroup_sync(10)
 
                 # dealloc TMEM

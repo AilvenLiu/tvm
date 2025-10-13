@@ -1,16 +1,13 @@
 import math
 from enum import Enum
 
-import ml_dtypes
 import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
-from tvm.ir import PointerType, PrimType
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
 from tvm.tirp.tile_scheduler import GroupMajor3D
@@ -278,17 +275,12 @@ def get_hgemm_kernel(dim_n, dim_k):
                     T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=N_COLS, cta_group=1)
                     T.cuda.warp_sync()
 
-                # define events
-                tma_event = Tp.alloc_semaphore_event_tensor(EventImpl.kTMALoad, state=[tma2mma_bar.mbar, None, None], shape=[SMEM_PIPE_DEPTH])
-                wb_event = Tp.alloc_bulk_group_event(EventImpl.kTMAStore)
-
                 # sync
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
                 T.cuda.cta_sync()
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
-                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
-                                     layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TLane"), (1, "TCol")])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -333,8 +325,9 @@ def get_hgemm_kernel(dim_n, dim_k):
                                         mma2tma_bar.wait(ks, phase[0])
                                         profiler.end(ProfileEventType.WAIT, lane_id == 0)
                                         profiler.start(ProfileEventType.IssueTMA, lane_id == 0)
-                                        Tp.copy_async(A_smem[ks, :, :], A[m_st : m_st + BLK_M, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=CTA_GROUP, cache_hint="evict_last")
-                                        Tp.copy_async(B_smem[ks, :, :], B[n_st : n_st + BLK_N, k_start : k_start + BLK_K], evt=tma_event[ks], cta_group=CTA_GROUP, cache_hint="evict_first")
+                                        tma_copy = T.meta_var({"dispatch": "tma", "mbar": tma2mma_bar.mbar.ptr_to([ks]), "cta_group": CTA_GROUP})
+                                        Tp.copy_async(A_smem[ks, :, :], A[m_st : m_st + BLK_M, k_start : k_start + BLK_K], **tma_copy)
+                                        Tp.copy_async(B_smem[ks, :, :], B[n_st : n_st + BLK_N, k_start : k_start + BLK_K], **tma_copy)
                                         tma2mma_bar.arrive(ks, CTA_GROUP * BLK_K * (BLK_M + BLK_N) * F16_BYTES)
                                         profiler.end(ProfileEventType.IssueTMA, lane_id == 0)
 
@@ -445,11 +438,11 @@ def get_hgemm_kernel(dim_n, dim_k):
                                 with T.thread()[lane_id == 0 and warp_id == 0]:
                                     m_start = T.meta_var(m_idx * BLK_M + ko * EPI_TILE)
                                     n_start = T.meta_var(n_idx * BLK_N)
-                                    Tp.copy_async(partial_sum[k_idx, m_start : m_start + EPI_TILE, n_start : n_start + BLK_N], D_smem[stage, :, :], evt=wb_event, cache_hint="evict_last")
-                                    wb_event.commit()
+                                    Tp.copy_async(partial_sum[k_idx, m_start : m_start + EPI_TILE, n_start : n_start + BLK_N], D_smem[stage, :, :], dispatch="tma", cache_hint="evict_last")
+                                    T.ptx.cp_async.bulk.commit_group()
                                 profiler.end(ProfileEventType.WRITEBACK, lane_id == 0 and warp_id == 0)
                             with T.thread()[lane_id == 0 and warp_id == 0]:
-                                wb_event.wait(0)
+                                T.ptx.cp_async.bulk.wait_group(0)
                             T.cuda.warpgroup_sync(10)
                             tile_scheduler.next_tile()
 

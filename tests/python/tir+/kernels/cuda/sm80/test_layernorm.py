@@ -15,13 +15,11 @@
 # specific language governing permissions and limitations
 # under the License.
 import numpy as np
-import ml_dtypes
 import pytest
 import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 from tvm.tirp.bench.utils import ProtonContext, bench
 
 
@@ -84,10 +82,10 @@ def test_layernorm(dtype):
                 Tp.copy(norm_weight_smem[:], norm_weight[:])
 
                 # two cp.async
-                event = Tp.alloc_bulk_group_event(EventImpl.kCpAsync, state=[])
-                Tp.copy_async(x_smem[:, 0, :], inp[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], event)
-                Tp.copy_async(resid_smem[:, 0, :], inp_resid[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], event)
-                event.commit()
+                non_bulk_copy = T.meta_var({"dispatch": "non-bulk-copy"})
+                Tp.copy_async(x_smem[:, 0, :], inp[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], **non_bulk_copy)
+                Tp.copy_async(resid_smem[:, 0, :], inp_resid[by, 0, slice(bx * NUM_WORKERS, (bx + 1) * NUM_WORKERS), :], **non_bulk_copy)
+                T.ptx.cp_async.commit_group()
                 T.cuda.cta_sync()
 
                 # main loop
@@ -98,10 +96,10 @@ def test_layernorm(dtype):
 
                     if k < n_loops - 1:
                         # TODO(@kathy): support pipeline token flip when pipeline is long
-                        Tp.copy_async(x_smem[:, 1, :], inp[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], event)
-                        Tp.copy_async(resid_smem[:, 1, :], inp_resid[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], event)
-                        event.commit()
-                    event.wait(0)
+                        Tp.copy_async(x_smem[:, 1, :], inp[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], **non_bulk_copy)
+                        Tp.copy_async(resid_smem[:, 1, :], inp_resid[by, 0, slice(bx * NUM_WORKERS + next_idx, (bx + 1) * NUM_WORKERS + next_idx), :], **non_bulk_copy)
+                        T.ptx.cp_async.commit_group()
+                    T.ptx.cp_async.wait_group(0)
                     T.cuda.cta_sync()
 
                     # store residual

@@ -102,8 +102,6 @@ class StmtFunctor<R(const Stmt& n, Args... args)> {
   virtual R VisitStmt_(const SBlockRealizeNode* op, Args... args) STMT_FUNCTOR_DEFAULT;
   virtual R VisitStmt_(const tirp::OpCallNode* op, Args... args) STMT_FUNCTOR_DEFAULT;
   virtual R VisitStmt_(const AllocBufferNode* op, Args... args) STMT_FUNCTOR_DEFAULT;
-  virtual R VisitStmt_(const AllocBulkGroupEventNode* op, Args... args) STMT_FUNCTOR_DEFAULT;
-  virtual R VisitStmt_(const AllocSemaphoreEventTensorNode* op, Args... args) STMT_FUNCTOR_DEFAULT;
   virtual R VisitStmtDefault_(const Object* op, Args...) {
     TVM_FFI_THROW(InternalError) << "Do not have a default for " << op->GetTypeKey();
     TVM_FFI_UNREACHABLE();
@@ -130,8 +128,6 @@ class StmtFunctor<R(const Stmt& n, Args... args)> {
     IR_STMT_FUNCTOR_DISPATCH(SBlockRealizeNode);
     IR_STMT_FUNCTOR_DISPATCH(tirp::OpCallNode);
     IR_STMT_FUNCTOR_DISPATCH(AllocBufferNode);
-    IR_STMT_FUNCTOR_DISPATCH(AllocBulkGroupEventNode);
-    IR_STMT_FUNCTOR_DISPATCH(AllocSemaphoreEventTensorNode);
     vtable.Finalize();
     return vtable;
   }
@@ -189,8 +185,6 @@ class TVM_DLL StmtVisitor : protected StmtFunctor<void(const Stmt&)> {
   void VisitStmt_(const SBlockRealizeNode* op) override;
   void VisitStmt_(const tirp::OpCallNode* op) override;
   void VisitStmt_(const AllocBufferNode* op) override;
-  void VisitStmt_(const AllocBulkGroupEventNode* op) override;
-  void VisitStmt_(const AllocSemaphoreEventTensorNode* op) override;
 };
 
 /*!
@@ -309,8 +303,6 @@ class TVM_DLL StmtMutator : protected StmtFunctor<Stmt(const Stmt&)> {
   Stmt VisitStmt_(const SBlockRealizeNode* op) override;
   Stmt VisitStmt_(const tirp::OpCallNode* op) override;
   Stmt VisitStmt_(const AllocBufferNode* op) override;
-  Stmt VisitStmt_(const AllocBulkGroupEventNode* op) override;
-  Stmt VisitStmt_(const AllocSemaphoreEventTensorNode* op) override;
   /*!
    * \brief Alternative advance method for SeqStmtNode.
    *

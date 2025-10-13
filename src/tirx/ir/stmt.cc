@@ -53,8 +53,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   SBlockNode::RegisterReflection();
   SBlockRealizeNode::RegisterReflection();
   AllocBufferNode::RegisterReflection();
-  AllocBulkGroupEventNode::RegisterReflection();
-  AllocSemaphoreEventTensorNode::RegisterReflection();
 }
 
 // Bind
@@ -610,41 +608,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("tir.AllocBuffer", [](Buffer buffer, Stmt body, Span span) {
     return AllocBuffer(buffer, body, span);
   });
-}
-
-// AllocBulkGroupEvent
-AllocBulkGroupEvent::AllocBulkGroupEvent(BulkGroupEvent bulk_group_event, Stmt body, Span span) {
-  ObjectPtr<AllocBulkGroupEventNode> node = ffi::make_object<AllocBulkGroupEventNode>();
-  node->bulk_group_event = std::move(bulk_group_event);
-  node->body = std::move(body);
-  node->span = std::move(span);
-  data_ = std::move(node);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.AllocBulkGroupEvent",
-                        [](BulkGroupEvent bulk_group_event, Stmt body, Span span) {
-                          return AllocBulkGroupEvent(bulk_group_event, body, span);
-                        });
-}
-
-// AllocSemaphoreEventTensor
-AllocSemaphoreEventTensor::AllocSemaphoreEventTensor(SemaphoreEventTensor sem_event_tensor,
-                                                     Stmt body, Span span) {
-  ObjectPtr<AllocSemaphoreEventTensorNode> node = ffi::make_object<AllocSemaphoreEventTensorNode>();
-  node->sem_event_tensor = std::move(sem_event_tensor);
-  node->body = std::move(body);
-  node->span = std::move(span);
-  data_ = std::move(node);
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.AllocSemaphoreEventTensor",
-                        [](SemaphoreEventTensor sem_event_tensor, Stmt body, Span span) {
-                          return AllocSemaphoreEventTensor(sem_event_tensor, body, span);
-                        });
 }
 
 // Block

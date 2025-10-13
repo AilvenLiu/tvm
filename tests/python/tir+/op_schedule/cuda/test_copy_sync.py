@@ -269,7 +269,7 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
                 T.tvm_storage_sync("shared")
 
                 tmem = T.decl_buffer((128, OFFSET + WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
-                                     layout=TileLayout(([128, OFFSET + WIDTH], [(1, "TCol"), (1, "TLane")])))
+                                     layout=TileLayout(([128, OFFSET + WIDTH], [(1, "TLane"), (1, "TCol")])))
 
                 A_reg = T.alloc_local((WIDTH), dtype)
                 B_reg = T.alloc_local((WIDTH), dtype)

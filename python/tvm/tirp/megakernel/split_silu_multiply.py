@@ -1,9 +1,10 @@
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.event import EventImpl
 
 from .common import SmemManager, Tile, KernelConfig, F16_BYTES, silu
+
 # from .dynamic_scheduler import DynamicTileScheduler
+
 
 class SiluMultiplyTile(Tile):
 
@@ -20,7 +21,9 @@ class SiluMultiplyTile(Tile):
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # allocate smem
-        self.buf = smem_manager.alloc([self.PIPE_DEPTH, 2, KernelConfig.NUM_THREADS, self.VEC_SIZE], dtype=self.dtype).buffer
+        self.buf = smem_manager.alloc(
+            [self.PIPE_DEPTH, 2, KernelConfig.NUM_THREADS, self.VEC_SIZE], dtype=self.dtype
+        ).buffer
 
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
@@ -32,13 +35,13 @@ class SiluMultiplyTile(Tile):
         self.vec2 = T.alloc_local([self.VEC_SIZE], self.dtype, name="vec2")
         self.idx = T.local_cell("int32", name="idx")
 
+    # fmt: off
     @T.macro
     def run(self, m_idx, n_idx, k_idx, input, output, tile_scheduler):
         with T.cta():
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
-            evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
             self._alloc_local()
             with T.thread():
                 self.idx = tid * self.VEC_SIZE
@@ -50,10 +53,10 @@ class SiluMultiplyTile(Tile):
                     offset_imme = T.meta_var(m_idx * self.TILE_SIZE + self.idx % self.TILE_SIZE)
                     if self.idx < self.batch_size * self.TILE_SIZE:
                         Tp.copy_async(self.buf[ki, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE],
-                                      evt, vec_len=self.VEC_SIZE)
+                                      dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
                         Tp.copy_async(self.buf[ki, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE],
-                                      evt, vec_len=self.VEC_SIZE)
-                    evt.commit()
+                                      dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
+                    T.ptx.cp_async.commit_group()
                     self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS
 
                 while self.idx < self.batch_size * self.TILE_SIZE + (self.PIPE_DEPTH - 1) * self.VEC_SIZE * KernelConfig.NUM_THREADS:
@@ -62,11 +65,11 @@ class SiluMultiplyTile(Tile):
                     if self.idx < self.batch_size * self.TILE_SIZE:
                         cp_pipe_idx = T.meta_var((self.idx // (self.VEC_SIZE * KernelConfig.NUM_THREADS)) % self.PIPE_DEPTH)
                         Tp.copy_async(self.buf[cp_pipe_idx, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE],
-                                      evt, vec_len=self.VEC_SIZE)
+                                      dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
                         Tp.copy_async(self.buf[cp_pipe_idx, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE],
-                                      evt, vec_len=self.VEC_SIZE)
-                    evt.commit()
-                    evt.wait(self.PIPE_DEPTH - 1)
+                                      dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
+                    T.ptx.cp_async.commit_group()
+                    T.ptx.cp_async.wait_group(self.PIPE_DEPTH - 1)
                     pipe_idx = T.meta_var((self.idx // (self.VEC_SIZE * KernelConfig.NUM_THREADS) - (self.PIPE_DEPTH - 1)) % self.PIPE_DEPTH)
                     for kv in T.vectorized(self.VEC_SIZE):
                         self.vec1[kv] = self.buf[pipe_idx, 0, tid, kv]
@@ -82,24 +85,25 @@ class SiluMultiplyTile(Tile):
 
                 self.smem_manager.arrive_all("cta")
                 self.smem_manager.advance()
+    # fmt: on
+
 
 class SiluMultiplyMOETile(SiluMultiplyTile):
 
     TILE_SIZE = 768
-
 
     def __init__(self, batch_size, intermediate_size, numel, BLK_M, dtype):
         super().__init__(batch_size, intermediate_size, dtype)
         self.BLK_M = BLK_M
         self.numel = numel
 
+    # fmt: off
     @T.macro
     def run(self, m_idx, n_idx, k_idx, input, output, sorted_token_ids):
         with T.cta():
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
-            evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
             self._alloc_local()
             with T.thread():
                 self.idx = tid * self.VEC_SIZE
@@ -112,10 +116,10 @@ class SiluMultiplyMOETile(SiluMultiplyTile):
                     if self.idx < self.BLK_M * self.TILE_SIZE:
                         if sorted_token_ids[token_idx] < self.numel:
                             Tp.copy_async(self.buf[ki, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE],
-                                        evt, vec_len=self.VEC_SIZE)
+                                        dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
                             Tp.copy_async(self.buf[ki, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE],
-                                        evt, vec_len=self.VEC_SIZE)
-                    evt.commit()
+                                        dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
+                    T.ptx.cp_async.commit_group()
                     self.idx += self.VEC_SIZE * KernelConfig.NUM_THREADS
 
                 while self.idx < self.BLK_M * self.TILE_SIZE + (self.PIPE_DEPTH - 1) * self.VEC_SIZE * KernelConfig.NUM_THREADS:
@@ -125,11 +129,11 @@ class SiluMultiplyMOETile(SiluMultiplyTile):
                         if sorted_token_ids[token_idx] < self.numel:
                             cp_pipe_idx = T.meta_var((self.idx // (self.VEC_SIZE * KernelConfig.NUM_THREADS)) % self.PIPE_DEPTH)
                             Tp.copy_async(self.buf[cp_pipe_idx, 0, tid, :], input[token_idx, offset_imme:offset_imme + self.VEC_SIZE],
-                                        evt, vec_len=self.VEC_SIZE)
+                                        dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
                             Tp.copy_async(self.buf[cp_pipe_idx, 1, tid, :], input[token_idx, self.intermediate_size + offset_imme:self.intermediate_size + offset_imme + self.VEC_SIZE],
-                                        evt, vec_len=self.VEC_SIZE)
-                    evt.commit()
-                    evt.wait(self.PIPE_DEPTH - 1)
+                                        dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
+                    T.ptx.cp_async.commit_group()
+                    T.ptx.cp_async.wait_group(self.PIPE_DEPTH - 1)
                     pipe_idx = T.meta_var((self.idx // (self.VEC_SIZE * KernelConfig.NUM_THREADS) - (self.PIPE_DEPTH - 1)) % self.PIPE_DEPTH)
                     for kv in T.vectorized(self.VEC_SIZE):
                         self.vec1[kv] = self.buf[pipe_idx, 0, tid, kv]
@@ -148,3 +152,4 @@ class SiluMultiplyMOETile(SiluMultiplyTile):
 
                 self.smem_manager.arrive_all("cta")
                 self.smem_manager.advance()
+    # fmt: on

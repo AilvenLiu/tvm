@@ -3,7 +3,6 @@ from typing import Any, Dict
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
-from tvm.tir.event import EventImpl
 
 from .common import F32_BYTES, KernelConfig, SmemManager, Tile, ceildiv, exp2
 
@@ -11,7 +10,7 @@ from .common import F32_BYTES, KernelConfig, SmemManager, Tile, ceildiv, exp2
 class DecodeMergeTile(Tile):
 
     @classmethod
-    def class_config_init(cls, problem_config: Dict[str, Any], use_device_call = False):
+    def class_config_init(cls, problem_config: Dict[str, Any], use_device_call=False):
         cls.use_device_call = use_device_call
         cls.qo_heads = problem_config["num_attention_heads"]
         cls.kv_heads = problem_config["num_key_value_heads"]
@@ -63,9 +62,7 @@ class DecodeMergeTile(Tile):
             self.lse_tmp_smem_load, [self.bdz, self.bdx, self.bdy]
         ).buffer
         smem_manager.pool_allocator.move_base_to(offset)
-        self.o_epi_smem = smem_manager.alloc(
-            [self.bdz, self.bdy, self.head_dim], "float32"
-        ).buffer
+        self.o_epi_smem = smem_manager.alloc([self.bdz, self.bdy, self.head_dim], "float32").buffer
         self.lse_epi_smem = smem_manager.alloc([self.bdz, self.bdy], "float32").buffer
 
         # allocate the reg
@@ -90,7 +87,6 @@ class DecodeMergeTile(Tile):
             ty = T.meta_var((tid // self.bdx) % self.bdy)
             tz = T.meta_var(tid // (self.bdx * self.bdy))
 
-            evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
             tx_start = T.meta_var(tx * self.vec_size)
 
             with T.thread():
@@ -132,10 +128,10 @@ class DecodeMergeTile(Tile):
                                     head_idx,
                                     tx_start : tx_start + self.vec_size,
                                 ],
-                                evt,
+                                dispatch="non-bulk-copy",
                                 vec_len=self.vec_size,
                             )
-                        evt.commit()
+                        T.ptx.cp_async.commit_group()
 
                     # initialize the value
                     self.m[0] = T.float32("-inf")
@@ -155,7 +151,7 @@ class DecodeMergeTile(Tile):
                                 self.lse_tmp_smem_load[tz, ty, tx] = 0.0
                             T.ptx.bar.sync(2, KernelConfig.NUM_THREADS)
 
-                        evt.wait(self.pipe_depth - 1)
+                        T.ptx.cp_async.wait_group(self.pipe_depth - 1)
                         T.ptx.bar.sync(2, KernelConfig.NUM_THREADS)
 
                         for kv in T.serial(self.vec_size):
@@ -188,11 +184,11 @@ class DecodeMergeTile(Tile):
                                     head_idx,
                                     tx_start : tx_start + self.vec_size,
                                 ],
-                                evt,
+                                dispatch="non-bulk-copy",
                                 vec_len=self.vec_size,
                             )
-                        evt.commit()
-                    evt.wait(0)
+                        T.ptx.cp_async.commit_group()
+                    T.ptx.cp_async.wait_group(0)
                     T.ptx.bar.sync(2, KernelConfig.NUM_THREADS)
                     # normalize
                     for kv in T.unroll(self.vec_size):

@@ -23,7 +23,6 @@ import tvm
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tirp.bench.utils import ProtonContext, bench
-from tvm.tirp.op_schedule import EventImpl
 
 
 def ceildiv(a, b):
@@ -117,16 +116,16 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
                 shared_buf = T.alloc_buffer([PIPE_DEPTH, 2, THREAD_NUM, VEC_SIZE], "float16", scope="shared.dyn")
                 vec1 = T.alloc_local([VEC_SIZE], "float16")
                 vec2 = T.alloc_local([VEC_SIZE], "float16")
-                evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
                 idx[0] = 0
                 real_idx = T.meta_var(idx[0] * SM_COUNT * THREAD_NUM + bx * THREAD_NUM + tx)
+                non_bulk_copy = T.meta_var({"dispatch": "non-bulk-copy", "vec_len": VEC_SIZE})
                 while idx[0] < PIPE_DEPTH - 1:
                     intermediate_idx = T.meta_var((real_idx * VEC_SIZE) % INTERMEDIATE_SIZE)
                     batch_idx = T.meta_var((real_idx * VEC_SIZE) // INTERMEDIATE_SIZE)
                     if real_idx * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                        Tp.copy_async(shared_buf[idx[0], 0, tx, :], input_cat_global[batch_idx, intermediate_idx:intermediate_idx + VEC_SIZE], evt, vec_len=VEC_SIZE)
-                        Tp.copy_async(shared_buf[idx[0], 1, tx, :], input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx:INTERMEDIATE_SIZE + intermediate_idx + VEC_SIZE], evt, vec_len=VEC_SIZE)
-                    evt.commit()
+                        Tp.copy_async(shared_buf[idx[0], 0, tx, :], input_cat_global[batch_idx, intermediate_idx:intermediate_idx + VEC_SIZE], **non_bulk_copy)
+                        Tp.copy_async(shared_buf[idx[0], 1, tx, :], input_cat_global[batch_idx, INTERMEDIATE_SIZE + intermediate_idx:INTERMEDIATE_SIZE + intermediate_idx + VEC_SIZE], **non_bulk_copy)
+                    T.ptx.cp_async.commit_group()
                     idx[0] += 1
 
                 idx[0] = 0
@@ -138,10 +137,10 @@ def get_fused_split_silu_multiply_kernel_cp_async(out_dim):
                     intermediate_idx_to_prefetch = T.meta_var((real_idx_to_prefetch * VEC_SIZE) % INTERMEDIATE_SIZE)
                     batch_idx_to_prefetch = T.meta_var((real_idx_to_prefetch * VEC_SIZE) // INTERMEDIATE_SIZE)
                     if real_idx_to_prefetch * VEC_SIZE < batch_size * INTERMEDIATE_SIZE:
-                        Tp.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 0, tx, :], input_cat_global[batch_idx_to_prefetch, intermediate_idx_to_prefetch:intermediate_idx_to_prefetch + VEC_SIZE], evt, vec_len=VEC_SIZE)
-                        Tp.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 1, tx, :], input_cat_global[batch_idx_to_prefetch, INTERMEDIATE_SIZE + intermediate_idx_to_prefetch:INTERMEDIATE_SIZE + intermediate_idx_to_prefetch + VEC_SIZE], evt, vec_len=VEC_SIZE)
-                    evt.commit()
-                    evt.wait(PIPE_DEPTH - 1)
+                        Tp.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 0, tx, :], input_cat_global[batch_idx_to_prefetch, intermediate_idx_to_prefetch:intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)
+                        Tp.copy_async(shared_buf[T.truncmod(idx[0] + PIPE_DEPTH - 1, PIPE_DEPTH), 1, tx, :], input_cat_global[batch_idx_to_prefetch, INTERMEDIATE_SIZE + intermediate_idx_to_prefetch:INTERMEDIATE_SIZE + intermediate_idx_to_prefetch + VEC_SIZE], **non_bulk_copy)
+                    T.ptx.cp_async.commit_group()
+                    T.ptx.cp_async.wait_group(PIPE_DEPTH - 1)
                     for kv in T.vectorized(VEC_SIZE):
                         vec1[kv] = shared_buf[T.truncmod(idx[0], PIPE_DEPTH), 0, tx, kv]
                     for kv in T.vectorized(VEC_SIZE):

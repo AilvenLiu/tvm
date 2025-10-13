@@ -1,12 +1,12 @@
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 
-from tvm.tir.event import EventImpl
-
 from .common import F32_BYTES, F16_BYTES, KernelConfig, SmemManager, Tile, ceildiv, float22half2
 
+
 def next_power_of_two(x):
-    return 1 << (x-1).bit_length()
+    return 1 << (x - 1).bit_length()
+
 
 class MOEAlignTile(Tile):
 
@@ -14,7 +14,7 @@ class MOEAlignTile(Tile):
         super().__init__()
         self.num_experts = num_experts
         self.scan_size = next_power_of_two(num_experts)
-        self.numel = numel # numel = num_tokens * num_experts
+        self.numel = numel  # numel = num_tokens * num_experts
         self.block_size = block_size
         self.pad_sorted_token_ids = pad_sorted_token_ids
 
@@ -22,16 +22,18 @@ class MOEAlignTile(Tile):
         self.smem_manager = smem_manager
         # alloc shared memory
         self.shared_counts = smem_manager.alloc([self.num_experts], "int32").buffer
-        self.prefix = smem_manager.alloc([self.num_experts+1], "int32").buffer
+        self.prefix = smem_manager.alloc([self.num_experts + 1], "int32").buffer
         self.scan_buf = smem_manager.alloc([self.scan_size], "int32").buffer
-        self.warp_sums = smem_manager.alloc([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], "int32").buffer
+        self.warp_sums = smem_manager.alloc(
+            [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], "int32"
+        ).buffer
         self.s_total_tokens_post_pad = smem_manager.alloc([1], "int32").buffer
 
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
 
     @T.macro
-    def warp_exclusive_scan(self, v, output, mask=0xffffffff):
+    def warp_exclusive_scan(self, v, output, mask=0xFFFFFFFF):
         # offset = T.alloc_cell("int32", name="offset")
         # original = T.alloc_cell("int32", name="original")
         # with T.warp():
@@ -45,8 +47,11 @@ class MOEAlignTile(Tile):
         #         offset = offset << 1
         #     output = v - original
         #     v = original
-        output[0] = T.cuda.func_call("warp_exclusive_scan", v, mask,
-                                  source_code="""
+        output[0] = T.cuda.func_call(
+            "warp_exclusive_scan",
+            v,
+            mask,
+            source_code="""
             __device__ __forceinline__ int warp_exclusive_scan(int v, unsigned mask = 0xffffffffu) {
             int original = v;
             #pragma unroll
@@ -56,10 +61,23 @@ class MOEAlignTile(Tile):
             }
             return v - original;
             }
-                                  """, return_type="int32")
+                                  """,
+            return_type="int32",
+        )
 
     @T.macro
-    def run(self, m_idx, n_idx, k_idx, topk_ids, sorted_token_ids, expert_ids, total_tokens_post_pad, cumsum_buffer, num_valid_tokens=None):
+    def run(
+        self,
+        m_idx,
+        n_idx,
+        k_idx,
+        topk_ids,
+        sorted_token_ids,
+        expert_ids,
+        total_tokens_post_pad,
+        cumsum_buffer,
+        num_valid_tokens=None,
+    ):
         idx = T.alloc_local([1], "int32", name="idx")
         pre = T.alloc_local([1], "int32", name="pre")
         sum_val = T.alloc_local([1], "int32", name="sum_val")
@@ -73,7 +91,9 @@ class MOEAlignTile(Tile):
             T.tvm_storage_sync("shared")
             idx[0] = tid
             while idx[0] < self.numel:
-                expert_id = topk_ids[idx[0]] # TODO: the reference expert use topk_ids[idx[0]] + 1. Is it correct?
+                expert_id = topk_ids[
+                    idx[0]
+                ]  # TODO: the reference expert use topk_ids[idx[0]] + 1. Is it correct?
                 T.cuda.atomic_add(T.address_of(self.shared_counts[expert_id]), 1)
                 idx[0] += KernelConfig.NUM_THREADS
             T.tvm_storage_sync("shared")
@@ -120,12 +140,14 @@ class MOEAlignTile(Tile):
                             left[0] = mid + 1
                         else:
                             right[0] = mid
-                expert_ids[idx[0]] = left[0] - 1 # TODO: the reference expert use left - 2
+                expert_ids[idx[0]] = left[0] - 1  # TODO: the reference expert use left - 2
                 if num_valid_tokens is not None:
-                    if idx[0] < cumsum_buffer[left[0]] // self.block_size- 1:
+                    if idx[0] < cumsum_buffer[left[0]] // self.block_size - 1:
                         num_valid_tokens[idx[0]] = self.block_size
                     else:
-                        num_valid_tokens[idx[0]] = (self.shared_counts[left[0]-1] - 1) % self.block_size + 1
+                        num_valid_tokens[idx[0]] = (
+                            self.shared_counts[left[0] - 1] - 1
+                        ) % self.block_size + 1
 
                 idx[0] += KernelConfig.NUM_THREADS
             if self.pad_sorted_token_ids:
@@ -142,6 +164,7 @@ class MOEAlignTile(Tile):
             self.smem_manager.arrive_all("cta")
             self.smem_manager.advance()
 
+
 class CountAndSortExpertTokens(Tile):
 
     VEC_SIZE = 16 // F16_BYTES
@@ -149,7 +172,7 @@ class CountAndSortExpertTokens(Tile):
 
     def __init__(self, numel, hidden_size, topk):
         super().__init__()
-        self.numel = numel # numel = num_tokens * num_experts
+        self.numel = numel  # numel = num_tokens * num_experts
         self.hidden_size = hidden_size
         assert self.hidden_size <= KernelConfig.NUM_THREADS * self.VEC_SIZE
         self.topk = topk
@@ -157,11 +180,14 @@ class CountAndSortExpertTokens(Tile):
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         self.s_rank_post_pad = smem_manager.alloc([KernelConfig.NUM_THREADS], "int64").buffer
-        self.fetched_data = smem_manager.alloc([self.PIPE_DEPTH, KernelConfig.NUM_THREADS, self.VEC_SIZE], "float16").buffer
+        self.fetched_data = smem_manager.alloc(
+            [self.PIPE_DEPTH, KernelConfig.NUM_THREADS, self.VEC_SIZE], "float16"
+        ).buffer
 
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
 
+    # fmt: off
     @T.macro
     def run(self, m_idx, n_idx, k_idx, topk_ids, sorted_token_ids, cumsum_buffer, data, reordered_data):
         idx = T.alloc_local([1], "int32", name="idx")
@@ -169,7 +195,6 @@ class CountAndSortExpertTokens(Tile):
         col_idx = T.alloc_local([1], "int32", name="col_idx")
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            evt = Tp.alloc_bulk_group_event(EventImpl.kCpAsync)
             process_token_idx = m_idx + tid * KernelConfig.SM_NUMBER
             self.smem_manager.wait_all("cta")
             if process_token_idx < self.numel:
@@ -183,17 +208,17 @@ class CountAndSortExpertTokens(Tile):
             for i in T.unroll(self.PIPE_DEPTH - 1):
                 with T.thread():
                     if idx[0] < self.numel and col_idx[0] < self.hidden_size:
-                        Tp.copy_async(self.fetched_data[i, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], evt, vec_len=self.VEC_SIZE)
-                    evt.commit()
+                        Tp.copy_async(self.fetched_data[i, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
+                    T.ptx.cp_async.commit_group()
                 idx[0] += KernelConfig.SM_NUMBER
             cnt[0] = 0
             while idx[0] < self.numel + (self.PIPE_DEPTH - 1) * KernelConfig.SM_NUMBER:
                 with T.thread():
                     if idx[0] < self.numel and col_idx[0] < self.hidden_size:
                         cp_pipe_idx = T.meta_var((idx[0] // KernelConfig.SM_NUMBER) % self.PIPE_DEPTH)
-                        Tp.copy_async(self.fetched_data[cp_pipe_idx, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], evt, vec_len=self.VEC_SIZE)
-                    evt.commit()
-                    evt.wait(self.PIPE_DEPTH - 1)
+                        Tp.copy_async(self.fetched_data[cp_pipe_idx, tid, :], data[idx[0] // self.topk, col_idx[0]:col_idx[0] + self.VEC_SIZE], dispatch="non-bulk-copy", vec_len=self.VEC_SIZE)
+                    T.ptx.cp_async.commit_group()
+                    T.ptx.cp_async.wait_group(self.PIPE_DEPTH - 1)
                     rank_post_pad = self.s_rank_post_pad[cnt[0]]
                     pipe_idx = T.meta_var(cnt[0] % self.PIPE_DEPTH)
                     if col_idx[0] < self.hidden_size:
@@ -203,3 +228,4 @@ class CountAndSortExpertTokens(Tile):
                     cnt[0] += 1
             self.smem_manager.arrive_all("cta")
             self.smem_manager.advance()
+    # fmt: on
