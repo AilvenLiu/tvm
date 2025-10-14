@@ -51,7 +51,7 @@ def test(args):
     NUM_HIDDEN_LAYERS = 64
     # notes: "/raid/catalyst/models/Qwen3-32B-q0f16-MLC" is the weights converted directly from huggingface
     #        "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" is the weights converted with interwoven gate_up_weight
-    LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" if TP_SIZE == 1 else "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
+    LOAD_WEIGHTS = "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" if MegaKernel.GATE_UP_PROJ_SPLIT_K_FACTOR_DICT[args.tp_size] == 1 else "/raid/catalyst/models/Qwen3-32B-q0f16-MLC"
     MODEL_LIB_PATH = f"/raid/catalyst/ruihang-shared/latest/Qwen3-32B-q0f16-tp{TP_SIZE}.so"
     MEGA_LIB_PATH = f"{Path('~/megalib').expanduser()}/Qwen3-32B-q0f16-MLC-{args.scheduler}-tp{TP_SIZE}-profiler{'on' if PROFILER_ON else 'off'}.so"  # NOTE: update this path
     DEBUG_PATH = Path("~/qwen3-mg-debug").expanduser()  # NOTE: update this path

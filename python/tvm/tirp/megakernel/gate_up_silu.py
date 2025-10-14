@@ -1,11 +1,13 @@
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 
+from tvm.tirp.bench.utils import CudaProfiler
 from tvm.tirp.megakernel.gemm import GemmTile
 from tvm.tirp.megakernel.common import (
     F16_BYTES,
     Barriers,
     KernelConfig,
+    ProfileEventType,
     SmemManager,
 )
 
@@ -42,19 +44,15 @@ class BarLD2MMA(Barriers):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([idx]), cta_id=0, pred=True)
 
 
-@T.macro
-def trap_when_assert_failed(cond):
-    T.cuda.func_call(
-        "trap_when_assert_fail",
-        cond,
+def silu(val):
+    return T.cuda.func_call(
+        "silu",
+        val,
         source_code=f"""
-__forceinline__ __device__ void trap_when_assert_fail(bool cond) {{
-    do {{
-        if (not (cond))
-            asm("trap;");
-    }} while (0);
+__forceinline__ __device__ float silu(float val) {{
+  return val / (1.0f + __expf(-val));
 }}
-    """,
+    """, return_type="float32"
     )
 
 # A: [batch_size, hidden_size]
@@ -98,6 +96,17 @@ class GateUpSiluTile(GemmTile):
             align=1024,
             method="exclusive",
         ).buffer
+        
+    def _alloc_local(self, m_idx):
+        # alloc local memory
+        self.reg = T.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")
+        self.reg_fp16 = T.alloc_buffer(
+            (self.TMEM_LD_SIZE // 2,), "float16", scope="local", name="reg_fp16"
+        )
+        self.tmem_idx = T.local_cell("int32", name="tmem_idx")
+        self.tmem_phase = T.local_cell("int32", name="tmem_phase")
+        self.stage = T.local_cell("int32", name="stage")
+        self.wait_complete = T.local_cell("bool", name="wait_complete")
 
     @T.macro
     def init(self, smem_manager: SmemManager):
@@ -130,11 +139,11 @@ class GateUpSiluTile(GemmTile):
 
 
     @T.macro
-    def _consumer_wg(self, m_idx, n_idx, k_idx):
+    def _consumer_wg(self, m_idx, n_idx, k_idx, profiler: CudaProfiler):
         with T.thread():
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
             lane_id = T.thread_id([32], parent="warp")
-            trap_when_assert_failed(self.tmem_addr[0] == 0)
+            T.cuda.trap_when_assert_failed(self.tmem_addr[0] == 0)
             if warp_id == 0:
                 self.smem_manager.wait_specific(lane_id, self.output_smem, 0)
             T.ptx.bar.sync(10, 128)
@@ -169,16 +178,21 @@ class GateUpSiluTile(GemmTile):
                         *[self.reg[j] for j in range(self.TMEM_LD_SIZE)],
                     )
                     T.ptx.tcgen05.wait.ld()
+                    if self.profiler_on:
+                        profiler.start(ProfileEventType.SILU_MUL, lane_id == 0)
                     # for each warp, lane 0~15 holds the gate output, lane 16~31 holds the up output
-                    # TODO: may interleave the gate output between lane 0~15 and lane 16~31 to balance
-                    if lane_id < 16:
-                        for vec in T.unroll(self.TMEM_LD_SIZE):
-                            self.reg[vec] = self.reg[vec] * T.sigmoid(self.reg[vec])
-                    for vec in T.unroll(self.TMEM_LD_SIZE):
-                        self.reg[vec] = self.reg[vec] * T.tvm_warp_shuffle_down(0xffffffff, self.reg[vec], 16, 32, 32)
-                    if lane_id < 16:
-                        Tp.cast(self.reg_fp16[:], self.reg[:])
-                        Tp.copy(self.output_smem[self.stage, ki * self.TMEM_LD_SIZE: (ki + 1) * self.TMEM_LD_SIZE, warp_id * 16 + lane_id], self.reg_fp16[:])
+                    SILU_HANDLE_UNIT = T.meta_var(self.TMEM_LD_SIZE // 2)
+                    off = T.if_then_else(lane_id < 16, SILU_HANDLE_UNIT, 0)
+                    for kv in T.unroll(SILU_HANDLE_UNIT):
+                        self.reg[off + kv] = T.tvm_warp_shuffle_xor(0xffffffff, self.reg[off + kv], 16, 32, 32)
+                    for kv in T.unroll(SILU_HANDLE_UNIT):
+                        self.reg[kv] = silu(self.reg[kv]) * self.reg[SILU_HANDLE_UNIT + kv]
+                    Tp.cast(self.reg_fp16[:], self.reg[0:SILU_HANDLE_UNIT], vec=SILU_HANDLE_UNIT)
+                    st = T.meta_var(ki * self.TMEM_LD_SIZE + (lane_id // 16) * SILU_HANDLE_UNIT)
+                    Tp.copy(self.output_smem[self.stage, st:st + SILU_HANDLE_UNIT, warp_id * 16 + lane_id % 16], self.reg_fp16[:], vec=SILU_HANDLE_UNIT)
+                    if self.profiler_on:
+                        profiler.end(ProfileEventType.SILU_MUL, lane_id == 0)
+                                            
                 # the tmem can be overwritten
                 if ko == self.MMA_M // self.EPI_TILE - 1:
                     T.ptx.tcgen05.fence.before_thread_sync()

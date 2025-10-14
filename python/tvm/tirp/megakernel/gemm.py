@@ -294,7 +294,7 @@ class GemmTile(Tile):
         )
 
     @T.macro
-    def _consumer_wg(self, m_idx, n_idx, k_idx):
+    def _consumer_wg(self, m_idx, n_idx, k_idx, profiler: CudaProfiler):
         with T.cta():
             tid_in_wg = T.thread_id([128], parent="warpgroup")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER], parent="warpgroup")
@@ -691,7 +691,7 @@ class GemmTile(Tile):
                             self.smem_manager.arrive_specific(lane_id, self.A_smem, ks)
 
                 with T.warpgroup()[0:1]:
-                    self._consumer_wg(m_idx, n_idx, k_idx)
+                    self._consumer_wg(m_idx, n_idx, k_idx, profiler)
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx, profiler: CudaProfiler = None):

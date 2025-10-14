@@ -14,7 +14,7 @@ __forceinline__ __device__ void ld_reduce_8_fp16(void* src_addr, void* dst_addr)
     };
     #pragma unroll
     for (int u = 0; u < UNROLL; u++) {
-        asm("multimem.ld_reduce.acquire.sys.global.add.v8.f16 {%0, %1, %2, %3, %4, %5, %6, %7}, [%8];"
+        asm("multimem.ld_reduce.acquire.sys.global.add.acc::f32.v8.f16 {%0, %1, %2, %3, %4, %5, %6, %7}, [%8];"
             : "=h"(u2[8 * u]), "=h"(u2[8 * u + 1]), "=h"(u2[8 * u + 2]), "=h"(u2[8 * u + 3]), "=h"(u2[8 * u + 4]), "=h"(u2[8 * u + 5]), "=h"(u2[8 * u + 6]), "=h"(u2[8 * u + 7])
             : "l"(source));
     }

@@ -50,8 +50,8 @@ class MegaKernel:
 
     # FIXME: the config for TP 4 is not tuned
     SPLIT_QKV_PROJECT_DICT = {1: 3, 4: 4, 8: 4}
-    SPLIT_O_PROJECT_DICT = {1: 3, 4: 2, 8: 2}
-    GATE_UP_PROJ_SPLIT_K_FACTOR_DICT = {1: 1, 4: 2, 8: 2}
+    SPLIT_O_PROJECT_DICT = {1: 3, 4: 3, 8: 2}
+    GATE_UP_PROJ_SPLIT_K_FACTOR_DICT = {1: 1, 4: 1, 8: 2}
     DOWN_PROJ_SPLIT_K_FACTOR_DICT = {1: 10, 4: 3, 8: 3}
     NUM_TASK_ARGS = 10
     MAX_TOTAL_NUM_WORKERS = 65536
@@ -469,7 +469,7 @@ class MegaKernel:
                                     range_end = ((kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM - 1) // self.o_proj_tile.TILE_K
                                     if tid_in_wg <= range_end - range_start:
                                         evt_o_proj.semaphore_notify(range_start + tid_in_wg)
-                                new_m_idx[0] += KernelConfig.SM_NUMBER
+                            new_m_idx[0] += KernelConfig.SM_NUMBER
                         if issubclass(Scheduler, DynamicTileScheduler):
                             self.tile_scheduler.prefetch()
                         smem_manager.arrive_all("cta")

@@ -211,7 +211,12 @@ SPLIT_QKV_PROJECT = {
 }
 SPLIT_O_PROJECT = {
     1: 3,
-    4: 2,
+    4: 3,
+    8: 2,
+}
+GATE_UP_PROJ_SPLIT_K_FACTOR = {
+    1: 1,
+    4: 1,
     8: 2,
 }
 DOWN_PROJ_SPLIT_K_FACTOR = {
@@ -219,11 +224,7 @@ DOWN_PROJ_SPLIT_K_FACTOR = {
     4: 3,
     8: 3,
 }
-GATE_UP_PROJ_SPLIT_K_FACTOR = {
-    1: 1,
-    4: 2,
-    8: 2,
-}
+
 
 
 VOCAB_SIZE = 151936
