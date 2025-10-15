@@ -136,6 +136,13 @@ TVM_DLL const Op& cast();
 /*!
  * \brief See pesudo code below:
  *
+ * Tp.permute_dims(BufferRegion buffer, List order)
+ */
+TVM_DLL const Op& permute_dims();
+
+/*!
+ * \brief See pesudo code below:
+ *
  * Tp.copy(BufferRegion dst, BufferRegion src)
  */
 TVM_DLL const Op& copy();

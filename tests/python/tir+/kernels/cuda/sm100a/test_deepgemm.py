@@ -354,7 +354,7 @@ def test_deepgemm():
                         with T.warp(parent="warpgroup")[warp_id == 2]:
                             # transpose
                             phase = 0
-                            reg_trans = T.alloc_buffer((4,), "uint32", scope="local")
+                            # reg_trans = T.alloc_buffer((4,), "uint32", scope="local")
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx)
                                 n_idx = T.meta_var(tile_scheduler.n_idx)
@@ -364,20 +364,23 @@ def test_deepgemm():
                                     # wait for sf has been prepared
                                     T.ptx.mbarrier.try_wait(tma2trans_bar.mbar.ptr_to([ks]), phase)
                                     if stage % 4 == 0:
-                                        for ki in T.unroll(0, BLK_SFA // 128):
-                                            for vec in T.vectorized(4):
-                                                reg_trans[vec] = SFA_smem[ks, ki * 4 + vec, lane_id]
-                                            T.cuda.warp_sync()
-                                            for vec in T.vectorized(4):
-                                                SFA_smem[ks, ki * 4 + (4 * lane_id + vec) // 32, (4 * lane_id + vec) % 32] = reg_trans[vec]
-                                            T.cuda.warp_sync()
-                                        for ki in T.unroll(0, BLK_SFB // 128):
-                                            for vec in T.vectorized(4):
-                                                reg_trans[vec] = SFB_smem[ks, ki * 4 + vec, lane_id]
-                                            T.cuda.warp_sync()
-                                            for vec in T.vectorized(4):
-                                                SFB_smem[ks, ki * 4 + (4 * lane_id + vec) // 32, (4 * lane_id + vec) % 32] = reg_trans[vec]
-                                            T.cuda.warp_sync()
+                                        Tp.permute_dims(SFA_smem[ks], [0, 2, 1])
+                                        Tp.permute_dims(SFB_smem[ks, :4], [0, 2, 1])
+                                        Tp.permute_dims(SFB_smem[ks, 4:], [0, 2, 1])
+                                        # for ki in T.unroll(0, BLK_SFA // 128):
+                                        #     for vec in T.vectorized(4):
+                                        #         reg_trans[vec] = SFA_smem[ks, ki * 4 + vec, lane_id]
+                                        #     T.cuda.warp_sync()
+                                        #     for vec in T.vectorized(4):
+                                        #         SFA_smem[ks, ki * 4 + (4 * lane_id + vec) // 32, (4 * lane_id + vec) % 32] = reg_trans[vec]
+                                        #     T.cuda.warp_sync()
+                                        # for ki in T.unroll(0, BLK_SFB // 128):
+                                        #     for vec in T.vectorized(4):
+                                        #         reg_trans[vec] = SFB_smem[ks, ki * 4 + vec, lane_id]
+                                        #     T.cuda.warp_sync()
+                                        #     for vec in T.vectorized(4):
+                                        #         SFB_smem[ks, ki * 4 + (4 * lane_id + vec) // 32, (4 * lane_id + vec) % 32] = reg_trans[vec]
+                                        #     T.cuda.warp_sync()
                                         T.ptx.fence.proxy("shared")
                                     # mark that transpose is completed
                                     trans2mma_bar.arrive(ks)
@@ -537,9 +540,9 @@ def test_deepgemm():
     target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": deepgemm})
-        mod.show()
+        # mod.show()
         mod = tvm.tir.transform.LowerTIRp()(mod)
-        mod.show()
+        # mod.show()
         src, mod = get_source(deepgemm)
         # print(src)
         # mod(A_tvm, B_tvm, C_tvm, A_scale_tvm, B_scale_tvm)

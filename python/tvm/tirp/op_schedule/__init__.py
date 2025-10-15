@@ -25,6 +25,7 @@ from .dispatcher import (
 from .cuda.copy import *
 from .cuda.reduction import *
 from .cuda.copy_async import *
+from .cuda.permute_dims import *
 from .cuda.cast import *
 from .trn import *
 

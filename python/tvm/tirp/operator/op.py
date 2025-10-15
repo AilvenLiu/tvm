@@ -613,3 +613,21 @@ class ComposeOp(OpCall):
         raise NotImplementedError(
             "Generic compose_op must be lowered to specific compose ops before operator-level passes"
         )
+
+
+class PermuteDims(OpCall):
+    """Permute the tensor dimensions with given order."""
+
+    op = get_tirp_op("permute_dims")
+
+    buffer = ArgProperty(0)
+    order = ArgProperty(1)
+
+    @property
+    def buffer(self) -> PrimExpr:
+        """Get the source expressions (inputs) of the operator."""
+        return self.buffer
+
+    def validate(self) -> None:
+        """Validate that the operator has the correct number and types of arguments."""
+        pass

@@ -1151,6 +1151,36 @@ def reshape(buffer: Buffer, shape: List[PrimExpr]):
     )
 
 
+def permute_dims(
+    buffer: Union[BufferRegion, Buffer],
+    order: List[Union[PrimExpr, int]],
+    workspace: Dict[str, Buffer] = None,
+    dispatch: Optional[str] = None,
+    **kwargs,
+):
+    """Permute the tensor dimensions with given order.
+
+
+    Parameters
+    ----------
+    buffer : Union[BufferRegion, Buffer]
+        The tensor to be permuted.
+
+    order : List[Union[PrimExpr, int]]
+        The permuting order.
+
+    workspace : Dict[str, Buffer]
+        The workspace of the operator.
+
+    config : Dict[str, Any]
+        The scheduler configuration.
+    """
+    config = kwargs or {}
+    return f_insert(
+        tirp_op.PermuteDims(buffer, order, workspace=workspace, config=config, dispatch=dispatch)
+    )
+
+
 __all__ = [
     "zero",
     "sqrt",
@@ -1179,4 +1209,5 @@ __all__ = [
     "reduce_negate",
     "select",
     "PoolAllocator",
+    "permute_dims",
 ]
