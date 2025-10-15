@@ -3666,6 +3666,19 @@ __forceinline__ __device__ T {func_name}(T* src) {{
     return cuda_func_call(func_name, addr, source_code=source_code, return_type=dtype)
 
 
+@register_codegen("cuda_get_tmem_addr")
+def codegen_cuda_get_tmem_addr(addr, row_offset, col_offset):
+    func_name = "tvm_builtin_cuda_get_tmem_addr"
+    source_code = f"""
+__forceinline__ __device__ uint32_t {func_name}(uint32_t addr, int row_offset, int col_offset) {{
+    return get_tmem_addr(addr, row_offset, col_offset);
+}}
+"""
+    return cuda_func_call(
+        func_name, addr, row_offset, col_offset, source_code=source_code, return_type="uint32"
+    ), ["get_tmem_addr"]
+
+
 ########################################################
 # NVSHMEM related ops
 ########################################################

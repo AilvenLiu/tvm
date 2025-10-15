@@ -916,6 +916,11 @@ TVM_DLL const Op& cuda_printf();
  */
 TVM_DLL const Op& cuda_ldg();
 
+/*!
+ * \brief tvm intrinsic for cuda tmem address calculation
+ */
+TVM_DLL const Op& cuda_get_tmem_addr();
+
 }  // namespace builtin
 }  // namespace tirx
 }  // namespace tvm

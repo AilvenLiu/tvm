@@ -138,17 +138,11 @@ TIRP_DEFINE_SCHEDULE_OP(permute_dims);
 
 TIRP_DEFINE_COMPOSE_OP(compose_op);
 
-/********************* Event Ops **********************/
-#define TIRP_DEFINE_EVENT_OP(OpName) TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsEventOp", Bool(true))
-
-TIRP_DEFINE_EVENT_OP(event_init);
-TIRP_DEFINE_EVENT_OP(event_commit);
-TIRP_DEFINE_EVENT_OP(event_wait);
-
 /********************* Async Ops **********************/
 #define TIRP_DEFINE_ASYNC_OP(OpName) TIRP_DEFINE_OP(OpName).set_attr<Bool>("TIsAsyncOp", Bool(true))
 
 TIRP_DEFINE_ASYNC_OP(copy_async);
+TIRP_DEFINE_ASYNC_OP(gemm_async);
 
 /********************* Misc Ops **********************/
 TIRP_DEFINE_OP(tvm_kernel_replace_point);

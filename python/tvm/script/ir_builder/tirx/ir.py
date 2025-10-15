@@ -2531,6 +2531,7 @@ class CUDANamespace:
         self.func_call = _op_wrapper(_tir_op.cuda_func_call)
         self.printf = _op_wrapper(_tir_op.cuda_printf)
         self.ldg = _op_wrapper(_tir_op.cuda_ldg)
+        self.get_tmem_addr = _op_wrapper(_tir_op.cuda_get_tmem_addr)
 
 
 class NVSHMEMNamespace:

@@ -333,9 +333,63 @@ def copy_async(
     dispatch: Optional[str] = None,
     **kwargs,
 ):
+    if workspace is None:
+        workspace = {}
     config = kwargs or {}
+    dst = _to_region(dst)
+    src = _to_region(src)
     return f_insert(
         tirp_op.CopyAsync(dst, src, workspace=workspace, config=config, dispatch=dispatch)
+    )
+
+
+def gemm_async(
+    C: Union[BufferRegion, Buffer],
+    A: Union[BufferRegion, Buffer],
+    B: Union[BufferRegion, Buffer],
+    transA: bool = False,
+    transB: bool = False,
+    accum: bool = False,
+    workspace: Dict[str, Buffer] = None,
+    dispatch: Optional[str] = None,
+    **kwargs,
+):
+    """General matrix multiplication asynchronously.
+
+    Parameters
+    ----------
+    C : Union[BufferRegion, Buffer]
+        The buffer of matrix C.
+
+    A : Union[BufferRegion, Buffer]
+        The buffer of matrix A.
+
+    B : Union[BufferRegion, Buffer]
+        The buffer of matrix B.
+
+    transA : bool
+        False if A is K-major (MxK), True if A is MN-major (KxM).
+
+    transB : bool
+        False if B is K-major (NxK), True if B is MN-major (KxN).
+
+    accum : bool
+        Whether C is accumulated.
+        C = A * B if accum is False, otherwise C += A * B.
+
+    workspace : Optional[Dict[str, Buffer]]
+        The workspace of the operator.
+    """
+    if workspace is None:
+        workspace = {}
+    config = kwargs or {}
+    C = _to_region(C)
+    A = _to_region(A)
+    B = _to_region(B)
+    return f_insert(
+        tirp_op.GemmAsync(
+            C, A, B, transA, transB, accum, workspace=workspace, config=config, dispatch=dispatch
+        )
     )
 
 
@@ -1191,6 +1245,7 @@ __all__ = [
     "cast",
     "copy",
     "copy_async",
+    "gemm_async",
     "fill",
     "gemm",
     "reciprocal",

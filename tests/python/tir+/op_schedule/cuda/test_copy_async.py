@@ -508,6 +508,16 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
                 dtype, swizzle_len, (2, 2, 24, 64)
             ).normalize(),
         ),
+        (
+            (256, 64),  # global_shape
+            ((128, 256), (0, 64)),  # global_region
+            (256, 64),  # shared_shape
+            ((0, 128), (0, 64)),  # shared_region
+            128,  # thread count per CTA
+            TileLayout([256, 64]).normalize(),  # A_layout
+            TileLayout([256, 64]).normalize(),  # B_layout
+            lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (256, 64)).normalize(),
+        ),
     ],
 )
 def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3):
@@ -563,6 +573,7 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3):
 
     with target:
         mod = tvm.IRModule({"main": copy_async})
+        mod.show()
         mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
         print(mod.mod.imports[0].inspect_source())
 

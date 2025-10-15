@@ -15,11 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Optional, Union, List, Dict, Any
+from typing import Optional, Union, List
 from enum import Enum
 import copy
 import tvm
-import functools
 
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
@@ -30,10 +29,13 @@ from tvm.tirp.op_schedule import (
     register_dispatch,
     predicate,
 )
-from .common import target_cuda
-from tvm.tir import BufferRegion
-from .common import CopyInstType, copy_vec_load_impl, validate_copy_op, thread_selector
-from tvm.tir.layout import TileLayout, SwizzleLayout
+from .common import (
+    CopyInstType,
+    copy_vec_load_impl,
+    validate_copy_op,
+    single_thread,
+)
+from tvm.tir.layout import TileLayout, SwizzleLayout, TLayout
 
 
 class SwizzleMode(Enum):
@@ -45,7 +47,7 @@ class SwizzleMode(Enum):
     SWIZZLE_128B_ATOM = 3
 
 
-def tma_atom_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int]):
+def tma_atom_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int]) -> SwizzleLayout:
     """Generate the TMA atom layout given dtype and swizzle mode."""
     bits = tvm.DataType(dtype).bits
     if isinstance(swizzle_mode, int):
@@ -76,7 +78,7 @@ def tma_atom_shape(
     return atom_shape
 
 
-def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape):
+def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape) -> TLayout:
     """Generate the TMA layout for the shared memory given shape and dtype.
     It uses a default tiling strategy to tile the TMA atom layout into the shared memory.
     """
@@ -198,11 +200,12 @@ def copy_tma_impl(
             box_dim = copy.copy(atom_shape_global)
             if outer_shared.shard[seps[-2] - 1].stride == 1:
                 enlarge_factor = outer_shared.shard[seps[-2] - 1].extent
-                if s_st[-2] % enlarge_factor == 0 and s_ext[-2] % enlarge_factor == 0:
-                    # exactly multiple of enlarge_factor
-                    box_dim[-2] *= enlarge_factor
-                elif s_st[-2] // enlarge_factor == s_ext[-2] // enlarge_factor:
-                    # completely within a enlarge_factor
+                new_box_dim = box_dim[-2] * enlarge_factor
+                if s_st[-2] % new_box_dim == 0 and s_ext[-2] % new_box_dim == 0:
+                    # exactly multiple of new_box_dim
+                    box_dim[-2] = new_box_dim
+                elif s_st[-2] // new_box_dim == s_ext[-2] // new_box_dim:
+                    # completely within a new_box_dim
                     box_dim[-2] = s_ext[-2]
 
             # iterator over global space, each element is a box in global space
@@ -247,8 +250,8 @@ def copy_tma_impl(
     # ---------------------------------------------------------------------
 
     # fmt: off
-    @T.macro
-    def inner_impl():
+    @T.prim_func(tirp=True, check_well_formed=False)
+    def impl():
         # TODO(@bohan): reconsider this under warp specialized scenario. Q: should we place the fence here?
         # make sure smem write is visible to tma proxy
         if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
@@ -295,8 +298,6 @@ def copy_tma_impl(
                         cache_hint=op_call.config.get("cache_hint", ""),
                     )
 
-    impl = thread_selector(sctx, inner_impl)
-
     # fmt: on
     # ---------------------------------------------------------------------
     # Host‑side tensor‑map creation
@@ -341,7 +342,7 @@ def copy_tma_impl(
     when=[
         predicate(
             "validate_copy_op",
-            lambda op, sctx: (validate_copy_op(op, sctx), "validate_copy_op failed"),
+            lambda op, sctx: (validate_copy_op(op, sctx), "not a valid copy op"),
         ),
     ],
 )
@@ -357,7 +358,14 @@ def copy_async_dispatch_cp_async(op: OpCall, sctx: ScheduleContext) -> PrimFunc:
     when=[
         predicate(
             "validate_copy_op",
-            lambda op, sctx: (validate_copy_op(op, sctx), "validate_copy_op failed"),
+            lambda op, sctx: (validate_copy_op(op, sctx), "not a valid copy op"),
+        ),
+        predicate(
+            "single_thread",
+            lambda op, sctx: (
+                single_thread(op, sctx),
+                f"unsupported exec_scope {sctx.exec_scope}, expected single thread",
+            ),
         ),
     ],
 )

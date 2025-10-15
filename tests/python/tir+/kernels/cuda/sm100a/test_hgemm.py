@@ -286,8 +286,8 @@ def test_hgemm():
                                 tile_scheduler.next_tile()
 
                         elif warp_id < 2 and cbx == 0:
-                            phase_tmem = T.alloc_buffer((1,), "int32", scope="local")
-                            phase_tmem[0] = 0
+                            phase_tmem = T.local_cell("int32")
+                            phase_tmem = 0
                             phase[0] = 0
 
                             T.ptx.tcgen05.encode_instr_descriptor(T.address_of(descI), "float32", a_type, b_type, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
@@ -295,39 +295,29 @@ def test_hgemm():
                             while tile_scheduler.valid():
                                 m_idx = T.meta_var(tile_scheduler.m_idx)
                                 n_idx = T.meta_var(tile_scheduler.n_idx)
-                                with T.thread():
-                                    if T.ptx.elect_sync():
-                                        ld2mma.wait(0, warp_id, phase_tmem[0])
-                                        T.ptx.tcgen05.fence.after_thread_sync()
+                                with T.thread()[T.ptx.elect_sync()]:
+                                    ld2mma.wait(0, warp_id, phase_tmem)
+                                    T.ptx.tcgen05.fence.after_thread_sync()
 
-                                        @T.macro
-                                        def mma(is_remain, ks):
-                                            # wait tma
-                                            tma2mma.wait(ks, 0, phase[0])
-                                            for ki in T.unroll(BLK_K // MMA_K):
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descA), A_smem.ptr_to([ks, warp_id, 0, ki * MMA_K]),
-                                                                                        ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                T.ptx.tcgen05.encode_matrix_descriptor(T.address_of(descB), B_smem.ptr_to([ks, 0, ki * MMA_K]),
-                                                                                        ldo=1, sdo=8 * BLK_K * F16_BYTES // F128_BYTES, swizzle=SWIZZLE)
-                                                if (stage == 0 and ki == 0) and ((not is_remain) or (is_remain and PIPE_CYCLE == 0)):
-                                                    T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,
-                                                                        descI, False, CTA_GROUP, False)
-                                                else:
-                                                    T.ptx.tcgen05.mma("float32", a_type, b_type, warp_id * MMA_N, descA, descB,
-                                                                        descI, False, CTA_GROUP, True)
-                                            mma2tma.arrive(ks)
+                                    @T.macro
+                                    def mma(is_remain, ks):
+                                        # wait tma
+                                        tma2mma.wait(ks, 0, phase[0])
+                                        Tp.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + BLK_N], A_smem[ks, warp_id, :, :], B_smem[ks, :, :], dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI,
+                                                        accum=tvm.tir.Not(stage == 0 and ((not is_remain) or (is_remain and PIPE_CYCLE == 0))))
+                                        mma2tma.arrive(ks)
 
-                                        @T.macro
-                                        def mma_epilogue1():
-                                            mma2ld.arrive(warp_id)
+                                    @T.macro
+                                    def mma_epilogue1():
+                                        mma2ld.arrive(warp_id)
 
-                                        @T.macro
-                                        def mma_epilogue2(ks):
-                                            tma2mma.wait(ks, 0, phase[0])
-                                            mma2tma.arrive(ks)
+                                    @T.macro
+                                    def mma_epilogue2(ks):
+                                        tma2mma.wait(ks, 0, phase[0])
+                                        mma2tma.arrive(ks)
 
-                                        paritioned_loop(mma, mma_epilogue1, mma_epilogue2)
-                                        phase_tmem[0] = phase_tmem[0] ^ 1
+                                    paritioned_loop(mma, mma_epilogue1, mma_epilogue2)
+                                    phase_tmem = phase_tmem ^ 1
                                 tile_scheduler.next_tile()
 
                     with T.warpgroup()[0:NUM_CONSUMER]:
@@ -336,12 +326,12 @@ def test_hgemm():
                         reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
                         reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
                         reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
-                        phase_tmem = T.alloc_buffer((1,), "int32", scope="local")
+                        phase_tmem = T.local_cell("int32")
 
-                        phase_tmem[0] = 0
+                        phase_tmem = 0
                         while tile_scheduler.valid():
-                            mma2ld.wait(0, wg_id, phase_tmem[0])
-                            phase_tmem[0] = phase_tmem[0] ^ 1
+                            mma2ld.wait(0, wg_id, phase_tmem)
+                            phase_tmem = phase_tmem ^ 1
                             T.ptx.tcgen05.fence.after_thread_sync()
                             # TMEM -> RF (ld)
                             for i in T.unroll(MMA_N // TMEM_LD_SIZE):  # load (MMA_M // 2, MMA_N)

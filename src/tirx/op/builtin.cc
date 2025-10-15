@@ -439,6 +439,8 @@ TIR_DEFINE_BUILTIN_FUNC(cuda_ldg)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque))
     .set_num_inputs(2);
 
+TIR_DEFINE_BUILTIN_FUNC(cuda_get_tmem_addr)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 }  // namespace builtin
 }  // namespace tirx
 }  // namespace tvm

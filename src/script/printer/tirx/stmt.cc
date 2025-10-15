@@ -103,7 +103,6 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
           static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
           static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
-          static const auto& event_op_map = Op::GetAttrMap<Bool>("TIsEventOp");
           static const auto& async_op_map = Op::GetAttrMap<Bool>("TIsAsyncOp");
           ICHECK(bool(tirp_op_map.get(op, tvm::Bool(false))))
               << "Only TIR+ ops can be used in tirx::tirp::OpCall";

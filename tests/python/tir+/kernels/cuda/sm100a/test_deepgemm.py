@@ -513,7 +513,8 @@ def test_deepgemm():
                                 # smem -> gmem
                                 m_start = (m_idx * CTA_GROUP + cbx) * BLK_M
                                 n_start = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
-                                Tp.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")
+                                with T.thread(parent="warpgroup")[T.ptx.elect_sync()]:
+                                    Tp.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")
                                 T.ptx.cp_async.bulk.commit_group()
 
                             tile_scheduler.next_tile()

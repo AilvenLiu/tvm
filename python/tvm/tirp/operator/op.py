@@ -341,6 +341,28 @@ class Gemm(OpCall):
         assert isinstance(self.beta, FloatImm), f"{self} expects FloatImm as beta, got {self.beta}"
 
 
+class GemmAsync(OpCall):
+    """General matrix multiplication asynchronously."""
+
+    op = get_tirp_op("gemm_async")
+    output = ArgProperty(0)
+    lhs = ArgProperty(1)
+    rhs = ArgProperty(2)
+    transA = ArgProperty(4)
+    transB = ArgProperty(5)
+    accum = ArgProperty(6)
+
+    @property
+    def srcs(self) -> List[PrimExpr]:
+        """Get the source matrices."""
+        return [self.lhs, self.rhs]
+
+    @property
+    def dsts(self) -> List[PrimExpr]:
+        """Get the destination matrix."""
+        return [self.output]
+
+
 class Sum(ReduceOp):
     """Sum elements in src along specified axes and store in dst."""
 

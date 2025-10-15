@@ -179,6 +179,62 @@ def thread_selector(sctx: ScheduleContext, inner_impl, macro=False) -> Callable:
         )
 
 
+def single_thread(op_call: OpCall, sctx: ScheduleContext) -> bool:
+    return (
+        sctx.exec_scope.name == "thread"
+        and isinstance(sctx.exec_scope, ExecScopeSlice)
+        and (
+            isinstance(sctx.exec_scope.slices, PrimExpr)
+            or functools.reduce(operator.mul, [s.extent for s in sctx.exec_scope.slices], 1) == 1
+        )
+    )
+
+
+################################################################################
+# Gemm operations related utilities
+# Reused by sync and async gemm pipelines
+################################################################################
+
+
+def validate_gemm_op(op_call: OpCall, sctx: ScheduleContext) -> bool:
+    """Sanity check for gemm op"""
+    C_buffer_region, A_buffer_region, B_buffer_region = op_call.args[:3]
+    C: Buffer = C_buffer_region.buffer
+    A: Buffer = A_buffer_region.buffer
+    B: Buffer = B_buffer_region.buffer
+    if not (C.layout and A.layout and B.layout and A.dtype == B.dtype):
+        return False
+    # Extract regions and validate dimensions
+    analyzer = Analyzer()
+    C_region, A_region, B_region = (
+        C_buffer_region.region,
+        A_buffer_region.region,
+        B_buffer_region.region,
+    )
+    # Extract extents and validate non-unit dimensions match
+    transA, transB = op_call.args[3:5]
+    C_extent_ = [r.extent for r in C_region if r.extent != 1]
+    A_extent_ = [r.extent for r in A_region if r.extent != 1]
+    B_extent_ = [r.extent for r in B_region if r.extent != 1]
+    assert (
+        len(C_extent_) == len(A_extent_) == len(B_extent_) == 2
+    ), "Only 2D C, A, B are supported for gemm"
+    if transA:
+        A_extent_ = [A_extent_[1], A_extent_[0]]
+    if transB:
+        B_extent_ = [B_extent_[1], B_extent_[0]]
+    # C: MxN, A: MxK, B: NxK
+    if not all(
+        [
+            analyzer.can_prove_equal(C_extent_[0], A_extent_[0]),
+            analyzer.can_prove_equal(C_extent_[1], B_extent_[0]),
+            analyzer.can_prove_equal(A_extent_[1], B_extent_[1]),
+        ]
+    ):
+        return False
+    return True
+
+
 ################################################################################
 # Copy operations related utilities
 # Reused by sync and async copy pipelines

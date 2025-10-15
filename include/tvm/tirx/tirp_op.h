@@ -168,6 +168,14 @@ TVM_DLL const Op& fill();
  */
 TVM_DLL const Op& gemm();
 
+/*!
+ * \brief See pesudo code below:
+ *
+ * Tp.gemm_async(BufferRegion C, BufferRegion A, BufferRegion B, bool transA, bool transB,
+ * bool accum)
+ */
+TVM_DLL const Op& gemm_async();
+
 TVM_DLL const Op& zero();
 
 TVM_DLL const Op& sqrt();

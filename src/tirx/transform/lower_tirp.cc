@@ -31,11 +31,10 @@ namespace tirx {
 namespace transform {
 
 Pass LowerTIRp() {
-  return tvm::transform::Sequential({LowerTIRpResolveScopeIds(), LowerTIRpScheduleOps(),
-                                     LowerTIRpResolveScopeSlices(),
-                                     LowerTIRpDedupCuTensorMaps(),
-                                     LowerTIRpCleanup()},
-                                    "tirx.LowerTIRp");
+  return tvm::transform::Sequential(
+      {LowerTIRpResolveScopeIds(), LowerTIRpScheduleOps(), tvm::transform::PrintIR(),
+       LowerTIRpResolveScopeSlices(), LowerTIRpDedupCuTensorMaps(), LowerTIRpCleanup()},
+      "tirx.LowerTIRp");
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -50,5 +49,5 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 }  // namespace transform
-}  // namespace tirxxxxxxxxxxxxxxx
+}  // namespace tirxxxxxxxxxxxxxxxx
 }  // namespace tvm

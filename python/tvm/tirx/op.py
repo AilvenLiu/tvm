@@ -5619,6 +5619,28 @@ def cuda_ldg(addr, dtype):
     return call_intrin(dtype, "tir.cuda_ldg", addr, dtype)
 
 
+def cuda_get_tmem_addr(addr, row_offset, col_offset):
+    """TVM intrinsic to call cuda tmem address calculation
+
+    Parameters
+    ----------
+    addr: PrimExpr
+        The memory address to calculate.
+
+    row_offset: PrimExpr
+        The row offset to calculate.
+
+    col_offset: PrimExpr
+        The column offset to calculate.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("uint32", "tir.cuda_get_tmem_addr", addr, row_offset, col_offset)
+
+
 def ptx_ld_global_acquire(res, addr):
     """TVM intrinsic to call ptx ld.global.acquire instruction
 
