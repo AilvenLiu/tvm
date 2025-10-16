@@ -1145,8 +1145,10 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
         for key, value in arg_dict.items():
             std_arg_dict[key] = value.clone().to(torch_dev)
         output = torch.zeros_like(std_arg_dict["hidden_state"])
+        stream = torch.cuda.Stream()
+        graph = torch.cuda.CUDAGraph()
 
-        def func():
+        def flashinfer_func():
             gating_output = std_arg_dict["hidden_state"] @ std_arg_dict["gate_weight"].T
             topk_softmax(
                 gating_output=gating_output,
@@ -1164,6 +1166,16 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
                 output=output,
             )
 
+        for _ in range(10):
+            flashinfer_func()
+        with torch.cuda.graph(graph, stream=stream):
+            flashinfer_func()
+        torch.cuda.synchronize()
+
+        def func():
+            nonlocal graph
+            graph.replay()
+
         ms = bench(func, warmup=10, repeat=30, proton_name=f"flashinfer")
         print(f"flashinfer time: {ms:.3f} ms")
         return output.cpu().numpy()
@@ -1174,15 +1186,17 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
         for key, value in arg_dict.items():
             std_arg_dict[key] = value.clone().to(torch_dev)
         output = torch.zeros_like(std_arg_dict["hidden_state"])
+        stream = torch.cuda.Stream()
+        graph = torch.cuda.CUDAGraph()
 
-        def func():
+        def sglang_fused_func():
             gating_output = std_arg_dict["hidden_state"] @ std_arg_dict["gate_weight"].T
             topk_softmax(
                 gating_output=gating_output,
                 topk_weights=std_arg_dict["topk_weights"],
                 topk_ids=std_arg_dict["topk_indices"],
             )
-            return fused_moe_sglang(
+            out = fused_moe_sglang(
                 std_arg_dict["hidden_state"],
                 std_arg_dict["grp_gate_up_weight"],
                 std_arg_dict["grp_down_weight"],
@@ -1190,11 +1204,21 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
                 std_arg_dict["topk_weights"],
                 std_arg_dict["topk_indices"].to(torch.int),
             )
+            return out
 
-        output = func()
+        for _ in range(10):
+            out = sglang_fused_func()
+        with torch.cuda.graph(graph, stream=stream):
+            sglang_fused_func()
+        torch.cuda.synchronize()
+
+        def func():
+            nonlocal graph
+            graph.replay()
+
         ms = bench(func, warmup=10, repeat=30, proton_name=f"sglang_fused")
         print(f"sglang_fused time: {ms:.3f} ms")
-        return output.cpu().numpy()
+        return out.cpu().numpy()
 
     def run():
         if mega_kernel_static["main"] is not None:
