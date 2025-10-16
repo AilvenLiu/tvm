@@ -15,20 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 """Basic tests for a Disco nvshmem support"""
-import subprocess
-import sys
 
 # pylint: disable=missing-docstring
 import tempfile
-import threading
-from multiprocessing import Process
-from typing import Any, Callable, List
 
 import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
+from tvm.contrib.popen_pool import PopenWorker
 from tvm.exec import disco_worker as _  # pylint: disable=unused-import
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
@@ -297,11 +293,11 @@ def test_codegen_nvshmem():
         finalize_dfunc = sess.get_global_func("runtime.disco.nvshmem.finalize_nvshmem")
         finalize_dfunc()
         sess.sync_worker_0()
+        return True
 
-    p = Process(target=_test_func)
-    p.start()
-    p.join()
-    assert p.exitcode == 0, "test failed"
+    p = PopenWorker()
+    p.send(_test_func)
+    assert p.recv()
 
 
 if __name__ == "__main__":

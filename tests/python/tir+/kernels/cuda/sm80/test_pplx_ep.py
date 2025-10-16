@@ -17,13 +17,13 @@
 
 import math
 import tempfile
-from multiprocessing import Process
 
 import numpy as np
 import pytest
 
 import tvm
 import tvm.testing
+from tvm.contrib.popen_pool import PopenWorker
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
@@ -79,8 +79,9 @@ def test_dispatch_combine(world_size=8):
             def __init__(self, cnt, buffer):
                 self.cnt = cnt
                 self.sem = buffer
-                self.state = T.alloc_buffer([1], "int32", scope="local", align=4)
-                IRBuilder.current().name("semaphore_state", self.state)
+                self.state = T.alloc_buffer(
+                    [1], "int32", scope="local", align=4, name="semaphore_state"
+                )
 
             @T.macro
             def wait(self):
@@ -802,11 +803,11 @@ def test_dispatch_combine(world_size=8):
         np.testing.assert_allclose(res_dict["recv_tokens_new_res"], recv_tokens_new_ref, atol=1e-6)
 
         print("Results all correct.")
+        return True
 
-    p = Process(target=test_func)
-    p.start()
-    p.join()
-    assert p.exitcode == 0, "test_dispatch_combine failed"
+    p = PopenWorker()
+    p.send(test_func)
+    assert p.recv()
 
 
 if __name__ == "__main__":
