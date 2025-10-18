@@ -17,7 +17,7 @@ qwen3_30b_a3b_config = {
     "NUM_EXPERTS_PER_TOK": 8,
     "GATING_SPLIT_K_FACTOR": 4,
     "SPLIT_QKV_PROJECT_DICT": {1: 3, 4: 4, 8: 4},
-    "SPLIT_O_PROJECT_DICT": {1: 3, 4: 3, 8: 2},
+    "SPLIT_O_PROJECT_DICT": {1: 5, 4: 3, 8: 2},
 }
 
 qwen3_32b_config = {

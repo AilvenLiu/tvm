@@ -143,7 +143,7 @@ class GroupGEMMTile(GemmTile):
                 if tid_in_wg < self.M_pad_size:
                     idx = self.sorted_token_ids[m_idx * self.M_pad_size + tid_in_wg]
                     self.smem_sorted_token_ids[tid_in_wg] = idx
-                    self.smem_routing_weights[tid_in_wg] = self.routing_weights[idx]
+                    self.smem_routing_weights[tid_in_wg] = T.if_then_else(idx < self.numel, self.routing_weights[idx], 0.0)
                 T.ptx.bar.sync(10, 128)
                 if warp_id == 0:
                     self.smem_manager.wait_specific(lane_id, self.output_smem, 0)
