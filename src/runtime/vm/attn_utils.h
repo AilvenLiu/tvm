@@ -24,6 +24,7 @@
 #ifndef TVM_RUNTIME_VM_ATTN_UTILS_H_
 #define TVM_RUNTIME_VM_ATTN_UTILS_H_
 
+#include <tvm/ffi/container/map.h>
 #include <tvm/runtime/tensor.h>
 
 #include <algorithm>
@@ -527,8 +528,8 @@ class PagedKVCacheAuxDataManager {
   // Event tensor transfer.
   virtual void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
                                     std::vector<Tensor*> etensor_data_views, int num_layers,
-                                    int cur_batch_size, int attn_num, int num_qo_heads,
-                                    int num_kv_heads, int qk_head_dim, int tp_size) = 0;
+                                    int cur_batch_size, int attn_num, std::string model_name,
+                                    int tp_size) = 0;
 
  protected:
   /*! \brief The dtype of the auxiliary data. It is expected to be int32. */
@@ -740,8 +741,8 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
 
   void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
                             std::vector<Tensor*> etensor_data_views, int num_layers,
-                            int cur_batch_size, int attn_num, int num_qo_heads, int num_kv_heads,
-                            int qk_head_dim, int tp_size) final {
+                            int cur_batch_size, int attn_num, std::string model_name,
+                            int tp_size) final {
     LOG(FATAL) << "Event tensor transfer is not supported for plain auxiliary data manager.";
     throw;
   }
@@ -991,58 +992,121 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
 
   void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
                             std::vector<Tensor*> etensor_data_views, int num_layers,
-                            int cur_batch_size, int attn_num, int num_qo_heads, int num_kv_heads,
-                            int qk_head_dim, int tp_size) final {
-    TVM_FFI_ICHECK_EQ(etensor_data.size(), 15)
-        << "Event tensor size mismatch, expected 15, got " << etensor_data.size();
-    TVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
-    std::vector<Tensor> etensor_data_views_raw;
-    etensor_data_views_raw.reserve(etensor_data.size());
-    for (int i = 0; i < static_cast<int>(etensor_data.size()); i++) {
-      HostMemoryVector* etensor_data_item = etensor_data[i];
-      etensor_data_views_raw.push_back(CopyAttnAuxVecToCache(etensor_data_item));
-      TVM_FFI_ICHECK(etensor_data_views[i] != nullptr) << "Event tensor view is nullptr";
-    }
-
-    int qkv_h_d = (num_qo_heads + 2 * num_kv_heads) * qk_head_dim;
-    int split_o_project = megakernel::kSplitOProject[tp_size];
-    int down_proj_split_k_factor = megakernel::kDownProjSplitKFactor[tp_size];
+                            int cur_batch_size, int attn_num, std::string model_name,
+                            int tp_size) final {
+    const auto f_get_config =
+        tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
+    auto config = f_get_config(model_name).cast<ffi::Map<ffi::String, ffi::Any>>();
+    int split_o_project = config["SPLIT_O_PROJECT_DICT"].cast<ffi::Map<int, int>>()[tp_size];
     TVM_FFI_ITVM_FFI_ICHECK_NE(split_o_project, -1);
-    TVM_FFI_ITVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
-    *etensor_data_views[0] = etensor_data_views_raw[0].CreateView(
-        {num_layers, ceildiv(qkv_h_d, megakernel::kSplitKReduceTileNUnit)}, dtype_aux_);
-    *etensor_data_views[1] =
-        etensor_data_views_raw[1].CreateView({num_layers, megakernel::kNumSM}, dtype_aux_);
-    *etensor_data_views[2] = etensor_data_views_raw[2].CreateView(
-        {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
-    *etensor_data_views[3] = etensor_data_views_raw[3].CreateView(
-        {num_layers, ceildiv(megakernel::kHiddenSize / tp_size, megakernel::kAllReduceTileNTile)},
-        dtype_aux_);
-    *etensor_data_views[4] =
-        etensor_data_views_raw[4].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-    *etensor_data_views[5] = etensor_data_views_raw[5].CreateView({num_layers, 1}, dtype_aux_);
-    *etensor_data_views[6] = etensor_data_views_raw[6].CreateView(
-        {num_layers,
-         ceildiv(megakernel::kIntermediateSizeTP1 / tp_size * 2, megakernel::kGemmTileBlkN)},
-        dtype_aux_);
-    *etensor_data_views[7] = etensor_data_views_raw[7].CreateView(
-        {num_layers,
-         ceildiv(megakernel::kIntermediateSizeTP1 / tp_size, megakernel::kGemmTileBlkN)},
-        dtype_aux_);
-    *etensor_data_views[8] = etensor_data_views_raw[8].CreateView(
-        {num_layers, ceildiv(megakernel::kHiddenSize, megakernel::kGemmTileBlkN)}, dtype_aux_);
-    *etensor_data_views[9] = etensor_data_views_raw[9].CreateView(
-        {num_layers, ceildiv(megakernel::kHiddenSize / tp_size, megakernel::kAllReduceTileNTile)},
-        dtype_aux_);
-    *etensor_data_views[10] =
-        etensor_data_views_raw[10].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-    *etensor_data_views[11] = etensor_data_views_raw[11].CreateView({num_layers, 1}, dtype_aux_);
-    *etensor_data_views[12] =
-        etensor_data_views_raw[12].CreateView({num_layers, split_o_project}, dtype_aux_);
-    *etensor_data_views[13] =
-        etensor_data_views_raw[13].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
-    *etensor_data_views[14] = etensor_data_views_raw[14].CreateView(
-        {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
+    int hidden_size = config["HIDDEN_SIZE"].cast<int>();
+    int intermediate_size = config["INTERMEDIATE_SIZE"].cast<int>() / tp_size;
+    int num_qo_heads = config["NUM_ATTENTION_HEADS"].cast<int>() / tp_size;
+    int num_kv_heads = config["NUM_KV_HEADS"].cast<int>() / tp_size;
+    int qk_head_dim = config["HEAD_DIM"].cast<int>();
+    if (model_name == "qwen3_32b") {
+      int down_proj_split_k_factor =
+          config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"].cast<ffi::Map<int, int>>()[tp_size];
+      TVM_FFI_ITVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
+      TVM_FFI_ICHECK_EQ(etensor_data.size(), 15)
+          << "Event tensor size mismatch, expected 15, got " << etensor_data.size();
+      TVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
+      std::vector<Tensor> etensor_data_views_raw;
+      etensor_data_views_raw.reserve(etensor_data.size());
+      for (int i = 0; i < static_cast<int>(etensor_data.size()); i++) {
+        HostMemoryVector* etensor_data_item = etensor_data[i];
+        etensor_data_views_raw.push_back(CopyAttnAuxVecToCache(etensor_data_item));
+        TVM_FFI_ICHECK(etensor_data_views[i] != nullptr) << "Event tensor view is nullptr";
+      }
+      *etensor_data_views[0] = etensor_data_views_raw[0].CreateView(
+          {num_layers, ceildiv((num_qo_heads + 2 * num_kv_heads) * qk_head_dim,
+                               megakernel::kSplitKReduceTileNUnit)},
+          dtype_aux_);
+      *etensor_data_views[1] =
+          etensor_data_views_raw[1].CreateView({num_layers, megakernel::kNumSM}, dtype_aux_);
+      *etensor_data_views[2] = etensor_data_views_raw[2].CreateView(
+          {num_layers, ceildiv(hidden_size, megakernel::kGemmTileBlkN)}, dtype_aux_);
+      *etensor_data_views[3] = etensor_data_views_raw[3].CreateView(
+          {num_layers, ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile)},
+          dtype_aux_);
+      *etensor_data_views[4] =
+          etensor_data_views_raw[4].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+      *etensor_data_views[5] = etensor_data_views_raw[5].CreateView({num_layers, 1}, dtype_aux_);
+      *etensor_data_views[6] = etensor_data_views_raw[6].CreateView(
+          {num_layers, ceildiv(intermediate_size * 2, megakernel::kGemmTileBlkN)}, dtype_aux_);
+      *etensor_data_views[7] = etensor_data_views_raw[7].CreateView(
+          {num_layers, ceildiv(intermediate_size, megakernel::kGemmTileBlkN)}, dtype_aux_);
+      *etensor_data_views[8] = etensor_data_views_raw[8].CreateView(
+          {num_layers, ceildiv(hidden_size, megakernel::kGemmTileBlkN)}, dtype_aux_);
+      *etensor_data_views[9] = etensor_data_views_raw[9].CreateView(
+          {num_layers, ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile)},
+          dtype_aux_);
+      *etensor_data_views[10] =
+          etensor_data_views_raw[10].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+      *etensor_data_views[11] = etensor_data_views_raw[11].CreateView({num_layers, 1}, dtype_aux_);
+      *etensor_data_views[12] =
+          etensor_data_views_raw[12].CreateView({num_layers, split_o_project}, dtype_aux_);
+      *etensor_data_views[13] =
+          etensor_data_views_raw[13].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
+      *etensor_data_views[14] = etensor_data_views_raw[14].CreateView(
+          {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
+    } else if (model_name == "qwen3_30b_a3b" || model_name == "qwen3_30b_a3b_unfused") {
+      TVM_FFI_ICHECK_EQ(etensor_data.size(), 16)
+          << "Event tensor size mismatch, expected 15, got " << etensor_data.size();
+      TVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
+      std::vector<Tensor> etensor_data_views_raw;
+      etensor_data_views_raw.reserve(etensor_data.size());
+      for (int i = 0; i < static_cast<int>(etensor_data.size()); i++) {
+        HostMemoryVector* etensor_data_item = etensor_data[i];
+        etensor_data_views_raw.push_back(CopyAttnAuxVecToCache(etensor_data_item));
+        TVM_FFI_ICHECK(etensor_data_views[i] != nullptr) << "Event tensor view is nullptr";
+      }
+      *etensor_data_views[0] = etensor_data_views_raw[0].CreateView(
+          {num_layers, ceildiv((num_qo_heads + 2 * num_kv_heads) * qk_head_dim,
+                               megakernel::kSplitKReduceTileNUnit)},
+          dtype_aux_);
+      *etensor_data_views[1] =
+          etensor_data_views_raw[1].CreateView({num_layers, megakernel::kNumSM}, dtype_aux_);
+      *etensor_data_views[2] = etensor_data_views_raw[2].CreateView(
+          {num_layers, ceildiv(hidden_size, megakernel::kGemmTileBlkN)}, dtype_aux_);
+      *etensor_data_views[3] = etensor_data_views_raw[3].CreateView(
+          {num_layers, ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile)},
+          dtype_aux_);
+      *etensor_data_views[4] =
+          etensor_data_views_raw[4].CreateView({num_layers, cur_batch_size}, dtype_aux_);
+      *etensor_data_views[5] = etensor_data_views_raw[5].CreateView({num_layers, 1}, dtype_aux_);
+      *etensor_data_views[6] = etensor_data_views_raw[6].CreateView({num_layers, 1}, dtype_aux_);
+      *etensor_data_views[7] =
+          etensor_data_views_raw[7].CreateView({num_layers, split_o_project}, dtype_aux_);
+      *etensor_data_views[8] = etensor_data_views_raw[8].CreateView(
+          {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
+
+      *etensor_data_views[9] = etensor_data_views_raw[9].CreateView({num_layers, 1}, dtype_aux_);
+      *etensor_data_views[10] = etensor_data_views_raw[10].CreateView({num_layers, 1}, dtype_aux_);
+      *etensor_data_views[11] = etensor_data_views_raw[11].CreateView({num_layers, 1}, dtype_aux_);
+      *etensor_data_views[12] = etensor_data_views_raw[12].CreateView({num_layers, 1}, dtype_aux_);
+      if (model_name == "qwen3_30b_a3b_unfused") {
+        *etensor_data_views[13] =
+            etensor_data_views_raw[13].CreateView({num_layers, 1}, dtype_aux_);
+        *etensor_data_views[14] =
+            etensor_data_views_raw[14].CreateView({num_layers, 1}, dtype_aux_);
+      } else {
+        int num_experts = config["NUM_EXPERTS"].cast<int>();
+        int num_experts_per_tok = config["NUM_EXPERTS_PER_TOK"].cast<int>();
+        const auto f_get_max_num_tokens_padded =
+            tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_max_num_tokens_padded");
+        int max_num_tokens_padded = f_get_max_num_tokens_padded(cur_batch_size, num_experts_per_tok,
+                                                                num_experts, megakernel::kMoeBlkM)
+                                        .cast<int>();
+        *etensor_data_views[13] = etensor_data_views_raw[13].CreateView(
+            {num_layers, max_num_tokens_padded / megakernel::kMoeBlkM}, dtype_aux_);
+        *etensor_data_views[14] = etensor_data_views_raw[14].CreateView(
+            {num_layers, max_num_tokens_padded / megakernel::kMoeBlkM}, dtype_aux_);
+      }
+      *etensor_data_views[15] = etensor_data_views_raw[15].CreateView({num_layers, 1}, dtype_aux_);
+    } else {
+      LOG(FATAL) << "Unsupported model name: " << model_name;
+    }
   }
 
  private:

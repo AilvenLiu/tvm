@@ -204,45 +204,9 @@ def decode_attn_plan(
     )
 
 
-SPLIT_QKV_PROJECT = {
-    1: 3,
-    4: 4,
-    8: 4,
-}
-SPLIT_O_PROJECT = {
-    1: 3,
-    4: 3,
-    8: 2,
-}
-GATE_UP_PROJ_SPLIT_K_FACTOR = {
-    1: 1,
-    4: 1,
-    8: 2,
-}
-DOWN_PROJ_SPLIT_K_FACTOR = {
-    1: 10,
-    4: 3,
-    8: 3,
-}
-
-
-
-VOCAB_SIZE = 151936
-MAX_POSITION_EMBEDDINGS = 40960
-HIDDEN_SIZE = 5120
-FULL_INTERMEDIATE_SIZE = 25600
-NUM_HIDDEN_LAYERS = 64
-FULL_NUM_ATTENTION_HEADS = 64
-FULL_NUM_KEY_VALUE_HEADS = 8
-HEAD_DIM = 128
-RMS_NORM_EPS = 1e-6
-ROPE_THETA = 1000000
-MAX_PAGE_NUM = 8192
-PAGE_SIZE = 16
-
-MAX_TOTAL_NUM_WORKERS = 65536
 def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_task_num):
     """For layer testing use."""
+    MAX_TOTAL_NUM_WORKERS = 65536
     inverse_info = [[] for _ in range(batch_size * kv_head_num)]
     for m in range(attn_task_num):
         bs_idx = q_indptr[m]
@@ -265,12 +229,37 @@ def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_t
     )
 
 
-def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Literal["static", "dynamic"]):
-    """The execution queue generation function for layer testing use."""
-    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE // WORLD_SIZE
-    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS // WORLD_SIZE
-    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS // WORLD_SIZE
+def push_moe_tasks(central_queue, batch_size, config):
+    MOE_BLK_M = 128
+    gating_blk_m = 128
+    for m_idx in range(ceildiv(batch_size, gating_blk_m)):
+        for k_idx in range(config["GATING_SPLIT_K_FACTOR"]):
+            central_queue.append((m_idx, 0, k_idx, JobType.MOE_GATING.value))
+    for m_idx in range(KernelConfig.SM_NUMBER):
+        central_queue.append((m_idx, 0, 0, JobType.MOE_TOPK_SOFTMAX.value))
+    central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
+    for m_idx in range(KernelConfig.SM_NUMBER):
+        central_queue.append((m_idx, 0, 0, JobType.MOE_COUNT_AND_SORT.value))
+    max_num_tokens_padded = get_max_num_tokens_padded(
+        batch_size, config["NUM_EXPERTS_PER_TOK"], config["NUM_EXPERTS"], MOE_BLK_M
+    )
+    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
+        for n_idx in range(config["INTERMEDIATE_SIZE"] * 2 // GroupGEMMTile.BLK_N):
+            central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_GATE_UP.value))
+    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
+        for n_idx in range(config["INTERMEDIATE_SIZE"] // SiluMultiplyMOETile.TILE_SIZE):
+            central_queue.append((m_idx, n_idx, 0, JobType.MOE_SILU_MULTIPLY.value))
+    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
+        for n_idx in range(config["HIDDEN_SIZE"] // GroupGEMMTile.BLK_N):
+            central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
 
+
+def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler: Literal["static", "dynamic"]):
+    """The execution queue generation function for layer testing use."""
+    INTERMEDIATE_SIZE = config["INTERMEDIATE_SIZE"] // WORLD_SIZE
+    NUM_ATTENTION_HEADS = config["NUM_ATTENTION_HEADS"] // WORLD_SIZE
+    NUM_KEY_VALUE_HEADS = config["NUM_KEY_VALUE_HEADS"] // WORLD_SIZE
+    is_moe = "NUM_EXPERTS" in config
     torch.cuda.nvtx.range_push("generate_exec_queue")
     if scheduler == "static":
         exec_queue = np.zeros(
@@ -280,16 +269,16 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
 
         # qkv projection
         for n_idx in range(
-            ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, GemmTile.BLK_N)
+            ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"], GemmTile.BLK_N)
         ):
-            for k_idx in range(SPLIT_QKV_PROJECT[WORLD_SIZE]):
-                central_queue.append(pack_into_32bit(0, n_idx, k_idx, JobType.GEMM_QKV_PROJ.value))
+            for k_idx in range(config["SPLIT_QKV_PROJECT_DICT"][WORLD_SIZE]):
+                central_queue.append((0, n_idx, k_idx, JobType.GEMM_QKV_PROJ.value))
 
         m_split = min(
             batch_size,
             ceildiv(
                 KernelConfig.SM_NUMBER,
-                (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM // SplitKReduceTile.N_UNIT,
+                (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"] // SplitKReduceTile.N_UNIT,
             ),
         )
         m_tile = ceildiv(batch_size, m_split)
@@ -298,22 +287,22 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
         # q reduce + rmsnorm + rope
         for m_idx in range(m_split):
             for n_idx in range(NUM_ATTENTION_HEADS):
-                central_queue.append(pack_into_32bit(m_idx, n_idx, -1, JobType.Q_REDUCE_RMS_ROPE.value))
+                central_queue.append((m_idx, n_idx, -1, JobType.Q_REDUCE_RMS_ROPE.value))
 
         # k reduce + rmsnorm + rope + append
         for m_idx in range(m_split):
             for n_idx in range(NUM_KEY_VALUE_HEADS):
-                central_queue.append(pack_into_32bit(m_idx, n_idx, -1, JobType.K_REDUCE_RMS_ROPE_APPEND.value))
+                central_queue.append((m_idx, n_idx, -1, JobType.K_REDUCE_RMS_ROPE_APPEND.value))
 
         # v reduce + append
         for m_idx in range(m_split):
             for n_idx in range(NUM_KEY_VALUE_HEADS):
-                central_queue.append(pack_into_32bit(m_idx, n_idx, -1, JobType.V_REDUCE_APPEND.value))
+                central_queue.append((m_idx, n_idx, -1, JobType.V_REDUCE_APPEND.value))
 
         # attention
         attn_tile_num = ceildiv(attn_task_num, KernelConfig.WG_NUMBER)
         for m_idx in range(min(KernelConfig.SM_NUMBER, attn_tile_num)):
-            central_queue.append(pack_into_32bit(m_idx, -1, -1, JobType.BATCH_ATTENTION.value))
+            central_queue.append((m_idx, -1, -1, JobType.BATCH_ATTENTION.value))
 
         if attn_task_num > NUM_KEY_VALUE_HEADS * batch_size:
             # merge
@@ -322,16 +311,16 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
                     batch_size * NUM_ATTENTION_HEADS, KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
                 )
             ):
-                central_queue.append(pack_into_32bit(m_idx, -1, -1, JobType.BATCH_ATTENTION_MERGE.value))
+                central_queue.append((m_idx, -1, -1, JobType.BATCH_ATTENTION_MERGE.value))
 
         # o projection
-        for n_idx in range(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)):
-            for k_idx in range(SPLIT_O_PROJECT[WORLD_SIZE]):
-                central_queue.append(pack_into_32bit(0, n_idx, k_idx, JobType.GEMM_O_PROJ.value))
+        for n_idx in range(ceildiv(config["HIDDEN_SIZE"], GemmTile.BLK_N)):
+            for k_idx in range(config["SPLIT_O_PROJECT_DICT"][WORLD_SIZE]):
+                central_queue.append((0, n_idx, k_idx, JobType.GEMM_O_PROJ.value))
 
         # o reduction
         m_split_o_proj_reduce = min(
-            batch_size, KernelConfig.SM_NUMBER // (HIDDEN_SIZE // SplitKReduceTile.N_UNIT)
+            batch_size, KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT)
         )
         n_tile_o_proj_reduce = (
             ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_o_proj_reduce))
@@ -339,82 +328,85 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
         )
         m_tile_o_proj_reduce = ceildiv(batch_size, m_split_o_proj_reduce)
         m_split_o_proj_reduce = ceildiv(batch_size, m_tile_o_proj_reduce)
-        for n_idx in range(ceildiv(HIDDEN_SIZE, n_tile_o_proj_reduce)):
+        for n_idx in range(ceildiv(config["HIDDEN_SIZE"], n_tile_o_proj_reduce)):
             for m_idx in range(m_split_o_proj_reduce):
-                central_queue.append(pack_into_32bit(m_idx, n_idx, 0, JobType.GEMM_O_REDUCE.value))
+                central_queue.append((m_idx, n_idx, 0, JobType.GEMM_O_REDUCE.value))
 
         # o allreduce
         if WORLD_SIZE > 1:
             for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
-                for n_idx in range(ceildiv(HIDDEN_SIZE // WORLD_SIZE, AllreduceTile.N_TILE)):
-                    central_queue.append(pack_into_32bit(m_idx, n_idx, 0, JobType.O_ALLREDUCE.value))
+                for n_idx in range(ceildiv(config["HIDDEN_SIZE"] // WORLD_SIZE, AllreduceTile.N_TILE)):
+                    central_queue.append((m_idx, n_idx, 0, JobType.O_ALLREDUCE.value))
 
         # add rmsnorm
         for m_idx in range(batch_size):
-            central_queue.append(pack_into_32bit(m_idx, -1, -1, JobType.ATTN_ADD_RMS_NORM.value))
+            central_queue.append((m_idx, -1, -1, JobType.ATTN_ADD_RMS_NORM.value))
 
-        if GATE_UP_PROJ_SPLIT_K_FACTOR[WORLD_SIZE] == 1:
-            # gate_up_silu
-            assert INTERMEDIATE_SIZE % GateUpSiluTile.BLK_N == 0
-            for n_idx in range(INTERMEDIATE_SIZE * 2 // GateUpSiluTile.BLK_N):
-                central_queue.append(pack_into_32bit(0, n_idx, 0, JobType.GATE_UP_SILU.value))
+        if is_moe:
+            push_moe_tasks(central_queue, batch_size, config)
         else:
-            # gate_up_proj
-            assert INTERMEDIATE_SIZE % GemmTile.BLK_N == 0
-            for n_idx in range(INTERMEDIATE_SIZE // GemmTile.BLK_N):
-                for k_idx in range(GATE_UP_PROJ_SPLIT_K_FACTOR[WORLD_SIZE]):
-                    central_queue.append(pack_into_32bit(0, n_idx, k_idx, JobType.GEMM_GATE_UP_PROJ.value))
-                    central_queue.append(pack_into_32bit(0, n_idx + INTERMEDIATE_SIZE // GemmTile.BLK_N, k_idx, JobType.GEMM_GATE_UP_PROJ.value))
+            if config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE] == 1:
+                # gate_up_silu
+                assert INTERMEDIATE_SIZE % GateUpSiluTile.BLK_N == 0
+                for n_idx in range(INTERMEDIATE_SIZE * 2 // GateUpSiluTile.BLK_N):
+                    central_queue.append((0, n_idx, 0, JobType.GATE_UP_SILU.value))
+            else:
+                # gate_up_proj
+                assert INTERMEDIATE_SIZE % GemmTile.BLK_N == 0
+                for n_idx in range(INTERMEDIATE_SIZE // GemmTile.BLK_N):
+                    for k_idx in range(config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE]):
+                        central_queue.append((0, n_idx, k_idx, JobType.GEMM_GATE_UP_PROJ.value))
+                        central_queue.append((0, n_idx + INTERMEDIATE_SIZE // GemmTile.BLK_N, k_idx, JobType.GEMM_GATE_UP_PROJ.value))
 
-            # gate_up reduce
-            m_split_gate_up_proj_reduce = min(
-                batch_size,
-                KernelConfig.SM_NUMBER // (INTERMEDIATE_SIZE * 2 // SplitKReduceTile.N_UNIT),
+                # gate_up reduce
+                m_split_gate_up_proj_reduce = min(
+                    batch_size,
+                    KernelConfig.SM_NUMBER // (INTERMEDIATE_SIZE * 2 // SplitKReduceTile.N_UNIT),
+                )
+                m_tile_gate_up_proj_reduce = ceildiv(batch_size, m_split_gate_up_proj_reduce)
+                m_split_gate_up_proj_reduce = ceildiv(batch_size, m_tile_gate_up_proj_reduce)
+                for m_idx in range(m_split_gate_up_proj_reduce):
+                    for n_idx in range(ceildiv(INTERMEDIATE_SIZE * 2, SplitKReduceTile.N_UNIT)):
+                        central_queue.append((m_idx, n_idx, 0, JobType.GATE_UP_PROJ_REDUCE.value))
+
+                # split_silu_multiply
+                for m_idx in range(ceildiv(INTERMEDIATE_SIZE, SiluMultiplyTile.TILE_SIZE)):
+                    central_queue.append((m_idx, 0, 0, JobType.SPLIT_SILU_MULTIPLY.value))
+
+            # gemm_down_proj
+            for n_idx in range(ceildiv(config["HIDDEN_SIZE"], GemmTile.BLK_N)):
+                for k_idx in range(config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE]):
+                    central_queue.append((0, n_idx, k_idx, JobType.GEMM_DOWN_PROJ.value))
+
+            # down_proj_reduce
+            m_split_down_proj_reduce = min(
+                KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT), batch_size
             )
-            m_tile_gate_up_proj_reduce = ceildiv(batch_size, m_split_gate_up_proj_reduce)
-            m_split_gate_up_proj_reduce = ceildiv(batch_size, m_tile_gate_up_proj_reduce)
-            for m_idx in range(m_split_gate_up_proj_reduce):
-                for n_idx in range(ceildiv(INTERMEDIATE_SIZE * 2, SplitKReduceTile.N_UNIT)):
-                    central_queue.append(pack_into_32bit(m_idx, n_idx, 0, JobType.GATE_UP_PROJ_REDUCE.value))
+            n_tile = (
+                ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_down_proj_reduce))
+                * SplitKReduceTile.N_UNIT
+            )
+            m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce)
+            m_split_down_proj_reduce = ceildiv(batch_size, m_tile_down_proj_reduce)
+            for m_idx in range(m_split_down_proj_reduce):
+                for n_idx in range(ceildiv(config["HIDDEN_SIZE"], n_tile)):
+                    central_queue.append((m_idx, n_idx, 0, JobType.DOWN_PROJ_REDUCE.value))
 
-            # split_silu_multiply
-            for m_idx in range(ceildiv(INTERMEDIATE_SIZE, SiluMultiplyTile.TILE_SIZE)):
-                central_queue.append(pack_into_32bit(m_idx, 0, 0, JobType.SPLIT_SILU_MULTIPLY.value))
-
-        # gemm_down_proj
-        for n_idx in range(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N)):
-            for k_idx in range(DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE]):
-                central_queue.append(pack_into_32bit(0, n_idx, k_idx, JobType.GEMM_DOWN_PROJ.value))
-
-        # down_proj_reduce
-        m_split_down_proj_reduce = min(
-            KernelConfig.SM_NUMBER // (HIDDEN_SIZE // SplitKReduceTile.N_UNIT), batch_size
-        )
-        n_tile = (
-            ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_down_proj_reduce))
-            * SplitKReduceTile.N_UNIT
-        )
-        m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce)
-        m_split_down_proj_reduce = ceildiv(batch_size, m_tile_down_proj_reduce)
-        for m_idx in range(m_split_down_proj_reduce):
-            for n_idx in range(ceildiv(HIDDEN_SIZE, n_tile)):
-                central_queue.append(pack_into_32bit(m_idx, n_idx, 0, JobType.DOWN_PROJ_REDUCE.value))
-
-        # down_proj_allreduce
-        if WORLD_SIZE > 1:
-            for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
-                for n_idx in range(ceildiv(HIDDEN_SIZE // WORLD_SIZE, AllreduceTile.N_TILE)):
-                    central_queue.append(pack_into_32bit(m_idx, n_idx, 0, JobType.DOWN_PROJ_ALLREDUCE.value))
+            # down_proj_allreduce
+            if WORLD_SIZE > 1:
+                for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
+                    for n_idx in range(ceildiv(config["HIDDEN_SIZE"] // WORLD_SIZE, AllreduceTile.N_TILE)):
+                        central_queue.append((m_idx, n_idx, 0, JobType.DOWN_PROJ_ALLREDUCE.value))
 
         # add_rms_norm
         for m_idx in range(batch_size):
-            central_queue.append(pack_into_32bit(m_idx, 0, 0, JobType.MLP_ADD_RMS_NORM.value))
+            central_queue.append((m_idx, 0, 0, JobType.MLP_ADD_RMS_NORM.value))
 
         tile_idx = 0
         while len(central_queue) > 0:
             for bx in range(KernelConfig.SM_NUMBER):
                 if len(central_queue) > 0:
-                    exec_queue[bx, tile_idx] = central_queue.pop(0)
+                    exec_queue[bx, tile_idx] = pack_into_32bit(*central_queue.pop(0))
                 else:
                     exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value)
             tile_idx += 1
@@ -426,8 +418,8 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
         return ret
     elif scheduler == "dynamic":
         exec_queue = MPMCQueueHost(DynamicTileScheduler.MAX_TASKS)
-        for n in reversed(range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM, GemmTile.BLK_N))):
-            for k in range(SPLIT_QKV_PROJECT[WORLD_SIZE]):
+        for n in reversed(range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"], GemmTile.BLK_N))):
+            for k in range(config["SPLIT_QKV_PROJECT_DICT"][WORLD_SIZE]):
                 exec_queue.enqueue(JobType.GEMM_QKV_PROJ.value, 0, n, k)
         torch.cuda.nvtx.range_pop()
         return exec_queue
@@ -435,6 +427,7 @@ def generate_exec_queue(batch_size, attn_task_num, WORLD_SIZE, scheduler: Litera
         raise ValueError(f"Unsupported scheduler: {scheduler}")
 
 
+@tvm_ffi.register_global_func("tirp.megakernel.get_max_num_tokens_padded")
 def get_max_num_tokens_padded(batch_size, topk, num_experts, moe_blk_m):
     if batch_size * topk < num_experts:
         return batch_size * topk * moe_blk_m
@@ -442,56 +435,14 @@ def get_max_num_tokens_padded(batch_size, topk, num_experts, moe_blk_m):
         return (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m
 
 
-def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"]):
-    # todo: change to config dict
-    VOCAB_SIZE = 151936
-    MAX_POSITION_EMBEDDINGS = 40960
-    HIDDEN_SIZE = 2048
-    FULL_INTERMEDIATE_SIZE = 768
-    NUM_HIDDEN_LAYERS = 64
-    FULL_NUM_ATTENTION_HEADS = 32
-    FULL_NUM_KEY_VALUE_HEADS = 4
-    HEAD_DIM = 128
-    RMS_NORM_EPS = 1e-6
-    ROPE_THETA = 1000000
-    MAX_PAGE_NUM = 8192
-    PAGE_SIZE = 16
-    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE
-    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS
-    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS
-    GATING_SPLIT_K_FACTOR = 4
-
-    NUM_EXPERTS = 128
-    NUM_EXPERTS_PER_TOK = 8
-    MOE_BLK_M = 128
-
-
+def generate_exec_queue_moe(batch_size, config, scheduler: Literal["static", "dynamic"]):
     torch.cuda.nvtx.range_push("generate_exec_queue")
     if scheduler == "static":
         exec_queue = np.zeros(
                 (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
             )
         central_queue = []
-        gating_blk_m = 128
-        for m_idx in range(ceildiv(batch_size, gating_blk_m)):
-            for k_idx in range(GATING_SPLIT_K_FACTOR):
-                central_queue.append((m_idx, 0, k_idx, JobType.MOE_GATING.value))
-        for m_idx in range(KernelConfig.SM_NUMBER):
-            central_queue.append((m_idx, 0, 0, JobType.MOE_TOPK_SOFTMAX.value))
-        central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
-        for m_idx in range(KernelConfig.SM_NUMBER):
-            central_queue.append((m_idx, 0, 0, JobType.MOE_COUNT_AND_SORT.value))
-        max_num_tokens_padded = get_max_num_tokens_padded(batch_size, NUM_EXPERTS_PER_TOK, NUM_EXPERTS, MOE_BLK_M)
-        for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
-            for n_idx in range(INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N):
-                central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_GATE_UP.value))
-        for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
-            for n_idx in range(INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE):
-                central_queue.append((m_idx, n_idx, 0, JobType.MOE_SILU_MULTIPLY.value))
-        for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
-            for n_idx in range(HIDDEN_SIZE // GroupGEMMTile.BLK_N):
-                central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
-
+        push_moe_tasks(central_queue, batch_size, config)
         tile_idx = 0
 
         while len(central_queue) > 0:
@@ -511,32 +462,33 @@ def generate_exec_queue_moe(batch_size, scheduler: Literal["static", "dynamic"])
         exec_queue = MPMCQueueHost(DynamicTileScheduler.MAX_TASKS)
         gating_blk_m = 128
         for m in range(ceildiv(batch_size, gating_blk_m)):
-            for k in range(GATING_SPLIT_K_FACTOR):
+            for k in range(config["GATING_SPLIT_K_FACTOR"]):
                 exec_queue.enqueue(JobType.MOE_GATING.value, m, 0, k)
         torch.cuda.nvtx.range_pop()
         return exec_queue
 
 
-def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORLD_SIZE):
+def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, config, WORLD_SIZE):
     """The event tensor generation function for layer testing use."""
-    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE // WORLD_SIZE
-    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS // WORLD_SIZE
-    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS // WORLD_SIZE
+    INTERMEDIATE_SIZE = config["INTERMEDIATE_SIZE"] // WORLD_SIZE
+    NUM_ATTENTION_HEADS = config["NUM_ATTENTION_HEADS"] // WORLD_SIZE
+    NUM_KEY_VALUE_HEADS = config["NUM_KEY_VALUE_HEADS"] // WORLD_SIZE
+    is_moe = "NUM_EXPERTS" in config
     DEV = tvm.cuda(0)
-    qkv_h_d = (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * HEAD_DIM
+    qkv_h_d = (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"]
     base = 1 << 16
     max_int_32 = 2147483647
 
     # static event tensor
     etensor_qkv_partial = tvm.runtime.tensor(np.zeros(ceildiv(qkv_h_d, SplitKReduceTile.N_UNIT), dtype=np.int32), device=DEV)
-    etensor_o_partial = tvm.runtime.tensor(np.zeros(ceildiv(HIDDEN_SIZE, GemmTile.BLK_N), dtype=np.int32), device=DEV)
-    etensor_o_allreduce = tvm.runtime.tensor(np.zeros(HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV)
+    etensor_o_partial = tvm.runtime.tensor(np.zeros(ceildiv(config["HIDDEN_SIZE"], GemmTile.BLK_N), dtype=np.int32), device=DEV)
+    etensor_o_allreduce = tvm.runtime.tensor(np.zeros(config["HIDDEN_SIZE"] // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV)
     etensor_attn_add_rms_norm = tvm.runtime.tensor(np.zeros(batch_size, dtype=np.int32), device=DEV)
     etensor_attn_mlp = tvm.runtime.tensor(np.zeros(1, dtype=np.int32), device=DEV)
     etensor_gate_up_proj_reduce = tvm.runtime.tensor(np.zeros(INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N, dtype=np.int32), device=DEV)
     etensor_gate_up_proj = tvm.runtime.tensor(np.zeros(INTERMEDIATE_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV)
-    etensor_down_proj_reduce = tvm.runtime.tensor(np.zeros(HIDDEN_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV)
-    etensor_down_proj_allreduce = tvm.runtime.tensor(np.zeros(HIDDEN_SIZE // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV)
+    etensor_down_proj_reduce = tvm.runtime.tensor(np.zeros(config["HIDDEN_SIZE"] // GemmTile.BLK_N, dtype=np.int32), device=DEV)
+    etensor_down_proj_allreduce = tvm.runtime.tensor(np.zeros(config["HIDDEN_SIZE"] // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV)
     etensor_mlp_add_rms_norm = tvm.runtime.tensor(np.zeros((batch_size,), dtype=np.int32), device=DEV)
     etensor_end = tvm.runtime.tensor(np.zeros(1, dtype=np.int32), device=DEV)
 
@@ -566,10 +518,10 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
     etensor_attn_merge *= (base + 1)
     etensor_attn_merge = tvm.runtime.tensor(etensor_attn_merge, device=DEV)
 
-    etensor_o_proj = np.zeros(SPLIT_O_PROJECT[WORLD_SIZE], dtype=np.int32)
+    etensor_o_proj = np.zeros(config["SPLIT_O_PROJECT_DICT"][WORLD_SIZE], dtype=np.int32)
     o_proj_tile_k = (
         ceildiv(
-            ceildiv(NUM_ATTENTION_HEADS * HEAD_DIM, SPLIT_O_PROJECT[WORLD_SIZE]), GemmTile.BLK_K
+            ceildiv(NUM_ATTENTION_HEADS * config["HEAD_DIM"], config["SPLIT_O_PROJECT_DICT"][WORLD_SIZE]), GemmTile.BLK_K
         )
         * GemmTile.BLK_K
     )
@@ -589,7 +541,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
             qo_idx = worker_id % (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)
             range_start = (
                 (kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx)
-                * HEAD_DIM
+                * config["HEAD_DIM"]
                 // o_proj_tile_k
             )
             range_end = (
@@ -598,7 +550,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
                     + qo_idx
                     + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
                 )
-                * HEAD_DIM
+                * config["HEAD_DIM"]
                 - 1
             ) // o_proj_tile_k
             for i in range(range_start, range_end + 1):
@@ -608,34 +560,36 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
             kv_idx = kv_head_idx[m]
             batch_idx = q_indptr[m]
             range_start = (
-                kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM // o_proj_tile_k
+                kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"] // o_proj_tile_k
             )
             range_end = (
-                (kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * HEAD_DIM - 1
+                (kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"] - 1
             ) // o_proj_tile_k
             for i in range(range_start, range_end + 1):
                 etensor_o_proj[i] += 1
     assert ((etensor_o_proj <= base) & (etensor_o_proj * (base + 1) < max_int_32)).all()
     etensor_o_proj *= (base + 1)
     etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)
-
-    etensor_down_proj = np.zeros(DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE], dtype=np.int32)
-    down_proj_tile_k = (ceildiv(ceildiv(INTERMEDIATE_SIZE, DOWN_PROJ_SPLIT_K_FACTOR[WORLD_SIZE]), GemmTile.BLK_K) * GemmTile.BLK_K)
-    if GATE_UP_PROJ_SPLIT_K_FACTOR[WORLD_SIZE] == 1:
-        for m in range(INTERMEDIATE_SIZE * 2 // GateUpSiluTile.BLK_N):
-            range_start = m * GateUpSiluTile.BLK_N // 2 // down_proj_tile_k
-            range_end = ((m + 1) * GateUpSiluTile.BLK_N // 2 - 1) // down_proj_tile_k
-            for i in range(range_start, range_end + 1):
-                etensor_down_proj[i] += 1
+    if is_moe:
+        etensor_down_proj = None
     else:
-        for m in range(INTERMEDIATE_SIZE // SiluMultiplyTile.TILE_SIZE):
-            range_start = m * SiluMultiplyTile.TILE_SIZE // down_proj_tile_k
-            range_end = ((m + 1) * SiluMultiplyTile.TILE_SIZE - 1) // down_proj_tile_k
-            for i in range(range_start, range_end + 1):
-                etensor_down_proj[i] += 1
-    assert ((etensor_down_proj <= base) & (etensor_down_proj * (base + 1) < max_int_32)).all()
-    etensor_down_proj *= (base + 1)
-    etensor_down_proj = tvm.runtime.tensor(etensor_down_proj, device=DEV)
+        etensor_down_proj = np.zeros(config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE], dtype=np.int32)
+        down_proj_tile_k = (ceildiv(ceildiv(INTERMEDIATE_SIZE, config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE]), GemmTile.BLK_K) * GemmTile.BLK_K)
+        if config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE] == 1:
+            for m in range(INTERMEDIATE_SIZE * 2 // GateUpSiluTile.BLK_N):
+                range_start = m * GateUpSiluTile.BLK_N // 2 // down_proj_tile_k
+                range_end = ((m + 1) * GateUpSiluTile.BLK_N // 2 - 1) // down_proj_tile_k
+                for i in range(range_start, range_end + 1):
+                    etensor_down_proj[i] += 1
+        else:
+            for m in range(INTERMEDIATE_SIZE // SiluMultiplyTile.TILE_SIZE):
+                range_start = m * SiluMultiplyTile.TILE_SIZE // down_proj_tile_k
+                range_end = ((m + 1) * SiluMultiplyTile.TILE_SIZE - 1) // down_proj_tile_k
+                for i in range(range_start, range_end + 1):
+                    etensor_down_proj[i] += 1
+        assert ((etensor_down_proj <= base) & (etensor_down_proj * (base + 1) < max_int_32)).all()
+        etensor_down_proj *= (base + 1)
+        etensor_down_proj = tvm.runtime.tensor(etensor_down_proj, device=DEV)
 
     return (
         etensor_qkv_partial,
@@ -655,52 +609,34 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, WORL
         etensor_end,
     )
 
-def generate_event_tensor_moe(batch_size, WORLD_SIZE, unfused=False):
-    # todo: change to config dict
-    VOCAB_SIZE = 151936
-    MAX_POSITION_EMBEDDINGS = 40960
-    HIDDEN_SIZE = 2048
-    FULL_INTERMEDIATE_SIZE = 768
-    NUM_HIDDEN_LAYERS = 64
-    FULL_NUM_ATTENTION_HEADS = 32
-    FULL_NUM_KEY_VALUE_HEADS = 4
-    HEAD_DIM = 128
-    RMS_NORM_EPS = 1e-6
-    ROPE_THETA = 1000000
-    MAX_PAGE_NUM = 8192
-    PAGE_SIZE = 16
-    INTERMEDIATE_SIZE = FULL_INTERMEDIATE_SIZE
-    NUM_ATTENTION_HEADS = FULL_NUM_ATTENTION_HEADS
-    NUM_KEY_VALUE_HEADS = FULL_NUM_KEY_VALUE_HEADS
-    NUM_EXPERTS = 128
-    NUM_EXPERTS_PER_TOK = 8
-    MOE_BLK_M = 128
-    GATING_SPLIT_K_FACTOR = 4
+def generate_event_tensor_moe(batch_size, config, unfused=False):
+    
 
     DEV = tvm.cuda(0)
     base = 1 << 16
     factor = base + 1
+    MOE_BLK_M = 128
 
     gating_blk_m = 128
-    etensor_gating = tvm.runtime.tensor(np.full((1,), factor * GATING_SPLIT_K_FACTOR * ceildiv(batch_size, gating_blk_m), dtype=np.int32), device=DEV)
+    etensor_gating = tvm.runtime.tensor(np.full((1,), factor * config["GATING_SPLIT_K_FACTOR"] * ceildiv(batch_size, gating_blk_m), dtype=np.int32), device=DEV)
     etensor_topk_softmax = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
     etensor_moe_align = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
     etensor_count_and_sort = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
-    max_num_tokens_padded = get_max_num_tokens_padded(batch_size, NUM_EXPERTS_PER_TOK, NUM_EXPERTS, MOE_BLK_M)
+    max_num_tokens_padded = get_max_num_tokens_padded(batch_size, config["NUM_EXPERTS_PER_TOK"], config["NUM_EXPERTS"], MOE_BLK_M)
     if unfused:
-        etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
-        etensor_silu_mul = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE, dtype=np.int32), device=DEV)
+        etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * config["INTERMEDIATE_SIZE"] * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
+        etensor_silu_mul = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * config["INTERMEDIATE_SIZE"] // SiluMultiplyMOETile.TILE_SIZE, dtype=np.int32), device=DEV)
     else:
-        etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((max_num_tokens_padded // MOE_BLK_M,),  factor * INTERMEDIATE_SIZE * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
+        etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((max_num_tokens_padded // MOE_BLK_M,),  factor * config["INTERMEDIATE_SIZE"] * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
         etensor_silu_mul = tvm.runtime.tensor(
             np.full(
                 (max_num_tokens_padded // MOE_BLK_M,),
-                factor * INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE,
+                factor * config["INTERMEDIATE_SIZE"] // SiluMultiplyMOETile.TILE_SIZE,
                 dtype=np.int32,
             ),
             device=DEV,
         )
-    etensor_group_gemm_down = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * HIDDEN_SIZE // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
+    etensor_group_gemm_down = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * config["HIDDEN_SIZE"] // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
     etensor_end = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
     return (
         etensor_gating,

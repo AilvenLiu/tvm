@@ -16,3 +16,4 @@
 # under the License.
 
 from . import support
+from . import model_config

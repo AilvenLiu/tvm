@@ -4,7 +4,7 @@ from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.megakernel.common import ceildiv, F16_BYTES, F32_BYTES, KernelConfig, SmemManager
 
 from tvm.tirp.megakernel.gemm import GemmTile, trap_when_assert_failed, float22half2
-
+from tvm.tirp.bench.utils import CudaProfiler
 
 red = """
 __forceinline__ __device__ void red_f16_v4(half* address, half* reg) {
@@ -131,9 +131,9 @@ class GroupGEMMTile(GemmTile):
         cls.smem_routing_weights = smem_manager.alloc([cls.MAX_BLK_M], "float32", method="persistent").buffer
 
     @T.macro
-    def _consumer_wg(self, m_idx, n_idx, k_idx):
+    def _consumer_wg(self, m_idx, n_idx, k_idx, profiler: CudaProfiler):
         if not self.acc_output:
-            GemmTile._consumer_wg(self, m_idx, n_idx, k_idx)
+            GemmTile._consumer_wg(self, m_idx, n_idx, k_idx, profiler)
         else:
             with T.cta():
                 tid_in_wg = T.thread_id([128], parent="warpgroup")

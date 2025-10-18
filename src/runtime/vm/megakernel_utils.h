@@ -25,6 +25,8 @@
 #define TVM_RUNTIME_VM_MEGAKERNEL_UTILS_H_
 
 #include <tvm/runtime/tensor.h>
+#include <unordered_map>
+#include <string>
 
 namespace tvm {
 namespace runtime {
@@ -33,32 +35,36 @@ namespace vm {
 inline int ceildiv(int a, int b) { return (a + b - 1) / b; }
 
 namespace megakernel {
-
+// Kernel configurations
+constexpr const int kNumSM = 148;
+constexpr const int kNumWarpgroupPerBlock = 2;
+constexpr const int kNumWarpPerWarpgroup = 4;
+// Batch attention tasks config
 constexpr const int kSplitKReduceTileNUnit = 128;
 constexpr const int kSplitKReduceTileNRepeat = 1;
 constexpr const int kGemmTileBlkN = 128;
 constexpr const int kGemmTileBlkK = 64;
-constexpr const int kSplitQKVProject[] = {-1, 3, -1, -1, 4, -1, -1, -1, 4};
-constexpr const int kSplitOProject[] = {-1, 3, -1, -1, 3, -1, -1, -1, 2};
-constexpr const int kGateUpProjSplitKFactor[] = {-1, 1, -1, -1, 1, -1, -1, -1, 2};
-constexpr const int kDownProjSplitKFactor[] = {-1, 10, -1, -1, 3, -1, -1, -1, 3};
-constexpr const int kSiluMultiplyTileTileSize = 128;
+constexpr const int kSiluMultiplyTileSize = 128;
 constexpr const int kAllReduceTileMTile = 16;
 constexpr const int kAllReduceTileNTile = 128;
-constexpr const int kHiddenSize = 5120;
-constexpr const int kNumAttentionHeadsTP1 = 64;
-constexpr const int kIntermediateSizeTP1 = 25600;
-constexpr const int kDecodeMergeHeadsPerTile = 1;
-
-constexpr const int kNumSM = 148;
-constexpr const int kNumWarpgroupPerBlock = 2;
-constexpr const int kNumWarpPerWarpgroup = 4;
+constexpr const int kMaxTotalNumWorks = 65536;
+// MOE tasks config
+constexpr const int kMoeBlkM = 128;
+constexpr const int kGatingBlkM = 128;
+constexpr const int kGroupGemmBlkN = 128;
+constexpr const int kSiluMultiplyMoeTileSize = 768;
+// Scheduler and semaphore config
 constexpr const int kStaticTileSchedulerMaxTasks = 128;
 constexpr const int kDyanmicTileSchedulerMaxTasks = 8192;
-
-constexpr const int kMaxTotalNumWorks = 65536;
 constexpr const int kSemaphoreBase = (1 << 16);
+constexpr const int kSemaphoreFactor = (1 << 16) + 1;
 constexpr const int kMaxSemaphore = 2147483647;
+// supported model names
+const std::unordered_map<int, std::string> kModelNames = {
+  {0, "qwen3_32b"}, 
+  {1, "qwen3_30b_a3b"}, 
+  {2, "qwen3_30b_a3b_unfused"}
+};
 
 enum class JobType : int32_t {
   kVReduceAppend = 0,
@@ -79,7 +85,14 @@ enum class JobType : int32_t {
   kSplitSiluMultiply = 15,
   kGemmGateUpProj = 16,
   kGateUpSilu = 17,
-
+  kMoeGating = 18,
+  kMoeTopkSoftmax = 19,
+  kMoeAlign = 20,
+  kMoeCountAndSort = 21,
+  kMoeGroupGemmGateUp = 22,
+  kMoeSiluMultiply = 23,
+  kMoeGroupGemmDown = 24,
+  kMoeTopkReduce = 25,
   // end
   kEnd = 31,
 };
@@ -101,14 +114,12 @@ inline int32_t PackInto32bit(int32_t task_type, int32_t m_idx, int32_t n_idx, in
 
 ffi::Array<Tensor> GetEventTensorsOnLayer(ffi::Array<Tensor> etensors, int layer_id);
 
-Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size, int num_qo_heads,
-                               int num_kv_heads, int head_dim, Device device,
-                               Device preferred_host_device);
+Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
+                               std::string model_name, Device device, Device preferred_host_device);
 
 ffi::Array<ffi::Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
                                                         Tensor exec_queue_host_buf, int tp_size,
-                                                        int num_qo_heads, int num_kv_heads,
-                                                        int head_dim, int num_layers,
+                                                        std::string model_name, int num_layers,
                                                         TVMStreamHandle copy_stream);
 
 }  // namespace megakernel
