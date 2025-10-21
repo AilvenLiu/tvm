@@ -749,8 +749,14 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             output_global,
                             is_dynamic_sch,
                         )
+                    else:
+                        break
+                    self.tile_scheduler.next_tile()
+                
+                while self.tile_scheduler.valid():
+                    is_dynamic_sch = T.meta_var(issubclass(Scheduler, DynamicTileScheduler))
                     # MoE tasks (inherited from MegaKernelMOE)
-                    elif self.tile_scheduler.task_type == JobType.MOE_GATING.value:
+                    if self.tile_scheduler.task_type == JobType.MOE_GATING.value:
                         self.task_impl_moe_gating(is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.MOE_TOPK_SOFTMAX.value:
                         self.task_impl_moe_topk_softmax(
@@ -816,6 +822,8 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             mlp_add_rms_weight_global,
                             is_dynamic_sch,
                         )
+                    else:
+                        trap_when_assert_failed(False)
 
                     smem_manager.exit_tile_runtime()
                     self.tile_scheduler.next_tile()

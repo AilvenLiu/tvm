@@ -401,7 +401,8 @@ class FlashInferPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-me
         enable_disaggregation : bool
             Whether to enable disaggregation in the KV cache.
         """
-        assert rope_mode != RopeMode.INLINE, "FlashInfer RoPE does not support inline mode."
+        if rope_mode == RopeMode.INLINE:
+            assert rotary_dim == qk_head_dim, "FlashInfer RoPE does not support partial rotary dim."
         rope_scaling = _prepare_yarn_rope_scaling(rope_scaling, rope_theta)
 
         attn_kind_single = attn_kind[0] if isinstance(attn_kind, list) else attn_kind
@@ -413,8 +414,8 @@ class FlashInferPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-me
             dtype_o=dtype,
             qk_head_dim=(qk_head_dim if attn_kind_single == "mha" else mla_original_qk_head_dim),
             v_head_dim=(v_head_dim if attn_kind_single == "mha" else mla_original_v_head_dim),
-            enable_inline_rope=False,
-            return_static_libs=True,
+            target=target,
+            enable_inline_rope=rope_mode == RopeMode.INLINE,
         )
         flashinfer_decode_mods = (
             rx.backend.cuda.flashinfer.gen_flashinfer_decode_module(
@@ -423,8 +424,7 @@ class FlashInferPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-me
                 dtype_o=dtype,
                 qk_head_dim=qk_head_dim,
                 v_head_dim=v_head_dim,
-                enable_inline_rope=False,
-                return_static_libs=True,
+                target=target,
             )
             if attn_kind_single == "mha"
             else []
@@ -436,7 +436,7 @@ class FlashInferPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-me
                 dtype_o=dtype,
                 head_dim_ckv=v_head_dim,
                 head_dim_kpe=qk_head_dim - v_head_dim,
-                return_static_libs=True,
+                target=target,
             )
             if attn_kind_single == "mla"
             else []
@@ -446,18 +446,17 @@ class FlashInferPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-me
         bb = rx.BlockBuilder.current()
         mha_functions = (
             [
-                rx.Tuple([rx.StringImm("flashinfer"), rx.ExternFunc("batch_prefill_paged_run"), rx.ExternFunc("batch_prefill_plan")]),
-                rx.Tuple([rx.StringImm("flashinfer"), rx.ExternFunc("batch_decode_run"), rx.ExternFunc("batch_decode_plan")]),
-                rx.Tuple([rx.StringImm("tirx"), bb.add_func(_attention_prefill(num_key_value_heads, num_attention_heads, qk_head_dim, dtype, True, rope_scaling, target), "tir_attention_prefill_sliding_window")]),
-                rx.Tuple([rx.StringImm("tirx"), bb.add_func(_attention_decode(num_key_value_heads, num_attention_heads, qk_head_dim, dtype, True, rope_scaling, target), "tir_attention_decode_sliding_window")]),
-                rx.Tuple([rx.StringImm("tirx"), bb.add_func(tree_attn_with_paged_kv_cache(num_key_value_heads, num_attention_heads, qk_head_dim, dtype, rope_scaling, target), "tir_attention_prefill_with_tree_mask_with_paged_kv_cache")]),
-                rx.Tuple([rx.StringImm("tirx"), bb.add_func(tree_attn(num_key_value_heads, num_attention_heads, qk_head_dim, dtype, rope_scaling, target), "tir_attention_prefill_with_tree_mask")]),
+                rx.Tuple([rx.StringImm("flashinfer"), rx.ExternFunc("batch_prefill_with_paged_kv_cache_run"), rx.ExternFunc("batch_prefill_with_kv_cache_plan")]),
+                rx.Tuple([rx.StringImm("flashinfer"), rx.ExternFunc("batch_decode_with_paged_kv_cache_run"), rx.ExternFunc("batch_decode_with_paged_kv_cache_plan")]),
+                rx.Tuple([rx.StringImm("tir"), bb.add_func(_attention_prefill(num_key_value_heads, num_attention_heads, qk_head_dim, dtype, True, rope_scaling, target), "tir_attention_prefill_sliding_window")]),
+                rx.Tuple([rx.StringImm("tir"), bb.add_func(_attention_decode(num_key_value_heads, num_attention_heads, qk_head_dim, dtype, True, rope_scaling, target), "tir_attention_decode_sliding_window")]),
+                rx.Tuple([rx.StringImm("tir"), bb.add_func(tree_attn_with_paged_kv_cache(num_key_value_heads, num_attention_heads, qk_head_dim, dtype, rope_scaling, target), "tir_attention_prefill_with_tree_mask_with_paged_kv_cache")]),
+                rx.Tuple([rx.StringImm("tir"), bb.add_func(tree_attn(num_key_value_heads, num_attention_heads, qk_head_dim, dtype, rope_scaling, target), "tir_attention_prefill_with_tree_mask")]),
             ]
             if attn_kind_single == "mha"
             else [rx.Tuple([]) for _ in range(6)]
         )
-        ragged_prefill_function = rx.Tuple([rx.StringImm("flashinfer"), rx.ExternFunc("batch_prefill_ragged_run"), rx.ExternFunc("batch_prefill_plan")]) if attn_kind_single == "mha" else rx.Tuple([rx.StringImm("flashinfer"), rx.ExternFunc("batch_prefill_ragged_run"), rx.ExternFunc("batch_prefill_plan"), rx.PrimValue(mla_original_qk_head_dim), rx.PrimValue(mla_original_v_head_dim)])
-        mla_function = rx.Tuple([rx.StringImm("flashinfer"), rx.ExternFunc("batch_mla_run"), rx.ExternFunc("batch_mla_plan")] if attn_kind_single == "mla" else [])
+        mla_function = rx.Tuple([rx.StringImm("flashinfer"), rx.ExternFunc("batch_mla_paged_attention_run"), rx.ExternFunc("batch_mla_paged_attention_plan")] if attn_kind_single == "mla" else [])
         attn_merge_functions = [
             bb.add_func(_merge_state_inplace(num_attention_heads, v_head_dim, dtype, target, "tir_attention_merge_state"), "tir_attention_merge_state"),
         ]
@@ -494,7 +493,7 @@ class FlashInferPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-me
             rx.op.zeros((), dtype),
             bb.add_func(_kv_cache_transpose_append(num_key_value_heads, qk_head_dim, dtype), "kv_cache_transpose_append"),
             bb.add_func(_kv_cache_transpose_append_mla(qk_head_dim, dtype), "kv_cache_transpose_append_mla"),
-            ragged_prefill_function,
+            rx.Tuple([rx.StringImm("flashinfer"), rx.ExternFunc("batch_prefill_with_ragged_kv_cache_run"), rx.ExternFunc("batch_prefill_with_kv_cache_plan")]),
             *mha_functions,
             mla_function,
             rx.Tuple(attn_merge_functions),

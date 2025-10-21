@@ -926,9 +926,8 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
                 sliding_window_offset->data(), n_elem * elem_byte_size_);
     std::memcpy(merged_attn_aux_data_host_.data() + attn_aux_data_copy_offset_ + 2 * n_elem,
                 sink_size->data(), n_elem * elem_byte_size_);
-    Tensor view =
-        Tensor::FromNDAlloc(ViewHelper(merged_attn_aux_data_device_), ffi::Shape({3, n_elem}),
-                            dtype_aux_, device_, attn_aux_data_copy_offset_ * elem_byte_size_);
+    Tensor view = merged_attn_aux_data_device_.CreateView(
+        {3, n_elem}, dtype_aux_, attn_aux_data_copy_offset_ * elem_byte_size_);
     attn_aux_data_copy_offset_ += CeilDivElemAlignment(3 * n_elem);
     return view;
   }
@@ -962,9 +961,8 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
                 src_data->data(), n_elem * elem_byte_size_);
     std::memcpy(merged_compact_kv_aux_data_host_.data() + compact_kv_aux_data_copy_offset_ + n_elem,
                 dst_data->data(), n_elem * elem_byte_size_);
-    Tensor view = Tensor::FromNDAlloc(ViewHelper(merged_compact_kv_aux_data_device_),
-                                      ffi::Shape({2, n_elem}), dtype_aux_, device_,
-                                      compact_kv_aux_data_copy_offset_ * elem_byte_size_);
+    Tensor view = merged_compact_kv_aux_data_device_.CreateView(
+        {2, n_elem}, dtype_aux_, compact_kv_aux_data_copy_offset_ * elem_byte_size_);
     compact_kv_aux_data_copy_offset_ += CeilDivElemAlignment(2 * n_elem);
     return view;
   }
@@ -1002,7 +1000,7 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     int hidden_size = config["HIDDEN_SIZE"].cast<int>();
     int intermediate_size = config["INTERMEDIATE_SIZE"].cast<int>() / tp_size;
     int num_qo_heads = config["NUM_ATTENTION_HEADS"].cast<int>() / tp_size;
-    int num_kv_heads = config["NUM_KV_HEADS"].cast<int>() / tp_size;
+    int num_kv_heads = config["NUM_KEY_VALUE_HEADS"].cast<int>() / tp_size;
     int qk_head_dim = config["HEAD_DIM"].cast<int>();
     if (model_name == "qwen3_32b") {
       int down_proj_split_k_factor =
@@ -1110,20 +1108,6 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   }
 
  private:
-  // helper allocator class that applies byte offset to the original data pointer
-  class ViewHelper {
-   public:
-    explicit ViewHelper(Tensor source) : source_(source) {}
-    void AllocData(DLTensor* tensor, int64_t extra_byte_offset) {
-      tensor->data = static_cast<char*>(source_->data) + extra_byte_offset;
-    }
-
-    void FreeData(DLTensor* tensor) {}
-
-   private:
-    Tensor source_;
-  };
-
   /*!
    * \brief Calculate the start element offsets of the auxiliary arrays in the local cache.
    * \return Return the local cache size (total number of elements in the local cache).
@@ -1195,9 +1179,8 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     int64_t n_elem = data->size();
     std::memcpy(merged_attn_aux_data_host_.data() + attn_aux_data_copy_offset_, data->data(),
                 n_elem * elem_byte_size_);
-    Tensor view =
-        Tensor::FromNDAlloc(ViewHelper(merged_attn_aux_data_device_), ffi::Shape({n_elem}),
-                            dtype_aux_, device_, attn_aux_data_copy_offset_ * elem_byte_size_);
+    Tensor view = merged_attn_aux_data_device_.CreateView(
+        {n_elem}, dtype_aux_, attn_aux_data_copy_offset_ * elem_byte_size_);
     attn_aux_data_copy_offset_ += CeilDivElemAlignment(n_elem);
     return view;
   }
@@ -1206,9 +1189,8 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     int64_t n_elem = data->size();
     std::memcpy(merged_compact_kv_aux_data_host_.data() + compact_kv_aux_data_copy_offset_,
                 data->data(), n_elem * elem_byte_size_);
-    Tensor view = Tensor::FromNDAlloc(ViewHelper(merged_compact_kv_aux_data_device_),
-                                      ffi::Shape({n_elem}), dtype_aux_, device_,
-                                      compact_kv_aux_data_copy_offset_ * elem_byte_size_);
+    Tensor view = merged_compact_kv_aux_data_device_.CreateView(
+        {n_elem}, dtype_aux_, compact_kv_aux_data_copy_offset_ * elem_byte_size_);
     compact_kv_aux_data_copy_offset_ += CeilDivElemAlignment(n_elem);
     return view;
   }

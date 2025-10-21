@@ -78,7 +78,7 @@ def test(args):
         mlc_model_func = Qwen3LMHeadModel
         mk_wrapper_class = MegaKernelDenseLayer
         relax_mod_func = get_qwen3_megakernel_relax_mod
-        model_type = 0 # 0: dense, 1: moe
+        model_type = 0  # 0: dense, 1: moe
     elif args.model == "Qwen3-30B-A3B":
         mk_config = qwen3_30b_a3b_config
         mlc_config_tp1 = Qwen3MoeConfig(
@@ -109,8 +109,10 @@ def test(args):
         )
         mlc_model_func = Qwen3MoeForCausalLM
         mk_wrapper_class = MegaKernelMOEFullLayer
-        relax_mod_func = functools.partial(get_qwen3_30b_a3b_megakernel_relax_mod, max_batch_size=MAX_BATCH_SIZE)
-        model_type = 1 # 0: dense, 1: moe
+        relax_mod_func = functools.partial(
+            get_qwen3_30b_a3b_megakernel_relax_mod, max_batch_size=MAX_BATCH_SIZE
+        )
+        model_type = 1  # 0: dense, 1: moe
     else:
         raise ValueError(f"Invalid model: {args.model}")
 
@@ -434,9 +436,7 @@ def test(args):
             dim_n=mk_config["VOCAB_SIZE"], dim_k=mk_config["HIDDEN_SIZE"]
         )
         cos_sin_cache = get_cos_sin_cache_kernel(mk_config["HEAD_DIM"], mk_config["ROPE_THETA"])
-        relax_mod = relax_mod_func(
-            mk, args.scheduler, TP_SIZE, PROFILER_ON, tile_k_num
-        )
+        relax_mod = relax_mod_func(mk, args.scheduler, TP_SIZE, PROFILER_ON, tile_k_num)
         mod = relax_mod
         mod.update_func(mod.get_global_var("rms_norm"), attach_attr(rms_norm, "rms_norm"))
         mod.update_func(mod.get_global_var("hgemm"), attach_attr(hgemm, "hgemm"))

@@ -517,13 +517,14 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     auto config = f_get_config(model_name).cast<ffi::Map<ffi::String, ffi::Any>>();
 
     int tp_size = config["NUM_ATTENTION_HEADS"].cast<int>() / num_qo_heads;
-    TVM_FFI_ICHECK_EQ(tp_size, config["NUM_KV_HEADS"].cast<int>() / num_kv_heads);
+    TVM_FFI_ICHECK_EQ(tp_size, config["NUM_KEY_VALUE_HEADS"].cast<int>() / num_kv_heads);
     int split_o_project = config["SPLIT_O_PROJECT_DICT"].cast<ffi::Map<int, int>>()[tp_size];
     TVM_FFI_ICHECK_NE(split_o_project, -1);
     TVM_FFI_ICHECK_EQ(qk_head_dim, config["HEAD_DIM"].cast<int>());
     TVM_FFI_ICHECK_EQ(v_head_dim, config["HEAD_DIM"].cast<int>());
     int hidden_size = config["HIDDEN_SIZE"].cast<int>();
     int intermediate_size = config["INTERMEDIATE_SIZE"].cast<int>() / tp_size;
+    model_name_ = model_name;
     if (may_use_megakernel) {
       if (model_name == "qwen3_32b") {
         int down_proj_split_k_factor =
@@ -1071,7 +1072,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     cur_seq_ids_ = seq_ids;
     cur_append_lengths_ = append_lengths;
     use_mega_kernel_ = use_megakernel;
-    model_name_ = model_name_;
 
     // - Collect sequence/block/page information for attention.
     std::vector<Sequence*> sequences;
@@ -2829,7 +2829,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
               temp_float_attn_workspace_, temp_int_attn_workspace_[0],
               temp_int_pinned_attn_workspace_[0], &cur_append_lengths_indptr_host_,
               &cur_append_lengths_indptr_host_, cur_batch_size_,
-              cur_append_lengths_indptr_host_.back(), num_qo_heads_, num_qo_heads_, qk_head_dim_,
+              cur_append_lengths_indptr_host_.back(), num_qo_heads_, num_kv_heads_, qk_head_dim_,
               v_head_dim_, /*causal=*/true, copy_stream_);
         }
       }
@@ -3388,7 +3388,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
               attn_kinds_vec.push_back(static_cast<AttnKind>(attn_kind));
             }
 
-            TVM_FFI_ICHECK_EQ(cache_config.size(), 5);
+            TVM_FFI_ICHECK_EQ(cache_config.size(), 6);
             int64_t reserved_num_seqs = cache_config[0];
             int64_t total_token_capacity = cache_config[1];
             int64_t prefill_chunk_size = cache_config[2];

@@ -65,7 +65,7 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
       tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
   auto config = f_get_config(model_name).cast<ffi::Map<ffi::String, ffi::Any>>();
   int num_qo_heads = config["NUM_ATTENTION_HEADS"].cast<int>() / tp_size;
-  int num_kv_heads = config["NUM_KV_HEADS"].cast<int>() / tp_size;
+  int num_kv_heads = config["NUM_KEY_VALUE_HEADS"].cast<int>() / tp_size;
   int head_dim = config["HEAD_DIM"].cast<int>();
   int hidden_size = config["HIDDEN_SIZE"].cast<int>();
   int intermediate_size = config["INTERMEDIATE_SIZE"].cast<int>() / tp_size;
@@ -300,7 +300,7 @@ Array<Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
       tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
   auto config = f_get_config(model_name).cast<ffi::Map<ffi::String, ffi::Any>>();
   int num_qo_heads = config["NUM_ATTENTION_HEADS"].cast<int>() / tp_size;
-  int num_kv_heads = config["NUM_KV_HEADS"].cast<int>() / tp_size;
+  int num_kv_heads = config["NUM_KEY_VALUE_HEADS"].cast<int>() / tp_size;
   int head_dim = config["HEAD_DIM"].cast<int>();
   int split_qkv_project = config["SPLIT_QKV_PROJECT_DICT"].cast<ffi::Map<int, int>>()[tp_size];
 

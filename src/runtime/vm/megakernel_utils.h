@@ -25,8 +25,9 @@
 #define TVM_RUNTIME_VM_MEGAKERNEL_UTILS_H_
 
 #include <tvm/runtime/tensor.h>
-#include <unordered_map>
+
 #include <string>
+#include <unordered_map>
 
 namespace tvm {
 namespace runtime {
@@ -55,16 +56,13 @@ constexpr const int kGroupGemmBlkN = 128;
 constexpr const int kSiluMultiplyMoeTileSize = 768;
 // Scheduler and semaphore config
 constexpr const int kStaticTileSchedulerMaxTasks = 128;
-constexpr const int kDyanmicTileSchedulerMaxTasks = 8192;
+constexpr const int kDyanmicTileSchedulerMaxTasks = 32768;
 constexpr const int kSemaphoreBase = (1 << 16);
 constexpr const int kSemaphoreFactor = (1 << 16) + 1;
 constexpr const int kMaxSemaphore = 2147483647;
 // supported model names
 const std::unordered_map<int, std::string> kModelNames = {
-  {0, "qwen3_32b"}, 
-  {1, "qwen3_30b_a3b"}, 
-  {2, "qwen3_30b_a3b_unfused"}
-};
+    {0, "qwen3_32b"}, {1, "qwen3_30b_a3b"}, {2, "qwen3_30b_a3b_unfused"}};
 
 enum class JobType : int32_t {
   kVReduceAppend = 0,
