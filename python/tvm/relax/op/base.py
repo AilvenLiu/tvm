@@ -23,12 +23,11 @@ import tvm
 import tvm.runtime
 from tvm.runtime import ObjectConvertible
 from tvm.runtime.object import Object
-from tvm.tir import IndexMap
 
 from ...ir import PrimExpr
 from ..expr import Call, Expr, ExternFunc, GlobalVar, ShapeExpr, StringImm, Var
 from ..struct_info import StructInfo, TensorStructInfo
-from ..utils import convert_to_expr
+from ..utils import Dependency, convert_to_expr
 from . import _ffi_api
 
 PrimExprLike = int | PrimExpr
@@ -267,40 +266,83 @@ def call_tir_device(
     args: Expr,
     out_sinfo: TensorStructInfo | list[TensorStructInfo],
     tile_num: Expr | tuple[PrimExprLike, ...] | list[PrimExprLike],
-    in_events: Expr | tuple[Expr, ...] | list[Expr] = (),
-    out_events: Expr | tuple[Expr, ...] | list[Expr] = (),
-    in_deps: list[Callable | IndexMap] | None = None,
-    out_deps: list[Callable | IndexMap] | None = None,
+    in_deps: Dependency | list[Dependency] = (),
+    out_deps: Dependency | list[Dependency] = (),
+    inplace_indices: int | list[int] | None = None,
     tir_vars: ShapeExpr | tuple[PrimExpr] | list[PrimExpr] | None = None,
 ) -> Call:
     """Call a tile-level function and return the output."""
     args = _wrap_inline_arg_tuple(args)
-    in_events = _wrap_inline_arg_tuple(in_events)
-    out_events = _wrap_inline_arg_tuple(out_events)
-
-    if in_deps is None:
-        in_deps = []
-    if out_deps is None:
-        out_deps = []
-
-    default_index_dtype = "int64"
-    in_deps = [
-        IndexMap.from_func(dep, index_dtype=default_index_dtype) if callable(dep) else dep
-        for dep in in_deps
-    ]
-    out_deps = [
-        IndexMap.from_func(dep, index_dtype=default_index_dtype) if callable(dep) else dep
-        for dep in out_deps
-    ]
+    if not in_deps:
+        (
+            in_evt_list,
+            in_extra_tensors_list,
+            in_extra_tir_vars_list,
+            in_dep_list,
+            in_num_list,
+            in_dep_dim_list,
+        ) = ([], [], [], [], [], [])
+    else:
+        if not isinstance(in_deps, list):
+            in_deps = [in_deps]
+        (
+            in_evt_list,
+            in_extra_tensors_list,
+            in_extra_tir_vars_list,
+            in_dep_list,
+            in_num_list,
+            in_dep_dim_list,
+        ) = map(list, zip(*(dep.handle_dep() for dep in in_deps)))
+    if not out_deps:
+        (
+            out_evt_list,
+            out_extra_tensors_list,
+            out_extra_tir_vars_list,
+            out_dep_list,
+            out_num_list,
+            out_dep_dim_list,
+        ) = ([], [], [], [], [], [])
+    else:
+        if not isinstance(out_deps, list):
+            out_deps = [out_deps]
+        (
+            out_evt_list,
+            out_extra_tensors_list,
+            out_extra_tir_vars_list,
+            out_dep_list,
+            out_num_list,
+            out_dep_dim_list,
+        ) = map(list, zip(*(dep.handle_dep() for dep in out_deps)))
 
     if not isinstance(out_sinfo, list):
         out_sinfo = [out_sinfo]
+    if inplace_indices is None:
+        inplace_indices = [-1 for _ in range(len(out_sinfo))]
+    if not isinstance(inplace_indices, list):
+        inplace_indices = [inplace_indices]
     if isinstance(tile_num, list | tuple):
         tile_num = ShapeExpr(tile_num)
     if isinstance(tir_vars, list | tuple):
         tir_vars = ShapeExpr(tir_vars)
     return _ffi_api.call_tir_device(  # type: ignore
-        gvar, args, out_sinfo, tile_num, in_events, out_events, in_deps, out_deps, tir_vars
+        gvar,
+        args,
+        out_sinfo,
+        tile_num,
+        in_evt_list,
+        out_evt_list,
+        in_extra_tensors_list,
+        out_extra_tensors_list,
+        in_extra_tir_vars_list,
+        out_extra_tir_vars_list,
+        in_dep_list,
+        out_dep_list,
+        in_num_list,
+        out_num_list,
+        in_dep_dim_list,
+        out_dep_dim_list,
+        inplace_indices,
+        tir_vars,
     )
 
 

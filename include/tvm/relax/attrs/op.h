@@ -27,6 +27,7 @@
 #include <tvm/ir/global_info.h>
 #include <tvm/relax/expr.h>
 #include <tvm/tir/index_map.h>
+#include <tvm/tir/function.h>
 
 namespace tvm {
 namespace relax {
@@ -120,14 +121,40 @@ struct HintOnDeviceAttrs : public AttrsNodeReflAdapter<HintOnDeviceAttrs> {
 };  // struct HintOnDeviceAttrs
 
 struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
-  ffi::Array<tir::IndexMap> in_deps;
-  ffi::Array<tir::IndexMap> out_deps;
+  ffi::Array<Expr> in_events;
+  ffi::Array<Expr> out_events;
+  ffi::Array<ffi::Array<Expr>> in_extra_tensors;
+  ffi::Array<ffi::Array<Expr>> out_extra_tensors;
+  ffi::Array<ffi::Array<PrimExpr>> in_extra_tir_vars;
+  ffi::Array<ffi::Array<PrimExpr>> out_extra_tir_vars;
+  ffi::Array<tir::PrimFunc> in_deps;
+  ffi::Array<tir::PrimFunc> out_deps;
+  ffi::Array<tir::PrimFunc> in_nums;
+  ffi::Array<tir::PrimFunc> out_nums;
+  ffi::Array<Integer> in_deps_dim;
+  ffi::Array<Integer> out_deps_dim;
+  ffi::Array<Integer> inplace_indices;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<CallTIRDeviceAttrs>()
+        .def_ro("in_events", &CallTIRDeviceAttrs::in_events, "The input events.")
+        .def_ro("out_events", &CallTIRDeviceAttrs::out_events, "The output events.")
+        .def_ro("in_extra_tensors", &CallTIRDeviceAttrs::in_extra_tensors,
+                "The extra input tensors that are not in the args list.")
+        .def_ro("out_extra_tensors", &CallTIRDeviceAttrs::out_extra_tensors,
+                "The extra output tensors that are not in the args list.")
+        .def_ro("in_extra_tir_vars", &CallTIRDeviceAttrs::in_extra_tir_vars,
+                "The extra input tir vars that are not in the args list.")
+        .def_ro("out_extra_tir_vars", &CallTIRDeviceAttrs::out_extra_tir_vars,
+                "The extra output tir vars that are not in the args list.")
         .def_ro("in_deps", &CallTIRDeviceAttrs::in_deps, "The input dependencies.")
-        .def_ro("out_deps", &CallTIRDeviceAttrs::out_deps, "The output dependencies.");
+        .def_ro("out_deps", &CallTIRDeviceAttrs::out_deps, "The output dependencies.")
+        .def_ro("in_nums", &CallTIRDeviceAttrs::in_nums, "The input numbers.")
+        .def_ro("out_nums", &CallTIRDeviceAttrs::out_nums, "The output numbers.")
+        .def_ro("in_deps_dim", &CallTIRDeviceAttrs::in_deps_dim, "The input dependencies dim.")
+        .def_ro("out_deps_dim", &CallTIRDeviceAttrs::out_deps_dim, "The output dependencies dim.")
+        .def_ro("inplace_indices", &CallTIRDeviceAttrs::inplace_indices, "The inplace indices.");
   }
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.CallTIRDeviceAttrs", CallTIRDeviceAttrs,

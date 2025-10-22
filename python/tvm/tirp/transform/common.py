@@ -22,16 +22,22 @@ from tvm.tir import (
     BufferLoad,
     BufferRegion,
     BufferStore,
+    Block,
+    DeclBuffer,
     OpCall,
     PrimExpr,
     Stmt,
     Var,
+    decl_buffer
 )
 from tvm.tir.buffer import Buffer
 from tvm.tir.stmt_functor import StmtExprMutator, StmtMutator
+from tvm.tir.buffer import Buffer
 from tvm.tirp.operator.op import KernelReplacePoint
+from tvm.tir.layout import TileLayout, Iter
 
 
+#FIXME: this pass does not replace var in the shape/layout of a buffer
 class BufferReplacer(StmtExprMutator):
     """
     Replace buffer with another buffer.
@@ -42,29 +48,67 @@ class BufferReplacer(StmtExprMutator):
         super().__init__()
         self.buffer_map = buffer_map
         self.var_map = var_map
+        self.buffer_attr_var_mutated = False
+        for old_buffer, new_buffer in buffer_map.items():
+            self.var_map[old_buffer.data] = new_buffer.data
+
+    def mutate_buffer(self, buffer: Buffer):
+        if buffer in self.buffer_map:
+            return self.buffer_map[buffer]
+        self.buffer_attr_var_mutated = True
+        new_data = self.visit_expr(buffer.data)
+        new_shape = [self.visit_expr(expr) for expr in buffer.shape]
+        if isinstance(buffer.layout, TileLayout):
+            new_shard = []
+            new_replicate = []
+            for iter in buffer.layout.shard:
+                new_iter = Iter(self.visit_expr(iter.extent), self.visit_expr(iter.stride), iter.axis)
+                new_shard.append(new_iter)
+            for iter in buffer.layout.replicate:
+                new_iter = Iter(self.visit_expr(iter.extent), self.visit_expr(iter.stride), iter.axis)
+                new_replicate.append(new_iter)
+            new_layout = TileLayout(new_shard, new_replicate, buffer.layout.exclude)
+        else:
+            new_layout = buffer.layout
+        if not self.buffer_attr_var_mutated:
+            return None
+        new_buffer = decl_buffer(new_shape, buffer.dtype, buffer.name, new_data, buffer.strides, buffer.elem_offset, buffer.scope(), buffer.data_alignment, buffer.offset_factor, layout=new_layout)
+        self.buffer_map[buffer] = new_buffer
+        return new_buffer
 
     def visit_var_(self, op: Var):
         op = super().visit_var_(op)
         if op in self.var_map:
+            self.buffer_attr_var_mutated = True
             return self.var_map[op]
         return op
 
     def visit_buffer_load_(self, op: BufferLoad):
+        new_buffer = self.mutate_buffer(op.buffer)
         op = super().visit_buffer_load_(op)
-        if op.buffer in self.buffer_map:
-            return BufferLoad(self.buffer_map[op.buffer], op.indices)
+        if new_buffer is not None:
+            return BufferLoad(new_buffer, op.indices)
         return op
 
     def visit_buffer_store_(self, op: BufferStore):
+        new_buffer = self.mutate_buffer(op.buffer)
         op = super().visit_buffer_store_(op)
-        if op.buffer in self.buffer_map:
-            return BufferStore(self.buffer_map[op.buffer], op.value, op.indices)
+        if new_buffer is not None:
+            return BufferStore(new_buffer, op.value, op.indices)
         return op
 
     def visit_buffer_region_(self, op: BufferRegion):
+        new_buffer = self.mutate_buffer(op.buffer)
         op = super().visit_buffer_region_(op)
-        if op.buffer in self.buffer_map:
-            return BufferRegion(self.buffer_map[op.buffer], op.region)
+        if new_buffer is not None:
+            return BufferRegion(new_buffer, op.region)
+        return op
+
+    def visit_decl_buffer_(self, op: DeclBuffer):
+        new_buffer = self.mutate_buffer(op.buffer)
+        op = super().visit_decl_buffer_(op)
+        if new_buffer is not None:
+            return DeclBuffer(new_buffer, op.body)
         return op
 
     def visit_array_prim_expr_(self, op: List[PrimExpr]):
@@ -78,16 +122,20 @@ class BufferReplacer(StmtExprMutator):
 
     def visit_op_call_(self, op):
         op = super().visit_op_call_(op)
-        new_workspace = {
-            key: self.buffer_map[value] if value in self.buffer_map else value
-            for key, value in op.workspace.items()
-        }
+        new_workspace = {}
+        for key, value in op.workspace.items():
+            new_buffer = self.mutate_buffer(value)
+            if new_buffer is not None:
+                new_workspace[key] = new_buffer
+            else:
+                new_workspace[key] = value
         args = list()
         for arg in op.args:
             args.append(arg)
         return OpCall(
             *args, op=op.op, workspace=new_workspace, config=op.config, dispatch=op.dispatch
         )
+
 
 
 class KernelReplacePointSearcher(StmtMutator):

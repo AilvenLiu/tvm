@@ -117,13 +117,7 @@ class MegaKernelWrapper:
             is_static_scheduler, smem_manager, exec_queue, exec_tasks, exec_head, exec_tail
         )
         with T.cta():
-            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            if is_static_scheduler:
-                self.tile_scheduler.init(bx, tid)
-            else:
-                self.tile_scheduler.init()
+            self.tile_scheduler.init()
 
     @T.macro
     def run_tile(self, tile, *args, **kwargs):

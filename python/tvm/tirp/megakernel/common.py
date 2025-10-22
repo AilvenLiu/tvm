@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Literal, Type, Union
+from typing import List, Literal, Optional, Tuple, Type, Union
 
 import tvm
 from tvm.script import tir as T
@@ -51,7 +51,7 @@ MAX_TASK_TYPE = 1 << 5
 MAX_M_IDX = 1 << 14
 MAX_N_IDX = 1 << 9
 MAX_K_IDX = 1 << 5
-def pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=True, debug=True):
+def pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=True, debug=False):
     if host:
         if debug:
             assert task_type < MAX_TASK_TYPE and m_idx < MAX_M_IDX and n_idx < MAX_N_IDX and k_idx < MAX_K_IDX
@@ -332,7 +332,7 @@ def get_source(module: "tvm.ir.IRModule"):
     src = lib.mod.imports[0].inspect_source()
     return src, lib
 
-def get_source_func(func: "tvm.tir.PrimFunc") -> str:
+def get_source_func(func: "tvm.tir.PrimFunc"):
     target = tvm.target.Target("cuda")
     mod = tvm.IRModule({"main": func})
     mod = tvm.compile(mod, target=target, tir_pipeline="tirp")
@@ -451,7 +451,7 @@ event_type_names = [
 
 
 class SmemManager:
-    def __init__(self, smem_max_bytes, chunk_size, ptr: Var):
+    def __init__(self, smem_max_bytes, chunk_size, ptr: Var, fusion_mode=False):
         self.smem_max_bytes = smem_max_bytes
         self.chunk_size = chunk_size
         self.chunk_num = smem_max_bytes // chunk_size
@@ -463,14 +463,20 @@ class SmemManager:
         self.persistent_bufs = {} # persistent buf -> (beg, end)
         self.cur_tile_name = ""
         self.persistent_offset = self.chunk_size * self.chunk_num
+        self.fusion_mode = fusion_mode
 
     def _inner_alloc(self):
         # notes: these smem will never be overwritten by any tasks
         self.mbar = self.alloc((self.chunk_num,), "uint64", method="persistent").buffer
         self.shared_count = self.alloc((1,), "int32", method="persistent").buffer
-        self.cur_phase = T.alloc_local([1], "int32", layout="default", name="cur_phase")
-        self.reg_count = T.alloc_local([1], "int32", layout="default", name="reg_count")
-
+        if self.fusion_mode:
+            self.cur_phase = T.alloc_local([1], "int32", scope="local.persistent", name="cur_phase")
+            self.reg_count = T.alloc_local([1], "int32", scope="local.persistent", name="reg_count")
+        else:
+            self.cur_phase = T.alloc_local([1], "int32", name="cur_phase")
+            self.reg_count = T.alloc_local([1], "int32", name="reg_count")
+       
+        
     @T.macro
     def init(self):
         self.check_smem_well_formed(debug=False)
@@ -491,12 +497,15 @@ class SmemManager:
     #         "persistent" -> persistent smem, cannot be wait / arrive
     def alloc(self, shape, dtype="float32", strides=None, scope="shared.dyn", align=0, buffer_type="",
               axis_separators=None, layout="default", split=1, method: Literal["shared", "exclusive", "persistent"]="shared"):
+        assert "shared" in scope
         if method == "persistent":
             offset = self.pool_allocator.offset
             self.pool_allocator.move_base_to(self.persistent_offset)
         beg = self.pool_allocator.offset
         if align > 0:
             beg = (beg + align - 1) // align * align
+        if self.fusion_mode and method == "persistent":
+            scope = "shared.persistent"
         buf = self.pool_allocator.alloc(shape, dtype, strides, scope, align, buffer_type,
                                         axis_separators, layout)
         end = self.pool_allocator.offset
@@ -576,8 +585,11 @@ class SmemManager:
             print(k, v)
 
     # call before each op-kernel compilation
-    def set_tile(self, cur_tile: Tile):
-        self.cur_tile_name = str(cur_tile)
+    def set_tile(self, cur_tile: Optional[Tile]):
+        if cur_tile is None:
+            self.cur_tile_name = "default"
+        else:
+            self.cur_tile_name = str(cur_tile)
         self.tiles[self.cur_tile_name] = [-1, {"exclusive": [], "shared": []}, [0 for _ in range(self.chunk_num)]]
         self.runtime_tile_chunk_count[self.cur_tile_name] = [[0 for _ in range(self.chunk_num)] for _ in range(2)] # wait count, arrival count
         self.pool_allocator.move_base_to(0)
@@ -703,3 +715,48 @@ class SmemManager:
     @T.macro
     def arrive_chunk(self, chunk_id):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([chunk_id]))
+        
+class SemaphoreBase:
+    """Abstract base class for semaphore."""
+    def __init__(self):
+        pass
+    
+    def semaphore_wait(self, *coord, level, mask):
+        raise NotImplementedError
+    
+    def semaphore_notify(self, *coord, rank=-1):
+        raise NotImplementedError
+        
+class TileSchedulerBase:
+    """Abstract base class for tile schedulers."""
+    MAX_TASKS = 128
+
+    def __init__(self):
+        pass
+    
+    def get_idx_and_task_type(self) -> Tuple[List[PrimExpr], PrimExpr]:
+        raise NotImplementedError
+
+    @T.macro
+    def init(self):
+        raise NotImplementedError
+
+    @T.macro
+    def next_tile(self):
+        raise NotImplementedError
+        
+    @T.macro
+    def wait(self, evt, *coord, wait_level, mask):
+        raise NotImplementedError
+            
+    @T.macro
+    def notify(self, evt, notify_num, func_notify, scope, scope_id):
+        raise NotImplementedError
+    
+    @T.macro
+    def pre_notify_and_push(self, evt, notify_num, func_notify, func_trigger, push_level, scope, scope_id):
+        # for dynamic scheduler
+        pass
+    
+    def valid(self):
+        raise NotImplementedError

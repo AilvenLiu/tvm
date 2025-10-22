@@ -186,7 +186,7 @@ __syncwarp();
         merge_indptr_tvm,
         merge_o_indices_tvm,
     ):
-        with T.kernel():
+        with T.cta():
             warp_id = T.warp_id([self.num_warps], parent="cta")
             lane_id = T.thread_id([32], parent="warp")
 

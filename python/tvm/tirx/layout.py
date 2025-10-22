@@ -206,7 +206,7 @@ class TLayout(Object):
         assert isinstance(data, (list, tuple)), "data must be a tuple"
         res = list()
         for t in reversed(data):
-            assert isinstance(t, (int, PrimExpr)), "data must be int or PrimExpr"
+            assert isinstance(t, (int, PrimExpr)), f"data must be int or PrimExpr, but got {t}"
             res.append(stride)
             stride *= t
         return list(reversed(res))
@@ -433,8 +433,8 @@ class TileLayout(TLayout):
     replicate: List[Iter]
     exclude: List[Tuple[Axis, PrimExpr]]
 
-    IterList: TypeAlias = Tuple[
-        List[PrimExpr], List[Union[Tuple[PrimExpr, Union[str, Axis]], PrimExpr]]
+    IterList: TypeAlias = Union[
+        Tuple[List[PrimExpr], List[Union[Tuple[PrimExpr, Union[str, Axis]], PrimExpr]]], List[Iter]
     ]
 
     def __init__(
@@ -443,13 +443,29 @@ class TileLayout(TLayout):
         replicate: IterList = None,
         exclude: List[Tuple[Union[Axis, str], PrimExpr]] = None,
     ):
+        if exclude is None:
+            exclude = dict()
+        exclude = {
+            Axis.get(axis) if isinstance(axis, str) else axis: offset for axis, offset in exclude
+        }
+        if (
+            shard is not None
+            and all(isinstance(iter, Iter) for iter in shard)
+            and replicate is not None
+            and all(isinstance(iter, Iter) for iter in replicate)
+        ):
+            self.__init_handle_by_constructor__(
+                _ffi_api.TileLayout,  # pylint: disable=no-member
+                shard,
+                replicate,
+                exclude,
+            )
+            return
         # Handle None values
         if shard is None or shard == ():
             shard = ([], [])
         if replicate is None:
             replicate = ([], [])
-        if exclude is None:
-            exclude = dict()
 
         if isinstance(shard, (tuple, list)) and not isinstance(shard[0], (tuple, list)):
             # shard can be just a tuple of extents, infer the default strides
@@ -465,9 +481,6 @@ class TileLayout(TLayout):
 
         shard = [process_iter(e, s) for e, s in zip(shard[0], shard[1])]
         replicate = [process_iter(e, s) for e, s in zip(replicate[0], replicate[1])]
-        exclude = {
-            Axis.get(axis) if isinstance(axis, str) else axis: offset for axis, offset in exclude
-        }
 
         self.__init_handle_by_constructor__(
             _ffi_api.TileLayout,  # pylint: disable=no-member

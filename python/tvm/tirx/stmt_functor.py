@@ -74,8 +74,12 @@ class StmtFunctor:
         """
         if stmt is None:
             return None
-
-        key = stmt.__class__.__name__
+        if isinstance(stmt, tvm.tir.OpCall):
+            # subclass of OpCall only exists in python side
+            # and are not handled by dispatch map
+            key = "OpCall"
+        else:
+            key = stmt.__class__.__name__
         if key.endswith("Node"):
             key = key[:-4]  # Remove the "Node" suffix
 

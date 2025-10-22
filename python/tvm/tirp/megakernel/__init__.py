@@ -17,3 +17,4 @@
 
 from . import support
 from . import model_config
+from . import relax_compatible

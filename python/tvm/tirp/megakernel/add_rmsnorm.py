@@ -1,7 +1,7 @@
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
 
-from .common import F16_BYTES, KernelConfig, Tile, SmemManager, ceildiv, find_power_of_two, rsqrt
+from .common import F16_BYTES, F32_BYTES, KernelConfig, Tile, SmemManager, ceildiv, find_power_of_two, rsqrt
 
 
 class AddRMSNormTile(Tile):
@@ -15,7 +15,6 @@ class AddRMSNormTile(Tile):
         super().__init__()
         self.EPS = rms_norm_eps
         self.hidden_size = hidden_size
-
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory

@@ -1,8 +1,9 @@
 
+from typing import Literal
 import tvm
 from tvm.script import tir as T
 
-from .common import JobType, KernelConfig, any_sync, unpack_from_32bit
+from .common import JobType, KernelConfig, any_sync, unpack_from_32bit, TileSchedulerBase, SemaphoreBase
 
 atomic_add_int32 = f"""
 __forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, int32_t pe) {{
@@ -32,7 +33,7 @@ __forceinline__ __device__ void* nvshmem_get_ptr(void* ptr, int32_t pe) {
 """
 
 
-class Semaphore:
+class Semaphore(SemaphoreBase):
     def __init__(self, expected_cnt, buffer, decrement=False, base=(1 << 16), use_nvshmem=False):
         self.expected_cnt = expected_cnt
         self.base = base
@@ -43,56 +44,55 @@ class Semaphore:
             self.atomic_add_int32 = atomic_add_int32
         else:
             self.atomic_add_int32 = atomic_add_int32_local
-    # cta-level interface
-    @T.macro
-    def semaphore_wait(self, *coord):
-        with T.thread():
-            if not self.decrement:
-                while 1:
-                    T.ptx.ld_global_acquire(
-                        self.state[0],
-                        self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
-                    )
-                    if T.cuda.syncthreads_and(self.state[0] == self.expected_cnt * (self.base + 1)):
-                        break
-                    T.cuda.nano_sleep(40)
-            else:
-                while 1:
-                    T.ptx.ld_global_acquire(
-                        self.state[0],
-                        self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
-                    )
-                    if T.cuda.syncthreads_and(self.state[0] == 0):
-                        break
-                    T.cuda.nano_sleep(40)
 
-    # warp-level interface
     @T.macro
-    def semaphore_wait_warp(self, *coord, mask=0xffffffff):
-        with T.thread():
-            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            if (mask >> warp_id) & 1 == 1:
-                self.state[0] = -1
+    def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xffffffff):
+        if level == "cta":
+            with T.thread():
                 if not self.decrement:
                     while 1:
-                        if lane_id == 0:
-                            T.ptx.ld_global_acquire(
-                                self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
-                            )
-                        if any_sync(0xffffffff, self.state[0] == self.expected_cnt * (self.base + 1)):
+                        T.ptx.ld_global_acquire(
+                            self.state[0],
+                            self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
+                        )
+                        if T.cuda.syncthreads_and(self.state[0] == self.expected_cnt * (self.base + 1)):
                             break
                         T.cuda.nano_sleep(40)
                 else:
                     while 1:
-                        if lane_id == 0:
-                            T.ptx.ld_global_acquire(
-                                self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
-                            )
-                        if any_sync(0xffffffff, self.state[0] == 0):
+                        T.ptx.ld_global_acquire(
+                            self.state[0],
+                            self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
+                        )
+                        if T.cuda.syncthreads_and(self.state[0] == 0):
                             break
                         T.cuda.nano_sleep(40)
-
+        elif level == "warp":
+            with T.thread():
+                warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+                lane_id = T.thread_id([32], parent="warp")
+                if (mask >> warp_id) & 1 == 1:
+                    self.state[0] = -1
+                    if not self.decrement:
+                        while 1:
+                            if lane_id == 0:
+                                T.ptx.ld_global_acquire(
+                                    self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
+                                )
+                            if any_sync(0xffffffff, self.state[0] == self.expected_cnt * (self.base + 1)):
+                                break
+                            T.cuda.nano_sleep(40)
+                    else:
+                        while 1:    
+                            if lane_id == 0:
+                                T.ptx.ld_global_acquire(
+                                    self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
+                                )
+                            if any_sync(0xffffffff, self.state[0] == 0):
+                                break
+                            T.cuda.nano_sleep(40)
+        else:
+            assert False
 
     @T.macro
     def semaphore_notify(self, *coord, rank=-1):
@@ -116,10 +116,10 @@ class Semaphore:
 
 
 
-class StaticTileScheduler:
+class StaticTileScheduler(TileSchedulerBase):
     MAX_TASKS = 128
 
-    def __init__(self, prefix: str, exec_queue, smem_manager):
+    def __init__(self, prefix: str, exec_queue, smem_manager, debug=False):
         super().__init__()
         self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
         self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
@@ -128,25 +128,79 @@ class StaticTileScheduler:
         self.tile_idx = T.local_cell("int32", name=prefix + "_tile_idx")
         self.queue_smem = smem_manager.alloc((self.MAX_TASKS,), "int32", align=16, method="persistent").buffer
         self.exec_queue = exec_queue
+        self.debug = debug
 
     @T.macro
-    def update_current_m_n_idx(self):
+    def _update_current_m_n_idx(self):
         unpack_from_32bit(self.queue_smem[self.tile_idx], T.address_of(self.task_type), T.address_of(self.m_idx), T.address_of(self.n_idx), T.address_of(self.k_idx))
 
     @T.macro
-    def init(self, bx, tid):
-        self.tile_idx = 0
-        for k in T.serial(T.ceildiv(self.MAX_TASKS, KernelConfig.NUM_THREADS)):
-            idx = T.meta_var(k * KernelConfig.NUM_THREADS + tid)
-            if idx < self.MAX_TASKS:
-                self.queue_smem[idx] = self.exec_queue[bx, idx]
-        T.tvm_storage_sync("shared")
-        self.update_current_m_n_idx()
+    def init(self):
+        with T.cta():
+            bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            self.tile_idx = 0
+            for k in T.serial(T.ceildiv(self.MAX_TASKS, KernelConfig.NUM_THREADS)):
+                idx = T.meta_var(k * KernelConfig.NUM_THREADS + tid)
+                if idx < self.MAX_TASKS:
+                    self.queue_smem[idx] = self.exec_queue[bx, idx]
+            T.tvm_storage_sync("shared")
+            self._update_current_m_n_idx()
+            
+    
+    def get_idx_and_task_type(self):
+        return [self.m_idx, self.n_idx, self.k_idx], self.task_type
 
     @T.macro
     def next_tile(self):
         self.tile_idx += 1
-        self.update_current_m_n_idx()
+        self._update_current_m_n_idx()
+        
+    @T.macro
+    def wait(self, evt: Semaphore, *coord, wait_level: Literal["cta", "warp"]="cta", mask=0xffffffff):
+        evt.semaphore_wait(*coord, level=wait_level, mask=mask)
+            
+    @T.macro
+    def notify(self, evt: Semaphore, notify_num, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0):
+        # Notes: Here each thread will notify only at most one time，
+        #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
+        # Notes: (rank, coord) = func_notify(notify_idx), rank=-1 for the local rank
+        # Notes: scope_id = -1 represents that each scope will separately notify
+        
+        max_notify_num_map = T.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
+        max_scope_id_map = T.meta_var({"thread": KernelConfig.NUM_THREADS, "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1})
+        
+        @T.macro
+        def sync(scope: Literal["thread", "warp", "warpgroup", "cta"], scope_id=0):
+            if scope == "thread":
+                pass
+            elif scope == "warp":
+                T.cuda.warp_sync()
+            elif scope == "warpgroup":
+                T.ptx.bar.sync(6 + scope_id, 128)
+            elif scope == "cta":
+                T.tvm_storage_sync("shared")
+        
+        with T.cta():
+            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid_in_wg = T.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
+            lane_id = T.thread_id([32], parent="warp")
+            idx_map = T.meta_var({"thread": (tid, 0), "warp": (warp_id, lane_id), "warpgroup": (wg_id, tid_in_wg), "cta": (0, tid)})
+            idx = idx_map[scope]
+            if notify_num == 0:
+                pass
+            else:
+                if self.debug:
+                    T.cuda.trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
+                    T.cuda.trap_when_assert_failed(scope_id == -1 or scope_id < max_scope_id_map[scope])
+                if scope_id == -1 or idx[0] == scope_id:
+                    sync(scope, scope_id)
+                    if idx[1] < notify_num:
+                        rank, *coord = func_notify(idx[1])
+                        evt.semaphore_notify(*coord, rank=rank)
+        
 
     def valid(self):
         return tvm.tir.all(self.tile_idx < self.MAX_TASKS, self.task_type != JobType.END.value)

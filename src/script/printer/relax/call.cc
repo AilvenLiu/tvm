@@ -83,7 +83,7 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
     return std::nullopt;
   }
   if (n->op.same_as(call_tir_device_op)) {
-    TVM_FFI_ICHECK(n->args.size() == 5 || n->args.size() == 6);
+    TVM_FFI_ICHECK(n->args.size() == 3 || n->args.size() == 4);
   } else {
     TVM_FFI_ICHECK(n->args.size() == 2 || n->args.size() == 3);
   }
@@ -150,21 +150,52 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
   if (n->op.same_as(call_tir_device_op)) {
     kwargs_keys.push_back("tile_num");
     kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[2], n_p->Attr("args")->ArrayItem(2)));
-    kwargs_keys.push_back("in_events");
-    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[3], n_p->Attr("args")->ArrayItem(3)));
-    kwargs_keys.push_back("out_events");
-    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[4], n_p->Attr("args")->ArrayItem(4)));
     if (const auto* call_tir_device_attrs = n->attrs.as<relax::CallTIRDeviceAttrs>()) {
+      kwargs_keys.push_back("in_events");
+      kwargs_values.push_back(
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_events, n_p->Attr("attrs")->Attr("in_events")));
+      kwargs_keys.push_back("out_events");
+      kwargs_values.push_back(
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_events, n_p->Attr("attrs")->Attr("out_events")));
+      kwargs_keys.push_back("in_extra_tensors");
+      kwargs_values.push_back(
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_extra_tensors, n_p->Attr("attrs")->Attr("in_extra_tensors")));
+      kwargs_keys.push_back("out_extra_tensors");
+      kwargs_values.push_back(
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_extra_tensors, n_p->Attr("attrs")->Attr("out_extra_tensors")));
+      kwargs_keys.push_back("in_extra_tir_vars");
+      kwargs_values.push_back(
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_extra_tir_vars, n_p->Attr("attrs")->Attr("in_extra_tir_vars")));
+      kwargs_keys.push_back("out_extra_tir_vars");
+      kwargs_values.push_back(
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_extra_tir_vars, n_p->Attr("attrs")->Attr("out_extra_tir_vars")));
       kwargs_keys.push_back("in_deps");
-      kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_deps, n_p->Attr("attrs")->Attr("in_deps")));
+      kwargs_values.push_back(IdDoc("Ignored"));
       kwargs_keys.push_back("out_deps");
+      kwargs_values.push_back(IdDoc("Ignored"));
+      kwargs_keys.push_back("in_nums");
+      kwargs_values.push_back(IdDoc("Ignored"));
+      kwargs_keys.push_back("out_nums");
+      kwargs_values.push_back(IdDoc("Ignored"));
+      kwargs_keys.push_back("in_deps_dim");
       kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_deps, n_p->Attr("attrs")->Attr("out_deps")));
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_deps_dim, n_p->Attr("attrs")->Attr("in_deps_dim")));
+      kwargs_keys.push_back("out_deps_dim");
+      kwargs_values.push_back(
+          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_deps_dim, n_p->Attr("attrs")->Attr("out_deps_dim")));
     }
-    if (n->args.size() == 6) {
+    kwargs_keys.push_back("inplace_indices");
+    ffi::Array<ExprDoc> index_fields;
+    if (auto* call_tir_inplace_attrs = n->attrs.as<relax::CallTIRDeviceAttrs>()) {
+      for (auto inplace_index : call_tir_inplace_attrs->inplace_indices) {
+        index_fields.push_back(
+            LiteralDoc::Int(inplace_index.IntValue(), n_p->Attr("attrs")->Attr("inplace_indices")));
+      }
+    }
+    kwargs_values.push_back(ListDoc(index_fields));
+    if (n->args.size() == 4) {
       kwargs_keys.push_back("tir_vars");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[5], n_p->Attr("args")->ArrayItem(5)));
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[5], n_p->Attr("args")->ArrayItem(3)));
     }
     return Relax(d, "call_tir_device")->Call(args, kwargs_keys, kwargs_values);
   }

@@ -46,7 +46,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         self.reduce_rms_rope_q_tile = self._add_tile(SplitKReduceRMSnormRopeQTile(batch_size, self.RMS_NORM_EPS, self.NUM_ATTENTION_HEADS, self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM, self.SPLIT_QKV_PROJECT), ProfileEventType.Q_REDUCE_RMSNORM_ROPE)
         self.reduce_rms_rope_append_k_tile = self._add_tile(SplitKReduceRMSnormRopeAppendKTile(batch_size, self.RMS_NORM_EPS, self.NUM_ATTENTION_HEADS, self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM, self.SPLIT_QKV_PROJECT, self.PAGE_SIZE), ProfileEventType.K_REDUCE_RMSNORM_ROPE_APPEND)
         self.reduce_append_v_tile = self._add_tile(SplitKReduceAppendVTile(batch_size, self.NUM_KEY_VALUE_HEADS, self.NUM_ATTENTION_HEADS, self.HEAD_DIM, self.SPLIT_QKV_PROJECT, self.PAGE_SIZE), ProfileEventType.V_REDUCE_APPEND)
-        self.attn_tile = self._add_tile(BatchAttnTile(self.PAGE_SIZE, self.NUM_ATTENTION_HEADS, self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM), ProfileEventType.BATCH_ATTENTION)
+        self.attn_tile = self._add_tile(BatchAttnTile(self.PAGE_SIZE, self.NUM_ATTENTION_HEADS, self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM, prefetch_on=True), ProfileEventType.BATCH_ATTENTION)
         self.merge_tile = self._add_tile(BatchMergeTile(self.HEAD_DIM, self.NUM_KEY_VALUE_HEADS, self.NUM_ATTENTION_HEADS), ProfileEventType.BATCH_ATTENTION_MERGE)
         self.o_proj_tile = self._add_tile(GemmTile(self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM, "float16", "float16", self.SPLIT_O_PROJECT, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GEMM_O_PROJ)
         self.o_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.SPLIT_O_PROJECT), ProfileEventType.GEMM_O_REDUCE)
@@ -167,88 +167,34 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
     @T.macro
     def task_impl_gemm_qkv_proj(self, is_dynamic_sch):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             if is_dynamic_sch:
-                if tid == 0:
-                    self.evt_qkv_partial.semaphore_notify(
-                        self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile,
-                        pre_notify=True,
-                    )
-                if (
-                    self.tile_scheduler.n_idx // self.reduce_rms_rope_append_k_tile.h_tile
-                    < self.NUM_ATTENTION_HEADS // SplitKReduceRMSnormRopeAppendKTile.h_tile
-                ):
-                    self.tile_scheduler.push_task(
-                        self.evt_qkv_partial,
-                        1,
+                if self.tile_scheduler.n_idx // self.reduce_rms_rope_append_k_tile.h_tile < self.NUM_ATTENTION_HEADS // SplitKReduceRMSnormRopeAppendKTile.h_tile:
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_qkv_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile,),
                         lambda trigger_idx: (
-                            -1,
-                            self.reduce_rms_rope_q_tile.m_split,
-                            lambda push_idx: (
-                                JobType.Q_REDUCE_RMS_ROPE.value,
-                                push_idx,
-                                self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile,
-                                0,
-                            ),
-                        ),
-                        "warpgroup",
-                        "warpgroup",
+                            -1, self.reduce_rms_rope_q_tile.m_split, 
+                            lambda push_idx: (JobType.Q_REDUCE_RMS_ROPE.value, push_idx, self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile, 0)
+                        ), "warpgroup", "warpgroup", scope_id=0
                     )
-                elif (
-                    self.tile_scheduler.n_idx // self.reduce_rms_rope_append_k_tile.h_tile
-                    < (self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS)
-                    // SplitKReduceAppendVTile.H_TILE
-                ):
-                    self.tile_scheduler.push_task(
-                        self.evt_qkv_partial,
-                        1,
+                elif self.tile_scheduler.n_idx // self.reduce_rms_rope_append_k_tile.h_tile < (self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS) // SplitKReduceAppendVTile.H_TILE:
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_qkv_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile,),
                         lambda trigger_idx: (
-                            -1,
-                            self.reduce_rms_rope_q_tile.m_split,
-                            lambda push_idx: (
-                                JobType.K_REDUCE_RMS_ROPE_APPEND.value,
-                                push_idx,
-                                self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile
-                                - self.NUM_ATTENTION_HEADS // SplitKReduceAppendVTile.H_TILE,
-                                0,
-                            ),
-                        ),
-                        "warpgroup",
-                        "warpgroup",
+                            -1, self.reduce_rms_rope_q_tile.m_split, 
+                            lambda push_idx: (JobType.K_REDUCE_RMS_ROPE_APPEND.value, push_idx, self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile - self.NUM_ATTENTION_HEADS // SplitKReduceAppendVTile.H_TILE, 0)
+                        ), "warpgroup", "warpgroup", scope_id=0
                     )
                 else:
-                    self.tile_scheduler.push_task(
-                        self.evt_qkv_partial,
-                        1,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_qkv_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile,),
                         lambda trigger_idx: (
-                            -1,
-                            self.reduce_rms_rope_q_tile.m_split,
-                            lambda push_idx: (
-                                JobType.V_REDUCE_APPEND.value,
-                                push_idx,
-                                self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile
-                                - (self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS)
-                                // SplitKReduceRMSnormRopeAppendKTile.h_tile,
-                                0,
-                            ),
-                        ),
-                        "warpgroup",
-                        "warpgroup",
+                            -1, self.reduce_rms_rope_q_tile.m_split, 
+                            lambda push_idx: (JobType.V_REDUCE_APPEND.value, push_idx, self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile
+                                                - (self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS) // SplitKReduceRMSnormRopeAppendKTile.h_tile, 0)
+                        ), "warpgroup", "warpgroup", scope_id=0
                     )
-            self.run_tile(
-                self.qkv_proj_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                self.profiler,
-            )
-            if wg_id == 0:
-                T.cuda.warpgroup_sync(1)
-                if tid == 0:
-                    self.evt_qkv_partial.semaphore_notify(
-                        self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile
-                    )
+            self.run_tile(self.qkv_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+            self.tile_scheduler.notify(self.evt_qkv_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // self.reduce_rms_rope_q_tile.h_tile,), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_q_reduce_rms_rope(
@@ -264,61 +210,80 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            tid_in_wg = T.thread_id(
-                [KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup"
-            )
-            beg_idx = (
-                self.tile_scheduler.n_idx
-                // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-                * batch_size
-                + self.tile_scheduler.m_idx * self.reduce_rms_rope_q_tile.m_tile
-            )
-            end_idx = self.tile_scheduler.n_idx // (
-                self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS
-            ) * batch_size + T.min(
-                (self.tile_scheduler.m_idx + 1) * self.reduce_rms_rope_q_tile.m_tile, batch_size
-            )
+            beg_idx = self.tile_scheduler.n_idx // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * batch_size + self.tile_scheduler.m_idx * self.reduce_rms_rope_q_tile.m_tile
+            end_idx = self.tile_scheduler.n_idx // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * batch_size + T.min((self.tile_scheduler.m_idx + 1) * self.reduce_rms_rope_q_tile.m_tile, batch_size)
             beg = inverse_indptr_global[beg_idx]
             end = inverse_indptr_global[end_idx]
             if is_dynamic_sch:
-                if wg_id == 1 and tid_in_wg < end - beg:
-                    self.evt_notify_attn.semaphore_notify(
-                        inverse_indices_global[beg + tid_in_wg], pre_notify=True
-                    )
-                self.tile_scheduler.push_task(
-                    self.evt_notify_attn,
-                    end - beg,
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_notify_attn, end - beg, lambda notify_idx: (-1, inverse_indices_global[beg + notify_idx],),
                     lambda trigger_idx: (
-                        -1,
-                        1,
-                        lambda push_idx: (
-                            JobType.BATCH_ATTENTION.value,
-                            inverse_indices_global[beg + trigger_idx],
-                            0,
-                            0,
-                        ),
-                    ),
-                    "thread",
-                    "warpgroup",
-                    enqueue_wg=1,
+                        -1, 1, 
+                        lambda push_idx: (JobType.BATCH_ATTENTION.value, inverse_indices_global[beg + trigger_idx], 0, 0)
+                    ), "thread", "warpgroup", scope_id=1
+                )  
+            self.tile_scheduler.wait(self.evt_qkv_partial, self.tile_scheduler.n_idx)
+            self.run_tile(self.reduce_rms_rope_q_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_qkv_global, qkv_global, q_rms_weight_global, rope_pos_global, cos_sin_cache_global)
+            self.tile_scheduler.notify(self.evt_notify_attn, end - beg, lambda notify_idx: (-1, inverse_indices_global[beg + notify_idx],), scope="cta")            
+
+    @T.macro
+    def task_impl_k_reduce_rms_rope_append(
+        self,
+        batch_size,
+        inverse_indptr_global,
+        inverse_indices_global,
+        partial_qkv_global,
+        k_rms_weight_global,
+        rope_pos_global,
+        cos_sin_cache_global,
+        append_pos_global,
+        kv_cache_global,
+        is_dynamic_sch,
+    ):
+        with T.cta():
+            beg_idx = self.tile_scheduler.n_idx * batch_size + self.tile_scheduler.m_idx * self.reduce_rms_rope_q_tile.m_tile
+            end_idx = self.tile_scheduler.n_idx * batch_size + T.min((self.tile_scheduler.m_idx + 1) * self.reduce_rms_rope_q_tile.m_tile, batch_size)
+            beg = inverse_indptr_global[beg_idx]
+            end = inverse_indptr_global[end_idx]
+            if is_dynamic_sch:
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_notify_attn, end - beg, lambda notify_idx: (-1, inverse_indices_global[beg + notify_idx],),
+                    lambda trigger_idx: (
+                        -1, 1, 
+                        lambda push_idx: (JobType.BATCH_ATTENTION.value, inverse_indices_global[beg + trigger_idx], 0, 0)
+                    ), "thread", "warpgroup", scope_id=1
                 )
-            self.evt_qkv_partial.semaphore_wait(self.tile_scheduler.n_idx)
-            self.run_tile(
-                self.reduce_rms_rope_q_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                partial_qkv_global,
-                qkv_global,
-                q_rms_weight_global,
-                rope_pos_global,
-                cos_sin_cache_global,
-            )
-            T.tvm_storage_sync("shared")
-            if tid < end - beg:
-                self.evt_notify_attn.semaphore_notify(inverse_indices_global[beg + tid])
+            self.tile_scheduler.wait(self.evt_qkv_partial, self.tile_scheduler.n_idx + self.NUM_ATTENTION_HEADS // SplitKReduceRMSnormRopeAppendKTile.h_tile)
+            self.run_tile(self.reduce_rms_rope_append_k_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_qkv_global, k_rms_weight_global, rope_pos_global, cos_sin_cache_global, append_pos_global, kv_cache_global)
+            self.tile_scheduler.notify(self.evt_notify_attn, end - beg, lambda notify_idx: (-1, inverse_indices_global[beg + notify_idx],), scope="cta")
+
+    @T.macro
+    def task_impl_v_reduce_append(
+        self,
+        batch_size,
+        inverse_indptr_global,
+        inverse_indices_global,
+        partial_qkv_global,
+        kv_cache_global,
+        append_pos_global,
+        is_dynamic_sch,
+    ):
+        with T.cta():
+            beg_idx = self.tile_scheduler.n_idx * batch_size + self.tile_scheduler.m_idx * self.reduce_rms_rope_q_tile.m_tile
+            end_idx = self.tile_scheduler.n_idx * batch_size + T.min((self.tile_scheduler.m_idx + 1) * self.reduce_rms_rope_q_tile.m_tile, batch_size)
+            beg = inverse_indptr_global[beg_idx]
+            end = inverse_indptr_global[end_idx]
+            if is_dynamic_sch:
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_notify_attn, end - beg, lambda notify_idx: (-1, inverse_indices_global[beg + notify_idx],),
+                    lambda trigger_idx: (
+                        -1, 1, 
+                        lambda push_idx: (JobType.BATCH_ATTENTION.value, inverse_indices_global[beg + trigger_idx], 0, 0)
+                    ), "thread", "warpgroup", scope_id=1
+                )
+            self.tile_scheduler.wait(self.evt_qkv_partial, self.tile_scheduler.n_idx + (self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS) // SplitKReduceAppendVTile.H_TILE)
+            self.run_tile(self.reduce_append_v_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_qkv_global, kv_cache_global, append_pos_global)
+            self.tile_scheduler.notify(self.evt_notify_attn, end - beg, lambda notify_idx: (-1, inverse_indices_global[beg + notify_idx],), scope="cta")
 
     @T.macro
     def task_impl_batch_attention(
@@ -348,293 +313,55 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            tid_in_wg = T.thread_id(
-                [KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup"
-            )
-            new_m_idx = T.alloc_local([1], "int32")
-            smem_manager.enter_tile_runtime(self.attn_tile)
-            smem_manager.wait_all("cta")
-            new_m_idx[0] = self.tile_scheduler.m_idx
+            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            # TODO: Here now cannot handle tha cases that each tile will be allocated with more than 8 tasks
             attn_task_num = work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER]
-            while new_m_idx[0] * KernelConfig.WG_NUMBER < attn_task_num:
-                worker_idx = new_m_idx[0] * KernelConfig.WG_NUMBER + wg_id
-                kv_idx = kv_head_idx_global[worker_idx]
-                batch_idx = q_indptr_global[worker_idx]
-                if worker_idx < attn_task_num:
-                    self.run_tile_prefetch(
-                        self.attn_tile,
-                        new_m_idx[0],
-                        self.tile_scheduler.n_idx,
-                        self.tile_scheduler.k_idx,
-                        qkv_global,
-                        kv_cache_global,
-                        q_indptr_global,
-                        kv_indptr_global,
-                        partial_indptr_global,
-                        kv_indices_global,
-                        q_len_global,
-                        kv_len_global,
-                        q_start_global,
-                        kv_start_global,
-                        kv_end_global,
-                        kv_head_idx_global,
-                        work_indptr_global,
-                        len_kv_chunk_global,
-                        o_global,
-                        o_partial_attn_global,
-                        lse_partial_attn_global,
-                        self.profiler,
-                    )
-                    if is_dynamic_sch:
-                        if attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS:  # split kv
-                            if tid_in_wg == 0:
-                                self.evt_attn_merge.semaphore_notify(
-                                    batch_idx, kv_idx, pre_notify=True
-                                )
-                            enqueue_num = (
-                                self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS
-                            ) // (KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER)
-                            self.tile_scheduler.push_task(
-                                self.evt_attn_merge,
-                                1,
-                                lambda trigger_idx: (
-                                    -1,
-                                    enqueue_num,
-                                    lambda push_idx: (
-                                        JobType.BATCH_ATTENTION_MERGE.value,
-                                        (kv_idx * batch_size + batch_idx) * enqueue_num + push_idx,
-                                        0,
-                                        0,
-                                    ),
-                                ),
-                                "warpgroup",
-                                "warpgroup",
-                                enqueue_wg=wg_id,
-                            )
-                        else:  # no split kv
-                            range_start = (
-                                kv_idx
-                                * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-                                * self.HEAD_DIM
-                                // self.o_proj_tile.TILE_K
-                            )
-                            range_end = (
-                                (kv_idx + 1)
-                                * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-                                * self.HEAD_DIM
-                                - 1
-                            ) // self.o_proj_tile.TILE_K
-                            if tid_in_wg <= range_end - range_start:
-                                self.evt_o_proj.semaphore_notify(
-                                    range_start + tid_in_wg, pre_notify=True
-                                )
-                            self.tile_scheduler.push_task(
-                                self.evt_o_proj,
-                                range_end - range_start + 1,
-                                lambda trigger_idx: (
-                                    -1,
-                                    ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
-                                    lambda push_idx: (
-                                        JobType.GEMM_O_PROJ.value,
-                                        0,
-                                        push_idx,
-                                        range_start + trigger_idx,
-                                    ),
-                                ),
-                                "warp",
-                                "warpgroup",
-                                enqueue_wg=wg_id,
-                            )
-                    if new_m_idx[0] < KernelConfig.SM_NUMBER:
-                        self.evt_notify_attn.semaphore_wait_warp(self.tile_scheduler.m_idx)
-                    self.run_tile(
-                        self.attn_tile,
-                        new_m_idx[0],
-                        self.tile_scheduler.n_idx,
-                        self.tile_scheduler.k_idx,
-                        qkv_global,
-                        kv_cache_global,
-                        q_indptr_global,
-                        kv_indptr_global,
-                        partial_indptr_global,
-                        kv_indices_global,
-                        q_len_global,
-                        kv_len_global,
-                        q_start_global,
-                        kv_start_global,
-                        kv_end_global,
-                        kv_head_idx_global,
-                        work_indptr_global,
-                        len_kv_chunk_global,
-                        o_global,
-                        o_partial_attn_global,
-                        lse_partial_attn_global,
-                        self.profiler,
-                    )
-                    if attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS:  # split kv
-                        if tid_in_wg == 0:
-                            self.evt_attn_merge.semaphore_notify(batch_idx, kv_idx)
-                    else:  # no split kv
-                        range_start = (
-                            kv_idx
-                            * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-                            * self.HEAD_DIM
-                            // self.o_proj_tile.TILE_K
-                        )
-                        range_end = (
-                            (kv_idx + 1)
-                            * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-                            * self.HEAD_DIM
-                            - 1
-                        ) // self.o_proj_tile.TILE_K
-                        if tid_in_wg <= range_end - range_start:
-                            self.evt_o_proj.semaphore_notify(range_start + tid_in_wg)
-                new_m_idx[0] += KernelConfig.SM_NUMBER
+            self.run_tile_prefetch(self.attn_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
+                                    kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
+                                    kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
+                                    o_global, o_partial_attn_global, lse_partial_attn_global, self.profiler)
             if is_dynamic_sch:
-                self.tile_scheduler.prefetch()
-            smem_manager.arrive_all("cta")
-            smem_manager.advance()
-
-    @T.macro
-    def task_impl_k_reduce_rms_rope_append(
-        self,
-        batch_size,
-        inverse_indptr_global,
-        inverse_indices_global,
-        partial_qkv_global,
-        k_rms_weight_global,
-        rope_pos_global,
-        cos_sin_cache_global,
-        append_pos_global,
-        kv_cache_global,
-        is_dynamic_sch,
-    ):
-        with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            tid_in_wg = T.thread_id(
-                [KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup"
-            )
-            beg_idx = (
-                self.tile_scheduler.n_idx * batch_size
-                + self.tile_scheduler.m_idx * self.reduce_rms_rope_q_tile.m_tile
-            )
-            end_idx = self.tile_scheduler.n_idx * batch_size + T.min(
-                (self.tile_scheduler.m_idx + 1) * self.reduce_rms_rope_q_tile.m_tile,
-                batch_size,
-            )
-            beg = inverse_indptr_global[beg_idx]
-            end = inverse_indptr_global[end_idx]
-            if is_dynamic_sch:
-                if wg_id == 1 and tid_in_wg < end - beg:
-                    self.evt_notify_attn.semaphore_notify(
-                        inverse_indices_global[beg + tid_in_wg], pre_notify=True
+                if attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS: # split kv
+                    # notes: assume that gqa_size is no less than warp number in cta here
+                    enqueue_num = (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) // (KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER)
+                    push_worker_idx = (self.tile_scheduler.m_idx + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
+                    push_kv_idx = kv_head_idx_global[push_worker_idx]
+                    push_batch_idx = q_indptr_global[push_worker_idx]  
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_attn_merge, T.if_then_else(push_worker_idx < attn_task_num, 1, 0), lambda notify_idx: (-1, push_batch_idx, push_kv_idx,),
+                        lambda trigger_idx: ( 
+                            -1, enqueue_num, 
+                            lambda push_idx: (JobType.BATCH_ATTENTION_MERGE.value, (push_kv_idx * batch_size + push_batch_idx) * enqueue_num + push_idx, 0, 0)
+                        ), "warp", "warp", scope_id=-1
                     )
-                self.tile_scheduler.push_task(
-                    self.evt_notify_attn,
-                    end - beg,
-                    lambda trigger_idx: (
-                        -1,
-                        1,
-                        lambda push_idx: (
-                            JobType.BATCH_ATTENTION.value,
-                            inverse_indices_global[beg + trigger_idx],
-                            0,
-                            0,
-                        ),
-                    ),
-                    "thread",
-                    "warpgroup",
-                    enqueue_wg=1,
-                )
-            self.evt_qkv_partial.semaphore_wait(
-                self.tile_scheduler.n_idx
-                + self.NUM_ATTENTION_HEADS // SplitKReduceRMSnormRopeAppendKTile.h_tile
-            )
-            self.run_tile(
-                self.reduce_rms_rope_append_k_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                partial_qkv_global,
-                k_rms_weight_global,
-                rope_pos_global,
-                cos_sin_cache_global,
-                append_pos_global,
-                kv_cache_global,
-            )
-            T.tvm_storage_sync("shared")
-            if tid < end - beg:
-                self.evt_notify_attn.semaphore_notify(inverse_indices_global[beg + tid])
-
-    @T.macro
-    def task_impl_v_reduce_append(
-        self,
-        batch_size,
-        inverse_indptr_global,
-        inverse_indices_global,
-        partial_qkv_global,
-        kv_cache_global,
-        append_pos_global,
-        is_dynamic_sch,
-    ):
-        with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            tid_in_wg = T.thread_id(
-                [KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup"
-            )
-            beg_idx = (
-                self.tile_scheduler.n_idx * batch_size
-                + self.tile_scheduler.m_idx * self.reduce_rms_rope_q_tile.m_tile
-            )
-            end_idx = self.tile_scheduler.n_idx * batch_size + T.min(
-                (self.tile_scheduler.m_idx + 1) * self.reduce_rms_rope_q_tile.m_tile,
-                batch_size,
-            )
-            beg = inverse_indptr_global[beg_idx]
-            end = inverse_indptr_global[end_idx]
-            if is_dynamic_sch:
-                if wg_id == 1 and tid_in_wg < end - beg:
-                    self.evt_notify_attn.semaphore_notify(
-                        inverse_indices_global[beg + tid_in_wg], pre_notify=True
+                else: # no split kv    
+                    push_worker_idx = (self.tile_scheduler.m_idx + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
+                    push_kv_idx = kv_head_idx_global[push_worker_idx]   
+                    range_start = push_kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM // self.o_proj_tile.TILE_K
+                    range_end = ((push_kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM - 1) // self.o_proj_tile.TILE_K
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_o_proj, T.if_then_else(push_worker_idx < attn_task_num, range_end - range_start + 1, 0), lambda notify_idx: (-1, range_start + notify_idx,),
+                        lambda trigger_idx: ( 
+                            -1, ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N), 
+                            lambda push_idx: (JobType.GEMM_O_PROJ.value, 0, push_idx, range_start + trigger_idx)
+                        ), "warp", "warp", scope_id=-1 
                     )
-                self.tile_scheduler.push_task(
-                    self.evt_notify_attn,
-                    end - beg,
-                    lambda trigger_idx: (
-                        -1,
-                        1,
-                        lambda push_idx: (
-                            JobType.BATCH_ATTENTION.value,
-                            inverse_indices_global[beg + trigger_idx],
-                            0,
-                            0,
-                        ),
-                    ),
-                    "thread",
-                    "warpgroup",
-                    enqueue_wg=1,
-                )
-            self.evt_qkv_partial.semaphore_wait(
-                self.tile_scheduler.n_idx
-                + (self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS)
-                // SplitKReduceAppendVTile.H_TILE
-            )
-            self.run_tile(
-                self.reduce_append_v_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                partial_qkv_global,
-                kv_cache_global,
-                append_pos_global,
-            )
-            T.tvm_storage_sync("shared")
-            if tid < end - beg:
-                self.evt_notify_attn.semaphore_notify(inverse_indices_global[beg + tid])
+            self.tile_scheduler.wait(self.evt_notify_attn, self.tile_scheduler.m_idx, wait_level="warp")
+            self.run_tile(self.attn_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
+                            kv_indices_global, q_len_global, kv_len_global, q_start_global, kv_start_global,
+                            kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
+                            o_global, o_partial_attn_global, lse_partial_attn_global, self.profiler)                           
+            if attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS: # split kv
+                notify_worker_idx = (self.tile_scheduler.m_idx + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
+                notify_kv_idx = kv_head_idx_global[notify_worker_idx]
+                notify_batch_idx = q_indptr_global[notify_worker_idx] 
+                self.tile_scheduler.notify(self.evt_attn_merge, T.if_then_else(notify_worker_idx < attn_task_num, 1, 0), lambda notify_idx: (-1, notify_batch_idx, notify_kv_idx,), scope="warp", scope_id=-1)
+            else: # no split kv     
+                notify_worker_idx = (self.tile_scheduler.m_idx + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
+                notify_kv_idx = kv_head_idx_global[notify_worker_idx]
+                range_start = notify_kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM // self.o_proj_tile.TILE_K
+                range_end = ((notify_kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM - 1) // self.o_proj_tile.TILE_K
+                self.tile_scheduler.notify(self.evt_o_proj, T.if_then_else(notify_worker_idx < attn_task_num, range_end - range_start + 1, 0), lambda notify_idx: (-1, range_start + notify_idx,), scope="warp", scope_id=-1)
 
     @T.macro
     def task_impl_batch_attention_merge(
@@ -649,118 +376,40 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            worker_id = (
-                self.tile_scheduler.m_idx * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-            )
+            worker_id = self.tile_scheduler.m_idx * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
             qo_idx = worker_id % (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-            kv_idx = worker_id // (
-                batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-            )
-            batch_idx = (
-                worker_id % (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
-            ) // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-            range_start = (
-                (kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) + qo_idx)
-                * self.HEAD_DIM
-                // self.o_proj_tile.TILE_K
-            )
-            range_end = (
-                (
-                    kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-                    + qo_idx
-                    + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-                )
-                * self.HEAD_DIM
-                - 1
-            ) // self.o_proj_tile.TILE_K
+            kv_idx = worker_id // (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
+            batch_idx = (worker_id % (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))) // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
+            range_start = (kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) + qo_idx) * self.HEAD_DIM // self.o_proj_tile.TILE_K
+            range_end = ((kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * self.HEAD_DIM - 1) // self.o_proj_tile.TILE_K
             if is_dynamic_sch:
-                if tid <= range_end - range_start:
-                    self.evt_o_proj.semaphore_notify(range_start + tid, pre_notify=True)
-                self.tile_scheduler.push_task(
-                    self.evt_o_proj,
-                    range_end - range_start + 1,
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_o_proj, range_end - range_start + 1, lambda notify_idx: (-1, range_start + notify_idx,),
                     lambda trigger_idx: (
-                        -1,
-                        ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
-                        lambda push_idx: (
-                            JobType.GEMM_O_PROJ.value,
-                            0,
-                            push_idx,
-                            range_start + trigger_idx,
-                        ),
-                    ),
-                    "warp",
-                    "cta",
+                        -1, ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
+                        lambda push_idx: (JobType.GEMM_O_PROJ.value, 0, push_idx, range_start + trigger_idx)
+                    ), "warp", "cta", scope_id=0
                 )
-            self.evt_attn_merge.semaphore_wait(batch_idx, kv_idx)
-            self.run_tile(
-                self.merge_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                o_partial_attn_global,
-                o_global,
-                lse_partial_attn_global,
-                num_qo_len_global,
-                merge_indptr_global,
-                merge_o_indices_global,
-            )
-            T.tvm_storage_sync("shared")
-            if tid <= range_end - range_start:
-                self.evt_o_proj.semaphore_notify(range_start + tid)
+            self.tile_scheduler.wait(self.evt_attn_merge, batch_idx, kv_idx)
+            self.run_tile(self.merge_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global,
+                                merge_indptr_global, merge_o_indices_global)
+            self.tile_scheduler.notify(self.evt_o_proj, range_end - range_start + 1, lambda notify_idx: (-1, range_start + notify_idx,), scope="cta")
 
     @T.macro
     def task_impl_gemm_o_proj(self, is_dynamic_sch):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            self.run_tile_prefetch(
-                self.o_proj_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                self.profiler,
-            )
+            self.run_tile_prefetch(self.o_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
             if is_dynamic_sch:
-                if tid == 0:
-                    self.evt_o_partial.semaphore_notify(
-                        self.tile_scheduler.n_idx
-                        // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),
-                        pre_notify=True,
-                    )
-                self.tile_scheduler.push_task(
-                    self.evt_o_partial,
-                    1,
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_o_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),),
                     lambda trigger_idx: (
-                        -1,
-                        self.o_reduce_tile.M_split,
-                        lambda push_idx: (
-                            JobType.GEMM_O_REDUCE.value,
-                            push_idx,
-                            self.tile_scheduler.n_idx
-                            // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),
-                            0,
-                        ),
-                    ),
-                    "warpgroup",
-                    "warpgroup",
+                        -1, self.o_reduce_tile.M_split,
+                        lambda push_idx: (JobType.GEMM_O_REDUCE.value, push_idx, self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 0)
+                    ), "warpgroup", "warpgroup", scope_id=0
                 )
-            self.evt_o_proj.semaphore_wait_warp(self.tile_scheduler.k_idx)
-            self.run_tile(
-                self.o_proj_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                self.profiler,
-            )
-            if wg_id == 0:
-                T.cuda.warpgroup_sync(1)
-                if tid == 0:
-                    self.evt_o_partial.semaphore_notify(
-                        self.tile_scheduler.n_idx
-                        // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT)
-                    )
+            self.tile_scheduler.wait(self.evt_o_proj, self.tile_scheduler.k_idx, wait_level="warp")
+            self.run_tile(self.o_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+            self.tile_scheduler.notify(self.evt_o_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_gemm_o_reduce(
@@ -772,86 +421,30 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
                 if self.world_size == 1:
-                    if tid == 128:
-                        self.evt_attn_add_rms.semaphore_notify(
-                            self.tile_scheduler.m_idx, pre_notify=True
-                        )
-                    self.tile_scheduler.push_task(
-                        self.evt_attn_add_rms,
-                        1,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_attn_add_rms, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx,),
                         lambda trigger_idx: (
-                            -1,
-                            T.min(
-                                self.o_reduce_tile.M_TILE,
-                                batch_size - self.tile_scheduler.m_idx * self.o_reduce_tile.M_TILE,
-                            ),
-                            lambda push_idx: (
-                                JobType.ATTN_ADD_RMS_NORM.value,
-                                self.tile_scheduler.m_idx * self.o_reduce_tile.M_TILE + push_idx,
-                                0,
-                                0,
-                            ),
-                        ),
-                        "warpgroup",
-                        "warpgroup",
-                        enqueue_wg=1,
+                            -1, T.min(self.o_reduce_tile.M_TILE, batch_size - self.tile_scheduler.m_idx * self.o_reduce_tile.M_TILE),
+                            lambda push_idx: (JobType.ATTN_ADD_RMS_NORM.value, self.tile_scheduler.m_idx * self.o_reduce_tile.M_TILE + push_idx, 0, 0)
+                        ), "warpgroup", "warpgroup", scope_id=1
                     )
                 else:
-                    if tid == 128:
-                        self.evt_o_allreduce.semaphore_notify(
-                            self.tile_scheduler.n_idx // self.world_size,
-                            rank=self.tile_scheduler.n_idx % self.world_size,
-                            pre_notify=True,
-                        )
-                    self.tile_scheduler.push_task(
-                        self.evt_o_allreduce,
-                        1,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_o_allreduce, 1, lambda notify_idx: (self.tile_scheduler.n_idx % self.world_size, self.tile_scheduler.n_idx // self.world_size,),
                         lambda trigger_idx: (
-                            self.tile_scheduler.n_idx % self.world_size,
-                            ceildiv(batch_size, self.o_allreduce_tile.M_TILE),
-                            lambda push_idx: (
-                                JobType.O_ALLREDUCE.value,
-                                push_idx,
-                                self.tile_scheduler.n_idx // self.world_size,
-                                0,
-                            ),
-                        ),
-                        "warpgroup",
-                        "warpgroup",
-                        enqueue_wg=1,
+                            self.tile_scheduler.n_idx % self.world_size, ceildiv(batch_size, self.o_allreduce_tile.M_TILE),
+                            lambda push_idx: (JobType.O_ALLREDUCE.value, push_idx, self.tile_scheduler.n_idx // self.world_size, 0)
+                        ), "warpgroup", "warpgroup", scope_id=1
                     )
-            self.evt_o_partial.semaphore_wait_warp(self.tile_scheduler.n_idx)
+            self.tile_scheduler.wait(self.evt_o_partial, self.tile_scheduler.n_idx, wait_level="warp")
             if self.world_size == 1:
-                self.run_tile(
-                    self.o_reduce_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    partial_o_global,
-                    hidden_state_attn_mlp_global,
-                )
+                self.run_tile(self.o_reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_o_global, hidden_state_attn_mlp_global)
+                self.tile_scheduler.notify(self.evt_attn_add_rms, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx,), scope="cta")
             else:
-                self.run_tile(
-                    self.o_reduce_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    partial_o_global,
-                    before_o_allreduce_global,
-                )
-            T.tvm_storage_sync("shared")
-            if self.world_size == 1:
-                if tid == 0:
-                    self.evt_attn_add_rms.semaphore_notify(self.tile_scheduler.m_idx)
-            else:
-                if tid == 0:
-                    self.evt_o_allreduce.semaphore_notify(
-                        self.tile_scheduler.n_idx // self.world_size,
-                        rank=self.tile_scheduler.n_idx % self.world_size,
-                    )
+                self.run_tile(self.o_reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_o_global, before_o_allreduce_global)
+                self.tile_scheduler.notify(self.evt_o_allreduce, 1, lambda notify_idx: (self.tile_scheduler.n_idx % self.world_size, self.tile_scheduler.n_idx // self.world_size,), scope="cta")
 
     @T.macro
     def task_impl_o_allreduce(
@@ -862,45 +455,18 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if self.world_size > 1:
                 if is_dynamic_sch:
-                    if tid < self.world_size:
-                        self.evt_attn_add_rms.semaphore_notify(
-                            self.tile_scheduler.m_idx, rank=tid, pre_notify=True
-                        )
-                    self.tile_scheduler.push_task(
-                        self.evt_attn_add_rms,
-                        self.world_size,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_attn_add_rms, self.world_size, lambda notify_idx: (notify_idx, self.tile_scheduler.m_idx,),
                         lambda trigger_idx: (
-                            trigger_idx,
-                            T.min(
-                                self.o_allreduce_tile.M_TILE,
-                                batch_size
-                                - self.tile_scheduler.m_idx * self.o_allreduce_tile.M_TILE,
-                            ),
-                            lambda push_idx: (
-                                JobType.ATTN_ADD_RMS_NORM.value,
-                                self.tile_scheduler.m_idx * self.o_allreduce_tile.M_TILE + push_idx,
-                                0,
-                                0,
-                            ),
-                        ),
-                        "warp",
-                        "cta",
+                            trigger_idx, T.min(self.o_allreduce_tile.M_TILE, batch_size - self.tile_scheduler.m_idx * self.o_allreduce_tile.M_TILE),
+                            lambda push_idx: (JobType.ATTN_ADD_RMS_NORM.value, self.tile_scheduler.m_idx * self.o_allreduce_tile.M_TILE + push_idx, 0, 0)
+                        ), "warp", "cta", scope_id=0
                     )
-                self.evt_o_allreduce.semaphore_wait(self.tile_scheduler.n_idx)
-                self.run_tile(
-                    self.o_allreduce_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    before_o_allreduce_global,
-                    hidden_state_attn_mlp_global,
-                )
-                T.tvm_storage_sync("shared")
-                if tid < self.world_size:
-                    self.evt_attn_add_rms.semaphore_notify(self.tile_scheduler.m_idx, rank=tid)
+                self.tile_scheduler.wait(self.evt_o_allreduce, self.tile_scheduler.n_idx)
+                self.run_tile(self.o_allreduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, before_o_allreduce_global, hidden_state_attn_mlp_global)
+                self.tile_scheduler.notify(self.evt_attn_add_rms, self.world_size, lambda notify_idx: (notify_idx, self.tile_scheduler.m_idx,), scope="cta")
 
     @T.macro
     def task_impl_attn_add_rms_norm(
@@ -911,167 +477,67 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
-                if tid == 0:
-                    self.evt_attn_mlp.semaphore_notify(0, pre_notify=True)
                 if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
-                    self.tile_scheduler.push_task(
-                        self.evt_attn_mlp,
-                        1,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_attn_mlp, 1, lambda notify_idx: (-1, 0,),
                         lambda trigger_idx: (
-                            -1,
-                            self.INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N,
-                            lambda push_idx: (JobType.GATE_UP_SILU.value, 0, push_idx, 0),
-                        ),
-                        "cta",
-                        "cta",
-                    )
+                            -1, self.INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N,
+                            lambda push_idx: (JobType.GATE_UP_SILU.value, 0, push_idx, 0)
+                        ), "cta", "cta"
+                    )  
                 else:
-                    self.tile_scheduler.push_task(
-                        self.evt_attn_mlp,
-                        1,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_attn_mlp, 1, lambda notify_idx: (-1, 0,),
                         lambda trigger_idx: (
-                            -1,
-                            self.INTERMEDIATE_SIZE
-                            * 2
-                            // GemmTile.BLK_N
-                            * self.GATE_UP_PROJ_SPLIT_K_FACTOR,
-                            lambda push_idx: (
-                                JobType.GEMM_GATE_UP_PROJ.value,
-                                0,
-                                (
-                                    (push_idx // 2) // self.GATE_UP_PROJ_SPLIT_K_FACTOR
-                                    + (push_idx % 2) * self.INTERMEDIATE_SIZE // GemmTile.BLK_N
-                                ),
-                                (push_idx // 2) % self.GATE_UP_PROJ_SPLIT_K_FACTOR,
-                            ),
-                        ),
-                        "cta",
-                        "cta",
-                    )
+                            -1, self.INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N * self.GATE_UP_PROJ_SPLIT_K_FACTOR,
+                            lambda push_idx: (JobType.GEMM_GATE_UP_PROJ.value, 0, ((push_idx // 2) // self.GATE_UP_PROJ_SPLIT_K_FACTOR 
+                                                                                    + (push_idx % 2) * self.INTERMEDIATE_SIZE // GemmTile.BLK_N),
+                                                                                    (push_idx // 2) % self.GATE_UP_PROJ_SPLIT_K_FACTOR)
+                        ), "cta", "cta"
+                    )  
             if self.world_size == 1:
-                self.evt_attn_add_rms.semaphore_wait(
-                    self.tile_scheduler.m_idx // self.o_reduce_tile.M_TILE
-                )
+                self.tile_scheduler.wait(self.evt_attn_add_rms, self.tile_scheduler.m_idx // self.o_reduce_tile.M_TILE)
             else:
-                self.evt_attn_add_rms.semaphore_wait(
-                    self.tile_scheduler.m_idx // self.o_allreduce_tile.M_TILE
-                )
-            self.run_tile(
-                self.attn_add_rms_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                hidden_state_attn_mlp_global,
-                residual_global,
-                attn_add_rms_weight_global,
-            )
-            T.tvm_storage_sync("shared")
-            if tid == 0:
-                self.evt_attn_mlp.semaphore_notify(0)
-
+                self.tile_scheduler.wait(self.evt_attn_add_rms, self.tile_scheduler.m_idx // self.o_allreduce_tile.M_TILE)
+            self.run_tile(self.attn_add_rms_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global)
+            self.tile_scheduler.notify(self.evt_attn_mlp, 1, lambda notify_idx: (-1, 0,), scope="cta")
+            
     @T.macro
     def task_impl_gemm_gate_up_proj(self, is_dynamic_sch):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             if self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1:
-                self.run_tile_prefetch(
-                    self.gemm_gate_up_proj_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    self.profiler,
-                )
+                self.run_tile_prefetch(self.gemm_gate_up_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                 if is_dynamic_sch:
-                    if wg_id == 0:
-                        if tid == 0:
-                            self.evt_gate_up_proj_reduce.semaphore_notify(
-                                self.tile_scheduler.n_idx, pre_notify=True
-                            )
-                        self.tile_scheduler.push_task(
-                            self.evt_gate_up_proj_reduce,
-                            1,
-                            lambda trigger_idx: (
-                                -1,
-                                self.gemm_gate_up_proj_reduce_tile.M_split,
-                                lambda push_idx: (
-                                    JobType.GATE_UP_PROJ_REDUCE.value,
-                                    push_idx,
-                                    self.tile_scheduler.n_idx,
-                                    0,
-                                ),
-                            ),
-                            "warpgroup",
-                            "warpgroup",
-                        )
-                self.evt_attn_mlp.semaphore_wait_warp(0)
-                self.run_tile(
-                    self.gemm_gate_up_proj_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    self.profiler,
-                )
-                if wg_id == 0:
-                    T.cuda.warpgroup_sync(1)
-                    if tid == 0:
-                        self.evt_gate_up_proj_reduce.semaphore_notify(self.tile_scheduler.n_idx)
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_gate_up_proj_reduce, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx,),
+                        lambda trigger_idx: (
+                            -1, self.gemm_gate_up_proj_reduce_tile.M_split,
+                            lambda push_idx: (JobType.GATE_UP_PROJ_REDUCE.value, push_idx, self.tile_scheduler.n_idx, 0)
+                        ), "warpgroup", "warpgroup"
+                    )
+                self.tile_scheduler.wait(self.evt_attn_mlp, 0, wait_level="warp")
+                self.run_tile(self.gemm_gate_up_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+                self.tile_scheduler.notify(self.evt_gate_up_proj_reduce, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx,), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_gate_up_silu(self, is_dynamic_sch):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
-                range_start = (
-                    self.tile_scheduler.n_idx
-                    * GateUpSiluTile.BLK_N
-                    // 2
-                    // self.gemm_down_proj_tile.TILE_K
-                )
-                range_end = (
-                    (self.tile_scheduler.n_idx + 1) * GateUpSiluTile.BLK_N // 2 - 1
-                ) // self.gemm_down_proj_tile.TILE_K
+                range_start = self.tile_scheduler.n_idx * GateUpSiluTile.BLK_N // 2 // self.gemm_down_proj_tile.TILE_K
+                range_end = ((self.tile_scheduler.n_idx + 1) * GateUpSiluTile.BLK_N // 2 - 1) // self.gemm_down_proj_tile.TILE_K
+                self.run_tile_prefetch(self.gate_up_silu_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
                 if is_dynamic_sch:
-                    if tid <= range_end - range_start:
-                        self.evt_down_proj.semaphore_notify(range_start + tid, pre_notify=True)
-                    self.tile_scheduler.push_task(
-                        self.evt_down_proj,
-                        range_end - range_start + 1,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_down_proj, range_end - range_start + 1, lambda notify_idx: (-1, range_start + notify_idx,),
                         lambda trigger_idx: (
-                            -1,
-                            ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
-                            lambda push_idx: (
-                                JobType.GEMM_DOWN_PROJ.value,
-                                0,
-                                push_idx,
-                                range_start + trigger_idx,
-                            ),
-                        ),
-                        "warp",
-                        "warpgroup",
+                            -1, ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
+                            lambda push_idx: (JobType.GEMM_DOWN_PROJ.value, 0, push_idx, range_start + trigger_idx)
+                        ), "warp", "warpgroup"
                     )
-                self.run_tile_prefetch(
-                    self.gate_up_silu_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    self.profiler,
-                )
-                self.evt_attn_mlp.semaphore_wait_warp(0)
-                self.run_tile(
-                    self.gate_up_silu_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    self.profiler,
-                )
-                if wg_id == 0:
-                    T.cuda.warpgroup_sync(1)
-                    if tid <= range_end - range_start:
-                        self.evt_down_proj.semaphore_notify(range_start + tid)
+                self.tile_scheduler.wait(self.evt_attn_mlp, 0, wait_level="warp")
+                self.run_tile(self.gate_up_silu_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+                self.tile_scheduler.notify(self.evt_down_proj, range_end - range_start + 1, lambda notify_idx: (-1, range_start + notify_idx,), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_gate_up_proj_reduce(
@@ -1081,72 +547,30 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1:
                 if is_dynamic_sch:
                     if self.tile_scheduler.n_idx >= self.INTERMEDIATE_SIZE // GemmTile.BLK_N:
-                        if tid == 0:
-                            self.evt_gate_up_proj.semaphore_notify(
-                                self.tile_scheduler.n_idx
-                                - self.INTERMEDIATE_SIZE // GemmTile.BLK_N,
-                                pre_notify=True,
-                            )
-                        self.tile_scheduler.push_task(
-                            self.evt_gate_up_proj,
-                            1,
+                        self.tile_scheduler.pre_notify_and_push(
+                            self.evt_gate_up_proj, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx - self.INTERMEDIATE_SIZE // GemmTile.BLK_N,),
                             lambda trigger_idx: (
-                                -1,
-                                1,
-                                lambda push_idx: (
-                                    JobType.SPLIT_SILU_MULTIPLY.value,
-                                    self.tile_scheduler.n_idx
-                                    - self.INTERMEDIATE_SIZE // GemmTile.BLK_N,
-                                    0,
-                                    0,
-                                ),
-                            ),
-                            "thread",
-                            "thread",
+                                -1, 1,
+                                lambda push_idx: (JobType.SPLIT_SILU_MULTIPLY.value, self.tile_scheduler.n_idx - self.INTERMEDIATE_SIZE // GemmTile.BLK_N, 0, 0)
+                            ), "thread", "thread"
                         )
                     else:
-                        if tid == 0:
-                            self.evt_gate_up_proj.semaphore_notify(
-                                self.tile_scheduler.n_idx, pre_notify=True
-                            )
-                        self.tile_scheduler.push_task(
-                            self.evt_gate_up_proj,
-                            1,
+                        self.tile_scheduler.pre_notify_and_push(
+                            self.evt_gate_up_proj, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx,),
                             lambda trigger_idx: (
-                                -1,
-                                1,
-                                lambda push_idx: (
-                                    JobType.SPLIT_SILU_MULTIPLY.value,
-                                    self.tile_scheduler.n_idx,
-                                    0,
-                                    0,
-                                ),
-                            ),
-                            "thread",
-                            "thread",
+                                -1, 1,
+                                lambda push_idx: (JobType.SPLIT_SILU_MULTIPLY.value, self.tile_scheduler.n_idx, 0, 0)
+                            ), "thread", "thread"
                         )
-                self.evt_gate_up_proj_reduce.semaphore_wait(self.tile_scheduler.n_idx)
-                self.run_tile(
-                    self.gemm_gate_up_proj_reduce_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    partial_out_gate_up_proj_global,
-                    out_gate_up_proj_global,
-                )
-                T.tvm_storage_sync("shared")
+                self.tile_scheduler.wait(self.evt_gate_up_proj_reduce, self.tile_scheduler.n_idx)
+                self.run_tile(self.gemm_gate_up_proj_reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_out_gate_up_proj_global, out_gate_up_proj_global)
                 if self.tile_scheduler.n_idx >= self.INTERMEDIATE_SIZE // GemmTile.BLK_N:
-                    if tid == 0:
-                        self.evt_gate_up_proj.semaphore_notify(
-                            self.tile_scheduler.n_idx - self.INTERMEDIATE_SIZE // GemmTile.BLK_N
-                        )
+                    self.tile_scheduler.notify(self.evt_gate_up_proj, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx - self.INTERMEDIATE_SIZE // GemmTile.BLK_N,), scope="cta")
                 else:
-                    if tid == 0:
-                        self.evt_gate_up_proj.semaphore_notify(self.tile_scheduler.n_idx)
+                    self.tile_scheduler.notify(self.evt_gate_up_proj, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx,), scope="cta")
 
     @T.macro
     def task_impl_split_silu_multiply(
@@ -1156,101 +580,36 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1:
-                range_start = (
-                    self.tile_scheduler.m_idx
-                    * SiluMultiplyTile.TILE_SIZE
-                    // self.gemm_down_proj_tile.TILE_K
-                )
-                range_end = (
-                    (self.tile_scheduler.m_idx + 1) * SiluMultiplyTile.TILE_SIZE - 1
-                ) // self.gemm_down_proj_tile.TILE_K
+                range_start = self.tile_scheduler.m_idx * SiluMultiplyTile.TILE_SIZE // self.gemm_down_proj_tile.TILE_K
+                range_end = ((self.tile_scheduler.m_idx + 1) * SiluMultiplyTile.TILE_SIZE - 1) // self.gemm_down_proj_tile.TILE_K
                 if is_dynamic_sch:
-                    if tid <= range_end - range_start:
-                        self.evt_down_proj.semaphore_notify(range_start + tid, pre_notify=True)
-                    self.tile_scheduler.push_task(
-                        self.evt_down_proj,
-                        range_end - range_start + 1,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_down_proj, range_end - range_start + 1, lambda notify_idx: (-1, range_start + notify_idx,),
                         lambda trigger_idx: (
-                            -1,
-                            ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
-                            lambda push_idx: (
-                                JobType.GEMM_DOWN_PROJ.value,
-                                0,
-                                push_idx,
-                                range_start + trigger_idx,
-                            ),
-                        ),
-                        "warp",
-                        "cta",
+                            -1, ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N),
+                            lambda push_idx: (JobType.GEMM_DOWN_PROJ.value, 0, push_idx, range_start + trigger_idx)
+                        ), "warp", "cta"
                     )
-                self.evt_gate_up_proj.semaphore_wait_warp(self.tile_scheduler.m_idx)
-                self.run_tile(
-                    self.silu_multiply_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    out_gate_up_proj_global,
-                    out_silu_multiply_global,
-                    self.tile_scheduler,
-                )
-                T.tvm_storage_sync("shared")
-                if tid <= range_end - range_start:
-                    self.evt_down_proj.semaphore_notify(range_start + tid)
+                self.tile_scheduler.wait(self.evt_gate_up_proj, self.tile_scheduler.m_idx, wait_level="warp")
+                self.run_tile(self.silu_multiply_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, out_gate_up_proj_global, out_silu_multiply_global, self.tile_scheduler)
+                self.tile_scheduler.notify(self.evt_down_proj, range_end - range_start + 1, lambda notify_idx: (-1, range_start + notify_idx,), scope="cta")
 
     @T.macro
     def task_impl_gemm_down_proj(self, is_dynamic_sch):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
-            self.run_tile_prefetch(
-                self.gemm_down_proj_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                self.profiler,
-            )
+            self.run_tile_prefetch(self.gemm_down_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
             if is_dynamic_sch:
-                if wg_id == 0:
-                    if tid == 0:
-                        self.evt_down_proj_reduce.semaphore_notify(
-                            self.tile_scheduler.n_idx
-                            // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),
-                            pre_notify=True,
-                        )
-                    self.tile_scheduler.push_task(
-                        self.evt_down_proj_reduce,
-                        1,
-                        lambda trigger_idx: (
-                            -1,
-                            self.down_proj_reduce_tile.M_split,
-                            lambda push_idx: (
-                                JobType.DOWN_PROJ_REDUCE.value,
-                                push_idx,
-                                self.tile_scheduler.n_idx
-                                // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),
-                                0,
-                            ),
-                        ),
-                        "warpgroup",
-                        "warpgroup",
-                    )
-            self.evt_down_proj.semaphore_wait_warp(self.tile_scheduler.k_idx)
-            self.run_tile(
-                self.gemm_down_proj_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                self.profiler,
-            )
-            if wg_id == 0:
-                T.cuda.warpgroup_sync(1)
-                if tid == 0:
-                    self.evt_down_proj_reduce.semaphore_notify(
-                        self.tile_scheduler.n_idx
-                        // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N)
-                    )
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_down_proj_reduce, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),),
+                    lambda trigger_idx: (
+                        -1, self.down_proj_reduce_tile.M_split,
+                        lambda push_idx: (JobType.DOWN_PROJ_REDUCE.value, push_idx, self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0)
+                    ), "warpgroup", "warpgroup", scope_id=0
+                )
+            self.tile_scheduler.wait(self.evt_down_proj, self.tile_scheduler.k_idx, wait_level="warp")
+            self.run_tile(self.gemm_down_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+            self.tile_scheduler.notify(self.evt_down_proj_reduce, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_down_proj_reduce(
@@ -1262,88 +621,30 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
                 if self.world_size == 1:
-                    if tid == 128:
-                        self.evt_add_rms_norm.semaphore_notify(
-                            self.tile_scheduler.m_idx, pre_notify=True
-                        )
-                    self.tile_scheduler.push_task(
-                        self.evt_add_rms_norm,
-                        1,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_add_rms_norm, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx,),
                         lambda trigger_idx: (
-                            -1,
-                            T.min(
-                                self.down_proj_reduce_tile.M_TILE,
-                                batch_size
-                                - self.tile_scheduler.m_idx * self.down_proj_reduce_tile.M_TILE,
-                            ),
-                            lambda push_idx: (
-                                JobType.MLP_ADD_RMS_NORM.value,
-                                self.tile_scheduler.m_idx * self.down_proj_reduce_tile.M_TILE
-                                + push_idx,
-                                0,
-                                0,
-                            ),
-                        ),
-                        "warpgroup",
-                        "warpgroup",
-                        enqueue_wg=1,
+                            -1, T.min(self.down_proj_reduce_tile.M_TILE, batch_size - self.tile_scheduler.m_idx * self.down_proj_reduce_tile.M_TILE),
+                            lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, self.tile_scheduler.m_idx * self.down_proj_reduce_tile.M_TILE + push_idx, 0, 0)
+                        ), "warpgroup", "warpgroup", scope_id=1
                     )
                 else:
-                    if tid == 128:
-                        self.evt_down_proj_allreduce.semaphore_notify(
-                            self.tile_scheduler.n_idx // self.world_size,
-                            rank=self.tile_scheduler.n_idx % self.world_size,
-                            pre_notify=True,
-                        )
-                    self.tile_scheduler.push_task(
-                        self.evt_down_proj_allreduce,
-                        1,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_down_proj_allreduce, 1, lambda notify_idx: (self.tile_scheduler.n_idx % self.world_size, self.tile_scheduler.n_idx // self.world_size,),
                         lambda trigger_idx: (
-                            self.tile_scheduler.n_idx % self.world_size,
-                            ceildiv(batch_size, self.down_proj_allreduce_tile.M_TILE),
-                            lambda push_idx: (
-                                JobType.DOWN_PROJ_ALLREDUCE.value,
-                                push_idx,
-                                self.tile_scheduler.n_idx // self.world_size,
-                                0,
-                            ),
-                        ),
-                        "warpgroup",
-                        "warpgroup",
-                        enqueue_wg=1,
+                            self.tile_scheduler.n_idx % self.world_size, ceildiv(batch_size, self.down_proj_allreduce_tile.M_TILE),
+                            lambda push_idx: (JobType.DOWN_PROJ_ALLREDUCE.value, push_idx, self.tile_scheduler.n_idx // self.world_size, 0)
+                        ), "warpgroup", "warpgroup", scope_id=1
                     )
-            self.evt_down_proj_reduce.semaphore_wait_warp(self.tile_scheduler.n_idx)
+            self.tile_scheduler.wait(self.evt_down_proj_reduce, self.tile_scheduler.n_idx, wait_level="warp")
             if self.world_size == 1:
-                self.run_tile(
-                    self.down_proj_reduce_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    partial_sum_down_proj_global,
-                    output_global,
-                )
+                self.run_tile(self.down_proj_reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_sum_down_proj_global, output_global)
+                self.tile_scheduler.notify(self.evt_add_rms_norm, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx,), scope="cta")
             else:
-                self.run_tile(
-                    self.down_proj_reduce_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    partial_sum_down_proj_global,
-                    before_down_proj_allreduce_global,
-                )
-            T.tvm_storage_sync("shared")
-            if self.world_size == 1:
-                if tid == 0:
-                    self.evt_add_rms_norm.semaphore_notify(self.tile_scheduler.m_idx)
-            else:
-                if tid == 0:
-                    self.evt_down_proj_allreduce.semaphore_notify(
-                        self.tile_scheduler.n_idx // self.world_size,
-                        rank=self.tile_scheduler.n_idx % self.world_size,
-                    )
+                self.run_tile(self.down_proj_reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_sum_down_proj_global, before_down_proj_allreduce_global)
+                self.tile_scheduler.notify(self.evt_down_proj_allreduce, 1, lambda notify_idx: (self.tile_scheduler.n_idx % self.world_size, self.tile_scheduler.n_idx // self.world_size,), scope="cta")
 
     @T.macro
     def task_impl_down_proj_allreduce(
@@ -1354,47 +655,19 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if self.world_size > 1:
                 if is_dynamic_sch:
-                    if tid < self.world_size:
-                        self.evt_add_rms_norm.semaphore_notify(
-                            self.tile_scheduler.m_idx, rank=tid, pre_notify=True
-                        )
-                    self.tile_scheduler.push_task(
-                        self.evt_add_rms_norm,
-                        self.world_size,
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_add_rms_norm, self.world_size, lambda notify_idx: (notify_idx, self.tile_scheduler.m_idx,),
                         lambda trigger_idx: (
-                            trigger_idx,
-                            T.min(
-                                self.down_proj_allreduce_tile.M_TILE,
-                                batch_size
-                                - self.tile_scheduler.m_idx * self.down_proj_allreduce_tile.M_TILE,
-                            ),
-                            lambda push_idx: (
-                                JobType.MLP_ADD_RMS_NORM.value,
-                                self.tile_scheduler.m_idx * self.down_proj_allreduce_tile.M_TILE
-                                + push_idx,
-                                0,
-                                0,
-                            ),
-                        ),
-                        "warp",
-                        "cta",
+                            trigger_idx, T.min(self.down_proj_allreduce_tile.M_TILE, batch_size - self.tile_scheduler.m_idx * self.down_proj_allreduce_tile.M_TILE),
+                            lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, self.tile_scheduler.m_idx * self.down_proj_allreduce_tile.M_TILE + push_idx, 0, 0)
+                        ), "warp", "cta"
                     )
-                self.evt_down_proj_allreduce.semaphore_wait(self.tile_scheduler.n_idx)
-                self.run_tile(
-                    self.down_proj_allreduce_tile,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    before_down_proj_allreduce_global,
-                    output_global,
-                )
-                T.tvm_storage_sync("shared")
-                if tid < self.world_size:
-                    self.evt_add_rms_norm.semaphore_notify(self.tile_scheduler.m_idx, rank=tid)
-
+                self.tile_scheduler.wait(self.evt_down_proj_allreduce, self.tile_scheduler.n_idx)
+                self.run_tile(self.down_proj_allreduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, before_down_proj_allreduce_global, output_global)
+                self.tile_scheduler.notify(self.evt_add_rms_norm, self.world_size, lambda notify_idx: (notify_idx, self.tile_scheduler.m_idx,), scope="cta")
+                
     @T.macro
     def task_impl_mlp_add_rms_norm(
         self,
@@ -1404,38 +677,19 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
-                if tid == 0:
-                    self.evt_end.semaphore_notify(0, pre_notify=True)
-                self.tile_scheduler.push_task(
-                    self.evt_end,
-                    1,
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_end, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1,
-                        KernelConfig.SM_NUMBER,
-                        lambda push_idx: (JobType.END.value, 0, 0, 0),
-                    ),
-                    "cta",
-                    "cta",
+                        -1, KernelConfig.SM_NUMBER,
+                        lambda push_idx: (JobType.END.value, 0, 0, 0)
+                    ), "cta", "cta"
                 )
             if self.world_size == 1:
-                self.evt_add_rms_norm.semaphore_wait(
-                    self.tile_scheduler.m_idx // self.down_proj_reduce_tile.M_TILE
-                )
+                self.tile_scheduler.wait(self.evt_add_rms_norm, self.tile_scheduler.m_idx // self.down_proj_reduce_tile.M_TILE)
             else:
-                self.evt_add_rms_norm.semaphore_wait(
-                    self.tile_scheduler.m_idx // self.down_proj_allreduce_tile.M_TILE
-                )
-            self.run_tile(
-                self.mlp_add_rms_norm_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                output_global,
-                residual_global,
-                mlp_add_rms_weight_global,
-            )
+                self.tile_scheduler.wait(self.evt_add_rms_norm, self.tile_scheduler.m_idx // self.down_proj_allreduce_tile.M_TILE)
+            self.run_tile(self.mlp_add_rms_norm_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, output_global, residual_global, mlp_add_rms_weight_global)
 
     # fmt: off
     @T.macro
@@ -1528,7 +782,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         self.set_tiles(batch_size, BLK_M)
 
         self.qkv_proj_tile.set_tensor_map(A_tensor_map_qkv_proj, B_tensor_map_qkv_proj, D_tensor_map_qkv_proj, hidden_state_global, qkv_proj_weight_global, partial_qkv_global)
-        self.o_proj_tile.set_tensor_map(A_tensor_map_o_proj, B_tensor_map_o_proj, D_tensor_map_o_proj, o_global.view(-1,self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer, o_proj_weight_global, partial_o_global)
+        self.o_proj_tile.set_tensor_map(A_tensor_map_o_proj, B_tensor_map_o_proj, D_tensor_map_o_proj, o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer, o_proj_weight_global, partial_o_global)
         if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
             self.gate_up_silu_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj, hidden_state_attn_mlp_global, gate_up_weight_global, out_silu_multiply_global)
         else:
@@ -1773,7 +1027,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             etensor_attn_merge_global = T.match_buffer(etensor_attn_merge_ptr, [batch_size, self.NUM_KEY_VALUE_HEADS],
                                     "int32", scope="global", offset_factor=1)
             etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [self.SPLIT_O_PROJECT], "int32", scope="global", offset_factor=1)
-            etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N)],
+            etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [self.HIDDEN_SIZE// GemmTile.BLK_N], 
                                     "int32", scope="global", offset_factor=1)
             etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [self.HIDDEN_SIZE // self.world_size // AllreduceTile.N_TILE], "int32", scope="global", offset_factor=1)
             etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", offset_factor=1)
@@ -1820,7 +1074,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                 run(128)
             # fmt: on
         return main
-
+    
     def _get_func_dynamic(self):
         # fmt: off
         @T.prim_func(tirp=True)

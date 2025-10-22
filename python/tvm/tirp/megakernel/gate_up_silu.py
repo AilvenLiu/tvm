@@ -2,10 +2,9 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 
 from tvm.tirp.bench.utils import CudaProfiler
-from tvm.tirp.megakernel.gemm import GemmTile
+from tvm.tirp.megakernel.gemm import GemmTile, Barriers
 from tvm.tirp.megakernel.common import (
     F16_BYTES,
-    Barriers,
     KernelConfig,
     ProfileEventType,
     SmemManager,

@@ -249,33 +249,22 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
-                if tid == 0:
-                    self.evt_attn_mlp.semaphore_notify(0, pre_notify=True)
-                self.tile_scheduler.push_task(
-                    self.evt_attn_mlp,
-                    1,
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_attn_mlp, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1,
-                        ceildiv(batch_size, 128) * self.GATING_SPLIT_K_FACTOR,
+                        -1, ceildiv(batch_size, 128) * self.GATING_SPLIT_K_FACTOR,
                         lambda push_idx: (
                             JobType.MOE_GATING.value,
                             0,
                             push_idx // self.GATING_SPLIT_K_FACTOR,
                             push_idx % self.GATING_SPLIT_K_FACTOR,
-                        ),
-                    ),
-                    "warpgroup",
-                    "warpgroup",
+                        )
+                    ), "warpgroup", "warpgroup"
                 )
-
             if self.world_size == 1:
-                self.evt_attn_add_rms.semaphore_wait(
-                    self.tile_scheduler.m_idx // self.o_reduce_tile.M_TILE
-                )
+                self.tile_scheduler.wait(self.evt_attn_add_rms, self.tile_scheduler.m_idx // self.o_reduce_tile.M_TILE, wait_level="cta")
             else:
-                self.evt_attn_add_rms.semaphore_wait(
-                    self.tile_scheduler.m_idx // self.o_allreduce_tile.M_TILE
-                )
+                self.tile_scheduler.wait(self.evt_attn_add_rms, self.tile_scheduler.m_idx // self.o_allreduce_tile.M_TILE, wait_level="cta")
             self.run_tile(
                 self.attn_add_rms_tile,
                 self.tile_scheduler.m_idx,
@@ -293,30 +282,22 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             if tid * 8 < self.HIDDEN_SIZE:
                 for vec in T.vectorized(8):
                     output_global[self.tile_scheduler.m_idx, tid * 8 + vec] = 0
-            T.tvm_storage_sync("shared")
-            if tid == 0:
-                self.evt_attn_mlp.semaphore_notify(0)
+            self.tile_scheduler.notify(self.evt_attn_mlp, 1, lambda notify_idx: (-1, 0), scope="cta")
 
     @T.macro
     def task_impl_moe_gating(self, is_dynamic_sch):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             if is_dynamic_sch:
-                if tid == 0:
-                    self.evt_gating.semaphore_notify(0, pre_notify=True)
-                self.tile_scheduler.push_task(
-                    self.evt_gating,
-                    1,
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_gating, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1,
-                        self.topk_softmax.PERSISTENT_SM_NUMBER,
-                        lambda push_idx: (JobType.MOE_TOPK_SOFTMAX.value, push_idx, 0, 0),
-                    ),
-                    "cta",
-                    "cta",
+                        -1, self.topk_softmax.PERSISTENT_SM_NUMBER,
+                        lambda push_idx: (
+                            JobType.MOE_TOPK_SOFTMAX.value, push_idx, 0, 0
+                        )
+                    ), "cta", "cta"
                 )
-            self.evt_attn_mlp.semaphore_wait_warp(0)
+            self.tile_scheduler.wait(self.evt_attn_mlp, 0, wait_level="warp")
             self.run_tile(
                 self.gate,
                 self.tile_scheduler.m_idx,
@@ -324,10 +305,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.tile_scheduler.k_idx,
                 self.profiler,
             )
-            if wg_id == 0:
-                T.cuda.warpgroup_sync(1)
-                if tid == 0:
-                    self.evt_gating.semaphore_notify(0)
+            self.tile_scheduler.notify(self.evt_gating, 1, lambda notify_idx: (-1, 0), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_moe_group_gemm_down(
@@ -342,24 +320,16 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             if is_dynamic_sch:
-                if tid == 0:
-                    self.evt_group_gemm_down.semaphore_notify(0, pre_notify=True)
-                self.tile_scheduler.push_task(
-                    self.evt_group_gemm_down,
-                    1,
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_group_gemm_down, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1,
-                        batch_size,
+                        -1, batch_size,
                         lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, push_idx, 0, 0),
-                    ),
-                    "warpgroup",
-                    "warpgroup",
+                    ), "warpgroup", "warpgroup"
                 )
             wait_idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
-            self.evt_silu_mul.semaphore_wait_warp(wait_idx)
+            self.tile_scheduler.wait(self.evt_silu_mul, wait_idx, wait_level="warp")
             if (
                 is_dynamic_sch
                 or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE
@@ -375,10 +345,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     num_valid_tokens_global,
                     self.profiler,
                 )
-            if wg_id == 0:
-                T.cuda.warpgroup_sync(1)
-                if tid == 0:
-                    self.evt_group_gemm_down.semaphore_notify(0)
+            self.tile_scheduler.notify(self.evt_group_gemm_down, 1, lambda notify_idx: (-1, 0), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_mlp_add_rms_norm(
@@ -389,23 +356,15 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         is_dynamic_sch,
     ):
         with T.cta():
-            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
-                if tid == 0:
-                    self.evt_end.semaphore_notify(0, pre_notify=True)
-                self.tile_scheduler.push_task(
-                    self.evt_end,
-                    1,
+                self.tile_scheduler.pre_notify_and_push(
+                    self.evt_end, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1,
-                        KernelConfig.SM_NUMBER,
+                        -1, KernelConfig.SM_NUMBER,
                         lambda push_idx: (JobType.END.value, 0, 0, 0),
-                    ),
-                    "cta",
-                    "cta",
+                    ), "cta", "cta"
                 )
-
-            self.evt_group_gemm_down.semaphore_wait(0)
+            self.tile_scheduler.wait(self.evt_group_gemm_down, 0, wait_level="cta")
             self.run_tile(
                 self.mlp_add_rms_norm_tile,
                 self.tile_scheduler.m_idx,

@@ -88,6 +88,17 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("tir.AxisGetSubscope", [](Axis axis) { return axis->GetSubscope(); });
 }
 
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::TypeAttrDef<AxisNode>()
+      .def("__data_to_json__",
+           [](const AxisNode* node) -> ffi::String {
+             // simply save as the string
+             return node->name;
+           })
+      .def("__data_from_json__", [](const ffi::String& name) -> Axis { return Axis::Get(name); });
+}
+
 // Axis
 Axis Axis::Get(const ffi::String& name) {
   const AxisRegEntry* reg = AxisRegistry::Global()->Get(name);

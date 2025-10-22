@@ -5,7 +5,10 @@ from tvm.script import tir as T
 from tvm.tir.op import ceildiv
 from tvm.tirp.bench.utils import CudaProfiler
 
-from .common import Barriers, JobType, ProfileEventType, KernelConfig, warp_sync, trap_when_assert_failed, pack_into_32bit, unpack_from_32bit, any_sync
+from .common import (
+    Barriers, JobType, ProfileEventType, KernelConfig, warp_sync, 
+    trap_when_assert_failed, pack_into_32bit, unpack_from_32bit, any_sync, SemaphoreBase, TileSchedulerBase
+)
 
 while_ld_global_acquire = f"""
 __forceinline__ __device__ void while_ld_global_acquire(int32_t* addr, int32_t* task_info) {{
@@ -89,7 +92,7 @@ __forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t valu
 #        In this way, the tasks will be pre-push when the last tile has already been dispatched to the sm, which avoid the dead lock.
 #        For semaphore wait, we can still use the condition value == expected_cnt * (base + 1) to distinguish.
 
-class Semaphore:
+class Semaphore(SemaphoreBase):
     def __init__(self, expected_cnt, buffer, base=(1 << 16), decrement=False, use_nvshmem=False, debug=False):
         self.expected_cnt = expected_cnt
         self.base = base
@@ -106,53 +109,53 @@ class Semaphore:
 
         # cta-level interface
     @T.macro
-    def semaphore_wait(self, *coord):
-        with T.thread():
-            if not self.decrement:
-                while 1:
-                    T.ptx.ld_global_acquire(
-                        self.state[0],
-                        self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
-                    )
-                    if T.cuda.syncthreads_and(self.state[0] == self.expected_cnt * (self.base + 1)):
-                        break
-                    T.cuda.nano_sleep(40)
-            else:
-                while 1:
-                    T.ptx.ld_global_acquire(
-                        self.state[0],
-                        self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
-                    )
-                    if T.cuda.syncthreads_and(self.state[0] == 0):
-                        break
-                    T.cuda.nano_sleep(40)
-
-    # warp-level interface
-    @T.macro
-    def semaphore_wait_warp(self, *coord, mask=0xffffffff):
-        with T.thread():
-            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-            lane_id = T.thread_id([32], parent="warp")
-            if (mask >> warp_id) & 1 == 1:
-                self.state[0] = -1
+    def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xffffffff):
+        if level == "cta":
+            with T.thread():
                 if not self.decrement:
                     while 1:
-                        if lane_id == 0:
-                            T.ptx.ld_global_acquire(
-                                self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
-                            )
-                        if any_sync(0xffffffff, self.state[0] == self.expected_cnt * (self.base + 1)):
+                        T.ptx.ld_global_acquire(
+                            self.state[0],
+                            self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
+                        )
+                        if T.cuda.syncthreads_and(self.state[0] == self.expected_cnt * (self.base + 1)):
                             break
                         T.cuda.nano_sleep(40)
                 else:
                     while 1:
-                        if lane_id == 0:
-                            T.ptx.ld_global_acquire(
-                                self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
-                            )
-                        if any_sync(0xffffffff, self.state[0] == 0):
+                        T.ptx.ld_global_acquire(
+                            self.state[0],
+                            self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
+                        )
+                        if T.cuda.syncthreads_and(self.state[0] == 0):
                             break
                         T.cuda.nano_sleep(40)
+        elif level == "warp":
+            with T.thread():
+                warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+                lane_id = T.thread_id([32], parent="warp")
+                if (mask >> warp_id) & 1 == 1:
+                    self.state[0] = -1
+                    if not self.decrement:
+                        while 1:
+                            if lane_id == 0:
+                                T.ptx.ld_global_acquire(
+                                    self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
+                                )
+                            if any_sync(0xffffffff, self.state[0] == self.expected_cnt * (self.base + 1)):
+                                break
+                            T.cuda.nano_sleep(40)
+                    else:
+                        while 1:    
+                            if lane_id == 0:
+                                T.ptx.ld_global_acquire(
+                                    self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
+                                )
+                            if any_sync(0xffffffff, self.state[0] == 0):
+                                break
+                            T.cuda.nano_sleep(40)
+        else:
+            assert False
 
     @T.macro
     def semaphore_notify(self, *coord, pre_notify=False, rank=-1):
@@ -342,7 +345,7 @@ class MPMCQueue:
         )
 
 
-class DynamicTileScheduler:
+class DynamicTileScheduler(TileSchedulerBase):
 
     MAX_TASKS = 32768
     scheduler_warp = 7
@@ -412,36 +415,13 @@ class DynamicTileScheduler:
             unpack_from_32bit(self.packed_value[0], T.address_of(self.task_type), T.address_of(self.m_idx), T.address_of(self.n_idx), T.address_of(self.k_idx))
             self.c2p_dequeue_barrier.arrive()
             self.dequeue_phase = self.dequeue_phase ^ 1
-
+            
     @T.macro
-    def init(self):
-        self.dequeue_phase = 0
-        self.has_prefetched = 0
-        with T.thread()[0:1]:
-            self.p2c_dequeue_barrier.init(1)
-            self.c2p_dequeue_barrier.init(KernelConfig.NUM_THREADS)
-        T.tvm_storage_sync("shared")
-        T.ptx.fence.proxy("shared")
-        T.ptx.fence.mbarrier_init()
-        self._fetch_from_queue()
-
-    @T.macro
-    def next_tile(self):
-        with T.cta():
-            lane_id = T.thread_id([32], parent="warp")
-            if self.profiler_on:
-                self.profiler.start(ProfileEventType.FETCH, lane_id == 0)
-            self._fetch_from_queue()
-            if self.profiler_on:
-                self.profiler.end(ProfileEventType.FETCH, lane_id == 0)
-
-
-    @T.macro
-    def push_task(
-        self, evt: Semaphore, notify_num, func_trigger,
+    def _push_task(
+        self, evt: Semaphore, notify_num, func_trigger, 
         push_level: Literal["thread", "warp", "warpgroup", "cta"],
         scope: Literal["thread", "warp", "warpgroup", "cta"],
-        enqueue_thread = 0, enqueue_warp = 0, enqueue_wg = 0
+        scope_id=0,
     ):
         # Notes: For push_level = "thread", we assume that the notify threads and the push threads will exactly be the same.
         #        In this way, the syncronization won't be necessary.
@@ -449,7 +429,8 @@ class DynamicTileScheduler:
         #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
         # Notes: (rank, num_enqueue, func_push) = func_trigger(trigger_idx), rank=-1 for the local rank
         #        (task_type, m_idx, n_idx, k_idx) = func_push(push_idx)
-
+        # Notes: scope_id = -1 represents that each scope will separately notify/push
+        
         max_notify_num_map = T.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
 
         with T.cta():
@@ -464,20 +445,22 @@ class DynamicTileScheduler:
                                             "cta": {"thread": tid, "warp": warp_id, "warpgroup": wg_id, "cta": 0}})
             stride_in_scope_map = T.meta_var({"warp": {"warp": 1}, "warpgroup": {"warp": KernelConfig.WARP_NUMBER, "warpgroup": 1},
                                             "cta": {"warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1}})
+            scope_id_map = T.meta_var({"thread": tid, "warp": warp_id, "warpgroup": wg_id, "cta": 0})
+            new_scope_id = T.if_then_else(scope_id == -1, scope_id_map[scope], scope_id)
             if self.debug:
-                trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
+                T.cuda.trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
             if self.profiler_on:
                 self.profiler.start(ProfileEventType.PUSH, lane_id == 0)
             if scope == "thread":
-                if tid == enqueue_thread:
-                    if push_level == "thread":
+                if tid == new_scope_id:
+                    if push_level == "thread": 
                         if evt.is_triggered():
                             rank, num_enqueue, func_push = T.meta_var(func_trigger(0))
                             self.queue.enqueue(rank, num_enqueue, func_push, push_level)
                     else:
                         assert False
             elif scope == "warp":
-                if warp_id == enqueue_warp:
+                if warp_id == new_scope_id:
                     if push_level == "thread":
                         if lane_id < notify_num:
                             if evt.is_triggered():
@@ -488,7 +471,7 @@ class DynamicTileScheduler:
                         warp_sync()
                         self.idx = idx_in_scope_map[scope][push_level]
                         while self.idx < notify_num:
-                            evt.state[0] = self.semaphore_state[enqueue_warp * 32 + self.idx]
+                            evt.state[0] = self.semaphore_state[new_scope_id * 32 + self.idx]
                             if evt.is_triggered():
                                 rank, num_enqueue, func_push = T.meta_var(func_trigger(self.idx))
                                 self.queue.enqueue(rank, num_enqueue, func_push, push_level)
@@ -496,7 +479,7 @@ class DynamicTileScheduler:
                     else:
                         assert False
             elif scope == "warpgroup":
-                if wg_id == enqueue_wg:
+                if wg_id == new_scope_id:
                     if push_level == "thread":
                         if tid_in_wg < notify_num:
                             if evt.is_triggered():
@@ -507,7 +490,7 @@ class DynamicTileScheduler:
                         T.ptx.bar.sync(6 + wg_id, 128)
                         self.idx = idx_in_scope_map[scope][push_level]
                         while self.idx < notify_num:
-                            evt.state[0] = self.semaphore_state[enqueue_wg * KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER + self.idx]
+                            evt.state[0] = self.semaphore_state[new_scope_id * KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER + self.idx]
                             if evt.is_triggered():
                                 rank, num_enqueue, func_push = T.meta_var(func_trigger(self.idx))
                                 self.queue.enqueue(rank, num_enqueue, func_push, push_level)
@@ -536,6 +519,88 @@ class DynamicTileScheduler:
                 assert False
             if self.profiler_on:
                 self.profiler.end(ProfileEventType.PUSH, lane_id == 0)
+                
+
+    @T.macro
+    def init(self):
+        self.dequeue_phase = 0
+        self.has_prefetched = 0
+        with T.thread()[0:1]:
+            self.p2c_dequeue_barrier.init(1)
+            self.c2p_dequeue_barrier.init(KernelConfig.NUM_THREADS)
+        T.tvm_storage_sync("shared")
+        T.ptx.fence.proxy("shared")
+        T.ptx.fence.mbarrier_init()
+        self._fetch_from_queue()
+
+    @T.macro
+    def next_tile(self):
+        with T.cta():
+            lane_id = T.thread_id([32], parent="warp")
+            if self.profiler_on:
+                self.profiler.start(ProfileEventType.FETCH, lane_id == 0)
+            self._fetch_from_queue()
+            if self.profiler_on:
+                self.profiler.end(ProfileEventType.FETCH, lane_id == 0)
+                
+    def get_idx_and_task_type(self):
+        return [self.m_idx, self.n_idx, self.k_idx], self.task_type
+
+    @T.macro
+    def wait(self, evt: Semaphore, *coord, wait_level: Literal["cta", "warp"]="cta", mask=0xffffffff):
+        evt.semaphore_wait(*coord, level=wait_level, mask=mask)
+            
+    @T.macro
+    def notify(self, evt: Semaphore, notify_num, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, pre_notify=False):
+        # Notes: Here each thread will notify only at most one time，
+        #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
+        # Notes: (rank, coord) = func_notify(notify_idx), rank=-1 for the local rank
+        # Notes: scope_id = -1 represents that each scope will separately notify
+        
+        max_notify_num_map = T.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
+        max_scope_id_map = T.meta_var({"thread": KernelConfig.NUM_THREADS, "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1})
+        
+        @T.macro
+        def sync(scope: Literal["thread", "warp", "warpgroup", "cta"], scope_id=0):
+            if scope == "thread":
+                pass
+            elif scope == "warp":
+                T.cuda.warp_sync()
+            elif scope == "warpgroup":
+                T.ptx.bar.sync(6 + scope_id, 128)
+            elif scope == "cta":
+                T.tvm_storage_sync("shared")
+        
+        with T.cta():
+            wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
+            warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+            tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+            tid_in_wg = T.thread_id([KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER], parent="warpgroup")
+            lane_id = T.thread_id([32], parent="warp")
+            idx_map = T.meta_var({"thread": (tid, 0), "warp": (warp_id, lane_id), "warpgroup": (wg_id, tid_in_wg), "cta": (0, tid)})
+            idx = idx_map[scope]
+            if notify_num == 0:
+                pass
+            else:
+                if self.debug:
+                    T.cuda.trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
+                    T.cuda.trap_when_assert_failed(scope_id == -1 or scope_id < max_scope_id_map[scope])
+                if scope_id == -1 or idx[0] == scope_id:
+                    if not pre_notify:
+                        sync(scope, scope_id)
+                    if idx[1] < notify_num:
+                        rank, *coord = func_notify(idx[1])
+                        evt.semaphore_notify(*coord, pre_notify=pre_notify, rank=rank)
+        
+    @T.macro
+    def pre_notify_and_push(
+        self, evt: Semaphore, notify_num, func_notify, func_trigger, 
+        push_level: Literal["thread", "warp", "warpgroup", "cta"],
+        scope: Literal["thread", "warp", "warpgroup", "cta"],
+        scope_id=0
+    ):
+        self.notify(evt, notify_num, func_notify, scope, scope_id, pre_notify=True)
+        self._push_task(evt, notify_num, func_trigger, push_level, scope, scope_id)
 
     def valid(self):
         return self.task_type != JobType.END.value

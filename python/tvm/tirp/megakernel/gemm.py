@@ -13,7 +13,6 @@ from tvm.tirp.megakernel.common import (
     Tile,
     ceildiv,
     float22half2,
-    warp_sync,
 )
 
 
@@ -203,7 +202,7 @@ class GemmTile(Tile):
         # alloc TMEM
         with T.warp()[0:1]:
             T.ptx.tcgen05.alloc(T.address_of(cls.tmem_addr[0]), n_cols=cls.N_COLS, cta_group=1)
-            warp_sync()
+            T.cuda.warp_sync()
         # init mbarrier and phase
         cls.tma2mma_bar.init(1)
         cls.mma2ld_bar.init(1)
@@ -335,25 +334,18 @@ class GemmTile(Tile):
                     )
                     T.ptx.tcgen05.wait.ld()
                     if self.out_type == "float16":
-                        for vec in range(self.TMEM_LD_SIZE // 2):
-                            float22half2(
-                                T.address_of(self.reg_fp16[vec * 2]),
-                                T.address_of(self.reg[vec * 2]),
-                            )
-
-                        for vec in range(self.TMEM_LD_SIZE):
-                            self.output_smem[
-                                self.stage,
-                                ki * self.TMEM_LD_SIZE + vec,
-                                warp_id * 32 + lane_id,
-                            ] = self.reg_fp16[vec]
+                        with T.thread():
+                            Tp.cast(self.reg_fp16[:], self.reg[:])
+                            Tp.copy(self.output_smem[self.stage, 
+                                                     ki * self.TMEM_LD_SIZE:(ki + 1) * self.TMEM_LD_SIZE, 
+                                                     warp_id * 32 + lane_id], 
+                                    self.reg_fp16[:])
                     else:
-                        for vec in range(self.TMEM_LD_SIZE):
-                            self.output_smem[
-                                self.stage,
-                                ki * self.TMEM_LD_SIZE + vec,
-                                warp_id * 32 + lane_id,
-                            ] = self.reg[vec]
+                        with T.thread():
+                            Tp.copy(self.output_smem[self.stage, 
+                                                     ki * self.TMEM_LD_SIZE:(ki + 1) * self.TMEM_LD_SIZE, 
+                                                     warp_id * 32 + lane_id], 
+                                    self.reg[:])
                 # the tmem can be overwritten
                 if ko == self.MMA_M // self.EPI_TILE - 1:
                     T.ptx.tcgen05.fence.before_thread_sync()
