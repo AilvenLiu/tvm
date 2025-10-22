@@ -1538,9 +1538,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                                        megakernel::kGemmTileBlkK) *
                                megakernel::kGemmTileBlkK);
           if (split_kv) {
-            // to simply, assume that one merge tile will not use two kv head
-            TVM_FFI_ICHECK_LE(megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup,
-                     num_qo_heads_ / num_kv_heads_);
             for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
               for (int m = 0; m < ceildiv(cur_batch_size_ * num_qo_heads_,
                                           megakernel::kNumWarpgroupPerBlock *
@@ -1549,14 +1546,10 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                 int worker_id =
                     m * megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup;
                 int kv_idx = worker_id / (cur_batch_size_ * (num_qo_heads_ / num_kv_heads_));
-                int qo_idx = worker_id % (num_qo_heads_ / num_kv_heads_);
-                int range_start = (kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx) *
-                                  v_head_dim_ / o_proj_tile_k;
+                int range_start =
+                    (kv_idx * (num_qo_heads_ / num_kv_heads_)) * v_head_dim_ / o_proj_tile_k;
                 int range_end =
-                    ((kv_idx * (num_qo_heads_ / num_kv_heads_) + qo_idx +
-                      megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup) *
-                         v_head_dim_ -
-                     1) /
+                    (((kv_idx + 1) * (num_qo_heads_ / num_kv_heads_)) * v_head_dim_ - 1) /
                     o_proj_tile_k;
                 for (int i = range_start; i <= range_end; ++i) {
                   TVM_FFI_ICHECK_GE(i, 0) << "Index " << i << " is negative.";
@@ -1658,13 +1651,15 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
               int batch_idx = q_indptr_data[m];
               int kv_idx = kv_head_idx_data[m];
               etensor_attn_merge_host_.set(
-                  layer_id * cur_batch_size_ * num_kv_heads_ + batch_idx * num_kv_heads_ + kv_idx,
+                  layer_id * cur_batch_size_ * num_kv_heads_ + kv_idx * cur_batch_size_ + batch_idx,
                   etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ +
-                                           batch_idx * num_kv_heads_ + kv_idx] +
+                                           (kv_idx * cur_batch_size_ + batch_idx) /
+                                               ((megakernel::kNumWarpgroupPerBlock *
+                                                 megakernel::kNumWarpPerWarpgroup) /
+                                                (num_qo_heads_ / num_kv_heads_))] +
                       1);
             }
           }
-
           for (int layer_id = 0; layer_id < num_layers_; ++layer_id) {
             for (int i = 0; i < cur_batch_size_ * num_kv_heads_; ++i) {
               TVM_FFI_ICHECK_LE(etensor_attn_merge_host_[layer_id * cur_batch_size_ * num_kv_heads_ + i],

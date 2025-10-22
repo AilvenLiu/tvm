@@ -92,7 +92,7 @@ class MegaKernel:
                 [
                     rx.TensorStructInfo([ceildiv((self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, FuseGemmTile.BLK_N)], "int32"),  # etensor_qkv_partial
                     rx.TensorStructInfo([KernelConfig.SM_NUMBER], "int32"),  # etensor_notify_attn
-                    rx.TensorStructInfo([max_batch_size, self.NUM_KEY_VALUE_HEADS], "int32"),  # etensor_attn_merge
+                    rx.TensorStructInfo([max_batch_size * self.NUM_KEY_VALUE_HEADS], "int32"),  # etensor_attn_merge
                     rx.TensorStructInfo([self.SPLIT_O_PROJECT], "int32"),  # etensor_o_proj
                     rx.TensorStructInfo([self.HIDDEN_SIZE // FuseGemmTile.BLK_N], "int32"),  # etensor_o_partial
                     rx.TensorStructInfo([max_batch_size], "int32"),  # etensor_attn_add_rmsnorm
@@ -452,7 +452,7 @@ class MegaKernel:
                     notify_worker_idx = (i + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER
                     notify_kv_idx = kv_head_idx_buf[notify_worker_idx]
                     notify_batch_idx = q_indptr_buf[notify_worker_idx]
-                    return (T.int32(-1), notify_batch_idx, notify_kv_idx)
+                    return (T.int32(-1), notify_kv_idx * batch_size + notify_batch_idx)
                 def batch_attn_num_notify_no_splitkv(i, j, k, kv_head_idx_buf, batch_size, attn_task_num, tile_k):
                     warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
                     notify_worker_idx = (i + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
@@ -491,7 +491,7 @@ class MegaKernel:
                                 dep=batch_attn_dep_notify_splitkv,
                                 num=batch_attn_num_notify_splitkv,
                                 extra_args=[kv_head_idx_, q_indptr_, batch_size, attn_task_num],
-                                dep_output_dim=3
+                                dep_output_dim=2
                             ),
                             rx.utils.Dependency(
                                 event=etensor_o_proj,
@@ -510,23 +510,16 @@ class MegaKernel:
                 )
                 
                 # ATTN_MERGE
-                def batch_merge_dep_wait(i, j, k, wait_idx, batch_size):
-                    worker_id = i * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-                    kv_idx = worker_id // (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
-                    batch_idx = (worker_id % (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))) // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
-                    return (batch_idx, kv_idx)
                 def batch_merge_num_notify(i, j, k, batch_size, k_tile):
                     worker_id = i * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-                    qo_idx = worker_id % (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
                     kv_idx = worker_id // (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
-                    range_start = (kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) + qo_idx) * self.HEAD_DIM // k_tile
-                    range_end = ((kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * self.HEAD_DIM - 1) // k_tile
+                    range_start = (kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM // k_tile
+                    range_end = (((kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM - 1) // k_tile
                     return range_end - range_start + 1
                 def batch_merge_dep_notify(i, j, k, notify_idx, batch_size, k_tile):
                     worker_id = i * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-                    qo_idx = worker_id % (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
                     kv_idx = worker_id // (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
-                    range_start = (kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) + qo_idx) * self.HEAD_DIM // k_tile
+                    range_start = (kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM // k_tile
                     return (T.int32(-1), range_start + notify_idx)
                 o = bb.emit(
                     R.call_tir_device(
@@ -543,10 +536,9 @@ class MegaKernel:
                         tile_num=batch_merge_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_attn_merge,
-                            dep=batch_merge_dep_wait,
-                            extra_args=[batch_size],
+                            dep=lambda i, j, k, wait_idx: i,
                             num=1,
-                            dep_output_dim=2
+                            dep_output_dim=1
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_o_proj,
@@ -778,7 +770,7 @@ class MegaKernel:
                 [
                     rx.TensorStructInfo([ceildiv((self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, FuseGemmTile.BLK_N)], "int32"),  # etensor_qkv_partial
                     rx.TensorStructInfo([KernelConfig.SM_NUMBER], "int32"),  # etensor_notify_attn
-                    rx.TensorStructInfo([max_batch_size, self.NUM_KEY_VALUE_HEADS], "int32"),  # etensor_attn_merge
+                    rx.TensorStructInfo([max_batch_size * self.NUM_KEY_VALUE_HEADS], "int32"),  # etensor_attn_merge
                     rx.TensorStructInfo([self.SPLIT_O_PROJECT], "int32"),  # etensor_o_proj
                     rx.TensorStructInfo([self.HIDDEN_SIZE // FuseGemmTile.BLK_N], "int32"),  # etensor_o_partial
                     rx.TensorStructInfo([max_batch_size], "int32"),  # etensor_attn_add_rmsnorm
@@ -1135,13 +1127,13 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
         event_list.append(etensor_notify_attn)
         
         # etensor_attn_merge
-        etensor_attn_merge = np.zeros((max_batch_size, mk.NUM_KEY_VALUE_HEADS), dtype=np.int32)
+        etensor_attn_merge = np.zeros((max_batch_size * mk.NUM_KEY_VALUE_HEADS), dtype=np.int32)
         kv_head_idx = arg_dict["kv_head_idx"].numpy()
         q_indptr = arg_dict["q_indptr"].numpy()
         for m in range(attn_task_num):
             kv_idx = kv_head_idx[m]
             batch_idx = q_indptr[m]
-            etensor_attn_merge[batch_idx, kv_idx] += 1
+            etensor_attn_merge[kv_idx * batch_size + batch_idx] += 1
         etensor_attn_merge *= (base + 1)
         etensor_attn_merge = tvm.runtime.tensor(etensor_attn_merge, device=DEV)
         event_list.append(etensor_attn_merge)

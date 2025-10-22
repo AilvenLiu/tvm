@@ -50,6 +50,7 @@ class MegaKernelWrapper:
 
     def __init__(self, config: Dict, tp_size, profiler_on):
         self.tp_size = tp_size
+        self.MODEL_NAME = config.get("MODEL_NAME", None)
         self.HIDDEN_SIZE = config.get("HIDDEN_SIZE", None)
         self.VOCAB_SIZE = config.get("VOCAB_SIZE", None)
         self.INTERMEDIATE_SIZE_TP1 = config.get("INTERMEDIATE_SIZE", None)
@@ -58,6 +59,7 @@ class MegaKernelWrapper:
         self.HEAD_DIM = config.get("HEAD_DIM", None)
         self.RMS_NORM_EPS = config.get("RMS_NORM_EPS", None)
         self.ROPE_THETA = config.get("ROPE_THETA", None)
+        self.ROPE_SCALING = config.get("ROPE_SCALING", None)
         self.NUM_EXPERTS = config.get("NUM_EXPERTS", None)
         self.NUM_EXPERTS_PER_TOK = config.get("NUM_EXPERTS_PER_TOK", None)
         self.GATING_SPLIT_K_FACTOR = config.get("GATING_SPLIT_K_FACTOR", None)

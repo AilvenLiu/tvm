@@ -101,8 +101,7 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
     }
   }
 
-  int32_t m_split = std::min(batch_size, ceildiv(kNumSM, (num_qo_heads + 2 * num_kv_heads) *
-                                                             head_dim / kSplitKReduceTileNUnit));
+  int32_t m_split = std::min(batch_size, ceildiv(kNumSM, num_qo_heads + 2 * num_kv_heads));
   int32_t m_tile = ceildiv(batch_size, m_split);
   m_split = ceildiv(batch_size, m_tile);
 

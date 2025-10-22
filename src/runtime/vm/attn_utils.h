@@ -1047,7 +1047,7 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
       *etensor_data_views[13] =
           etensor_data_views_raw[13].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
       *etensor_data_views[14] = etensor_data_views_raw[14].CreateView(
-          {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
+          {num_layers, cur_batch_size * num_kv_heads}, dtype_aux_);
     } else if (model_name == "qwen3_30b_a3b" || model_name == "qwen3_30b_a3b_unfused") {
       TVM_FFI_ICHECK_EQ(etensor_data.size(), 16)
           << "Event tensor size mismatch, expected 15, got " << etensor_data.size();
@@ -1077,7 +1077,7 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
       *etensor_data_views[7] =
           etensor_data_views_raw[7].CreateView({num_layers, split_o_project}, dtype_aux_);
       *etensor_data_views[8] = etensor_data_views_raw[8].CreateView(
-          {num_layers, cur_batch_size, num_kv_heads}, dtype_aux_);
+          {num_layers, cur_batch_size * num_kv_heads}, dtype_aux_);
 
       *etensor_data_views[9] = etensor_data_views_raw[9].CreateView({num_layers, 1}, dtype_aux_);
       *etensor_data_views[10] = etensor_data_views_raw[10].CreateView({num_layers, 1}, dtype_aux_);

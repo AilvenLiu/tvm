@@ -213,7 +213,7 @@ def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_t
         kv_idx = kv_head_idx[m]
         inverse_info[kv_idx * batch_size + bs_idx].append((m // KernelConfig.WG_NUMBER) % KernelConfig.SM_NUMBER)
     for m in range(attn_task_num, ceildiv(attn_task_num, KernelConfig.WG_NUMBER) * KernelConfig.WG_NUMBER):
-        inverse_info[(m - attn_task_num) % (batch_size * kv_head_num)].append(m // KernelConfig.WG_NUMBER) # align attn_task_num
+        inverse_info[(m - attn_task_num) % (batch_size * kv_head_num)].append((m // KernelConfig.WG_NUMBER) % KernelConfig.SM_NUMBER) # align attn_task_num
     inverse_indptr = [0 for _ in range(MAX_TOTAL_NUM_WORKERS)]
     inverse_indices = [0 for _ in range(MAX_TOTAL_NUM_WORKERS)]
     for i in range(batch_size * kv_head_num):
@@ -274,13 +274,7 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler
             for k_idx in range(config["SPLIT_QKV_PROJECT_DICT"][WORLD_SIZE]):
                 central_queue.append((0, n_idx, k_idx, JobType.GEMM_QKV_PROJ.value))
 
-        m_split = min(
-            batch_size,
-            ceildiv(
-                KernelConfig.SM_NUMBER,
-                (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"] // SplitKReduceTile.N_UNIT,
-            ),
-        )
+        m_split = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS))
         m_tile = ceildiv(batch_size, m_split)
         m_split = ceildiv(batch_size, m_tile)
 
@@ -475,12 +469,11 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, conf
     NUM_KEY_VALUE_HEADS = config["NUM_KEY_VALUE_HEADS"] // WORLD_SIZE
     is_moe = "NUM_EXPERTS" in config
     DEV = tvm.cuda(0)
-    qkv_h_d = (NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"]
     base = 1 << 16
     max_int_32 = 2147483647
 
     # static event tensor
-    etensor_qkv_partial = tvm.runtime.tensor(np.zeros(ceildiv(qkv_h_d, SplitKReduceTile.N_UNIT), dtype=np.int32), device=DEV)
+    etensor_qkv_partial = tvm.runtime.tensor(np.zeros(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"], SplitKReduceTile.N_UNIT), dtype=np.int32), device=DEV)
     etensor_o_partial = tvm.runtime.tensor(np.zeros(ceildiv(config["HIDDEN_SIZE"], GemmTile.BLK_N), dtype=np.int32), device=DEV)
     etensor_o_allreduce = tvm.runtime.tensor(np.zeros(config["HIDDEN_SIZE"] // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV)
     etensor_attn_add_rms_norm = tvm.runtime.tensor(np.zeros(batch_size, dtype=np.int32), device=DEV)
@@ -507,13 +500,13 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, conf
     etensor_notify_attn *= (base + 1)
     etensor_notify_attn = tvm.runtime.tensor(etensor_notify_attn, device=DEV)
 
-    etensor_attn_merge = np.zeros((batch_size, NUM_KEY_VALUE_HEADS), dtype=np.int32)
+    etensor_attn_merge = np.zeros((batch_size * NUM_KEY_VALUE_HEADS), dtype=np.int32)
     kv_head_idx = kv_head_idx.numpy()
     q_indptr = q_indptr.numpy()
     for m in range(attn_task_num):
         kv_idx = kv_head_idx[m]
         batch_idx = q_indptr[m]
-        etensor_attn_merge[batch_idx, kv_idx] += 1
+        etensor_attn_merge[(kv_idx * batch_size + batch_idx) // ((KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))] += 1
     assert ((etensor_attn_merge <= base) & (etensor_attn_merge * (base + 1) < max_int_32)).all()
     etensor_attn_merge *= (base + 1)
     etensor_attn_merge = tvm.runtime.tensor(etensor_attn_merge, device=DEV)
@@ -526,35 +519,16 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, conf
         * GemmTile.BLK_K
     )
     if attn_task_num > NUM_KEY_VALUE_HEADS * batch_size:
-        # to simply, assume that one merge tile will not use two kv head
-        assert (
-            KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-            <= NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS
-        )
-        for m in range(
-            ceildiv(
-                batch_size * NUM_ATTENTION_HEADS, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
-            )
-        ):
-            worker_id = m * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-            kv_idx = worker_id // (batch_size * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))
-            qo_idx = worker_id % (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)
-            range_start = (
-                (kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) + qo_idx)
-                * config["HEAD_DIM"]
-                // o_proj_tile_k
-            )
-            range_end = (
-                (
-                    kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)
-                    + qo_idx
-                    + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
+        for batch_idx in range(batch_size):
+            for kv_idx in range(NUM_KEY_VALUE_HEADS):
+                range_start = (
+                    (kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)) * config["HEAD_DIM"] // o_proj_tile_k
                 )
-                * config["HEAD_DIM"]
-                - 1
-            ) // o_proj_tile_k
-            for i in range(range_start, range_end + 1):
-                etensor_o_proj[i] += 1
+                range_end = (
+                    (kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"] - 1
+                ) // o_proj_tile_k
+                for i in range(range_start, range_end + 1):
+                    etensor_o_proj[i] += 1      
     else:
         for m in range(attn_task_num):
             kv_idx = kv_head_idx[m]

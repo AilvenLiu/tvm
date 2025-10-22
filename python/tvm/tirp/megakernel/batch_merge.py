@@ -162,7 +162,7 @@ __syncwarp();
         assert KernelConfig.NUM_THREADS % self.bdx == 0
         self.bdy = 32 // self.bdx
         self.smem_size = (self.num_warps * self.num_smem_stages * self.bdy * self.head_dim * F16_BYTES +
-                         KernelConfig.NUM_THREADS * F32_BYTES)
+                            KernelConfig.NUM_THREADS * F32_BYTES)
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
