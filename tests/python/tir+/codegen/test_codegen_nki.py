@@ -290,8 +290,8 @@ import neuronxcc.nki.compiler as ncc
 @baremetal(experimental_flags='enable-mutable-parameter', additional_compile_opt='--internal-skip-backend-allocation-opt-nki')
 def func_kernel(lhsT_ptr, rhs_ptr, result_ptr: nt.mutable_tensor, ):
   result_ptr_buffer = result_ptr.reshape([8388608])
-  rhs_ptr_buffer = rhs_ptr.reshape([2097152])
   lhsT_ptr_buffer = lhsT_ptr.reshape([4194304])
+  rhs_ptr_buffer = rhs_ptr.reshape([2097152])
   result_tiles_ptr = nl.ndarray(shape=[128, 2, 16, 1, 512], dtype=np.float32, buffer=ncc.sbuf.mod_alloc(base_addr=0))
   rhs_tiles_ptr = nl.ndarray(shape=[128, 8, 512], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=65536))
   lhsT_tiles_ptr = nl.ndarray(shape=[128, 8, 2048], dtype=np.float16, buffer=ncc.sbuf.mod_alloc(base_addr=73728))

@@ -91,7 +91,7 @@ def test_existing_alloc():
         T.func_attr({"global_symbol": "copy"})
         with T.kernel():
             A_sbuf = T.alloc_buffer([256, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[4*512*4+1])
-            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF", allocated_addr=[1])
+            B_sbuf = T.alloc_buffer([512, 512], "float32", scope="trn.sbuf", layout="PF")
             Tp.copy(B_sbuf[0:256, :], A_sbuf)
     # fmt: on
 

@@ -19,7 +19,14 @@ import numpy as np
 import tvm
 import tvm.testing
 from tvm import relax
-from tvm.tirp.megakernel.common import JobType, SemaphoreBase, TileSchedulerBase, SmemManager, KernelConfig, unpack_from_32bit
+from tvm.tirp.megakernel.common import (
+    JobType,
+    SemaphoreBase,
+    TileSchedulerBase,
+    SmemManager,
+    KernelConfig,
+    unpack_from_32bit,
+)
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
@@ -27,6 +34,7 @@ from tvm.script import tirp as Tp
 
 SM_CNT = 148
 NUM_THREADS = 256
+
 
 class Semaphore(SemaphoreBase):
     def __init__(self, expected_cnt, buffer, decrement=False, base=(1 << 16)):
@@ -42,7 +50,7 @@ __forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, i
 """
 
     @T.macro
-    def semaphore_wait(self, *coord, level="cta", mask=0xffffffff):
+    def semaphore_wait(self, *coord, level="cta", mask=0xFFFFFFFF):
         with T.thread():
             while 1:
                 T.ptx.ld_global_acquire(
@@ -63,6 +71,7 @@ __forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, i
             source_code=self.atomic_add_int32,
         )
 
+
 class RoundRobinStaticTileScheduler(TileSchedulerBase):
     MAX_TASKS = 128
 
@@ -73,13 +82,21 @@ class RoundRobinStaticTileScheduler(TileSchedulerBase):
         self.k_idx = T.local_cell("int32", name=prefix + "_k_idx")
         self.task_type = T.local_cell("int32", name=prefix + "_task_type")
         self.tile_idx = T.local_cell("int32", name=prefix + "_tile_idx")
-        self.queue_smem = smem_manager.alloc((self.MAX_TASKS,), "int32", align=16, method="persistent").buffer
+        self.queue_smem = smem_manager.alloc(
+            (self.MAX_TASKS,), "int32", align=16, method="persistent"
+        ).buffer
         self.exec_queue = exec_queue
         self.debug = debug
 
     @T.macro
     def _update_current_m_n_idx(self):
-        unpack_from_32bit(self.queue_smem[self.tile_idx], T.address_of(self.task_type), T.address_of(self.m_idx), T.address_of(self.n_idx), T.address_of(self.k_idx))
+        unpack_from_32bit(
+            self.queue_smem[self.tile_idx],
+            T.address_of(self.task_type),
+            T.address_of(self.m_idx),
+            T.address_of(self.n_idx),
+            T.address_of(self.k_idx),
+        )
 
     @T.macro
     def init(self):
@@ -91,10 +108,9 @@ class RoundRobinStaticTileScheduler(TileSchedulerBase):
                 idx = T.meta_var(k * KernelConfig.NUM_THREADS + tid)
                 if idx < self.MAX_TASKS:
                     self.queue_smem[idx] = self.exec_queue[bx, idx]
-            T.tvm_storage_sync("shared")
+            T.cuda.cta_sync()
             self._update_current_m_n_idx()
-            
-    
+
     def get_idx_and_task_type(self):
         return [self.m_idx, self.n_idx, self.k_idx], self.task_type
 
@@ -102,23 +118,24 @@ class RoundRobinStaticTileScheduler(TileSchedulerBase):
     def next_tile(self):
         self.tile_idx += 1
         self._update_current_m_n_idx()
-        
+
     @T.macro
-    def wait(self, evt: Semaphore, *coord, wait_level="cta", mask=0xffffffff):
+    def wait(self, evt: Semaphore, *coord, wait_level="cta", mask=0xFFFFFFFF):
         evt.semaphore_wait(*coord, level=wait_level, mask=mask)
-        
+
     @T.macro
-    def notify(self, evt: Semaphore, notify_num, func_notify, scope="cta", scope_id=0):        
+    def notify(self, evt: Semaphore, notify_num, func_notify, scope="cta", scope_id=0):
         with T.cta():
             tid = T.thread_id([NUM_THREADS], parent="cta")
-            T.cuda.block_sync()
+            T.cuda.cta_sync()
             if tid < notify_num:
                 rank, *coord = func_notify(tid)
                 evt.semaphore_notify(*coord, rank=rank)
 
     def valid(self):
         return tvm.tir.all(self.tile_idx < self.MAX_TASKS, self.task_type != JobType.END.value)
-            
+
+
 def test_basic():
 
     M = 1024
@@ -129,7 +146,7 @@ def test_basic():
 
     NUM_BLOCK_M = M // BLOCK_M
     NUM_BLOCK_N = N // BLOCK_N
-    
+
     class SpatialTileScheduler(TileSchedulerBase):
         @staticmethod
         def int_var(name):
@@ -166,16 +183,16 @@ def test_basic():
                     self.type[0] = 1
                     self.linear_idx[0] = bx - self.division
                 self._update_current_m_n_idx()
-            
+
         @T.macro
-        def wait(self, evt: Semaphore, *coord, wait_level="cta", mask=0xffffffff):
+        def wait(self, evt: Semaphore, *coord, wait_level="cta", mask=0xFFFFFFFF):
             evt.semaphore_wait(*coord, level=wait_level, mask=mask)
-            
+
         @T.macro
-        def notify(self, evt: Semaphore, notify_num, func_notify, scope="cta", scope_id=0):        
+        def notify(self, evt: Semaphore, notify_num, func_notify, scope="cta", scope_id=0):
             with T.cta():
                 tid = T.thread_id([NUM_THREADS], parent="cta")
-                T.cuda.block_sync()
+                T.cuda.cta_sync()
                 if tid < notify_num:
                     rank, *coord = func_notify(tid)
                     evt.semaphore_notify(*coord, rank=rank)
@@ -284,12 +301,12 @@ def test_basic():
                 R.output(C)
             return C
     # fmt: on
-    fused_naive_mod = relax.transform.StaticHorizontalFusion("mega_kernel", SpatialTileScheduler, Semaphore, "mega_kernel_")(
-        Before
-    )
-    fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion("mega_kernel", RoundRobinStaticTileScheduler, Semaphore, "mega_kernel_")(
-        Before
-    )
+    fused_naive_mod = relax.transform.StaticHorizontalFusion(
+        "mega_kernel", SpatialTileScheduler, Semaphore, "mega_kernel_"
+    )(Before)
+    fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion(
+        "mega_kernel", RoundRobinStaticTileScheduler, Semaphore, "mega_kernel_"
+    )(Before)
 
     # testing correctness
     A_np = np.random.randn(M, N).astype(np.float32)
@@ -300,18 +317,24 @@ def test_basic():
 
     # we initialize event on host instead of device because of Tp.fill not correctly implemented
     with target:
-        sem_tvm = tvm.runtime.tensor(np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV)
+        sem_tvm = tvm.runtime.tensor(
+            np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
+        )
         fused_naive_mod = tvm.compile(fused_naive_mod, target=target, tir_pipeline="tirp")
         vm = tvm.relax.VirtualMachine(fused_naive_mod, DEV)
         C_tvm_naive_fused = vm["mega_kernel"](A_tvm, sem_tvm)
         ret_naive_fused = C_tvm_naive_fused.numpy()
-        
-        sem_tvm = tvm.runtime.tensor(np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV)
-        fused_static_scheduler_mod = tvm.compile(fused_static_scheduler_mod, target=target, tir_pipeline="tirp")
+
+        sem_tvm = tvm.runtime.tensor(
+            np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
+        )
+        fused_static_scheduler_mod = tvm.compile(
+            fused_static_scheduler_mod, target=target, tir_pipeline="tirp"
+        )
         vm = tvm.relax.VirtualMachine(fused_static_scheduler_mod, DEV)
         C_tvm_static_scheduler_fused = vm["mega_kernel"](A_tvm, sem_tvm)
         ret_static_scheduler_fused = C_tvm_static_scheduler_fused.numpy()
-        
+
         ret_std = np.sum(A_np, axis=1, keepdims=True)
         tvm.testing.assert_allclose(ret_naive_fused, ret_std, rtol=1e-3, atol=1e-3)
         tvm.testing.assert_allclose(ret_static_scheduler_fused, ret_std, rtol=1e-3, atol=1e-3)
@@ -422,9 +445,9 @@ def test_extra_args():
                 R.output(C)
             return C
     # fmt: on
-    fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion("mega_kernel", RoundRobinStaticTileScheduler, Semaphore, "mega_kernel_")(
-        Before
-    )
+    fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion(
+        "mega_kernel", RoundRobinStaticTileScheduler, Semaphore, "mega_kernel_"
+    )(Before)
 
     # testing correctness
     A_np = np.random.randn(M, N).astype(np.float32)
@@ -437,12 +460,16 @@ def test_extra_args():
 
     # we initialize event on host instead of device because of Tp.fill not correctly implemented
     with target:
-        sem_tvm = tvm.runtime.tensor(np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV)
-        fused_static_scheduler_mod = tvm.compile(fused_static_scheduler_mod, target=target, tir_pipeline="tirp")
+        sem_tvm = tvm.runtime.tensor(
+            np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
+        )
+        fused_static_scheduler_mod = tvm.compile(
+            fused_static_scheduler_mod, target=target, tir_pipeline="tirp"
+        )
         vm = tvm.relax.VirtualMachine(fused_static_scheduler_mod, DEV)
         C_tvm_static_scheduler_fused = vm["mega_kernel"](A_tvm, sem_tvm, P_tvm)
         ret_static_scheduler_fused = C_tvm_static_scheduler_fused.numpy()
-        
+
         ret_std = np.sum(A_np, axis=1, keepdims=True)
         tvm.testing.assert_allclose(ret_static_scheduler_fused, ret_std, rtol=1e-3, atol=1e-3)
 
