@@ -66,9 +66,6 @@ class GateUpSiluTile(GemmTile):
         shard=((GemmTile.TMEM_PIPE_DEPTH, GemmTile.EPI_TILE, GemmTile.MMA_N // 2), (GemmTile.EPI_TILE * GemmTile.MMA_N // 2, GemmTile.MMA_N // 2, 1))
     )
 
-    def __init__(self, N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, prefetch_on=False, profiler_on=False):
-        super().__init__(N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, prefetch_on=prefetch_on, profiler_on=profiler_on)
-
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory
@@ -168,7 +165,7 @@ class GateUpSiluTile(GemmTile):
                 # tmem -> rf (ld) -> smem
                 for ki in T.unroll(self.EPI_TILE // self.TMEM_LD_SIZE):
                     T.ptx.tcgen05.ld(
-                        0 + self.tmem_idx * self.MMA_M + ko * self.EPI_TILE,
+                        0 + self.tmem_idx * self.M_pad_size + ko * self.EPI_TILE,
                         warp_id * 32,
                         ki * self.TMEM_LD_SIZE,
                         "32x32b",
@@ -206,7 +203,7 @@ class GateUpSiluTile(GemmTile):
                         self.output_smem.ptr_to([self.stage, 0, 0]),
                         self.output_tensor_map,
                         n_idx * self.BLK_N // 2,
-                        m_idx * self.BLK_M + ko * self.EPI_TILE,
+                        m_idx * self.M_pad_size + ko * self.EPI_TILE,
                     )
                     T.ptx.cp_async.bulk.commit_group()
             if lane_id == 0 and warp_id == 0:

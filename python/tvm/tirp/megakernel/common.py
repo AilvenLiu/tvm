@@ -40,6 +40,7 @@ class JobType(Enum):
     MOE_SILU_MULTIPLY = 23
     MOE_GROUP_GEMM_DOWN = 24
     MOE_TOPK_REDUCE = 25
+    MOE_GROUP_GEMM_GATE_UP_SILU = 26
 
     # end
     END = 31
@@ -392,6 +393,7 @@ class ProfileEventType(Enum):
     EP_DISPATCH_RECV = 48
     EP_COMBINE_SEND = 49
     EP_COMBINE_RECV = 50
+    GROUP_GEMM_GATE_UP_SILU = 51
 
 
 
@@ -447,6 +449,7 @@ event_type_names = [
     "EP_DISPATCH_RECV",
     "EP_COMBINE_SEND",
     "EP_COMBINE_RECV",
+    "GROUP_GEMM_GATE_UP_SILU",
 ]
 
 

@@ -317,6 +317,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         num_valid_tokens_global,
         num_tokens_post_pad_global,
         unfused,
+        down_proj_task_size,
         is_dynamic_sch,
     ):
         with T.cta():
@@ -329,22 +330,23 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     ), "warpgroup", "warpgroup"
                 )
             wait_idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
-            self.tile_scheduler.wait(self.evt_silu_mul, wait_idx, wait_level="warp")
+            self.tile_scheduler.wait(self.evt_group_gemm_gate_up, wait_idx, wait_level="warp")
             if (
                 is_dynamic_sch
                 or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE
             ):
-                self.run_tile(
-                    self.group_gemm_down,
-                    self.tile_scheduler.m_idx,
-                    self.tile_scheduler.n_idx,
-                    self.tile_scheduler.k_idx,
-                    expert_ids_global,
-                    topk_weights_flattened,
-                    sorted_token_ids_global,
-                    num_valid_tokens_global,
-                    self.profiler,
-                )
+                for i in range(down_proj_task_size):
+                    self.run_tile(
+                        self.group_gemm_down,
+                        self.tile_scheduler.m_idx,
+                        self.tile_scheduler.n_idx * down_proj_task_size + i,
+                        self.tile_scheduler.k_idx,
+                        expert_ids_global,
+                        topk_weights_flattened,
+                        sorted_token_ids_global,
+                        num_valid_tokens_global,
+                        self.profiler,
+                    )
             self.tile_scheduler.notify(self.evt_group_gemm_down, 1, lambda notify_idx: (-1, 0), scope="warpgroup", scope_id=0)
 
     @T.macro
@@ -466,6 +468,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         exec_head,
         exec_tail,
         BLK_M,
+        down_proj_task_size,
         low_batch,
         unfused,
         Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]],
@@ -530,7 +533,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             gate_weight_global,
             gating_output_global,
         )
-        self.group_gemm_gate_up.set_tensor_map(
+        self.group_gemm_gate_up_silu.set_tensor_map(
             [
                 A_tensor_map_grp_gate_up_128,
                 A_tensor_map_grp_gate_up_64,
@@ -544,7 +547,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             ],
             reordered_hidden_state_global,
             grp_gate_up_weight_global,
-            gate_up_output_global,
+            silu_mul_output_global,
         )
         self.group_gemm_down.set_tensor_map(
             [A_tensor_map_grp_down_128, A_tensor_map_grp_down_64, A_tensor_map_grp_down_32],
@@ -723,6 +726,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             topk_weights_global,
                             topk_indices_global,
                             is_dynamic_sch,
+                            renormalize=True
                         )
                     elif self.tile_scheduler.task_type == JobType.MOE_ALIGN.value:
                         self.task_impl_moe_align(
@@ -732,6 +736,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             num_tokens_post_pad_global,
                             cumsum_buffer_global,
                             num_valid_tokens_global,
+                            down_proj_task_size,
                             is_dynamic_sch,
                         )
                     elif self.tile_scheduler.task_type == JobType.MOE_COUNT_AND_SORT.value:
@@ -744,23 +749,15 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             num_tokens_post_pad_global,
                             is_dynamic_sch,
                         )
-                    elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_GATE_UP.value:
-                        self.task_impl_moe_group_gemm_gate_up(
+                    elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_GATE_UP_SILU.value:
+                        self.task_impl_moe_group_gemm_gate_up_silu(
                             topk_weights_flattened,
                             sorted_token_ids_global,
                             expert_ids_global,
                             num_valid_tokens_global,
                             num_tokens_post_pad_global,
                             unfused,
-                            is_dynamic_sch,
-                        )
-                    elif self.tile_scheduler.task_type == JobType.MOE_SILU_MULTIPLY.value:
-                        self.task_impl_moe_silu_mul(
-                            gate_up_output_global,
-                            silu_mul_output_global,
-                            sorted_token_ids_global,
-                            num_tokens_post_pad_global,
-                            unfused,
+                            down_proj_task_size,
                             is_dynamic_sch,
                         )
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_DOWN.value:
@@ -772,6 +769,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             num_valid_tokens_global,
                             num_tokens_post_pad_global,
                             unfused,
+                            down_proj_task_size,
                             is_dynamic_sch,
                         )
                     elif self.tile_scheduler.task_type == JobType.MLP_ADD_RMS_NORM.value:
@@ -987,7 +985,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             queue_tail_global = T.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
             
             @T.macro
-            def run(BLK_M, low_batch):
+            def run(BLK_M, low_batch, down_proj_task_size):
                 self.fused_body(
                     batch_size, hidden_state_global, residual_global, output_global,
                     qkv_proj_weight_global, o_proj_weight_global, q_rms_weight_global, k_rms_weight_global,
@@ -1009,16 +1007,17 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global,
                     etensor_group_gemm_down_global, etensor_end_global,
                     profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global,
-                    BLK_M, low_batch, False,
+                    BLK_M, down_proj_task_size, low_batch, False,
                     dynamic_scheduler.Semaphore, dynamic_scheduler.DynamicTileScheduler
                 )
-            
-            if batch_size <= 32:
-                run(32, True)
+            if batch_size <= 4:
+                run(32, True, 1)
+            elif batch_size <= 32:
+                run(32, True, 4)
             elif batch_size <= 64:
-                run(64, True)
+                run(64, True, 4)
             else:
-                run(128, True)
+                run(128, True, 4)
         # fmt: on
         return main
 
@@ -1233,7 +1232,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global,
                     etensor_group_gemm_down_global, None,
                     profiler_buffer, exec_queue, None, None, None,
-                    BLK_M, low_batch, False,
+                    BLK_M, 1, low_batch, False,
                     static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
                 )
             
@@ -1513,6 +1512,14 @@ def prepare_data(batch_size, seq_len, mk: MegaKernelMOEFullLayer):
     arg_dict["grp_up_gate_weight"] = torch.cat(
         (w1[:, mk.INTERMEDIATE_SIZE :, :], w1[:, : mk.INTERMEDIATE_SIZE, :]), dim=1
     ).contiguous()
+    new_order_indices = np.stack(
+        (
+            np.arange(mk.INTERMEDIATE_SIZE).reshape(-1, 16),
+            np.arange(mk.INTERMEDIATE_SIZE, mk.INTERMEDIATE_SIZE * 2).reshape(-1, 16),
+        ),
+        axis=1,
+    ).reshape(-1)
+    arg_dict["shuffled_grp_gate_up_weight"] = arg_dict["grp_gate_up_weight"][:, new_order_indices, :]
 
     arg_dict["grp_down_weight"] = _correct_weight_tensor_view(
         torch.zeros(
@@ -1683,7 +1690,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                         work_arg_dict["mlp_add_rms_weight"],
                         # MoE weights
                         work_arg_dict["gate_weight"],
-                        work_arg_dict["grp_gate_up_weight"],
+                        work_arg_dict["shuffled_grp_gate_up_weight"],
                         work_arg_dict["grp_down_weight"],
                         # Attention cache and plan
                         work_arg_dict["cos_sin_cache"],
@@ -1768,7 +1775,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                         work_arg_dict["mlp_add_rms_weight"],
                         # MoE weights
                         work_arg_dict["gate_weight"],
-                        work_arg_dict["grp_gate_up_weight"],
+                        work_arg_dict["shuffled_grp_gate_up_weight"],
                         work_arg_dict["grp_down_weight"],
                         # Attention cache and plan
                         work_arg_dict["cos_sin_cache"],

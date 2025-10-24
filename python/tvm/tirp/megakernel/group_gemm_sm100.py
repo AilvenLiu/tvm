@@ -2,7 +2,7 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.megakernel.common import ceildiv, F16_BYTES, F32_BYTES, KernelConfig, SmemManager
-
+from tvm.tirp.megakernel.gate_up_silu import GateUpSiluTile
 from tvm.tirp.megakernel.gemm import GemmTile, trap_when_assert_failed, float22half2
 from tvm.tirp.bench.utils import CudaProfiler
 
@@ -231,3 +231,45 @@ class GroupGEMMTile(GemmTile):
                 self.set_BLK_M(128)
                 GemmTile._run(self, m_idx, n_idx, k_idx, profiler)
             self.smem_manager.advance()
+
+class GroupGEMMSiluTile(GroupGEMMTile, GateUpSiluTile):
+    def _alloc_buffer(self, smem_manager: SmemManager):
+        self.smem_manager = smem_manager
+        # alloc shared memory
+        self.A_smem = smem_manager.alloc(
+            (self.SMEM_PIPE_DEPTH, self.MAX_BLK_M, self.BLK_K),
+            self.a_type,
+            layout=self.A_layout,
+            align=1024,
+            split=self.SMEM_PIPE_DEPTH,
+            method="exclusive",
+        ).buffer
+        self.B_smem = smem_manager.alloc(
+            (self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K),
+            self.b_type,
+            layout=self.B_layout,
+            align=1024,
+            split=self.SMEM_PIPE_DEPTH,
+            method="exclusive",
+        ).buffer
+        self.output_smem = smem_manager.alloc(
+            (self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N // 2),
+            "float16",
+            layout=self.D_layout,
+            align=1024,
+            method="exclusive",
+        ).buffer
+        
+    @T.macro
+    def _init_A_and_output_tensor_maps(self, BLK_M):
+        A_tensor_map = T.meta_var(self.A_tensor_maps[BLK_M])
+        output_tensor_map = T.meta_var(self.output_tensor_maps[BLK_M])
+        T.call_packed("runtime.cuTensorMapEncodeTiled", A_tensor_map, self.a_type, 2, self.A.data,
+                      self.K, self.M, self.K * F16_BYTES, self.BLK_K, BLK_M, 1, 1, 0, self.SWIZZLE, 0, 0)
+        if not self.acc_output:
+            T.call_packed("runtime.cuTensorMapEncodeTiled", output_tensor_map, self.out_type, 2, self.output.data,
+                        self.N // 2, self.M, self.N // 2 * F16_BYTES, self.MMA_N // 2, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
+            
+    @T.macro
+    def _consumer_wg(self, m_idx, n_idx, k_idx, profiler: CudaProfiler):
+        GateUpSiluTile._consumer_wg(self, m_idx, n_idx, k_idx, profiler)

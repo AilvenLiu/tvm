@@ -24,7 +24,7 @@ from tvm.tirp.megakernel.split_silu_multiply import SiluMultiplyMOETile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
 from tvm.tirp.megakernel.topk_softmax import TopkSoftmaxTile
 from tvm.tirp.megakernel.moe_align import MOEAlignTile, CountAndSortExpertTokens
-from tvm.tirp.megakernel.group_gemm_sm100 import GroupGEMMTile
+from tvm.tirp.megakernel.group_gemm_sm100 import GroupGEMMTile, GroupGEMMSiluTile
 from tvm.tirp.megakernel import static_scheduler, dynamic_scheduler
 from tvm.tirp.megakernel.support import (
     generate_event_tensor_moe,
@@ -50,9 +50,7 @@ from triton import language as tl
 
 # TODO: fix abnormal slowness of batch-attn on the first tile
 
-
 class MegaKernelMOE(MegaKernelWrapper):
-
 
     MOE_M_PAD_SIZE = 128
 
@@ -89,8 +87,8 @@ class MegaKernelMOE(MegaKernelWrapper):
             CountAndSortExpertTokens(numel, self.HIDDEN_SIZE, self.NUM_EXPERTS_PER_TOK),
             ProfileEventType.COUNT_AND_SORT,
         )
-        self.group_gemm_gate_up = self._add_tile(
-            GroupGEMMTile(
+        self.group_gemm_gate_up_silu = self._add_tile(
+            GroupGEMMSiluTile(
                 self.INTERMEDIATE_SIZE * 2,
                 self.HIDDEN_SIZE,
                 self.NUM_EXPERTS,
@@ -100,14 +98,8 @@ class MegaKernelMOE(MegaKernelWrapper):
                 "float16",
                 low_batch=low_batch,
             ),
-            ProfileEventType.GROUP_GEMM_GATE_UP,
+            ProfileEventType.GROUP_GEMM_GATE_UP_SILU,
         )
-        self.silu_mul = self._add_tile(
-            SiluMultiplyMOETile(
-                batch_size, self.INTERMEDIATE_SIZE, numel, self.MOE_M_PAD_SIZE, "float16"
-            ),
-            ProfileEventType.SILU_MUL,
-        )  # TODO: check if this is correct
         self.group_gemm_down = self._add_tile(
             GroupGEMMTile(
                 self.HIDDEN_SIZE,
@@ -126,12 +118,11 @@ class MegaKernelMOE(MegaKernelWrapper):
             MOETopKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.NUM_EXPERTS_PER_TOK),
             ProfileEventType.TOPK_REDUCE,
         )
-        
+
     def set_tiles(self, batch_size, low_batch):
         self.tile_attr = {}
         self.class_list = set()
         self._set_tiles(batch_size, low_batch)
-       
 
     def set_events(self, Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]], etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global, etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global):
         self.evt_gating = Semaphore(-1, etensor_gating_global, decrement=True, use_nvshmem=self.world_size > 1)
@@ -141,14 +132,13 @@ class MegaKernelMOE(MegaKernelWrapper):
         self.evt_group_gemm_gate_up = Semaphore(-1, etensor_group_gemm_gate_up_global, decrement=True, use_nvshmem=self.world_size > 1)
         self.evt_silu_mul = Semaphore(-1, etensor_silu_mul_global, decrement=True, use_nvshmem=self.world_size > 1)
         self.evt_group_gemm_down = Semaphore(-1, etensor_group_gemm_down_global, decrement=True, use_nvshmem=self.world_size>1)
-        
-        
+
     def _add_tile(self, tile, profiler_event_type, predicate=True):
         self.tile_attr[tile] = (profiler_event_type, predicate)
         subclass = GroupGEMMTile if isinstance(tile, GemmTile) else tile.__class__
         self.class_list.add(subclass)
         return tile
-        
+
     @T.macro
     def task_impl_moe_gating(self, is_dynamic_sch):
         with T.cta():
@@ -162,9 +152,9 @@ class MegaKernelMOE(MegaKernelWrapper):
                 )
             self.run_tile(self.gate, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
             self.tile_scheduler.notify(self.evt_gating, 1, lambda notify_idx: (-1, 0), scope="warpgroup", scope_id=0)
-    
+
     @T.macro
-    def task_impl_moe_topk_softmax(self, gating_output_global, topk_weights_global, topk_indices_global, is_dynamic_sch):
+    def task_impl_moe_topk_softmax(self, gating_output_global, topk_weights_global, topk_indices_global, is_dynamic_sch, renormalize=True):
         with T.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
@@ -175,11 +165,11 @@ class MegaKernelMOE(MegaKernelWrapper):
                     ), "thread", "thread"
                 )
             self.tile_scheduler.wait(self.evt_gating, 0, wait_level="cta")
-            self.run_tile(self.topk_softmax, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gating_output_global, topk_weights_global, topk_indices_global, renormalize=True)
+            self.run_tile(self.topk_softmax, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gating_output_global, topk_weights_global, topk_indices_global, renormalize=renormalize)
             self.tile_scheduler.notify(self.evt_topk_softmax, 1, lambda notify_idx: (-1, 0), scope="cta")
-    
+
     @T.macro
-    def task_impl_moe_align(self, topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global, is_dynamic_sch):
+    def task_impl_moe_align(self, topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global, down_proj_task_size, is_dynamic_sch):
         with T.cta():
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
@@ -195,9 +185,9 @@ class MegaKernelMOE(MegaKernelWrapper):
             T.cuda.cta_sync()
             if tid == 0:
                 if is_dynamic_sch:
-                    self.evt_group_gemm_down.sem[0] = (self.evt_group_gemm_down.base + 1) * (num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE) * (self.HIDDEN_SIZE // GroupGEMMTile.BLK_N)
+                    self.evt_group_gemm_down.sem[0] = (self.evt_group_gemm_down.base + 1) * (num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE) * (self.HIDDEN_SIZE // GroupGEMMTile.BLK_N // down_proj_task_size)
             self.tile_scheduler.notify(self.evt_moe_align, 1, lambda notify_idx: (-1, 0), scope="thread")
-                
+
     @T.macro
     def task_impl_moe_count_and_sort(self, topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global, num_tokens_post_pad_global, is_dynamic_sch):
         with T.cta():
@@ -207,49 +197,32 @@ class MegaKernelMOE(MegaKernelWrapper):
                     self.evt_count_and_sort, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
                         -1, num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE * n_axis_len,
-                        lambda push_idx: (JobType.MOE_GROUP_GEMM_GATE_UP.value, push_idx // n_axis_len, push_idx % n_axis_len, 0)
+                        lambda push_idx: (JobType.MOE_GROUP_GEMM_GATE_UP_SILU.value, push_idx // n_axis_len, push_idx % n_axis_len, 0)
                     ), "cta", "cta"
                 )
             self.tile_scheduler.wait(self.evt_moe_align, 0, wait_level="cta")
             self.run_tile(self.count_and_sort_expert_tokens, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global)
             self.tile_scheduler.notify(self.evt_count_and_sort, 1, lambda notify_idx: (-1, 0), scope="cta")
-        
+
     @T.macro
-    def task_impl_moe_group_gemm_gate_up(self, topk_weights_flattened, sorted_token_ids_global, expert_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, is_dynamic_sch):
+    def task_impl_moe_group_gemm_gate_up_silu(self, topk_weights_flattened, sorted_token_ids_global, expert_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch):
         with T.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_group_gemm_gate_up, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx),
                     lambda trigger_idx: (
-                        -1, self.INTERMEDIATE_SIZE // SiluMultiplyMOETile.TILE_SIZE,
-                        lambda push_idx: (JobType.MOE_SILU_MULTIPLY.value, self.tile_scheduler.m_idx, push_idx, 0)
+                        -1, self.HIDDEN_SIZE // GroupGEMMTile.BLK_N // down_proj_task_size,
+                        lambda push_idx: (JobType.MOE_GROUP_GEMM_DOWN.value, self.tile_scheduler.m_idx, push_idx, 0)
                     ), "warp", "warp"
                 )
             self.tile_scheduler.wait(self.evt_count_and_sort, 0, wait_level="warp")
             if is_dynamic_sch or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
-                self.run_tile(self.group_gemm_gate_up, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)    
+                self.run_tile(self.group_gemm_gate_up_silu, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)    
             idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
             self.tile_scheduler.notify(self.evt_group_gemm_gate_up, 1, lambda notify_idx: (-1, idx), scope="warpgroup", scope_id=0)
-        
-    @T.macro
-    def task_impl_moe_silu_mul(self, gate_up_output_global, silu_mul_output_global, sorted_token_ids_global, num_tokens_post_pad_global, unfused, is_dynamic_sch):
-        with T.cta():
-            if is_dynamic_sch:
-                self.tile_scheduler.pre_notify_and_push(
-                    self.evt_silu_mul, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx),
-                    lambda trigger_idx: (
-                        -1, self.HIDDEN_SIZE // GroupGEMMTile.BLK_N,
-                        lambda push_idx: (JobType.MOE_GROUP_GEMM_DOWN.value, self.tile_scheduler.m_idx, push_idx, 0)
-                    ), "warp", "warp"
-                )
-            notify_wait_idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
-            self.tile_scheduler.wait(self.evt_group_gemm_gate_up, notify_wait_idx, wait_level="cta")
-            if is_dynamic_sch or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
-                self.run_tile(self.silu_mul, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, gate_up_output_global, silu_mul_output_global, sorted_token_ids_global)
-            self.tile_scheduler.notify(self.evt_silu_mul, 1, lambda notify_idx: (-1, notify_wait_idx), scope="cta")
 
     @T.macro
-    def task_impl_moe_group_gemm_down(self, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, is_dynamic_sch):
+    def task_impl_moe_group_gemm_down(self, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch):
         with T.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
@@ -260,9 +233,10 @@ class MegaKernelMOE(MegaKernelWrapper):
                     ), "warp", "warp"
                 )
             wait_idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
-            self.tile_scheduler.wait(self.evt_silu_mul, wait_idx, wait_level="warp")
+            self.tile_scheduler.wait(self.evt_group_gemm_gate_up, wait_idx, wait_level="warp")
             if is_dynamic_sch or self.tile_scheduler.m_idx < num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE:
-                self.run_tile(self.group_gemm_down, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
+                for i in range(down_proj_task_size):
+                    self.run_tile(self.group_gemm_down, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx * down_proj_task_size + i, self.tile_scheduler.k_idx, expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, self.profiler)
 
     # fmt: off
     @T.macro
@@ -299,6 +273,7 @@ class MegaKernelMOE(MegaKernelWrapper):
         exec_task,
         exec_head,
         exec_tail,
+        down_proj_task_size, # to amortize dynamic scheduling overhead
         low_batch,
         unfused,
         Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]],
@@ -326,7 +301,7 @@ class MegaKernelMOE(MegaKernelWrapper):
         self.set_tiles(batch_size, low_batch)
 
         self.gate.set_tensor_map(A_tensor_map_gate, B_tensor_map_gate, D_tensor_map_gate, hidden_state_global, gate_weight_global, gating_output_global)
-        self.group_gemm_gate_up.set_tensor_map([A_tensor_map_grp_gate_up_128, A_tensor_map_grp_gate_up_64, A_tensor_map_grp_gate_up_32], B_tensor_map_grp_gate_up, [D_tensor_map_grp_gate_up_128, D_tensor_map_grp_gate_up_64, D_tensor_map_grp_gate_up_32], reordered_hidden_state_global, grp_gate_up_weight_global, gate_up_output_global)
+        self.group_gemm_gate_up_silu.set_tensor_map([A_tensor_map_grp_gate_up_128, A_tensor_map_grp_gate_up_64, A_tensor_map_grp_gate_up_32], B_tensor_map_grp_gate_up, [D_tensor_map_grp_gate_up_128, D_tensor_map_grp_gate_up_64, D_tensor_map_grp_gate_up_32], reordered_hidden_state_global, grp_gate_up_weight_global, silu_mul_output_global)
         self.group_gemm_down.set_tensor_map([A_tensor_map_grp_down_128, A_tensor_map_grp_down_64, A_tensor_map_grp_down_32], B_tensor_map_grp_down, [D_tensor_map_grp_down_128, D_tensor_map_grp_down_64, D_tensor_map_grp_down_32], silu_mul_output_global, grp_down_weight_global, topk_reduce_output_global)
 
         self.host_init_all()
@@ -360,17 +335,15 @@ class MegaKernelMOE(MegaKernelWrapper):
                     if self.tile_scheduler.task_type == JobType.MOE_GATING.value:
                         self.task_impl_moe_gating(is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.MOE_TOPK_SOFTMAX.value:
-                        self.task_impl_moe_topk_softmax(gating_output_global, topk_weights_global, topk_indices_global, is_dynamic_sch)
+                        self.task_impl_moe_topk_softmax(gating_output_global, topk_weights_global, topk_indices_global, is_dynamic_sch, renormalize=False)
                     elif self.tile_scheduler.task_type == JobType.MOE_ALIGN.value:
-                        self.task_impl_moe_align(topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global, is_dynamic_sch)
+                        self.task_impl_moe_align(topk_ids_flattened, sorted_token_ids_global, expert_ids_global, num_tokens_post_pad_global, cumsum_buffer_global, num_valid_tokens_global, down_proj_task_size, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.MOE_COUNT_AND_SORT.value:
                         self.task_impl_moe_count_and_sort(topk_ids_flattened, sorted_token_ids_global, cumsum_buffer_global, hidden_state_global, reordered_hidden_state_global, num_tokens_post_pad_global, is_dynamic_sch)
-                    elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_GATE_UP.value:
-                        self.task_impl_moe_group_gemm_gate_up(topk_weights_flattened, sorted_token_ids_global, expert_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, is_dynamic_sch)
-                    elif self.tile_scheduler.task_type == JobType.MOE_SILU_MULTIPLY.value:
-                        self.task_impl_moe_silu_mul(gate_up_output_global, silu_mul_output_global, sorted_token_ids_global, num_tokens_post_pad_global, unfused, is_dynamic_sch)
+                    elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_GATE_UP_SILU.value:
+                        self.task_impl_moe_group_gemm_gate_up_silu(topk_weights_flattened, sorted_token_ids_global, expert_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.MOE_GROUP_GEMM_DOWN.value:
-                        self.task_impl_moe_group_gemm_down(expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, is_dynamic_sch)
+                        self.task_impl_moe_group_gemm_down(expert_ids_global, topk_weights_flattened, sorted_token_ids_global, num_valid_tokens_global, num_tokens_post_pad_global, unfused, down_proj_task_size, is_dynamic_sch)
                     smem_manager.exit_tile_runtime()
                     self.tile_scheduler.next_tile()
                 if self.profiler_on:
@@ -477,7 +450,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                     cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
                     etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global,
-                    profiler_buffer, exec_queue, None, None, None, low_batch, unfused,
+                    profiler_buffer, exec_queue, None, None, None, 1, low_batch, unfused, 
                     static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
                 )
 
@@ -583,7 +556,7 @@ class MegaKernelMOE(MegaKernelWrapper):
             queue_tail_global = T.match_buffer(queue_tail_ptr, [1], "int32", scope="global", offset_factor=1)
 
             @T.macro
-            def run(low_batch, dynamic_gemm_size):
+            def run(low_batch, dynamic_gemm_size, down_proj_task_size):
                 num_valid_tokens = T.meta_var(num_valid_tokens_global if dynamic_gemm_size else None)
                 self.fused_body(
                     batch_size, hidden_state_global, residual_global, output_global, gate_weight_global, grp_gate_up_weight_global, grp_down_weight_global,
@@ -591,16 +564,18 @@ class MegaKernelMOE(MegaKernelWrapper):
                     cumsum_buffer_global, reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global, topk_reduce_output_global,
                     etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
                     etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global, etensor_group_gemm_down_global,
-                    profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, low_batch, False,
+                    profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global, down_proj_task_size, low_batch, False, 
                     dynamic_scheduler.Semaphore, dynamic_scheduler.DynamicTileScheduler
                 )
 
             if batch_size >= 2048:
-                run(low_batch=False, dynamic_gemm_size=True)
+                run(low_batch=False, dynamic_gemm_size=True, down_proj_task_size=4)
             elif batch_size >= 512:
-                run(low_batch=True, dynamic_gemm_size=True)
+                run(low_batch=True, dynamic_gemm_size=True, down_proj_task_size=4)
+            elif batch_size >= 4:
+                run(low_batch=True, dynamic_gemm_size=False, down_proj_task_size=4)
             else:
-                run(low_batch=True, dynamic_gemm_size=False)
+                run(low_batch=True, dynamic_gemm_size=False, down_proj_task_size=1)
             # fmt: on
         return main
 
@@ -717,6 +692,14 @@ def prepare_data(batch_size, mk: MegaKernelMOE):
     arg_dict["grp_up_gate_weight"] = torch.cat(
         (w1[:, mk.INTERMEDIATE_SIZE :, :], w1[:, : mk.INTERMEDIATE_SIZE, :]), dim=1
     ).contiguous()
+    new_order_indices = np.stack(
+        (
+            np.arange(mk.INTERMEDIATE_SIZE).reshape(-1, 16),
+            np.arange(mk.INTERMEDIATE_SIZE, mk.INTERMEDIATE_SIZE * 2).reshape(-1, 16),
+        ),
+        axis=1,
+    ).reshape(-1)
+    arg_dict["shuffled_grp_gate_up_weight"] = arg_dict["grp_gate_up_weight"][:, new_order_indices, :]
 
     arg_dict["grp_down_weight"] = _correct_weight_tensor_view(
         torch.zeros(
@@ -801,7 +784,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
                         work_arg_dict["output"],
                         # weight
                         work_arg_dict["gate_weight"],
-                        work_arg_dict["grp_gate_up_weight"],
+                        work_arg_dict["shuffled_grp_gate_up_weight"],
                         work_arg_dict["grp_down_weight"],
                         # intermediate buffer
                         work_arg_dict[f"gating_output_{iter}"],
@@ -843,7 +826,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
                         work_arg_dict["output"],
                         # weight
                         work_arg_dict["gate_weight"],
-                        work_arg_dict["grp_gate_up_weight"],
+                        work_arg_dict["shuffled_grp_gate_up_weight"],
                         work_arg_dict["grp_down_weight"],
                         # intermediate buffer
                         work_arg_dict[f"gating_output_{iter}"],
@@ -947,7 +930,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
                 gating_output=gating_output,
                 topk_weights=std_arg_dict["topk_weights"],
                 topk_ids=std_arg_dict["topk_indices"],
-                renormalize=True,
+                renormalize=False,
             )
 
             out1 = torch.empty(
@@ -1053,7 +1036,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
                 gating_output=gating_output,
                 topk_weights=std_arg_dict["topk_weights"],
                 topk_ids=std_arg_dict["topk_indices"],
-                renormalize=True,
+                renormalize=False,
             )
             return fused_moe.cutlass_fused_moe(
                 std_arg_dict["hidden_state"],
@@ -1095,7 +1078,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
                 gating_output=gating_output,
                 topk_weights=std_arg_dict["topk_weights"],
                 topk_ids=std_arg_dict["topk_indices"],
-                renormalize=True,
+                renormalize=False,
             )
             out = fused_moe_sglang(
                 std_arg_dict["hidden_state"],

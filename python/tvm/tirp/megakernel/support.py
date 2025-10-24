@@ -245,10 +245,7 @@ def push_moe_tasks(central_queue, batch_size, config):
     )
     for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
         for n_idx in range(config["INTERMEDIATE_SIZE"] * 2 // GroupGEMMTile.BLK_N):
-            central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_GATE_UP.value))
-    for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
-        for n_idx in range(config["INTERMEDIATE_SIZE"] // SiluMultiplyMOETile.TILE_SIZE):
-            central_queue.append((m_idx, n_idx, 0, JobType.MOE_SILU_MULTIPLY.value))
+            central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_GATE_UP_SILU.value))
     for m_idx in range(max_num_tokens_padded // MOE_BLK_M):
         for n_idx in range(config["HIDDEN_SIZE"] // GroupGEMMTile.BLK_N):
             central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))

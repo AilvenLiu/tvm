@@ -91,6 +91,7 @@ enum class JobType : int32_t {
   kMoeSiluMultiply = 23,
   kMoeGroupGemmDown = 24,
   kMoeTopkReduce = 25,
+  kMoeGroupGemmGateUpSilu = 26,
   // end
   kEnd = 31,
 };

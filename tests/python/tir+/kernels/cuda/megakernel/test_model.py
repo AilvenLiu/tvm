@@ -123,8 +123,8 @@ def test(args):
     #        "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" is the weights converted with interwoven gate_up_weight
     use_mega_weights = (
         mk_config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"][args.tp_size] == 1
-        if "GATE_UP_PROJ_SPLIT_K_FACTOR_DICT" in mk_config
-        else False
+        if "GATE_UP_PROJ_SPLIT_K_FACTOR_DICT" in mk_config 
+        else model_type == 1
     )
     LOAD_WEIGHTS = (
         f"/raid/catalyst/models/{args.model}-q0f16-MLC-mega"

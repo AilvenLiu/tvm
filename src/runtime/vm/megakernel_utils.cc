@@ -190,12 +190,7 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
             .cast<int>();
     for (int m_idx = 0; m_idx < max_num_tokens_padded / kMoeBlkM; ++m_idx) {
       for (int n_idx = 0; n_idx < (intermediate_size * 2) / kGroupGemmBlkN; ++n_idx) {
-        f_push_task(m_idx, n_idx, 0, JobType::kMoeGroupGemmGateUp);
-      }
-    }
-    for (int m_idx = 0; m_idx < max_num_tokens_padded / kMoeBlkM; ++m_idx) {
-      for (int n_idx = 0; n_idx < intermediate_size / kSiluMultiplyMoeTileSize; ++n_idx) {
-        f_push_task(m_idx, n_idx, 0, JobType::kMoeSiluMultiply);
+        f_push_task(m_idx, n_idx, 0, JobType::kMoeGroupGemmGateUpSilu);
       }
     }
     for (int m_idx = 0; m_idx < max_num_tokens_padded / kMoeBlkM; ++m_idx) {
