@@ -76,11 +76,11 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
   bool is_moe = config.count("NUM_EXPERTS");
   bool split_kv = attn_task_num > num_kv_heads * batch_size;
 
-  Tensor exec_queue_host = Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks}, DataType::Int(32),
+  Tensor exec_queue_host = Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks}, DataType::UInt(32),
                                          preferred_host_device);
   Tensor exec_queue_device =
-      Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks}, DataType::Int(32), device);
-  int32_t* exec_queue_host_data = static_cast<int32_t*>(exec_queue_host->data);
+      Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks}, DataType::UInt(32), device);
+  uint32_t* exec_queue_host_data = static_cast<uint32_t*>(exec_queue_host->data);
 
   // Generate round-robin static execution queue
   std::vector<int32_t> task_counts(kNumSM, 0);
@@ -285,10 +285,10 @@ Array<Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
   NVTXScopedRange range("Generate execution queue");
   int elem_per_layer = kDyanmicTileSchedulerMaxTasks + 4;
   TVM_FFI_ICHECK(exec_queue_device_buf.dtype() == DataType::Int(32));
-  TVM_FFI_ICHECK(exec_queue_host_buf.dtype() == DataType::Int(32));
+  TVM_FFI_ICHECK(exec_queue_host_buf.dtype() == DataType::UInt(32));
   TVM_FFI_ICHECK(exec_queue_device_buf.Shape().Product() >= num_layers * elem_per_layer);
   TVM_FFI_ICHECK(exec_queue_host_buf.Shape().Product() >= num_layers * elem_per_layer);
-  int32_t* exec_queue_host_data = static_cast<int32_t*>(exec_queue_host_buf->data);
+  uint32_t* exec_queue_host_data = static_cast<uint32_t*>(exec_queue_host_buf->data);
   int num_tasks = 0;
   const auto f_get_config =
       tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");

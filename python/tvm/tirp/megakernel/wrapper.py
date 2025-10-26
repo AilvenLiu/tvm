@@ -73,9 +73,9 @@ class MegaKernelWrapper:
         self.SPLIT_O_PROJECT = self.SPLIT_O_PROJECT_DICT[tp_size] if self.SPLIT_O_PROJECT_DICT is not None else None
         self.GATE_UP_PROJ_SPLIT_K_FACTOR = self.GATE_UP_PROJ_SPLIT_K_FACTOR_DICT[tp_size] if self.GATE_UP_PROJ_SPLIT_K_FACTOR_DICT is not None else None
         self.DOWN_PROJ_SPLIT_K_FACTOR = self.DOWN_PROJ_SPLIT_K_FACTOR_DICT[tp_size] if self.DOWN_PROJ_SPLIT_K_FACTOR_DICT is not None else None
-        self.INTERMEDIATE_SIZE = self.INTERMEDIATE_SIZE_TP1 // tp_size
-        self.NUM_ATTENTION_HEADS = self.NUM_ATTENTION_HEADS_TP1 // tp_size
-        self.NUM_KEY_VALUE_HEADS = self.NUM_KEY_VALUE_HEADS_TP1 // tp_size
+        self.INTERMEDIATE_SIZE = self.INTERMEDIATE_SIZE_TP1 // tp_size if self.INTERMEDIATE_SIZE_TP1 is not None else None
+        self.NUM_ATTENTION_HEADS = self.NUM_ATTENTION_HEADS_TP1 // tp_size if self.NUM_ATTENTION_HEADS_TP1 is not None else None
+        self.NUM_KEY_VALUE_HEADS = self.NUM_KEY_VALUE_HEADS_TP1 // tp_size if self.NUM_KEY_VALUE_HEADS_TP1 is not None else None
         self.config = config
         self.tile_attr = {}
         self.class_list = set()

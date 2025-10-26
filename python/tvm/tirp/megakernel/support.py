@@ -260,7 +260,7 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler
     torch.cuda.nvtx.range_push("generate_exec_queue")
     if scheduler == "static":
         exec_queue = np.zeros(
-            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
+            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.uint32
         )
         central_queue = []
 

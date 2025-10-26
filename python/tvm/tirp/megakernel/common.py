@@ -46,33 +46,33 @@ class JobType(Enum):
     END = 31
 
 
-# every task info in exec queue will be squashed into 32bit:
-# task_type: [0:5], m_idx: [5:18], n_idx: [18:27], k_idx: [27:32]
+# task_type: [0:5], m_idx: [5:18], n_idx: [18:28], k_idx: [28:32]
 MAX_TASK_TYPE = 1 << 5
-MAX_M_IDX = 1 << 14
-MAX_N_IDX = 1 << 9
-MAX_K_IDX = 1 << 5
+MAX_M_IDX = 1 << 13
+MAX_N_IDX = 1 << 10
+MAX_K_IDX = 1 << 4
 def pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=True, debug=False):
     if host:
         if debug:
             assert task_type < MAX_TASK_TYPE and m_idx < MAX_M_IDX and n_idx < MAX_N_IDX and k_idx < MAX_K_IDX
-        return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 27)
+        return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)
     else:
         if debug:
             trap_when_assert_failed(task_type < MAX_TASK_TYPE)
             trap_when_assert_failed(m_idx < MAX_M_IDX)
             trap_when_assert_failed(n_idx < MAX_N_IDX)
             trap_when_assert_failed(k_idx < MAX_K_IDX)
-        return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 27)
+        return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)
 
 unpack_from_32bit_code = """
 __forceinline__ __device__ void unpack_from_32bit(int32_t task_info, int32_t* task_type_ptr, int32_t* m_idx_ptr, int32_t* n_idx_ptr, int32_t* k_idx_ptr) {
-    *task_type_ptr = task_info & 0b11111;
-    *m_idx_ptr = (task_info >> 5) & 0b1111111111111;
-    *n_idx_ptr = (task_info >> 18) & 0b111111111;
-    *k_idx_ptr = task_info >> 27;
+    *(unsigned int*)task_type_ptr = ((unsigned int)task_info & 0b11111);
+    *(unsigned int*)m_idx_ptr = (((unsigned int)task_info >> 5) & 0b11111111111111);
+    *(unsigned int*)n_idx_ptr = (((unsigned int)task_info >> 18) & 0b1111111111);
+    *(unsigned int*)k_idx_ptr = (((unsigned int)task_info >> 28));
 }
 """
+
 
 @T.macro
 def unpack_from_32bit(task_info, task_type_ptr, m_idx_ptr, n_idx_ptr, k_idx_ptr):

@@ -1076,7 +1076,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             etensor_end_global = T.match_buffer(etensor_end_ptr, [1], "int32", scope="global", offset_factor=1)
 
             # exec queue
-            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
+            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "uint32", scope="global")
 
             @T.macro
             def run(BLK_M):

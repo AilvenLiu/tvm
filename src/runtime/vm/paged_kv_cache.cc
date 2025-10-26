@@ -646,7 +646,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         f_empty({num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks + 4)});
     exec_queue_host_buf_ =
         Tensor::Empty({num_layers * (megakernel::kDyanmicTileSchedulerMaxTasks + 4)},
-                      DataType::Int(32), preferred_host_device);
+                      DataType::UInt(32), preferred_host_device);
 
     for (int d = 0; d < kPagedKVCacheMaxBlockDepth; ++d) {
       if (NeedKernelBeginForward()) {

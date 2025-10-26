@@ -97,18 +97,18 @@ enum class JobType : int32_t {
 };
 
 // every task info in exec queue will be squashed into 32bit:
-// task_type: [0:5], m_idx: [5:18], n_idx: [18:27], k_idx: [27:32]
-constexpr const int kMaxTaskType = 1 << 5;
-constexpr const int kMaxMIdx = 1 << 14;
-constexpr const int kMaxNIdx = 1 << 9;
-constexpr const int kMaxKIdx = 1 << 5;
+// task_type: [0:5], m_idx: [5:18], n_idx: [18:28], k_idx: [28:32]
+constexpr const unsigned int kMaxTaskType = 1 << 5;
+constexpr const unsigned int kMaxMIdx = 1 << 14;
+constexpr const unsigned int kMaxNIdx = 1 << 10;
+constexpr const unsigned int kMaxKIdx = 1 << 4;
 
-inline int32_t PackInto32bit(int32_t task_type, int32_t m_idx, int32_t n_idx, int32_t k_idx) {
+inline uint32_t PackInto32bit(int32_t task_type, int32_t m_idx, int32_t n_idx, int32_t k_idx) {
   CHECK_LT(task_type, kMaxTaskType);
   CHECK_LT(m_idx, kMaxMIdx);
   CHECK_LT(n_idx, kMaxNIdx);
   CHECK_LT(k_idx, kMaxKIdx);
-  return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 27);
+  return uint32_t(task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28));
 }
 
 ffi::Array<Tensor> GetEventTensorsOnLayer(ffi::Array<Tensor> etensors, int layer_id);

@@ -85,7 +85,7 @@ __forceinline__ __device__ bool tvm_builtin_ptx_mbarrier_try_wait(void* barrier,
 class GemmTile(Tile):
     SMEM_PIPE_DEPTH = 6
     TMEM_PIPE_DEPTH = 2
-    MAX_BLK_M, BLK_N, BLK_K = 128, 128, 64
+    MAX_BLK_M, MAX_BLK_N, BLK_N, BLK_K = 128, 128, 128, 64
     MMA_N, MMA_K = 128, 16
     EPI_TILE = 32
     TMEM_LD_SIZE = 8
@@ -93,7 +93,7 @@ class GemmTile(Tile):
     SWIZZLE = 3
     SMEM_SIZE = (
         SMEM_PIPE_DEPTH * MAX_BLK_M * BLK_K * F16_BYTES
-        + SMEM_PIPE_DEPTH * BLK_N * BLK_K * F16_BYTES
+        + SMEM_PIPE_DEPTH * MAX_BLK_N * BLK_K * F16_BYTES
         + TMEM_PIPE_DEPTH * EPI_TILE * MMA_N * F32_BYTES
         + 1024
     )
@@ -107,7 +107,7 @@ class GemmTile(Tile):
     )
     B_layout = T.ComposeLayout(
         T.SwizzleLayout(3, 3, 3, swizzle_inner=True),
-        T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_N, BLK_K), (BLK_N * BLK_K, BLK_K, 1))),
+        T.TileLayout(shard=((SMEM_PIPE_DEPTH, MAX_BLK_N, BLK_K), (MAX_BLK_N * BLK_K, BLK_K, 1))),
     )
     D_layout = T.TileLayout(
         shard=((TMEM_PIPE_DEPTH, EPI_TILE, MMA_N), (EPI_TILE * MMA_N, MMA_N, 1))
@@ -116,9 +116,10 @@ class GemmTile(Tile):
     # idx of current gemm tile (no matter which shape it is)
     tile_idx = None
 
-    def __init__(self, N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, out_type=None, use_tma_reduce=False, low_batch=True, prefetch_on=False, profiler_on=False):
+    def __init__(self, N, K, a_type, b_type, split_k_factor, BLK_M, MMA_M, out_type=None, use_tma_reduce=False, low_batch=True, blk_n=128, prefetch_on=False, profiler_on=False):
         super().__init__()
         self.BLK_M = BLK_M
+        self.BLK_N = blk_n
         self.MMA_M = MMA_M
         self.N = N
         self.K = K
@@ -152,7 +153,7 @@ class GemmTile(Tile):
             method="exclusive",
         ).buffer
         self.B_smem = smem_manager.alloc(
-            (self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K),
+            (self.SMEM_PIPE_DEPTH, self.MAX_BLK_N, self.BLK_K),
             self.b_type,
             layout=self.B_layout,
             align=1024,
@@ -249,13 +250,13 @@ class GemmTile(Tile):
         if self.split_k_factor > 1:
             if not self.use_tma_reduce:
                 T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 3, self.output.data,
-                            self.N, self.M, self.split_k_factor, self.N * F32_BYTES, self.N * self.M * F32_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 1, 1, 0, 0, 0, 0)
+                            self.N, self.M, self.split_k_factor, self.N * F32_BYTES, self.N * self.M * F32_BYTES, self.BLK_N, self.EPI_TILE, 1, 1, 1, 1, 0, 0, 0, 0)
             else:
                 T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data,
-                          self.N, self.M, self.N * F32_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
+                          self.N, self.M, self.N * F32_BYTES, self.BLK_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
         else:
             T.call_packed("runtime.cuTensorMapEncodeTiled", self.output_tensor_map, self.out_type, 2, self.output.data,
-                          self.N, self.M, self.N * F16_BYTES, self.MMA_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
+                          self.N, self.M, self.N * F16_BYTES, self.BLK_N, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
 
     # call by warp 7 (tmp load warp)
     @T.macro
