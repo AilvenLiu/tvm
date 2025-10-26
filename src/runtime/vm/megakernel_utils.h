@@ -62,7 +62,7 @@ constexpr const int kSemaphoreFactor = (1 << 16) + 1;
 constexpr const int kMaxSemaphore = 2147483647;
 // supported model names
 const std::unordered_map<int, std::string> kModelNames = {
-    {0, "qwen3_32b"}, {1, "qwen3_30b_a3b"}, {2, "qwen3_30b_a3b_unfused"}};
+    {0, "qwen3_32b"}, {1, "qwen3_30b_a3b"}, {2, "qwen3_30b_a3b_unfused"}, {3, "llama3_1b"}};
 
 enum class JobType : int32_t {
   kVReduceAppend = 0,

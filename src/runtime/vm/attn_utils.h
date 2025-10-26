@@ -1002,7 +1002,7 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     int num_qo_heads = config["NUM_ATTENTION_HEADS"].cast<int>() / tp_size;
     int num_kv_heads = config["NUM_KEY_VALUE_HEADS"].cast<int>() / tp_size;
     int qk_head_dim = config["HEAD_DIM"].cast<int>();
-    if (model_name == "qwen3_32b") {
+    if (model_name == "qwen3_32b" || model_name == "llama3_1b") {
       int down_proj_split_k_factor =
           config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"].cast<ffi::Map<int, int>>()[tp_size];
       TVM_FFI_ITVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);

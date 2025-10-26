@@ -4,6 +4,7 @@ import tvm
 
 qwen3_30b_a3b_config = {
     "MODEL_NAME": "qwen3_30b_a3b",
+    "TIE_WORD_EMBEDDINGS": False,
     "VOCAB_SIZE": 151936,
     "MAX_POSITION_EMBEDDINGS": 40960,
     "HIDDEN_SIZE": 2048,
@@ -23,6 +24,7 @@ qwen3_30b_a3b_config = {
 
 qwen3_32b_config = {
     "MODEL_NAME": "qwen3_32b",
+    "TIE_WORD_EMBEDDINGS": False,
     "VOCAB_SIZE": 151936,
     "MAX_POSITION_EMBEDDINGS": 40960,
     "HIDDEN_SIZE": 5120,
@@ -42,6 +44,7 @@ qwen3_32b_config = {
 
 llama3_1b_config = {
     "MODEL_NAME": "llama3_1b",
+    "TIE_WORD_EMBEDDINGS": True,
     "VOCAB_SIZE": 128256,
     "MAX_POSITION_EMBEDDINGS": 131072,
     "HIDDEN_SIZE": 2048,

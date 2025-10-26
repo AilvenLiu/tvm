@@ -51,6 +51,8 @@ class MegaKernelWrapper:
     def __init__(self, config: Dict, tp_size, profiler_on):
         self.tp_size = tp_size
         self.MODEL_NAME = config.get("MODEL_NAME", None)
+        self.TIE_WORD_EMBEDDINGS = config.get("TIE_WORD_EMBEDDINGS", None)
+        self.NUM_HIDDEN_LAYERS = config.get("NUM_HIDDEN_LAYERS", None)
         self.HIDDEN_SIZE = config.get("HIDDEN_SIZE", None)
         self.VOCAB_SIZE = config.get("VOCAB_SIZE", None)
         self.INTERMEDIATE_SIZE_TP1 = config.get("INTERMEDIATE_SIZE", None)

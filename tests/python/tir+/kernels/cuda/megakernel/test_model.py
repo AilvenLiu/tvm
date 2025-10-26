@@ -1,9 +1,9 @@
+import functools
 import json
+import random
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import List
-import random
-import functools
 
 import numpy as np
 import torch
@@ -15,6 +15,7 @@ from mlc_llm.compiler_pass.blas_dispatch import BLASDispatch
 from mlc_llm.compiler_pass.dispatch_kv_cache_creation import DispatchKVCacheCreation
 from mlc_llm.compiler_pass.fuse_add_norm import FuseAddRMSNorm
 from mlc_llm.compiler_pass.pipeline import _DebugDump
+from mlc_llm.model.llama.llama_model import LlamaConfig, LlamaForCausalLM
 from mlc_llm.model.qwen3.qwen3_model import Qwen3Config, Qwen3LMHeadModel
 from mlc_llm.model.qwen3_moe.qwen3_moe_model import Qwen3MoeConfig, Qwen3MoeForCausalLM
 from mlc_llm.nn.kv_cache import PagedKVCache
@@ -29,15 +30,22 @@ from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
-
-from tvm.tirp.megakernel.model_config import qwen3_32b_config, qwen3_30b_a3b_config
+from tvm.tirp.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
+from tvm.tirp.megakernel.model.qwen3_30b_a3b import (
+    get_qwen3_30b_a3b_megakernel_relax_mod,
+)
 from tvm.tirp.megakernel.model.qwen3_32b import get_qwen3_megakernel_relax_mod
-from tvm.tirp.megakernel.model.qwen3_30b_a3b import get_qwen3_30b_a3b_megakernel_relax_mod
-from .test_layer import MegaKernelDenseLayer
-from .test_moe_full_layer import MegaKernelMOEFullLayer
+from tvm.tirp.megakernel.model_config import (
+    llama3_1b_config,
+    qwen3_30b_a3b_config,
+    qwen3_32b_config,
+)
+
 from ..sm100a.test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
 from ..sm100a.test_rmsnorm import get_rmsnorm_kernel
 from ..sm100a.test_rope import get_cos_sin_cache_kernel
+from .test_layer import MegaKernelDenseLayer
+from .test_moe_full_layer import MegaKernelMOEFullLayer
 
 # pyright: reportInvalidTypeForm=false
 
@@ -65,7 +73,7 @@ def test(args):
             rms_norm_eps=mk_config["RMS_NORM_EPS"],
             rope_theta=mk_config["ROPE_THETA"],
             vocab_size=mk_config["VOCAB_SIZE"],
-            tie_word_embeddings=False,
+            tie_word_embeddings=mk_config["TIE_WORD_EMBEDDINGS"],
             context_window_size=mk_config["MAX_POSITION_EMBEDDINGS"],
             prefill_chunk_size=2048,
             tensor_parallel_shards=1,
@@ -92,7 +100,7 @@ def test(args):
             rms_norm_eps=mk_config["RMS_NORM_EPS"],
             rope_theta=mk_config["ROPE_THETA"],
             vocab_size=mk_config["VOCAB_SIZE"],
-            tie_word_embeddings=False,
+            tie_word_embeddings=mk_config["TIE_WORD_EMBEDDINGS"],
             context_window_size=mk_config["MAX_POSITION_EMBEDDINGS"],
             prefill_chunk_size=2048,
             tensor_parallel_shards=1,
@@ -113,6 +121,29 @@ def test(args):
             get_qwen3_30b_a3b_megakernel_relax_mod, max_batch_size=MAX_BATCH_SIZE
         )
         model_type = 1  # 0: dense, 1: moe
+    elif args.model == "Llama3-1B":
+        mk_config = llama3_1b_config
+        mlc_config_tp1 = LlamaConfig(
+            hidden_size=mk_config["HIDDEN_SIZE"],
+            intermediate_size=mk_config["INTERMEDIATE_SIZE"],
+            num_attention_heads=mk_config["NUM_ATTENTION_HEADS"],
+            num_hidden_layers=mk_config["NUM_HIDDEN_LAYERS"],  # 16,
+            num_key_value_heads=mk_config["NUM_KEY_VALUE_HEADS"],
+            rms_norm_eps=mk_config["RMS_NORM_EPS"],
+            vocab_size=mk_config["VOCAB_SIZE"],
+            tie_word_embeddings=mk_config["TIE_WORD_EMBEDDINGS"],
+            context_window_size=mk_config["MAX_POSITION_EMBEDDINGS"],
+            prefill_chunk_size=2048,
+            tensor_parallel_shards=1,
+            head_dim=mk_config["HEAD_DIM"],
+            max_batch_size=MAX_BATCH_SIZE,
+            rope_scaling=mk_config["ROPE_SCALING"],
+            kwargs={"megakernel": True, "position_embedding_base": mk_config["ROPE_THETA"]},
+        )
+        mlc_model_func = LlamaForCausalLM
+        mk_wrapper_class = MegaKernelDenseLayer
+        relax_mod_func = get_llama3_megakernel_relax_mod
+        model_type = 3  # 3 for llama3_1b
     else:
         raise ValueError(f"Invalid model: {args.model}")
 
@@ -123,7 +154,7 @@ def test(args):
     #        "/raid/catalyst/models/Qwen3-32B-q0f16-MLC-mega" is the weights converted with interwoven gate_up_weight
     use_mega_weights = (
         mk_config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"][args.tp_size] == 1
-        if "GATE_UP_PROJ_SPLIT_K_FACTOR_DICT" in mk_config 
+        if "GATE_UP_PROJ_SPLIT_K_FACTOR_DICT" in mk_config
         else model_type == 1
     )
     LOAD_WEIGHTS = (
@@ -509,7 +540,7 @@ def test(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument(
-        "--model", type=str, default="Qwen3-32B", choices=["Qwen3-32B", "Qwen3-30B-A3B"]
+        "--model", type=str, default="Qwen3-32B", choices=["Qwen3-32B", "Qwen3-30B-A3B", "Llama3-1B"]
     )
     parser.add_argument("--tp-size", type=int, default=1, choices=[1, 4, 8])
     parser.add_argument("--profiler-on", action="store_true", default=False)

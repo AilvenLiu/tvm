@@ -25,6 +25,8 @@ from tvm.tirp.megakernel.support import get_max_num_tokens_padded
 
 NUM_HIDDEN_LAYERS = 48
 def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Literal["static", "dynamic"], TP_SIZE: int, PROFILER_ON: bool, lm_head_tile_k_num: int, max_batch_size: int):
+    assert mk.TIE_WORD_EMBEDDINGS == False, "Qwen3-30B-A3B does not support tie word embeddings"
+
     max_num_tokens_padded = get_max_num_tokens_padded(max_batch_size, mk.NUM_EXPERTS_PER_TOK, mk.NUM_EXPERTS, mk.MOE_M_PAD_SIZE)
     assert TP_SIZE == 1
     def static_mod():

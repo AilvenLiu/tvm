@@ -16,6 +16,8 @@ def get_qwen3_megakernel_relax_mod(
     PROFILER_ON: bool,
     lm_head_tile_k_num: int,
 ):
+    assert mk.TIE_WORD_EMBEDDINGS == False, "Qwen3-32B does not support tie word embeddings"
+
     def static_mod():
         # fmt: off
         @R.macro(hygienic=False)
