@@ -25,6 +25,7 @@
 #include <../../../../3rdparty/flashinfer/include/flashinfer/attention/decode.cuh>
 #include <../../../../3rdparty/flashinfer/include/flashinfer/attention/variants.cuh>
 #include <../../../../3rdparty/flashinfer/include/flashinfer/page.cuh>
+#include <../../../../3rdparty/flashinfer/include/flashinfer/sampling.cuh>
 #include <optional>
 
 #include "../../../../3rdparty/flashinfer/include/flashinfer/attention/mask.cuh"
@@ -326,12 +327,33 @@ Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_wor
   return ret;
 }
 
-TVM_FFI_STATIC_INIT_BLOCK(){
+void TopPSamplingFromProb(DLTensor* probs, DLTensor* output, DLTensor* top_p_arr,
+                          uint64_t philox_seed, uint64_t philox_offset, uint64_t cuda_stream) {
+  bool deterministic = true;
+  CHECK_EQ(probs->ndim, 2) << "Probs should have 2 dimensions";
+  CHECK_EQ(output->ndim, 1) << "Output should have 1 dimension";
+  CHECK_EQ(top_p_arr->ndim, 1) << "TopPArr should have 1 dimension";
+  int64_t batch_size = output->shape[0];
+  int64_t vocab_size = probs->shape[1];
+
+  cudaError_t status = sampling::TopPSamplingFromProb<float, int>(
+      static_cast<float*>(probs->data) + probs->byte_offset / sizeof(float),
+      static_cast<int*>(output->data) + output->byte_offset / sizeof(int),
+      /*indices=*/nullptr,
+      static_cast<float*>(top_p_arr->data) + top_p_arr->byte_offset / sizeof(float), batch_size,
+      /*top_p_val=*/0, vocab_size, deterministic, philox_seed, philox_offset,
+      reinterpret_cast<cudaStream_t>(cuda_stream));
+  CHECK(status == cudaSuccess) << "SamplingFromProbs failed with error "
+                               << cudaGetErrorString(status);
+}
+
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("flashinfer.batch_prefill_with_kv_cache_plan", BatchPrefillWithKVCachePlan);
   refl::GlobalDef().def("flashinfer.batch_decode_with_paged_kv_cache_plan",
                         BatchDecodeWithPagedKVCachePlan);
   refl::GlobalDef().def("flashinfer.batch_paged_attention_plan", BatchPagedAttentionPlan);
+  refl::GlobalDef().def("flashinfer.top_p_sampling_from_prob", TopPSamplingFromProb);
 }
 
 }  // namespace runtime
