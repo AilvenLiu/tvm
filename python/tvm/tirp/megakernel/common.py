@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import List, Literal, Optional, Tuple, Type, Union
+import numpy as np
 
 import tvm
 from tvm.script import tir as T
@@ -66,10 +67,10 @@ def pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=True, debug=False):
 
 unpack_from_32bit_code = """
 __forceinline__ __device__ void unpack_from_32bit(int32_t task_info, int32_t* task_type_ptr, int32_t* m_idx_ptr, int32_t* n_idx_ptr, int32_t* k_idx_ptr) {
-    *(unsigned int*)task_type_ptr = ((unsigned int)task_info & 0b11111);
-    *(unsigned int*)m_idx_ptr = (((unsigned int)task_info >> 5) & 0b11111111111111);
-    *(unsigned int*)n_idx_ptr = (((unsigned int)task_info >> 18) & 0b1111111111);
-    *(unsigned int*)k_idx_ptr = (((unsigned int)task_info >> 28));
+    *task_type_ptr = task_info & 0b11111;
+    *m_idx_ptr = (task_info >> 5) & 0b1111111111111;
+    *n_idx_ptr = (task_info >> 18) & 0b1111111111;
+    *k_idx_ptr = (task_info >> 28) & 0b1111;
 }
 """
 

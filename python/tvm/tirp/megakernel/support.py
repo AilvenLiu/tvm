@@ -260,7 +260,7 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler
     torch.cuda.nvtx.range_push("generate_exec_queue")
     if scheduler == "static":
         exec_queue = np.zeros(
-            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.uint32
+            (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
         )
         central_queue = []
 
@@ -309,22 +309,22 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler
             for k_idx in range(config["SPLIT_O_PROJECT_DICT"][WORLD_SIZE]):
                 central_queue.append((0, n_idx, k_idx, JobType.GEMM_O_PROJ.value))
 
-        # o reduction
-        m_split_o_proj_reduce = min(
-            batch_size, KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT)
-        )
-        n_tile_o_proj_reduce = (
-            ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_o_proj_reduce))
-            * SplitKReduceTile.N_UNIT
-        )
-        m_tile_o_proj_reduce = ceildiv(batch_size, m_split_o_proj_reduce)
-        m_split_o_proj_reduce = ceildiv(batch_size, m_tile_o_proj_reduce)
-        for n_idx in range(ceildiv(config["HIDDEN_SIZE"], n_tile_o_proj_reduce)):
-            for m_idx in range(m_split_o_proj_reduce):
-                central_queue.append((m_idx, n_idx, 0, JobType.GEMM_O_REDUCE.value))
-
-        # o allreduce
         if WORLD_SIZE > 1:
+            # o reduction
+            m_split_o_proj_reduce = min(
+                batch_size, KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT)
+            )
+            n_tile_o_proj_reduce = (
+                ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_o_proj_reduce))
+                * SplitKReduceTile.N_UNIT
+            )
+            m_tile_o_proj_reduce = ceildiv(batch_size, m_split_o_proj_reduce)
+            m_split_o_proj_reduce = ceildiv(batch_size, m_tile_o_proj_reduce)
+            for n_idx in range(ceildiv(config["HIDDEN_SIZE"], n_tile_o_proj_reduce)):
+                for m_idx in range(m_split_o_proj_reduce):
+                    central_queue.append((m_idx, n_idx, 0, JobType.GEMM_O_REDUCE.value))
+
+            # o allreduce
             for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
                 for n_idx in range(ceildiv(config["HIDDEN_SIZE"] // WORLD_SIZE, AllreduceTile.N_TILE)):
                     central_queue.append((m_idx, n_idx, 0, JobType.O_ALLREDUCE.value))
@@ -369,22 +369,22 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler
                 for k_idx in range(config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE]):
                     central_queue.append((0, n_idx, k_idx, JobType.GEMM_DOWN_PROJ.value))
 
-            # down_proj_reduce
-            m_split_down_proj_reduce = min(
-                KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT), batch_size
-            )
-            n_tile = (
-                ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_down_proj_reduce))
-                * SplitKReduceTile.N_UNIT
-            )
-            m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce)
-            m_split_down_proj_reduce = ceildiv(batch_size, m_tile_down_proj_reduce)
-            for m_idx in range(m_split_down_proj_reduce):
-                for n_idx in range(ceildiv(config["HIDDEN_SIZE"], n_tile)):
-                    central_queue.append((m_idx, n_idx, 0, JobType.DOWN_PROJ_REDUCE.value))
-
-            # down_proj_allreduce
             if WORLD_SIZE > 1:
+                # down_proj_reduce
+                m_split_down_proj_reduce = min(
+                    KernelConfig.SM_NUMBER // (config["HIDDEN_SIZE"] // SplitKReduceTile.N_UNIT), batch_size
+                )
+                n_tile = (
+                    ceildiv(SplitKReduceTile.N_REPEAT, ceildiv(batch_size, m_split_down_proj_reduce))
+                    * SplitKReduceTile.N_UNIT
+                )
+                m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce)
+                m_split_down_proj_reduce = ceildiv(batch_size, m_tile_down_proj_reduce)
+                for m_idx in range(m_split_down_proj_reduce):
+                    for n_idx in range(ceildiv(config["HIDDEN_SIZE"], n_tile)):
+                        central_queue.append((m_idx, n_idx, 0, JobType.DOWN_PROJ_REDUCE.value))
+
+                # down_proj_allreduce
                 for m_idx in range(ceildiv(batch_size, AllreduceTile.M_TILE)):
                     for n_idx in range(ceildiv(config["HIDDEN_SIZE"] // WORLD_SIZE, AllreduceTile.N_TILE)):
                         central_queue.append((m_idx, n_idx, 0, JobType.DOWN_PROJ_ALLREDUCE.value))

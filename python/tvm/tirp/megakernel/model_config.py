@@ -62,10 +62,10 @@ llama3_1b_config = {
         "ORIGINAL_MAX_POSITION_EMBEDDINGS": 8192,
         "ROPE_TYPE": "llama3"
     },
-    "SPLIT_QKV_PROJECT_DICT": {1: 4, 4: -1, 8: -1},
-    "SPLIT_O_PROJECT_DICT": {1: 4, 4: -1, 8: -1},
+    "SPLIT_QKV_PROJECT_DICT": {1: 8, 4: -1, 8: -1},
+    "SPLIT_O_PROJECT_DICT": {1: 8, 4: -1, 8: -1},
     "GATE_UP_PROJ_SPLIT_K_FACTOR_DICT": {1: 1, 4: -1, 8: -1},
-    "DOWN_PROJ_SPLIT_K_FACTOR_DICT": {1: 8, 4: -1, 8: -1},
+    "DOWN_PROJ_SPLIT_K_FACTOR_DICT": {1: 9, 4: -1, 8: -1},
 }
 
 @tvm.register_global_func("tirp.megakernel.get_model_config")

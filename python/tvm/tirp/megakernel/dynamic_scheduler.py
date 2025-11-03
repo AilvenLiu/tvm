@@ -13,7 +13,7 @@ from .common import (
 while_ld_global_acquire = f"""
 __forceinline__ __device__ void while_ld_global_acquire(int32_t* addr, int32_t* task_info) {{
   asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(*task_info) : "l"(addr) : "memory");
-  while (*task_info < 0) {{
+  while (*task_info == -1) {{
     __nanosleep(800);
     asm volatile ("ld.global.acquire.gpu.b32 %0, [%1];\\n" : "=r"(*task_info) : "l"(addr) : "memory");
   }}

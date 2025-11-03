@@ -127,8 +127,9 @@ class GemmTile(Tile):
         self.b_type = b_type
         assert a_type == "float16", "only float16 is supported for now"
         assert b_type == "float16", "only float16 is supported for now"
+        assert not (use_tma_reduce and split_k_factor == 1), "use_tma_reduce when split_k_factor == 1 is not supported"
         if out_type is None:
-            self.out_type = "float32" if split_k_factor > 1 else "float16"
+            self.out_type = "float32" if split_k_factor > 1 or use_tma_reduce else "float16"
         else:
             self.out_type = out_type
         self.split_k_factor = split_k_factor

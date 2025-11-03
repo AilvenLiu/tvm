@@ -120,8 +120,7 @@ def get_qwen3_megakernel_relax_mod(
                     [2, 1, 61],
                     out_sinfo=[
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
-                        # R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
-                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # residual
+                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
                         R.Tensor((mk.PROFILER_BUFFER_SIZE,), dtype="uint64"), # profiler
                     ]
                 )
@@ -362,8 +361,8 @@ def get_qwen3_megakernel_relax_mod(
 
                     rs0_ = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
                     rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
-                    # rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
-                    rs0 = rs0_    
+                    rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
+                        
                     o_layer0 = call_qwen3_layer(rms_norm, rs0, 0)
                     o_layer1 = call_qwen3_layer(o_layer0[0], o_layer0[1], 1)
                     o_layer2 = call_qwen3_layer(o_layer1[0], o_layer1[1], 2)
@@ -617,8 +616,7 @@ def get_qwen3_megakernel_relax_mod(
                     [2, 1, 63],
                     out_sinfo=[
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
-                        # R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
-                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # residual
+                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
                         R.Tensor((mk.PROFILER_BUFFER_SIZE,), dtype="uint64"), # profiler
                     ]
                 )
@@ -850,8 +848,7 @@ def get_qwen3_megakernel_relax_mod(
 
                     rs0_ = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
                     rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
-                    # rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
-                    rs0 = rs0_
+                    rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
                     
                     o_layer0 = call_qwen3_layer(rms_norm, rs0, 0)
                     o_layer1 = call_qwen3_layer(o_layer0[0], o_layer0[1], 1)

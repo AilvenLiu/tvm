@@ -6,7 +6,7 @@ from tvm.tirp.megakernel.gate_up_silu import GateUpSiluTile
 from tvm.tirp.megakernel.gemm import GemmTile, trap_when_assert_failed, float22half2
 from tvm.tirp.bench.utils import CudaProfiler
 
-red = """
+red_f16 = """
 __forceinline__ __device__ void red_f16_v4(half* address, half* reg) {
     uint16_t* h_reg = (uint16_t*) reg;
     asm volatile("red.global.v4.f16.add.noftz [%0], {%1, %2, %3, %4};"
@@ -14,7 +14,15 @@ __forceinline__ __device__ void red_f16_v4(half* address, half* reg) {
                  : "l"(address), "h"(h_reg[0]), "h"(h_reg[1]), "h"(h_reg[2]), "h"(h_reg[3])
                  : "memory");
 }
+"""
 
+red_f32 = """
+__forceinline__ __device__ void red_f32_v4(float* address, float* reg) {
+    asm volatile("red.global.v4.f32.add [%0], {%1, %2, %3, %4};"
+                 :
+                 : "l"(address), "f"(reg[0]), "f"(reg[1]), "f"(reg[2]), "f"(reg[3])
+                 : "memory");
+}
 """
 
 class GroupGEMMTile(GemmTile):
@@ -195,13 +203,21 @@ class GroupGEMMTile(GemmTile):
                             break
                         routing_weight = self.smem_routing_weights[ko * self.EPI_TILE + row_idx]
                         # TODO: vectorize this
-                        o_reg_f32 = T.alloc_buffer([self.VEC_LEN], "float32", scope="local")
-                        o_reg_f16 = T.alloc_buffer([self.VEC_LEN], "float16", scope="local")
-                        for v in range(self.VEC_LEN):
-                            o_reg_f32[v] = self.output_smem[self.stage, row_idx, col_idx + v]
-                        for v in T.unroll(self.VEC_LEN):
-                            o_reg_f16[v] = T.cast(o_reg_f32[v] * routing_weight, "float16")
-                        T.cuda.func_call("red_f16_v4", T.address_of(self.output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), T.address_of(o_reg_f16[0]), source_code=red)
+                        if self.output.dtype == "float16":
+                            o_reg_f32 = T.alloc_buffer([self.VEC_LEN], "float32", scope="local")
+                            o_reg_f16 = T.alloc_buffer([self.VEC_LEN], "float16", scope="local")
+                            for v in range(self.VEC_LEN):
+                                o_reg_f32[v] = self.output_smem[self.stage, row_idx, col_idx + v]
+                            for v in T.unroll(self.VEC_LEN):
+                                o_reg_f16[v] = T.cast(o_reg_f32[v] * routing_weight, "float16")
+                            T.cuda.func_call("red_f16_v4", T.address_of(self.output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), T.address_of(o_reg_f16[0]), source_code=red_f16)
+                        else:
+                            o_reg = T.alloc_buffer([self.VEC_LEN], "float32", scope="local")
+                            for v in range(self.VEC_LEN):
+                                o_reg[v] = self.output_smem[self.stage, row_idx, col_idx + v]
+                            for v in T.unroll(self.VEC_LEN):
+                                o_reg[v] = o_reg[v] * routing_weight
+                            T.cuda.func_call("red_f32_v4", T.address_of(self.output[reordered_row_idx // self.top_k, n_idx * self.BLK_N + col_idx]), T.address_of(o_reg[0]), source_code=red_f32)
                 T.ptx.bar.sync(10, 128)
                 self.tile_idx += 1
                 if warp_id == 0:

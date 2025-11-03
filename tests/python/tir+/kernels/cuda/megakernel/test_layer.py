@@ -14,7 +14,7 @@ from tvm.script import tirp as Tp
 from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
-from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile
+from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile, RMSNormTile
 from tvm.tirp.megakernel.allreduce import AllreduceTile
 from tvm.tirp.megakernel.common import *
 from tvm.tirp.megakernel.batch_attn import BatchAttnTile
@@ -48,18 +48,18 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         self.reduce_append_v_tile = self._add_tile(SplitKReduceAppendVTile(batch_size, self.NUM_KEY_VALUE_HEADS, self.NUM_ATTENTION_HEADS, self.HEAD_DIM, self.SPLIT_QKV_PROJECT, self.PAGE_SIZE), ProfileEventType.V_REDUCE_APPEND)
         self.attn_tile = self._add_tile(BatchAttnTile(self.PAGE_SIZE, self.NUM_ATTENTION_HEADS, self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM, prefetch_on=True), ProfileEventType.BATCH_ATTENTION)
         self.merge_tile = self._add_tile(BatchMergeTile(self.HEAD_DIM, self.NUM_KEY_VALUE_HEADS, self.NUM_ATTENTION_HEADS), ProfileEventType.BATCH_ATTENTION_MERGE)
-        self.o_proj_tile = self._add_tile(GemmTile(self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM, "float16", "float16", self.SPLIT_O_PROJECT, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GEMM_O_PROJ)
-        self.o_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.SPLIT_O_PROJECT), ProfileEventType.GEMM_O_REDUCE)
+        self.o_proj_tile = self._add_tile(GemmTile(self.HIDDEN_SIZE, self.NUM_ATTENTION_HEADS * self.HEAD_DIM, "float16", "float16", self.SPLIT_O_PROJECT, BLK_M, BLK_M, use_tma_reduce=self.world_size == 1, prefetch_on=True), ProfileEventType.GEMM_O_PROJ)
+        self.o_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.SPLIT_O_PROJECT), ProfileEventType.GEMM_O_REDUCE, predicate=self.world_size > 1)
         self.o_allreduce_tile = self._add_tile(AllreduceTile(self.world_size), ProfileEventType.O_ALLREDUCE, predicate=self.world_size > 1)
-        self.attn_add_rms_tile = self._add_tile(AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), ProfileEventType.ATTN_ADD_RMS_NORM)
+        self.attn_add_rms_tile = self._add_tile(RMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE) if self.world_size == 1 else AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), ProfileEventType.ATTN_ADD_RMS_NORM)
         self.gate_up_silu_tile = self._add_tile(GateUpSiluTile(self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE, "float16", "float16", self.GATE_UP_PROJ_SPLIT_K_FACTOR, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GATE_UP_SILU, predicate=self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1)
         self.gemm_gate_up_proj_tile = self._add_tile(GemmTile(self.INTERMEDIATE_SIZE * 2, self.HIDDEN_SIZE, "float16", "float16", self.GATE_UP_PROJ_SPLIT_K_FACTOR, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GEMM_GATE_UP_PROJ, predicate=self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1)
         self.silu_multiply_tile = self._add_tile(SiluMultiplyTile(batch_size, self.INTERMEDIATE_SIZE, "float16"), ProfileEventType.SPLIT_SILU_MULTIPLY, predicate=self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1)
         self.gemm_gate_up_proj_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.INTERMEDIATE_SIZE * 2, "float16", self.GATE_UP_PROJ_SPLIT_K_FACTOR), ProfileEventType.GATE_UP_PROJ_REDUCE, predicate=self.GATE_UP_PROJ_SPLIT_K_FACTOR > 1)
-        self.gemm_down_proj_tile = self._add_tile(GemmTile(self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE, "float16", "float16", self.DOWN_PROJ_SPLIT_K_FACTOR, BLK_M, BLK_M, prefetch_on=True), ProfileEventType.GEMM_DOWN_PROJ)
-        self.down_proj_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.DOWN_PROJ_SPLIT_K_FACTOR), ProfileEventType.DOWN_PROJ_REDUCE)
+        self.gemm_down_proj_tile = self._add_tile(GemmTile(self.HIDDEN_SIZE, self.INTERMEDIATE_SIZE, "float16", "float16", self.DOWN_PROJ_SPLIT_K_FACTOR, BLK_M, BLK_M, use_tma_reduce=self.world_size == 1, prefetch_on=True), ProfileEventType.GEMM_DOWN_PROJ)
+        self.down_proj_reduce_tile = self._add_tile(SplitKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.DOWN_PROJ_SPLIT_K_FACTOR), ProfileEventType.DOWN_PROJ_REDUCE, predicate=self.world_size > 1)
         self.down_proj_allreduce_tile = self._add_tile(AllreduceTile(self.world_size), ProfileEventType.DOWN_PROJ_ALLREDUCE, predicate=self.world_size > 1)
-        self.mlp_add_rms_norm_tile = self._add_tile(AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), ProfileEventType.MLP_ADD_RMS_NORM)
+        self.mlp_add_rms_norm_tile = self._add_tile(RMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE) if self.world_size == 1 else AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), ProfileEventType.MLP_ADD_RMS_NORM)
 
     def set_tiles(self, batch_size, BLK_M):
         self.tile_attr = {}
@@ -107,14 +107,8 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             use_nvshmem=self.world_size > 1,
         ) if etensor_o_allreduce_global is not None else None   
         self.evt_attn_add_rms = Semaphore(
-            ceildiv(
-                self.HIDDEN_SIZE,
-                (
-                    self.o_reduce_tile.N_TILE
-                    if self.world_size == 1
-                    else self.o_allreduce_tile.N_TILE
-                ),
-            ),
+            self.SPLIT_O_PROJECT * (self.HIDDEN_SIZE // GemmTile.BLK_N) if self.world_size == 1 else
+            self.HIDDEN_SIZE // self.o_allreduce_tile.N_TILE,
             etensor_attn_add_rms_global,
             use_nvshmem=self.world_size > 1,
         ) if etensor_attn_mlp_global is not None else None
@@ -127,11 +121,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             use_nvshmem=self.world_size > 1,
         ) if etensor_gate_up_proj_reduce_global is not None else None
         self.evt_gate_up_proj = Semaphore(
-            (
-                2
-                if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1
-                else 2 * self.gemm_gate_up_proj_reduce_tile.M_split
-            ),
+            2 if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1 else 2 * self.gemm_gate_up_proj_reduce_tile.M_split,
             etensor_gate_up_proj_global,
             use_nvshmem=self.world_size > 1,
         ) if etensor_gate_up_proj_global is not None else None
@@ -148,13 +138,9 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             etensor_down_proj_allreduce_global,
             use_nvshmem=self.world_size > 1,
         ) if etensor_down_proj_allreduce_global is not None else None
-        self.evt_add_rms_norm = Semaphore(
-            self.HIDDEN_SIZE
-            // (
-                self.down_proj_reduce_tile.N_TILE
-                if self.world_size == 1
-                else self.down_proj_allreduce_tile.N_TILE
-            ),
+        self.evt_mlp_add_rms = Semaphore(
+            self.DOWN_PROJ_SPLIT_K_FACTOR * (self.HIDDEN_SIZE // GemmTile.BLK_N) if self.world_size == 1 else
+            self.HIDDEN_SIZE // self.down_proj_allreduce_tile.N_TILE,
             etensor_mlp_add_rms_global,
             use_nvshmem=self.world_size > 1,
         ) if etensor_mlp_add_rms_global is not None else None
@@ -427,20 +413,33 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             assert False
 
     @T.macro
-    def task_impl_gemm_o_proj(self, is_dynamic_sch):
+    def task_impl_gemm_o_proj(self, batch_size, is_dynamic_sch):
         with T.cta():
             self.run_tile_prefetch(self.o_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
             if is_dynamic_sch:
-                self.tile_scheduler.pre_notify_and_push(
-                    self.evt_o_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),),
-                    lambda trigger_idx: (
-                        -1, self.o_reduce_tile.M_split,
-                        lambda push_idx: (JobType.GEMM_O_REDUCE.value, push_idx, self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 0)
-                    ), "warpgroup", "warpgroup", scope_id=0
-                )
+                if self.world_size == 1:
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_attn_add_rms, 1, lambda notify_idx: (-1, 0,),
+                        lambda trigger_idx: (
+                            -1, batch_size,
+                            lambda push_idx: (JobType.ATTN_ADD_RMS_NORM.value, push_idx, 0, 0)
+                        ), "warpgroup", "warpgroup", scope_id=0
+                    )
+                else:
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_o_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),),
+                        lambda trigger_idx: (
+                            -1, self.o_reduce_tile.M_split,
+                            lambda push_idx: (JobType.GEMM_O_REDUCE.value, push_idx, self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT), 0)
+                        ), "warpgroup", "warpgroup", scope_id=0
+                    )
             self.tile_scheduler.wait(self.evt_o_proj, self.tile_scheduler.k_idx, wait_level="warp")
             self.run_tile(self.o_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
-            self.tile_scheduler.notify(self.evt_o_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),), scope="warpgroup", scope_id=0)
+            if self.world_size == 1:
+                self.tile_scheduler.notify(self.evt_attn_add_rms, 1, lambda notify_idx: (-1, 0), scope="warpgroup", scope_id=0)
+            else:
+                self.tile_scheduler.notify(self.evt_o_partial, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.o_reduce_tile.N_TILE // SplitKReduceTile.N_UNIT),), scope="warpgroup", scope_id=0)
+                
 
     @T.macro
     def task_impl_gemm_o_reduce(
@@ -452,16 +451,8 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            if is_dynamic_sch:
-                if self.world_size == 1:
-                    self.tile_scheduler.pre_notify_and_push(
-                        self.evt_attn_add_rms, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx,),
-                        lambda trigger_idx: (
-                            -1, T.min(self.o_reduce_tile.M_TILE, batch_size - self.tile_scheduler.m_idx * self.o_reduce_tile.M_TILE),
-                            lambda push_idx: (JobType.ATTN_ADD_RMS_NORM.value, self.tile_scheduler.m_idx * self.o_reduce_tile.M_TILE + push_idx, 0, 0)
-                        ), "warpgroup", "warpgroup", scope_id=1
-                    )
-                else:
+            if self.world_size > 1:
+                if is_dynamic_sch:
                     self.tile_scheduler.pre_notify_and_push(
                         self.evt_o_allreduce, 1, lambda notify_idx: (self.tile_scheduler.n_idx % self.world_size, self.tile_scheduler.n_idx // self.world_size,),
                         lambda trigger_idx: (
@@ -469,11 +460,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                             lambda push_idx: (JobType.O_ALLREDUCE.value, push_idx, self.tile_scheduler.n_idx // self.world_size, 0)
                         ), "warpgroup", "warpgroup", scope_id=1
                     )
-            self.tile_scheduler.wait(self.evt_o_partial, self.tile_scheduler.n_idx, wait_level="warp")
-            if self.world_size == 1:
-                self.run_tile(self.o_reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_o_global, hidden_state_attn_mlp_global)
-                self.tile_scheduler.notify(self.evt_attn_add_rms, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx,), scope="cta")
-            else:
+                self.tile_scheduler.wait(self.evt_o_partial, self.tile_scheduler.n_idx, wait_level="warp")
                 self.run_tile(self.o_reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_o_global, before_o_allreduce_global)
                 self.tile_scheduler.notify(self.evt_o_allreduce, 1, lambda notify_idx: (self.tile_scheduler.n_idx % self.world_size, self.tile_scheduler.n_idx // self.world_size,), scope="cta")
 
@@ -528,7 +515,8 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                         ), "cta", "cta"
                     )  
             if self.world_size == 1:
-                self.tile_scheduler.wait(self.evt_attn_add_rms, self.tile_scheduler.m_idx // self.o_reduce_tile.M_TILE)
+                self.tile_scheduler.wait(self.evt_attn_add_rms, 0)
+                T.cuda.thread_fence() # ensure previous tma-reduce are visible
             else:
                 self.tile_scheduler.wait(self.evt_attn_add_rms, self.tile_scheduler.m_idx // self.o_allreduce_tile.M_TILE)
             self.run_tile(self.attn_add_rms_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global)
@@ -627,20 +615,32 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                 self.tile_scheduler.notify(self.evt_down_proj, range_end - range_start + 1, lambda notify_idx: (-1, range_start + notify_idx,), scope="cta")
 
     @T.macro
-    def task_impl_gemm_down_proj(self, is_dynamic_sch):
+    def task_impl_gemm_down_proj(self, batch_size, is_dynamic_sch):
         with T.cta():
             self.run_tile_prefetch(self.gemm_down_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
             if is_dynamic_sch:
-                self.tile_scheduler.pre_notify_and_push(
-                    self.evt_down_proj_reduce, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),),
-                    lambda trigger_idx: (
-                        -1, self.down_proj_reduce_tile.M_split,
-                        lambda push_idx: (JobType.DOWN_PROJ_REDUCE.value, push_idx, self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0)
-                    ), "warpgroup", "warpgroup", scope_id=0
-                )
+                if self.world_size == 1:
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_mlp_add_rms, 1, lambda notify_idx: (-1, 0,),
+                        lambda trigger_idx: (
+                            -1, batch_size,
+                            lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, push_idx, 0, 0)
+                        ), "warpgroup", "warpgroup", scope_id=0
+                    ) 
+                else:
+                    self.tile_scheduler.pre_notify_and_push(
+                        self.evt_down_proj_reduce, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),),
+                        lambda trigger_idx: (
+                            -1, self.down_proj_reduce_tile.M_split,
+                            lambda push_idx: (JobType.DOWN_PROJ_REDUCE.value, push_idx, self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N), 0)
+                        ), "warpgroup", "warpgroup", scope_id=0
+                    )
             self.tile_scheduler.wait(self.evt_down_proj, self.tile_scheduler.k_idx, wait_level="warp")
             self.run_tile(self.gemm_down_proj_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
-            self.tile_scheduler.notify(self.evt_down_proj_reduce, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),), scope="warpgroup", scope_id=0)
+            if self.world_size == 1:
+                self.tile_scheduler.notify(self.evt_mlp_add_rms, 1, lambda notify_idx: (-1, 0), scope="warpgroup", scope_id=0)
+            else:
+                self.tile_scheduler.notify(self.evt_down_proj_reduce, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx // (self.down_proj_reduce_tile.N_TILE // GemmTile.BLK_N),), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_down_proj_reduce(
@@ -652,16 +652,8 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         is_dynamic_sch,
     ):
         with T.cta():
-            if is_dynamic_sch:
-                if self.world_size == 1:
-                    self.tile_scheduler.pre_notify_and_push(
-                        self.evt_add_rms_norm, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx,),
-                        lambda trigger_idx: (
-                            -1, T.min(self.down_proj_reduce_tile.M_TILE, batch_size - self.tile_scheduler.m_idx * self.down_proj_reduce_tile.M_TILE),
-                            lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, self.tile_scheduler.m_idx * self.down_proj_reduce_tile.M_TILE + push_idx, 0, 0)
-                        ), "warpgroup", "warpgroup", scope_id=1
-                    )
-                else:
+            if self.world_size > 1:
+                if is_dynamic_sch:
                     self.tile_scheduler.pre_notify_and_push(
                         self.evt_down_proj_allreduce, 1, lambda notify_idx: (self.tile_scheduler.n_idx % self.world_size, self.tile_scheduler.n_idx // self.world_size,),
                         lambda trigger_idx: (
@@ -669,11 +661,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                             lambda push_idx: (JobType.DOWN_PROJ_ALLREDUCE.value, push_idx, self.tile_scheduler.n_idx // self.world_size, 0)
                         ), "warpgroup", "warpgroup", scope_id=1
                     )
-            self.tile_scheduler.wait(self.evt_down_proj_reduce, self.tile_scheduler.n_idx, wait_level="warp")
-            if self.world_size == 1:
-                self.run_tile(self.down_proj_reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_sum_down_proj_global, output_global)
-                self.tile_scheduler.notify(self.evt_add_rms_norm, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx,), scope="cta")
-            else:
+                self.tile_scheduler.wait(self.evt_down_proj_reduce, self.tile_scheduler.n_idx, wait_level="warp")
                 self.run_tile(self.down_proj_reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_sum_down_proj_global, before_down_proj_allreduce_global)
                 self.tile_scheduler.notify(self.evt_down_proj_allreduce, 1, lambda notify_idx: (self.tile_scheduler.n_idx % self.world_size, self.tile_scheduler.n_idx // self.world_size,), scope="cta")
 
@@ -689,7 +677,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             if self.world_size > 1:
                 if is_dynamic_sch:
                     self.tile_scheduler.pre_notify_and_push(
-                        self.evt_add_rms_norm, self.world_size, lambda notify_idx: (notify_idx, self.tile_scheduler.m_idx,),
+                        self.evt_mlp_add_rms, self.world_size, lambda notify_idx: (notify_idx, self.tile_scheduler.m_idx,),
                         lambda trigger_idx: (
                             trigger_idx, T.min(self.down_proj_allreduce_tile.M_TILE, batch_size - self.tile_scheduler.m_idx * self.down_proj_allreduce_tile.M_TILE),
                             lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, self.tile_scheduler.m_idx * self.down_proj_allreduce_tile.M_TILE + push_idx, 0, 0)
@@ -697,7 +685,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                     )
                 self.tile_scheduler.wait(self.evt_down_proj_allreduce, self.tile_scheduler.n_idx)
                 self.run_tile(self.down_proj_allreduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, before_down_proj_allreduce_global, output_global)
-                self.tile_scheduler.notify(self.evt_add_rms_norm, self.world_size, lambda notify_idx: (notify_idx, self.tile_scheduler.m_idx,), scope="cta")
+                self.tile_scheduler.notify(self.evt_mlp_add_rms, self.world_size, lambda notify_idx: (notify_idx, self.tile_scheduler.m_idx,), scope="cta")
                 
     @T.macro
     def task_impl_mlp_add_rms_norm(
@@ -717,10 +705,12 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                     ), "cta", "cta"
                 )
             if self.world_size == 1:
-                self.tile_scheduler.wait(self.evt_add_rms_norm, self.tile_scheduler.m_idx // self.down_proj_reduce_tile.M_TILE)
+                self.tile_scheduler.wait(self.evt_mlp_add_rms, 0)
+                T.cuda.thread_fence() # ensure previous tma-reduce are visible
             else:
-                self.tile_scheduler.wait(self.evt_add_rms_norm, self.tile_scheduler.m_idx // self.down_proj_allreduce_tile.M_TILE)
+                self.tile_scheduler.wait(self.evt_mlp_add_rms, self.tile_scheduler.m_idx // self.down_proj_allreduce_tile.M_TILE)
             self.run_tile(self.mlp_add_rms_norm_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, output_global, residual_global, mlp_add_rms_weight_global)
+            
 
     # fmt: off
     @T.macro
@@ -813,12 +803,14 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
         self.set_tiles(batch_size, BLK_M)
 
         self.qkv_proj_tile.set_tensor_map(A_tensor_map_qkv_proj, B_tensor_map_qkv_proj, D_tensor_map_qkv_proj, hidden_state_global, qkv_proj_weight_global, partial_qkv_global)
-        self.o_proj_tile.set_tensor_map(A_tensor_map_o_proj, B_tensor_map_o_proj, D_tensor_map_o_proj, o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer, o_proj_weight_global, partial_o_global)
+        self.o_proj_tile.set_tensor_map(A_tensor_map_o_proj, B_tensor_map_o_proj, D_tensor_map_o_proj, o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer, 
+                                        o_proj_weight_global, residual_global if self.world_size == 1 else partial_o_global)
         if self.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
             self.gate_up_silu_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj, hidden_state_attn_mlp_global, gate_up_weight_global, out_silu_multiply_global)
         else:
             self.gemm_gate_up_proj_tile.set_tensor_map(A_tensor_map_up_proj, B_tensor_map_up_proj, D_tensor_map_up_proj, hidden_state_attn_mlp_global, gate_up_weight_global, partial_out_gate_up_proj_global)
-        self.gemm_down_proj_tile.set_tensor_map(A_tensor_map_down_proj, B_tensor_map_down_proj, D_tensor_map_down_proj, out_silu_multiply_global, down_weight_global, partial_sum_down_proj_global)
+        self.gemm_down_proj_tile.set_tensor_map(A_tensor_map_down_proj, B_tensor_map_down_proj, D_tensor_map_down_proj, out_silu_multiply_global, down_weight_global, 
+                                                residual_global if self.world_size == 1 else partial_sum_down_proj_global)
 
         self.host_init_all()
 
@@ -858,7 +850,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                     elif self.tile_scheduler.task_type == JobType.BATCH_ATTENTION_MERGE.value:
                         self.task_impl_batch_attention_merge(batch_size, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global, merge_indptr_global, merge_o_indices_global, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
-                        self.task_impl_gemm_o_proj(is_dynamic_sch)
+                        self.task_impl_gemm_o_proj(batch_size, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
                         self.task_impl_gemm_o_reduce(batch_size, partial_o_global, hidden_state_attn_mlp_global, before_o_allreduce_global, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.O_ALLREDUCE.value:
@@ -874,7 +866,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                     elif self.tile_scheduler.task_type == JobType.SPLIT_SILU_MULTIPLY.value:
                         self.task_impl_split_silu_multiply(out_gate_up_proj_global, out_silu_multiply_global, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.GEMM_DOWN_PROJ.value:
-                        self.task_impl_gemm_down_proj(is_dynamic_sch)
+                        self.task_impl_gemm_down_proj(batch_size, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.DOWN_PROJ_REDUCE.value:
                         self.task_impl_down_proj_reduce(batch_size, partial_sum_down_proj_global, output_global, before_down_proj_allreduce_global, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.DOWN_PROJ_ALLREDUCE.value:
@@ -983,7 +975,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
 
             # input and output
             hidden_state_global = T.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float32" if self.world_size == 1 else "float16", scope="global")
             output_global = T.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
 
             # weight
@@ -1076,7 +1068,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             etensor_end_global = T.match_buffer(etensor_end_ptr, [1], "int32", scope="global", offset_factor=1)
 
             # exec queue
-            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "uint32", scope="global")
+            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
 
             @T.macro
             def run(BLK_M):
@@ -1199,7 +1191,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
 
             # input and output
             hidden_state_global = T.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float32" if self.world_size == 1 else "float16", scope="global")
             output_global = T.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
 
             # weight
@@ -1615,6 +1607,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
     arg_dict = prepare_data(batch_size, seq_len, mega_kernel_wrapper)
 
     def tir(arg_dict, mk: MegaKernelDenseLayer, scheduler: Literal["static", "dynamic"]):
+        import torch
         REPEAT = 100
         DEV = tvm.cuda(0)
         tvm_arg_dict = {}
@@ -1704,7 +1697,10 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
         if mk.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
             tvm_arg_dict["gate_up_weight"] = tvm.runtime.tensor(gate_up_weight, device=DEV)
         for i in range(REPEAT):
-            tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"], device=DEV)
+            if mk.world_size == 1:
+                tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"].to(torch.float32), device=DEV)
+            else:
+                tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"], device=DEV)
             # generate event tensor
             (
                 tvm_arg_dict[f"etensor_qkv_partial_{i}"],
@@ -1966,7 +1962,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                         f"{scheduler}-layer-bs{batch_size}-tp{mk.world_size}.perfetto-trace",
                         event_type_names,
                     )
-                return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy()
+                return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy().astype(np.float16)
             else:
                 for i in range(REPEAT):
                     func()

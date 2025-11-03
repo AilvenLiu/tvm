@@ -17,7 +17,7 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace, CudaProfiler
 from tvm.tirp.megakernel.common import *
-from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile
+from tvm.tirp.megakernel.add_rmsnorm import AddRMSNormTile, RMSNormTile
 from tvm.tirp.megakernel.allreduce import AllreduceTile
 from tvm.tirp.megakernel.batch_attn import BatchAttnTile
 from tvm.tirp.megakernel.batch_merge import BatchMergeTile
@@ -152,12 +152,14 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 BLK_M,
                 BLK_M,
                 prefetch_on=True,
+                use_tma_reduce=self.world_size == 1,
             ),
             ProfileEventType.GEMM_O_PROJ,
         )
         self.o_reduce_tile = self._add_tile(
             SplitKReduceTile(batch_size, self.HIDDEN_SIZE, "float16", self.SPLIT_O_PROJECT),
             ProfileEventType.GEMM_O_REDUCE,
+            predicate=self.world_size > 1,
         )
         self.o_allreduce_tile = self._add_tile(
             AllreduceTile(self.world_size),
@@ -165,10 +167,14 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             predicate=self.world_size > 1,
         )
         self.attn_add_rms_tile = self._add_tile(
-            AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), ProfileEventType.ATTN_ADD_RMS_NORM
+            AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE) if self.world_size > 1 
+            else RMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), 
+            ProfileEventType.ATTN_ADD_RMS_NORM
         )
         self.mlp_add_rms_norm_tile = self._add_tile(
-            AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE), ProfileEventType.MLP_ADD_RMS_NORM
+            AddRMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE) if self.world_size > 1
+            else RMSNormTile(self.RMS_NORM_EPS, self.HIDDEN_SIZE),
+            ProfileEventType.MLP_ADD_RMS_NORM
         )
         MegaKernelMOE._set_tiles(self, batch_size, low_batch)
 
@@ -262,18 +268,12 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     ), "warpgroup", "warpgroup"
                 )
             if self.world_size == 1:
-                self.tile_scheduler.wait(self.evt_attn_add_rms, self.tile_scheduler.m_idx // self.o_reduce_tile.M_TILE, wait_level="cta")
+                self.tile_scheduler.wait(self.evt_attn_add_rms, 0, wait_level="cta")
+                T.cuda.thread_fence() # ensure previous tma-reduce are visible
             else:
                 self.tile_scheduler.wait(self.evt_attn_add_rms, self.tile_scheduler.m_idx // self.o_allreduce_tile.M_TILE, wait_level="cta")
-            self.run_tile(
-                self.attn_add_rms_tile,
-                self.tile_scheduler.m_idx,
-                self.tile_scheduler.n_idx,
-                self.tile_scheduler.k_idx,
-                hidden_state_attn_mlp_global,
-                residual_global,
-                attn_add_rms_weight_global,
-            )
+            self.run_tile(self.attn_add_rms_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx,
+                            hidden_state_attn_mlp_global, residual_global, attn_add_rms_weight_global)
             # FIXME: this only works for num experts <= 1024
             if tid * 4 < self.NUM_EXPERTS:
                 for vec in T.vectorized(4):
@@ -521,7 +521,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             D_tensor_map_o_proj,
             o_global.view(-1, self.NUM_ATTENTION_HEADS * self.HEAD_DIM).buffer,
             o_proj_weight_global,
-            partial_o_global,
+            partial_o_global if self.world_size > 1 else residual_global,
         )
 
         # Set tensor maps for MoE
@@ -555,7 +555,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             [D_tensor_map_grp_down_128, D_tensor_map_grp_down_64, D_tensor_map_grp_down_32],
             silu_mul_output_global,
             grp_down_weight_global,
-            output_global,
+            output_global if self.world_size > 1 else residual_global,
         )
 
         self.host_init_all()
@@ -692,7 +692,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             is_dynamic_sch,
                         )
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_PROJ.value:
-                        self.task_impl_gemm_o_proj(is_dynamic_sch)
+                        self.task_impl_gemm_o_proj(batch_size, is_dynamic_sch)
                     elif self.tile_scheduler.task_type == JobType.GEMM_O_REDUCE.value:
                         self.task_impl_gemm_o_reduce(
                             batch_size,
@@ -895,7 +895,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             
             # Input and output
             hidden_state_global = T.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16" if self.world_size > 1 else "float32", scope="global")
             output_global = T.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
             
             # Attention weights
@@ -1123,7 +1123,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             
             # Input and output
             hidden_state_global = T.match_buffer(hidden_state_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
-            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16", scope="global")
+            residual_global = T.match_buffer(residual_ptr, [batch_size, self.HIDDEN_SIZE], "float16" if self.world_size > 1 else "float32", scope="global")
             output_global = T.match_buffer(output_ptr, [batch_size, self.HIDDEN_SIZE], "float16")
             
             # Attention weights
@@ -1207,7 +1207,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             etensor_group_gemm_down_global = T.match_buffer(etensor_group_gemm_down_ptr, [1], "int32", scope="global", offset_factor=1)
             
             # Execution queue
-            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "uint32", scope="global")
+            exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
             
             @T.macro
             def run(BLK_M, low_batch):
@@ -1619,7 +1619,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
 
         # Prepare per-iteration buffers
         for i in range(REPEAT):
-            tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"], device=DEV)
+            tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"].to(torch.float32), device=DEV)
 
             # Generate event tensors (combine attention + MoE)
             (
@@ -1853,7 +1853,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                     f"{scheduler}-moe-full-layer-bs{batch_size}-tp{mk.world_size}.perfetto-trace",
                     event_type_names,
                 )
-            return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy()
+            return tvm_arg_dict["output"].numpy(), tvm_arg_dict["residual_0"].numpy().astype(np.float16)
 
     def std(arg_dict, use_prefill, mk: MegaKernelMOEFullLayer):
         """Standard reference implementation combining attention and MoE"""

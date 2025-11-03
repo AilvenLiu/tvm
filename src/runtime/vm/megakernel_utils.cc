@@ -76,11 +76,11 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
   bool is_moe = config.count("NUM_EXPERTS");
   bool split_kv = attn_task_num > num_kv_heads * batch_size;
 
-  Tensor exec_queue_host = Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks}, DataType::UInt(32),
+  Tensor exec_queue_host = Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks}, DataType::Int(32),
                                          preferred_host_device);
   Tensor exec_queue_device =
-      Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks}, DataType::UInt(32), device);
-  uint32_t* exec_queue_host_data = static_cast<uint32_t*>(exec_queue_host->data);
+      Tensor::Empty({kNumSM, kStaticTileSchedulerMaxTasks}, DataType::Int(32), device);
+  int32_t* exec_queue_host_data = static_cast<int32_t*>(exec_queue_host->data);
 
   // Generate round-robin static execution queue
   std::vector<int32_t> task_counts(kNumSM, 0);
@@ -142,20 +142,20 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
     }
   }
 
-  int32_t m_split_o_proj_reduce =
-      std::min(batch_size, kNumSM / (hidden_size / kSplitKReduceTileNUnit));
-  int32_t n_tile_o_proj_reduce =
-      (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split_o_proj_reduce)) *
-       kSplitKReduceTileNUnit);
-  int32_t m_tile_o_reduce = ceildiv(batch_size, m_split_o_proj_reduce);
-  m_split_o_proj_reduce = ceildiv(batch_size, m_tile_o_reduce);
-  for (int n_idx = 0; n_idx < ceildiv(hidden_size, n_tile_o_proj_reduce); ++n_idx) {
-    for (int m_idx = 0; m_idx < m_split_o_proj_reduce; ++m_idx) {
-      f_push_task(m_idx, n_idx, 0, JobType::kGemmOReduce);
-    }
-  }
-
   if (tp_size > 1) {
+    int32_t m_split_o_proj_reduce =
+        std::min(batch_size, kNumSM / (hidden_size / kSplitKReduceTileNUnit));
+    int32_t n_tile_o_proj_reduce =
+        (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split_o_proj_reduce)) *
+        kSplitKReduceTileNUnit);
+    int32_t m_tile_o_reduce = ceildiv(batch_size, m_split_o_proj_reduce);
+    m_split_o_proj_reduce = ceildiv(batch_size, m_tile_o_reduce);
+    for (int n_idx = 0; n_idx < ceildiv(hidden_size, n_tile_o_proj_reduce); ++n_idx) {
+      for (int m_idx = 0; m_idx < m_split_o_proj_reduce; ++m_idx) {
+        f_push_task(m_idx, n_idx, 0, JobType::kGemmOReduce);
+      }
+    }
+
     for (int m_idx = 0; m_idx < ceildiv(batch_size, kAllReduceTileMTile); ++m_idx) {
       for (int n_idx = 0; n_idx < ceildiv(hidden_size / tp_size, kAllReduceTileNTile); ++n_idx) {
         f_push_task(m_idx, n_idx, 0, JobType::kOAllReduce);
@@ -239,20 +239,20 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
       }
     }
 
-    int32_t m_split_down_proj_reduce =
-        std::min(kNumSM / (hidden_size / kSplitKReduceTileNUnit), batch_size);
-    int32_t n_tile_down_proj_reduce =
-        (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split_down_proj_reduce)) *
-         kSplitKReduceTileNUnit);
-    int32_t m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce);
-    m_split_down_proj_reduce = ceildiv(batch_size, m_tile_down_proj_reduce);
-    for (int m_idx = 0; m_idx < m_split_down_proj_reduce; ++m_idx) {
-      for (int n_idx = 0; n_idx < ceildiv(hidden_size, n_tile_down_proj_reduce); ++n_idx) {
-        f_push_task(m_idx, n_idx, 0, JobType::kDownProjReduce);
-      }
-    }
-
     if (tp_size > 1) {
+      int32_t m_split_down_proj_reduce =
+          std::min(kNumSM / (hidden_size / kSplitKReduceTileNUnit), batch_size);
+      int32_t n_tile_down_proj_reduce =
+          (ceildiv(kSplitKReduceTileNRepeat, ceildiv(batch_size, m_split_down_proj_reduce)) *
+          kSplitKReduceTileNUnit);
+      int32_t m_tile_down_proj_reduce = ceildiv(batch_size, m_split_down_proj_reduce);
+      m_split_down_proj_reduce = ceildiv(batch_size, m_tile_down_proj_reduce);
+      for (int m_idx = 0; m_idx < m_split_down_proj_reduce; ++m_idx) {
+        for (int n_idx = 0; n_idx < ceildiv(hidden_size, n_tile_down_proj_reduce); ++n_idx) {
+          f_push_task(m_idx, n_idx, 0, JobType::kDownProjReduce);
+        }
+      }
+
       for (int m_idx = 0; m_idx < ceildiv(batch_size, kAllReduceTileMTile); ++m_idx) {
         for (int n_idx = 0; n_idx < ceildiv(hidden_size / tp_size, kAllReduceTileNTile); ++n_idx) {
           f_push_task(m_idx, n_idx, 0, JobType::kDownProjAllReduce);
@@ -285,10 +285,10 @@ Array<Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
   NVTXScopedRange range("Generate execution queue");
   int elem_per_layer = kDyanmicTileSchedulerMaxTasks + 4;
   TVM_FFI_ICHECK(exec_queue_device_buf.dtype() == DataType::Int(32));
-  TVM_FFI_ICHECK(exec_queue_host_buf.dtype() == DataType::UInt(32));
+  TVM_FFI_ICHECK(exec_queue_host_buf.dtype() == DataType::Int(32));
   TVM_FFI_ICHECK(exec_queue_device_buf.Shape().Product() >= num_layers * elem_per_layer);
   TVM_FFI_ICHECK(exec_queue_host_buf.Shape().Product() >= num_layers * elem_per_layer);
-  uint32_t* exec_queue_host_data = static_cast<uint32_t*>(exec_queue_host_buf->data);
+  int32_t* exec_queue_host_data = static_cast<int32_t*>(exec_queue_host_buf->data);
   int num_tasks = 0;
   const auto f_get_config =
       tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
