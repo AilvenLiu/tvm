@@ -14,7 +14,6 @@ def get_qwen3_megakernel_relax_mod(
     scheduler: Literal["static", "dynamic"],
     TP_SIZE: int,
     PROFILER_ON: bool,
-    lm_head_tile_k_num: int,
 ):
     assert mk.TIE_WORD_EMBEDDINGS == False, "Qwen3-32B does not support tie word embeddings"
 
@@ -120,8 +119,9 @@ def get_qwen3_megakernel_relax_mod(
                     ),
                     [2, 1, 61],
                     out_sinfo=[
-                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # residual
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
+                        # R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
+                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # residual
                         R.Tensor((mk.PROFILER_BUFFER_SIZE,), dtype="uint64"), # profiler
                     ]
                 )
@@ -147,13 +147,23 @@ def get_qwen3_megakernel_relax_mod(
                         T.reads(lv4[v_i0, v_i1, v_i2])
                         T.writes(compute[v_i0, v_i1, v_i2])
                         compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
+                        
+            @T.prim_func(private=True)
+            def cast_res(var_res: T.handle, var_compute: T.handle):
+                T.func_attr({"op_pattern": 0, "tir.noalias": True})
+                batch_size = T.int64()
+                res = T.match_buffer(var_res, (batch_size, T.int64(mk.HIDDEN_SIZE)), "float16")
+                compute = T.match_buffer(var_compute, (batch_size, T.int64(mk.HIDDEN_SIZE)))
+                # with T.block("root"):
+                for i0, i1 in T.grid(batch_size, T.int64(mk.HIDDEN_SIZE)):
+                    with T.block("compute"):
+                        v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
+                        T.reads(res[v_i0, v_i1])
+                        T.writes(compute[v_i0, v_i1])
+                        compute[v_i0, v_i1] = T.Cast("float32", res[v_i0, v_i1])
 
             @T.prim_func(private=True)
-            def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle, profiler_buffer_ptr: T.handle):
-                pass
-
-            @T.prim_func(private=True)
-            def reduce(partial_sum_ptr: T.handle, D_ptr: T.handle):
+            def hgemm(A_ptr: T.handle, B_ptr: T.handle, out_ptr: T.handle):
                 pass
 
             @T.prim_func(private=True)
@@ -350,9 +360,10 @@ def get_qwen3_megakernel_relax_mod(
                     model_layers_0_input_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[7]
                     lm_head_weight1: R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[NUM_HIDDEN_LAYERS*8+2] # num_hidden_layers*8+2
 
-                    rs0 = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
-                    rms_norm = R.call_tir(cls.rms_norm, (rs0, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
-
+                    rs0_ = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
+                    rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
+                    # rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
+                    rs0 = rs0_    
                     o_layer0 = call_qwen3_layer(rms_norm, rs0, 0)
                     o_layer1 = call_qwen3_layer(o_layer0[0], o_layer0[1], 1)
                     o_layer2 = call_qwen3_layer(o_layer1[0], o_layer1[1], 2)
@@ -420,10 +431,7 @@ def get_qwen3_megakernel_relax_mod(
 
                     # permute_dims4 = R.permute_dims(lm_head_weight1, axes=None)
                     # lv4: R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
-                    rs4 = R.call_tir(cls.hgemm, (o_layer63[0], lm_head_weight1),
-                                        out_sinfo=[R.Tensor((lm_head_tile_k_num, batch_size, mk.VOCAB_SIZE), dtype="float32"), R.Tensor([T.int64(2e6)], dtype="uint64")])
-                    lv4 = R.call_tir(cls.reduce, (rs4[0],), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
-
+                    lv4 = R.call_tir(cls.hgemm, (o_layer63[0], lm_head_weight1), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
                     lv4_rs = R.reshape(lv4, (batch_size, 1, mk.VOCAB_SIZE))
                     astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, mk.VOCAB_SIZE), dtype="float32"))
 
@@ -608,8 +616,9 @@ def get_qwen3_megakernel_relax_mod(
                     ),
                     [2, 1, 63],
                     out_sinfo=[
-                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # residual
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
+                        # R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
+                        R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # residual
                         R.Tensor((mk.PROFILER_BUFFER_SIZE,), dtype="uint64"), # profiler
                     ]
                 )
@@ -635,13 +644,23 @@ def get_qwen3_megakernel_relax_mod(
                         T.reads(lv4[v_i0, v_i1, v_i2])
                         T.writes(compute[v_i0, v_i1, v_i2])
                         compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
+                        
+            @T.prim_func(private=True)
+            def cast_res(var_res: T.handle, var_compute: T.handle):
+                T.func_attr({"op_pattern": 0, "tir.noalias": True})
+                batch_size = T.int64()
+                res = T.match_buffer(var_res, (batch_size, T.int64(mk.HIDDEN_SIZE)), "float16")
+                compute = T.match_buffer(var_compute, (batch_size, T.int64(mk.HIDDEN_SIZE)))
+                # with T.block("root"):
+                for i0, i1 in T.grid(batch_size, T.int64(mk.HIDDEN_SIZE)):
+                    with T.block("compute"):
+                        v_i0, v_i1 = T.axis.remap("SS", [i0, i1])
+                        T.reads(res[v_i0, v_i1])
+                        T.writes(compute[v_i0, v_i1])
+                        compute[v_i0, v_i1] = T.Cast("float32", res[v_i0, v_i1])
 
             @T.prim_func(private=True)
-            def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle, profiler_buffer_ptr: T.handle):
-                pass
-
-            @T.prim_func(private=True)
-            def reduce(partial_sum_ptr: T.handle, D_ptr: T.handle):
+            def hgemm(A_ptr: T.handle, B_ptr: T.handle, out_ptr: T.handle):
                 pass
 
             @T.prim_func(private=True)
@@ -829,9 +848,11 @@ def get_qwen3_megakernel_relax_mod(
                     model_layers_0_input_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[7]
                     lm_head_weight1: R.Tensor((mk.VOCAB_SIZE, mk.HIDDEN_SIZE), dtype="float16") = packed_params[NUM_HIDDEN_LAYERS*8+2] # num_hidden_layers*8+2
 
-                    rs0 = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
-                    rms_norm = R.call_tir(cls.rms_norm, (rs0, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
-
+                    rs0_ = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
+                    rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
+                    # rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
+                    rs0 = rs0_
+                    
                     o_layer0 = call_qwen3_layer(rms_norm, rs0, 0)
                     o_layer1 = call_qwen3_layer(o_layer0[0], o_layer0[1], 1)
                     o_layer2 = call_qwen3_layer(o_layer1[0], o_layer1[1], 2)
@@ -899,10 +920,7 @@ def get_qwen3_megakernel_relax_mod(
 
                     # permute_dims4 = R.permute_dims(lm_head_weight1, axes=None)
                     # lv4: R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
-                    rs4 = R.call_tir(cls.hgemm, (o_layer63[0], lm_head_weight1),
-                                        out_sinfo=[R.Tensor((lm_head_tile_k_num, batch_size, mk.VOCAB_SIZE), dtype="float32"), R.Tensor([T.int64(2e6)], dtype="uint64")])
-                    lv4 = R.call_tir(cls.reduce, (rs4[0],), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
-
+                    lv4 = R.call_tir(cls.hgemm, (o_layer63[0], lm_head_weight1), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
                     lv4_rs = R.reshape(lv4, (batch_size, 1, mk.VOCAB_SIZE))
                     astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, mk.VOCAB_SIZE), dtype="float32"))
 

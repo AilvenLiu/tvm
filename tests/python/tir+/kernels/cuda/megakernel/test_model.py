@@ -30,10 +30,8 @@ from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
-from tvm.tirp.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
-from tvm.tirp.megakernel.model.qwen3_30b_a3b import (
-    get_qwen3_30b_a3b_megakernel_relax_mod,
-)
+# from tvm.tirp.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
+from tvm.tirp.megakernel.model.qwen3_30b_a3b import get_qwen3_30b_a3b_megakernel_relax_mod
 from tvm.tirp.megakernel.model.qwen3_32b import get_qwen3_megakernel_relax_mod
 from tvm.tirp.megakernel.model_config import (
     llama3_1b_config,
@@ -41,11 +39,11 @@ from tvm.tirp.megakernel.model_config import (
     qwen3_32b_config,
 )
 
-from ..sm100a.test_hgemm_1consumer_1cta_swap_splitk import get_hgemm_kernel
 from ..sm100a.test_rmsnorm import get_rmsnorm_kernel
 from ..sm100a.test_rope import get_cos_sin_cache_kernel
 from .test_layer import MegaKernelDenseLayer
 from .test_moe_full_layer import MegaKernelMOEFullLayer
+from .test_lm_head import LMHeadLayer
 
 # pyright: reportInvalidTypeForm=false
 
@@ -463,15 +461,12 @@ def test(args):
         rms_norm = get_rmsnorm_kernel(mk_config["HIDDEN_SIZE"])
         mk = mk_wrapper_class(mk_config, world_size=TP_SIZE, profiler_on=PROFILER_ON)
         layer_kernel = mk.get_func(args.scheduler)
-        hgemm, reduce, tile_k_num = get_hgemm_kernel(
-            dim_n=mk_config["VOCAB_SIZE"], dim_k=mk_config["HIDDEN_SIZE"]
-        )
+        hgemm = LMHeadLayer(N=mk_config["VOCAB_SIZE"], K=mk_config["HIDDEN_SIZE"]).get_func()
         cos_sin_cache = get_cos_sin_cache_kernel(mk_config["HEAD_DIM"], mk_config["ROPE_THETA"])
-        relax_mod = relax_mod_func(mk, args.scheduler, TP_SIZE, PROFILER_ON, tile_k_num)
+        relax_mod = relax_mod_func(mk, args.scheduler, TP_SIZE, PROFILER_ON)
         mod = relax_mod
         mod.update_func(mod.get_global_var("rms_norm"), attach_attr(rms_norm, "rms_norm"))
         mod.update_func(mod.get_global_var("hgemm"), attach_attr(hgemm, "hgemm"))
-        mod.update_func(mod.get_global_var("reduce"), attach_attr(reduce, "reduce"))
         mod.update_func(
             mod.get_global_var("layer_kernel"), attach_attr(layer_kernel, "layer_kernel")
         )

@@ -24,7 +24,7 @@ from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler
 from tvm.tirp.megakernel.support import get_max_num_tokens_padded
 
 NUM_HIDDEN_LAYERS = 48
-def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Literal["static", "dynamic"], TP_SIZE: int, PROFILER_ON: bool, lm_head_tile_k_num: int, max_batch_size: int):
+def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Literal["static", "dynamic"], TP_SIZE: int, PROFILER_ON: bool, max_batch_size: int):
     assert mk.TIE_WORD_EMBEDDINGS == False, "Qwen3-30B-A3B does not support tie word embeddings"
 
     max_num_tokens_padded = get_max_num_tokens_padded(max_batch_size, mk.NUM_EXPERTS_PER_TOK, mk.NUM_EXPERTS, mk.MOE_M_PAD_SIZE)
@@ -176,11 +176,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                         compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
 
             @T.prim_func(private=True)
-            def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle, profiler_buffer_ptr: T.handle):
-                pass
-
-            @T.prim_func(private=True)
-            def reduce(partial_sum_ptr: T.handle, D_ptr: T.handle):
+            def hgemm(A_ptr: T.handle, B_ptr: T.handle, out_ptr: T.handle):
                 pass
 
             @T.prim_func(private=True)
@@ -442,11 +438,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                     o_layer46 = call_qwen3_layer(o_layer45[0], o_layer45[1], 46, max_num_tokens_padded)
                     o_layer47 = call_qwen3_layer(o_layer46[0], o_layer46[1], 47, max_num_tokens_padded)
 
-
-                    rs4 = R.call_tir(cls.hgemm, (o_layer47[0], lm_head_weight1),
-                                        out_sinfo=[R.Tensor((lm_head_tile_k_num, batch_size, mk.VOCAB_SIZE), dtype="float32"), R.Tensor([T.int64(2e6)], dtype="uint64")])
-                    lv4 = R.call_tir(cls.reduce, (rs4[0],), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
-
+                    lv4 = R.call_tir(cls.hgemm, (o_layer47[0], lm_head_weight1), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
                     lv4_rs = R.reshape(lv4, (batch_size, 1, mk.VOCAB_SIZE))
                     astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, mk.VOCAB_SIZE), dtype="float32"))
 
@@ -674,11 +666,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                         compute[v_i0, v_i1, v_i2] = T.Cast("float32", lv4[v_i0, v_i1, v_i2])
 
             @T.prim_func(private=True)
-            def hgemm(A_ptr: T.handle, b_ptr: T.handle, partial_sum_ptr: T.handle, profiler_buffer_ptr: T.handle):
-                pass
-
-            @T.prim_func(private=True)
-            def reduce(partial_sum_ptr: T.handle, D_ptr: T.handle):
+            def hgemm(A_ptr: T.handle, B_ptr: T.handle, out_ptr: T.handle):
                 pass
 
             @T.prim_func(private=True)
@@ -935,10 +923,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
 
                     # permute_dims4 = R.permute_dims(lm_head_weight1, axes=None)
                     # lv4: R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16") = R.matmul(rms_norm4, permute_dims4, out_dtype="void")
-                    rs4 = R.call_tir(cls.hgemm, (o_layer47[0], lm_head_weight1),
-                                        out_sinfo=[R.Tensor((lm_head_tile_k_num, batch_size, mk.VOCAB_SIZE), dtype="float32"), R.Tensor([T.int64(2e6)], dtype="uint64")])
-                    lv4 = R.call_tir(cls.reduce, (rs4[0],), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
-
+                    lv4 = R.call_tir(cls.hgemm, (o_layer47[0], lm_head_weight1), out_sinfo=R.Tensor((batch_size, mk.VOCAB_SIZE), dtype="float16"))
                     lv4_rs = R.reshape(lv4, (batch_size, 1, mk.VOCAB_SIZE))
                     astype = R.call_tir(cls.cast, (lv4_rs,), out_sinfo=R.Tensor((batch_size, 1, mk.VOCAB_SIZE), dtype="float32"))
 
