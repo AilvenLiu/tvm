@@ -41,6 +41,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   IfFrameNode::RegisterReflection();
   ThenFrameNode::RegisterReflection();
   ElseFrameNode::RegisterReflection();
+  ComposeOpFrameNode::RegisterReflection();
   DeclBufferFrameNode::RegisterReflection();
   ComposeOpFrameNode::RegisterReflection();
   AllocBufferFrameNode::RegisterReflection();

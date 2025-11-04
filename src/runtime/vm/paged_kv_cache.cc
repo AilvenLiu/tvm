@@ -3404,7 +3404,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                 num_kv_heads, qk_head_dim, v_head_dim, attn_kinds_vec, reserved_num_seqs,
                 num_total_pages, prefill_chunk_size, support_sliding_window, RoPEMode(rope_mode),
                 rotary_scale, rotary_theta, std::move(rope_ext_factors), enable_kv_transfer,
-                may_use_megakernel, model_name, init->dtype, init->device,  //
+                may_use_megakernel, model_name, init.dtype(), init.device(),  //
                 std::move(f_transpose_append_mha), std::move(f_transpose_append_mla),
                 std::move(f_compact_copy), std::move(f_attention_prefill_ragged),
                 std::move(f_attention_prefill), std::move(f_attention_decode),

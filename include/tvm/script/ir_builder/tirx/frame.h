@@ -649,7 +649,10 @@ class ComposeOpFrameNode : public TIRFrameNode {
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<ComposeOpFrameNode>().def_ro("workspace", &ComposeOpFrameNode::workspace);
+    refl::ObjectDef<ComposeOpFrameNode>()
+        .def_ro("workspace", &ComposeOpFrameNode::workspace)
+        .def_ro("config", &ComposeOpFrameNode::config)
+        .def_ro("dispatch", &ComposeOpFrameNode::dispatch);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tir.ComposeOpFrame", ComposeOpFrameNode,
                                     TIRFrameNode);
