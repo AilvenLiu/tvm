@@ -26,6 +26,8 @@
 
 #include <tvm/ffi/container/map.h>
 #include <tvm/runtime/tensor.h>
+#include <tvm/runtime/int_tuple.h>
+#include <tvm/runtime/nvtx.h>
 
 #include <algorithm>
 #include <limits>

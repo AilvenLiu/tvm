@@ -1640,7 +1640,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                 tvm_arg_dict[f"etensor_end_{i}"],
             ) = generate_event_tensor(
                 batch_size,
-                arg_dict["attn_task_num"],
+                arg_dict["attn_task_num"].item(),
                 tvm_arg_dict["kv_head_idx"],
                 tvm_arg_dict["q_indptr"],
                 mk.config,

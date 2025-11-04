@@ -315,28 +315,20 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
             if is_dynamic_sch:
                 if attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS: # split kv
                     # notes: assume that gqa_size is no greater than warp number in cta here
-                    push_worker_idx = (self.tile_scheduler.m_idx + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
-                    push_kv_idx = kv_head_idx_global[push_worker_idx]
-                    push_batch_idx = q_indptr_global[push_worker_idx]
-                    bh_tile = T.meta_var((KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER) // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
                     self.tile_scheduler.pre_notify_and_push(
-                        self.evt_attn_merge, T.if_then_else(push_worker_idx < attn_task_num, 1, 0), lambda notify_idx: (-1, (push_kv_idx * batch_size + push_batch_idx) // bh_tile,),
+                        self.evt_attn_merge, 1, lambda notify_idx: (-1, 0),
                         lambda trigger_idx: ( 
-                            -1, 1, 
-                            lambda push_idx: (JobType.BATCH_ATTENTION_MERGE.value, (push_kv_idx * batch_size + push_batch_idx) // bh_tile, 0, 0)
-                        ), "warp", "warp", scope_id=-1
+                            -1, ceildiv(batch_size * self.NUM_ATTENTION_HEADS, KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER), 
+                            lambda push_idx: (JobType.BATCH_ATTENTION_MERGE.value, push_idx, 0, 0)
+                        ), "cta", "cta", scope_id=-1
                     )
                 else: # no split kv    
-                    push_worker_idx = (self.tile_scheduler.m_idx + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
-                    push_kv_idx = kv_head_idx_global[push_worker_idx]   
-                    range_start = push_kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM // self.o_proj_tile.TILE_K
-                    range_end = ((push_kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM - 1) // self.o_proj_tile.TILE_K
                     self.tile_scheduler.pre_notify_and_push(
-                        self.evt_o_proj, T.if_then_else(push_worker_idx < attn_task_num, range_end - range_start + 1, 0), lambda notify_idx: (-1, range_start + notify_idx,),
+                        self.evt_o_proj, self.SPLIT_O_PROJECT, lambda notify_idx: (-1, notify_idx,),
                         lambda trigger_idx: ( 
                             -1, ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N), 
-                            lambda push_idx: (JobType.GEMM_O_PROJ.value, 0, push_idx, range_start + trigger_idx)
-                        ), "warp", "warp", scope_id=-1 
+                            lambda push_idx: (JobType.GEMM_O_PROJ.value, 0, push_idx, trigger_idx)
+                        ), "warp", "cta", scope_id=-1 
                     )
             self.tile_scheduler.wait(self.evt_notify_attn, self.tile_scheduler.m_idx, wait_level="warp")
             self.run_tile(self.attn_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, qkv_global, kv_cache_global, q_indptr_global, kv_indptr_global, partial_indptr_global,
@@ -344,17 +336,9 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                             kv_end_global, kv_head_idx_global, work_indptr_global, len_kv_chunk_global,
                             o_global, o_partial_attn_global, lse_partial_attn_global, self.profiler)                           
             if attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS: # split kv
-                notify_worker_idx = (self.tile_scheduler.m_idx + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
-                notify_kv_idx = kv_head_idx_global[notify_worker_idx]
-                notify_batch_idx = q_indptr_global[notify_worker_idx]
-                bh_tile = T.meta_var((KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER) // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
-                self.tile_scheduler.notify(self.evt_attn_merge, T.if_then_else(notify_worker_idx < attn_task_num, 1, 0), lambda notify_idx: (-1, (notify_kv_idx * batch_size + notify_batch_idx) // bh_tile,), scope="warp", scope_id=-1)
+                self.tile_scheduler.notify(self.evt_attn_merge, 1, lambda notify_idx: (-1, 0), scope="cta", scope_id=-1)
             else: # no split kv     
-                notify_worker_idx = (self.tile_scheduler.m_idx + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
-                notify_kv_idx = kv_head_idx_global[notify_worker_idx]
-                range_start = notify_kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM // self.o_proj_tile.TILE_K
-                range_end = ((notify_kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM - 1) // self.o_proj_tile.TILE_K
-                self.tile_scheduler.notify(self.evt_o_proj, T.if_then_else(notify_worker_idx < attn_task_num, range_end - range_start + 1, 0), lambda notify_idx: (-1, range_start + notify_idx,), scope="warp", scope_id=-1)
+                self.tile_scheduler.notify(self.evt_o_proj, self.SPLIT_O_PROJECT, lambda notify_idx: (-1, notify_idx,), scope="cta", scope_id=-1)
 
     @T.macro
     def task_impl_batch_attention_merge(
@@ -384,7 +368,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                             lambda push_idx: (JobType.GEMM_O_PROJ.value, 0, push_idx, range_start + trigger_idx)
                         ), "warp", "cta"
                     )
-                self.tile_scheduler.wait(self.evt_attn_merge, self.tile_scheduler.m_idx)
+                self.tile_scheduler.wait(self.evt_attn_merge, 0)
                 self.run_tile(self.merge_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global,
                                     merge_indptr_global, merge_o_indices_global)
                 self.tile_scheduler.notify(self.evt_o_proj, range_end - range_start + 1, lambda notify_idx: (-1, range_start + notify_idx,), scope="cta")
@@ -405,7 +389,7 @@ class MegaKernelDenseLayer(MegaKernelWrapper):
                             lambda push_idx: (JobType.GEMM_O_PROJ.value, 0, push_idx, range_start + trigger_idx)
                         ), "warp", "warpgroup", scope_id=-1
                     )
-                self.tile_scheduler.wait(self.evt_attn_merge, self.tile_scheduler.m_idx)
+                self.tile_scheduler.wait(self.evt_attn_merge, 0)
                 self.run_tile(self.merge_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, o_partial_attn_global, o_global, lse_partial_attn_global, num_qo_len_global,
                                     merge_indptr_global, merge_o_indices_global)
                 self.tile_scheduler.notify(self.evt_o_proj, range_end - range_start + 1, lambda notify_idx: (-1, range_start + notify_idx,), scope="warpgroup", scope_id=-1)
@@ -1720,7 +1704,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                 tvm_arg_dict[f"etensor_end_{i}"],
             ) = generate_event_tensor(
                 batch_size,
-                arg_dict["attn_task_num"],
+                arg_dict["attn_task_num"].item(),
                 tvm_arg_dict["kv_head_idx"],
                 tvm_arg_dict["q_indptr"],
                 mk.config,

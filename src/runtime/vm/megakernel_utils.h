@@ -33,6 +33,8 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
+class HostMemoryVector;
+
 inline int ceildiv(int a, int b) { return (a + b - 1) / b; }
 
 namespace megakernel {
@@ -120,6 +122,11 @@ ffi::Array<ffi::Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device
                                                         Tensor exec_queue_host_buf, int tp_size,
                                                         std::string model_name, int num_layers,
                                                         TVMStreamHandle copy_stream);
+
+std::vector<HostMemoryVector> GenerateEventTensorHost(int batch_size, int attn_task_num,
+                                                     int max_batch_size, std::string model_name,
+                                                     int tp_size, DLDataType dtype_aux,
+                                                     Device host_device);
 
 }  // namespace megakernel
 }  // namespace vm

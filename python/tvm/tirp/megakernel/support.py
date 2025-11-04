@@ -497,15 +497,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, conf
     etensor_notify_attn *= (base + 1)
     etensor_notify_attn = tvm.runtime.tensor(etensor_notify_attn, device=DEV)
 
-    etensor_attn_merge = np.zeros((batch_size * NUM_KEY_VALUE_HEADS), dtype=np.int32)
-    kv_head_idx = kv_head_idx.numpy()
-    q_indptr = q_indptr.numpy()
-    for m in range(attn_task_num):
-        kv_idx = kv_head_idx[m]
-        batch_idx = q_indptr[m]
-        etensor_attn_merge[(kv_idx * batch_size + batch_idx) // ((KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) // (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS))] += 1
-    assert ((etensor_attn_merge <= base) & (etensor_attn_merge * (base + 1) < max_int_32)).all()
-    etensor_attn_merge *= (base + 1)
+    etensor_attn_merge = np.full((batch_size * NUM_KEY_VALUE_HEADS), min(KernelConfig.SM_NUMBER, attn_tile_num) * (base + 1), dtype=np.int32)
     etensor_attn_merge = tvm.runtime.tensor(etensor_attn_merge, device=DEV)
 
     etensor_o_proj = np.zeros(config["SPLIT_O_PROJECT_DICT"][WORLD_SIZE], dtype=np.int32)
@@ -527,17 +519,7 @@ def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, conf
                 for i in range(range_start, range_end + 1):
                     etensor_o_proj[i] += 1      
     else:
-        for m in range(attn_task_num):
-            kv_idx = kv_head_idx[m]
-            batch_idx = q_indptr[m]
-            range_start = (
-                kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"] // o_proj_tile_k
-            )
-            range_end = (
-                (kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"] - 1
-            ) // o_proj_tile_k
-            for i in range(range_start, range_end + 1):
-                etensor_o_proj[i] += 1
+        etensor_o_proj += min(KernelConfig.SM_NUMBER, attn_tile_num)
     assert ((etensor_o_proj <= base) & (etensor_o_proj * (base + 1) < max_int_32)).all()
     etensor_o_proj *= (base + 1)
     etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)

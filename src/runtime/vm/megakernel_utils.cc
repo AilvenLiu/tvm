@@ -18,6 +18,7 @@
  */
 
 #include "megakernel_utils.h"
+#include "attn_utils.h"
 
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
@@ -351,8 +352,402 @@ Array<Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
   return queue_by_layer;
 }
 
-// RNN State methods
-TVM_FFI_STATIC_INIT_BLOCK() {
+std::vector<HostMemoryVector> GenerateEventTensorHost(int batch_size, int attn_task_num, int max_batch_size, 
+                                           std::string model_name, int tp_size, DLDataType dtype_aux, Device host_device){
+  NVTXScopedRange range("Generate event tensor on host");
+  const auto f_get_config =
+      tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
+  auto config = f_get_config(model_name).cast<ffi::Map<ffi::String, ffi::Any>>();
+  int num_qo_heads = config["NUM_ATTENTION_HEADS"].cast<int>() / tp_size;
+  int num_kv_heads = config["NUM_KEY_VALUE_HEADS"].cast<int>() / tp_size;
+  int head_dim = config["HEAD_DIM"].cast<int>();
+  int num_layers = config["NUM_HIDDEN_LAYERS"].cast<int>();
+  bool split_kv = attn_task_num > num_kv_heads * batch_size;
+  int split_qkv_project = config["SPLIT_QKV_PROJECT_DICT"].cast<ffi::Map<int, int>>()[tp_size];
+  int split_o_project = config["SPLIT_O_PROJECT_DICT"].cast<ffi::Map<int, int>>()[tp_size];
+  int hidden_size = config["HIDDEN_SIZE"].cast<int>();
+  int intermediate_size = config["INTERMEDIATE_SIZE"].cast<int>() / tp_size;
+  HostMemoryVector etensor_qkv_partial_host_ =
+      HostMemoryVector(num_layers * ceildiv((num_qo_heads + 2 * num_kv_heads) * head_dim,
+                                            megakernel::kSplitKReduceTileNUnit),
+                       dtype_aux, host_device);
+  HostMemoryVector etensor_notify_attn_host_ =
+      HostMemoryVector(num_layers * megakernel::kNumSM, dtype_aux, host_device);
+  HostMemoryVector etensor_o_partial_host_ =
+      HostMemoryVector(num_layers * ceildiv(hidden_size, megakernel::kGemmTileBlkN), dtype_aux,
+                       host_device);
+  HostMemoryVector etensor_o_allreduce_host_ =
+      HostMemoryVector(num_layers * ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile),
+                       dtype_aux, host_device);
+  HostMemoryVector etensor_attn_add_rms_host_ =
+      HostMemoryVector(num_layers * max_batch_size, dtype_aux, host_device);
+  HostMemoryVector etensor_attn_mlp_host_ = HostMemoryVector(num_layers, dtype_aux, host_device);
+  HostMemoryVector etensor_end_host_ = HostMemoryVector(num_layers, dtype_aux, host_device);
+  HostMemoryVector etensor_o_proj_host_ =
+      HostMemoryVector(num_layers * split_o_project, dtype_aux, host_device);
+  HostMemoryVector etensor_attn_merge_host_ = HostMemoryVector(num_layers * max_batch_size * num_kv_heads,
+                                              dtype_aux, host_device);
+  // 2. Initialize event tensors
+  if (model_name == "qwen3_32b") {
+    int gate_up_proj_factor =
+        config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"].cast<ffi::Map<int, int>>()[tp_size];
+    int down_proj_split_k_factor =
+        config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"].cast<ffi::Map<int, int>>()[tp_size];
+    ICHECK_NE(split_qkv_project, -1);
+    ICHECK_NE(split_o_project, -1);
+    ICHECK_NE(gate_up_proj_factor, -1);
+    ICHECK_NE(down_proj_split_k_factor, -1);
+    HostMemoryVector etensor_gate_up_proj_reduce_host_ =
+        HostMemoryVector(num_layers * ceildiv(intermediate_size * 2, megakernel::kGemmTileBlkN),
+                         dtype_aux, host_device);
+    HostMemoryVector etensor_gate_up_proj_host_ =
+        HostMemoryVector(num_layers * ceildiv(intermediate_size, megakernel::kGemmTileBlkN),
+                         dtype_aux, host_device);
+    HostMemoryVector etensor_down_proj_reduce_host_ =
+        HostMemoryVector(num_layers * ceildiv(hidden_size, megakernel::kGemmTileBlkN), dtype_aux, host_device);
+    HostMemoryVector etensor_down_proj_allreduce_host_ = HostMemoryVector(
+        num_layers * ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile), dtype_aux, host_device);
+    HostMemoryVector etensor_mlp_add_rms_host_ =
+        HostMemoryVector(num_layers * max_batch_size, dtype_aux, host_device);
+    HostMemoryVector etensor_down_proj_host_ =
+        HostMemoryVector(num_layers * down_proj_split_k_factor, dtype_aux, host_device);
+    // static zero etensors
+    etensor_qkv_partial_host_.resize(num_layers *
+                                      ceildiv((num_qo_heads + 2 * num_kv_heads) * head_dim,
+                                              megakernel::kSplitKReduceTileNUnit));
+    etensor_qkv_partial_host_.fill(0);
+    etensor_o_partial_host_.resize(num_layers * ceildiv(hidden_size, megakernel::kGemmTileBlkN));
+    etensor_o_partial_host_.fill(0);
+    etensor_o_allreduce_host_.resize(
+        num_layers * ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile));
+    etensor_o_allreduce_host_.fill(0);
+    etensor_attn_add_rms_host_.resize(num_layers * batch_size);
+    etensor_attn_add_rms_host_.fill(0);
+    etensor_attn_mlp_host_.resize(num_layers);
+    etensor_attn_mlp_host_.fill(0);
+    etensor_gate_up_proj_reduce_host_.resize(
+        num_layers * ceildiv(intermediate_size * 2, megakernel::kGemmTileBlkN));
+    etensor_gate_up_proj_reduce_host_.fill(0);
+    etensor_gate_up_proj_host_.resize(num_layers *
+                                      ceildiv(intermediate_size, megakernel::kGemmTileBlkN));
+    etensor_gate_up_proj_host_.fill(0);
+    etensor_down_proj_reduce_host_.resize(num_layers *
+                                          ceildiv(hidden_size, megakernel::kGemmTileBlkN));
+    etensor_down_proj_reduce_host_.fill(0);
+    etensor_down_proj_allreduce_host_.resize(
+        num_layers * ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile));
+    etensor_down_proj_allreduce_host_.fill(0);
+    etensor_mlp_add_rms_host_.resize(num_layers * batch_size);
+    etensor_mlp_add_rms_host_.fill(0);
+    etensor_end_host_.resize(num_layers);
+    etensor_end_host_.fill(0);
+    // dynamic etensors
+    etensor_notify_attn_host_.resize(num_layers * megakernel::kNumSM);
+    etensor_notify_attn_host_.fill(0);
+    int attn_tile_num = ceildiv(attn_task_num, megakernel::kNumWarpgroupPerBlock);
+    int unit = megakernel::kNumWarpgroupPerBlock * (2 + num_qo_heads / num_kv_heads);
+    int num = unit * (attn_tile_num / megakernel::kNumSM);
+    int remain = attn_tile_num % megakernel::kNumSM;
+    for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+      for (int i = 0; i < megakernel::kNumSM; ++i) {
+        int cnt = (i < remain) ? unit + num : num;
+        CHECK_LE(cnt, megakernel::kSemaphoreBase);
+        CHECK_LT(cnt * (megakernel::kSemaphoreBase + 1), megakernel::kMaxSemaphore);
+        etensor_notify_attn_host_.set(layer_id * megakernel::kNumSM + i,
+                                      cnt * (megakernel::kSemaphoreBase + 1));
+      }
+    }
+
+    etensor_o_proj_host_.resize(num_layers * split_o_project);
+    etensor_o_proj_host_.fill(0);
+    int o_proj_tile_k = (ceildiv(ceildiv(num_qo_heads * head_dim, split_o_project),
+                                  megakernel::kGemmTileBlkK) *
+                          megakernel::kGemmTileBlkK);
+    if (split_kv) {
+      for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+        for (int m = 0;
+              m < ceildiv(batch_size * num_qo_heads,
+                          megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup);
+              ++m) {
+          int worker_id =
+              m * megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup;
+          int kv_idx = worker_id / (batch_size * (num_qo_heads / num_kv_heads));
+          int range_start =
+              (kv_idx * (num_qo_heads / num_kv_heads)) * head_dim / o_proj_tile_k;
+          int range_end = (((kv_idx + 1) * (num_qo_heads / num_kv_heads)) * head_dim - 1) /
+                          o_proj_tile_k;
+          for (int i = range_start; i <= range_end; ++i) {
+            CHECK_GE(i, 0) << "Index " << i << " is negative.";
+            CHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
+            etensor_o_proj_host_.set(layer_id * split_o_project + i,
+                                      etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
+          }
+        }
+      }
+    } else {
+      etensor_o_proj_host_.fill(std::min(megakernel::kNumSM, attn_tile_num));
+    }
+    for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+      for (int i = 0; i < split_o_project; ++i) {
+        CHECK_LE(etensor_o_proj_host_[layer_id * split_o_project + i],
+                  megakernel::kSemaphoreBase);
+        CHECK_LT(etensor_o_proj_host_[layer_id * split_o_project + i] *
+                      (megakernel::kSemaphoreBase + 1),
+                  megakernel::kMaxSemaphore);
+        etensor_o_proj_host_.set(layer_id * split_o_project + i,
+                                  etensor_o_proj_host_[layer_id * split_o_project + i] *
+                                      (megakernel::kSemaphoreBase + 1));
+      }
+    }
+
+    etensor_down_proj_host_.resize(num_layers * down_proj_split_k_factor);
+    etensor_down_proj_host_.fill(0);
+    int down_proj_tile_k = (ceildiv(ceildiv(intermediate_size, down_proj_split_k_factor),
+                                    megakernel::kGemmTileBlkK) *
+                            megakernel::kGemmTileBlkK);
+    if (gate_up_proj_factor == 1) {
+      for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+        for (int m = 0; m < (intermediate_size) * 2 / megakernel::kGemmTileBlkN; ++m) {
+          int range_start = m * megakernel::kGemmTileBlkN / 2 / down_proj_tile_k;
+          int range_end = ((m + 1) * megakernel::kGemmTileBlkN / 2 - 1) / down_proj_tile_k;
+          for (int i = range_start; i <= range_end; ++i) {
+            CHECK_GE(i, 0) << "Index " << i << " is negative.";
+            CHECK_LT(i, down_proj_split_k_factor)
+                << "Index " << i << " out of bounds " << down_proj_split_k_factor;
+            etensor_down_proj_host_.set(
+                layer_id * down_proj_split_k_factor + i,
+                etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] + 1);
+          }
+        }
+      }
+    } else {
+      for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+        for (int m = 0; m < intermediate_size / megakernel::kSiluMultiplyTileSize; ++m) {
+          int range_start = m * megakernel::kSiluMultiplyTileSize / down_proj_tile_k;
+          int range_end = ((m + 1) * megakernel::kSiluMultiplyTileSize - 1) / down_proj_tile_k;
+          for (int i = range_start; i <= range_end; ++i) {
+            CHECK_GE(i, 0) << "Index " << i << " is negative.";
+            CHECK_LT(i, down_proj_split_k_factor)
+                << "Index " << i << " out of bounds " << down_proj_split_k_factor;
+            etensor_down_proj_host_.set(
+                layer_id * down_proj_split_k_factor + i,
+                etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] + 1);
+          }
+        }
+      }
+    }
+    for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+      for (int i = 0; i < down_proj_split_k_factor; ++i) {
+        CHECK_LE(etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i],
+                  megakernel::kSemaphoreBase);
+        CHECK_LT(etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] *
+                      (megakernel::kSemaphoreBase + 1),
+                  megakernel::kMaxSemaphore);
+        etensor_down_proj_host_.set(
+            layer_id * down_proj_split_k_factor + i,
+            etensor_down_proj_host_[layer_id * down_proj_split_k_factor + i] *
+                (megakernel::kSemaphoreBase + 1));
+      }
+    }
+
+    etensor_attn_merge_host_.resize(num_layers * batch_size * num_kv_heads);
+    etensor_attn_merge_host_.fill(std::min(megakernel::kNumSM, attn_tile_num) *
+                                  (megakernel::kSemaphoreBase + 1));
+    std::vector<HostMemoryVector> result;
+    result.push_back(std::move(etensor_qkv_partial_host_));
+    result.push_back(std::move(etensor_notify_attn_host_));
+    result.push_back(std::move(etensor_o_partial_host_));
+    result.push_back(std::move(etensor_o_allreduce_host_));
+    result.push_back(std::move(etensor_attn_add_rms_host_));
+    result.push_back(std::move(etensor_attn_mlp_host_));
+    result.push_back(std::move(etensor_gate_up_proj_reduce_host_));
+    result.push_back(std::move(etensor_gate_up_proj_host_));
+    result.push_back(std::move(etensor_down_proj_reduce_host_));
+    result.push_back(std::move(etensor_down_proj_allreduce_host_));
+    result.push_back(std::move(etensor_mlp_add_rms_host_));
+    result.push_back(std::move(etensor_end_host_));
+    result.push_back(std::move(etensor_o_proj_host_));
+    result.push_back(std::move(etensor_down_proj_host_));
+    result.push_back(std::move(etensor_attn_merge_host_));
+    return result;
+  } else if (model_name == "qwen3_30b_a3b" || model_name == "qwen3_30b_a3b_unfused") {
+    int gating_split_k_factor = config["GATING_SPLIT_K_FACTOR"].cast<int>();
+    int num_experts = config["NUM_EXPERTS"].cast<int>();
+    int num_experts_per_tok = config["NUM_EXPERTS_PER_TOK"].cast<int>();
+    ICHECK_NE(split_qkv_project, -1);
+    ICHECK_NE(split_o_project, -1);
+    HostMemoryVector etensor_gating_host_ = HostMemoryVector(num_layers, dtype_aux, host_device);
+    HostMemoryVector etensor_topk_softmax_host_ = HostMemoryVector(num_layers, dtype_aux, host_device);
+    HostMemoryVector etensor_moe_align_host_ = HostMemoryVector(num_layers, dtype_aux, host_device);
+    HostMemoryVector etensor_count_and_sort_host_ = HostMemoryVector(num_layers, dtype_aux, host_device);
+    HostMemoryVector etensor_group_gemm_gate_up_host_;
+    HostMemoryVector etensor_silu_mul_host_;
+    if (model_name == "qwen3_30b_a3b_unfused") {
+      etensor_group_gemm_gate_up_host_ =
+          HostMemoryVector(num_layers, dtype_aux, host_device);
+      etensor_silu_mul_host_ = HostMemoryVector(num_layers, dtype_aux, host_device);
+    } else {
+      const auto f_get_max_num_tokens_padded =
+          tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_max_num_tokens_padded");
+      int max_num_tokens_padded =
+          f_get_max_num_tokens_padded(max_batch_size, num_experts_per_tok, num_experts,
+                                      megakernel::kMoeBlkM)
+              .cast<int>();
+      etensor_group_gemm_gate_up_host_ =
+          HostMemoryVector(num_layers * (max_num_tokens_padded / megakernel::kMoeBlkM), dtype_aux,
+                           host_device);
+      etensor_silu_mul_host_ =
+          HostMemoryVector(num_layers * (max_num_tokens_padded / megakernel::kMoeBlkM), dtype_aux,
+                           host_device);
+    }
+    HostMemoryVector etensor_group_gemm_down_host_ = HostMemoryVector(num_layers, dtype_aux, host_device);
+    // static zero etensors
+    etensor_qkv_partial_host_.resize(num_layers *
+                                      ceildiv((num_qo_heads + 2 * num_kv_heads) * head_dim,
+                                              megakernel::kSplitKReduceTileNUnit));
+    etensor_qkv_partial_host_.fill(0);
+    etensor_o_partial_host_.resize(num_layers * ceildiv(hidden_size, megakernel::kGemmTileBlkN));
+    etensor_o_partial_host_.fill(0);
+    etensor_o_allreduce_host_.resize(
+        num_layers * ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile));
+    etensor_o_allreduce_host_.fill(0);
+    etensor_attn_add_rms_host_.resize(num_layers * batch_size);
+    etensor_attn_add_rms_host_.fill(0);
+    etensor_attn_mlp_host_.resize(num_layers);
+    etensor_attn_mlp_host_.fill(0);
+    etensor_gating_host_.resize(num_layers);
+    etensor_gating_host_.fill(megakernel::kSemaphoreFactor * gating_split_k_factor *
+                              ceildiv(batch_size, megakernel::kGatingBlkM));
+    etensor_topk_softmax_host_.resize(num_layers);
+    etensor_topk_softmax_host_.fill(megakernel::kSemaphoreFactor * megakernel::kNumSM);
+    etensor_moe_align_host_.resize(num_layers);
+    etensor_moe_align_host_.fill(megakernel::kSemaphoreFactor);
+    etensor_count_and_sort_host_.resize(num_layers);
+    etensor_count_and_sort_host_.fill(megakernel::kSemaphoreFactor * megakernel::kNumSM);
+    const auto f_get_max_num_tokens_padded =
+        tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_max_num_tokens_padded");
+    int max_num_tokens_padded = f_get_max_num_tokens_padded(batch_size, num_experts_per_tok,
+                                                            num_experts, megakernel::kMoeBlkM)
+                                    .cast<int>();
+    if (model_name == "qwen3_30b_a3b_unfused") {
+      etensor_group_gemm_gate_up_host_.resize(num_layers);
+      etensor_group_gemm_gate_up_host_.fill(megakernel::kSemaphoreFactor *
+                                            (max_num_tokens_padded / megakernel::kMoeBlkM) *
+                                            intermediate_size * 2 / megakernel::kGemmTileBlkN);
+      etensor_silu_mul_host_.resize(num_layers);
+      etensor_silu_mul_host_.fill(megakernel::kSemaphoreFactor *
+                                  (max_num_tokens_padded / megakernel::kMoeBlkM) *
+                                  intermediate_size / megakernel::kSiluMultiplyMoeTileSize);
+    } else {
+      etensor_group_gemm_gate_up_host_.resize(num_layers *
+                                              (max_num_tokens_padded / megakernel::kMoeBlkM));
+      etensor_group_gemm_gate_up_host_.fill(megakernel::kSemaphoreFactor * intermediate_size * 2 /
+                                            megakernel::kGemmTileBlkN);
+      etensor_silu_mul_host_.resize(num_layers * (max_num_tokens_padded / megakernel::kMoeBlkM));
+      etensor_silu_mul_host_.fill(megakernel::kSemaphoreFactor * intermediate_size /
+                                  megakernel::kSiluMultiplyMoeTileSize);
+    }
+    etensor_group_gemm_down_host_.resize(num_layers);
+    etensor_group_gemm_down_host_.fill(megakernel::kSemaphoreFactor *
+                                        (max_num_tokens_padded / megakernel::kMoeBlkM) *
+                                        (hidden_size / megakernel::kGemmTileBlkN));
+    etensor_end_host_.resize(num_layers);
+    etensor_end_host_.fill(0);
+    // dynamic etensors
+    etensor_notify_attn_host_.resize(num_layers * megakernel::kNumSM);
+    etensor_notify_attn_host_.fill(0);
+    int attn_tile_num = ceildiv(attn_task_num, megakernel::kNumWarpgroupPerBlock);
+    int unit = megakernel::kNumWarpgroupPerBlock * (2 + num_qo_heads / num_kv_heads);
+    int num = unit * (attn_tile_num / megakernel::kNumSM);
+    int remain = attn_tile_num % megakernel::kNumSM;
+    for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+      for (int i = 0; i < megakernel::kNumSM; ++i) {
+        int cnt = (i < remain) ? unit + num : num;
+        CHECK_LE(cnt, megakernel::kSemaphoreBase);
+        CHECK_LT(cnt * (megakernel::kSemaphoreBase + 1), megakernel::kMaxSemaphore);
+        etensor_notify_attn_host_.set(layer_id * megakernel::kNumSM + i,
+                                      cnt * (megakernel::kSemaphoreBase + 1));
+      }
+    }
+
+    etensor_o_proj_host_.resize(num_layers * split_o_project);
+    etensor_o_proj_host_.fill(0);
+    int o_proj_tile_k = (ceildiv(ceildiv(num_qo_heads * head_dim, split_o_project),
+                                  megakernel::kGemmTileBlkK) *
+                          megakernel::kGemmTileBlkK);
+    if (split_kv) {
+      // to simply, assume that one merge tile will not use two kv head
+      CHECK_LE(megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup,
+                num_qo_heads / num_kv_heads);
+      for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+        for (int m = 0;
+              m < ceildiv(batch_size * num_qo_heads,
+                          megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup);
+              ++m) {
+          int worker_id =
+              m * megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup;
+          int kv_idx = worker_id / (batch_size * (num_qo_heads / num_kv_heads));
+          int qo_idx = worker_id % (num_qo_heads / num_kv_heads);
+          int range_start =
+              (kv_idx * (num_qo_heads / num_kv_heads) + qo_idx) * head_dim / o_proj_tile_k;
+          int range_end =
+              ((kv_idx * (num_qo_heads / num_kv_heads) + qo_idx +
+                megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup) *
+                    head_dim -
+                1) /
+              o_proj_tile_k;
+          for (int i = range_start; i <= range_end; ++i) {
+            CHECK_GE(i, 0) << "Index " << i << " is negative.";
+            CHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
+            etensor_o_proj_host_.set(layer_id * split_o_project + i,
+                                      etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
+          }
+        }
+      }
+    } else {
+      etensor_o_proj_host_.fill(std::min(megakernel::kNumSM, attn_tile_num));
+    }
+    for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
+      for (int i = 0; i < split_o_project; ++i) {
+        CHECK_LE(etensor_o_proj_host_[layer_id * split_o_project + i],
+                  megakernel::kSemaphoreBase);
+        CHECK_LT(etensor_o_proj_host_[layer_id * split_o_project + i] *
+                      (megakernel::kSemaphoreBase + 1),
+                  megakernel::kMaxSemaphore);
+        etensor_o_proj_host_.set(layer_id * split_o_project + i,
+                                  etensor_o_proj_host_[layer_id * split_o_project + i] *
+                                      (megakernel::kSemaphoreBase + 1));
+      }
+    }
+
+    etensor_attn_merge_host_.resize(num_layers * batch_size * num_kv_heads);
+    etensor_attn_merge_host_.fill(std::min(megakernel::kNumSM, attn_tile_num) *
+                                  (megakernel::kSemaphoreBase + 1));
+    std::vector<HostMemoryVector> result;
+    result.push_back(std::move(etensor_qkv_partial_host_));
+    result.push_back(std::move(etensor_notify_attn_host_));
+    result.push_back(std::move(etensor_o_partial_host_));
+    result.push_back(std::move(etensor_o_allreduce_host_));
+    result.push_back(std::move(etensor_attn_add_rms_host_));
+    result.push_back(std::move(etensor_attn_mlp_host_));
+    result.push_back(std::move(etensor_end_host_));
+    result.push_back(std::move(etensor_o_proj_host_));
+    result.push_back(std::move(etensor_attn_merge_host_));
+    result.push_back(std::move(etensor_gating_host_));
+    result.push_back(std::move(etensor_topk_softmax_host_));
+    result.push_back(std::move(etensor_moe_align_host_));
+    result.push_back(std::move(etensor_count_and_sort_host_));
+    result.push_back(std::move(etensor_group_gemm_gate_up_host_));
+    result.push_back(std::move(etensor_silu_mul_host_));
+    result.push_back(std::move(etensor_group_gemm_down_host_));
+    return result;
+  } else {
+    LOG(FATAL) << "Megakernel does not support model " << model_name;
+  }
+}
+
+    // RNN State methods
+    TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("megakernel.get_event_tensors_on_layer", GetEventTensorsOnLayer)
