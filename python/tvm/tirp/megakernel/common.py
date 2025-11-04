@@ -56,7 +56,7 @@ def pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=True, debug=False):
     if host:
         if debug:
             assert task_type < MAX_TASK_TYPE and m_idx < MAX_M_IDX and n_idx < MAX_N_IDX and k_idx < MAX_K_IDX
-        return task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)
+        return np.int64([task_type | (m_idx << 5) | (n_idx << 18) | (k_idx << 28)]).astype(np.int32)
     else:
         if debug:
             trap_when_assert_failed(task_type < MAX_TASK_TYPE)

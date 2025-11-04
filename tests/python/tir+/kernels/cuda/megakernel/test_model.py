@@ -357,8 +357,8 @@ def test(args):
 
     vm, batch_decode_func, kv_cache_create_func, embed_func = load_reference_model_lib()
     params = get_params(named_params, vm)
-    decrease_bs = set()
-
+    decrease_bs = set(random.sample(range(1, SEQ_LEN + 1), BATCH_SIZE))
+    
     def test_qwen3_model(
         get_global_func,
         batch_decode_func,
