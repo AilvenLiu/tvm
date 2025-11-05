@@ -124,7 +124,7 @@ class Buffer(Object, Scriptable):
         load : Expr
             The corresponding load expression.
         """
-        begin = (begin,) if isinstance(begin, int | PrimExpr) else begin
+        begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin
         dtype = dtype if dtype else self.dtype
         return _ffi_api.BufferVLoad(self, begin, dtype, predicate)  # type: ignore
 
@@ -149,7 +149,7 @@ class Buffer(Object, Scriptable):
         store : Stmt
             The corresponding store stmt.
         """
-        begin = (begin,) if isinstance(begin, int | PrimExpr) else begin
+        begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin
         return _ffi_api.BufferVStore(self, begin, value, predicate)  # type: ignore
 
     def scope(self):
@@ -270,7 +270,7 @@ class Buffer(Object, Scriptable):
         assert len(indices) == len(
             self.shape
         ), f"The number of indices {indices} does not match the shape of the buffer {self.shape}"
-        return tvm.tir.address_of(self[*indices])
+        return tvm.tirx.address_of(self[*indices])
 
     def view(self, *args, **kwargs) -> "Buffer":
         """Creates a new view of the buffer. (used by parser)
@@ -406,7 +406,7 @@ class Buffer(Object, Scriptable):
         )
         from .stmt import BufferRegion  # pylint: disable=import-outside-toplevel
 
-        if not isinstance(indices, tuple | list):
+        if not isinstance(indices, (tuple, list)):
             indices = [indices]
         has_slice = any(isinstance(i, slice) for i in indices)
         has_step = any(
@@ -451,131 +451,7 @@ class Buffer(Object, Scriptable):
             return BufferLoad(self, expr_indices)
 
 
-def decl_buffer(
-    shape,
-    dtype=None,
-    name="buffer",
-    data=None,
-    strides=None,
-    elem_offset=None,
-    scope="",
-    data_alignment=-1,
-    offset_factor=0,
-    buffer_type="",
-    axis_separators=None,
-    span=None,
-    layout=None,
-):
-    """Declare a new symbolic buffer.
 
-    Normally buffer is created automatically during lower and build.
-    This is only needed if user want to specify their own buffer layout.
-
-    See the note below for detailed discussion on usage of buffer.
-
-    Parameters
-    ----------
-    shape : tuple of Expr
-        The shape of the buffer.
-
-    dtype : str, optional
-        The data type of the buffer.
-
-    name : str, optional
-        The name of the buffer.
-
-    data : tirx.Var, optional
-        The data pointer in the buffer.
-
-    strides: array of Expr
-        The stride of the buffer.
-
-    elem_offset: Expr, optional
-        The beginning offset of the array to data.
-        In terms of number of elements of dtype.
-
-    scope: str, optional
-        The storage scope of the buffer, if not global.
-        If scope equals empty string, it means it is global memory.
-
-    data_alignment: int, optional
-        The alignment of data pointer in bytes.
-        If -1 is passed, the alignment will be set to TVM's internal default.
-
-    offset_factor: int, optional
-        The factor of elem_offset field, when set,
-        elem_offset is required to be multiple of offset_factor.
-        If 0 is pssed, the alignment will be set to 1.
-        if non-zero is passed, we will created a Var for elem_offset if elem_offset is not None.
-
-    buffer_type: str, optional, {"", "auto_broadcast"}
-        auto_broadcast buffer allows one to implement broadcast computation
-        without considering whether dimension size equals to one.
-        TVM maps buffer[i][j][k] -> buffer[i][0][k] if dimension j's shape equals 1.
-
-    axis_separators : list of int, optional
-        If passed, a list of separators between groups of axes,
-        each of which is flattened to an output axis.  For flat
-        memory spaces, should either be None, or an empty list.
-
-    span: Optional[Span]
-        The location of the decl_buffer creation in the source.
-
-    layout: Optional[TLayout]
-        The layout of the buffer.
-
-    Returns
-    -------
-    buffer : tvm.tirx.Buffer
-        The created buffer
-
-    Note
-    ----
-    Buffer data structure reflects the DLTensor structure in dlpack.
-    While DLTensor data structure is very general, it is usually helpful
-    to create function that only handles specific case of data structure
-    and make compiled function benefit from it.
-
-    If user pass strides and elem_offset is passed as None
-    when constructing the function, then the function will be specialized
-    for the DLTensor that is compact and aligned.
-    If user pass a fully generic symbolic array to the strides,
-    then the resulting function becomes fully generic.
-    """
-    # pylint: disable=import-outside-toplevel
-    from .expr import Var
-
-    shape = (shape,) if isinstance(shape, PrimExpr | Integral) else shape
-    dtype = "float32" if dtype is None else dtype
-    strides = () if strides is None else strides
-
-    if axis_separators is None:
-        axis_separators = []
-
-    if offset_factor != 0 and elem_offset is None:
-        shape_dtype = shape[0].dtype if shape and hasattr(shape[0], "dtype") else "int32"
-        elem_offset = Var(f"{name}_elem_offset", shape_dtype)
-    if data is None:
-        # Bool is represented as uint1 in the IR, but stored as int8
-        storage_type = PrimType(dtype)
-        storage_type = PrimType("int8") if storage_type.dtype == "bool" else storage_type
-        data = Var(name, PointerType(storage_type, scope), span)
-    return _ffi_api.Buffer(  # type: ignore
-        data,
-        dtype,
-        shape,
-        strides,
-        elem_offset,
-        name,
-        data_alignment,
-        offset_factor,
-        buffer_type,
-        axis_separators,
-        span,
-    )
-
-
-@tvm_ffi.register_object("tir.DataProducer")
 def decl_buffer(
     shape,
     dtype=None,
