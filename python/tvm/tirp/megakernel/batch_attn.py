@@ -121,8 +121,8 @@ class BatchAttnTile(Tile):
             == num_mma_kv * num_warps_kv)
     assert (num_warps_kv * cta_tile_q * 2
             == num_warps * num_mma_q * 16 * 2)
-    max_total_num_workers = 65536
-    max_num_kv_splits = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)
+    max_total_num_workers = 1025
+    max_num_kv_splits = 4 * KernelConfig.SM_NUMBER * 2 * 16
 
     def get_permuted_offset(self, stride, i, j):
         return i * stride + (j ^ (i % 8))

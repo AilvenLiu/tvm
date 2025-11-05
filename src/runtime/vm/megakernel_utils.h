@@ -50,7 +50,7 @@ constexpr const int kGemmTileBlkK = 64;
 constexpr const int kSiluMultiplyTileSize = 128;
 constexpr const int kAllReduceTileMTile = 16;
 constexpr const int kAllReduceTileNTile = 128;
-constexpr const int kMaxTotalNumWorks = 65536;
+constexpr const int kMaxTotalNumWorks = 1025;
 // MOE tasks config
 constexpr const int kMoeBlkM = 128;
 constexpr const int kGatingBlkM = 128;

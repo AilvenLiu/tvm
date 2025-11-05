@@ -206,7 +206,7 @@ def decode_attn_plan(
 
 def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_task_num):
     """For layer testing use."""
-    MAX_TOTAL_NUM_WORKERS = 65536
+    MAX_TOTAL_NUM_WORKERS = 1025
     inverse_info = [[] for _ in range(batch_size * kv_head_num)]
     for m in range(attn_task_num):
         bs_idx = q_indptr[m]

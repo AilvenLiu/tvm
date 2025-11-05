@@ -49,8 +49,8 @@ SM_COUNT = 148
 F16_BYTE = 2
 F32_BYTE = 4
 
-MAX_TOTAL_NUM_WORKERS = 65536
-MAX_NUM_KV_SPLITS = 4 * SM_COUNT * 2 * (128 + 16)
+MAX_TOTAL_NUM_WORKERS = 1025
+MAX_NUM_KV_SPLITS = 4 * SM_COUNT * 2 * 16
 
 
 def perpare_data(batch_size, qo_heads, kv_heads, seq_len, head_dim, page_size, max_page_num):

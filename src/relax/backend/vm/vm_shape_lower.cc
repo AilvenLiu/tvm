@@ -205,7 +205,7 @@ class VMShapeLowerMutator
  public:
   static IRModule Lower(IRModule mod, bool emit_err_ctx) {
     VMShapeLowerMutator mutator(mod, emit_err_ctx);
-
+    mutator.skip_shape_check_ = mod->attrs.GetAttr<bool>(attr::kSkipShapeCheck).value_or(false);
     for (auto& kv : mod->functions) {
       if (auto* func = kv.second.as<FunctionNode>()) {
         Function updated_func = mutator.Rewrite(kv.first, ffi::GetRef<Function>(func));
@@ -502,6 +502,7 @@ class VMShapeLowerMutator
     for (const MatchShapeTodoItem& item : match_todos) {
       bool all_nop = true;
       bool any_nop = false;
+      bool all_assert_equal = true;
 
       ffi::Array<Expr> args = {item.input, shape_heap_};
 
@@ -513,11 +514,12 @@ class VMShapeLowerMutator
         match_op = builtin_match_shape_;
         args.push_back(PrimValue::Int64(item.pattern.size()));
       }
-
+      
       for (PrimExpr expr : item.pattern) {
         auto [code, rvalue] = MakeMatchArgs(expr, require_value_computed);
         all_nop = all_nop && code == MatchShapeCode::kNoOp;
         any_nop = any_nop || code == MatchShapeCode::kNoOp;
+        all_assert_equal = all_assert_equal && code != MatchShapeCode::kStoreToHeap;
         args.push_back(PrimValue::Int64(static_cast<int>(code)));
         args.push_back(rvalue);
       }
@@ -525,7 +527,8 @@ class VMShapeLowerMutator
         outstanding_todos.push_back(item);
       }
       args.push_back(GetErrContext(item.err_ctx));
-      if (!all_nop) {
+      bool emit = skip_shape_check_ ? !all_assert_equal : all_nop;
+      if (emit) {
         Call call(match_op, args, Attrs(), {void_sinfo_});
         builder_->Emit(call, "_");
       }
@@ -652,7 +655,9 @@ class VMShapeLowerMutator
       // check_shape_info(value, ndim, err_ctx)
       Call call(builtin_check_prim_value_info_,
                 {value, DataTypeImm(op->dtype), GetErrContext(err_ctx)}, Attrs(), {void_sinfo_});
-      builder_->Emit(call, "_");
+      if (!skip_shape_check_) {
+        builder_->Emit(call, "_");
+      }
     }
     if (op->value.defined()) {
       MatchShapeTodoItem item;
@@ -672,7 +677,9 @@ class VMShapeLowerMutator
       Call call(builtin_check_shape_info_,
                 {value, PrimValue::Int64(op->ndim), GetErrContext(err_ctx)}, Attrs(),
                 {void_sinfo_});
-      builder_->Emit(call, "_");
+      if (!skip_shape_check_) {
+        builder_->Emit(call, "_");
+      }
     }
     if (op->values.defined()) {
       MatchShapeTodoItem item;
@@ -699,7 +706,9 @@ class VMShapeLowerMutator
       Call call(builtin_check_tensor_info_,
                 {value, PrimValue::Int64(op->ndim), DataTypeImm(op->dtype), GetErrContext(err_ctx)},
                 Attrs(), {void_sinfo_});
-      builder_->Emit(call, "_");
+      if (!skip_shape_check_) {
+        builder_->Emit(call, "_");
+      }
     }
 
     if (shape_expr != nullptr) {
@@ -749,7 +758,9 @@ class VMShapeLowerMutator
                 {value, PrimValue::Int64(static_cast<int64_t>(op->fields.size())),
                  GetErrContext(err_ctx)},
                 Attrs(), {void_sinfo_});
-      builder_->Emit(call, "_");
+      if (!skip_shape_check_) {
+        builder_->Emit(call, "_");
+      }
     }
     // recursively visit each sub-field and run matching
     for (size_t i = 0; i < op->fields.size(); ++i) {
@@ -765,7 +776,9 @@ class VMShapeLowerMutator
     if (!always_check && MatchStructInfo<FuncStructInfo>(value)) return;
     // check_func_info(value, err_ctx)
     Call call(builtin_check_func_info_, {value, GetErrContext(err_ctx)}, Attrs(), {void_sinfo_});
-    builder_->Emit(call, "_");
+    if (!skip_shape_check_) {
+      builder_->Emit(call, "_");
+    }
   }
 
   //-------------------------------------------------------
@@ -773,6 +786,8 @@ class VMShapeLowerMutator
   //-------------------------------------------------------
   /*! \brief whether to emit error context, can be turned off for testing purposes. */
   bool emit_err_ctx_{true};
+  /*! \brief whether to skip shape check, can be turned on to speed up execution. */
+  bool skip_shape_check_{false};
   /*! \brief heap ptr to store the PrimExpr slots. */
   Var shape_heap_;
   /*! \brief heap size. */

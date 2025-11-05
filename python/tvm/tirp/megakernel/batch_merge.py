@@ -101,7 +101,7 @@ class BatchMergeTile(Tile):
     num_warps = KernelConfig.NUM_THREADS // 32
     num_smem_stages = 1
     num_workers = num_warps * KernelConfig.SM_NUMBER
-    max_num_kv_splits = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)
+    max_num_kv_splits = 4 * KernelConfig.SM_NUMBER * 2 * 16
 
     class State:
         def __init__(self, vec_size):

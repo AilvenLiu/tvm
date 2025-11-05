@@ -388,7 +388,7 @@ std::vector<HostMemoryVector> GenerateEventTensorHost(int batch_size, int attn_t
   HostMemoryVector etensor_attn_merge_host_ = HostMemoryVector(num_layers * max_batch_size * num_kv_heads,
                                               dtype_aux, host_device);
   // 2. Initialize event tensors
-  if (model_name == "qwen3_32b") {
+  if (model_name == "qwen3_32b" || model_name == "llama3_1b") {
     int gate_up_proj_factor =
         config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"].cast<ffi::Map<int, int>>()[tp_size];
     int down_proj_split_k_factor =
@@ -465,22 +465,18 @@ std::vector<HostMemoryVector> GenerateEventTensorHost(int batch_size, int attn_t
                           megakernel::kGemmTileBlkK);
     if (split_kv) {
       for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
-        for (int m = 0;
-              m < ceildiv(batch_size * num_qo_heads,
-                          megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup);
-              ++m) {
-          int worker_id =
-              m * megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup;
-          int kv_idx = worker_id / (batch_size * (num_qo_heads / num_kv_heads));
-          int range_start =
-              (kv_idx * (num_qo_heads / num_kv_heads)) * head_dim / o_proj_tile_k;
-          int range_end = (((kv_idx + 1) * (num_qo_heads / num_kv_heads)) * head_dim - 1) /
-                          o_proj_tile_k;
-          for (int i = range_start; i <= range_end; ++i) {
-            CHECK_GE(i, 0) << "Index " << i << " is negative.";
-            CHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
-            etensor_o_proj_host_.set(layer_id * split_o_project + i,
-                                      etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
+        for (int batch_idx = 0; batch_idx < static_cast<int>(batch_size); ++batch_idx) {
+          for (int kv_idx = 0; kv_idx < static_cast<int>(num_kv_heads); ++kv_idx) {
+            int range_start =
+                (kv_idx * (num_qo_heads / num_kv_heads)) * head_dim / o_proj_tile_k;
+            int range_end = (((kv_idx + 1) * (num_qo_heads / num_kv_heads)) * head_dim - 1) /
+                            o_proj_tile_k;
+            for (int i = range_start; i <= range_end; ++i) {
+              CHECK_GE(i, 0) << "Index " << i << " is negative.";
+              CHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
+              etensor_o_proj_host_.set(layer_id * split_o_project + i,
+                                       etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
+            }
           }
         }
       }
@@ -680,27 +676,18 @@ std::vector<HostMemoryVector> GenerateEventTensorHost(int batch_size, int attn_t
       CHECK_LE(megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup,
                 num_qo_heads / num_kv_heads);
       for (int layer_id = 0; layer_id < num_layers; ++layer_id) {
-        for (int m = 0;
-              m < ceildiv(batch_size * num_qo_heads,
-                          megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup);
-              ++m) {
-          int worker_id =
-              m * megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup;
-          int kv_idx = worker_id / (batch_size * (num_qo_heads / num_kv_heads));
-          int qo_idx = worker_id % (num_qo_heads / num_kv_heads);
-          int range_start =
-              (kv_idx * (num_qo_heads / num_kv_heads) + qo_idx) * head_dim / o_proj_tile_k;
-          int range_end =
-              ((kv_idx * (num_qo_heads / num_kv_heads) + qo_idx +
-                megakernel::kNumWarpgroupPerBlock * megakernel::kNumWarpPerWarpgroup) *
-                    head_dim -
-                1) /
-              o_proj_tile_k;
-          for (int i = range_start; i <= range_end; ++i) {
-            CHECK_GE(i, 0) << "Index " << i << " is negative.";
-            CHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
-            etensor_o_proj_host_.set(layer_id * split_o_project + i,
-                                      etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
+        for (int batch_idx = 0; batch_idx < static_cast<int>(batch_size); ++batch_idx) {
+          for (int kv_idx = 0; kv_idx < static_cast<int>(num_kv_heads); ++kv_idx) {
+            int range_start =
+                (kv_idx * (num_qo_heads / num_kv_heads)) * head_dim / o_proj_tile_k;
+            int range_end = (((kv_idx + 1) * (num_qo_heads / num_kv_heads)) * head_dim - 1) /
+                            o_proj_tile_k;
+            for (int i = range_start; i <= range_end; ++i) {
+              CHECK_GE(i, 0) << "Index " << i << " is negative.";
+              CHECK_LT(i, split_o_project) << "Index " << i << " out of bounds " << split_o_project;
+              etensor_o_proj_host_.set(layer_id * split_o_project + i,
+                                       etensor_o_proj_host_[layer_id * split_o_project + i] + 1);
+            }
           }
         }
       }

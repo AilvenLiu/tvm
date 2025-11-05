@@ -344,9 +344,9 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                         ],
                     )
                     (
-                        kv_data_,
+                        kv_data,
                         page_kv_indptr,
-                        page_kv_indices_,
+                        page_kv_indices,
                         page_kv_last_page_len,
                         append_pos,
                         rope_pos,
@@ -368,24 +368,24 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                         res0[9],
                         res0[10],
                     )
-                    kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, mk.NUM_KEY_VALUE_HEADS, mk.PAGE_SIZE, mk.HEAD_DIM), dtype="float16")] * NUM_HIDDEN_LAYERS))
-                    page_kv_indices = R.match_cast(page_kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
-                    task, len_kv_chunk_, merge_indptr_, merge_o_indices_, num_qo_len_ = attn_plan_results[3], attn_plan_results[4], attn_plan_results[5], attn_plan_results[6], attn_plan_results[7]
-                    q_indptr_, kv_indptr_, partial_indptr_, q_len_, kv_len_, q_start_, kv_start_, kv_end_, kv_head_idx_, work_indptr_ = task[0], task[1], task[2], task[3], task[4], task[5], task[6], task[7], task[8], task[9]
-                    len_kv_chunk = R.match_cast(len_kv_chunk_, R.Tensor((2,), dtype="int32"))
-                    merge_indptr = R.match_cast(merge_indptr_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
-                    merge_o_indices = R.match_cast(merge_o_indices_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
-                    num_qo_len = R.match_cast(num_qo_len_, R.Tensor((1,), dtype="int32"))
-                    q_indptr = R.match_cast(q_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_indptr = R.match_cast(kv_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    partial_indptr = R.match_cast(partial_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    q_len = R.match_cast(q_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_len = R.match_cast(kv_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    q_start = R.match_cast(q_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_start = R.match_cast(kv_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_end = R.match_cast(kv_end_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    kv_head_idx = R.match_cast(kv_head_idx_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
-                    work_indptr = R.match_cast(work_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # kv_data = R.match_cast(kv_data_, R.Tuple([R.Tensor((max_page_num, 2, mk.NUM_KEY_VALUE_HEADS, mk.PAGE_SIZE, mk.HEAD_DIM), dtype="float16")] * NUM_HIDDEN_LAYERS))
+                    # page_kv_indices = R.match_cast(page_kv_indices_, R.Tensor((total_page_num,), dtype="int32"))
+                    task, len_kv_chunk, merge_indptr, merge_o_indices, num_qo_len = attn_plan_results[3], attn_plan_results[4], attn_plan_results[5], attn_plan_results[6], attn_plan_results[7]
+                    q_indptr, kv_indptr, partial_indptr, q_len, kv_len, q_start, kv_start, kv_end, kv_head_idx, work_indptr = task[0], task[1], task[2], task[3], task[4], task[5], task[6], task[7], task[8], task[9]
+                    # len_kv_chunk = R.match_cast(len_kv_chunk_, R.Tensor((2,), dtype="int32"))
+                    # merge_indptr = R.match_cast(merge_indptr_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
+                    # merge_o_indices = R.match_cast(merge_o_indices_, R.Tensor((mk.MAX_NUM_KV_SPLITS,), dtype="int32"))
+                    # num_qo_len = R.match_cast(num_qo_len_, R.Tensor((1,), dtype="int32"))
+                    # q_indptr = R.match_cast(q_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # kv_indptr = R.match_cast(kv_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # partial_indptr = R.match_cast(partial_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # q_len = R.match_cast(q_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # kv_len = R.match_cast(kv_len_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # q_start = R.match_cast(q_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # kv_start = R.match_cast(kv_start_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # kv_end = R.match_cast(kv_end_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # kv_head_idx = R.match_cast(kv_head_idx_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
+                    # work_indptr = R.match_cast(work_indptr_, R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"))
                     exec_queue = R.call_pure_packed(
                         "vm.builtin.paged_attention_kv_cache_get_exec_queue",
                         paged_kv_cache,
@@ -900,7 +900,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
 
                     rs0_ = R.reshape(input_embeds, (batch_size, mk.HIDDEN_SIZE))
                     rms_norm = R.call_tir(cls.rms_norm, (rs0_, model_layers_0_input_layernorm_weight1), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"))
-                    rs0 = R.call_tir(cls.cast_res, (rms_norm,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
+                    rs0 = R.call_tir(cls.cast_res, (rs0_,), out_sinfo=R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32")) if mk.tp_size == 1 else rs0_
 
                     o_layer0 = call_qwen3_layer(rms_norm, rs0, 0, max_num_tokens_padded)
                     o_layer1 = call_qwen3_layer(o_layer0[0], o_layer0[1], 1, max_num_tokens_padded)

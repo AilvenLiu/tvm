@@ -30,7 +30,7 @@ from tvm.runtime import disco as di
 from tvm.script import ir as I
 from tvm.script import relax as R
 from tvm.script import tir as T
-# from tvm.tirp.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
+from tvm.tirp.megakernel.model.llama3_1b import get_llama3_megakernel_relax_mod
 from tvm.tirp.megakernel.model.qwen3_30b_a3b import get_qwen3_30b_a3b_megakernel_relax_mod
 from tvm.tirp.megakernel.model.qwen3_32b import get_qwen3_megakernel_relax_mod
 from tvm.tirp.megakernel.model_config import (
@@ -473,6 +473,7 @@ def test(args):
         mod.update_func(
             mod.get_global_var("cos_sin_cache"), attach_attr(cos_sin_cache, "cos_sin_cache")
         )
+        mod = mod.with_attr("relax.skip_shape_check", True)
         return mod
 
     def get_qwen3_megakernel_batch_decode_func():

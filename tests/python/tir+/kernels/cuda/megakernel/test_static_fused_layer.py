@@ -49,8 +49,8 @@ class MegaKernel:
     DOWN_PROJ_SPLIT_K_FACTOR = 10
     GATE_UP_PROJ_SPLIT_K_FACTOR = 1
     NUM_TASK_ARGS = 10
-    MAX_TOTAL_NUM_WORKERS = 65536
-    MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)
+    MAX_TOTAL_NUM_WORKERS = 1025
+    MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * 16
     
     def __init__(self):
         self.world_size = 1

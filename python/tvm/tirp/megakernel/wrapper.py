@@ -41,8 +41,8 @@ class MegaKernelWrapper:
     MAX_PAGE_NUM = 8192
     PAGE_SIZE = 16
     NUM_TASK_ARGS = 10
-    MAX_TOTAL_NUM_WORKERS = 65536
-    MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * (128 + 16)
+    MAX_TOTAL_NUM_WORKERS = 1025
+    MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * 16
 
     NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
     PROFILER_BUFFER_SIZE = int(1e7)

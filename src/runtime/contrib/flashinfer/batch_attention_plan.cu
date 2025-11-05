@@ -229,10 +229,10 @@ Array<Any> BatchPagedAttentionPlan(Tensor float_workspace_buffer, Tensor int_wor
 
   constexpr uint32_t NUM_TASK_ARGS = 10;
   constexpr uint32_t NUM_SHARED_ARGS = 8;
-  const int max_total_num_works = 65536;
+  const int max_total_num_works = 1025;
   int num_clusters = 148;
   const int max_num_kv_splits =
-      4 * num_clusters * 2 * (CTA_TILE_Q_SIZES[0] + CTA_TILE_Q_SIZES[1]);
+      4 * num_clusters * 2 * (CTA_TILE_Q_SIZES[1]);
   DataType int_dtype = DataType::Int(32);
   DataType fp16_dtype = DataType::Float(16);
   DataType fp32_dtype = DataType::Float(32);
