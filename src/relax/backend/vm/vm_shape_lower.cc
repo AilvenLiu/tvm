@@ -527,7 +527,7 @@ class VMShapeLowerMutator
         outstanding_todos.push_back(item);
       }
       args.push_back(GetErrContext(item.err_ctx));
-      bool emit = skip_shape_check_ ? !all_assert_equal : all_nop;
+      bool emit = skip_shape_check_ ? !all_assert_equal : !all_nop;
       if (emit) {
         Call call(match_op, args, Attrs(), {void_sinfo_});
         builder_->Emit(call, "_");
