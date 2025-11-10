@@ -75,24 +75,27 @@ class GateUpSiluTile(GemmTile):
             layout=self.A_layout,
             align=1024,
             split=self.SMEM_PIPE_DEPTH,
+            name="A_smem",
             method="exclusive",
-        ).buffer
+        )
         self.B_smem = smem_manager.alloc(
             (self.SMEM_PIPE_DEPTH, self.BLK_N, self.BLK_K),
             self.b_type,
             layout=self.B_layout,
             align=1024,
             split=self.SMEM_PIPE_DEPTH,
+            name="B_smem",
             method="exclusive",
-        ).buffer
+        )
         self.output_smem = smem_manager.alloc(
             (self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N // 2),
             "float16",
             layout=self.D_layout,
             align=1024,
+            name="output_smem",
             method="exclusive",
-        ).buffer
-        
+        )
+
     def _alloc_local(self, m_idx):
         # alloc local memory
         self.reg = T.alloc_buffer((self.TMEM_LD_SIZE,), "float32", scope="local", name="reg")

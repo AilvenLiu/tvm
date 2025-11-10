@@ -13,19 +13,19 @@ from tvm import relax as rx
 import flashinfer
 import torch
 
-from tvm.tirp.megakernel.relax_compatible.gemm import FuseGemmTile
+from tvm.tirp.megakernel.relax_compatible.gemm import FuseGemmTile, FuseGateUpSiluTile
 from tvm.tirp.megakernel.relax_compatible.gemm_splitk_reduce import FuseSplitKReduceTile
 from tvm.tirp.megakernel.relax_compatible.reduce_rms_rope_append import FuseSplitKReduceRMSnormRopeQTile, FuseSplitKReduceRMSnormRopeAppendKTile, FuseSplitKReduceAppendVTile
 from tvm.tirp.megakernel.relax_compatible.batch_attn import FuseBatchAttnTile
 from tvm.tirp.megakernel.relax_compatible.batch_merge import FuseBatchMergeTile
-from tvm.tirp.megakernel.relax_compatible.add_rmsnorm import FuseAddRMSNormTile
-from tvm.tirp.megakernel.relax_compatible.gate_up_silu import FuseGateUpSiluTile
+from tvm.tirp.megakernel.relax_compatible.add_rmsnorm import FuseAddRMSNormTile, FuseRMSNormTile
+from tvm.tirp.megakernel.relax_compatible.end import FuseEndTile
 
 from tvm.tirp.megakernel.common import KernelConfig, ceildiv, JobType
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 from tvm.tirp.megakernel.support import get_inverse_plan_info
-from tvm.tirp.megakernel.static_scheduler import StaticTileScheduler, Semaphore
-
+import tvm.tirp.megakernel.static_scheduler as static_scheduler
+import tvm.tirp.megakernel.dynamic_scheduler as dynamic_scheduler
 
 class MegaKernel:
 
@@ -57,9 +57,9 @@ class MegaKernel:
 
 
     def _qwen3_layer_inner(self, bb: rx.BlockBuilder, max_batch_size, blk_m):
-        batch_size = T.int64()
+        batch_size = T.var("int64", name="batch_size")
         x = rx.Var("x", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"))
-        residual = rx.Var("residual", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"))
+        residual = rx.Var("residual", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"))
         packed_info = rx.Var(
             "packed_info",
             rx.TupleStructInfo(
@@ -100,6 +100,7 @@ class MegaKernel:
                     rx.TensorStructInfo([self.DOWN_PROJ_SPLIT_K_FACTOR], "int32"),  # etensor_down_proj
                     rx.TensorStructInfo([self.HIDDEN_SIZE // FuseGemmTile.BLK_N], "int32"),  # etensor_down_proj_reduce
                     rx.TensorStructInfo([max_batch_size], "int32"),  # etensor_mlp_add_rmsnorm
+                    rx.TensorStructInfo([1], "int32"),  # etensor_end
                 ]
             ),
         )
@@ -130,9 +131,9 @@ class MegaKernel:
                 cos_sin_cache = bb.emit(R.TupleGetItem(packed_info, 20))
                 inverse_indptr = bb.emit(R.TupleGetItem(packed_info, 21))
                 inverse_indices = bb.emit(R.TupleGetItem(packed_info, 22))
-                attn_task_num = T.int64()
+                attn_task_num = T.var("int64", name="attn_task_num")
                 _ = bb.match_cast(R.TupleGetItem(packed_info, 23), R.Shape([attn_task_num]))
-                max_page_num = T.int64()
+                max_page_num = T.var("int64", name="max_page_num")
                 kv_data_ = bb.match_cast(kv_data_, rx.TensorStructInfo([max_page_num, 2, self.NUM_KEY_VALUE_HEADS, self.PAGE_SIZE, self.HEAD_DIM], "float16"))
                 
                 # unpack weights
@@ -156,7 +157,8 @@ class MegaKernel:
                 etensor_down_proj = bb.emit(R.TupleGetItem(packed_events, 7))
                 etensor_down_proj_reduce = bb.emit(R.TupleGetItem(packed_events, 8))
                 etensor_mlp_add_rms = bb.emit(R.TupleGetItem(packed_events, 9))
-                
+                etensor_end = bb.emit(R.TupleGetItem(packed_events, 10))
+
                 # get tile kernels
                 qkv_proj_func, qkv_proj_num_tiles, _ = FuseGemmTile.get_func(
                     (self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS * 2) * self.HEAD_DIM,
@@ -166,10 +168,6 @@ class MegaKernel:
                     blk_m,
                     split_k_factor=self.SPLIT_QKV_PROJECT,
                     prefetch_on=False,
-                    job_type=JobType.GEMM_QKV_PROJ.value,
-                    wait_level="warp",
-                    notify_scope="warpgroup",
-                    notify_scope_id=0,
                 )
                 reduce_rms_rope_q_func, reduce_rms_rope_q_num_tiles, reduce_rms_rope_q_size = FuseSplitKReduceRMSnormRopeQTile.get_func(
                     batch_size,
@@ -178,10 +176,6 @@ class MegaKernel:
                     self.NUM_KEY_VALUE_HEADS,
                     self.HEAD_DIM,
                     self.SPLIT_QKV_PROJECT,
-                    job_type=JobType.Q_REDUCE_RMS_ROPE.value,
-                    wait_level="cta",
-                    notify_scope="cta",
-                    notify_scope_id=0,
                 )
                 reduce_rms_rope_append_k_func, reduce_rms_rope_append_k_num_tiles, _ = FuseSplitKReduceRMSnormRopeAppendKTile.get_func(
                     batch_size,
@@ -191,10 +185,6 @@ class MegaKernel:
                     self.HEAD_DIM,
                     self.SPLIT_QKV_PROJECT,
                     self.PAGE_SIZE,
-                    job_type=JobType.K_REDUCE_RMS_ROPE_APPEND.value,
-                    wait_level="cta",
-                    notify_scope="cta",
-                    notify_scope_id=0,
                 )
                 reduce_append_v_func, reduce_append_v_num_tiles, _ = FuseSplitKReduceAppendVTile.get_func(
                     batch_size,
@@ -203,10 +193,6 @@ class MegaKernel:
                     self.HEAD_DIM,
                     self.SPLIT_QKV_PROJECT,
                     self.PAGE_SIZE,
-                    job_type=JobType.V_REDUCE_APPEND.value,
-                    wait_level="cta",
-                    notify_scope="cta",
-                    notify_scope_id=0,
                 )
                 batch_attn_func, batch_attn_num_tiles, _ = FuseBatchAttnTile.get_func(
                     self.PAGE_SIZE,
@@ -215,10 +201,6 @@ class MegaKernel:
                     self.HEAD_DIM,
                     attn_task_num,
                     prefetch_on=True,
-                    job_type=JobType.BATCH_ATTENTION.value,
-                    wait_level="warp",
-                    notify_scope="warp",
-                    notify_scope_id=-1,
                 )
                 batch_merge_func, batch_merge_num_tiles, _ = FuseBatchMergeTile.get_func(
                     self.HEAD_DIM,
@@ -226,10 +208,6 @@ class MegaKernel:
                     self.NUM_KEY_VALUE_HEADS,
                     self.NUM_ATTENTION_HEADS,
                     batch_size,
-                    job_type=JobType.BATCH_ATTENTION_MERGE.value,
-                    wait_level="cta",
-                    notify_scope="cta",
-                    notify_scope_id=0,
                 )
                 o_proj_func, o_proj_num_tiles, o_proj_size = FuseGemmTile.get_func(
                     self.HIDDEN_SIZE,
@@ -240,29 +218,12 @@ class MegaKernel:
                     split_k_factor=self.SPLIT_O_PROJECT,
                     prefetch_on=True,
                     A_dim=3,
-                    job_type=JobType.GEMM_O_PROJ.value,
-                    wait_level="warp",
-                    notify_scope="warpgroup",
-                    notify_scope_id=0,
+                    use_tma_reduce=True,
                 )
-                o_reduce_func, o_reduce_num_tiles, o_reduce_size = FuseSplitKReduceTile.get_func(
-                    batch_size,
-                    self.HIDDEN_SIZE,
-                    "float16",
-                    self.SPLIT_O_PROJECT,
-                    job_type=JobType.GEMM_O_REDUCE.value,
-                    wait_level="warp",
-                    notify_scope="cta",
-                    notify_scope_id=0,
-                )
-                attn_add_rms_func, attn_add_rms_num_tiles, _ = FuseAddRMSNormTile.get_func(
+                attn_add_rms_func, attn_add_rms_num_tiles, _ = FuseRMSNormTile.get_func(
                     batch_size,
                     self.RMS_NORM_EPS,
                     self.HIDDEN_SIZE,
-                    job_type=JobType.ATTN_ADD_RMS_NORM.value,
-                    wait_level="cta",
-                    notify_scope="cta",
-                    notify_scope_id=0,
                 )
                 gate_up_silu_func, gate_up_silu_num_tiles, gate_up_silu_size = FuseGateUpSiluTile.get_func(
                     self.INTERMEDIATE_SIZE * 2,
@@ -271,10 +232,6 @@ class MegaKernel:
                     "float16",
                     blk_m,
                     prefetch_on=True,
-                    job_type=JobType.GATE_UP_SILU.value,
-                    wait_level="warp",
-                    notify_scope="warpgroup",
-                    notify_scope_id=0,
                 )
                 down_proj_func, down_proj_num_tiles, down_proj_size = FuseGemmTile.get_func(
                     self.HIDDEN_SIZE,
@@ -284,30 +241,14 @@ class MegaKernel:
                     blk_m,
                     split_k_factor=self.DOWN_PROJ_SPLIT_K_FACTOR,
                     prefetch_on=True,
-                    job_type=JobType.GEMM_DOWN_PROJ.value,
-                    wait_level="warp",
-                    notify_scope="warpgroup",
-                    notify_scope_id=0,
+                    use_tma_reduce=True,
                 )
-                down_reduce_func, down_reduce_num_tiles, down_reduce_size = FuseSplitKReduceTile.get_func(
-                    batch_size,
-                    self.HIDDEN_SIZE,
-                    "float16",
-                    split_k_factor=self.DOWN_PROJ_SPLIT_K_FACTOR,
-                    job_type=JobType.DOWN_PROJ_REDUCE.value,
-                    wait_level="warp",
-                    notify_scope="cta",
-                    notify_scope_id=0,
-                )
-                mlp_add_rms_func, mlp_add_rms_num_tiles, _ = FuseAddRMSNormTile.get_func(
+                mlp_add_rms_func, mlp_add_rms_num_tiles, _ = FuseRMSNormTile.get_func(
                     batch_size,
                     self.RMS_NORM_EPS,
                     self.HIDDEN_SIZE,
-                    job_type=JobType.MLP_ADD_RMS_NORM.value,
-                    wait_level="cta",
-                    notify_scope="cta",
-                    notify_scope_id=0,
                 )
+                end_func, end_num_tiles, _ = FuseEndTile.get_func()
                 
                 # add tile kernels to bb
                 qkv_proj_gv = bb.add_func(qkv_proj_func, f"qkv_proj_blk{blk_m}")
@@ -317,13 +258,12 @@ class MegaKernel:
                 batch_attn_gv = bb.add_func(batch_attn_func, "batch_attn")
                 batch_merge_gv = bb.add_func(batch_merge_func, "batch_merge")
                 o_proj_gv = bb.add_func(o_proj_func, f"o_proj_blk{blk_m}")
-                o_reduce_gv = bb.add_func(o_reduce_func, "o_reduce")
                 attn_add_rms_gv = bb.add_func(attn_add_rms_func, "attn_add_rms")
                 gate_up_silu_gv = bb.add_func(gate_up_silu_func, f"gate_up_silu_blk{blk_m}")
                 down_proj_gv = bb.add_func(down_proj_func, f"down_proj_blk{blk_m}")
-                down_reduce_gv = bb.add_func(down_reduce_func, "down_reduce")
                 mlp_add_rms_gv = bb.add_func(mlp_add_rms_func, "mlp_add_rms")
-                
+                end_gv = bb.add_func(end_func, "end")
+
                 # data flow
                 # QKV_GEMM
                 qkv_partial = bb.emit(
@@ -331,12 +271,12 @@ class MegaKernel:
                         qkv_proj_gv,
                         [x, qkv_proj_weight],
                         rx.TensorStructInfo([self.SPLIT_QKV_PROJECT, batch_size, (self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS * 2) * self.HEAD_DIM], "float32"),
+                        job_id=JobType.GEMM_QKV_PROJ.value,
                         tile_num=qkv_proj_num_tiles,
                         out_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda i, j, k, notify_idx: (T.int32(-1), j),
+                            dep=lambda i, j, k, notify_idx: (-1, j),
                             num=1,
-                            dep_output_dim=2, 
                         ),
                     )
                 )
@@ -351,25 +291,30 @@ class MegaKernel:
                 def reduce_rms_rope_q_dep_notify(i, j, k, notify_idx, inverse_indptr_buf, inverse_indices_buf, batch_size, m_tile):
                     beg_idx = j // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * batch_size + i * m_tile
                     beg = inverse_indptr_buf[beg_idx]
-                    return (T.int32(-1), inverse_indices_buf[beg + notify_idx])
+                    return (-1, inverse_indices_buf[beg + notify_idx])
                 q = bb.emit(
                     R.call_tir_device(
                         reduce_rms_rope_q_gv,
                         [qkv_partial, q_rms_weight, rope_pos, cos_sin_cache],
                         rx.TensorStructInfo([batch_size, self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS, self.HEAD_DIM], "float16"),
+                        job_id=JobType.Q_REDUCE_RMS_ROPE.value,
                         tile_num=reduce_rms_rope_q_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda i, j, k, wait_idx: j,
+                            dep=lambda i, j, k, wait_idx: (-1, j),
                             num=1,
-                            dep_output_dim=1,
+                        ),
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_qkv_partial,
+                            dep=lambda rank, x, inv_idx, m_split: (inv_idx, x, 0),
+                            num=lambda rank, x, m_split: T.if_then_else(x < self.NUM_ATTENTION_HEADS, m_split, 0),
+                            extra_args=[reduce_rms_rope_q_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
                             dep=reduce_rms_rope_q_dep_notify,
                             num=reduce_rms_rope_q_num_notify,
                             extra_args=[inverse_indptr, inverse_indices, batch_size, reduce_rms_rope_q_size[0]],
-                            dep_output_dim=2,
                         ),
                     )
                 )
@@ -384,25 +329,30 @@ class MegaKernel:
                 def reduce_rms_rope_append_k_dep_notify(i, j, k, notify_idx, inverse_indptr_buf, inverse_indices_buf, batch_size, m_tile):
                     beg_idx = j * batch_size + i * m_tile
                     beg = inverse_indptr_buf[beg_idx]
-                    return (T.int32(-1), inverse_indices_buf[beg + notify_idx])        
+                    return (-1, inverse_indices_buf[beg + notify_idx])        
                 kv_data_ = bb.emit(
                     R.call_tir_device(
                         reduce_rms_rope_append_k_gv,
                         [qkv_partial, k_rms_weight, rope_pos, cos_sin_cache, append_pos, kv_data_],
                         rx.TensorStructInfo([max_page_num, 2, self.NUM_KEY_VALUE_HEADS, self.PAGE_SIZE, self.HEAD_DIM], "float16"),
                         tile_num=reduce_rms_rope_append_k_num_tiles,
+                        job_id=JobType.K_REDUCE_RMS_ROPE_APPEND.value,
                         in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda i, j, k, wait_idx: j + self.NUM_ATTENTION_HEADS,
+                            dep=lambda i, j, k, wait_idx: (-1, j + self.NUM_ATTENTION_HEADS),
                             num=1,
-                            dep_output_dim=1,
+                        ),
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_qkv_partial,
+                            dep=lambda rank, x, inv_idx, m_split: (inv_idx, x - self.NUM_ATTENTION_HEADS, 0),
+                            num=lambda rank, x, m_split: T.if_then_else(tvm.tir.all(x >= self.NUM_ATTENTION_HEADS, x < self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS), m_split, 0),
+                            extra_args=[reduce_rms_rope_append_k_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
                             dep=reduce_rms_rope_append_k_dep_notify,
                             num=reduce_rms_rope_append_k_num_notify,
                             extra_args=[inverse_indptr, inverse_indices, batch_size, reduce_rms_rope_q_size[0]],
-                            dep_output_dim=2,
                         ),
                         inplace_indices=5,
                     )
@@ -418,54 +368,36 @@ class MegaKernel:
                 def reduce_append_v_dep_notify(i, j, k, notify_idx, inverse_indptr_buf, inverse_indices_buf, batch_size, m_tile):
                     beg_idx = j * batch_size + i * m_tile
                     beg = inverse_indptr_buf[beg_idx]
-                    return (T.int32(-1), inverse_indices_buf[beg + notify_idx])        
+                    return (-1, inverse_indices_buf[beg + notify_idx])        
                 kv_data_ = bb.emit(
                     R.call_tir_device(
                         reduce_append_v_gv,
                         [qkv_partial, kv_data_, append_pos],
                         rx.TensorStructInfo([max_page_num, 2, self.NUM_KEY_VALUE_HEADS, self.PAGE_SIZE, self.HEAD_DIM], "float16"),
+                        job_id=JobType.V_REDUCE_APPEND.value,
                         tile_num=reduce_append_v_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda i, j, k, wait_idx: j + self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS,
+                            dep=lambda i, j, k, wait_idx: (-1, j + self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS),
                             num=1,
-                            dep_output_dim=1,
+                        ),
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_qkv_partial,
+                            dep=lambda rank, x, inv_idx, m_split: (inv_idx, x - self.NUM_ATTENTION_HEADS - self.NUM_KEY_VALUE_HEADS, 0),
+                            num=lambda rank, x, m_split: T.if_then_else(x >= self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS, m_split, 0),
+                            extra_args=[reduce_append_v_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
                             dep=reduce_append_v_dep_notify,
                             num=reduce_append_v_num_notify,
                             extra_args=[inverse_indptr, inverse_indices, batch_size, reduce_rms_rope_q_size[0]],
-                            dep_output_dim=2,
                         ),
                         inplace_indices=1,
                     )
                 )
 
                 # ATTENTION
-                def batch_attn_num_notify_splitkv(i, j, k, kv_head_idx_buf, q_indptr_buf, batch_size, attn_task_num):
-                    warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-                    notify_worker_idx = (i + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
-                    return T.if_then_else(tvm.tir.all(attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS, notify_worker_idx < attn_task_num), 1, 0)
-                def batch_attn_dep_notify_splitkv(i, j, k, notify_idx, kv_head_idx_buf, q_indptr_buf, batch_size, attn_task_num):
-                    warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-                    notify_worker_idx = (i + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER
-                    notify_kv_idx = kv_head_idx_buf[notify_worker_idx]
-                    notify_batch_idx = q_indptr_buf[notify_worker_idx]
-                    return (T.int32(-1), notify_kv_idx * batch_size + notify_batch_idx)
-                def batch_attn_num_notify_no_splitkv(i, j, k, kv_head_idx_buf, batch_size, attn_task_num, tile_k):
-                    warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-                    notify_worker_idx = (i + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
-                    notify_kv_idx = kv_head_idx_buf[notify_worker_idx]
-                    range_start = notify_kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM // tile_k
-                    range_end = ((notify_kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM - 1) // tile_k
-                    return T.if_then_else(tvm.tir.all(attn_task_num <= batch_size * self.NUM_KEY_VALUE_HEADS, notify_worker_idx < attn_task_num), range_end - range_start + 1, 0)
-                def batch_attn_dep_notify_no_splitkv(i, j, k, notify_idx, kv_head_idx_buf, batch_size, attn_task_num, tile_k):
-                    warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
-                    notify_worker_idx = (i + KernelConfig.SM_NUMBER * (warp_id // KernelConfig.WG_NUMBER)) * KernelConfig.WG_NUMBER + warp_id % KernelConfig.WG_NUMBER            
-                    notify_kv_idx = kv_head_idx_buf[notify_worker_idx]
-                    range_start = notify_kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM // tile_k
-                    return (T.int32(-1), range_start + notify_idx)
                 batch_attn_packed = bb.emit(
                     R.call_tir_device(
                         batch_attn_gv,
@@ -478,27 +410,30 @@ class MegaKernel:
                             rx.TensorStructInfo([FuseBatchAttnTile.max_num_kv_splits * self.NUM_KEY_VALUE_HEADS * self.HEAD_DIM], "float32"),
                             rx.TensorStructInfo([FuseBatchAttnTile.max_num_kv_splits * self.NUM_KEY_VALUE_HEADS], "float32"),
                         ],
+                        job_id=JobType.BATCH_ATTENTION.value,
                         tile_num=batch_attn_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
-                            dep=lambda i, j, k, wait_idx: i,
+                            dep=lambda i, j, k, wait_idx: (-1, i),
                             num=1,
-                            dep_output_dim=1
+                        ),
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_notify_attn,
+                            dep=lambda rank, x, inv_idx: (x, 0, 0),
+                            num=1,
                         ),
                         out_deps=[
                             rx.utils.Dependency(
                                 event=etensor_attn_merge,
-                                dep=batch_attn_dep_notify_splitkv,
-                                num=batch_attn_num_notify_splitkv,
-                                extra_args=[kv_head_idx_, q_indptr_, batch_size, attn_task_num],
-                                dep_output_dim=2
+                                dep=lambda i, j, k, notify_idx, attn_task_num, batch_size: (-1, 0),
+                                num=lambda i, j, k, attn_task_num, batch_size: T.if_then_else(attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS, 1, 0),
+                                extra_args=[attn_task_num, batch_size],
                             ),
                             rx.utils.Dependency(
                                 event=etensor_o_proj,
-                                dep=batch_attn_dep_notify_no_splitkv,
-                                num=batch_attn_num_notify_no_splitkv,
-                                extra_args=[kv_head_idx_, batch_size, attn_task_num, o_proj_size[2]],
-                                dep_output_dim=2
+                                dep=lambda i, j, k, notify_idx, attn_task_num, batch_size: (-1, notify_idx),
+                                num=lambda i, j, k, attn_task_num, batch_size: T.if_then_else(attn_task_num <= batch_size * self.NUM_KEY_VALUE_HEADS, self.SPLIT_O_PROJECT, 0),
+                                extra_args=[attn_task_num, batch_size],
                             )
                         ]
                     )
@@ -520,7 +455,7 @@ class MegaKernel:
                     worker_id = i * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
                     kv_idx = worker_id // (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
                     range_start = (kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM // k_tile
-                    return (T.int32(-1), range_start + notify_idx)
+                    return (-1, range_start + notify_idx)
                 o = bb.emit(
                     R.call_tir_device(
                         batch_merge_gv,
@@ -533,95 +468,83 @@ class MegaKernel:
                             o,
                         ],
                         out_sinfo=rx.TensorStructInfo([batch_size, self.NUM_ATTENTION_HEADS, self.HEAD_DIM], "float16"),
+                        job_id=JobType.BATCH_ATTENTION_MERGE.value,
                         tile_num=batch_merge_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_attn_merge,
-                            dep=lambda i, j, k, wait_idx: i,
+                            dep=lambda i, j, k, wait_idx: (-1, 0),
                             num=1,
-                            dep_output_dim=1
+                        ),
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_attn_merge,
+                            dep=lambda rank, x, inv_idx, num_tile: (inv_idx, 0, 0),
+                            num=lambda rank, x, num_tile: num_tile,
+                            extra_args=[batch_merge_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_o_proj,
                             dep=batch_merge_dep_notify,
                             num=batch_merge_num_notify,
                             extra_args=[batch_size, o_proj_size[2]],
-                            dep_output_dim=2
                         ),
                         inplace_indices=[5],
                     )
                 )
                 
                 # O_PROJ
-                o_partial = bb.emit(
+                residual = bb.emit(
                     R.call_tir_device(
                         o_proj_gv,
-                        [o, o_proj_weight],
-                        out_sinfo=rx.TensorStructInfo([self.SPLIT_O_PROJECT, batch_size, self.HIDDEN_SIZE], "float32"),
+                        [o, o_proj_weight, residual],
+                        out_sinfo=rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"),
                         tile_num=o_proj_num_tiles,
+                        job_id=JobType.GEMM_O_PROJ.value,
                         in_deps=rx.utils.Dependency(
                             event=etensor_o_proj,
-                            dep=lambda i, j, k, wait_idx: k,
+                            dep=lambda i, j, k, wait_idx: (-1, k),
                             num=1,
-                            dep_output_dim=1,
                         ),
-                        out_deps=rx.utils.Dependency(
-                            event=etensor_o_partial,
-                            dep=lambda i, j, k, notify_idx: (T.int32(-1), j),
-                            num=1,
-                            dep_output_dim=2,
-                        )
-                    )
-                )
-                
-                # O_REDUCE
-                o_reduce = bb.emit(
-                    R.call_tir_device(
-                        o_reduce_gv,
-                        [o_partial],
-                        out_sinfo=rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
-                        tile_num=o_reduce_num_tiles,
-                        in_deps=rx.utils.Dependency(
-                            event=etensor_o_partial,
-                            dep=lambda i, j, k, wait_idx: j,
-                            num=1,
-                            dep_output_dim=1,
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_o_proj,
+                            dep=lambda rank, x, inv_idx, split_n: (0, inv_idx, x),
+                            num=lambda rank, x, split_n: split_n,
+                            extra_args=[o_proj_num_tiles[1]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_attn_add_rms,
-                            dep=lambda i, j, k, notify_idx: (T.int32(-1), i),
+                            dep=lambda i, j, k, notify_idx: (-1, 0),
                             num=1,
-                            dep_output_dim=2,
-                        )
+                        ),
+                        inplace_indices=[2],
                     )
                 )
                 
                 # ATTN_ADD_RMS
-                attn_add_rmsnorm_packed = bb.emit(
+                mlp_hidden_state = bb.emit(
                     R.call_tir_device(
                         attn_add_rms_gv,
-                        [o_reduce, residual, attn_add_rms_weight],
-                        out_sinfo=[
-                            rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
-                            rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
-                        ],
+                        [residual, attn_add_rms_weight],
+                        out_sinfo=rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
+                        job_id=JobType.ATTN_ADD_RMS_NORM.value,
                         tile_num=attn_add_rms_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_attn_add_rms,
-                            dep=lambda i, j, k, wait_idx, m_tile: i // m_tile,
-                            extra_args=[o_reduce_size[0]],
+                            dep=lambda i, j, k, wait_idx: (-1, 0),
                             num=1,
-                            dep_output_dim=1,
+                        ),
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_attn_add_rms,
+                            dep=lambda rank, x, inv_idx, batch_size: (inv_idx, 0, 0),
+                            num=lambda rank, x, batch_size: batch_size,
+                            extra_args=[batch_size],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_attn_mlp,
-                            dep=lambda i, j, k, notify_idx: (T.int32(-1), 0),
+                            dep=lambda i, j, k, notify_idx: (-1, 0),
                             num=1,
-                            dep_output_dim=2,
                         )
                     )
                 )
-                mlp_hidden_state = bb.emit(R.TupleGetItem(attn_add_rmsnorm_packed, 0))
-                mlp_residual = bb.emit(R.TupleGetItem(attn_add_rmsnorm_packed, 1))
 
                 # GATE_UP_SILU
                 def gate_up_silu_num_notify(i, j, k, n_tile, k_tile):
@@ -630,99 +553,116 @@ class MegaKernel:
                     return range_end - range_start + 1
                 def gate_up_silu_dep_notify(i, j, k, notify_idx, n_tile, k_tile):
                     range_start = j * n_tile // 2 // k_tile
-                    return (T.int32(-1), range_start + notify_idx) 
+                    return (-1, range_start + notify_idx) 
                 out_silu_mul = bb.emit(
                     R.call_tir_device(
                         gate_up_silu_gv,
                         [mlp_hidden_state, gate_up_weight],
                         out_sinfo=rx.TensorStructInfo([batch_size, self.INTERMEDIATE_SIZE], "float16"),
-                        tile_num = gate_up_silu_num_tiles,
+                        job_id=JobType.GATE_UP_SILU.value,
+                        tile_num=gate_up_silu_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_attn_mlp,
-                            dep=lambda i, j, k, wait_idx: 0,
+                            dep=lambda i, j, k, wait_idx: (-1, 0),
                             num=1,
-                            dep_output_dim=1,
+                        ),
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_attn_mlp,
+                            dep=lambda rank, x, inv_idx, split_n: (0, inv_idx, 0),
+                            num=lambda rank, x, split_n: split_n,
+                            extra_args=[gate_up_silu_num_tiles[1]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_down_proj,
                             dep=gate_up_silu_dep_notify,
                             num=gate_up_silu_num_notify,
                             extra_args=[gate_up_silu_size[1], down_proj_size[2]],
-                            dep_output_dim=2,
                         )
                     )
                 )
                 
                 # DOWN_PROJ
-                down_partial = bb.emit(
+                residual = bb.emit(
                     R.call_tir_device(
                         down_proj_gv,
-                        [out_silu_mul, down_weight],
-                        out_sinfo=rx.TensorStructInfo(
-                            [self.DOWN_PROJ_SPLIT_K_FACTOR, batch_size, self.HIDDEN_SIZE], "float32"
-                        ),
+                        [out_silu_mul, down_weight, residual],
+                        out_sinfo=rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"),
+                        job_id=JobType.GEMM_DOWN_PROJ.value,
                         tile_num=down_proj_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_down_proj,
-                            dep=lambda i, j, k, wait_idx: k,
+                            dep=lambda i, j, k, wait_idx: (-1, k),
                             num=1,
-                            dep_output_dim=1,
                         ),
-                        out_deps=rx.utils.Dependency(
-                            event=etensor_down_proj_reduce,
-                            dep=lambda i, j, k, notify_idx: (T.int32(-1), j),
-                            num=1,
-                            dep_output_dim=2,
-                        )
-                    )
-                )
-                
-                # DOWN_REDUCE
-                down_reduce = bb.emit(
-                    R.call_tir_device(
-                        down_reduce_gv,
-                        [down_partial],
-                        out_sinfo=rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
-                        tile_num=down_reduce_num_tiles,
-                        in_deps=rx.utils.Dependency(
-                            event=etensor_down_proj_reduce,
-                            dep=lambda i, j, k, wait_idx: j,
-                            num=1,
-                            dep_output_dim=1,
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_down_proj,
+                            dep=lambda rank, x, inv_idx, split_n: (0, inv_idx, x),
+                            num=lambda rank, x, split_n: split_n,
+                            extra_args=[down_proj_num_tiles[1]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_mlp_add_rms,
-                            dep=lambda i, j, k, notify_idx: (T.int32(-1), i),
+                            dep=lambda i, j, k, notify_idx: (-1, 0),
                             num=1,
-                            dep_output_dim=2,
-                        )
+                        ),
+                        inplace_indices=[2],
                     )
                 )
                 
                 # MLP_ADD_RMS
-                mlp_add_rmsnorm_packed = bb.emit(
+                output_hidden_state = bb.emit(
                     R.call_tir_device(
                         mlp_add_rms_gv,
-                        [down_reduce, mlp_residual, mlp_add_rms_weight],
-                        out_sinfo=[
-                            rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
-                            rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
-                        ],
+                        [residual, mlp_add_rms_weight],
+                        out_sinfo=rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
+                        job_id=JobType.MLP_ADD_RMS_NORM.value,
                         tile_num=mlp_add_rms_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_mlp_add_rms,
-                            dep=lambda i, j, k, wait_idx, m_tile: i // m_tile,
-                            extra_args=[down_reduce_size[0]],
+                            dep=lambda i, j, k, wait_idx: (-1, 0),
                             num=1,
-                            dep_output_dim=1,
+                        ),
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_mlp_add_rms,
+                            dep=lambda rank, x, inv_idx, batch_size: (inv_idx, 0, 0),
+                            num=lambda rank, x, batch_size: batch_size,
+                            extra_args=[batch_size],
+                        ),
+                        out_deps=rx.utils.Dependency(
+                            event=etensor_end,
+                            dep=lambda i, j, k, notify_idx: (-1, 0),
+                            num=1,
                         ),
                     )
                 )
-                # out = bb.emit_output(mlp_add_rmsnorm_packed) 
                 
+                # END
+                _ = bb.emit(
+                    R.call_tir_device(
+                        end_gv,
+                        [],
+                        out_sinfo=[],
+                        job_id=JobType.END.value,
+                        tile_num=end_num_tiles,
+                        in_deps=rx.utils.Dependency(
+                            event=etensor_end,
+                            dep=lambda i, j, k, wait_idx: (-1, 0),
+                            num=1,
+                        ),
+                        inverse_in_deps=rx.utils.Dependency(
+                            event=etensor_end,
+                            dep=lambda rank, x, inv_idx: (inv_idx, 0, 0),
+                            num=KernelConfig.SM_NUMBER,
+                        ),
+                    )
+                )
+                
+                output = rx.Tuple([output_hidden_state, residual])
+                # out = bb.emit_output(mlp_add_rmsnorm_packed)
+
             # output
-                bb.emit_func_output(mlp_add_rmsnorm_packed)
-            
+                bb.emit_func_output(output)
+
         func_gv = bb.add_func(bb.get()[f"megakernel_blkm{blk_m}"], f"megakernel_blkm{blk_m}")
 
         return func_gv
@@ -735,9 +675,9 @@ class MegaKernel:
         inner_blkm128 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=128)
         
         # dispatcher function
-        batch_size = T.int64()
+        batch_size = T.var("int64", name="batch_size")
         x = rx.Var("x", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"))
-        residual = rx.Var("residual", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"))
+        residual = rx.Var("residual", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"))
         packed_info = rx.Var(
             "packed_info",
             rx.TupleStructInfo(
@@ -778,19 +718,20 @@ class MegaKernel:
                     rx.TensorStructInfo([self.DOWN_PROJ_SPLIT_K_FACTOR], "int32"),  # etensor_down_proj
                     rx.TensorStructInfo([self.HIDDEN_SIZE // FuseGemmTile.BLK_N], "int32"),  # etensor_down_proj_reduce
                     rx.TensorStructInfo([max_batch_size], "int32"),  # etensor_mlp_add_rmsnorm
+                    rx.TensorStructInfo([1], "int32"),  # etensor_end
                 ]
             ),
         )
 
         with bb.function("megakernel", [x, residual, packed_info, packed_weights, packed_events]):
             with bb.dataflow():
-                runtime_batch_size = T.int64()
+                runtime_batch_size = T.var("int64", name="runtime_batch_size")
                 _ = bb.match_cast(R.shape_of(x), R.Shape([runtime_batch_size, self.HIDDEN_SIZE]))
                 output_sinfo = [
                     rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
-                    rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
+                    rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"),
                 ]
-                output_shape = R.Tuple(R.Tensor([batch_size, self.HIDDEN_SIZE], "float16"), R.Tensor([batch_size, self.HIDDEN_SIZE], "float16"))
+                output_shape = R.Tuple(R.Tensor([batch_size, self.HIDDEN_SIZE], "float16"), R.Tensor([batch_size, self.HIDDEN_SIZE], "float32"))
                 def bind_branch_with_r_func(r_func, blk_m):
                     out = rx.Var(f"out_blkm{blk_m}", output_shape)
                     bindings = [rx.VarBinding(out, rx.Call(r_func, [x, residual, packed_info, packed_weights, packed_events], sinfo_args=output_sinfo))]
@@ -1127,16 +1068,7 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
         event_list.append(etensor_notify_attn)
         
         # etensor_attn_merge
-        etensor_attn_merge = np.zeros((max_batch_size * mk.NUM_KEY_VALUE_HEADS), dtype=np.int32)
-        kv_head_idx = arg_dict["kv_head_idx"].numpy()
-        q_indptr = arg_dict["q_indptr"].numpy()
-        for m in range(attn_task_num):
-            kv_idx = kv_head_idx[m]
-            batch_idx = q_indptr[m]
-            etensor_attn_merge[kv_idx * batch_size + batch_idx] += 1
-        etensor_attn_merge *= (base + 1)
-        etensor_attn_merge = tvm.runtime.tensor(etensor_attn_merge, device=DEV)
-        event_list.append(etensor_attn_merge)
+        event_list.append(tvm.runtime.tensor(np.full((max_batch_size * mk.NUM_KEY_VALUE_HEADS), min(KernelConfig.SM_NUMBER, attn_tile_num) * (base + 1), dtype=np.int32), device=DEV))
         
         # etensor_o_proj
         etensor_o_proj = np.zeros(mk.SPLIT_O_PROJECT, dtype=np.int32)
@@ -1153,13 +1085,7 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
                 for i in range(range_start, range_end + 1):
                     etensor_o_proj[i] += 1
         else:
-            for m in range(attn_task_num):
-                kv_idx = kv_head_idx[m]
-                batch_idx = q_indptr[m]
-                range_start = kv_idx * (mk.NUM_ATTENTION_HEADS // mk.NUM_KEY_VALUE_HEADS) * mk.HEAD_DIM // o_proj_tile_k
-                range_end = ((kv_idx + 1) * (mk.NUM_ATTENTION_HEADS // mk.NUM_KEY_VALUE_HEADS) * mk.HEAD_DIM - 1) // o_proj_tile_k
-                for i in range(range_start, range_end + 1):
-                    etensor_o_proj[i] += 1
+            etensor_o_proj += min(KernelConfig.SM_NUMBER, attn_tile_num)
         etensor_o_proj *= (base + 1)
         etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)
         event_list.append(etensor_o_proj)
@@ -1168,7 +1094,7 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
         event_list.append(tvm.runtime.tensor(np.full(mk.HIDDEN_SIZE // FuseGemmTile.BLK_N, mk.SPLIT_O_PROJECT * (base + 1), dtype=np.int32), device=DEV))
         
         # etensor_attn_add_rmsnorm
-        event_list.append(tvm.runtime.tensor(np.full(max_batch_size, mk.HIDDEN_SIZE // FuseSplitKReduceTile.N_UNIT * (base + 1), dtype=np.int32), device=DEV))
+        event_list.append(tvm.runtime.tensor(np.full(max_batch_size, mk.SPLIT_O_PROJECT * mk.HIDDEN_SIZE // FuseSplitKReduceTile.N_UNIT * (base + 1), dtype=np.int32), device=DEV))
         
         # etensor_attn_mlp
         event_list.append(tvm.runtime.tensor(np.full(1, batch_size * (base + 1), dtype=np.int32), device=DEV))
@@ -1189,7 +1115,10 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
         event_list.append(tvm.runtime.tensor(np.full(mk.HIDDEN_SIZE // FuseGemmTile.BLK_N, mk.DOWN_PROJ_SPLIT_K_FACTOR * (base + 1), dtype=np.int32), device=DEV))
         
         # etensor_mlp_add_rmsnorm
-        event_list.append(tvm.runtime.tensor(np.full(max_batch_size, mk.HIDDEN_SIZE // FuseSplitKReduceTile.N_UNIT * (base + 1), dtype=np.int32), device=DEV))
+        event_list.append(tvm.runtime.tensor(np.full(max_batch_size, mk.DOWN_PROJ_SPLIT_K_FACTOR * mk.HIDDEN_SIZE // FuseSplitKReduceTile.N_UNIT * (base + 1), dtype=np.int32), device=DEV))
+        
+        # etensor_end
+        event_list.append(tvm.runtime.tensor(np.array([batch_size * (base + 1)], dtype=np.int32), device=DEV))
         
         all_event_list.append(event_list)
     return all_event_list
@@ -1203,7 +1132,7 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper):
     def tir(vm, arg_dict, batch_size, mk: MegaKernel):
         dev = tvm.cuda()
         hidden_state = tvm.runtime.tensor(arg_dict["hidden_state"], device=dev)
-        residual = tvm.runtime.tensor(arg_dict["residual"], device=dev)
+        # residual = tvm.runtime.tensor(arg_dict["residual"].to(torch.float32), device=dev)
         
         if mk.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
             # reorder the gate_up_weight for the fusion of gate_up projection and silu
@@ -1235,12 +1164,13 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper):
         def func():
             nonlocal iter
             iter += 1
+            residual = tvm.runtime.tensor(arg_dict["residual"].to(torch.float32), device=dev)
             res = vm["megakernel"](hidden_state, residual, packed_info, weights, events[iter])
             return res
         res = bench(func, warmup=3, repeat=10, proton_name="tir")
         res = func()
         # export_to_perfetto_trace(res, "blackwell_attn.json")
-        return res[0].numpy(), res[1].numpy()
+        return res[0].numpy(), res[1].numpy().astype(np.float16)
 
     def std(arg_dict, batch_size, use_prefill, mk: MegaKernel):
         import flashinfer
@@ -1398,7 +1328,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="MegaKernel testing script.")
     parser.add_argument("--scheduler", type=str, nargs='+', default=["static"],
-                        choices=["static"], help="A list of test methods to run: now only support 'static'.")
+                        choices=["static", "dynamic"], help="A list of test methods to run.")
     parser.add_argument("--world-size", type=int, default=1, choices=[1],
                         help="The number of devices for the world size, now only support 1.")
     parser.add_argument("--batch-size", type=int, nargs='+',
@@ -1408,19 +1338,30 @@ if __name__ == "__main__":
                         help="A list of sequence lengths to test.")
     args = parser.parse_args()
     
-    megakernel_wrapper = MegaKernel()
-    mod = megakernel_wrapper.get_mod(max_batch_size=128)
-    mod = rx.transform.StaticHorizontalFusion(
-        ["megakernel_blkm32", "megakernel_blkm64", "megakernel_blkm128"], tile_scheduler_class=StaticTileScheduler, semaphore_class=Semaphore
-    )(mod)
-    # mod.show()
-    ex = rx.build(mod, target="cuda", tir_pipeline="tirp")
-    src = ex.mod.imports[0].imports[0].inspect_source()
-    print(src)
-    vm = rx.VirtualMachine(ex, tvm.cuda())
-    for batch_size in args.batch_size:
-        print(f"batch_size: {batch_size}", flush=True)
-        for seq_len in args.seq_len:
-            print(f"seq_len: {seq_len}", flush=True)
-            test(batch_size, seq_len, vm, megakernel_wrapper)
+    tile_scheduler_class_map = {
+        "static": static_scheduler.StaticTileScheduler,
+        "dynamic": dynamic_scheduler.DynamicTileScheduler,
+    }
+    semaphore_class_map = {
+        "static": static_scheduler.Semaphore,
+        "dynamic": dynamic_scheduler.Semaphore,
+    }
+    for scheduler in args.scheduler:
+        print(f"Testing with {scheduler} tile scheduler...", flush=True)
+        megakernel_wrapper = MegaKernel()
+        mod = megakernel_wrapper.get_mod(max_batch_size=128)
+        mod = rx.transform.StaticHorizontalFusion(
+            ["megakernel_blkm32", "megakernel_blkm64", "megakernel_blkm128"], 
+            strategy=scheduler, tile_scheduler_class=tile_scheduler_class_map[scheduler], semaphore_class=semaphore_class_map[scheduler]
+        )(mod)
+        # mod.show()
+        ex = rx.build(mod, target="cuda", tir_pipeline="tirp")
+        src = ex.mod.imports[0].imports[0].inspect_source()
+        print(src)
+        vm = rx.VirtualMachine(ex, tvm.cuda())
+        for batch_size in args.batch_size:
+            print(f"batch_size: {batch_size}", flush=True)
+            for seq_len in args.seq_len:
+                print(f"seq_len: {seq_len}", flush=True)
+                test(batch_size, seq_len, vm, megakernel_wrapper)
 

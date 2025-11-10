@@ -11,7 +11,7 @@ from tvm.tirp.megakernel.batch_attn import BatchAttnTile
 class FuseBatchAttnTile(BatchAttnTile):
 
     @staticmethod
-    def get_func(page_size, qo_heads, kv_heads, head_dim, attn_task_num, job_type, wait_level, notify_scope, notify_scope_id, prefetch_on=False):
+    def get_func(page_size, qo_heads, kv_heads, head_dim, attn_task_num, prefetch_on=False):
         num_tiles = (T.min(ceildiv(attn_task_num, KernelConfig.WG_NUMBER), KernelConfig.SM_NUMBER), 1, 1)
         tile_size = (None, None, None)
 
@@ -21,8 +21,7 @@ class FuseBatchAttnTile(BatchAttnTile):
                             q_start_ptr: T.handle, kv_start_ptr: T.handle, kv_end_ptr: T.handle, kv_head_idx_ptr: T.handle,
                             work_indptr_ptr: T.handle, len_kv_chunk_ptr: T.handle, o_ptr: T.handle, partial_o_ptr: T.handle,
                             partial_lse_ptr: T.handle, m_idx: T.int32, n_idx: T.int32, k_idx: T.int32):
-            T.func_attr({"megakernel.device_func": "batch_attn", "megakernel.job_type_id": job_type, "megakernel.wait_level": wait_level,
-                        "megakernel.notify_scope": notify_scope, "megakernel.notify_scope_id": notify_scope_id})
+            T.func_attr({"megakernel.device_func": "batch_attn"})
             batch_size = T.int32()
             max_page_num = T.int32()
             total_page_num = T.int32()

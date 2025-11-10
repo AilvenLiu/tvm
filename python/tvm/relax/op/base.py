@@ -17,6 +17,7 @@
 # ruff: noqa: F821
 """The base Relax operators."""
 
+import inspect
 from collections.abc import Callable
 
 import tvm
@@ -265,54 +266,107 @@ def call_tir_device(
     gvar: GlobalVar,
     args: Expr,
     out_sinfo: TensorStructInfo | list[TensorStructInfo],
-    tile_num: Expr | tuple[PrimExprLike, ...] | list[PrimExprLike],
+    job_id: int,
+    tile_num: Expr | tuple[PrimExprLike, ...] | list[PrimExprLike] | None,
     in_deps: Dependency | list[Dependency] = (),
     out_deps: Dependency | list[Dependency] = (),
+    inverse_in_deps: Dependency | list[Dependency] | None = None,
     inplace_indices: int | list[int] | None = None,
     tir_vars: ShapeExpr | tuple[PrimExpr] | list[PrimExpr] | None = None,
+    handle_config: dict | None = None,
 ) -> Call:
     """Call a tile-level function and return the output."""
     args = _wrap_inline_arg_tuple(args)
+    assert (
+        tile_num is not None or inverse_in_deps is not None
+    ), "tile_num is required when using static scheduling and inverse_in_deps is required when using dynamic scheduling"
+
+    if tile_num is None:
+        tile_idx_dim = (
+            len(inspect.signature(in_deps[0].dep).parameters)
+            if isinstance(in_deps, list)
+            else len(inspect.signature(in_deps.dep).parameters)
+        )
+    else:
+        tile_idx_dim = len(tile_num)
+
+    def _event_coord_dim(dep: Dependency) -> int:
+        sinfo = dep.event.struct_info
+        if isinstance(sinfo, TensorStructInfo):
+            if sinfo.ndim != -1:
+                return sinfo.ndim + 1
+            if isinstance(sinfo.shape, ShapeExpr):
+                return len(sinfo.shape.values) + 1
+        raise ValueError("Dependency event must have static rank")
+
+    def _handle_dep(dep: Dependency, input_dim: int, output_dim: int):
+        handle_dep_params = len(inspect.signature(dep.handle_dep).parameters)
+        if handle_dep_params == 0:
+            return dep.handle_dep()
+        return dep.handle_dep(input_dim, output_dim)
+
     if not in_deps:
-        (
-            in_evt_list,
-            in_extra_tensors_list,
-            in_extra_tir_vars_list,
-            in_dep_list,
-            in_num_list,
-            in_dep_dim_list,
-        ) = ([], [], [], [], [], [])
+        in_evt_list, in_extra_tensors_list, in_extra_tir_vars_list, in_dep_list, in_num_list = (
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
     else:
         if not isinstance(in_deps, list):
             in_deps = [in_deps]
+        event_dim = _event_coord_dim(in_deps[0])
         (
             in_evt_list,
             in_extra_tensors_list,
             in_extra_tir_vars_list,
             in_dep_list,
             in_num_list,
-            in_dep_dim_list,
-        ) = map(list, zip(*(dep.handle_dep() for dep in in_deps)))
+        ) = map(list, zip(*(_handle_dep(dep, tile_idx_dim, event_dim) for dep in in_deps)))
+
     if not out_deps:
-        (
-            out_evt_list,
-            out_extra_tensors_list,
-            out_extra_tir_vars_list,
-            out_dep_list,
-            out_num_list,
-            out_dep_dim_list,
-        ) = ([], [], [], [], [], [])
+        out_evt_list, out_extra_tensors_list, out_extra_tir_vars_list, out_dep_list, out_num_list = (
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
     else:
         if not isinstance(out_deps, list):
             out_deps = [out_deps]
+        event_dim = _event_coord_dim(out_deps[0])
         (
             out_evt_list,
             out_extra_tensors_list,
             out_extra_tir_vars_list,
             out_dep_list,
             out_num_list,
-            out_dep_dim_list,
-        ) = map(list, zip(*(dep.handle_dep() for dep in out_deps)))
+        ) = map(list, zip(*(_handle_dep(dep, tile_idx_dim, event_dim) for dep in out_deps)))
+
+    if not inverse_in_deps:
+        (
+            inv_in_evt_list,
+            inv_in_extra_tensors_list,
+            inv_in_extra_tir_vars_list,
+            inv_in_dep_list,
+            inv_in_num_list,
+        ) = ([], [], [], [], [])
+    else:
+        if not isinstance(inverse_in_deps, list):
+            inverse_in_deps = [inverse_in_deps]
+        event_dim = _event_coord_dim(inverse_in_deps[0])
+        (
+            inv_in_evt_list,
+            inv_in_extra_tensors_list,
+            inv_in_extra_tir_vars_list,
+            inv_in_dep_list,
+            inv_in_num_list,
+        ) = map(
+            list,
+            zip(*(_handle_dep(dep, event_dim, tile_idx_dim) for dep in inverse_in_deps)),
+        )
 
     if not isinstance(out_sinfo, list):
         out_sinfo = [out_sinfo]
@@ -324,23 +378,42 @@ def call_tir_device(
         tile_num = ShapeExpr(tile_num)
     if isinstance(tir_vars, list | tuple):
         tir_vars = ShapeExpr(tir_vars)
+    handle_config = {} if handle_config is None else handle_config
+    if not set(handle_config.keys()).issubset(
+        {
+            "wait_scope",
+            "notify_scope",
+            "notify_scope_id",
+            "push_level",
+            "push_scope",
+            "push_scope_id",
+        }
+    ):
+        raise ValueError(
+            "handle_config only supports keys: 'wait_scope', 'notify_scope', 'notify_scope_id', 'push_level', 'push_scope', 'push_scope_id'"
+        )
     return _ffi_api.call_tir_device(  # type: ignore
         gvar,
         args,
         out_sinfo,
         tile_num,
+        job_id,
         in_evt_list,
         out_evt_list,
+        inv_in_evt_list,
         in_extra_tensors_list,
         out_extra_tensors_list,
+        inv_in_extra_tensors_list,
         in_extra_tir_vars_list,
         out_extra_tir_vars_list,
+        inv_in_extra_tir_vars_list,
         in_dep_list,
         out_dep_list,
+        inv_in_dep_list,
         in_num_list,
         out_num_list,
-        in_dep_dim_list,
-        out_dep_dim_list,
+        inv_in_num_list,
+        handle_config,
         inplace_indices,
         tir_vars,
     )

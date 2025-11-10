@@ -53,17 +53,17 @@ class DecodeMergeTile(Tile):
         # allocate the smem
         offset = smem_manager.pool_allocator.offset
         self.o_tmp_smem = smem_manager.alloc(
-            [self.bdz, self.pipe_depth, self.bdy, self.head_dim], "float32", align=16
-        ).buffer
+            [self.bdz, self.pipe_depth, self.bdy, self.head_dim], "float32", align=16, name="o_tmp_smem"
+        )
         self.lse_tmp_smem_load = smem_manager.alloc(
-            [self.bdz, self.bdy, self.bdx], "float32"
-        ).buffer
+            [self.bdz, self.bdy, self.bdx], "float32", name="lse_tmp_smem_load"
+        )
         self.lse_tmp_smem_use = Tp.reshape(
-            self.lse_tmp_smem_load, [self.bdz, self.bdx, self.bdy]
-        ).buffer
+            self.lse_tmp_smem_load, [self.bdz, self.bdx, self.bdy], name="lse_tmp_smem_use"
+        )
         smem_manager.pool_allocator.move_base_to(offset)
-        self.o_epi_smem = smem_manager.alloc([self.bdz, self.bdy, self.head_dim], "float32").buffer
-        self.lse_epi_smem = smem_manager.alloc([self.bdz, self.bdy], "float32").buffer
+        self.o_epi_smem = smem_manager.alloc([self.bdz, self.bdy, self.head_dim], "float32", name="o_epi_smem")
+        self.lse_epi_smem = smem_manager.alloc([self.bdz, self.bdy], "float32", name="lse_epi_smem")
 
         # allocate the reg
         self.new_beg_batch_idx = T.alloc_local([1], "int32", name="new_beg_batch_idx")

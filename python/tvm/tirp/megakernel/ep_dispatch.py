@@ -40,7 +40,7 @@ class EPDispatchPrecomputeTile(Tile):
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory
-        self.smem_buf = smem_manager.alloc([self.num_tokens * self.topk], "uint32").buffer
+        self.smem_buf = smem_manager.alloc([self.num_tokens * self.topk], "uint32", name="smem_buf")
 
     def _alloc_local(self):
         # alloc local memory

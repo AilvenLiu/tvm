@@ -234,14 +234,14 @@ return 1.44269504088896340736 * 1 / sqrtf({self.head_dim});
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # allocate smem
-        self.q_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
-        self.k_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16).buffer
-        self.v_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16).buffer
+        self.q_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16, name="q_smem")
+        self.k_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16, name="k_smem")
+        self.v_smem = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_kv * self.head_dim], "float16", align=16, name="v_smem")
         self.cta_sync_o_smem = smem_manager.alloc([KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1
-                                        else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, self.num_mma_d_vo, 32, 8], "float32", align=16).buffer
+                                        else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, self.num_mma_d_vo, 32, 8], "float32", align=16, name="cta_sync_o_smem")
         self.cta_sync_md_smem = smem_manager.alloc([KernelConfig.WG_NUMBER, 1] if self.num_warps_kv == 1
-                                        else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, 16, 2], "float32", align=16).buffer
-        self.smem_o = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16).buffer
+                                        else [KernelConfig.WG_NUMBER, self.num_warps, self.num_mma_q, 16, 2], "float32", align=16, name="cta_sync_md_smem")
+        self.smem_o = smem_manager.alloc([KernelConfig.WG_NUMBER * self.cta_tile_q * self.head_dim], "float16", align=16, name="smem_o")
 
     @T.macro
     def init(self, smem_manager: SmemManager):

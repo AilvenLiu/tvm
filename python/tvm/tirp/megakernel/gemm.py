@@ -151,23 +151,26 @@ class GemmTile(Tile):
             layout=self.A_layout,
             align=1024,
             split=self.SMEM_PIPE_DEPTH,
+            name="A_smem",
             method="exclusive",
-        ).buffer
+        )
         self.B_smem = smem_manager.alloc(
             (self.SMEM_PIPE_DEPTH, self.MAX_BLK_N, self.BLK_K),
             self.b_type,
             layout=self.B_layout,
             align=1024,
             split=self.SMEM_PIPE_DEPTH,
+            name="B_smem",
             method="exclusive",
-        ).buffer
+        )
         self.output_smem = smem_manager.alloc(
             (self.TMEM_PIPE_DEPTH, self.EPI_TILE, self.MMA_N),
             self.out_type,
             layout=self.D_layout,
             align=1024,
+            name="output_smem",
             method="exclusive",
-        ).buffer
+        )
 
     def _alloc_local(self, m_idx):
         # alloc local memory
@@ -187,7 +190,7 @@ class GemmTile(Tile):
         # use GemmTile instead of cls to avoid re-allocating memory for different subclasses
         # TODO: this cannot be generalized if there are multiple subclasses of GemmTile
         #       we need to delete these members in class_finalize, and only alloc when there are no members
-        GemmTile.tmem_addr = smem_manager.alloc([1], "uint32", method="persistent").buffer
+        GemmTile.tmem_addr = smem_manager.alloc([1], "uint32", name="tmem_addr", method="persistent")
         GemmTile.tma2mma_bar = BarTMA2MMA(smem_manager, cls.SMEM_PIPE_DEPTH, True)
         GemmTile.mma2tma_bar = BarMMA2TMA(smem_manager, cls.SMEM_PIPE_DEPTH, False)
         GemmTile.mma2ld_bar = BarMMA2LD(smem_manager, cls.TMEM_PIPE_DEPTH, True)

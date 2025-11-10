@@ -11,15 +11,14 @@ from tvm.tirp.megakernel.batch_merge import BatchMergeTile
 class FuseBatchMergeTile(BatchMergeTile):
 
     @staticmethod   
-    def get_func(head_dim, attn_task_num, kv_heads, qo_heads, batch_size, job_type, wait_level, notify_scope, notify_scope_id):
+    def get_func(head_dim, attn_task_num, kv_heads, qo_heads, batch_size):
         num_tiles = (T.if_then_else(attn_task_num > kv_heads * batch_size, ceildiv(batch_size * qo_heads, KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER), 0), 1, 1)
         tile_size = (None, None, None)
 
         @T.prim_func(tirp=True, private=True)
         def batch_merge_func(partial_o_ptr: T.handle, partial_lse_ptr: T.handle, num_qo_len_ptr: T.handle, merge_indptr_ptr: T.handle,
                              merge_o_indices_ptr: T.handle, final_o_ptr: T.handle, m_idx: T.int32, n_idx: T.int32, k_idx: T.int32):
-            T.func_attr({"megakernel.device_func": "batch_merge", "megakernel.job_type_id": job_type, "megakernel.wait_level": wait_level,
-                        "megakernel.notify_scope": notify_scope, "megakernel.notify_scope_id": notify_scope_id})
+            T.func_attr({"megakernel.device_func": "batch_merge"})
             batch_size = T.int32()
             partial_o = T.match_buffer(partial_o_ptr, (FuseBatchMergeTile.max_num_kv_splits * kv_heads * head_dim), "float32", scope="global")
             final_o = T.match_buffer(final_o_ptr, (batch_size, qo_heads, head_dim), "float16", scope="global")

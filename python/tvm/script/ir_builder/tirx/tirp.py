@@ -1145,6 +1145,7 @@ class PoolAllocator:
         buffer_type="",
         axis_separators=None,
         layout="default",
+        name=None,
     ) -> frame.DeclBufferFrame:
         if align > 0:
             self.offset = (self.offset + align - 1) // align * align
@@ -1161,6 +1162,7 @@ class PoolAllocator:
             buffer_type,
             axis_separators,
             layout,
+            name,
         )
         self.offset += functools.reduce(lambda x, y: x * y, shape) * (DataType(dtype).bits // 8)
         return res

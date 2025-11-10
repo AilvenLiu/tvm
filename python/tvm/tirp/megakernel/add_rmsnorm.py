@@ -18,8 +18,8 @@ class AddRMSNormTile(Tile):
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory
-        self.x_smem = smem_manager.alloc([self.loop_inner * self.hidden_size], "float32").buffer
-        self.sum_sq_smem = smem_manager.alloc([self.loop_inner, self.bdy], "float32").buffer
+        self.x_smem = smem_manager.alloc([self.loop_inner * self.hidden_size], name="x_smem", dtype="float32")
+        self.sum_sq_smem = smem_manager.alloc([self.loop_inner, self.bdy], name="sum_sq_smem", dtype="float32")
 
     def _alloc_local(self):
         # alloc local memory

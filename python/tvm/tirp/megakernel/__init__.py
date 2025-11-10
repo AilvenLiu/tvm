@@ -18,3 +18,5 @@
 from . import support
 from . import model_config
 from . import relax_compatible
+from . import static_scheduler
+from . import dynamic_scheduler

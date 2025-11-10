@@ -150,7 +150,7 @@ class Tile:
 class Barriers:
 
     def __init__(self, smem_manager, pipe_depth, is_p2c, persistent=True):
-        self.mbar = smem_manager.alloc((pipe_depth,), "uint64", method="persistent" if persistent else "shared").buffer
+        self.mbar = smem_manager.alloc((pipe_depth,), "uint64", method="persistent" if persistent else "shared", name="mbarrier")
         self.init_phase = 0 if is_p2c else 1
         self.pipe_depth = pipe_depth
 
@@ -200,17 +200,6 @@ __forceinline__ __device__ void half22float2(void* dst, void* src) {{
     """,
     )
 
-
-@T.macro
-def warp_sync():
-    T.cuda.func_call(
-        "sync_warp",
-        source_code=f"""
-__forceinline__ __device__ void sync_warp() {{
-    __syncwarp();
-}}
-    """,
-    )
 
 
 def rsqrt(x):
@@ -460,19 +449,23 @@ class SmemManager:
         self.chunk_size = chunk_size
         self.chunk_num = smem_max_bytes // chunk_size
         assert self.chunk_num <= 32
-        self.pool_allocator = Tp.PoolAllocator(ptr)
+        self.ptr = ptr
+        self.reguler_pool_allocator = Tp.PoolAllocator(ptr)
+        self.persistent_pool_allocator = Tp.PoolAllocator(None if fusion_mode else ptr)
         self.tiles = {} # tile id -> [max used chunk id for the tile, {list of exclusive/other buf}, [arrival count for each chunk]]
         self.runtime_tile_chunk_count = {}
         self.bufs = {} # buf -> (split, beg, size, method)
         self.persistent_bufs = {} # persistent buf -> (beg, end)
         self.cur_tile_name = ""
-        self.persistent_offset = self.chunk_size * self.chunk_num
+        self.persistent_pool_allocator.move_base_to(self.chunk_size * self.chunk_num)
+        self.exist_bufs = {}
         self.fusion_mode = fusion_mode
+        self.pool_allocator = {"persistent": self.persistent_pool_allocator, "shared": self.reguler_pool_allocator, "exclusive": self.reguler_pool_allocator}
 
     def _inner_alloc(self):
         # notes: these smem will never be overwritten by any tasks
-        self.mbar = self.alloc((self.chunk_num,), "uint64", method="persistent").buffer
-        self.shared_count = self.alloc((1,), "int32", method="persistent").buffer
+        self.mbar = self.alloc((self.chunk_num,), "uint64", name="mbar", method="persistent")
+        self.shared_count = self.alloc((1,), "int32", name="shared_count", method="persistent")
         if self.fusion_mode:
             self.cur_phase = T.alloc_local([1], "int32", scope="local.persistent", name="cur_phase")
             self.reg_count = T.alloc_local([1], "int32", scope="local.persistent", name="reg_count")
@@ -500,25 +493,28 @@ class SmemManager:
     #         "shared" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will share the corresponding pages
     #         "persistent" -> persistent smem, cannot be wait / arrive
     def alloc(self, shape, dtype="float32", strides=None, scope="shared.dyn", align=0, buffer_type="",
-              axis_separators=None, layout="default", split=1, method: Literal["shared", "exclusive", "persistent"]="shared"):
+              axis_separators=None, layout="default", split=1, name=None, method: Literal["shared", "exclusive", "persistent"]="shared"):
+        # avoid name conflict
+        if name is not None:
+            if name in self.exist_bufs:
+                self.exist_bufs[name] += 1
+                name = name + str(self.exist_bufs[name] - 1)
+            else:
+                self.exist_bufs[name] = 1
         assert "shared" in scope
-        if method == "persistent":
-            offset = self.pool_allocator.offset
-            self.pool_allocator.move_base_to(self.persistent_offset)
-        beg = self.pool_allocator.offset
+        pool_allocator = self.pool_allocator[method]
+        beg = pool_allocator.offset
         if align > 0:
             beg = (beg + align - 1) // align * align
         if self.fusion_mode and method == "persistent":
             scope = "shared.persistent"
-        buf = self.pool_allocator.alloc(shape, dtype, strides, scope, align, buffer_type,
-                                        axis_separators, layout)
-        end = self.pool_allocator.offset
+        buf = pool_allocator.alloc(shape, dtype, strides, scope, align, buffer_type,
+                                    axis_separators, layout, name)
+        end = pool_allocator.offset
         size = end - beg
         assert size % split == 0
         if method == "persistent":
-            self.persistent_bufs[buf.buffer] = (beg, end)
-            self.persistent_offset = end
-            self.pool_allocator.move_base_to(offset)
+            self.persistent_bufs[buf] = (beg, end)
         else:
             # check the validity of the method
             if method == "shared":
@@ -529,7 +525,7 @@ class SmemManager:
             buf_info = (split, beg, size, method)
             self.tiles[self.cur_tile_name][0] = max(self.tiles[self.cur_tile_name][0], (end - 1) // self.chunk_size)
             self.tiles[self.cur_tile_name][1][method].append(buf_info)
-            self.bufs[buf.buffer] = buf_info
+            self.bufs[buf] = buf_info
             if method == "exclusive":
                 for split_idx in range(split):
                     beg_chunk_id = (beg + size // split * split_idx) // self.chunk_size
@@ -596,7 +592,7 @@ class SmemManager:
             self.cur_tile_name = str(cur_tile)
         self.tiles[self.cur_tile_name] = [-1, {"exclusive": [], "shared": []}, [0 for _ in range(self.chunk_num)]]
         self.runtime_tile_chunk_count[self.cur_tile_name] = [[0 for _ in range(self.chunk_num)] for _ in range(2)] # wait count, arrival count
-        self.pool_allocator.move_base_to(0)
+        self.reguler_pool_allocator.move_base_to(0)
 
     def _assert_cond(self, cond):
         assert cond

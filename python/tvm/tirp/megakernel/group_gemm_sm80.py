@@ -128,10 +128,10 @@ class GroupGEMMTile(Tile):
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         start_offset = smem_manager.pool_allocator.offset
-        A_smem = smem_manager.alloc([self.num_stages * self.BLK_M * self.BLK_K], "float16", align=16)
-        B_smem = smem_manager.alloc([self.num_stages * self.BLK_N * self.BLK_K], "float16", align=16)
+        A_smem = smem_manager.alloc([self.num_stages * self.BLK_M * self.BLK_K], "float16", align=16, name="A_smem")
+        B_smem = smem_manager.alloc([self.num_stages * self.BLK_N * self.BLK_K], "float16", align=16, name="B_smem")
         smem_manager.pool_allocator.move_base_to(start_offset)
-        C_smem = smem_manager.alloc([self.BLK_M * self.BLK_N], "float16", align=16)
+        C_smem = smem_manager.alloc([self.BLK_M * self.BLK_N], "float16", align=16, name="C_smem")
 
     @T.macro
     def run(self, m_idx, n_idx, k_idx, A, B, C, topk_weights, topk_ids, sorted_tok_ids, expert_ids, num_tokens_post_pad):

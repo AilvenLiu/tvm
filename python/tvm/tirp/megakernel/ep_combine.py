@@ -123,8 +123,8 @@ class EPCombineRecvTile(Tile):
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory
-        self.weights_buf = smem_manager.alloc([self.topk], self.out_dtype).buffer
-        self.experts_buf = smem_manager.alloc([self.topk], "int32").buffer
+        self.weights_buf = smem_manager.alloc([self.topk], self.out_dtype, name="weights_buf")
+        self.experts_buf = smem_manager.alloc([self.topk], "int32", name="experts_buf")
 
     def _alloc_local(self):
         # alloc local memory

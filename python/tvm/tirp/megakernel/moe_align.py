@@ -21,13 +21,13 @@ class MOEAlignTile(Tile):
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
         # alloc shared memory
-        self.shared_counts = smem_manager.alloc([self.num_experts], "int32").buffer
-        self.prefix = smem_manager.alloc([self.num_experts + 1], "int32").buffer
-        self.scan_buf = smem_manager.alloc([self.scan_size], "int32").buffer
+        self.shared_counts = smem_manager.alloc([self.num_experts], "int32", name="shared_counts")
+        self.prefix = smem_manager.alloc([self.num_experts + 1], "int32", name="prefix")
+        self.scan_buf = smem_manager.alloc([self.scan_size], "int32", name="scan_buf")
         self.warp_sums = smem_manager.alloc(
-            [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], "int32"
-        ).buffer
-        self.s_total_tokens_post_pad = smem_manager.alloc([1], "int32").buffer
+            [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], "int32", name="warp_sums"
+        )
+        self.s_total_tokens_post_pad = smem_manager.alloc([1], "int32", name="s_total_tokens_post_pad")
 
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)
@@ -179,10 +179,10 @@ class CountAndSortExpertTokens(Tile):
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
-        self.s_rank_post_pad = smem_manager.alloc([KernelConfig.NUM_THREADS], "int64").buffer
+        self.s_rank_post_pad = smem_manager.alloc([KernelConfig.NUM_THREADS], "int64", name="s_rank_post_pad")
         self.fetched_data = smem_manager.alloc(
-            [self.PIPE_DEPTH, KernelConfig.NUM_THREADS, self.VEC_SIZE], "float16"
-        ).buffer
+            [self.PIPE_DEPTH, KernelConfig.NUM_THREADS, self.VEC_SIZE], "float16", name="fetched_data"
+        )
 
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)

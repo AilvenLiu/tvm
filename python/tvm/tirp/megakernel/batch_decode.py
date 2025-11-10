@@ -104,7 +104,8 @@ class DecodeTile(Tile):
             ],
             "float16",
             align=16,
-        ).buffer
+            name="k_smem",
+        )
         self.v_smem = smem_manager.alloc(
             [
                 self.pipe_depth,
@@ -116,14 +117,15 @@ class DecodeTile(Tile):
             ],
             "float16",
             align=16,
-        ).buffer
+            name="v_smem",
+        )
         self.kv_offset = smem_manager.alloc(
-            [self.bdz, self.bdx, self.bdy, self.tile_per_bdx], "int32"
-        ).buffer
+            [self.bdz, self.bdx, self.bdy, self.tile_per_bdx], "int32", name="kv_offset"
+        )
         self.epi_o = smem_manager.alloc(
-            [self.bdz, self.bdy, self.bdx, self.loop_inner, self.vec_size], "float32"
-        ).buffer
-        self.epi_md = smem_manager.alloc([self.bdz, self.bdy, self.loop_inner, 2], "float32").buffer
+            [self.bdz, self.bdy, self.bdx, self.loop_inner, self.vec_size], "float32", name="epi_o"
+        )
+        self.epi_md = smem_manager.alloc([self.bdz, self.bdy, self.loop_inner, 2], "float32", name="epi_md")
 
         # allocate the reg
         self.idx = T.alloc_local([1], "int32")

@@ -398,50 +398,101 @@ PrimExprLike = Union[int, float, PrimExpr]
 
 class Dependency:
     def __init__(
-        self, event: Expr, dep: Callable, num: Union[Callable, int],
+        self,
+        event: Expr,
+        dep: Callable,
+        num: Union[Callable, int],
         extra_args: List[Union[Expr, PrimExprLike]] = [],
-        dep_output_dim=1, tile_idx_dim=3, tile_idx_dtype = "int32",
+        tile_idx_dtype: str = "int32",
     ):
+        """
+        Parameters
+        ----------
+        event : Expr
+            The variable of event tensor.
+        dep : Callable
+            The dependency function. 
+            It takes the (tile index/event coordinate), the index of the (event coordinate/tile index) to be calculated, 
+            and extra arguments, and returns the indices of the depended (event coordinate/tile index).
+        num : Union[Callable, int]
+            The number of depended (event coordinates/tile indices).
+            This can be a fixed integer or a Callable that dynamically computes this number.
+        extra_args : List[Union[Expr, PrimExprLike]], optional
+            A list of extra arguments passed to the dependency function.
+            Defaults to an empty list.
+        tile_idx_dtype : str, optional
+            The data type of the tile index. Defaults to "int32".
+
+        Notes
+        -----
+        The order of parameters for both callable functions is critical and strictly defined.
+        1. The dependency function (`dep`) must accept parameters in the following order:
+           The (tile index/event coordinate),
+           The index of the (event coordinate/tile index) to be calculated (ranging from 0 to num - 1),
+           The extra arguments in the same order as provided in `extra_args`.
+        2. The function to calculate the number of coordinates (if 'num' is Callable) must accept parameters in the following order:
+           The (tile index/event coordinate),
+           The extra arguments in the same order as provided in `extra_args`.
+        3. The event coordinate in defined as (rank, *evt_tensor_indices). 'rank=-1' represents the local rank.
+           
+        Examples
+        --------
+        Task (i, j, k) depends on events E at coordinates (rank=-1, X[i], j, 0), (rank=-1, X[i], j, 1), ..., (rank=-1, X[i], j, Y[k]),
+        where X, Y are the tensors.
+        Then the Dependency object can be created as follows:
+        >>> dependency = Dependency(
+        ...     event=E,
+        ...     dep=lambda i, j, k, idx, X, Y: (-1, X[i], j, idx),
+        ...     num=lambda i, j, k, X, Y: Y[k] + 1,
+        ...     extra_args=[X, Y],
+        ... )
+        Then the dependency can be handled by:
+        >>> handled_info = dependency.handle_dep(input_dim=3, output_dim=4)
+        """
         self.event = event
         if not isinstance(event, Expr) or isinstance(event, List) or isinstance(event, Tuple) or isinstance(event, tvm.relax.Tuple):
             raise ValueError("One Dependency obj should handle a single event.")
         self.dep = dep
-        self.dep_dim = (len(inspect.signature(dep).parameters), dep_output_dim)
-        if self.dep_dim[0] != tile_idx_dim + 1 + len(extra_args):
-            raise ValueError(f"dep requires {tile_idx_dim + 1 + len(extra_args)} parameters")
         if isinstance(num, int):
             self.num = lambda *args: num
-            self.num_dim = (tile_idx_dim + len(extra_args), 1)
+            self.pass_num_signature_check = True
         else:
             self.num = num
-            self.num_dim = (len(inspect.signature(num).parameters), 1)
-            if self.num_dim[0] != tile_idx_dim + len(extra_args):
-                raise ValueError(f"num requires {tile_idx_dim + len(extra_args)} parameters")
+            self.pass_num_signature_check = False
 
         self.extra_tensors = [arg for arg in extra_args if isinstance(arg, Expr)]
         self.extra_tir_vars = [arg for arg in extra_args if not isinstance(arg, Expr)]
-        self.tile_idx_dim = tile_idx_dim
         if len(self.extra_tensors) + len(self.extra_tir_vars) != len(extra_args):
             raise ValueError("extra_args should be Expr or PrimExpr/int/float")
+        self.tile_idx_dtype = tile_idx_dtype
+        
 
-        self.dep_param = (
+    def handle_dep(self, input_dim, output_dim) -> Tuple[Expr, List[Expr], List[PrimExpr], PrimFunc, PrimFunc]:
+        # check the signature of dep and num
+        if len(inspect.signature(self.dep).parameters) != input_dim + 1 + len(self.extra_tensors) + len(self.extra_tir_vars):
+             raise ValueError(f"dep requires {input_dim + 1 + len(self.extra_tensors) + len(self.extra_tir_vars)} parameters")
+        if not self.pass_num_signature_check and len(inspect.signature(self.num).parameters) != input_dim + len(self.extra_tensors) + len(self.extra_tir_vars):
+             raise ValueError(f"num requires {input_dim + len(self.extra_tensors) + len(self.extra_tir_vars)} parameters")
+         
+        # create dep and num param    
+        dep_param = (
             (
-                [T.var(dtype=tile_idx_dtype) for _ in range(tile_idx_dim + 1)] + 
+                [T.var(dtype=self.tile_idx_dtype) for _ in range(input_dim + 1)] + 
                 [T.Buffer(shape=[v for v in arg.struct_info.shape], dtype=arg.struct_info.dtype, scope="global") for arg in self.extra_tensors] + 
                 [T.var(dtype=arg.dtype) if isinstance(arg, PrimExpr) else arg for arg in self.extra_tir_vars]
             ), 
-            T.Buffer(shape=[dep_output_dim], dtype=tile_idx_dtype, scope="local"),
+            T.Buffer(shape=[output_dim], dtype=self.tile_idx_dtype, scope="local"),
         )
-        self.num_param = (
+        num_param = (
             (
-                [T.var(dtype=tile_idx_dtype) for _ in range(tile_idx_dim)] + 
+                [T.var(dtype=self.tile_idx_dtype) for _ in range(input_dim)] + 
                 [T.Buffer(shape=[v for v in arg.struct_info.shape], dtype=arg.struct_info.dtype, scope="global") for arg in self.extra_tensors] + 
                 [T.var(dtype=arg.dtype) if isinstance(arg, PrimExpr) else arg for arg in self.extra_tir_vars]
             ), 
-            T.Buffer(shape=[1], dtype=tile_idx_dtype, scope="local"),
+            T.Buffer(shape=[1], dtype=self.tile_idx_dtype, scope="local"),
         )
-
-    def handle_dep(self) -> Tuple[Expr, List[Expr], List[PrimExpr], PrimFunc, PrimFunc, int]:
+        
+        # pack dep and num func to PrimFunc
         def _convert_arg(para: Union[tir.Var, tir.Buffer]) -> T.Var:
             if isinstance(para, tir.Var) or isinstance(para, tir.Buffer):
                 return T.arg("var", para)
@@ -457,16 +508,16 @@ class Dependency:
 
         @T.prim_func(check_well_formed=False)
         def dep():
-            in_args = T.meta_var([_convert_arg(spec) for spec in self.dep_param[0]])
-            out_arg = T.meta_var(_convert_arg(self.dep_param[1]))
+            in_args = T.meta_var([_convert_arg(spec) for spec in dep_param[0]])
+            out_arg = T.meta_var(_convert_arg(dep_param[1]))
             with T.cta():
-                _unpack_and_assign(self.dep(*in_args), out_arg, self.dep_dim[1])
+                _unpack_and_assign(self.dep(*in_args), out_arg, output_dim)
         
         @T.prim_func(check_well_formed=False)
         def num():
-            in_args = T.meta_var([_convert_arg(spec) for spec in self.num_param[0]])
-            out_arg = T.meta_var(_convert_arg(self.num_param[1]))
+            in_args = T.meta_var([_convert_arg(spec) for spec in num_param[0]])
+            out_arg = T.meta_var(_convert_arg(num_param[1]))
             with T.cta():
-                _unpack_and_assign(self.num(*in_args), out_arg, self.num_dim[1])
-
-        return self.event, self.extra_tensors, [var for var in self.extra_tir_vars if isinstance(var, PrimExpr)], dep, num, self.dep_dim[1]
+                _unpack_and_assign(self.num(*in_args), out_arg, 1)
+        
+        return self.event, self.extra_tensors, [var for var in self.extra_tir_vars if isinstance(var, PrimExpr)], dep, num

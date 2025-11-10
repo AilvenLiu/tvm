@@ -166,8 +166,8 @@ __syncwarp();
 
     def _alloc_buffer(self, smem_manager: SmemManager):
         self.smem_manager = smem_manager
-        self.v_smem = smem_manager.alloc([self.num_warps, self.num_smem_stages, self.bdy, self.head_dim], "float16").buffer
-        self.s_smem = smem_manager.alloc([self.num_warps, 32], "float32").buffer
+        self.v_smem = smem_manager.alloc([self.num_warps, self.num_smem_stages, self.bdy, self.head_dim], "float16", name="v_smem")
+        self.s_smem = smem_manager.alloc([self.num_warps, 32], "float32", name="s_smem")
 
     @T.macro
     def init(self, smem_manager: SmemManager):

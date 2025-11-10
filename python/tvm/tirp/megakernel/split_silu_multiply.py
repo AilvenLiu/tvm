@@ -22,8 +22,8 @@ class SiluMultiplyTile(Tile):
         self.smem_manager = smem_manager
         # allocate smem
         self.buf = smem_manager.alloc(
-            [self.PIPE_DEPTH, 2, KernelConfig.NUM_THREADS, self.VEC_SIZE], dtype=self.dtype
-        ).buffer
+            [self.PIPE_DEPTH, 2, KernelConfig.NUM_THREADS, self.VEC_SIZE], dtype=self.dtype, name="buf"
+        )
 
     def init(self, smem_manager: SmemManager):
         self._alloc_buffer(smem_manager)

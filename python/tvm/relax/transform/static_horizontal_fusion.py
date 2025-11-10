@@ -19,16 +19,17 @@ The pass is written in Python for experiment, fast development.
 """
 
 from collections import defaultdict
-from tvm.ir import DictAttrs
-from typing import Dict, List, Type, Tuple, Optional, Union
+from functools import partial
+from typing import Dict, List, Literal, Set, Type, Tuple, Optional, Union
 from dataclasses import dataclass
 
 import tvm
 from tvm import relax
 from tvm.ir import DictAttrs, load_json, save_json
 from tvm.ir.module import IRModule
+from tvm.meta_schedule.runner import config
 from tvm.relax.expr import Expr
-from tvm.relax.expr_functor import PyExprMutator, mutator
+from tvm.relax.expr_functor import PyExprMutator, PyExprVisitor, mutator
 from tvm.relax.struct_info import StructInfo, TensorStructInfo, TupleStructInfo
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
@@ -37,7 +38,6 @@ from tvm.tir import (
     Block,
     Buffer,
     BufferLoad,
-    IndexMap,
     PrimExpr,
     PrimFunc,
     SeqStmt,
@@ -48,6 +48,7 @@ from tvm.tir import (
     AllocBuffer,
 )
 from tvm.tir.analysis import verify_tirp_well_formed
+from tvm.tir.op import ret
 from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
 from tvm.tirp.transform.common import seek_kernel_replace_point, BufferReplacer
 from tvm.tirp.megakernel.common import KernelConfig, JobType, SmemManager, TileSchedulerBase, SemaphoreBase, pack_into_32bit
@@ -55,6 +56,53 @@ from tvm.tirp.operator import KernelReplacePoint
 from tvm.tir.exec_scope import ExecScope
 
 # FIXME: add decl_buffer for all newly generated buffers
+    
+
+@tvm.transform.module_pass(opt_level=0, name="StaticHorizontalFusion")
+class StaticHorizontalFusion:
+    """Static horizontal fusion."""
+
+    def __init__(self, func_name: Union[str, List[str]], strategy: Literal["static", "dynamic"],
+                 tile_scheduler_class: Type[TileSchedulerBase], semaphore_class: Type[SemaphoreBase],
+                 fusion_prefix: str = "megakernel_"):
+        self.func_name = func_name if isinstance(func_name, list) else [func_name]
+        self.strategy = strategy
+        self.tile_scheduler_class = tile_scheduler_class
+        self.semaphore_class = semaphore_class
+        self.fusion_prefix = fusion_prefix
+        self.gvar_to_remove = []
+
+    def transform_module(self, mod: IRModule, _ctx: tvm.transform.PassContext) -> IRModule:
+        """IRModule-level transformation"""
+        rewriter = _Rewriter(mod, self.strategy, self.func_name, self.fusion_prefix, self.tile_scheduler_class, self.semaphore_class)
+        mod = rewriter.transform()
+        for gvar in rewriter.gvar_to_remove:
+            del mod[gvar]
+        mod = relax.transform.DeadCodeElimination()(mod)
+        return mod
+    
+@dataclass
+class EventHandleEntry:
+    idx: int
+    event: Expr
+    scope: Literal["thread", "warp", "warpgroup", "cta"]
+    scope_id: int
+    push_level: Literal["thread", "warp", "warpgroup", "cta", "none"]
+    push_job_id: int
+    freeze: bool
+    
+@dataclass
+class EventHandleConfigs:
+    func_type: str
+    job_id: int
+    wait_scope: Literal["warp", "cta"]
+    notify_scope: Literal["thread", "warp", "warpgroup", "cta"]
+    notify_scope_id: int
+    push_scope: Literal["thread", "warp", "warpgroup", "cta"]
+    push_level: Literal["thread", "warp", "warpgroup", "cta", "none"]
+    push_scope_id: int
+    freeze: bool
+    
 
 @dataclass(frozen=True)
 class VarEntry:
@@ -74,96 +122,219 @@ class DeviceFuncInfo:
     sym_vars: set[Var]
     in_info_list: List[Tuple[callable, callable, PrimExpr, PrimExpr]]
     out_info_list: List[Tuple[callable, callable, PrimExpr, PrimExpr]]
-    func_type: str
+    push_info_list: List[Tuple[callable, callable, List[callable], List[PrimExpr]]]
     job_type_id: int
-    wait_level: str
-    notify_scope: str
-    notify_scope_id: int
+    evt_handle_config: EventHandleConfigs
 
-@tvm.transform.module_pass(opt_level=0, name="StaticHorizontalFusion")
-class StaticHorizontalFusion:
-    """Static horizontal fusion."""
+@relax.expr_functor.visitor
+class EventHandleHelper(PyExprVisitor):
+    def __init__(self, mod: IRModule, strategy: Literal["static", "dynamic"]):
+        super().__init__()
+        self.mod = mod
+        self.strategy = strategy
+        self.call_tir_device_op = tvm.ir.Op.get("relax.call_tir_device")
+        self.event_handle_configs: Dict[relax.Call, EventHandleConfigs] = {}
+        self.in_evt: Dict[Expr, set[Tuple[int, relax.Call]]] = defaultdict(set)
+        self.out_evt: Dict[Expr, set[Tuple[int, relax.Call]]] = defaultdict(set)
+        self.prev: Dict[relax.Call, set[relax.Call]] = defaultdict(set)
+        self.next: Dict[relax.Call, set[relax.Call]] = defaultdict(set)
+        self.topological_order: List[relax.Call] = []
+        self.entry_points: set[relax.Call] = set()
 
-    def __init__(self, func_name: Union[str, List[str]], tile_scheduler_class: Type[TileSchedulerBase], semaphore_class: Type[SemaphoreBase], fusion_prefix: str = "megakernel_"):
-        self.func_name = func_name if isinstance(func_name, list) else [func_name]
-        self.tile_scheduler_class = tile_scheduler_class
-        self.semaphore_class = semaphore_class
-        self.fusion_prefix = fusion_prefix
-        self.gvar_to_remove = []
+    def clear_state(self):
+        self.event_handle_configs = {}
+        self.in_evt = defaultdict(set)
+        self.out_evt = defaultdict(set)
+        self.prev = defaultdict(set)
+        self.next = defaultdict(set)
+        self.topological_order = []
+        self.entry_points = set()
 
-    def transform_module(self, mod: IRModule, _ctx: tvm.transform.PassContext) -> IRModule:
-        """IRModule-level transformation"""
-        rewriter = _Rewriter(mod, self.func_name, self.fusion_prefix, self.tile_scheduler_class, self.semaphore_class)
-        mod = rewriter.transform()
-        for gvar in rewriter.gvar_to_remove:
-            del mod[gvar]
-        mod = relax.transform.DeadCodeElimination()(mod)
-        return mod
+    def visit_call_(self, call: relax.Call) -> None:
+        if call.op == self.call_tir_device_op:
+            tir_gvar = call.args[0]
+            job_id = call.attrs.job_id
+            in_events = call.attrs.in_events
+            out_events = call.attrs.out_events
+            handle_configs = call.attrs.handle_config
+            prim_func = load_json(save_json(self.mod[tir_gvar]))
+            func_type = prim_func.attrs.get("megakernel.device_func")
+            # set the default handle config            
+            default_config_pool = {
+                "gemm": {
+                    "wait_scope": "warp", "notify_scope": "warpgroup", "notify_scope_id": 0,
+                    "push_level": "warp", "push_scope": "warpgroup", "push_scope_id": 0
+                },
+                "default": {
+                    "wait_scope": "cta", "notify_scope": "cta", "notify_scope_id": 0,
+                    "push_level": "none", "push_scope": "none", "push_scope_id": 0
+                }
+            }
+            default_config = default_config_pool.get(func_type, default_config_pool["default"])
+            self.event_handle_configs[call] = EventHandleConfigs(func_type, job_id, **default_config, freeze=False)
+            if handle_configs:
+                self.event_handle_configs[call].wait_scope = handle_configs.get("wait_scope", self.event_handle_configs[call].wait_scope)
+                self.event_handle_configs[call].notify_scope = handle_configs.get("notify_scope", self.event_handle_configs[call].notify_scope)
+                self.event_handle_configs[call].notify_scope_id = handle_configs.get("notify_scope_id", self.event_handle_configs[call].notify_scope_id)
+                self.event_handle_configs[call].push_level = handle_configs.get("push_level", self.event_handle_configs[call].push_level)
+                self.event_handle_configs[call].push_scope = handle_configs.get("push_scope", self.event_handle_configs[call].push_scope)
+                self.event_handle_configs[call].push_scope_id = handle_configs.get("push_scope_id", self.event_handle_configs[call].push_scope_id)
+                self.event_handle_configs[call].freeze = True
+            for idx, evt in enumerate(in_events):
+                self.in_evt[evt].add((idx, call))
+            for idx, evt in enumerate(out_events):
+                self.out_evt[evt].add((idx, call))
+            return super().visit_call_(call)
+        else:
+            raise ValueError(
+                "StaticHorizontalFusion can only be applied to relax function with only call_tir_device"
+            )
 
+    def infer(self, func: relax.Function):
+        self.clear_state()
+        self.visit_expr(func)
+        # for dynamic scheduling, one task can only rely on one event
+        if self.strategy == "dynamic":
+            for call in self.event_handle_configs.keys():
+                assert len(call.attrs.in_events) <= 1, "Dynamic scheduling only supports one event wait per task"
+        # check whether the dep graph is a DAG and find entry nodes
+        for call, config in self.event_handle_configs.items():
+            for evt in call.attrs.in_events:
+                self.prev[call].update({call for _, call in self.out_evt[evt]})
+            for evt in call.attrs.out_events:
+                self.next[call].update({call for _, call in self.in_evt[evt]})
+        # topological sort
+        visited = set()
+        stack = set()
+        def dfs(cur_call):
+            if cur_call in stack:
+                raise ValueError("The event dependency graph is not a DAG")
+            if cur_call in visited:
+                return
+            visited.add(cur_call)
+            stack.add(cur_call)
+            for next_call in self.next[cur_call]:
+                dfs(next_call)
+            stack.remove(cur_call)
+            self.topological_order.append(cur_call)
+        for call in self.event_handle_configs.keys():
+            dfs(call)
+            if len(self.prev[call]) == 0:
+                self.entry_points.add(call)
+        self.topological_order = self.topological_order[::-1]
+        # propagate the inv dependencies to previous calls (push)
+        if self.strategy == "dynamic":
+            for call, config in self.event_handle_configs.items():
+                if not config.freeze:
+                    config.push_level = "warp"
+                    config.push_scope = "cta"
+                    config.push_scope_id = 0
+                    for prev_call in self.prev[call]:
+                        if self.event_handle_configs[prev_call].func_type == "gemm":
+                            config.push_level = "warp"
+                            config.push_scope = "warpgroup"
+                            config.push_scope_id = 1
+                
 
 class EventOpInserter(StmtExprMutator):
     def __init__(
         self,
+        strategy: Literal["static", "dynamic"],
         func_info: DeviceFuncInfo,
         tile_scheduler: TileSchedulerBase,
         semaphore_class: Type[SemaphoreBase]
     ):
         super().__init__()
+        self.strategy = strategy
         self.func_info = func_info
         self.tile_scheduler = tile_scheduler
         self.semaphore_class = semaphore_class
 
     @staticmethod
     def rewrite(
+        strategy: Literal["static", "dynamic"],
         func_info: DeviceFuncInfo,
         tile_scheduler: TileSchedulerBase,
         semaphore_class: Type[SemaphoreBase]
     ) -> Stmt:
-        inserter = EventOpInserter(func_info, tile_scheduler, semaphore_class)
+        inserter = EventOpInserter(strategy, func_info, tile_scheduler, semaphore_class)
         return inserter.visit_stmt(func_info.func_body)
 
     def visit_block_(self, block: Block): 
         if block.annotations.get("tirp.tile_class.prefetch") is not None:
             return block
         elif block.annotations.get("tirp.tile_class.run") is not None:  
-            def get_semaphore_wait(idx):
+            def get_wait(idx):
                 @T.prim_func(tirp=True, check_well_formed=False)
                 def wait():
                     sem = T.meta_var(self.semaphore_class(-1, self.func_info.in_event_tensors[idx], decrement=True))
                     wait_func = T.meta_var(self.func_info.in_info_list[idx][0])
-                    self.tile_scheduler.wait(sem, *(wait_func(T.int32(0))), wait_level=self.func_info.wait_level)
+                    self.tile_scheduler.wait(
+                        sem, *(wait_func(T.int32(0))[1:]),
+                        wait_level=self.func_info.evt_handle_config.wait_scope,
+                    )
                 return wait
             
-            def get_semaphore_notify(idx):            
+            def get_notify(idx):            
                 @T.prim_func(tirp=True, check_well_formed=False)
                 def notify():
                     sem = T.meta_var(self.semaphore_class(-1, self.func_info.out_event_tensors[idx], decrement=True))
                     notify_func = T.meta_var(self.func_info.out_info_list[idx][0])
                     num_func = T.meta_var(self.func_info.out_info_list[idx][1])
-                    self.tile_scheduler.notify(sem, num_func()[0], notify_func, 
-                                            scope=self.func_info.notify_scope, scope_id=self.func_info.notify_scope_id)
+                    self.tile_scheduler.notify(
+                        sem, num_func()[0], notify_func,
+                        scope=self.func_info.evt_handle_config.notify_scope,
+                        scope_id=self.func_info.evt_handle_config.notify_scope_id,
+                    )
                 return notify
+
+            if self.strategy == "dynamic":
+                def get_pre_notify_and_push(idx):
+                    if len(self.func_info.push_info_list[idx][2]) == 0:
+                        return None
+                    @T.prim_func(tirp=True, check_well_formed=False)
+                    def pre_notify_and_push():
+                        sem = T.meta_var(self.semaphore_class(-1, self.func_info.out_event_tensors[idx], decrement=True))
+                        notify_func = T.meta_var(self.func_info.push_info_list[idx][0])
+                        num_func = T.meta_var(self.func_info.push_info_list[idx][1])
+                        push_func_list = T.meta_var(self.func_info.push_info_list[idx][2])
+                        self.tile_scheduler.pre_notify_and_push(
+                            sem, num_func()[0], notify_func, push_func_list,
+                            push_level=self.func_info.evt_handle_config.push_level,
+                            scope=self.func_info.evt_handle_config.push_scope,
+                            scope_id=self.func_info.evt_handle_config.push_scope_id,
+                        )
+                    return pre_notify_and_push
             
             # insert wait and notify
-            waits = [get_semaphore_wait(idx).body for idx in range(len(self.func_info.in_event_tensors))]
-            commits = [get_semaphore_notify(idx).body for idx in range(len(self.func_info.out_event_tensors))]
+            waits = [get_wait(idx).body for idx in range(len(self.func_info.in_event_tensors))]
+            commits = [get_notify(idx).body for idx in range(len(self.func_info.out_event_tensors))]
+            pushes = []
+            if self.strategy == "dynamic":
+                for idx in range(len(self.func_info.out_event_tensors)):
+                    pre_notify_and_push = get_pre_notify_and_push(idx)
+                    if pre_notify_and_push is not None:
+                        pushes.append(pre_notify_and_push.body)
+                
             if len(waits) > 0:
                 waits = SeqStmt(waits) if len(waits) > 1 else waits[0]
                 for _, _, buf1, buf2 in self.func_info.in_info_list:
                     waits = AllocBuffer(buf1, waits)
                     waits = AllocBuffer(buf2, waits)
                 waits = [waits]
-            else:
-                waits = []
             if len(commits) > 0:
                 commits = SeqStmt(commits) if len(commits) > 1 else commits[0]
                 for _, _, buf1, buf2 in self.func_info.out_info_list:
                     commits = AllocBuffer(buf1, commits)
                     commits = AllocBuffer(buf2, commits)
                 commits = [commits]
-            else:
-                commits = []
-            body_list = waits + [block.body] + commits
+            if self.strategy == "dynamic" and len(pushes) > 0:
+                pushes = SeqStmt(pushes) if len(pushes) > 1 else pushes[0]
+                for _, _, _, buf_list in self.func_info.push_info_list:
+                    for buf in buf_list:
+                        pushes = AllocBuffer(buf, pushes)
+                pushes = [pushes]
+            body_list = pushes + waits + [block.body] + commits
             new_body = SeqStmt(body_list) if len(body_list) > 1 else body_list[0]
             # Reconstruct the block with the new body, preserving all other attributes.
             return Block(
@@ -215,8 +386,26 @@ class PersistentVarCollector(StmtExprMutator):
     def visit_alloc_buffer_(self, op):
         op = super().visit_alloc_buffer_(op)
         if "persistent" in op.buffer.scope():
+            # notes: here using buffer.name to distinguish different persistent buffers
+            #        it's not a robust way, need to be improved in the future
             cur_persistent_vars = self.persistent_vars_tile_class if self.visit_tile_class else self.persistent_vars_megakernel
             cur_persistent_vars[op.buffer.name].append(op.buffer)
+            return op.body
+        return op
+
+    def visit_decl_buffer_(self, op):
+        op = super().visit_decl_buffer_(op)
+        if "persistent" in op.buffer.scope():
+            cur_persistent_vars = self.persistent_vars_tile_class if self.visit_tile_class else self.persistent_vars_megakernel
+            cur_persistent_vars[op.buffer.name].append(op.buffer)
+            return op.body
+        return op
+    
+    def visit_allocate_(self, op):
+        # here buffer with shared.persistent scope will be declared with None data pointer
+        # so we need to remove the extra allocate node due to this
+        op = super().visit_allocate_(op)
+        if "persistent" in op.buffer_var.type_annotation.storage_scope:
             return op.body
         return op
     
@@ -235,7 +424,7 @@ class PersistentVarCollector(StmtExprMutator):
         for annotation, var_name in annotation_to_var.items():
             if block.annotations.get(annotation) is not None:
                 setattr(self, var_name, block.body)
-                break 
+                break
         if not any(block.annotations.get(key) for key in annotation_to_var.keys()):
             return block
         return Block(
@@ -279,7 +468,7 @@ class DynSharedMemCollector(StmtExprMutator):
         self.dyn_shared_mem_buffer = None
         
     def visit_alloc_buffer_(self, op):
-        op =super().visit_alloc_buffer_(op)
+        op = super().visit_alloc_buffer_(op)
         if op.buffer.scope() == "shared.dyn":
             if self.dyn_shared_mem_buffer is None:
                 self.dyn_shared_mem_buffer = op.buffer
@@ -326,15 +515,120 @@ class DisjointSet:
 
     def get_size(self, a: object) -> int:
         return self.size[self.find(a)]
+    
+
+class DependencyHandler:
+    def __init__(self, tile_idx: List[PrimExpr], in_var_entries: List[VarEntry], sym_vars: Set[Var], relax_var_to_entry: Dict[Var, VarEntry],
+                 builder_: relax.BlockBuilder, var_entry_mapping: DisjointSet):
+        self.tile_idx = tile_idx
+        self.in_var_entries = in_var_entries
+        self.sym_vars = sym_vars
+        self.relax_var_to_entry = relax_var_to_entry
+        self.builder_ = builder_
+        self.var_entry_mapping = var_entry_mapping
+
+    def _get_func_template(self, accept_idx: bool, job_id: int):
+        def _func_template_1(idx: T.Var, buffer_replace_map, var_replace_map, func, out_buf, input_dim, output_dim, job_id, emit=True):
+            replacer = BufferReplacer(
+                buffer_replace_map, var_replace_map | {func.params[input_dim]: idx}
+            )
+            stmt = replacer.visit_stmt(func.body)
+            if emit:
+                T.add_to_parent(stmt)
+            return [BufferLoad(out_buf, [i]) for i in range(output_dim)]
+
+        def _func_template_2(buffer_replace_map, var_replace_map, func, out_buf, input_dim, output_dim, job_id, emit=True):
+            replacer = BufferReplacer(buffer_replace_map, var_replace_map)
+            stmt = replacer.visit_stmt(func.body)
+            if emit:
+                T.add_to_parent(stmt)
+            return [BufferLoad(out_buf, [i]) for i in range(output_dim)]
+
+        def _func_template_3(idx: T.Var, *args, buffer_replace_map, var_replace_map, func, out_buf, input_dim, output_dim, job_id, emit=True):
+            replacer = BufferReplacer(
+                buffer_replace_map, var_replace_map | {func.params[i]: args[i] for i in range(input_dim)} | {func.params[input_dim]: idx}
+            )
+            stmt = replacer.visit_stmt(func.body)
+            if emit:
+                T.add_to_parent(stmt)
+            return [T.int32(job_id)] + [BufferLoad(out_buf, [i]) for i in range(output_dim)]
+
+        def _func_template_4(*args, buffer_replace_map, var_replace_map, func, out_buf, input_dim, output_dim, job_id, emit=True):
+            replacer = BufferReplacer(
+                buffer_replace_map, var_replace_map | {func.params[i]: args[i] for i in range(input_dim)}
+            )
+            stmt = replacer.visit_stmt(func.body)
+            if emit:
+                T.add_to_parent(stmt)
+            return [BufferLoad(out_buf, [i]) for i in range(output_dim)]
+        
+        template_map = {(True, True): _func_template_1, (False, True): _func_template_2, 
+                        (True, False): _func_template_3, (False, False): _func_template_4}
+        return template_map[(accept_idx, job_id == -1)]
+    
+    def _create_func(self, accept_idx: bool, job_id: int, buffer_replace_map, var_replace_map, func: PrimFunc,
+                     out_buf: Buffer, input_dim: int, output_dim: int):
+        func_template = self._get_func_template(accept_idx, job_id)
+        return partial(func_template, buffer_replace_map=buffer_replace_map, var_replace_map=var_replace_map,
+                       func=func, out_buf=out_buf, input_dim=input_dim, output_dim=output_dim, job_id=job_id)
+
+    def handle(self, func: PrimFunc, extra_tensors: List[Expr], extra_tir_vars: List[PrimExpr],
+                input_dim: int, output_dim: int, accept_idx: bool, job_id: int = -1):
+        # notes: here we don't directly capture the outer variables in the closure to avoid wrongly using values when executing rather than compiling
+        var_replace_map = {}
+        buffer_replace_map = {}
+        
+        def _replace_var(src: Var, dst: Var):
+            var_replace_map[src] = dst
+            
+        def _replace_buffer(src: Buffer, dst: Buffer):
+            buffer_replace_map[src] = dst
+            for i in range(len(src.shape)):
+                if isinstance(src.shape[i], Var):
+                    var_replace_map[src.shape[i]] = dst.shape[i]
+        
+        # handle the tile_idx
+        if job_id == -1:
+            for i, var in enumerate(self.tile_idx):
+                _replace_var(func.params[i], var)
+        # handle extra tensors
+        extra_tensor_offset = input_dim + 1 if accept_idx else input_dim
+        for i, var in enumerate(extra_tensors):
+            if var in self.relax_var_to_entry:
+                var_entry = self.relax_var_to_entry[var]
+                _replace_var(func.params[extra_tensor_offset + i], var_entry.tir_var)
+                _replace_buffer(func.buffer_map[func.params[extra_tensor_offset + i]], var_entry.tir_buffer)
+            else:
+                binding = self.builder_.lookup_binding(var)
+                assert isinstance(binding, relax.TupleGetItem), f"unknown source of call_tir_device extra_args: {var} with binding {binding}"
+                var_entry = VarEntry(
+                    var,
+                    func.params[extra_tensor_offset + i],
+                    func.buffer_map[func.params[extra_tensor_offset + i]],
+                )
+                self.var_entry_mapping.add_element(var_entry)
+                self.relax_var_to_entry[var] = var_entry
+            self.in_var_entries.append(var_entry)
+        # handle extra tir sym vars
+        extra_tir_var_offset = extra_tensor_offset + len(extra_tensors)
+        for i, var in enumerate(extra_tir_vars):
+            _replace_var(func.params[extra_tir_var_offset + i], var)
+            self.sym_vars.add(var)
+        # handle the output buffer
+        out_buf = func.buffer_map[func.params[-1]]
+        out_func = self._create_func(accept_idx, job_id, buffer_replace_map, var_replace_map,
+                                     func, out_buf, input_dim, output_dim)
+        return out_func, out_buf
 
 @mutator
 class _Rewriter(PyExprMutator):
     def __init__(
-        self, mod: IRModule, rewrite_func_name: Union[str, List[str]], fusion_prefix: str, 
+        self, mod: IRModule, strategy: Literal["static", "dynamic"], rewrite_func_name: Union[str, List[str]], fusion_prefix: str, 
         tile_scheduler_class: Type[TileSchedulerBase], semaphore_class: Type[SemaphoreBase]
     ):
         super().__init__(mod)
         self.mod = mod
+        self.strategy = strategy
         self.call_tir_device_op = tvm.ir.Op.get("relax.call_tir_device")
         self.rewrite_func_name = set(rewrite_func_name)
         self.fusion_prefix = fusion_prefix
@@ -351,6 +645,7 @@ class _Rewriter(PyExprMutator):
         self.var_entry_mapping = DisjointSet()
         self.relax_var_to_entry = {}
         self.gvar_to_remove = list()
+        self.evt_handle_helper = EventHandleHelper(mod, self.strategy)
 
     def clear_state(self):
         # user might want to rewrite 2 megakernels, so clear state before each rewrite
@@ -365,6 +660,7 @@ class _Rewriter(PyExprMutator):
         self.var_entry_mapping = DisjointSet()
         self.relax_var_to_entry = {}
         self.cur_rewrite_func_name = None
+        self.x = 0
 
     def transform(self) -> IRModule:
         """Entry point"""
@@ -424,6 +720,7 @@ class _Rewriter(PyExprMutator):
             
             
     def visit_function_(self, func: relax.Function) -> Expr:
+        self.evt_handle_helper.infer(func)
         for i, para in enumerate(func.params):
             assert isinstance(
                 para, relax.Var
@@ -442,7 +739,10 @@ class _Rewriter(PyExprMutator):
                 self.var_entry_mapping.add_element(var_entry)
                 self.relax_var_to_entry[var_entry.relax_var] = var_entry
         return super().visit_function_(func)
-
+    
+    def _deep_copy(self, func: PrimFunc) -> PrimFunc:
+        return load_json(save_json(func))
+    
     def visit_call_(self, call: relax.Call) -> Expr:  # pylint: disable=arguments-renamed
         if call.op == self.call_tir_device_op:
             tile_num = call.args[2]
@@ -458,10 +758,8 @@ class _Rewriter(PyExprMutator):
             out_deps = call.attrs.out_deps
             in_nums = call.attrs.in_nums
             out_nums = call.attrs.out_nums
-            in_deps_dim = call.attrs.in_deps_dim
-            out_deps_dim = call.attrs.out_deps_dim
             inplace_indices = list(int(i) for i in call.attrs.inplace_indices)
-            prim_func = load_json(save_json(self.mod[tir_gvar]))
+            prim_func = self._deep_copy(self.mod[tir_gvar])
             self.gvar_to_remove.append(tir_gvar)
             # check if this device function is well-formed and has consistent exec scope
             verify_tirp_well_formed(prim_func, device_func=True)
@@ -484,10 +782,6 @@ class _Rewriter(PyExprMutator):
                 ), f"device function exec scope mismatch: {self.device_func_exec_scope} != {exec_scope.name}"
             body, persistent_var_info_tile_class, persistent_var_info_megakernel = PersistentVarCollector.rewrite(body)
             func_type = prim_func.attrs.get("megakernel.device_func")
-            job_type_id = prim_func.attrs.get("megakernel.job_type_id")
-            wait_level = prim_func.attrs.get("megakernel.wait_level")
-            notify_scope = prim_func.attrs.get("megakernel.notify_scope")
-            notify_scope_id = prim_func.attrs.get("megakernel.notify_scope_id")
             self._update_persistent_var_info(persistent_var_info_tile_class, persistent_var_info_megakernel, func_type)
             
             dyn_shared_mem_buffer, body = DynSharedMemCollector.rewrite(body)
@@ -548,79 +842,51 @@ class _Rewriter(PyExprMutator):
                 out_var_entries.append(var_entry)
                 
             # handle the dep       
-            sym_vars = set()     
-            def _handle_dep(func: PrimFunc, extra_tensors: List[Expr], extra_tir_vars: List[PrimExpr], dim: int, accept_dep_idx: bool):
-                var_replace_map = {}
-                buffer_replace_map = {}
-                
-                def _replace_var(src: Var, dst: Var):
-                    var_replace_map[src] = dst
-                    
-                def _replace_buffer(src: Buffer, dst: Buffer):
-                    buffer_replace_map[src] = dst
-                    for i in range(len(src.shape)):
-                        if isinstance(src.shape[i], Var):
-                            var_replace_map[src.shape[i]] = dst.shape[i]
-                            
-                # handle the tile_idx
-                for i, var in enumerate(tile_idx):
-                    _replace_var(func.params[i], var)
-                # handle extra tensors
-                extra_tensor_offset = len(tile_num) + 1 if accept_dep_idx else len(tile_num)
-                for i, var in enumerate(extra_tensors):
-                    if var in self.relax_var_to_entry:
-                        var_entry = self.relax_var_to_entry[var]
-                        _replace_var(func.params[extra_tensor_offset + i], var_entry.tir_var)
-                        _replace_buffer(func.buffer_map[func.params[extra_tensor_offset + i]], var_entry.tir_buffer)
-                    else:
-                        binding = self.builder_.lookup_binding(var)
-                        assert isinstance(binding, relax.TupleGetItem), f"unknown source of call_tir_device extra_args: {var} with binding {binding}"
-                        var_entry = VarEntry(
-                            var,
-                            func.params[extra_tensor_offset + i],
-                            func.buffer_map[func.params[extra_tensor_offset + i]],
-                        )
-                        self.var_entry_mapping.add_element(var_entry)
-                        self.relax_var_to_entry[var] = var_entry
-                    in_var_entries.append(var_entry)
-                # handle extra tir sym vars
-                extra_tir_var_offset = extra_tensor_offset + len(extra_tensors)
-                for i, var in enumerate(extra_tir_vars):
-                    _replace_var(func.params[extra_tir_var_offset + i], var)
-                    sym_vars.add(var)
-                # handle the output buffer
-                out_buf = func.buffer_map[func.params[-1]]                    
-                            
-                if accept_dep_idx:
-                    def lambda_func(dep_idx: T.Var):
-                        replacer = BufferReplacer(
-                            buffer_replace_map, var_replace_map | {func.params[len(tile_num)]: dep_idx}
-                        )
-                        stmt = replacer.visit_stmt(func.body)
-                        T.add_to_parent(stmt)
-                        return [BufferLoad(out_buf, [i]) for i in range(dim.value)]
-                else:
-                    def lambda_func():
-                        replacer = BufferReplacer(buffer_replace_map, var_replace_map)
-                        stmt = replacer.visit_stmt(func.body)
-                        T.add_to_parent(stmt)
-                        return [BufferLoad(out_buf, [i]) for i in range(dim.value)]       
-                                 
-                return lambda_func, out_buf
-            
+            sym_vars = set()                 
             in_info_list = []
             out_info_list = []
+            push_info_list = []
+            dep_handler = DependencyHandler(tile_idx, in_var_entries, sym_vars, self.relax_var_to_entry, self.builder_, self.var_entry_mapping)
             for idx in range(len(in_deps)):
-                in_dep_func, in_dep_buf = _handle_dep(in_deps[idx], in_extra_tensors[idx], in_extra_tir_vars[idx], in_deps_dim[idx], True)
-                in_num_func, in_num_buf = _handle_dep(in_nums[idx], in_extra_tensors[idx], in_extra_tir_vars[idx], T.int32(1), False)
+                in_dep_func, in_dep_buf = dep_handler.handle(in_deps[idx], in_extra_tensors[idx], in_extra_tir_vars[idx],
+                                                           len(tile_idx), len(in_events[idx].struct_info.shape) + 1, True)
+                in_num_func, in_num_buf = dep_handler.handle(in_nums[idx], in_extra_tensors[idx], in_extra_tir_vars[idx],
+                                                           len(tile_idx), 1, False)
                 in_info_list.append((in_dep_func, in_num_func, in_dep_buf, in_num_buf))
             for idx in range(len(out_deps)):
-                out_dep_func, out_dep_buf = _handle_dep(out_deps[idx], out_extra_tensors[idx], out_extra_tir_vars[idx], out_deps_dim[idx], True)
-                out_num_func, out_num_buf = _handle_dep(out_nums[idx], out_extra_tensors[idx], out_extra_tir_vars[idx], T.int32(1), False)
+                out_dep_func, out_dep_buf = dep_handler.handle(out_deps[idx], out_extra_tensors[idx], out_extra_tir_vars[idx],
+                                                              len(tile_idx), len(out_events[idx].struct_info.shape) + 1, True)
+                out_num_func, out_num_buf = dep_handler.handle(out_nums[idx], out_extra_tensors[idx], out_extra_tir_vars[idx],
+                                                              len(tile_idx), 1, False)
                 out_info_list.append((out_dep_func, out_num_func, out_dep_buf, out_num_buf))
+            if self.strategy == "dynamic":
+                for i, evt in enumerate(out_events):
+                    notify_dep_func, notify_dep_buf = dep_handler.handle(self._deep_copy(out_deps[i]), out_extra_tensors[i], out_extra_tir_vars[i], 
+                                                                         len(tile_idx), len(out_events[i].struct_info.shape) + 1, True)
+                    notify_num_func, notify_num_buf = dep_handler.handle(self._deep_copy(out_nums[i]), out_extra_tensors[i], out_extra_tir_vars[i], 
+                                                                       len(tile_idx), 1, False)
+                    push_info = (notify_dep_func, notify_num_func, [], [notify_dep_buf, notify_num_buf])
+                    for j, push_call in self.evt_handle_helper.in_evt[evt]:
+                        assert len(push_call.attrs.in_deps) == 1
+                        push_dep_func, push_dep_buf = dep_handler.handle(self._deep_copy(push_call.attrs.inv_in_deps[j]),
+                                                                       push_call.attrs.inv_in_extra_tensors[j], push_call.attrs.inv_in_extra_tir_vars[j],
+                                                                       len(push_call.attrs.inv_in_events[j].struct_info.shape) + 1, len(tile_idx),
+                                                                       True, job_id=push_call.attrs.job_id)
+                        push_num_func, push_num_buf = dep_handler.handle(self._deep_copy(push_call.attrs.inv_in_nums[j]), 
+                                                                       push_call.attrs.inv_in_extra_tensors[j], push_call.attrs.inv_in_extra_tir_vars[j],
+                                                                       len(push_call.attrs.inv_in_events[j].struct_info.shape) + 1, 1,
+                                                                       False, job_id=push_call.attrs.job_id)
+                        def push_map_func(idx: T.Var, notify_dep_func=notify_dep_func, push_dep_func=push_dep_func, push_num_func=push_num_func, emit=True):
+                            evt_coord = notify_dep_func(idx, emit=emit)
+                            return push_num_func(*evt_coord, emit=emit)[0], lambda idx: push_dep_func(idx, *evt_coord, emit=emit)
+                        
+                        push_info[2].append(push_map_func)
+                        push_info[3].extend([push_dep_buf, push_num_buf])
+                        
+                    push_info_list.append(push_info)                                
             self.device_func_infos[call] = DeviceFuncInfo(
                 body, in_var_entries, out_var_entries, tile_idx, in_event_tensors, out_event_tensors, sym_vars,
-                in_info_list, out_info_list, func_type, job_type_id, wait_level, notify_scope, notify_scope_id
+                in_info_list, out_info_list, push_info_list, call.attrs.job_id, self.evt_handle_helper.event_handle_configs[call]
             )
             return super().visit_call_(call)
         else:
@@ -642,7 +908,7 @@ class _Rewriter(PyExprMutator):
                             "local.persistent": "local",
                         }
                         if old_buffers[0].scope() == "shared.persistent":
-                            new_buffer = smem_manager.alloc(old_buffers[0].shape, old_buffers[0].dtype, scope=scope_resolve_table[old_buffers[0].scope()], align=old_buffers[0].data_alignment, layout=old_buffers[0].layout, method="persistent").buffer
+                            new_buffer = smem_manager.alloc(old_buffers[0].shape, old_buffers[0].dtype, scope=scope_resolve_table[old_buffers[0].scope()], align=old_buffers[0].data_alignment, layout=old_buffers[0].layout, name=buffer_name, method="persistent")
                             self.buffers.append(new_buffer)
                             for old_buffer in old_buffers:
                                 buffer_replace_map[old_buffer] = new_buffer
@@ -672,10 +938,10 @@ class _Rewriter(PyExprMutator):
             total_type_count = len(self.device_func_infos)
             if_frames = [T.If(type == info.job_type_id) for info in self.device_func_infos.values()]
             then_frames = [T.Then() for i in range(total_type_count)]
-            else_frames = [T.Else() for i in range(total_type_count - 1)]
+            else_frames = [T.Else() for i in range(total_type_count)]
             for i, (call, func) in enumerate(self.device_func_infos.items()):
                 if_frames[i].__enter__()
-                new_body = EventOpInserter.rewrite(func, tile_scheduler, self.semaphore_class)
+                new_body = EventOpInserter.rewrite(self.strategy, func, tile_scheduler, self.semaphore_class)
                 needed_idx_num = len(func.tile_idx)
                 replacer = BufferReplacer(
                     buffer_map=buffer_replace_map,
@@ -684,35 +950,54 @@ class _Rewriter(PyExprMutator):
                 new_body = replacer.visit_stmt(new_body)
                 with then_frames[i]:
                     T.add_to_parent(new_body)
-                if i < total_type_count - 1:
-                    else_frames[i].__enter__()
-
+                else_frames[i].__enter__()
+            T.add_to_parent(Evaluate(T.cuda.trap_when_assert_failed(False)))
+            
             for i in range(total_type_count - 1, -1, -1):
-                if i < total_type_count - 1:
-                    else_frames[i].__exit__(None, None, None)
+                else_frames[i].__exit__(None, None, None)
                 if_frames[i].__exit__(None, None, None)
 
         def replace_dyn_shared_mem_buffer(new_buffer):
             for buffer in self.dyn_shared_mem_buffers:
                 buffer_replace_map[buffer] = new_buffer
 
-        @T.prim_func(tirp=True)
-        def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32")):
-            with T.kernel():
-                bx = T.scope_id([KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope)
-                tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-                smem_buffer = T.alloc_buffer(KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16)
-                replace_dyn_shared_mem_buffer(smem_buffer)
-                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data))
-                # TODO: remove tile scheduler from arg
-                tile_scheduler = T.meta_var(self.tile_scheduler_class("mega_", queue, smem_manager))
-                persistent_vars = T.meta_var(PersistentVars(list(self.persistent_var_infos.values()), smem_manager))
-                persistent_vars.init()
-                tile_scheduler.init()
-                while tile_scheduler.valid():
-                    switch_task_type(tile_scheduler)
-                    tile_scheduler.next_tile()
-                persistent_vars.finalize()
+        if self.strategy == "static":
+            @T.prim_func(tirp=True, private=True)
+            def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32")):
+                with T.kernel():
+                    bx = T.scope_id([KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope)
+                    tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+                    smem_buffer = T.alloc_buffer(KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16)
+                    replace_dyn_shared_mem_buffer(smem_buffer)
+                    smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data))
+                    # TODO: remove tile scheduler from arg
+                    tile_scheduler = T.meta_var(self.tile_scheduler_class("mega_", queue, smem_manager))
+                    persistent_vars = T.meta_var(PersistentVars(list(self.persistent_var_infos.values()), smem_manager))
+                    persistent_vars.init()
+                    tile_scheduler.init()
+                    while tile_scheduler.valid():
+                        switch_task_type(tile_scheduler)
+                        tile_scheduler.next_tile()
+                    persistent_vars.finalize()
+        else:
+            @T.prim_func(tirp=True, private=True)
+            def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"), tail: T.buffer((1,), "int32")):
+                with T.kernel():
+                    bx = T.scope_id([KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope)
+                    tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+                    smem_buffer = T.alloc_buffer(KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16)
+                    replace_dyn_shared_mem_buffer(smem_buffer)
+                    smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data))
+                    # TODO: remove tile scheduler from arg
+                    tile_scheduler = T.meta_var(self.tile_scheduler_class(tasks, head, tail, smem_manager))
+                    persistent_vars = T.meta_var(PersistentVars(list(self.persistent_var_infos.values()), smem_manager))
+                    persistent_vars.init()
+                    tile_scheduler.init()
+                    while tile_scheduler.valid():
+                        switch_task_type(tile_scheduler)
+                        tile_scheduler.next_tile()
+                    persistent_vars.finalize()        
+
         new_body = persistent_kernel.body
         for template in self.host_templates:
             template = BufferReplacer(
@@ -732,10 +1017,15 @@ class _Rewriter(PyExprMutator):
 
     def _build_gen_exec_queue_kernel(self):
         THREAD_NUM = 256
-        assert len(self.device_func_infos) <= KernelConfig.SM_NUMBER
+        if self.strategy == "static":
+            assert len(self.device_func_infos) <= KernelConfig.SM_NUMBER
+        else:
+            assert len(self.evt_handle_helper.entry_points) + 1 <= KernelConfig.SM_NUMBER
         var_collector = VarCollector()
         def emit_task_round_robin(queue, idx, bx, tx):
-            for i, (call, device_func_info) in enumerate(self.device_func_infos.items()):
+            # generate tasks in topological order
+            for i, call in enumerate(self.evt_handle_helper.topological_order):
+                device_func_info = self.device_func_infos[call]
                 tile_num = call.args[2]
                 with T.If(bx == i):
                     with T.Then():
@@ -759,15 +1049,58 @@ class _Rewriter(PyExprMutator):
                                 packed_val = pack_into_32bit(0, 0, 0, JobType.END.value, host=False)
                                 T.buffer_store(queue, packed_val, [idx[0] % KernelConfig.SM_NUMBER, idx[0] // KernelConfig.SM_NUMBER])
                                 T.buffer_store(idx, idx[0] + 1, 0)
-
-        @T.prim_func(tirp=True)
-        def gen_exec_queue(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS,), "int32")):
-            with T.kernel():
-                bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
-                tx = T.thread_id([THREAD_NUM], parent="cta")
-                idx = T.alloc_buffer([1], "int32", scope="local")
-                idx[0] = 0
-                emit_task_round_robin(queue, idx, bx, tx)
+                                
+        def emit_entry_tasks(tasks, head, tail, idx, bx, tx):
+            for i, call in enumerate(self.evt_handle_helper.entry_points):
+                device_func_info = self.device_func_infos[call]
+                tile_num = call.args[2]
+                with T.If(bx == i):
+                    with T.Then():
+                        with T.If(tx == 0):
+                            with T.Then():     
+                                for e in tile_num.values:
+                                    var_collector.visit_expr(e)
+                                for_grid = T.grid(*tile_num.values)
+                                vars = for_grid.__enter__()
+                                packed_val = pack_into_32bit(vars[0], vars[1], vars[2], device_func_info.job_type_id, host=False)
+                                T.buffer_store(tasks, packed_val, [idx[0]])
+                                T.buffer_store(idx, idx[0] + 1, 0)
+                                for_grid.__exit__(None, None, None)
+                    with T.Else():
+                        T.buffer_store(idx, idx[0] + tile_num[0] * tile_num[1] * tile_num[2], 0)
+            with T.If(bx == len(self.evt_handle_helper.entry_points)):
+                with T.Then():
+                    T.buffer_store(idx, tx, 0)
+                    for call in self.evt_handle_helper.entry_points:
+                        tile_num = call.args[2]
+                        T.buffer_store(idx, idx[0] + tile_num[0] * tile_num[1] * tile_num[2], 0)
+                    with T.If(tx == 0):
+                        with T.Then():
+                            T.buffer_store(head, 0, 0)
+                            T.buffer_store(tail, idx[0], 0)
+                    with T.While(idx[0] < self.tile_scheduler_class.MAX_TASKS):
+                        T.buffer_store(tasks, -1, [idx[0]])
+                        T.buffer_store(idx, idx[0] + THREAD_NUM, 0)
+                        
+        if self.strategy == "static":
+            @T.prim_func(tirp=True, private=True)
+            def gen_exec_queue(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS,), "int32")):
+                with T.kernel():
+                    bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+                    tx = T.thread_id([THREAD_NUM], parent="cta")
+                    idx = T.alloc_buffer([1], "int32", scope="local")
+                    idx[0] = 0
+                    emit_task_round_robin(queue, idx, bx, tx)    
+        else:
+            @T.prim_func(tirp=True, private=True)
+            def gen_exec_queue(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS,), "int32"), head: T.buffer((1,), "int32"), tail: T.buffer((1,), "int32")):
+                with T.kernel():
+                    # fill tasks queue with -1 first
+                    bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+                    tx = T.thread_id([THREAD_NUM], parent="cta")
+                    idx = T.alloc_buffer([1], "int32", scope="local")
+                    idx[0] = 0
+                    emit_entry_tasks(tasks, head, tail, idx, bx, tx)
 
         new_vars = [Var("sym", v.dtype) for v in var_collector.vars]
         replace = BufferReplacer(
@@ -861,7 +1194,8 @@ class _Rewriter(PyExprMutator):
 
         persistent_kernel, persistent_kernel_new_sym_vars, persistent_kernel_sym_vars = self._build_persistent_kernel(buffer_replace_map, var_replace_map)
         new_body = persistent_kernel.body
-        new_tir_params.insert(total_input_num, persistent_kernel.params[0])
+        for i, param in enumerate(persistent_kernel.params):
+            new_tir_params.insert(total_input_num + i, param)
         new_tir_params.extend(persistent_kernel_new_sym_vars)
         new_buffer_map.update(persistent_kernel.buffer_map)
         new_prim_func = PrimFunc(
@@ -876,13 +1210,26 @@ class _Rewriter(PyExprMutator):
             ),
         )
         new_gvar = self.builder_.add_func(new_prim_func, f"persistent_kernel_{self.cur_rewrite_func_name}")
-        queue_buffer = list(persistent_kernel.buffer_map.values())[0]
-        gen_exec_queue_tir, sym_vars = self._build_gen_exec_queue_kernel()
-        gen_exec_queue_gvar = self.builder_.add_func(gen_exec_queue_tir, f"gen_exec_queue_{self.cur_rewrite_func_name}")
-        exec_queue = self.builder_.emit(relax.call_tir(gen_exec_queue_gvar, [], out_sinfo=TensorStructInfo(shape=queue_buffer.shape, dtype=queue_buffer.dtype), tir_vars=sym_vars))
-        new_relax_params.append(
-            exec_queue
-        )
+        if self.strategy == "static":
+            queue_buffer = list(persistent_kernel.buffer_map.values())[0]
+            gen_exec_queue_tir, sym_vars = self._build_gen_exec_queue_kernel()
+            gen_exec_queue_gvar = self.builder_.add_func(gen_exec_queue_tir, f"gen_exec_queue_{self.cur_rewrite_func_name}")
+            exec_queue = self.builder_.emit(relax.call_tir(gen_exec_queue_gvar, [], out_sinfo=TensorStructInfo(shape=queue_buffer.shape, dtype=queue_buffer.dtype), tir_vars=sym_vars))
+            new_relax_params.append(
+                exec_queue
+            )
+        else:
+            task_buffer = list(persistent_kernel.buffer_map.values())[0]
+            head_buffer = list(persistent_kernel.buffer_map.values())[1]
+            tail_buffer = list(persistent_kernel.buffer_map.values())[2]
+            gen_exec_queue_tir, sym_vars = self._build_gen_exec_queue_kernel()
+            gen_exec_queue_gvar = self.builder_.add_func(gen_exec_queue_tir, f"gen_exec_queue_{self.cur_rewrite_func_name}")
+            output_sinfo = [TensorStructInfo(shape=task_buffer.shape, dtype=task_buffer.dtype), TensorStructInfo(shape=head_buffer.shape, dtype=head_buffer.dtype), 
+                            TensorStructInfo(shape=tail_buffer.shape, dtype=tail_buffer.dtype)]
+            packed_exec_queue = self.builder_.emit(relax.call_tir(gen_exec_queue_gvar, [], out_sinfo=output_sinfo, tir_vars=sym_vars))
+            new_relax_params.extend(
+                [packed_exec_queue[0], packed_exec_queue[1], packed_exec_queue[2]]
+            )
         if all(i == -1 for i in inplace_indices):
             return relax.call_tir(new_gvar, new_relax_params, out_sinfo, tir_vars=persistent_kernel_sym_vars)
         return relax.call_tir_inplace(

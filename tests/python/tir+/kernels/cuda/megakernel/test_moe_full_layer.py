@@ -258,7 +258,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_attn_mlp, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1, ceildiv(batch_size, 128) * self.GATING_SPLIT_K_FACTOR,
+                        ceildiv(batch_size, 128) * self.GATING_SPLIT_K_FACTOR,
                         lambda push_idx: (
                             JobType.MOE_GATING.value,
                             0,
@@ -291,7 +291,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_gating, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1, self.topk_softmax.PERSISTENT_SM_NUMBER,
+                        self.topk_softmax.PERSISTENT_SM_NUMBER,
                         lambda push_idx: (
                             JobType.MOE_TOPK_SOFTMAX.value, push_idx, 0, 0
                         )
@@ -325,7 +325,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_group_gemm_down, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1, batch_size,
+                        batch_size,
                         lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, push_idx, 0, 0),
                     ), "warpgroup", "warpgroup"
                 )
@@ -362,7 +362,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_end, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1, KernelConfig.SM_NUMBER,
+                        KernelConfig.SM_NUMBER,
                         lambda push_idx: (JobType.END.value, 0, 0, 0),
                     ), "cta", "cta"
                 )

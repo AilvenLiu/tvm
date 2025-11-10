@@ -6,15 +6,14 @@ from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
 class FuseSplitKReduceTile(SplitKReduceTile):
 
     @staticmethod
-    def get_func(batch_size, N, dtype, split_k_factor, job_type, wait_level, notify_scope, notify_scope_id):
+    def get_func(batch_size, N, dtype, split_k_factor):
         symbolic_tile = FuseSplitKReduceTile(batch_size, N, dtype, split_k_factor)
         num_tiles = (symbolic_tile.M_split, ceildiv(N, symbolic_tile.N_TILE), 1)
         tile_size = (symbolic_tile.M_TILE, symbolic_tile.N_TILE, 1)
         
         @T.prim_func(tirp=True, private=True)
         def split_k_reduce_func(input_ptr: T.handle, output_ptr: T.handle, m_idx: T.int32, n_idx: T.int32, k_idx: T.int32):
-            T.func_attr({"megakernel.device_func": "split_k_reduce", "megakernel.job_type_id": job_type, "megakernel.wait_level": wait_level,
-                        "megakernel.notify_scope": notify_scope, "megakernel.notify_scope_id": notify_scope_id})
+            T.func_attr({"megakernel.device_func": "split_k_reduce"})
             batch_size = T.int32()
             input = T.match_buffer(input_ptr, (split_k_factor, batch_size, N), "float32", layout="default")
             output = T.match_buffer(output_ptr, (batch_size, N), dtype, layout="default")

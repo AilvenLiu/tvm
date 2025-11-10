@@ -826,7 +826,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 // call_tir_device
 
-
 Expr NormalizeCallTIRDevice(const BlockBuilder& ctx, Call call) {
   // Apply normalization before error checks.  This allows the error
   // checks to safely apply `Downcast<Tuple>(call->args[1])`, which
@@ -912,26 +911,37 @@ TVM_REGISTER_OP("relax.call_tir_device")
     .set_attr<Bool>("FPurity", Bool(true));
 
 Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_sinfo_list,
-                       ShapeExpr tile_num, ffi::Array<Expr> in_events, ffi::Array<Expr> out_events,
-                       ffi::Array<ffi::Array<Expr>> in_extra_tensors, ffi::Array<ffi::Array<Expr>> out_extra_tensors,
-                       ffi::Array<ffi::Array<PrimExpr>> in_extra_tir_vars, ffi::Array<ffi::Array<PrimExpr>> out_extra_tir_vars,
+                       ShapeExpr tile_num, int job_id, ffi::Array<Expr> in_events,
+                       ffi::Array<Expr> out_events, ffi::Array<Expr> inv_in_events,
+                       ffi::Array<ffi::Array<Expr>> in_extra_tensors,
+                       ffi::Array<ffi::Array<Expr>> out_extra_tensors,
+                       ffi::Array<ffi::Array<Expr>> inv_in_extra_tensors,
+                       ffi::Array<ffi::Array<PrimExpr>> in_extra_tir_vars,
+                       ffi::Array<ffi::Array<PrimExpr>> out_extra_tir_vars,
+                       ffi::Array<ffi::Array<PrimExpr>> inv_in_extra_tir_vars,
                        ffi::Array<tir::PrimFunc> in_deps, ffi::Array<tir::PrimFunc> out_deps,
-                       ffi::Array<tir::PrimFunc> in_nums, ffi::Array<tir::PrimFunc> out_nums,
-                       ffi::Array<Integer> in_deps_dim, ffi::Array<Integer> out_deps_dim,
+                       ffi::Array<tir::PrimFunc> inv_in_deps, ffi::Array<tir::PrimFunc> in_nums,
+                       ffi::Array<tir::PrimFunc> out_nums, ffi::Array<tir::PrimFunc> inv_in_nums,
+                       ffi::Map<ffi::String, ffi::Any> handle_config,
                        ffi::Array<Integer> inplace_indices, ffi::Optional<Expr> packed_ints) {
   ObjectPtr<CallTIRDeviceAttrs> attrs = ffi::make_object<CallTIRDeviceAttrs>();
+  attrs->job_id = job_id;
   attrs->in_events = in_events;
   attrs->out_events = out_events;
+  attrs->inv_in_events = inv_in_events;
   attrs->in_extra_tensors = in_extra_tensors;
   attrs->out_extra_tensors = out_extra_tensors;
+  attrs->inv_in_extra_tensors = inv_in_extra_tensors;
   attrs->in_extra_tir_vars = in_extra_tir_vars;
   attrs->out_extra_tir_vars = out_extra_tir_vars;
+  attrs->inv_in_extra_tir_vars = inv_in_extra_tir_vars;
   attrs->in_deps = in_deps;
   attrs->out_deps = out_deps;
+  attrs->inv_in_deps = inv_in_deps;
   attrs->in_nums = in_nums;
   attrs->out_nums = out_nums;
-  attrs->in_deps_dim = in_deps_dim;
-  attrs->out_deps_dim = out_deps_dim;
+  attrs->inv_in_nums = inv_in_nums;
+  attrs->handle_config = handle_config;
   attrs->inplace_indices = ffi::Array<Integer>(inplace_indices.begin(), inplace_indices.end());
   for (const TensorStructInfo& sinfo : out_sinfo_list) {
     const auto* shape = sinfo->shape.as<ShapeExprNode>();

@@ -151,38 +151,51 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
     kwargs_keys.push_back("tile_num");
     kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[2], n_p->Attr("args")->ArrayItem(2)));
     if (const auto* call_tir_device_attrs = n->attrs.as<relax::CallTIRDeviceAttrs>()) {
+      kwargs_keys.push_back("job_id");
+      kwargs_values.push_back(
+          LiteralDoc::Int(call_tir_device_attrs->job_id, n_p->Attr("attrs")->Attr("job_id")));
       kwargs_keys.push_back("in_events");
-      kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_events, n_p->Attr("attrs")->Attr("in_events")));
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->in_events,
+                                                n_p->Attr("attrs")->Attr("in_events")));
       kwargs_keys.push_back("out_events");
-      kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_events, n_p->Attr("attrs")->Attr("out_events")));
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->out_events,
+                                                n_p->Attr("attrs")->Attr("out_events")));
+      kwargs_keys.push_back("inv_in_events");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->inv_in_events,
+                                                n_p->Attr("attrs")->Attr("inv_in_events")));
       kwargs_keys.push_back("in_extra_tensors");
-      kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_extra_tensors, n_p->Attr("attrs")->Attr("in_extra_tensors")));
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->in_extra_tensors,
+                                                n_p->Attr("attrs")->Attr("in_extra_tensors")));
       kwargs_keys.push_back("out_extra_tensors");
-      kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_extra_tensors, n_p->Attr("attrs")->Attr("out_extra_tensors")));
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->out_extra_tensors,
+                                                n_p->Attr("attrs")->Attr("out_extra_tensors")));
+      kwargs_keys.push_back("inv_in_extra_tensors");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->inv_in_extra_tensors,
+                                                n_p->Attr("attrs")->Attr("inv_in_extra_tensors")));
       kwargs_keys.push_back("in_extra_tir_vars");
-      kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_extra_tir_vars, n_p->Attr("attrs")->Attr("in_extra_tir_vars")));
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->in_extra_tir_vars,
+                                                n_p->Attr("attrs")->Attr("in_extra_tir_vars")));
       kwargs_keys.push_back("out_extra_tir_vars");
-      kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_extra_tir_vars, n_p->Attr("attrs")->Attr("out_extra_tir_vars")));
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->out_extra_tir_vars,
+                                                n_p->Attr("attrs")->Attr("out_extra_tir_vars")));
+      kwargs_keys.push_back("inv_in_extra_tir_vars");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->inv_in_extra_tir_vars,
+                                                n_p->Attr("attrs")->Attr("inv_in_extra_tir_vars")));
       kwargs_keys.push_back("in_deps");
       kwargs_values.push_back(IdDoc("Ignored"));
       kwargs_keys.push_back("out_deps");
+      kwargs_values.push_back(IdDoc("Ignored"));
+      kwargs_keys.push_back("inv_in_deps");
       kwargs_values.push_back(IdDoc("Ignored"));
       kwargs_keys.push_back("in_nums");
       kwargs_values.push_back(IdDoc("Ignored"));
       kwargs_keys.push_back("out_nums");
       kwargs_values.push_back(IdDoc("Ignored"));
-      kwargs_keys.push_back("in_deps_dim");
-      kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->in_deps_dim, n_p->Attr("attrs")->Attr("in_deps_dim")));
-      kwargs_keys.push_back("out_deps_dim");
-      kwargs_values.push_back(
-          d->AsDoc<ExprDoc>(call_tir_device_attrs->out_deps_dim, n_p->Attr("attrs")->Attr("out_deps_dim")));
+      kwargs_keys.push_back("inv_in_nums");
+      kwargs_values.push_back(IdDoc("Ignored"));
+      kwargs_keys.push_back("handle_config");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->handle_config,
+                                                n_p->Attr("attrs")->Attr("handle_config")));
     }
     kwargs_keys.push_back("inplace_indices");
     ffi::Array<ExprDoc> index_fields;

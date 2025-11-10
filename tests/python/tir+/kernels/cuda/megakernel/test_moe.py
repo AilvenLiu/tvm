@@ -146,7 +146,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_gating, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1, self.topk_softmax.PERSISTENT_SM_NUMBER,
+                        self.topk_softmax.PERSISTENT_SM_NUMBER,
                         lambda push_idx: (JobType.MOE_TOPK_SOFTMAX.value, push_idx, 0, 0)
                     ), "cta", "cta"
                 )
@@ -160,7 +160,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_topk_softmax, 1, lambda notify_idx: (-1, 0),
                     lambda trigger_idx: (
-                        -1, 1,
+                        1,
                         lambda push_idx: (JobType.MOE_ALIGN.value, 0, 0, 0)
                     ), "thread", "thread"
                 )
@@ -176,7 +176,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_moe_align, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1, KernelConfig.SM_NUMBER,
+                        KernelConfig.SM_NUMBER,
                         lambda push_idx: (JobType.MOE_COUNT_AND_SORT.value, push_idx, 0, 0)
                     ), "cta", "cta"
                 )
@@ -196,7 +196,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_count_and_sort, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1, num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE * n_axis_len,
+                        num_tokens_post_pad_global[0] // self.MOE_M_PAD_SIZE * n_axis_len,
                         lambda push_idx: (JobType.MOE_GROUP_GEMM_GATE_UP_SILU.value, push_idx // n_axis_len, push_idx % n_axis_len, 0)
                     ), "cta", "cta"
                 )
@@ -211,7 +211,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_group_gemm_gate_up, 1, lambda notify_idx: (-1, self.tile_scheduler.m_idx),
                     lambda trigger_idx: (
-                        -1, self.HIDDEN_SIZE // GroupGEMMTile.BLK_N // down_proj_task_size,
+                        self.HIDDEN_SIZE // GroupGEMMTile.BLK_N // down_proj_task_size,
                         lambda push_idx: (JobType.MOE_GROUP_GEMM_DOWN.value, self.tile_scheduler.m_idx, push_idx, 0)
                     ), "warp", "warp"
                 )
@@ -228,7 +228,7 @@ class MegaKernelMOE(MegaKernelWrapper):
                 self.tile_scheduler.pre_notify_and_push(
                     self.evt_group_gemm_down, 1, lambda notify_idx: (-1, 0,),
                     lambda trigger_idx: (
-                        -1, KernelConfig.SM_NUMBER,
+                        KernelConfig.SM_NUMBER,
                         lambda push_idx: (JobType.END.value, 0, 0, 0)
                     ), "warp", "warp"
                 )
