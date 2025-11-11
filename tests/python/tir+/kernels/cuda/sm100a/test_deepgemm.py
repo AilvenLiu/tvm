@@ -7,7 +7,8 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tirp.tile_scheduler import GroupMajor2D
 from tvm.tirp.bench.utils import bench, ProtonContext
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, TLane, TCol
+from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
 
 import torch
 import deep_gemm
@@ -86,11 +87,13 @@ def ceildiv(a, b):
 def flops(ms):
     return M * N * K * 2 / (ms * 1e-3)
 
+
 def calc_diff(x: torch.Tensor, y: torch.Tensor):
     x, y = x.double(), y.double()
     denominator = (x * x + y * y).sum()
     sim = 2 * (x * y).sum() / denominator
     return 1 - sim
+
 
 TILE_GROUPS_ROW_SIZE = 16
 assert M % (BLK_M * CTA_GROUP) == 0
@@ -168,6 +171,7 @@ D_layout = T.ComposeLayout(
 SFA_layout = T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), (BLK_SFA, 32, 1)))
 SFB_layout = T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), (BLK_SFB, 32, 1)))
 
+
 @T.prim_func(tirp=True)
 def deepgemm(
     A: T.Buffer((M, K), a_type),
@@ -204,7 +208,7 @@ def deepgemm(
 
             # alloc local memory
             reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
+            reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@axis_tid_in_wg, 1])))
             reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
             stage = T.local_cell("int32")
             descA = T.local_cell("uint64")
@@ -240,7 +244,7 @@ def deepgemm(
             T.ptx.fence.mbarrier_init()
             T.cuda.cluster_sync()
             T.cuda.trap_when_assert_failed(tmem_addr == 0)
-            tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TLane"), (1, "TCol")])))
+            tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [1@TLane, 1@TCol])))
 
             @T.macro
             def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -315,20 +319,6 @@ def deepgemm(
                                     Tp.permute_dims(SFA_smem[ks], [0, 2, 1])
                                     Tp.permute_dims(SFB_smem[ks, :4], [0, 2, 1])
                                     Tp.permute_dims(SFB_smem[ks, 4:], [0, 2, 1])
-                                    # for ki in T.unroll(0, BLK_SFA // 128):
-                                    #     for vec in T.vectorized(4):
-                                    #         reg_trans[vec] = SFA_smem[ks, ki * 4 + vec, lane_id]
-                                    #     T.cuda.warp_sync()
-                                    #     for vec in T.vectorized(4):
-                                    #         SFA_smem[ks, ki * 4 + (4 * lane_id + vec) // 32, (4 * lane_id + vec) % 32] = reg_trans[vec]
-                                    #     T.cuda.warp_sync()
-                                    # for ki in T.unroll(0, BLK_SFB // 128):
-                                    #     for vec in T.vectorized(4):
-                                    #         reg_trans[vec] = SFB_smem[ks, ki * 4 + vec, lane_id]
-                                    #     T.cuda.warp_sync()
-                                    #     for vec in T.vectorized(4):
-                                    #         SFB_smem[ks, ki * 4 + (4 * lane_id + vec) // 32, (4 * lane_id + vec) % 32] = reg_trans[vec]
-                                    #     T.cuda.warp_sync()
                                     T.ptx.fence.proxy("shared")
                                 # mark that transpose is completed
                                 trans2mma_bar.arrive(ks)
@@ -480,8 +470,8 @@ def deepgemm(
 
             T.cuda.cluster_sync()
 
-# fmt: on
 
+# fmt: on
 
 
 def prepare_data():
@@ -491,7 +481,6 @@ def prepare_data():
     def ceil_to_ue8m0(x: torch.Tensor):
         assert x.view(-1).amax().item() > 0
         return torch.pow(2.0, torch.ceil(torch.log2(x.abs())))
-    
 
     # Vectorized Quantization
     # For A
@@ -501,18 +490,30 @@ def prepare_data():
     A_view = A_padded.view(M, -1, 128)
     A_amax = A_view.abs().float().amax(dim=2).view(M, -1).clamp(1e-4)
     sfa = ceil_to_ue8m0(A_amax / 448.0)
-    A_fp8 = (A_view * (1.0 / sfa.unsqueeze(2))).to(torch.float8_e4m3fn).view_as(A_padded)[:, :K].contiguous()
+    A_fp8 = (
+        (A_view * (1.0 / sfa.unsqueeze(2)))
+        .to(torch.float8_e4m3fn)
+        .view_as(A_padded)[:, :K]
+        .contiguous()
+    )
     sfa = sfa.to(torch.float8_e8m0fnu).contiguous()
-    
+
     # For B
     padded_n = ceildiv(N, 128) * 128
-    B_padded = torch.empty((padded_n, padded_k), dtype=B_origin.dtype, device=B_origin.device).fill_(0)
+    B_padded = torch.empty(
+        (padded_n, padded_k), dtype=B_origin.dtype, device=B_origin.device
+    ).fill_(0)
     B_padded[:N, :K] = B_origin
     B_view = B_padded.view(-1, 128, padded_k // 128, 128)
     B_amax = B_view.abs().float().amax(dim=(1, 3), keepdim=True).clamp(1e-4)
     sfb = ceil_to_ue8m0(B_amax / 448.0)
     B_fp8 = (B_view * (1.0 / sfb)).to(torch.float8_e4m3fn).view_as(B_padded)[:N, :K].contiguous()
-    sfb = sfb.to(torch.float8_e8m0fnu).view(B_view.shape[0], B_view.shape[2]).repeat(QUANT_SIZE, 1)[:N, :].contiguous()
+    sfb = (
+        sfb.to(torch.float8_e8m0fnu)
+        .view(B_view.shape[0], B_view.shape[2])
+        .repeat(QUANT_SIZE, 1)[:N, :]
+        .contiguous()
+    )
 
     # pack the scales
     sfa_pack = sfa.view(torch.uint32).T
@@ -537,11 +538,15 @@ def prepare_data():
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 def test_deepgemm():
-    
+
     DEV = tvm.cuda(0)
     A_fp8, B_fp8, sfa_pack, sfb_pack, C, C_ref, A_origin, B_origin = prepare_data()
-    A_tvm = tvm.runtime.tensor(A_fp8.view(torch.int8).numpy().view(ml_dtypes.float8_e4m3fn), device=DEV)
-    B_tvm = tvm.runtime.tensor(B_fp8.view(torch.int8).numpy().view(ml_dtypes.float8_e4m3fn), device=DEV)
+    A_tvm = tvm.runtime.tensor(
+        A_fp8.view(torch.int8).numpy().view(ml_dtypes.float8_e4m3fn), device=DEV
+    )
+    B_tvm = tvm.runtime.tensor(
+        B_fp8.view(torch.int8).numpy().view(ml_dtypes.float8_e4m3fn), device=DEV
+    )
     sfa_tvm = tvm.runtime.tensor(sfa_pack.numpy(), device=DEV)
     sfb_tvm = tvm.runtime.tensor(sfb_pack.numpy(), device=DEV)
     C_tvm = tvm.runtime.tensor(C.numpy(), device=DEV)
@@ -549,18 +554,28 @@ def test_deepgemm():
     with target:
         mod = tvm.IRModule({"main": deepgemm})
         src, mod = get_source(deepgemm)
-    
+
     def std():
         a = per_token_cast_to_fp8(A_origin.to(torch.bfloat16).to("cuda"), use_ue8m0=True)
         b = per_block_cast_to_fp8(B_origin.to(torch.bfloat16).to("cuda"), use_ue8m0=True)
-        out = torch.empty((M, N), dtype=torch.bfloat16, device='cuda')
-        ms = bench(lambda: deep_gemm.fp8_gemm_nt(a, b, out, c=None, disable_ue8m0_cast=False, recipe=None), warmup=50, repeat=50, proton_name="std")
+        out = torch.empty((M, N), dtype=torch.bfloat16, device="cuda")
+        ms = bench(
+            lambda: deep_gemm.fp8_gemm_nt(a, b, out, c=None, disable_ue8m0_cast=False, recipe=None),
+            warmup=50,
+            repeat=50,
+            proton_name="std",
+        )
         return ms, out.cpu()
-    
+
     def tir():
-        ms = bench(lambda: mod(A_tvm, B_tvm, C_tvm, sfa_tvm, sfb_tvm), warmup=50, repeat=50, proton_name="tir")
+        ms = bench(
+            lambda: mod(A_tvm, B_tvm, C_tvm, sfa_tvm, sfb_tvm),
+            warmup=50,
+            repeat=50,
+            proton_name="tir",
+        )
         return ms, torch.from_numpy(C_tvm.numpy())
-    
+
     # It seems that the tir and std profiling will interfere with each other
     # And also the value of warmup and repeat affect the profiling result abnormally
     # May need to find a better way to do the profiling

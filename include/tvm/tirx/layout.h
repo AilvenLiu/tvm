@@ -275,15 +275,15 @@ class Iter : public ObjectRef {
 class TileLayoutNode : public TLayoutNode {
  public:
   ffi::Array<Iter> shard;
-  ffi::Array<Iter> replicate;
-  ffi::Map<Axis, PrimExpr> exclude;
+  ffi::Array<Iter> replica;
+  ffi::Map<Axis, PrimExpr> offset;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<TileLayoutNode>()
         .def_ro("shard", &TileLayoutNode::shard)
-        .def_ro("replicate", &TileLayoutNode::replicate)
-        .def_ro("exclude", &TileLayoutNode::exclude);
+        .def_ro("replica", &TileLayoutNode::replica)
+        .def_ro("offset", &TileLayoutNode::offset);
   }
 
   /*! \brief Check if the layout is compatible with the shape */
@@ -345,8 +345,8 @@ class TileLayoutNode : public TLayoutNode {
 
 class TileLayout : public TLayout {
  public:
-  TVM_DLL explicit TileLayout(ffi::Array<Iter> shard, ffi::Array<Iter> replicate,
-                              ffi::Map<Axis, PrimExpr> exclude);
+  TVM_DLL explicit TileLayout(ffi::Array<Iter> shard, ffi::Array<Iter> replica,
+                              ffi::Map<Axis, PrimExpr> offset);
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TileLayout, TLayout, TileLayoutNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(TileLayoutNode);

@@ -21,7 +21,22 @@ import pytest
 
 import tvm
 from tvm.ir import assert_structural_equal
-from tvm.tir.layout import Axis, ComposeLayout, SwizzleLayout, TileLayout
+from tvm.tir.layout import (
+    Axis,
+    ComposeLayout,
+    SwizzleLayout,
+    TileLayout,
+    laneid,
+    warpid,
+    wid_in_wg,
+    wgid,
+    tid_in_wg,
+    tx,
+    pid,
+    P,
+    F,
+    m,
+)
 from tvm.tirp.op_schedule.cuda.copy_async import SwizzleMode, tma_shared_layout
 
 
@@ -80,37 +95,37 @@ def test_constructor():
     assert str(layout) == 'T.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
 
     layout = TileLayout(
-        shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]),
+        shard=([2, 3, 4], [12 @ m, 4 @ m, 1 @ m]),
     )
     assert str(layout) == 'T.TileLayout(shard=([2, 3, 4], [(12, "m"), (4, "m"), (1, "m")]))'
 
     layout = TileLayout(
-        shard=([8, 4, 2], [(4, Axis.laneid), (1, Axis.laneid), 1]),
+        shard=([8, 4, 2], [4 @ laneid, 1 @ laneid, 1]),
     )
     assert (
         str(layout) == 'T.TileLayout(shard=([8, 4, 2], [(4, "laneid"), (1, "laneid"), (1, "m")]))'
     )
 
     layout = TileLayout(
-        shard=([8], [(4, Axis.laneid)]),
-        replicate=([4], [(1, Axis.laneid)]),
+        shard=([8], [4 @ laneid]),
+        replica=([4], [1@laneid]),
     )
     assert (
         str(layout)
-        == 'T.TileLayout(shard=([8], [(4, "laneid")]), replicate=([4], [(1, "laneid")]))'
+        == 'T.TileLayout(shard=([8], [(4, "laneid")]), replica=([4], [(1, "laneid")]))'
     )
 
     layout = TileLayout(
-        shard=([8], [(4, Axis.laneid)]),
-        exclude=(("laneid", 1),),
+        shard=([8], [4 @ laneid]),
+        offset=1 @ laneid,
     )
-    assert str(layout) == 'T.TileLayout(shard=([8], [(4, "laneid")]), exclude=[("laneid", 1)])'
+    assert str(layout) == 'T.TileLayout(shard=([8], [(4, "laneid")]), offset=[("laneid", 1)])'
 
 
 def test_verify_well_formed():
     def test_scope_connected():
         layout = TileLayout(
-            shard=([8, 4, 2], [(4, "laneid"), (1, "laneid"), (1, "m")]),
+            shard=([8, 4, 2], [4 @ laneid, 1 @ laneid, 1]),
         )
         res = layout.get_scope()
         assert res is not None
@@ -119,8 +134,8 @@ def test_verify_well_formed():
         assert layout.verify_well_formed()
 
         layout = TileLayout(
-            shard=([8], [(4, "laneid")]),
-            replicate=([4], [(1, "laneid")]),
+            shard=([8], [4 @ laneid]),
+            replica=([4], [1@laneid]),
         )
         res = layout.get_scope()
         assert res is not None
@@ -129,7 +144,7 @@ def test_verify_well_formed():
         assert layout.verify_well_formed()
 
         layout = TileLayout(
-            shard=([8, 4, 2], [(4, "laneid"), (1, "laneid"), (1, "m")]),
+            shard=([8, 4, 2], [4 @ laneid, 1 @ laneid, 1]),
         )
         res = layout.get_scope()
         assert res is not None
@@ -140,7 +155,7 @@ def test_verify_well_formed():
         layout = TileLayout(
             shard=(
                 [2, 8, 2, 4, 2],
-                [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid"), (1, "m")],
+                [2 @ warpid, 4 @ laneid, 1 @ warpid, 1 @ laneid, 1],
             ),
         )
         res = layout.get_scope()
@@ -152,7 +167,7 @@ def test_verify_well_formed():
         layout = TileLayout(
             shard=(
                 [2, 8, 2, 4, 2],
-                [(2, "wid_in_wg"), (4, "laneid"), (1, "wid_in_wg"), (1, "laneid"), (1, "m")],
+                [2 @ wid_in_wg, 4 @ laneid, 1 @ wid_in_wg, 1 @ laneid, 1],
             ),
         )
         res = layout.get_scope()
@@ -164,7 +179,7 @@ def test_verify_well_formed():
         layout = TileLayout(
             shard=(
                 [2, 8, 2, 4, 2],
-                [(2, "wgid"), (4, "laneid"), (1, "wgid"), (1, "laneid"), (1, "m")],
+                [2 @ wgid, 4 @ laneid, 1 @ wgid, 1 @ laneid, 1],
             ),
         )
         with pytest.raises(Exception):
@@ -173,9 +188,9 @@ def test_verify_well_formed():
         layout = TileLayout(
             shard=(
                 [2, 8, 2, 4, 2],
-                [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid"), (1, "m")],
+                [2 @ warpid, 4 @ laneid, 1 @ warpid, 1 @ laneid, 1],
             ),
-            replicate=([4], [(1, "pid")]),
+            replica=([4], [1@pid]),
         )
         with pytest.raises(Exception):
             layout.verify_well_formed()
@@ -313,7 +328,7 @@ def test_normalize_tile_layout():
 
     def case_no_norm():
         layout_normalized = TileLayout(
-            shard=([8, 8, 8, 4, 2], [16, (4, "laneid"), 2, (1, "laneid"), 1]),
+            shard=([8, 8, 8, 4, 2], [16, 4 @ laneid, 2, 1 @ laneid, 1]),
         )
         assert_structural_equal(layout_normalized, layout_normalized.normalize())
 
@@ -321,10 +336,10 @@ def test_normalize_tile_layout():
 
     def case_both_data_device1():
         layout = TileLayout(
-            shard=([8, 8, 8, 1, 4, 2, 1], [16, (4, "laneid"), 2, 1, (1, "laneid"), 1, 1]),
+            shard=([8, 8, 8, 1, 4, 2, 1], [16, 4 @ laneid, 2, 1, 1 @ laneid, 1, 1]),
         )
         layout_normalized = TileLayout(
-            shard=([8, 8, 8, 4, 2], [16, (4, "laneid"), 2, (1, "laneid"), 1]),
+            shard=([8, 8, 8, 4, 2], [16, 4 @ laneid, 2, 1 @ laneid, 1]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -334,11 +349,11 @@ def test_normalize_tile_layout():
         layout = TileLayout(
             shard=(
                 [8, 8, 8, 1, 4, 2, 1],
-                [16, (4, "laneid"), 2, 1, (1, "laneid"), 1, (4, "laneid")],
+                [16, 4 @ laneid, 2, 1, 1 @ laneid, 1, 4 @ laneid],
             ),
         )
         layout_normalized = TileLayout(
-            shard=([8, 8, 8, 4, 2], [16, (4, "laneid"), 2, (1, "laneid"), 1]),
+            shard=([8, 8, 8, 4, 2], [16, 4 @ laneid, 2, 1 @ laneid, 1]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -346,11 +361,11 @@ def test_normalize_tile_layout():
 
     def case_both_data_device3():
         layout = TileLayout(
-            shard=([8, 8, 8, 1, 1, 2, 1], [16, (4, "laneid"), 2, 1, (4, "laneid"), 1, 1]),
-            exclude=[("laneid", 0)],
+            shard=([8, 8, 8, 1, 1, 2, 1], [16, 4 @ laneid, 2, 1, 4 @ laneid, 1, 1]),
+            offset=0 @ laneid,
         )
         layout_normalized = TileLayout(
-            shard=([8, 8, 16], [16, (4, "laneid"), 1]),
+            shard=([8, 8, 16], [16, 4 @ laneid, 1]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -358,10 +373,10 @@ def test_normalize_tile_layout():
 
     def case_both_data_device4():
         layout = TileLayout(
-            shard=([8, 4, 8, 8, 16], [(4, "laneid"), (1, "laneid"), 4, 2, 4]),
+            shard=([8, 4, 8, 8, 16], [4 @ laneid, 1 @ laneid, 4, 2, 4]),
         )
         layout_normalized = TileLayout(
-            shard=([32, 8, 8, 16], [(1, "laneid"), 4, 2, 4]),
+            shard=([32, 8, 8, 16], [1 @ laneid, 4, 2, 4]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -369,10 +384,10 @@ def test_normalize_tile_layout():
 
     def case_both_data_device6():
         layout = TileLayout(
-            shard=([8, 4, 8, 16], [(4, "laneid"), (1, "laneid"), 2, 4]),
+            shard=([8, 4, 8, 16], [4 @ laneid, 1 @ laneid, 2, 4]),
         )
         layout_normalized = TileLayout(
-            shard=([32, 8, 16], [(1, "laneid"), 2, 4]),
+            shard=([32, 8, 16], [1 @ laneid, 2, 4]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -380,10 +395,10 @@ def test_normalize_tile_layout():
 
     def case_both_data_device7():
         layout = TileLayout(
-            shard=([8, 4, 8], [(4, "laneid"), (1, "laneid"), 8]),
+            shard=([8, 4, 8], [4 @ laneid, 1 @ laneid, 8]),
         )
         layout_normalized = TileLayout(
-            shard=([32, 8], [(1, "laneid"), 8]),
+            shard=([32, 8], [1 @ laneid, 8]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -392,10 +407,10 @@ def test_normalize_tile_layout():
     def case_both_data_device8():
         # Fuse-Case 1
         layout = TileLayout(
-            shard=([8, 4, 8], [(4, "laneid"), (1, "laneid"), 4]),
+            shard=([8, 4, 8], [4 @ laneid, 1 @ laneid, 4]),
         )
         layout_normalized = TileLayout(
-            shard=([32, 8], [(1, "laneid"), 4]),
+            shard=([32, 8], [1 @ laneid, 4]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -404,10 +419,10 @@ def test_normalize_tile_layout():
     def case_both_data_device9():
         # Fuse-Case 2
         layout = TileLayout(
-            shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
+            shard=([8, 4], [4 @ laneid, 1 @ laneid]),
         )
         layout_normalized = TileLayout(
-            shard=([32], [(1, "laneid")]),
+            shard=([32], [1 @ laneid]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -416,10 +431,10 @@ def test_normalize_tile_layout():
     def case_both_data_device12():
         # Fuse-mixed
         layout = TileLayout(
-            shard=([8, 4, 4, 8, 8, 8], [(4, "laneid"), (1, "laneid"), 4, 8, 8, 8]),
+            shard=([8, 4, 4, 8, 8, 8], [4 @ laneid, 1 @ laneid, 4, 8, 8, 8]),
         )
         layout_normalized = TileLayout(
-            shard=([32, 4, 8, 8, 8], [(1, "laneid"), 4, 8, 8, 8]),
+            shard=([32, 4, 8, 8, 8], [1 @ laneid, 4, 8, 8, 8]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -428,10 +443,10 @@ def test_normalize_tile_layout():
     def case_both_data_device13():
         # Fuse-mixed with partial
         layout = TileLayout(
-            shard=([8, 4, 4, 8, 8, 8], [(4, "laneid"), (1, "laneid"), 16, 2, 8, 8]),
+            shard=([8, 4, 4, 8, 8, 8], [4 @ laneid, 1 @ laneid, 16, 2, 8, 8]),
         )
         layout_normalized = TileLayout(
-            shard=([32, 32, 8, 8], [(1, "laneid"), 2, 8, 8]),
+            shard=([32, 32, 8, 8], [1 @ laneid, 2, 8, 8]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -442,11 +457,11 @@ def test_normalize_tile_layout():
         layout = TileLayout(
             shard=(
                 [8, 4, 4, 8, 8, 4, 4, 16, 8],
-                [(4, "laneid"), (1, "laneid"), 16, 2, 8, 2, 16, 1, 4],
+                [4 @ laneid, 1 @ laneid, 16, 2, 8, 2, 16, 1, 4],
             ),
         )
         layout_normalized = TileLayout(
-            shard=([32, 32, 32, 64, 8], [(1, "laneid"), 2, 2, 1, 4]),
+            shard=([32, 32, 32, 64, 8], [1 @ laneid, 2, 2, 1, 4]),
         )
         assert_structural_equal(layout_normalized, layout.normalize())
 
@@ -455,10 +470,10 @@ def test_normalize_tile_layout():
     def case15():
         # Only data tree (partial norm - middle) #15
         layout = TileLayout(
-            shard=([32, 3, 4, 5, 2, 3, 4], [(1, "laneid"), 20, 5, 1, 60, 20, 5]),
+            shard=([32, 3, 4, 5, 2, 3, 4], [1 @ laneid, 20, 5, 1, 60, 20, 5]),
         )
         layout_expected = TileLayout(
-            shard=([32, 60, 24], [(1, "laneid"), 1, 5]),
+            shard=([32, 60, 24], [1 @ laneid, 1, 5]),
         )
         assert_structural_equal(layout_expected, layout.normalize())
 
@@ -478,22 +493,19 @@ def test_normalize_tile_layout():
     def case_fuse_axis():
         with tvm.target.Target("cuda"):
             layout = TileLayout(
-                shard=([2, 8, 2, 4], [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid")]),
+                shard=([2, 8, 2, 4], [2 @ warpid, 4 @ laneid, 1 @ warpid, 1 @ laneid]),
             )
             layout_expected = TileLayout(
-                shard=(
-                    [2, 8, 2, 4],
-                    [(64, "tx"), (4, "tx"), (32, "tx"), (1, "tx")],
-                ),
+                shard=([2, 8, 2, 4], [64 @ tx, 4 @ tx, 32 @ tx, 1 @ tx]),
             )
             assert layout.verify_well_formed()
             assert layout_expected.verify_well_formed()
             assert_structural_equal(layout_expected, layout.normalize())
 
             layout = TileLayout(
-                shard=([2, 2, 8, 4], [(2, "warpid"), (1, "warpid"), (4, "laneid"), (1, "laneid")]),
+                shard=([2, 2, 8, 4], [2 @ warpid, 1 @ warpid, 4 @ laneid, 1 @ laneid]),
             )
-            layout_expected = TileLayout(shard=([128], [(1, "tx")]))
+            layout_expected = TileLayout(shard=([128], [1 @ tx]))
             assert layout.verify_well_formed()
             assert layout_expected.verify_well_formed()
             assert_structural_equal(layout_expected, layout.normalize())
@@ -501,20 +513,23 @@ def test_normalize_tile_layout():
             layout = TileLayout(
                 shard=(
                     [2, 2, 8, 2, 2, 4],
-                    [
-                        (2, "wgid"),
-                        (2, "wid_in_wg"),
-                        (4, "laneid"),
-                        (1, "wgid"),
-                        (1, "wid_in_wg"),
-                        (1, "laneid"),
-                    ],
+                    [2 @ wgid, 2 @ wid_in_wg, 4 @ laneid, 1 @ wgid, 1 @ wid_in_wg, 1 @ laneid],
                 ),
             )
             layout_expected = TileLayout(
+                shard=([2, 2, 8, 2, 2, 4], [256 @ tx, 64 @ tx, 4 @ tx, 128 @ tx, 32 @ tx, 1 @ tx]),
+            )
+            assert layout.verify_well_formed()
+            assert layout_expected.verify_well_formed()
+            assert_structural_equal(layout_expected, layout.normalize())
+
+            layout = TileLayout(
+                shard=([2, 8, 2, 4], [2 @ wid_in_wg, 4 @ laneid, 1 @ wid_in_wg, 1 @ laneid]),
+            )
+            layout_expected = TileLayout(
                 shard=(
-                    [2, 2, 8, 2, 2, 4],
-                    [(256, "tx"), (64, "tx"), (4, "tx"), (128, "tx"), (32, "tx"), (1, "tx")],
+                    [2, 8, 2, 4],
+                    [64 @ tid_in_wg, 4 @ tid_in_wg, 32 @ tid_in_wg, 1 @ tid_in_wg],
                 ),
             )
             assert layout.verify_well_formed()
@@ -522,28 +537,9 @@ def test_normalize_tile_layout():
             assert_structural_equal(layout_expected, layout.normalize())
 
             layout = TileLayout(
-                shard=(
-                    [2, 8, 2, 4],
-                    [(2, "wid_in_wg"), (4, "laneid"), (1, "wid_in_wg"), (1, "laneid")],
-                ),
+                shard=([2, 2, 4, 32], [2 @ wgid, 1 @ wgid, 32 @ tid_in_wg, 1 @ tid_in_wg]),
             )
-            layout_expected = TileLayout(
-                shard=(
-                    [2, 8, 2, 4],
-                    [(64, "tid_in_wg"), (4, "tid_in_wg"), (32, "tid_in_wg"), (1, "tid_in_wg")],
-                ),
-            )
-            assert layout.verify_well_formed()
-            assert layout_expected.verify_well_formed()
-            assert_structural_equal(layout_expected, layout.normalize())
-
-            layout = TileLayout(
-                shard=(
-                    [2, 2, 4, 32],
-                    [(2, "wgid"), (1, "wgid"), (32, "tid_in_wg"), (1, "tid_in_wg")],
-                ),
-            )
-            layout_expected = TileLayout(shard=([512], [(1, "tx")]))
+            layout_expected = TileLayout(shard=([512], [1 @ tx]))
             assert layout.verify_well_formed()
             assert layout_expected.verify_well_formed()
             assert_structural_equal(layout_expected, layout.normalize())
@@ -553,13 +549,13 @@ def test_normalize_tile_layout():
     def case_sort_replicate_exclude_iters():
         layout1 = TileLayout(
             shard=([1], [1]),
-            replicate=([8, 4], [(4, "laneid"), (1, "laneid")]),
-            exclude=[("warpid", 2)],
+            replica=([8, 4], [4@laneid, 1@laneid]),
+            offset=2 @ warpid,
         )
         layout2 = TileLayout(
             shard=([1], [1]),
-            replicate=([4, 8], [(1, "laneid"), (4, "laneid")]),
-            exclude=[("warpid", 2)],
+            replica=([4, 8], [1@laneid, 4@laneid]),
+            offset=2 @ warpid,
         )
         assert_structural_equal(layout1.normalize(), layout2.normalize())
 
@@ -644,7 +640,7 @@ def test_tile_layout():
     def case5_sharded1():
         # Tile over a sharded layout - 1
         layout = TileLayout(
-            shard=([8, 1, 4, 2], [(4, "laneid"), 2, (1, "laneid"), 1]),
+            shard=([8, 1, 4, 2], [4 @ laneid, 2, 1 @ laneid, 1]),
         )
         outer = TileLayout(shard=([8, 8], [8, 1]))
         layout_tile = layout.tile(
@@ -653,7 +649,7 @@ def test_tile_layout():
             inner_shape=(8, 8),
         )
         layout_expected = TileLayout(
-            shard=([8, 8, 1, 8, 4, 2], [16, (4, "laneid"), 2, 2, (1, "laneid"), 1]),
+            shard=([8, 8, 1, 8, 4, 2], [16, 4 @ laneid, 2, 2, 1 @ laneid, 1]),
         )
         assert_structural_equal(layout_expected.normalize(), layout_tile)
 
@@ -673,7 +669,7 @@ def test_tile_layout():
     def case6_sharded2():
         # Tile over a sharded layout - 2
         inner = TileLayout(
-            shard=([8, 4], [(4, "laneid"), (1, "laneid")]),
+            shard=([8, 4], [4 @ laneid, 1 @ laneid]),
         )
         outer = TileLayout(shard=([8, 8], [8, 1]))
         layout_tile = inner.tile(
@@ -682,7 +678,7 @@ def test_tile_layout():
             inner_shape=(8, 4),
         )
         layout_expected = TileLayout(
-            shard=([8, 8, 8, 4], [8, (4, "laneid"), 1, (1, "laneid")]),
+            shard=([8, 8, 8, 4], [8, 4 @ laneid, 1, 1 @ laneid]),
         )
         assert_structural_equal(layout_expected, layout_tile)
 
@@ -780,7 +776,7 @@ def test_tile_layout():
         # Normalized Tile Layout Test - 8 (tile = inner w/ device)
         outer = TileLayout(shard=([8, 8, 4], [32, 4, 1]))
         inner = TileLayout(
-            shard=([8, 8, 1, 4, 2], [4, (4, "laneid"), 2, (1, "laneid"), 1]),
+            shard=([8, 8, 1, 4, 2], [4, 4 @ laneid, 2, 1 @ laneid, 1]),
         )
         layout_tile = inner.tile(outer, (8, 8, 4), (8, 8, 8))
 
@@ -937,9 +933,9 @@ def test_shard_layout():
 
     def case_mma_layout():
         layout = TileLayout(shard=([1, 2], [2, 1]))
-        layout_warp = TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
+        layout_warp = TileLayout(shard=([8, 4], [4 @ laneid, 1 @ laneid]))
         res = layout.tile(layout_warp, [8, 4], [1, 2])
-        layout_expected = TileLayout(shard=([32, 2], [(1, "laneid"), (1, "m")]))
+        layout_expected = TileLayout(shard=([32, 2], [1 @ laneid, 1]))
         assert_structural_equal(res.normalize(), layout_expected.normalize())
 
         outer = layout.is_tile_inner(res, [8, 8], [1, 2])
@@ -954,25 +950,19 @@ def test_shard_layout():
 
     def case_cta_layout():
         layout = TileLayout(shard=([1, 2], [2, 1]))
-        layout_warp = TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
-        layout_cta = TileLayout(shard=([2, 2], [(2, "warpid"), (1, "warpid")]))
+        layout_warp = TileLayout(shard=([8, 4], [4 @ laneid, 1 @ laneid]))
+        layout_cta = TileLayout(shard=([2, 2], [2 @ warpid, 1 @ warpid]))
 
         res_warp = layout.tile(layout_warp, [8, 4], [1, 2])
         res = res_warp.tile(layout_cta, [2, 2], [8, 8])
         layout_expected = TileLayout(
-            shard=(
-                [2, 8, 2, 4, 2],
-                [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid"), (1, "m")],
-            ),
+            shard=([2, 8, 2, 4, 2], [2 @ warpid, 4 @ laneid, 1 @ warpid, 1 @ laneid, 1]),
         )
         assert_structural_equal(res.normalize(), layout_expected.normalize())
 
         outer = layout.is_tile_inner(res, [16, 16], [1, 2])
         outer_expected = TileLayout(
-            shard=(
-                [2, 8, 2, 4],
-                [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid")],
-            ),
+            shard=([2, 8, 2, 4], [2 @ warpid, 4 @ laneid, 1 @ warpid, 1 @ laneid]),
         )
         assert outer is not None
         assert_structural_equal(outer, outer_expected)
@@ -986,22 +976,17 @@ def test_shard_layout():
     def case_cta_layout2():
         with tvm.target.Target("cuda"):
             tiled = TileLayout(
-                shard=(
-                    [2, 8, 2, 4, 2],
-                    [(64, "tx"), (4, "tx"), (32, "tx"), (1, "tx"), (1, "m")],
-                ),
+                shard=([2, 8, 2, 4, 2], [64 @ tx, 4 @ tx, 32 @ tx, 1 @ tx, 1]),
             )
             # local is inner of cta
             layout = TileLayout(shard=([2], [1]))
             outer = layout.is_tile_inner(tiled, [16, 16], [1, 2])
             assert outer is not None
-            outer_expected = TileLayout(
-                shard=([2, 8, 2, 4], [(64, "tx"), (4, "tx"), (32, "tx"), (1, "tx")])
-            )
+            outer_expected = TileLayout(shard=([2, 8, 2, 4], [64 @ tx, 4 @ tx, 32 @ tx, 1 @ tx]))
             assert_structural_equal(outer.normalize(), outer_expected.normalize())
 
             layout = TileLayout(
-                shard=([2, 8, 2, 4], [(2, "warpid"), (4, "laneid"), (1, "warpid"), (1, "laneid")])
+                shard=([2, 8, 2, 4], [2 @ warpid, 4 @ laneid, 1 @ warpid, 1 @ laneid])
             )
             inner = layout.is_tile_outer(tiled, [16, 16], [16, 8])
             inner_expected = TileLayout(shard=([2], [1]))
@@ -1009,15 +994,15 @@ def test_shard_layout():
             assert_structural_equal(inner.normalize(), inner_expected.normalize())
 
             # warp view is inner of cta
-            layout = TileLayout(shard=([8, 1, 4, 2], [(4, "laneid"), 2, (1, "laneid"), 1]))
+            layout = TileLayout(shard=([8, 1, 4, 2], [4 @ laneid, 2, 1 @ laneid, 1]))
             outer = layout.is_tile_inner(tiled, [16, 16], [8, 8])
             assert outer is not None
-            outer_expected = TileLayout(shard=([2, 2], [(2, "warpid"), (1, "warpid")]))
+            outer_expected = TileLayout(shard=([2, 2], [2 @ warpid, 1 @ warpid]))
             assert_structural_equal(outer.normalize(), outer_expected.normalize())
 
-            layout = TileLayout(shard=([2, 2], [(2, "warpid"), (1, "warpid")]))
+            layout = TileLayout(shard=([2, 2], [2 @ warpid, 1 @ warpid]))
             inner = layout.is_tile_outer(tiled, [16, 16], [2, 2])
-            inner_expected = TileLayout(shard=([32, 2], [(1, "laneid"), 1]))
+            inner_expected = TileLayout(shard=([32, 2], [1 @ laneid, 1]))
             assert inner is not None
             assert_structural_equal(inner.normalize(), inner_expected.normalize())
 
@@ -1025,9 +1010,9 @@ def test_shard_layout():
 
     def case_quad_shuffle():
         layout = TileLayout(shard=([1, 2], [2, 1]))
-        layout_warp = TileLayout(shard=([8], [(4, "laneid")]))
+        layout_warp = TileLayout(shard=([8], [4 @ laneid]))
         res = layout.tile(layout_warp, [8, 1], [1, 2])
-        layout_expected = TileLayout(shard=([8, 2], [(4, "laneid"), (1, "m")]))
+        layout_expected = TileLayout(shard=([8, 2], [4 @ laneid, 1]))
         assert_structural_equal(res.normalize(), layout_expected.normalize())
 
         outer = layout.is_tile_inner(res, [8, 2], [1, 2])
@@ -1042,11 +1027,9 @@ def test_shard_layout():
 
     def case_replicate():
         layout = TileLayout(shard=([64, 128], [128, 1]))
-        layout_rep = TileLayout(shard=([2], [(2, "pid")]), replicate=([2], [(1, "pid")]))
+        layout_rep = TileLayout(shard=([2], [2@pid]), replica=([2], [1@pid]))
         res = layout.tile(layout_rep, [2, 1], [64, 128])
-        layout_expected = TileLayout(
-            shard=([2, 8192], [(2, "pid"), (1, "m")]), replicate=([2], [(1, "pid")])
-        )
+        layout_expected = TileLayout(shard=([2, 8192], [2@pid, 1]), replica=([2], [1@pid]))
         assert_structural_equal(res.normalize(), layout_expected.normalize())
 
         outer = layout.is_tile_inner(res, [128, 128], [64, 128])
@@ -1089,7 +1072,7 @@ def test_size_cosize():
         assert layout.cosize() == 64
         layout = TileLayout(shard=([8, 6], [8, 1]))
         assert layout.cosize() == 62
-        layout = TileLayout(shard=([8, 1, 4, 2], [(4, "laneid"), 2, (1, "laneid"), 1]))
+        layout = TileLayout(shard=([8, 1, 4, 2], [4 @ laneid, 2, 1 @ laneid, 1]))
         assert layout.cosize() == 2
 
     tile_layout_cosize()
@@ -1113,19 +1096,19 @@ def test_size_cosize():
 
     def trainium_layout_tests():
         # TrainiumLayout tests
-        layout = TileLayout(shard=([8, 8], [(1, "P"), (1, "F")]))
+        layout = TileLayout(shard=([8, 8], [1 @ P, 1 @ F]))
         assert layout.size("P") == 8
         assert layout.size("F") == 8
 
-        layout = TileLayout(shard=([8, 8, 8], [(64, "F"), (1, "P"), (1, "F")]))
+        layout = TileLayout(shard=([8, 8, 8], [64 @ F, 1 @ P, 1 @ F]))
         assert layout.size("P") == 8
         assert layout.size("F") == 64
         assert layout.cosize("F") == 456
 
-        layout_partition = TileLayout(shard=([8], [(1, "P")]))
+        layout_partition = TileLayout(shard=([8], [1 @ P]))
         assert layout_partition.size("P") == 8 and layout_partition.size("F") == 1
 
-        layout_free = TileLayout(shard=([8], [(1, "F")]))
+        layout_free = TileLayout(shard=([8], [1 @ F]))
         assert layout_free.size("P") == 1 and layout_free.size("F") == 8
 
         layout = TileLayout.trainium("PF", (128, 128))
@@ -1134,15 +1117,13 @@ def test_size_cosize():
         layout = TileLayout.trainium("FPF", (32, 512, 512))
         assert_structural_equal(
             layout,
-            TileLayout(
-                shard=([32, 4, 128, 512], [(512, "F"), (512 * 32, "F"), (1, "P"), (1, "F")])
-            ),
+            TileLayout(shard=([32, 4, 128, 512], [512 @ F, (512 * 32) @ F, 1 @ P, 1 @ F])),
         )
 
         layout = TileLayout.trainium("FPPF", (2, 4, 32, 512))
         assert_structural_equal(
             layout,
-            TileLayout(shard=([2, 4, 32, 512], [(512, "F"), (32, "P"), (1, "P"), (1, "F")])),
+            TileLayout(shard=([2, 4, 32, 512], [512 @ F, 32 @ P, 1 @ P, 1 @ F])),
         )
 
     trainium_layout_tests()
@@ -1210,7 +1191,7 @@ def test_apply():
     test_tile_layout_2()
 
     def test_tile_layout_3():
-        layout = TileLayout(shard=([8, 1, 4, 2], [(4, "laneid"), 2, (1, "laneid"), 1]))
+        layout = TileLayout(shard=([8, 1, 4, 2], [4 @ laneid, 2, 1 @ laneid, 1]))
         for i0, i1 in itertools.product(range(8), range(8)):
             res = layout.apply(i0, i1, shape=(8, 8))
             assert res["m"] == i1 % 2
@@ -1296,7 +1277,7 @@ def test_apply():
 
     ################ Trainium Layout
     def test_trainium_layout_0():
-        layout = TileLayout(shard=([8, 8], [(8, "F"), (1, "P")]))
+        layout = TileLayout(shard=([8, 8], [8 @ F, 1 @ P]))
         for i, j in itertools.product(range(8), range(8)):
             coord = layout.apply(i, j, shape=(8, 8))
             assert coord["P"] == j
@@ -1305,9 +1286,7 @@ def test_apply():
     test_trainium_layout_0()
 
     def test_trainium_layout_1():
-        layout = TileLayout(
-            shard=([2, 6, 4, 2, 2], [(1, "F"), (1, "P"), (12, "F"), (6, "P"), (48, "F")])
-        )
+        layout = TileLayout(shard=([2, 6, 4, 2, 2], [1 @ F, 1 @ P, 12 @ F, 6 @ P, 48 @ F]))
 
         def f(i0, i1):
             leaf1 = i0 // 6
@@ -1328,7 +1307,7 @@ def test_apply():
 
     ################ Trainium PSUM Layout
     def test_trainium_psum_layout_0():
-        layout = TileLayout(shard=([1024, 8], [(1, "F"), (1, "P")])).to_psum()
+        layout = TileLayout(shard=([1024, 8], [1 @ F, 1 @ P])).to_psum()
         for i, j in itertools.product(range(1024), range(8)):
             coord = layout.apply(i, j, shape=(1024, 8))
             assert coord["Bank"] == i // 512
@@ -1358,27 +1337,27 @@ def test_normalize_compose_layout():
 
 def test_normalize_trainium_layout():
     def case1():
-        layout = TileLayout(shard=([8, 8], [(8, "P"), (1, "F")]))
+        layout = TileLayout(shard=([8, 8], [8 @ P, 1 @ F]))
         assert_structural_equal(layout, layout.normalize())
 
     case1()
 
     def case2():
-        layout = TileLayout(shard=([8, 1, 8], [(8, "F"), (1, "P"), (1, "F")]))
-        layout_expected = TileLayout(shard=([64], [(1, "F")]))
+        layout = TileLayout(shard=([8, 1, 8], [8 @ F, 1 @ P, 1 @ F]))
+        layout_expected = TileLayout(shard=([64], [1 @ F]))
         assert_structural_equal(layout_expected, layout.normalize())
 
     case2()
 
     def case3():
-        layout = TileLayout(shard=([8, 8, 8], [(8, "F"), (1, "P"), (1, "F")]))
+        layout = TileLayout(shard=([8, 8, 8], [8 @ F, 1 @ P, 1 @ F]))
         assert_structural_equal(layout, layout.normalize())
 
     case3()
 
     def case4():
-        layout = TileLayout(shard=([8, 8, 8, 8], [(8, "F"), (8, "P"), (1, "P"), (1, "F")]))
-        layout_expected = TileLayout(shard=([8, 64, 8], [(8, "F"), (1, "P"), (1, "F")]))
+        layout = TileLayout(shard=([8, 8, 8, 8], [8 @ F, 8 @ P, 1 @ P, 1 @ F]))
+        layout_expected = TileLayout(shard=([8, 64, 8], [8 @ F, 1 @ P, 1 @ F]))
         assert_structural_equal(layout_expected, layout.normalize())
 
     case4()
@@ -1447,7 +1426,7 @@ def test_storage():
     case1()
 
     def case2():
-        layout = TileLayout(shard=([8, 4, 2], [(4, "laneid"), (1, "laneid"), (1, "m")]))
+        layout = TileLayout(shard=([8, 4, 2], [4 @ laneid, 1 @ laneid, 1]))
         layout_stroage = TileLayout(shard=([2], [1]))
         assert_structural_equal(layout.storage(), layout_stroage)
 
@@ -1462,7 +1441,7 @@ def test_storage():
     def case4():
         layout = (
             TileLayout(shard=([2], [1]))
-            .tile(TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")])), (8, 4), (1, 2))
+            .tile(TileLayout(shard=([8, 4], [4 @ laneid, 1 @ laneid])), (8, 4), (1, 2))
             .tile(TileLayout(shard=([2, 1], [1, 2])), (2, 1), (8, 8))
             .tile(TileLayout(shard=([1, 8], [8, 1])), (1, 8), (16, 8))
         )

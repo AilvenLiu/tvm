@@ -20,6 +20,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tir as T
+from tvm.tir.layout import laneid
 from tvm.script import tirp as Tp
 from tvm.tir.layout import TileLayout
 
@@ -327,7 +328,7 @@ def test_unary_op_local(input, op_type, dtype):
             with T.thread():
                 # acc layout
                 atom = T.TileLayout(shard=([1, 2], [2, 1]))
-                warp_layout = T.TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
+                warp_layout = T.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
                 warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
                 tile = T.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
                 acc_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))
@@ -452,7 +453,7 @@ def test_binary_op_local(input, op_type, dtype):
             with T.thread():
                 # A layout
                 atom = T.TileLayout(shard=([1, 2], [2, 1]))
-                warp_layout = T.TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
+                warp_layout = T.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
                 warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
                 tile = T.TileLayout(shard=([2, NUM_COL // 8], [1, 2]))
                 A_layout = warp_atom.tile(tile, (2, NUM_COL // 8), (8, 8))

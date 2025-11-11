@@ -375,20 +375,20 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 /**************** TileLayout ****************/
 
-TileLayout::TileLayout(ffi::Array<Iter> shard, ffi::Array<Iter> replicate,
-                       ffi::Map<Axis, PrimExpr> exclude) {
+TileLayout::TileLayout(ffi::Array<Iter> shard, ffi::Array<Iter> replica,
+                       ffi::Map<Axis, PrimExpr> offset) {
   auto n = ffi::make_object<TileLayoutNode>();
   n->shard = shard;
-  n->replicate = replicate;
-  n->exclude = exclude;
+  n->replica = replica;
+  n->offset = offset;
   data_ = std::move(n);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TileLayout", [](ffi::Array<Iter> shard, ffi::Array<Iter> replicate,
-                                             ffi::Map<Axis, PrimExpr> exclude) {
-    return TileLayout(shard, replicate, exclude);
+  refl::GlobalDef().def("tir.TileLayout", [](ffi::Array<Iter> shard, ffi::Array<Iter> replica,
+                                             ffi::Map<Axis, PrimExpr> offset) {
+    return TileLayout(shard, replica, offset);
   });
 }
 
@@ -460,11 +460,11 @@ PrimExpr TileLayoutNode::GetCosize(ffi::Optional<ffi::String> axis_name) const {
   for (const auto& iter : shard) {
     if (filter(iter->axis)) result += (iter->extent - 1) * iter->stride;
   }
-  for (const auto& iter : replicate) {
+  for (const auto& iter : replica) {
     if (filter(iter->axis)) result += (iter->extent - 1) * iter->stride;
   }
-  for (const auto& [axis, offset] : exclude) {
-    if (filter(axis)) result += offset;
+  for (const auto& [axis, off] : offset) {
+    if (filter(axis)) result += off;
   }
   return analyzer.Simplify(result);
 }
@@ -504,13 +504,13 @@ TileLayout RemoveUnitIters(TileLayout layout) {
 
 TileLayout RemoveZeroOffset(TileLayout layout) {
   auto new_layout = layout.CopyOnWrite();
-  ffi::Map<Axis, PrimExpr> exclude;
-  for (const auto& [axis, offset] : layout->exclude) {
-    if (!is_zero(offset)) {
-      exclude.Set(axis, offset);
+  ffi::Map<Axis, PrimExpr> new_offset;
+  for (const auto& [axis, off] : layout->offset) {
+    if (!is_zero(off)) {
+      new_offset.Set(axis, off);
     }
   }
-  new_layout->exclude = exclude;
+  new_layout->offset = new_offset;
   return ffi::GetRef<TileLayout>(new_layout);
 }
 
@@ -551,8 +551,8 @@ TileLayout TryFuseAxes(TileLayout layout) {
 
   // Step 2: Create vectors for the new layout components
   std::vector<Iter> shard;
-  std::vector<Iter> replicate;
-  ffi::Map<Axis, PrimExpr> exclude;
+  std::vector<Iter> replica;
+  ffi::Map<Axis, PrimExpr> offset;
 
   // Step 3: Define the axis fusion function
   auto try_fuse_axis = [&](const Iter& iter) -> Iter {
@@ -565,34 +565,34 @@ TileLayout TryFuseAxes(TileLayout layout) {
     shard.push_back(try_fuse_axis(iter));
   }
   // Step 5: Process replicate iterators
-  for (auto iter : layout->replicate) {
-    replicate.push_back(try_fuse_axis(iter));
+  for (auto iter : layout->replica) {
+    replica.push_back(try_fuse_axis(iter));
   }
-  // Step 6: Process exclude iterators
-  for (auto [axis, offset] : layout->exclude) {
-    Iter iter = try_fuse_axis(Iter(1, offset, axis));
-    exclude.Set(iter->axis, iter->stride);
+  // Step 6: Process offset iterators
+  for (auto [axis, off] : layout->offset) {
+    Iter iter = try_fuse_axis(Iter(1, off, axis));
+    offset.Set(iter->axis, iter->stride);
   }
   // Step 7: Create and return the new layout
-  auto result = TileLayout(shard, replicate, exclude);
+  auto result = TileLayout(shard, replica, offset);
   return result;
 }
 
 TileLayout SortReplicateIters(TileLayout layout) {
   auto n = layout.CopyOnWrite();
-  std::vector<Iter> replicate(n->replicate.begin(), n->replicate.end());
+  std::vector<Iter> replicate(n->replica.begin(), n->replica.end());
   auto hash_compare = [](const auto& a, const auto& b) {
     return StructuralHash()(a) < StructuralHash()(b);
   };
   std::sort(replicate.begin(), replicate.end(), hash_compare);
-  n->replicate = std::move(replicate);
+  n->replica = std::move(replicate);
   return ffi::GetRef<TileLayout>(n);
 }
 
 TLayout TileLayoutNode::Normalize() const {
   // 0. Remove unit iters in shard
   TileLayout res = RemoveUnitIters(ffi::GetRef<TileLayout>(this));
-  // 1. Remove zero offset in exclude
+  // 1. Remove zero offset
   res = RemoveZeroOffset(res);
   // 2. Try fuse axes
   res = TryFuseAxes(res);
@@ -691,7 +691,7 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
         new_shard.push_back(outer->shard[i]);
       }
     }
-    outer = TileLayout(new_shard, outer->replicate, outer->exclude);
+    outer = TileLayout(new_shard, outer->replica, outer->offset);
   }
 
   CHECK(!outer_seps.empty()) << "Outer layout must only use split/reorder from logical scope";
@@ -710,20 +710,20 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
   }
 
   // Combine replicate attributes from both layouts
-  std::vector<Iter> tile_rep{inner->replicate.begin(), inner->replicate.end()};
-  tile_rep.insert(tile_rep.end(), outer->replicate.begin(), outer->replicate.end());
+  std::vector<Iter> tile_rep{inner->replica.begin(), inner->replica.end()};
+  tile_rep.insert(tile_rep.end(), outer->replica.begin(), outer->replica.end());
 
   // Combine exclude attributes from both layouts
   ffi::Map<Axis, PrimExpr> tile_offset;
-  for (const auto& [axis, offset] : inner->exclude) {
-    tile_offset.Set(axis, offset);
+  for (const auto& [axis, off] : inner->offset) {
+    tile_offset.Set(axis, off);
   }
-  for (const auto& [axis, offset] : outer->exclude) {
+  for (const auto& [axis, off] : outer->offset) {
     auto it = tile_offset.find(axis);
     if (it != tile_offset.end()) {
-      tile_offset.Set(axis, (*it).second + offset);
+      tile_offset.Set(axis, (*it).second + off);
     } else {
-      tile_offset.Set(axis, offset);
+      tile_offset.Set(axis, off);
     }
   }
 
@@ -782,32 +782,32 @@ TileLayout SplitAxes(TileLayout layout, const ffi::String& split_scope) {
     return {iter};
   };
 
-  std::vector<Iter> shard, replicate;
-  ffi::Map<Axis, PrimExpr> exclude;
+  std::vector<Iter> shard, replica;
+  ffi::Map<Axis, PrimExpr> offset;
 
   for (const auto& iter : layout->shard) {
     auto split_iters = split_iter(iter);
     shard.insert(shard.end(), split_iters.begin(), split_iters.end());
   }
 
-  for (const auto& iter : layout->replicate) {
+  for (const auto& iter : layout->replica) {
     auto split_iters = split_iter(iter);
-    replicate.insert(replicate.end(), split_iters.begin(), split_iters.end());
+    replica.insert(replica.end(), split_iters.begin(), split_iters.end());
   }
 
-  for (const auto& [axis, offset] : layout->exclude) {
-    auto split_iters = split_iter(Iter(1, offset, axis));
+  for (const auto& [axis, off] : layout->offset) {
+    auto split_iters = split_iter(Iter(1, off, axis));
     if (split_iters.size() == 1) {
-      exclude.Set(split_iters[0]->axis, split_iters[0]->stride);
+      offset.Set(split_iters[0]->axis, split_iters[0]->stride);
     } else {
-      auto coord = SplitCoord(offset, {split_iters[0]->extent, split_iters[1]->extent});
+      auto coord = SplitCoord(off, {split_iters[0]->extent, split_iters[1]->extent});
       ICHECK(coord.size() == 2) << "Split coord size must be 2";
-      exclude.Set(split_iters[0]->axis, coord[0] * split_iters[0]->stride);
-      exclude.Set(split_iters[1]->axis, coord[1] * split_iters[1]->stride);
+      offset.Set(split_iters[0]->axis, coord[0] * split_iters[0]->stride);
+      offset.Set(split_iters[1]->axis, coord[1] * split_iters[1]->stride);
     }
   }
 
-  return TileLayout(shard, replicate, exclude);
+  return TileLayout(shard, replica, offset);
 }
 
 ffi::Optional<TileLayout> TileLayoutNode::IsTileInner(
@@ -894,23 +894,23 @@ ffi::Optional<TileLayout> TileLayoutNode::IsTileInner(
 
   // Gather outer replicate
   std::vector<Iter> outer_replicate;
-  for (const auto& tiled_iter : tiled->replicate) {
-    if (std::none_of(
-            layout->replicate.begin(), layout->replicate.end(),
-            [&](const Iter& inner_iter) { return StructuralEqual()(tiled_iter, inner_iter); })) {
+  for (const auto& tiled_iter : tiled->replica) {
+    if (std::none_of(layout->replica.begin(), layout->replica.end(), [&](const Iter& inner_iter) {
+          return StructuralEqual()(tiled_iter, inner_iter);
+        })) {
       auto outer_iter = rescale_iter(tiled_iter);
       if (!outer_iter.has_value()) return std::nullopt;
       outer_replicate.push_back(outer_iter.value());
     }
   }
-  // Gather outer exclude
+  // Gather outer offset
   ffi::Map<Axis, PrimExpr> outer_exclude;
-  for (const auto& [axis, offset] : tiled->exclude) {
-    auto it = layout->exclude.find(axis);
-    if (it != layout->exclude.end()) {
-      outer_exclude.Set(axis, analyzer.Simplify(offset - (*it).second));
+  for (const auto& [axis, off] : tiled->offset) {
+    auto it = layout->offset.find(axis);
+    if (it != layout->offset.end()) {
+      outer_exclude.Set(axis, analyzer.Simplify(off - (*it).second));
     } else {
-      outer_exclude.Set(axis, offset);
+      outer_exclude.Set(axis, off);
     }
   }
   return TileLayout(outer_shard, outer_replicate, outer_exclude);
@@ -987,22 +987,22 @@ ffi::Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
 
   // Gather inner replicate
   std::vector<Iter> inner_replicate;
-  for (const auto& tiled_iter : tiled->replicate) {
-    if (std::none_of(
-            layout->replicate.begin(), layout->replicate.end(),
-            [&](const Iter& inner_iter) { return StructuralEqual()(tiled_iter, inner_iter); })) {
+  for (const auto& tiled_iter : tiled->replica) {
+    if (std::none_of(layout->replica.begin(), layout->replica.end(), [&](const Iter& inner_iter) {
+          return StructuralEqual()(tiled_iter, inner_iter);
+        })) {
       inner_replicate.push_back(tiled_iter);
     }
   }
 
-  // Gather inner exclude
+  // Gather inner offset
   ffi::Map<Axis, PrimExpr> inner_exclude;
-  for (const auto& [axis, offset] : tiled->exclude) {
-    auto it = layout->exclude.find(axis);
-    if (it != layout->exclude.end()) {
-      inner_exclude.Set(axis, analyzer.Simplify(offset - (*it).second));
+  for (const auto& [axis, off] : tiled->offset) {
+    auto it = layout->offset.find(axis);
+    if (it != layout->offset.end()) {
+      inner_exclude.Set(axis, analyzer.Simplify(off - (*it).second));
     } else {
-      inner_exclude.Set(axis, offset);
+      inner_exclude.Set(axis, off);
     }
   }
 
@@ -1023,7 +1023,7 @@ bool TileLayoutNode::IsTrivial() const {
   if (shard.size() == 1) {
     if (!shard[0]->axis->IsMemoryAxis() || !is_one(shard[0]->stride)) return false;
   }
-  return replicate.size() == 0 && exclude.size() == 0;
+  return replica.size() == 0 && offset.size() == 0;
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -1085,8 +1085,8 @@ ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> TileLayoutNode::GetScope() const
   };
 
   for (const auto& iter : shard) check_axis(iter->axis);
-  for (const auto& iter : replicate) check_axis(iter->axis);
-  for (const auto& [axis, offset] : exclude) check_axis(axis);
+  for (const auto& iter : replica) check_axis(iter->axis);
+  for (const auto& [axis, off] : offset) check_axis(axis);
 
   ffi::String outer_most = inner_most.value();
   size_t count = 0;

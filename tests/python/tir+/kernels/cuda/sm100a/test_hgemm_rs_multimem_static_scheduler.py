@@ -34,7 +34,7 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol
 
 
 class JobType(Enum):
@@ -397,7 +397,7 @@ def test_hgemm_rs():
                 B_smem = T.decl_buffer((PIPE_DEPTH, BLK_N // 2, BLK_K), b_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH, layout=B_layout)
                 C_smem = T.decl_buffer((NUM_CONSUMER, BLK_M, EPI_TILE), d_type, buf.data, elem_offset=512 + BLK_K * BLK_M * NUM_CONSUMER * PIPE_DEPTH + BLK_K * BLK_N // 2 * PIPE_DEPTH, layout=D_layout)
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
+                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@tid_in_wg, 1])))
                 reg_fp16 = T.alloc_buffer((BLK_N,), d_type, scope="local")
                 descA = T.local_cell("uint64")
                 descB = T.local_cell("uint64")
@@ -444,7 +444,7 @@ def test_hgemm_rs():
                 T.cuda.cta_sync()
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
                 tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0,
-                                     layout=TileLayout(([128, N_COLS], [(1, "TCol"), (1, "TLane")])))
+                                     layout=TileLayout(([128, N_COLS], [1@TCol, 1@TLane])))
 
                 while task_id < MAX_TASKS and task_smem[task_id, 2] != JobType.END.value:
                     # GEMM

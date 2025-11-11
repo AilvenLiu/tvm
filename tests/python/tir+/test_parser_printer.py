@@ -21,6 +21,7 @@ import tvm.script
 import tvm.testing
 from tvm.ir import assert_structural_equal
 from tvm.script import tir as T
+from tvm.tir.layout import laneid
 from tvm.script import tirp as Tp
 
 
@@ -109,11 +110,11 @@ def test_roundtrip_exec_scope():
 def test_roundtrip_layout():
     def get_layout1():
         return T.TileLayout(
-            shard=([8, 8, 8, 4, 2], [6, (4, "laneid"), 2, (1, "laneid"), 1]),
+            shard=([8, 8, 8, 4, 2], [6, 4@laneid, 2, 1@laneid, 1]),
         )
 
     def get_layout2():
-        return T.TileLayout(shard=([8, 8, 8, 4, 2], [64, (4, "laneid"), 8, 2, 1]))
+        return T.TileLayout(shard=([8, 8, 8, 4, 2], [64, 4@laneid, 8, 2, 1]))
 
     def get_layout3():
         return T.TileLayout(
@@ -177,7 +178,7 @@ def test_print_kwargs_schedule_op_full_code():
     assert_structural_equal(test, from_source(code))
 
 
-L_LANE = T.TileLayout(shard=([32], [(1, "laneid")]))
+L_LANE = T.TileLayout(shard=([32], [1@laneid]))
 
 
 def test_roundtrip_buffer_view_get1():

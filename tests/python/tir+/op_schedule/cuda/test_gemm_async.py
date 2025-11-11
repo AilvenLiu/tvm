@@ -26,7 +26,7 @@ import tvm.testing
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
 from tvm.tirp.op_schedule.cuda.copy_async import tma_shared_layout
 
 
@@ -107,7 +107,7 @@ def test_gemm_tcgen05_cta_group_1(task):
                 T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=cols_alloc, cta_group=1)
             T.cuda.cta_sync()
             tmem = T.decl_buffer((128, C_shape[1]), C_dtype, scope="tmem", allocated_addr=tmem_addr[0],
-                                 layout=TileLayout(([128, C_shape[1]], [(1, "TLane"), (1, "TCol")])))
+                                 layout=TileLayout(([128, C_shape[1]], [1@TLane, 1@TCol])))
 
             with T.thread()[0:1]:
                 tma_args = T.meta_var({"dispatch": "tma", "mbar": tma_mbar.ptr_to([0])})
@@ -125,7 +125,7 @@ def test_gemm_tcgen05_cta_group_1(task):
             
             T.ptx.tcgen05.fence.after_thread_sync()
             C_reg = T.alloc_local(width, dtype=C_dtype)
-            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [(1, "tid_in_wg"), (1, "m")])))
+            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [1@axis_tid_in_wg, 1])))
             with T.warpgroup()[0:1]:
                 Tp.copy(C_view[:, :], tmem[*r_tmem_C])
             T.cuda.cta_sync()
@@ -282,7 +282,7 @@ def test_gemm_tcgen05_cta_group_2(task):
             T.cuda.cta_sync()
 
             C_reg = T.alloc_local(width , dtype=C_dtype)
-            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [(1, "tid_in_wg"), (1, "m")])))
+            C_view = C_reg.view(128, width, layout=TileLayout(([128, width], [1@axis_tid_in_wg, 1])))
             with T.warpgroup()[0:1]:
                 Tp.copy(C_view[:, :], tmem[C_region[0][0]:C_region[0][1], C_region[1][0]:C_region[1][0] + width])
             T.cuda.cta_sync()

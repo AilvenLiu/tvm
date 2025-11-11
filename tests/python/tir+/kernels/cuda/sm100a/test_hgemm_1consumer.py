@@ -7,7 +7,7 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tirp.bench.utils import ProtonContext, bench
 from tvm.tirp.tile_scheduler import GroupMajor2D
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol
 
 # cluster: [2, 1], cta_num = 2
 # warpgroup:
@@ -183,7 +183,7 @@ def test_hgemm_1consumer():
 
                 # alloc local memory
                 reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
+                reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@tid_in_wg, 1])))
                 reg_fp16 = T.alloc_buffer((TMEM_LD_SIZE,), d_type, scope="local")
                 stage = T.local_cell("int32")
                 phase = T.alloc_buffer((1, ), "int32", scope="local")
@@ -215,7 +215,7 @@ def test_hgemm_1consumer():
                 T.ptx.fence.mbarrier_init()
                 T.cuda.cluster_sync()
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
-                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TLane"), (1, "TCol")])))
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [1@TLane, 1@TCol])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):

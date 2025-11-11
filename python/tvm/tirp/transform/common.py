@@ -28,7 +28,7 @@ from tvm.tir import (
     PrimExpr,
     Stmt,
     Var,
-    decl_buffer
+    decl_buffer,
 )
 from tvm.tir.buffer import Buffer
 from tvm.tir.stmt_functor import StmtExprMutator, StmtMutator
@@ -37,7 +37,7 @@ from tvm.tirp.operator.op import KernelReplacePoint
 from tvm.tir.layout import TileLayout, Iter
 
 
-#FIXME: this pass does not replace var in the shape/layout of a buffer
+# FIXME: this pass does not replace var in the shape/layout of a buffer
 class BufferReplacer(StmtExprMutator):
     """
     Replace buffer with another buffer.
@@ -62,17 +62,34 @@ class BufferReplacer(StmtExprMutator):
             new_shard = []
             new_replicate = []
             for iter in buffer.layout.shard:
-                new_iter = Iter(self.visit_expr(iter.extent), self.visit_expr(iter.stride), iter.axis)
+                new_iter = Iter(
+                    self.visit_expr(iter.extent), self.visit_expr(iter.stride), iter.axis
+                )
                 new_shard.append(new_iter)
-            for iter in buffer.layout.replicate:
-                new_iter = Iter(self.visit_expr(iter.extent), self.visit_expr(iter.stride), iter.axis)
+            for iter in buffer.layout.replica:
+                new_iter = Iter(
+                    self.visit_expr(iter.extent), self.visit_expr(iter.stride), iter.axis
+                )
                 new_replicate.append(new_iter)
-            new_layout = TileLayout(new_shard, new_replicate, buffer.layout.exclude)
+            new_layout = TileLayout.from_iters(
+                new_shard, new_replicate, offset=buffer.layout.offset
+            )
         else:
             new_layout = buffer.layout
         if not self.buffer_attr_var_mutated:
             return None
-        new_buffer = decl_buffer(new_shape, buffer.dtype, buffer.name, new_data, buffer.strides, buffer.elem_offset, buffer.scope(), buffer.data_alignment, buffer.offset_factor, layout=new_layout)
+        new_buffer = decl_buffer(
+            new_shape,
+            buffer.dtype,
+            buffer.name,
+            new_data,
+            buffer.strides,
+            buffer.elem_offset,
+            buffer.scope(),
+            buffer.data_alignment,
+            buffer.offset_factor,
+            layout=new_layout,
+        )
         self.buffer_map[buffer] = new_buffer
         return new_buffer
 
@@ -135,7 +152,6 @@ class BufferReplacer(StmtExprMutator):
         return OpCall(
             *args, op=op.op, workspace=new_workspace, config=op.config, dispatch=op.dispatch
         )
-
 
 
 class KernelReplacePointSearcher(StmtMutator):

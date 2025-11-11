@@ -229,11 +229,9 @@ class TLayout(Object):
         if isinstance(self, TileLayout):
             # Filter out shard with thread axis
             shard = [iter for iter in self.shard if not iter.axis.is_thread()]
-            replicate = [iter for iter in self.replicate if not iter.axis.is_thread()]
-            exclude = {
-                axis: offset for axis, offset in self.exclude.items() if not axis.is_thread()
-            }
-            return _ffi_api.TileLayout(shard, replicate, exclude)  # pylint: disable=no-member
+            replicate = [iter for iter in self.replica if not iter.axis.is_thread()]
+            exclude = {axis: offset for axis, offset in self.offset.items() if not axis.is_thread()}
+            return TileLayout.from_iters(shard, replicate, exclude)  # pylint: disable=no-member
 
         elif isinstance(self, SwizzleLayout):
             return self
@@ -258,7 +256,7 @@ class TLayout(Object):
         if isinstance(self, TileLayout):
             shard = [Iter(iter.extent, iter.stride * num, iter.axis) for iter in self.shard]
             shard.append(Iter(num, 1, Axis.get("m")))
-            return _ffi_api.TileLayout(shard, self.replicate, self.exclude)
+            return TileLayout.from_iters(shard, self.replica, self.offset)
         elif isinstance(self, SwizzleLayout):
             assert num & (num - 1) == 0, "num must be a power of 2"
             return SwizzleLayout(
@@ -294,7 +292,7 @@ class TLayout(Object):
             ), f"Layout {self} can not be packed into {num} elements"
             shard = [Iter(iter.extent, iter.stride // num, iter.axis) for iter in self.shard[:-1]]
             shard.append(Iter(inner_iter.extent // num, 1, inner_iter.axis))
-            return _ffi_api.TileLayout(shard, self.replicate, self.exclude)
+            return TileLayout.from_iters(shard, self.replica, self.offset)
         elif isinstance(self, SwizzleLayout):
             assert num & (num - 1) == 0, "num must be a power of 2"
             assert (
@@ -398,6 +396,12 @@ class Axis(Object):
         """Get the subscope of the axis."""
         return _ffi_api.AxisGetSubscope(self)  # pylint: disable=no-member
 
+    # Enable syntax like `4 @ Axis.laneid` to attach an axis to a stride/term.
+    # This mirrors libraries that overload the matrix multiply operator for DSLs.
+    def __rmatmul__(self, other: PrimExpr):  # type: ignore[override]
+        # Represent a single value bound to an axis.
+        return _OnAxis(other, self)
+
 
 # ------------------------------------------------------------------
 # 2)  Runtime: actually attach the attributes
@@ -407,6 +411,83 @@ for _n in Axis._NAMES:  # pylint: disable=protected-access
     _axis_obj = Axis._register_axis(_n)  # pylint: disable=protected-access
     setattr(Axis, _n, _axis_obj)
     Axis.reg_dict[_n] = _axis_obj
+    # Export axis names at module level for `from tvm.tir.layout import laneid` style.
+    globals()[_n] = _axis_obj
+
+# Populate __all__ for axis symbols in addition to classes
+try:
+    __all__  # type: ignore[name-defined]
+except NameError:  # pragma: no cover
+    __all__ = []  # type: ignore[var-annotated]
+__all__ += Axis._NAMES  # pylint: disable=protected-access
+
+
+# ------------------------------------------------------------------
+# Helper types to support `PrimExpr @ Axis` and `sum` for offsets
+# ------------------------------------------------------------------
+class _OnAxis:
+    """Represents a single value attached to an axis, created via `value @ Axis.X`.
+
+    Used in two places:
+    - As stride spec in `TileLayout(..., shard=(extents, [value @ Axis.X]))`
+    - As terms to build an offset expression like `1 @ Axis.laneid + 512`
+    """
+
+    def __init__(self, value: PrimExpr, axis: Axis):
+        self.value = value
+        self.axis = axis
+
+    # Arithmetic to build offset sums
+    def __add__(self, other: "_OffsetExprLike") -> "_OffsetExpr":
+        base = _OffsetExpr({self.axis: self.value})
+        return base + other
+
+    def __radd__(self, other: "_OffsetExprLike") -> "_OffsetExpr":
+        return self.__add__(other)
+
+
+class _OffsetExpr:
+    """Sum of axis-bound terms forming an offset specification.
+
+    Internally stored as a dict {Axis: PrimExpr}. When a plain PrimExpr is
+    provided (without axis), it is treated as `Axis.m` by convention.
+    """
+
+    def __init__(self, terms: Optional[Dict[Axis, PrimExpr]] = None):
+        self.terms: Dict[Axis, PrimExpr] = dict(terms or {})
+
+    def _add_term(self, axis: Axis, value: PrimExpr):
+        if axis in self.terms:
+            # Merge if both exist; rely on tvm arith for symbolic add
+            self.terms[axis] = self.terms[axis] + value  # type: ignore[operator]
+        else:
+            self.terms[axis] = value
+
+    def __add__(self, other: "_OffsetExprLike") -> "_OffsetExpr":
+        res = _OffsetExpr(dict(self.terms))
+        if isinstance(other, _OffsetExpr):
+            for ax, v in other.terms.items():
+                res._add_term(ax, v)
+        elif isinstance(other, _OnAxis):
+            res._add_term(other.axis, other.value)
+        else:  # PrimExpr-like -> default to Axis.m
+            res._add_term(Axis.get("m"), other)  # type: ignore[arg-type]
+        return res
+
+    def __radd__(self, other: "_OffsetExprLike") -> "_OffsetExpr":
+        return self.__add__(other)
+
+
+_OffsetExprLike = Union[_OffsetExpr, _OnAxis, PrimExpr, int]
+
+
+def _to_offset_expr(x: _OffsetExprLike) -> _OffsetExpr:
+    if isinstance(x, _OffsetExpr):
+        return x
+    if isinstance(x, _OnAxis):
+        return _OffsetExpr({x.axis: x.value})
+    # Fallback: treat plain PrimExpr/int as Axis.m
+    return _OffsetExpr({Axis.get("m"): x})  # type: ignore[arg-type]
 
 
 @tvm_ffi.register_object("tir.Iter")
@@ -440,54 +521,65 @@ class TileLayout(TLayout):
     def __init__(
         self,
         shard: IterList = None,
-        replicate: IterList = None,
-        exclude: List[Tuple[Union[Axis, str], PrimExpr]] = None,
+        replica: IterList = None,
+        offset: "_OffsetExprLike" = None,
     ):
-        if exclude is None:
-            exclude = dict()
-        exclude = {
-            Axis.get(axis) if isinstance(axis, str) else axis: offset for axis, offset in exclude
-        }
+        # New API: accept only replica and offset
+        offset_dict = dict()
+        if offset is not None:
+            off_expr = _to_offset_expr(offset)
+            for ax, val in off_expr.terms.items():
+                offset_dict[ax] = val
         if (
             shard is not None
             and all(isinstance(iter, Iter) for iter in shard)
-            and replicate is not None
-            and all(isinstance(iter, Iter) for iter in replicate)
+            and replica is not None
+            and all(isinstance(iter, Iter) for iter in replica)
         ):
             self.__init_handle_by_constructor__(
                 _ffi_api.TileLayout,  # pylint: disable=no-member
                 shard,
-                replicate,
-                exclude,
+                replica,
+                offset_dict,
             )
             return
         # Handle None values
         if shard is None or shard == ():
             shard = ([], [])
-        if replicate is None:
-            replicate = ([], [])
+        if replica is None:
+            replica = ([], [])
 
         if isinstance(shard, (tuple, list)) and not isinstance(shard[0], (tuple, list)):
             # shard can be just a tuple of extents, infer the default strides
             shard = (shard, TLayout._get_default_strides(shard, 1))
         # Convert to Iter objects
         assert len(shard[0]) == len(shard[1]), "shard's extent and stride must have the same length"
-        assert len(replicate[0]) == len(
-            replicate[1]
+        assert len(replica[0]) == len(
+            replica[1]
         ), "replicate's extent and stride must have the same length"
 
         def process_iter(e, s):
+            if isinstance(s, _OnAxis):
+                return Iter(e, s.value, s.axis)
             return Iter(e, s[0], s[1]) if isinstance(s, tuple) else Iter(e, s, "m")
 
         shard = [process_iter(e, s) for e, s in zip(shard[0], shard[1])]
-        replicate = [process_iter(e, s) for e, s in zip(replicate[0], replicate[1])]
+        replica = [process_iter(e, s) for e, s in zip(replica[0], replica[1])]
 
         self.__init_handle_by_constructor__(
             _ffi_api.TileLayout,  # pylint: disable=no-member
             shard,
-            replicate,
-            exclude,
+            replica,
+            offset_dict,
         )
+
+    @staticmethod
+    def from_iters(
+        shard: IterList = None, replica: IterList = None, offset: Dict[Axis, PrimExpr] = None
+    ) -> "TileLayout":
+        if offset is None:
+            offset = dict()
+        return _ffi_api.TileLayout(shard, replica, offset)  # pylint: disable=no-member
 
     def is_trivial(self) -> bool:
         """Check if the layout is trivial."""
@@ -567,7 +659,7 @@ class TileLayout(TLayout):
             result = result[1:]
             result = result[:p_idx] + [higher_P] + result[p_idx:]
 
-        res = _ffi_api.TileLayout(result, [], dict())  # pylint: disable=no-member
+        res = TileLayout.from_iters(result, [], dict())  # pylint: disable=no-member
         if is_psum:
             res = res.to_psum()
         return res
@@ -597,7 +689,7 @@ class TileLayout(TLayout):
                     assert False, f"layout {self} can not be converted to psum layout"
             else:
                 shard.append(i)
-        return _ffi_api.TileLayout(shard, [], dict())  # pylint: disable=no-member
+        return TileLayout.from_iters(shard, [], dict())  # pylint: disable=no-member
 
 
 @tvm_ffi.register_object("tir.SwizzleLayout")

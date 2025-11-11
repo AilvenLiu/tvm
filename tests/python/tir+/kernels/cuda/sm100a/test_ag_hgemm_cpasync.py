@@ -29,7 +29,7 @@ from tvm.runtime import ShapeTuple
 from tvm.runtime import disco as di
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirp.bench.utils import export_to_perfetto_trace, CudaProfiler
 
@@ -616,7 +616,7 @@ def test_ag_hgemm():
                 tile_scheduler.init(cbx, bx, rank, warp_id_in_cta, lane_id)
 
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
-                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TLane"), (1, "TCol")])))
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [1@TLane, 1@TCol])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -721,7 +721,7 @@ def test_ag_hgemm():
                                     T.ptx.setmaxnreg(True, 224)
 
                                     reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                                    reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
+                                    reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@tid_in_wg, 1])))
                                     reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
 
                                     mma2ld.wait(0, wg_id, phase_tmem[0])

@@ -23,7 +23,7 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirp as Tp
-from tvm.tir.layout import TileLayout, SwizzleLayout, ComposeLayout
+from tvm.tir.layout import TileLayout, SwizzleLayout, ComposeLayout, tid_in_wg, TLane, TCol
 
 ml_dtypes_dict = {
     "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
@@ -242,7 +242,7 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
         pytest.skip(f"dtype {dtype} + width {width_32b} is not supported")
 
     g_layout = TileLayout(shard=([128, WIDTH // VEC_LEN, VEC_LEN], [WIDTH, VEC_LEN, 1]))
-    local_view = TileLayout(shard=([128, WIDTH], [(1, "tid_in_wg"), (1, "m")]))
+    local_view = TileLayout(shard=([128, WIDTH], [1@tid_in_wg, 1]))
 
     # fmt: off
     @T.prim_func(tirp=True)
@@ -269,7 +269,7 @@ def test_copy_tmem2reg(dtype, width_32b, offset_32b):
                 T.tvm_storage_sync("shared")
 
                 tmem = T.decl_buffer((128, OFFSET + WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
-                                     layout=TileLayout(([128, OFFSET + WIDTH], [(1, "TLane"), (1, "TCol")])))
+                                     layout=TileLayout(([128, OFFSET + WIDTH], [1@TLane, 1@TCol])))
 
                 A_reg = T.alloc_local((WIDTH), dtype)
                 B_reg = T.alloc_local((WIDTH), dtype)

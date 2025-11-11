@@ -499,7 +499,7 @@ class InstructionGenerator:
                 assert False, f"Cannot analyze physical tensor region for: {buffer_region}"
             new_shard += reversed(reversed_shard)
             new_seps.append(len(reversed_shard) + new_seps[-1])
-        new_tile_layout = tvm.tir._ffi_api.TileLayout(  # pylint: disable=no-member
+        new_tile_layout = tvm.tir.layout.TileLayout.from_iters(  # pylint: disable=no-member
             new_shard, [], dict()
         )
         return new_tile_layout, new_seps

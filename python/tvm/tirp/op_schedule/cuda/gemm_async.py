@@ -25,7 +25,7 @@ from tvm.tir import PrimFunc
 from tvm.runtime import DataType
 from tvm.arith.analyzer import Analyzer
 from tvm.tir.stmt import OpCall
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, TLane, TCol
 from tvm.tirp.op_schedule import ScheduleContext, register_dispatch, predicate
 from .common import single_thread, validate_gemm_op, get_st_extent
 from .copy_async import SwizzleMode, tma_atom_layout, tma_atom_shape, tma_atom_compatible
@@ -88,7 +88,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
 
     # Check C's region [0:128, st:st+MMA_N] and layout (128, NCOLS):(1@TLane, 1@TCol)
     assert analyzer.can_prove_equal(C_buffer.shape[0], 128)
-    tmem_layout = TileLayout(([128, C_buffer.shape[1]], [(1, "TLane"), (1, "TCol")])).normalize()
+    tmem_layout = TileLayout(([128, C_buffer.shape[1]], [1@TLane, 1@TCol])).normalize()
     tvm.ir.assert_structural_equal(C_buffer.layout.normalize(), tmem_layout)
     assert analyzer.can_prove_equal(C_st[0], 0)
     assert analyzer.can_prove_equal(C_extent[0], 128)

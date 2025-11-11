@@ -21,6 +21,7 @@ import pytest
 import tvm
 import tvm.testing
 from tvm.script import tir as T
+from tvm.tir.layout import laneid, warpid
 from tvm.script import tirp as Tp
 from tvm.tir.function import PrimFunc
 from tvm.tir.transform import LowerTIRp
@@ -39,7 +40,7 @@ def compare(before, after, transform):
         tvm.ir.assert_structural_equal(transform()(before), after, map_free_vars=False)
 
 
-L_LANE = T.TileLayout(shard=([32], [(1, "laneid")]))
+L_LANE = T.TileLayout(shard=([32], [1@laneid]))
 
 
 def test_lower_view_get():
@@ -187,7 +188,7 @@ def test_lower_view_get():
                 tile = T.TileLayout(shard=([2, 128 // 8], [1, 2])) # column-major
                 warp_layout = warp_atom.tile(tile, (2, 128 // 8), (8, 8))
                 # shard from warp to cta
-                L_warp = T.TileLayout(shard=([8], [(1, "warpid")]))
+                L_warp = T.TileLayout(shard=([8], [1@warpid]))
                 layout = warp_layout.tile(L_warp, (8, 1), (16, 128))
                 # alloc
                 acc = T.alloc_buffer([64,], dtype="float32", scope="local", layout=atom.tile(tile, (2, 128 // 8), (1, 2)))

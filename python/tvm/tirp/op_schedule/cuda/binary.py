@@ -25,6 +25,7 @@ from tvm.arith.analyzer import Analyzer
 from tvm.error import InternalError
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, OpCall, PrimFunc
+from tvm.tir.layout import laneid
 from tvm.tir.expr import FloatImm
 from tvm.tirp.op_schedule import ScheduleContext, fail
 
@@ -349,7 +350,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
 
     # WGMMA layout check
     atom = T.TileLayout(shard=([1, 2], [2, 1]))
-    warp_layout = T.TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
+    warp_layout = T.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
 
     def check_wgmma(buf):

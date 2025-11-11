@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 from tvm.arith.analyzer import Analyzer
 from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
+from tvm.tir.layout import laneid
 from tvm.tir.stmt import OpCall
 from tvm.tirp.op_schedule import ScheduleContext, fail
 
@@ -237,7 +238,7 @@ def reduction_cuda_warp_logical_view_impl(
         fail("swizzle layout unsupported for local reduction")
 
     atom = T.TileLayout(shard=([1, 2], [2, 1]))
-    warp_layout = T.TileLayout(shard=([8, 4], [(4, "laneid"), (1, "laneid")]))
+    warp_layout = T.TileLayout(shard=([8, 4], [4@laneid, 1@laneid]))
     warp_atom = atom.tile(warp_layout, (8, 4), (1, 2))
     red_atom = T.TileLayout(shard=([1, 1], [1, 1]))
     red_warp_atom = red_atom.tile(warp_layout, (8, 4), (1, 1))

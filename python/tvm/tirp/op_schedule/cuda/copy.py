@@ -22,7 +22,7 @@ from tvm.arith import Analyzer
 import tvm
 from tvm.script import tir as T
 from tvm.tir import Buffer, BufferRegion, PrimFunc
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg
 from tvm.tir.stmt import OpCall
 from tvm.runtime import DataType
 from tvm.tirp.op_schedule import (
@@ -265,9 +265,9 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
     tmem_st, tmem_extent = get_st_extent(tmem_region)
     local_st, local_extent = get_st_extent(local_region)
     # tmem layout (128, WIDTH):(1@TLane, 1@TCol)
-    tmem_layout = TileLayout(([128, tmem_buf.shape[1]], [(1, "TLane"), (1, "TCol")])).normalize()
+    tmem_layout = TileLayout(([128, tmem_buf.shape[1]], [1@TLane, 1@TCol])).normalize()
     # local layout
-    local_layout = TileLayout(([128, width], [(1, "tid_in_wg"), (1, "m")])).normalize()
+    local_layout = TileLayout(([128, width], [1@tid_in_wg, 1])).normalize()
 
     # tmem allocated addr is not None
     assert tmem_buf.allocated_addr is not None

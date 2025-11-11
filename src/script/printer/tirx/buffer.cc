@@ -423,7 +423,7 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, AccessPath p) {
   ffi::Array<ffi::String> keys;
   ffi::Array<ExprDoc> values;
 
-  // print shard, replicate, and exclude
+  // print shard, replica, and offset
   if (layout->shard.size() > 0) {
     ffi::Array<ExprDoc> shard_e_docs, shard_sa_docs;
     for (const auto& iter : layout->shard) {
@@ -434,23 +434,23 @@ Doc PrintTileLayout(tirx::TileLayout layout, IRDocsifier d, AccessPath p) {
     keys.push_back("shard");
     values.push_back(TupleDoc({ListDoc(shard_e_docs), ListDoc(shard_sa_docs)}));
   }
-  if (layout->replicate.size() > 0) {
+  if (layout->replica.size() > 0) {
     ffi::Array<ExprDoc> replicate_e_docs, replicate_sa_docs;
-    for (const auto& iter : layout->replicate) {
+    for (const auto& iter : layout->replica) {
       replicate_e_docs.push_back(d->AsDoc<ExprDoc>(iter->extent, p->Attr("extent")));
       replicate_sa_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(iter->stride, p->Attr("stride")),
                                             d->AsDoc<ExprDoc>(iter->axis->name, p->Attr("axis"))}));
     }
-    keys.push_back("replicate");
+    keys.push_back("replica");
     values.push_back(TupleDoc({ListDoc(replicate_e_docs), ListDoc(replicate_sa_docs)}));
   }
-  if (layout->exclude.size() > 0) {
+  if (layout->offset.size() > 0) {
     ffi::Array<ExprDoc> exclude_docs;
-    for (const auto& [axis, offset] : layout->exclude) {
+    for (const auto& [axis, off] : layout->offset) {
       exclude_docs.push_back(TupleDoc({d->AsDoc<ExprDoc>(axis->name, p->Attr("axis")),
-                                       d->AsDoc<ExprDoc>(offset, p->Attr("offset"))}));
+                                       d->AsDoc<ExprDoc>(off, p->Attr("offset"))}));
     }
-    keys.push_back("exclude");
+    keys.push_back("offset");
     values.push_back(ListDoc(exclude_docs));
   }
 

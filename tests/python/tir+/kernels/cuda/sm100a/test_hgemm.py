@@ -4,7 +4,7 @@ import tvm
 import tvm.testing
 from tvm.ir.type import PointerType, PrimType
 from tvm.script import tirp as Tp
-from tvm.tir.layout import TileLayout
+from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg
 from tvm.script import tir as T
 from tvm.tirp.bench.utils import ProtonContext, bench
 from tvm.tirp.tile_scheduler import GroupMajor2D
@@ -229,7 +229,7 @@ def test_hgemm():
                 T.ptx.fence.proxy("shared")
                 T.ptx.fence.mbarrier_init()
                 T.cuda.trap_when_assert_failed(tmem_addr == 0)
-                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [(1, "TLane"), (1, "TCol")])))
+                tmem = T.decl_buffer((128, N_COLS), "float32", scope="tmem", allocated_addr=0, layout=TileLayout(([128, N_COLS], [1@TLane, 1@TCol])))
 
                 @T.macro
                 def paritioned_loop(main_loop, epilogue1, epilogue2):
@@ -324,7 +324,7 @@ def test_hgemm():
                         T.ptx.setmaxnreg(True, 224)
 
                         reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
-                        reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [(1, "tid_in_wg"), (1, "m")])))
+                        reg_wg = reg.view(128, TMEM_LD_SIZE, layout=TileLayout(([128, TMEM_LD_SIZE], [1@tid_in_wg, 1])))
                         reg_fp16 = T.alloc_buffer((BLK_N * CTA_GROUP,), d_type, scope="local")
                         phase_tmem = T.local_cell("int32")
 
