@@ -144,11 +144,11 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
     if (trn_layout && trn_layout->IsTrainium()) {
       ffi::Array<PrimExpr> new_shape =
           buf.scope() == "trn.psum"
-              ? ffi::Array<PrimExpr>{trn_layout->GetCosize(ffi::String("Bank")),
+              ? ffi::Array<PrimExpr>{trn_layout->GetSpan(ffi::String("Bank")),
                                      trn_layout->GetSize(ffi::String("P")),
-                                     trn_layout->GetCosize(ffi::String("F"))}
+                                     trn_layout->GetSpan(ffi::String("F"))}
               : ffi::Array<PrimExpr>{trn_layout->GetSize(ffi::String("P")),
-                                     trn_layout->GetCosize(ffi::String("F"))};
+                                     trn_layout->GetSpan(ffi::String("F"))};
       flattened = buf;
       writer = flattened.CopyOnWrite();
       writer->shape = new_shape;

@@ -60,8 +60,8 @@ class TLayoutNode : public Object {
   /*! \brief Get the size of the layout (of some axis) */
   virtual PrimExpr GetSize(ffi::Optional<ffi::String> axis_name = std::nullopt) const = 0;
 
-  /*! \brief Get the cosize of the layout (of some axis) */
-  virtual PrimExpr GetCosize(ffi::Optional<ffi::String> axis_name = std::nullopt) const = 0;
+  /*! \brief Get the span of the layout (of some axis) */
+  virtual PrimExpr GetSpan(ffi::Optional<ffi::String> axis_name = std::nullopt) const = 0;
 
   /*! \brief Apply layout on the input coordinate and get the mapped output */
   virtual ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const = 0;
@@ -295,8 +295,8 @@ class TileLayoutNode : public TLayoutNode {
   /*! \brief Get the size of the layout (of some axis) */
   PrimExpr GetSize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
-  /*! \brief Get the cosize of the layout (of some axis) */
-  PrimExpr GetCosize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
+  /*! \brief Get the span of the layout (of some axis) */
+  PrimExpr GetSpan(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
   ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const final;
@@ -381,8 +381,8 @@ class SwizzleLayoutNode : public TLayoutNode {
   /*! \brief Get the size of the layout */
   PrimExpr GetSize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
-  /*! \brief Get the cosize of the layout */
-  PrimExpr GetCosize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
+  /*! \brief Get the span of the layout */
+  PrimExpr GetSpan(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
   ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const final;
@@ -425,14 +425,14 @@ class SwizzleLayout : public TLayout {
 // ComposeLayout
 class ComposeLayoutNode : public TLayoutNode {
  public:
-  SwizzleLayout layout_A;
-  TileLayout layout_B;
+  SwizzleLayout swizzle;
+  TileLayout tile_layout;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<ComposeLayoutNode>()
-        .def_ro("layout_A", &ComposeLayoutNode::layout_A)
-        .def_ro("layout_B", &ComposeLayoutNode::layout_B);
+        .def_ro("swizzle", &ComposeLayoutNode::swizzle)
+        .def_ro("tile_layout", &ComposeLayoutNode::tile_layout);
   }
 
   /*! \brief Check if the layout is compatible with the shape */
@@ -444,8 +444,8 @@ class ComposeLayoutNode : public TLayoutNode {
   /*! \brief Get the size (of some axis) of the layout */
   PrimExpr GetSize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
-  /*! \brief Get the cosize (of some axis) of the layout */
-  PrimExpr GetCosize(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
+  /*! \brief Get the span (of some axis) of the layout */
+  PrimExpr GetSpan(ffi::Optional<ffi::String> axis_name = std::nullopt) const final;
 
   /*! \brief Apply the input coordinate and get the mapped output */
   ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const final;

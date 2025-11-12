@@ -64,15 +64,17 @@ class TLayout(Object):
         """
         return _ffi_api.TLayoutGetSize(self, axis_name)  # pylint: disable=no-member
 
-    def cosize(self, axis_name: Optional[str] = None):
-        """Get the cosize of the layout.
+    def span(self, axis_name: Optional[str] = None):
+        """Get the span of the layout.
 
         Parameters
         ----------
         axis_name : Optional[str]
-            The name of the axis to get the cosize of. If not provided, the default cosize will be returned.
+            The name of the axis to get the span of. If not provided, the default span will be returned.
         """
-        return _ffi_api.TLayoutGetCosize(self, axis_name)  # pylint: disable=no-member
+        return _ffi_api.TLayoutGetSpan(self, axis_name)  # pylint: disable=no-member
+
+    # Note: no backward-compat alias; `cosize` is removed.
 
     def apply(self, *coord: List[PrimExpr], shape: List[PrimExpr] = None) -> Dict[str, PrimExpr]:
         """Apply the layout on the input coordinate and get the mapped output.
@@ -236,7 +238,7 @@ class TLayout(Object):
         elif isinstance(self, SwizzleLayout):
             return self
         elif isinstance(self, ComposeLayout):
-            return ComposeLayout(self.layout_A.storage(), self.layout_B.storage())
+            return ComposeLayout(self.swizzle.storage(), self.tile_layout.storage())
         else:
             raise ValueError(f"Unsupported layout type: {type(self)}")
 
@@ -266,7 +268,7 @@ class TLayout(Object):
                 self.swizzle_inner,
             )
         elif isinstance(self, ComposeLayout):
-            return ComposeLayout(self.layout_A.unpack(num), self.layout_B.unpack(num))
+            return ComposeLayout(self.swizzle.unpack(num), self.tile_layout.unpack(num))
         else:
             raise ValueError(f"Unsupported layout type: {type(self)}")
 
@@ -305,7 +307,7 @@ class TLayout(Object):
                 self.swizzle_inner,
             )
         elif isinstance(self, ComposeLayout):
-            return ComposeLayout(self.layout_A.pack(num), self.layout_B.pack(num))
+            return ComposeLayout(self.swizzle.pack(num), self.tile_layout.pack(num))
         else:
             raise ValueError(f"Unsupported layout type: {type(self)}")
 

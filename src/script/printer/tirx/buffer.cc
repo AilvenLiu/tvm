@@ -466,8 +466,8 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)  //
     .set_dispatch<tirx::ComposeLayout>(
         "", [](tirx::ComposeLayout layout, AccessPath p, IRDocsifier d) -> Doc {
-          auto layoutA = d->AsDoc<ExprDoc>(layout->layout_A, p);
-          auto layoutB = d->AsDoc<ExprDoc>(layout->layout_B, p);
+          auto layoutA = d->AsDoc<ExprDoc>(layout->swizzle, p);
+          auto layoutB = d->AsDoc<ExprDoc>(layout->tile_layout, p);
           return TIR(d, "ComposeLayout")->Call({layoutA, layoutB}, {}, {});
         });
 

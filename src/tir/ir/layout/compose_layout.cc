@@ -24,8 +24,8 @@ namespace tir {
 /**************** ComposeLayout ****************/
 ComposeLayout::ComposeLayout(SwizzleLayout layout_A, TileLayout layout_B) {
   auto n = ffi::make_object<ComposeLayoutNode>();
-  n->layout_A = layout_A;
-  n->layout_B = layout_B;
+  n->swizzle = layout_A;
+  n->tile_layout = layout_B;
   CHECK(n->VerifyWellFormed()) << "ValueError: The compose layout is not well-formed";
 
   data_ = std::move(n);
@@ -41,11 +41,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 bool ComposeLayoutNode::CompatibleWithShape(const Array<PrimExpr>& shape) const { return true; }
 
 bool ComposeLayoutNode::VerifyWellFormed() const {
-  if (!layout_A->VerifyWellFormed() || !layout_B->VerifyWellFormed()) {
+  if (!swizzle->VerifyWellFormed() || !tile_layout->VerifyWellFormed()) {
     return false;
   }
   arith::Analyzer analyzer;
-  if (!analyzer.CanProve(FloorMod(layout_B->GetCosize(), layout_A->GetSize()) == 0)) {
+  if (!analyzer.CanProve(FloorMod(tile_layout->GetSpan(), swizzle->GetSize()) == 0)) {
     return false;
   }
   return true;
@@ -53,12 +53,12 @@ bool ComposeLayoutNode::VerifyWellFormed() const {
 
 PrimExpr ComposeLayoutNode::GetSize(ffi::Optional<ffi::String> axis_name) const {
   CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for compose layout";
-  return layout_B->GetSize(axis_name);
+  return tile_layout->GetSize(axis_name);
 }
 
-PrimExpr ComposeLayoutNode::GetCosize(ffi::Optional<ffi::String> axis_name) const {
+PrimExpr ComposeLayoutNode::GetSpan(ffi::Optional<ffi::String> axis_name) const {
   CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for compose layout";
-  return layout_B->GetCosize(axis_name);
+  return tile_layout->GetSpan(axis_name);
 }
 
 ffi::Map<ffi::String, PrimExpr> ComposeLayoutNode::Apply(ffi::Array<PrimExpr> coord) const {
@@ -67,35 +67,35 @@ ffi::Map<ffi::String, PrimExpr> ComposeLayoutNode::Apply(ffi::Array<PrimExpr> co
 }
 
 ffi::Map<ffi::String, PrimExpr> ComposeLayoutNode::Apply(PrimExpr coord) const {
-  auto res = layout_B->Apply(coord);
+  auto res = tile_layout->Apply(coord);
   CHECK(res.size() == 1 && res.find("m") != res.end());
   auto m = res["m"];
-  auto layout_A_res = layout_A->Apply(m);
-  CHECK(layout_A_res.size() == 1 && layout_A_res.find("m") != layout_A_res.end());
-  return layout_A_res;
+  auto swizzle_res = swizzle->Apply(m);
+  CHECK(swizzle_res.size() == 1 && swizzle_res.find("m") != swizzle_res.end());
+  return swizzle_res;
 }
 
 TLayout ComposeLayoutNode::Canonicalize() const {
-  auto layout_B_normalized = layout_B->Canonicalize().as<TileLayout>().value();
-  if (layout_B_normalized->IsTrivial()) {
-    return layout_A;
+  auto tile_normalized = tile_layout->Canonicalize().as<TileLayout>().value();
+  if (tile_normalized->IsTrivial()) {
+    return swizzle;
   }
-  return ComposeLayout(layout_A, layout_B_normalized);
+  return ComposeLayout(swizzle, tile_normalized);
 }
 
 TLayout ComposeLayoutNode::Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
                                 const ffi::Array<PrimExpr>& inner_shape) const {
   // layout_B is first tiled with `outer`, then compose with layout_A.
-  auto tiled_B = layout_B->Tile(outer, outer_shape, inner_shape).as<TileLayout>().value();
-  return ComposeLayout(layout_A, tiled_B);
+  auto tiled_B = tile_layout->Tile(outer, outer_shape, inner_shape).as<TileLayout>().value();
+  return ComposeLayout(swizzle, tiled_B);
 }
 
 ffi::Optional<TileLayout> ComposeLayoutNode::IsTileInner(
     const TLayout& tile_layout, const ffi::Array<PrimExpr>& tiled_shape,
     const ffi::Array<PrimExpr>& inner_shape) const {
   if (auto comp = tile_layout.as<ComposeLayout>()) {
-    if (StructuralEqual()(comp.value()->layout_A, this->layout_A)) {
-      return this->layout_B->IsTileInner(comp.value()->layout_B, tiled_shape, inner_shape);
+    if (StructuralEqual()(comp.value()->swizzle, this->swizzle)) {
+      return this->tile_layout->IsTileInner(comp.value()->tile_layout, tiled_shape, inner_shape);
     }
   }
   return std::nullopt;

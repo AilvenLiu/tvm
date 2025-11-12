@@ -182,7 +182,7 @@ def unary_map_cuda_warp_logical_view_nd_impl(
         [
             src.layout != dst.layout,
             src.layout.size() != dst.layout.size(),
-            src.layout.cosize() != dst.layout.cosize(),
+            src.layout.span() != dst.layout.span(),
             src.layout.is_swizzle(),
             dst.layout.is_swizzle(),
         ]

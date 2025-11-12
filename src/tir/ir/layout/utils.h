@@ -26,6 +26,7 @@
 #include <tvm/tir/op.h>
 
 #include <numeric>
+#include <vector>
 
 #include "../../../node/attr_registry.h"
 
@@ -47,6 +48,38 @@ Array<PrimExpr> SplitCoord(PrimExpr coord, const Array<PrimExpr>& shape);
  * \return The flattened coordinate
  */
 PrimExpr FlattenCoord(const Array<PrimExpr>& coord, const Array<PrimExpr>& shape);
+
+/*!
+ * \brief Create a TileLayout that maps the given logical shape to itself on the memory axis.
+ *        This is effectively an identity layout over axis "m" with unit stride.
+ * \param shape Logical shape to map.
+ * \return Identity TileLayout over the concatenated extent of `shape`.
+ */
+TileLayout IdentityTileLayout(const ffi::Array<PrimExpr>& shape);
+
+/*!
+ * \brief Build a map from axis name to span for the provided layout's shard axes.
+ *        If an axis appears multiple times, the first occurrence defines the span value.
+ * \param layout The layout whose shard axes will be scanned.
+ * \return A map from axis name to span expression.
+ */
+ffi::Map<ffi::String, PrimExpr> BuildSpanMap(const TileLayout& layout);
+
+/*!
+ * \brief Compute default contiguous strides for a list of extents.
+ *        The last dimension has `initial_stride`, and strides accumulate outward.
+ * \param data The extents per dimension.
+ * \param initial_stride The initial innermost stride, defaults to 1.
+ * \return A vector of strides, same length as `data`.
+ */
+std::vector<PrimExpr> GetDefaultStrides(const ffi::Array<PrimExpr>& data,
+                                        PrimExpr initial_stride = PrimExpr(1));
+
+/*!
+ * \brief Test whether an axis matches the optional axis_name filter used by size/span queries.
+ *        When `axis_name` is not provided, memory axes match; when provided, the name must match.
+ */
+bool AxisMatchesFilter(const Axis& axis, const ffi::Optional<ffi::String>& axis_name);
 
 }  // namespace tir
 }  // namespace tvm

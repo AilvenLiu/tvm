@@ -31,85 +31,41 @@ ffi::Map<ffi::String, PrimExpr> TLayoutNode::Apply(const ffi::Array<PrimExpr>& c
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def(
-      "tir.TLayoutCompatibleWithShape",
-      [](TLayout layout, Array<PrimExpr> shape) { return layout->CompatibleWithShape(shape); });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutVerifyWellFormed",
-                        [](TLayout layout) { return layout->VerifyWellFormed(); });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutGetSize",
-                        [](TLayout layout, ffi::Optional<ffi::String> axis_name) {
-                          return layout->GetSize(axis_name);
-                        });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutGetCosize",
-                        [](TLayout layout, ffi::Optional<ffi::String> axis_name) {
-                          return layout->GetCosize(axis_name);
-                        });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutApplyWithShape",
-                        [](TLayout layout, ffi::Array<PrimExpr> coord, ffi::Array<PrimExpr> shape) {
-                          return layout->Apply(coord, shape);
-                        });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutApply", [](TLayout layout, ffi::Array<PrimExpr> coord) {
-    return layout->Apply(coord);
-  });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutApplyLinear",
-                        [](TLayout layout, PrimExpr coord) { return layout->Apply(coord); });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutCanonicalize",
-                        [](TLayout layout) { return layout->Canonicalize(); });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutTile",
-                        [](TLayout layout, TileLayout outer, ffi::Array<PrimExpr> outer_shape,
-                           ffi::Array<PrimExpr> inner_shape) {
-                          return layout->Tile(outer, outer_shape, inner_shape);
-                        });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutIsTileInner",
-                        [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
-                           ffi::Array<PrimExpr> inner_shape) {
-                          return layout->IsTileInner(tile_layout, tiled_shape, inner_shape);
-                        });
-}
-
-TVM_FFI_STATIC_INIT_BLOCK() {
-  namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutIsTileOuter",
-                        [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
-                           ffi::Array<PrimExpr> outer_shape) {
-                          return layout->IsTileOuter(tile_layout, tiled_shape, outer_shape);
-                        });
+  auto def = refl::GlobalDef();
+  def.def("tir.TLayoutCompatibleWithShape",
+          [](TLayout layout, Array<PrimExpr> shape) { return layout->CompatibleWithShape(shape); });
+  def.def("tir.TLayoutVerifyWellFormed",
+          [](TLayout layout) { return layout->VerifyWellFormed(); });
+  def.def("tir.TLayoutGetSize",
+          [](TLayout layout, ffi::Optional<ffi::String> axis_name) {
+            return layout->GetSize(axis_name);
+          });
+  def.def("tir.TLayoutGetSpan",
+          [](TLayout layout, ffi::Optional<ffi::String> axis_name) {
+            return layout->GetSpan(axis_name);
+          });
+  def.def("tir.TLayoutApplyWithShape",
+          [](TLayout layout, ffi::Array<PrimExpr> coord, ffi::Array<PrimExpr> shape) {
+            return layout->Apply(coord, shape);
+          });
+  def.def("tir.TLayoutApply",
+          [](TLayout layout, ffi::Array<PrimExpr> coord) { return layout->Apply(coord); });
+  def.def("tir.TLayoutApplyLinear",
+          [](TLayout layout, PrimExpr coord) { return layout->Apply(coord); });
+  def.def("tir.TLayoutCanonicalize", [](TLayout layout) { return layout->Canonicalize(); });
+  def.def("tir.TLayoutTile",
+          [](TLayout layout, TileLayout outer, ffi::Array<PrimExpr> outer_shape,
+             ffi::Array<PrimExpr> inner_shape) { return layout->Tile(outer, outer_shape, inner_shape); });
+  def.def("tir.TLayoutIsTileInner",
+          [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
+             ffi::Array<PrimExpr> inner_shape) {
+            return layout->IsTileInner(tile_layout, tiled_shape, inner_shape);
+          });
+  def.def("tir.TLayoutIsTileOuter",
+          [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
+             ffi::Array<PrimExpr> outer_shape) {
+            return layout->IsTileOuter(tile_layout, tiled_shape, outer_shape);
+          });
 }
 
 }  // namespace tir

@@ -54,7 +54,7 @@ PrimExpr SwizzleLayoutNode::GetSize(ffi::Optional<ffi::String> axis_name) const 
   return 1 << (per_element + swizzle_len + atom_len);
 }
 
-PrimExpr SwizzleLayoutNode::GetCosize(ffi::Optional<ffi::String> axis_name) const {
+PrimExpr SwizzleLayoutNode::GetSpan(ffi::Optional<ffi::String> axis_name) const {
   CHECK(!axis_name.has_value()) << "ValueError: axis_name is not supported for swizzle layout";
   return GetSize();
 }
@@ -83,13 +83,6 @@ ffi::Map<ffi::String, PrimExpr> SwizzleLayoutNode::Apply(PrimExpr coord) const {
 
 TLayout SwizzleLayoutNode::Canonicalize() const { return ffi::GetRef<SwizzleLayout>(this); }
 
-// Creates a TileLayout mapping a logical shape to itself (identity).
-TileLayout IdentityTileLayout(ffi::Array<PrimExpr> shape) {
-  PrimExpr extent = std::accumulate(shape.begin() + 1, shape.end(), shape[0],
-                                    [](PrimExpr a, PrimExpr b) { return a * b; });
-  return TileLayout({Iter(extent, 1, Axis::Get("m"))}, {}, {});
-}
-
 TLayout SwizzleLayoutNode::Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
                                 const ffi::Array<PrimExpr>& inner_shape) const {
   // Compose(Swizzle, Identity) -> then tile with `outer`.
@@ -102,9 +95,9 @@ ffi::Optional<TileLayout> SwizzleLayoutNode::IsTileInner(
     const ffi::Array<PrimExpr>& inner_shape) const {
   // We expect tile_layout to be Compose(SwizzleLayout(this), _).
   if (auto comp = tile_layout.as<ComposeLayout>()) {
-    if (StructuralEqual()(comp.value()->layout_A, ffi::GetRef<SwizzleLayout>(this))) {
+    if (StructuralEqual()(comp.value()->swizzle, ffi::GetRef<SwizzleLayout>(this))) {
       auto identity = IdentityTileLayout(inner_shape);
-      return identity->IsTileInner(comp.value()->layout_B, tiled_shape, inner_shape);
+      return identity->IsTileInner(comp.value()->tile_layout, tiled_shape, inner_shape);
     }
   } else if (auto swizzle = tile_layout.as<SwizzleLayout>()) {
     if (StructuralEqual()(swizzle.value(), ffi::GetRef<SwizzleLayout>(this))) {

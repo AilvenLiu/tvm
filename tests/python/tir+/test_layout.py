@@ -1046,7 +1046,7 @@ def test_shard_layout():
     case_replicate()
 
 
-def test_size_cosize():
+def test_size_span():
     def tile_layout_size():
         layout = TileLayout(shard=([8, 8], [8, 1]))
         assert layout.size() == 64
@@ -1070,32 +1070,32 @@ def test_size_cosize():
 
     compose_layout_size()
 
-    def tile_layout_cosize():
+    def tile_layout_span():
         layout = TileLayout(shard=([8, 8], [8, 1]))
-        assert layout.cosize() == 64
+        assert layout.span() == 64
         layout = TileLayout(shard=([8, 6], [8, 1]))
-        assert layout.cosize() == 62
+        assert layout.span() == 62
         layout = TileLayout(shard=([8, 1, 4, 2], [4 @ laneid, 2, 1 @ laneid, 1]))
-        assert layout.cosize() == 2
+        assert layout.span() == 2
 
-    tile_layout_cosize()
+    tile_layout_span()
 
-    def swizzle_layout_cosize():
+    def swizzle_layout_span():
         layout = SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3)
-        assert layout.cosize() == 512
+        assert layout.span() == 512
         layout = SwizzleLayout(per_element=4, swizzle_len=3, atom_len=3)
-        assert layout.cosize() == 1024
+        assert layout.span() == 1024
 
-    swizzle_layout_cosize()
+    swizzle_layout_span()
 
-    def compose_layout_cosize():
+    def compose_layout_span():
         layout = ComposeLayout(
             SwizzleLayout(per_element=3, swizzle_len=3, atom_len=3),
             TileLayout(shard=([8, 64], [64, 1])),
         )
-        assert layout.cosize() == 512
+        assert layout.span() == 512
 
-    compose_layout_cosize()
+    compose_layout_span()
 
     def trainium_layout_tests():
         # TrainiumLayout tests
@@ -1106,7 +1106,7 @@ def test_size_cosize():
         layout = TileLayout(shard=([8, 8, 8], [64 @ F, 1 @ P, 1 @ F]))
         assert layout.size("P") == 8
         assert layout.size("F") == 64
-        assert layout.cosize("F") == 456
+        assert layout.span("F") == 456
 
         layout_partition = TileLayout(shard=([8], [1 @ P]))
         assert layout_partition.size("P") == 8 and layout_partition.size("F") == 1
@@ -1256,7 +1256,7 @@ def test_apply():
         layoutB = TileLayout(shard=([8, 64], [64, 1]))
         layout = ComposeLayout(layoutA, layoutB)
         assert layout.size() == 512
-        assert layout.cosize() == 512
+        assert layout.span() == 512
         for i, j in itertools.product(range(8), range(64)):
             assert (
                 layout.apply(i * 64 + j)["m"] == layoutA.apply(layoutB.apply(i * 64 + j)["m"])["m"]
@@ -1269,7 +1269,7 @@ def test_apply():
         layoutB = TileLayout(shard=([16, 64, 8], [64, 1, 1024]))
         layout = ComposeLayout(layoutA, layoutB)
         assert layout.size() == 16 * 64 * 8
-        assert layout.cosize() == 16 * 64 * 8
+        assert layout.span() == 16 * 64 * 8
         for i, j, k in itertools.product(range(16), range(64), range(8)):
             assert (
                 layout.apply(i * 64 * 8 + j * 8 + k)["m"]
@@ -1579,5 +1579,4 @@ def test_slice():
 
 
 if __name__ == "__main__":
-    test_slice()
     tvm.testing.main()
