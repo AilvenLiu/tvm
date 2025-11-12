@@ -21,7 +21,7 @@ from tvm.tirp.megakernel.relax_compatible.batch_merge import FuseBatchMergeTile
 from tvm.tirp.megakernel.relax_compatible.add_rmsnorm import FuseAddRMSNormTile, FuseRMSNormTile
 from tvm.tirp.megakernel.relax_compatible.end import FuseEndTile
 
-from tvm.tirp.megakernel.common import KernelConfig, ceildiv, JobType
+from tvm.tirp.megakernel.common import KernelConfig, ceildiv, JobType, event_type_names
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace
 from tvm.tirp.megakernel.support import get_inverse_plan_info
 import tvm.tirp.megakernel.static_scheduler as static_scheduler
@@ -56,7 +56,7 @@ class MegaKernel:
         self.world_size = 1
 
 
-    def _qwen3_layer_inner(self, bb: rx.BlockBuilder, max_batch_size, blk_m):
+    def _qwen3_layer_inner(self, bb: rx.BlockBuilder, max_batch_size, blk_m, profile_on):
         batch_size = T.var("int64", name="batch_size")
         x = rx.Var("x", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"))
         residual = rx.Var("residual", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"))
@@ -666,13 +666,13 @@ class MegaKernel:
         func_gv = bb.add_func(bb.get()[f"megakernel_blkm{blk_m}"], f"megakernel_blkm{blk_m}")
 
         return func_gv
-    
-    def get_mod(self, max_batch_size):
+
+    def get_mod(self, max_batch_size, profile_on=False):
         bb = rx.BlockBuilder()
         
-        inner_blkm32 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=32)
-        inner_blkm64 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=64)
-        inner_blkm128 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=128)
+        inner_blkm32 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=32, profile_on=profile_on)
+        inner_blkm64 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=64, profile_on=profile_on)
+        inner_blkm128 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=128, profile_on=profile_on)
         
         # dispatcher function
         batch_size = T.var("int64", name="batch_size")
@@ -727,11 +727,22 @@ class MegaKernel:
             with bb.dataflow():
                 runtime_batch_size = T.var("int64", name="runtime_batch_size")
                 _ = bb.match_cast(R.shape_of(x), R.Shape([runtime_batch_size, self.HIDDEN_SIZE]))
-                output_sinfo = [
-                    rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
-                    rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"),
-                ]
-                output_shape = R.Tuple(R.Tensor([batch_size, self.HIDDEN_SIZE], "float16"), R.Tensor([batch_size, self.HIDDEN_SIZE], "float32"))
+                if profile_on:
+                    output_sinfo = [
+                        rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
+                        rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"),
+                        rx.TensorStructInfo([T.int64(1e7)], "uint64")
+                    ]
+                    output_shape = R.Tuple(R.Tensor([batch_size, self.HIDDEN_SIZE], "float16"),
+                                           R.Tensor([batch_size, self.HIDDEN_SIZE], "float32"),
+                                           R.Tensor([T.int64(1e7)], "uint64"))
+                else:
+                    output_sinfo = [
+                        rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"),
+                        rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"),
+                    ]
+                    output_shape = R.Tuple(R.Tensor([batch_size, self.HIDDEN_SIZE], "float16"),
+                                           R.Tensor([batch_size, self.HIDDEN_SIZE], "float32"))
                 def bind_branch_with_r_func(r_func, blk_m):
                     out = rx.Var(f"out_blkm{blk_m}", output_shape)
                     bindings = [rx.VarBinding(out, rx.Call(r_func, [x, residual, packed_info, packed_weights, packed_events], sinfo_args=output_sinfo))]
@@ -1126,7 +1137,7 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 @pytest.mark.skip
-def test(batch_size, seq_len, vm, mega_kernel_wrapper):
+def test(batch_size, seq_len, vm, mega_kernel_wrapper, profile_on=False):
     arg_dict = prepare_data(batch_size, seq_len, mega_kernel_wrapper)
 
     def tir(vm, arg_dict, batch_size, mk: MegaKernel):
@@ -1169,7 +1180,8 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper):
             return res
         res = bench(func, warmup=3, repeat=10, proton_name="tir")
         res = func()
-        # export_to_perfetto_trace(res, "blackwell_attn.json")
+        if profile_on:
+            export_to_perfetto_trace(res[2].numpy(), f"layer.perfetto-trace", event_type_names)
         return res[0].numpy(), res[1].numpy().astype(np.float16)
 
     def std(arg_dict, batch_size, use_prefill, mk: MegaKernel):
@@ -1336,6 +1348,7 @@ if __name__ == "__main__":
                         help="A list of batch sizes to test.")
     parser.add_argument("--seq-len", type=int, nargs='+', default=[512],
                         help="A list of sequence lengths to test.")
+    parser.add_argument("--profiler-on", action="store_true", help="Enable the profiler.")
     args = parser.parse_args()
     
     tile_scheduler_class_map = {
@@ -1349,10 +1362,11 @@ if __name__ == "__main__":
     for scheduler in args.scheduler:
         print(f"Testing with {scheduler} tile scheduler...", flush=True)
         megakernel_wrapper = MegaKernel()
-        mod = megakernel_wrapper.get_mod(max_batch_size=128)
+        mod = megakernel_wrapper.get_mod(max_batch_size=128, profile_on=args.profiler_on)
         mod = rx.transform.StaticHorizontalFusion(
             ["megakernel_blkm32", "megakernel_blkm64", "megakernel_blkm128"], 
-            strategy=scheduler, tile_scheduler_class=tile_scheduler_class_map[scheduler], semaphore_class=semaphore_class_map[scheduler]
+            strategy=scheduler, tile_scheduler_class=tile_scheduler_class_map[scheduler],
+            semaphore_class=semaphore_class_map[scheduler], profiler_on=args.profiler_on
         )(mod)
         # mod.show()
         ex = rx.build(mod, target="cuda", tir_pipeline="tirp")
@@ -1363,5 +1377,5 @@ if __name__ == "__main__":
             print(f"batch_size: {batch_size}", flush=True)
             for seq_len in args.seq_len:
                 print(f"seq_len: {seq_len}", flush=True)
-                test(batch_size, seq_len, vm, megakernel_wrapper)
+                test(batch_size, seq_len, vm, megakernel_wrapper, profile_on=args.profiler_on)
 

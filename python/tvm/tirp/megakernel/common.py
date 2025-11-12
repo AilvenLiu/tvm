@@ -384,8 +384,29 @@ class ProfileEventType(Enum):
     EP_COMBINE_SEND = 49
     EP_COMBINE_RECV = 50
     GROUP_GEMM_GATE_UP_SILU = 51
+    END = 52
 
-
+map_job_type_to_profile_event_type = {
+    JobType.GEMM_GATE_UP_PROJ.value: ProfileEventType.GEMM_GATE_UP_PROJ,
+    JobType.SPLIT_SILU_MULTIPLY.value: ProfileEventType.SPLIT_SILU_MULTIPLY,
+    JobType.GEMM_DOWN_PROJ.value: ProfileEventType.GEMM_DOWN_PROJ,
+    JobType.DOWN_PROJ_REDUCE.value: ProfileEventType.DOWN_PROJ_REDUCE,
+    JobType.MLP_ADD_RMS_NORM.value: ProfileEventType.MLP_ADD_RMS_NORM,
+    JobType.GEMM_QKV_PROJ.value: ProfileEventType.GEMM_QKV_PROJ,
+    JobType.GEMM_O_PROJ.value: ProfileEventType.GEMM_O_PROJ,
+    JobType.GEMM_O_REDUCE.value: ProfileEventType.GEMM_O_REDUCE,
+    JobType.ATTN_ADD_RMS_NORM.value: ProfileEventType.ATTN_ADD_RMS_NORM,
+    JobType.O_ALLREDUCE.value: ProfileEventType.O_ALLREDUCE,
+    JobType.DOWN_PROJ_ALLREDUCE.value: ProfileEventType.DOWN_PROJ_ALLREDUCE,
+    JobType.GATE_UP_PROJ_REDUCE.value: ProfileEventType.GATE_UP_PROJ_REDUCE,
+    JobType.BATCH_ATTENTION.value: ProfileEventType.BATCH_ATTENTION,
+    JobType.BATCH_ATTENTION_MERGE.value: ProfileEventType.BATCH_ATTENTION_MERGE,
+    JobType.Q_REDUCE_RMS_ROPE.value: ProfileEventType.Q_REDUCE_RMSNORM_ROPE,
+    JobType.K_REDUCE_RMS_ROPE_APPEND.value: ProfileEventType.K_REDUCE_RMSNORM_ROPE_APPEND,
+    JobType.V_REDUCE_APPEND.value: ProfileEventType.V_REDUCE_APPEND,
+    JobType.GATE_UP_SILU.value: ProfileEventType.GATE_UP_SILU,
+    JobType.END.value: ProfileEventType.END,
+}
 
 event_type_names = [
     "GEMM_GATE_UP_PROJ",

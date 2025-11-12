@@ -51,9 +51,10 @@ from tvm.tir.analysis import verify_tirp_well_formed
 from tvm.tir.op import ret
 from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
 from tvm.tirp.transform.common import seek_kernel_replace_point, BufferReplacer
-from tvm.tirp.megakernel.common import KernelConfig, JobType, SmemManager, TileSchedulerBase, SemaphoreBase, pack_into_32bit
+from tvm.tirp.megakernel.common import KernelConfig, JobType, SmemManager, TileSchedulerBase, SemaphoreBase, pack_into_32bit, map_job_type_to_profile_event_type
 from tvm.tirp.operator import KernelReplacePoint
 from tvm.tir.exec_scope import ExecScope
+from tvm.tirp.bench.utils import CudaProfiler
 
 # FIXME: add decl_buffer for all newly generated buffers
     
@@ -64,17 +65,18 @@ class StaticHorizontalFusion:
 
     def __init__(self, func_name: Union[str, List[str]], strategy: Literal["static", "dynamic"],
                  tile_scheduler_class: Type[TileSchedulerBase], semaphore_class: Type[SemaphoreBase],
-                 fusion_prefix: str = "megakernel_"):
+                 fusion_prefix: str = "megakernel_", profiler_on: bool = False):
         self.func_name = func_name if isinstance(func_name, list) else [func_name]
         self.strategy = strategy
         self.tile_scheduler_class = tile_scheduler_class
         self.semaphore_class = semaphore_class
         self.fusion_prefix = fusion_prefix
+        self.profiler_on = profiler_on
         self.gvar_to_remove = []
 
     def transform_module(self, mod: IRModule, _ctx: tvm.transform.PassContext) -> IRModule:
         """IRModule-level transformation"""
-        rewriter = _Rewriter(mod, self.strategy, self.func_name, self.fusion_prefix, self.tile_scheduler_class, self.semaphore_class)
+        rewriter = _Rewriter(mod, self.strategy, self.func_name, self.fusion_prefix, self.tile_scheduler_class, self.semaphore_class, self.profiler_on)
         mod = rewriter.transform()
         for gvar in rewriter.gvar_to_remove:
             del mod[gvar]
@@ -528,6 +530,7 @@ class DependencyHandler:
         self.var_entry_mapping = var_entry_mapping
 
     def _get_func_template(self, accept_idx: bool, job_id: int):
+        # TODO: leverage visit_buffer_store to eliminate extra buffer using
         def _func_template_1(idx: T.Var, buffer_replace_map, var_replace_map, func, out_buf, input_dim, output_dim, job_id, emit=True):
             replacer = BufferReplacer(
                 buffer_replace_map, var_replace_map | {func.params[input_dim]: idx}
@@ -624,7 +627,7 @@ class DependencyHandler:
 class _Rewriter(PyExprMutator):
     def __init__(
         self, mod: IRModule, strategy: Literal["static", "dynamic"], rewrite_func_name: Union[str, List[str]], fusion_prefix: str, 
-        tile_scheduler_class: Type[TileSchedulerBase], semaphore_class: Type[SemaphoreBase]
+        tile_scheduler_class: Type[TileSchedulerBase], semaphore_class: Type[SemaphoreBase], profiler_on: bool
     ):
         super().__init__(mod)
         self.mod = mod
@@ -634,6 +637,7 @@ class _Rewriter(PyExprMutator):
         self.fusion_prefix = fusion_prefix
         self.tile_scheduler_class = tile_scheduler_class
         self.semaphore_class = semaphore_class
+        self.profiler_on = profiler_on
         self.device_func_exec_scope = None
         self.device_func_infos: Dict[relax.Call, DeviceFuncInfo] = {}
         self.persistent_var_infos: Dict[str, PersistentVarInfo] = {}
@@ -646,6 +650,7 @@ class _Rewriter(PyExprMutator):
         self.relax_var_to_entry = {}
         self.gvar_to_remove = list()
         self.evt_handle_helper = EventHandleHelper(mod, self.strategy)
+        self.profiler_buf_size = int(1e7)
 
     def clear_state(self):
         # user might want to rewrite 2 megakernels, so clear state before each rewrite
@@ -932,8 +937,10 @@ class _Rewriter(PyExprMutator):
             def finalize(self):
                 for finalize in self.finalizes:
                     T.add_to_parent(finalize)
+                    
+        
 
-        def switch_task_type(tile_scheduler: TileSchedulerBase):
+        def switch_task_type(tile_scheduler: TileSchedulerBase, lane_id, profiler: Optional[CudaProfiler]):
             idxs, type = tile_scheduler.get_idx_and_task_type()
             total_type_count = len(self.device_func_infos)
             if_frames = [T.If(type == info.job_type_id) for info in self.device_func_infos.values()]
@@ -949,54 +956,87 @@ class _Rewriter(PyExprMutator):
                 )
                 new_body = replacer.visit_stmt(new_body)
                 with then_frames[i]:
+                    if profiler is not None:
+                        profiler.start(map_job_type_to_profile_event_type[func.job_type_id], lane_id == 0)
                     T.add_to_parent(new_body)
+                    if profiler is not None:
+                        profiler.end(map_job_type_to_profile_event_type[func.job_type_id], lane_id == 0)
                 else_frames[i].__enter__()
             T.add_to_parent(Evaluate(T.cuda.trap_when_assert_failed(False)))
             
             for i in range(total_type_count - 1, -1, -1):
                 else_frames[i].__exit__(None, None, None)
                 if_frames[i].__exit__(None, None, None)
+            
 
         def replace_dyn_shared_mem_buffer(new_buffer):
             for buffer in self.dyn_shared_mem_buffers:
                 buffer_replace_map[buffer] = new_buffer
+        
+        def set_tile_scheduler(queue, tasks, head, tail, smem_manager):
+            if self.strategy == "static":
+                tile_scheduler = self.tile_scheduler_class("mega_", queue, smem_manager)
+            else:
+                tile_scheduler = self.tile_scheduler_class(tasks, head, tail, smem_manager)
+            return tile_scheduler
+        
+        def set_profiler(profiler_buf):
+            if self.profiler_on:
+                num_groups = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
+                profiler_write_stride = KernelConfig.SM_NUMBER * num_groups
+                profiler = CudaProfiler(profiler_buf, profiler_write_stride, num_groups)
+                return profiler
+            else:
+                return None
+            
+        def init_profiler(warp_id, profiler):
+            if self.profiler_on:
+                profiler.init(warp_id)
+                
+        @T.macro
+        def persistent_body(queue, tasks, head, tail, profiler_buf):
+            with T.kernel():
+                bx = T.scope_id([KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope)
+                tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+                warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
+                lane_id = T.thread_id([32], parent="warp")
+                smem_buffer = T.alloc_buffer(KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16)
+                replace_dyn_shared_mem_buffer(smem_buffer)
+                smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data))
+                tile_scheduler = T.meta_var(set_tile_scheduler(queue, tasks, head, tail, smem_manager))
+                persistent_vars = T.meta_var(PersistentVars(list(self.persistent_var_infos.values()), smem_manager))
+                profiler = T.meta_var(set_profiler(profiler_buf))
+                init_profiler(warp_id, profiler)
+                persistent_vars.init()
+                tile_scheduler.init()
+                while tile_scheduler.valid():
+                    switch_task_type(tile_scheduler, lane_id, profiler)
+                    tile_scheduler.next_tile()
+                if profiler is not None:
+                    profiler.finalize(lane_id == 0)
+                persistent_vars.finalize()
 
         if self.strategy == "static":
-            @T.prim_func(tirp=True, private=True)
-            def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32")):
-                with T.kernel():
-                    bx = T.scope_id([KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope)
-                    tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-                    smem_buffer = T.alloc_buffer(KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16)
-                    replace_dyn_shared_mem_buffer(smem_buffer)
-                    smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data))
-                    # TODO: remove tile scheduler from arg
-                    tile_scheduler = T.meta_var(self.tile_scheduler_class("mega_", queue, smem_manager))
-                    persistent_vars = T.meta_var(PersistentVars(list(self.persistent_var_infos.values()), smem_manager))
-                    persistent_vars.init()
-                    tile_scheduler.init()
-                    while tile_scheduler.valid():
-                        switch_task_type(tile_scheduler)
-                        tile_scheduler.next_tile()
-                    persistent_vars.finalize()
+            if self.profiler_on:
+                @T.prim_func(tirp=True, private=True)
+                def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32"),
+                                      profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
+                    persistent_body(queue, None, None, None, profiler_buf)
+            else:
+                @T.prim_func(tirp=True, private=True)
+                def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32")):
+                    persistent_body(queue, None, None, None, None)
         else:
-            @T.prim_func(tirp=True, private=True)
-            def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"), tail: T.buffer((1,), "int32")):
-                with T.kernel():
-                    bx = T.scope_id([KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope)
-                    tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
-                    smem_buffer = T.alloc_buffer(KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16)
-                    replace_dyn_shared_mem_buffer(smem_buffer)
-                    smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data))
-                    # TODO: remove tile scheduler from arg
-                    tile_scheduler = T.meta_var(self.tile_scheduler_class(tasks, head, tail, smem_manager))
-                    persistent_vars = T.meta_var(PersistentVars(list(self.persistent_var_infos.values()), smem_manager))
-                    persistent_vars.init()
-                    tile_scheduler.init()
-                    while tile_scheduler.valid():
-                        switch_task_type(tile_scheduler)
-                        tile_scheduler.next_tile()
-                    persistent_vars.finalize()        
+            if self.profiler_on:
+                @T.prim_func(tirp=True, private=True)
+                def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"),
+                                      tail: T.buffer((1,), "int32"), profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
+                    persistent_body(None, tasks, head, tail, profiler_buf)
+            else:
+                @T.prim_func(tirp=True, private=True)
+                def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"),
+                                      tail: T.buffer((1,), "int32")):
+                    persistent_body(None, tasks, head, tail, None)       
 
         new_body = persistent_kernel.body
         for template in self.host_templates:
@@ -1195,7 +1235,10 @@ class _Rewriter(PyExprMutator):
         persistent_kernel, persistent_kernel_new_sym_vars, persistent_kernel_sym_vars = self._build_persistent_kernel(buffer_replace_map, var_replace_map)
         new_body = persistent_kernel.body
         for i, param in enumerate(persistent_kernel.params):
-            new_tir_params.insert(total_input_num + i, param)
+            if not self.profiler_on or i < len(persistent_kernel.params) - 1:
+                new_tir_params.insert(total_input_num + i, param)
+            else:
+                new_tir_params.append(param) # append profiler buffer at last
         new_tir_params.extend(persistent_kernel_new_sym_vars)
         new_buffer_map.update(persistent_kernel.buffer_map)
         new_prim_func = PrimFunc(
@@ -1215,9 +1258,7 @@ class _Rewriter(PyExprMutator):
             gen_exec_queue_tir, sym_vars = self._build_gen_exec_queue_kernel()
             gen_exec_queue_gvar = self.builder_.add_func(gen_exec_queue_tir, f"gen_exec_queue_{self.cur_rewrite_func_name}")
             exec_queue = self.builder_.emit(relax.call_tir(gen_exec_queue_gvar, [], out_sinfo=TensorStructInfo(shape=queue_buffer.shape, dtype=queue_buffer.dtype), tir_vars=sym_vars))
-            new_relax_params.append(
-                exec_queue
-            )
+            new_relax_params.append(exec_queue)
         else:
             task_buffer = list(persistent_kernel.buffer_map.values())[0]
             head_buffer = list(persistent_kernel.buffer_map.values())[1]
@@ -1230,11 +1271,12 @@ class _Rewriter(PyExprMutator):
             new_relax_params.extend(
                 [packed_exec_queue[0], packed_exec_queue[1], packed_exec_queue[2]]
             )
+            if self.profiler_on:
+                out_sinfo.append(TensorStructInfo(shape=(self.profiler_buf_size,), dtype="uint64"))
+                inplace_indices.append(-1)
         if all(i == -1 for i in inplace_indices):
             return relax.call_tir(new_gvar, new_relax_params, out_sinfo, tir_vars=persistent_kernel_sym_vars)
-        return relax.call_tir_inplace(
-            new_gvar, new_relax_params, inplace_indices, out_sinfo, tir_vars=persistent_kernel_sym_vars
-        )
+        return relax.call_tir_inplace(new_gvar, new_relax_params, inplace_indices, out_sinfo, tir_vars=persistent_kernel_sym_vars), len(out_sinfo)
 
     def visit_seq_expr_(self, op: relax.SeqExpr) -> Expr:
         op = super().visit_seq_expr_(op)  
@@ -1269,7 +1311,8 @@ class _Rewriter(PyExprMutator):
         else:
             raise ValueError(f"Unsupported body: {op.body}")
         self.builder_._begin_binding_block()
-        call_megakernel = self.builder_.emit(self.merge_function())
+        merge_call, ret_len = self.merge_function()
+        call_megakernel = self.builder_.emit(merge_call)
         if isinstance(call_megakernel.struct_info, TensorStructInfo):
             ret = call_megakernel
         else:
@@ -1289,6 +1332,8 @@ class _Rewriter(PyExprMutator):
                         ret_vars.append(self.builder_.emit(relax.TupleGetItem(call_megakernel, self.new_ret_index[call][idx])))
                     else:
                         raise ValueError(f"Call {call} with index {idx} not found in new_ret_index")
+            if self.profiler_on:
+                ret_vars.append(self.builder_.emit(relax.TupleGetItem(call_megakernel, ret_len - 1)))
             if len(ret_vars) == 1:
                 ret = ret_vars[0]
             else:
