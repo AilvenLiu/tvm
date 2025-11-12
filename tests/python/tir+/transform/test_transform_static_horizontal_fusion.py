@@ -184,7 +184,6 @@ def test_basic():
                 buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn", align=16)
                 smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data, fusion_mode=True))
                 smem_manager.set_tile(None)
-                T.cuda.printf("Inside stage 2 %d %d %d\n", m, n, k)
                 with T.cta():
                     T.block_attr({"tirp.megakernel.persistent.init": True})
                     smem_manager.init()
@@ -508,4 +507,4 @@ def test_extra_args():
 
 if __name__ == "__main__":
     test_basic()
-    # test_extra_args()
+    test_extra_args()

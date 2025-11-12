@@ -394,7 +394,8 @@ from typing import Tuple, Union
 import inspect
 from tvm.script import tir as T
 from tvm.tir.function import PrimFunc
-PrimExprLike = Union[int, float, PrimExpr]
+ImmeValueType = Union[int, float]
+PrimExprLike = Union[ImmeValueType, PrimExpr]
 
 class Dependency:
     def __init__(
@@ -460,38 +461,41 @@ class Dependency:
             self.num = num
             self.pass_num_signature_check = False
 
-        self.extra_tensors = [arg for arg in extra_args if isinstance(arg, Expr)]
-        self.extra_tir_vars = [arg for arg in extra_args if not isinstance(arg, Expr)]
-        if len(self.extra_tensors) + len(self.extra_tir_vars) != len(extra_args):
-            raise ValueError("extra_args should be Expr or PrimExpr/int/float")
+        self.extra_args = extra_args
+        for arg in self.extra_args:
+            if not isinstance(arg, (Expr, PrimExprLike)):
+                raise ValueError("extra_args should be Expr or PrimExpr/int/float")
         self.tile_idx_dtype = tile_idx_dtype
         
 
-    def handle_dep(self, input_dim, output_dim) -> Tuple[Expr, List[Expr], List[PrimExpr], PrimFunc, PrimFunc]:
+    def handle_dep(self, input_dim, output_dim) -> Tuple[Expr, List[Expr], List[PrimExpr], PrimFunc, PrimFunc, List[Optional[ImmeValueType]], List[Optional[ImmeValueType]]]:
         # check the signature of dep and num
-        if len(inspect.signature(self.dep).parameters) != input_dim + 1 + len(self.extra_tensors) + len(self.extra_tir_vars):
-             raise ValueError(f"dep requires {input_dim + 1 + len(self.extra_tensors) + len(self.extra_tir_vars)} parameters")
-        if not self.pass_num_signature_check and len(inspect.signature(self.num).parameters) != input_dim + len(self.extra_tensors) + len(self.extra_tir_vars):
-             raise ValueError(f"num requires {input_dim + len(self.extra_tensors) + len(self.extra_tir_vars)} parameters")
-         
-        # create dep and num param    
-        dep_param = (
-            (
-                [T.var(dtype=self.tile_idx_dtype) for _ in range(input_dim + 1)] + 
-                [T.Buffer(shape=[v for v in arg.struct_info.shape], dtype=arg.struct_info.dtype, scope="global") for arg in self.extra_tensors] + 
-                [T.var(dtype=arg.dtype) if isinstance(arg, PrimExpr) else arg for arg in self.extra_tir_vars]
-            ), 
-            T.Buffer(shape=[output_dim], dtype=self.tile_idx_dtype, scope="local"),
-        )
-        num_param = (
-            (
-                [T.var(dtype=self.tile_idx_dtype) for _ in range(input_dim)] + 
-                [T.Buffer(shape=[v for v in arg.struct_info.shape], dtype=arg.struct_info.dtype, scope="global") for arg in self.extra_tensors] + 
-                [T.var(dtype=arg.dtype) if isinstance(arg, PrimExpr) else arg for arg in self.extra_tir_vars]
-            ), 
-            T.Buffer(shape=[1], dtype=self.tile_idx_dtype, scope="local"),
-        )
+        if len(inspect.signature(self.dep).parameters) != input_dim + 1 + len(self.extra_args):
+             raise ValueError(f"dep requires {input_dim + 1 + len(self.extra_args)} parameters")
+        if not self.pass_num_signature_check and len(inspect.signature(self.num).parameters) != input_dim + len(self.extra_args):
+             raise ValueError(f"num requires {input_dim + len(self.extra_args)} parameters")
+
+        # create dep and num param
+        dep_input = [T.var(dtype=self.tile_idx_dtype) for _ in range(input_dim + 1)]
+        for arg in self.extra_args:
+            if isinstance(arg, Expr):
+                dep_input.append(T.Buffer(shape=[v for v in arg.struct_info.shape], dtype=arg.struct_info.dtype, scope="global"))
+            elif isinstance(arg, PrimExpr):
+                dep_input.append(T.var(dtype=arg.dtype))
+            else: # int or float
+                dep_input.append(arg)
+        dep_output = [T.Buffer(shape=[1], dtype=self.tile_idx_dtype, scope="local") for _ in range(output_dim)]
         
+        num_input = [T.var(dtype=self.tile_idx_dtype) for _ in range(input_dim)]
+        for arg in self.extra_args:
+            if isinstance(arg, Expr):
+                num_input.append(T.Buffer(shape=[v for v in arg.struct_info.shape], dtype=arg.struct_info.dtype, scope="global"))
+            elif isinstance(arg, PrimExpr):
+                num_input.append(T.var(dtype=arg.dtype))
+            else: # int or float
+                num_input.append(arg)
+        num_output = [T.Buffer(shape=[1], dtype=self.tile_idx_dtype, scope="local")]
+
         # pack dep and num func to PrimFunc
         def _convert_arg(para: Union[tir.Var, tir.Buffer]) -> T.Var:
             if isinstance(para, tir.Var) or isinstance(para, tir.Buffer):
@@ -499,25 +503,25 @@ class Dependency:
             else:
                 return para
 
-        def _unpack_and_assign(value_list: List[T.Var], buf: T.Buffer, length):
+        def _unpack_and_assign(value_list: List[T.Var], buf_list: List[T.Buffer], length):
             if length == 1:
-                T.buffer_store(buf, value_list, [0])
+                T.buffer_store(buf_list[0], value_list, [0])
             else:
                 for i in range(length):
-                    T.buffer_store(buf, value_list[i], [i])
+                    T.buffer_store(buf_list[i], value_list[i], [0])
 
         @T.prim_func(check_well_formed=False)
         def dep():
-            in_args = T.meta_var([_convert_arg(spec) for spec in dep_param[0]])
-            out_arg = T.meta_var(_convert_arg(dep_param[1]))
+            in_args = T.meta_var([_convert_arg(spec) for spec in dep_input])
+            out_arg = T.meta_var([_convert_arg(spec) for spec in dep_output])
             with T.cta():
                 _unpack_and_assign(self.dep(*in_args), out_arg, output_dim)
         
         @T.prim_func(check_well_formed=False)
         def num():
-            in_args = T.meta_var([_convert_arg(spec) for spec in num_param[0]])
-            out_arg = T.meta_var(_convert_arg(num_param[1]))
+            in_args = T.meta_var([_convert_arg(spec) for spec in num_input])
+            out_arg = T.meta_var([_convert_arg(spec) for spec in num_output])
             with T.cta():
                 _unpack_and_assign(self.num(*in_args), out_arg, 1)
-        
-        return self.event, self.extra_tensors, [var for var in self.extra_tir_vars if isinstance(var, PrimExpr)], dep, num
+
+        return self.event, [var for var in self.extra_args if isinstance(var, (Expr, PrimExpr))], dep, num

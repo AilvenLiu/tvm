@@ -125,12 +125,9 @@ struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
   ffi::Array<Expr> in_events;
   ffi::Array<Expr> out_events;
   ffi::Array<Expr> inv_in_events;
-  ffi::Array<ffi::Array<Expr>> in_extra_tensors;
-  ffi::Array<ffi::Array<Expr>> out_extra_tensors;
-  ffi::Array<ffi::Array<Expr>> inv_in_extra_tensors;
-  ffi::Array<ffi::Array<PrimExpr>> in_extra_tir_vars;
-  ffi::Array<ffi::Array<PrimExpr>> out_extra_tir_vars;
-  ffi::Array<ffi::Array<PrimExpr>> inv_in_extra_tir_vars;
+  ffi::Array<ffi::Array<ffi::Any>> in_extra_args;
+  ffi::Array<ffi::Array<ffi::Any>> out_extra_args;
+  ffi::Array<ffi::Array<ffi::Any>> inv_in_extra_args;
   ffi::Array<tir::PrimFunc> in_deps;
   ffi::Array<tir::PrimFunc> out_deps;
   ffi::Array<tir::PrimFunc> inv_in_deps;
@@ -147,18 +144,10 @@ struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
         .def_ro("in_events", &CallTIRDeviceAttrs::in_events, "The input events.")
         .def_ro("out_events", &CallTIRDeviceAttrs::out_events, "The output events.")
         .def_ro("inv_in_events", &CallTIRDeviceAttrs::inv_in_events, "The inverse input events.")
-        .def_ro("in_extra_tensors", &CallTIRDeviceAttrs::in_extra_tensors,
-                "The extra input tensors that are not in the args list.")
-        .def_ro("out_extra_tensors", &CallTIRDeviceAttrs::out_extra_tensors,
-                "The extra output tensors that are not in the args list.")
-        .def_ro("inv_in_extra_tensors", &CallTIRDeviceAttrs::inv_in_extra_tensors,
-                "The inverse extra input tensors that are not in the args list.")
-        .def_ro("in_extra_tir_vars", &CallTIRDeviceAttrs::in_extra_tir_vars,
-                "The extra input tir vars that are not in the args list.")
-        .def_ro("out_extra_tir_vars", &CallTIRDeviceAttrs::out_extra_tir_vars,
-                "The extra output tir vars that are not in the args list.")
-        .def_ro("inv_in_extra_tir_vars", &CallTIRDeviceAttrs::inv_in_extra_tir_vars,
-                "The inverse extra input tir vars that are not in the args list.")
+        .def_ro("in_extra_args", &CallTIRDeviceAttrs::in_extra_args, "The extra input args.")
+        .def_ro("out_extra_args", &CallTIRDeviceAttrs::out_extra_args, "The extra output args.")
+        .def_ro("inv_in_extra_args", &CallTIRDeviceAttrs::inv_in_extra_args,
+                "The inverse extra input args.")
         .def_ro("in_deps", &CallTIRDeviceAttrs::in_deps, "The input dependencies.")
         .def_ro("out_deps", &CallTIRDeviceAttrs::out_deps, "The output dependencies.")
         .def_ro("inv_in_deps", &CallTIRDeviceAttrs::inv_in_deps, "The inverse input dependencies.")

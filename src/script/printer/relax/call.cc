@@ -163,24 +163,15 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
       kwargs_keys.push_back("inv_in_events");
       kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->inv_in_events,
                                                 n_p->Attr("attrs")->Attr("inv_in_events")));
-      kwargs_keys.push_back("in_extra_tensors");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->in_extra_tensors,
-                                                n_p->Attr("attrs")->Attr("in_extra_tensors")));
-      kwargs_keys.push_back("out_extra_tensors");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->out_extra_tensors,
-                                                n_p->Attr("attrs")->Attr("out_extra_tensors")));
-      kwargs_keys.push_back("inv_in_extra_tensors");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->inv_in_extra_tensors,
-                                                n_p->Attr("attrs")->Attr("inv_in_extra_tensors")));
-      kwargs_keys.push_back("in_extra_tir_vars");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->in_extra_tir_vars,
-                                                n_p->Attr("attrs")->Attr("in_extra_tir_vars")));
-      kwargs_keys.push_back("out_extra_tir_vars");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->out_extra_tir_vars,
-                                                n_p->Attr("attrs")->Attr("out_extra_tir_vars")));
-      kwargs_keys.push_back("inv_in_extra_tir_vars");
-      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->inv_in_extra_tir_vars,
-                                                n_p->Attr("attrs")->Attr("inv_in_extra_tir_vars")));
+      kwargs_keys.push_back("in_extra_args");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->in_extra_args,
+                                                n_p->Attr("attrs")->Attr("in_extra_args")));
+      kwargs_keys.push_back("out_extra_args");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->out_extra_args,
+                                                n_p->Attr("attrs")->Attr("out_extra_args")));
+      kwargs_keys.push_back("inv_in_extra_args");
+      kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->inv_in_extra_args,
+                                                n_p->Attr("attrs")->Attr("inv_in_extra_args")));
       kwargs_keys.push_back("in_deps");
       kwargs_values.push_back(IdDoc("Ignored"));
       kwargs_keys.push_back("out_deps");

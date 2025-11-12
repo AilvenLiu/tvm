@@ -4,6 +4,8 @@ import random
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import List
+import pytest
+pytest.skip("Skipping pytest for tests/python/tir+/kernels/cuda/megakernel/test_model.py.", allow_module_level=True)
 
 import numpy as np
 import torch

@@ -122,9 +122,9 @@ class DeviceFuncInfo:
     in_event_tensors: List[Buffer]
     out_event_tensors: List[Buffer]
     sym_vars: set[Var]
-    in_info_list: List[Tuple[callable, callable, PrimExpr, PrimExpr]]
-    out_info_list: List[Tuple[callable, callable, PrimExpr, PrimExpr]]
-    push_info_list: List[Tuple[callable, callable, List[callable], List[PrimExpr]]]
+    in_info_list: List[Tuple[callable, callable]]
+    out_info_list: List[Tuple[callable, callable]]
+    push_info_list: List[Tuple[callable, callable, List[callable]]]
     job_type_id: int
     evt_handle_config: EventHandleConfigs
 
@@ -169,7 +169,7 @@ class EventHandleHelper(PyExprVisitor):
                 },
                 "default": {
                     "wait_scope": "cta", "notify_scope": "cta", "notify_scope_id": 0,
-                    "push_level": "none", "push_scope": "none", "push_scope_id": 0
+                    "push_level": "warp", "push_scope": "cta", "push_scope_id": 0
                 }
             }
             default_config = default_config_pool.get(func_type, default_config_pool["default"])
@@ -228,11 +228,8 @@ class EventHandleHelper(PyExprVisitor):
         if self.strategy == "dynamic":
             for call, config in self.event_handle_configs.items():
                 if not config.freeze:
-                    config.push_level = "warp"
-                    config.push_scope = "cta"
-                    config.push_scope_id = 0
                     for prev_call in self.prev[call]:
-                        if self.event_handle_configs[prev_call].func_type == "gemm":
+                        if self.event_handle_configs[call].func_type != "gemm" and self.event_handle_configs[prev_call].func_type == "gemm":
                             config.push_level = "warp"
                             config.push_scope = "warpgroup"
                             config.push_scope_id = 1
@@ -318,24 +315,29 @@ class EventOpInserter(StmtExprMutator):
                     if pre_notify_and_push is not None:
                         pushes.append(pre_notify_and_push.body)
                 
-            if len(waits) > 0:
-                waits = SeqStmt(waits) if len(waits) > 1 else waits[0]
-                for _, _, buf1, buf2 in self.func_info.in_info_list:
-                    waits = AllocBuffer(buf1, waits)
-                    waits = AllocBuffer(buf2, waits)
-                waits = [waits]
-            if len(commits) > 0:
-                commits = SeqStmt(commits) if len(commits) > 1 else commits[0]
-                for _, _, buf1, buf2 in self.func_info.out_info_list:
-                    commits = AllocBuffer(buf1, commits)
-                    commits = AllocBuffer(buf2, commits)
-                commits = [commits]
-            if self.strategy == "dynamic" and len(pushes) > 0:
-                pushes = SeqStmt(pushes) if len(pushes) > 1 else pushes[0]
-                for _, _, _, buf_list in self.func_info.push_info_list:
-                    for buf in buf_list:
-                        pushes = AllocBuffer(buf, pushes)
-                pushes = [pushes]
+            # if len(waits) > 0:
+            #     waits = SeqStmt(waits) if len(waits) > 1 else waits[0]
+            #     for _, _, buf_list_1, buf_list_2 in self.func_info.in_info_list:
+            #         for buf1 in buf_list_1:
+            #             waits = AllocBuffer(buf1, waits)
+            #         for buf2 in buf_list_2:
+            #             waits = AllocBuffer(buf2, waits)
+            #     waits = [waits]
+            # if len(commits) > 0:
+            #     commits = SeqStmt(commits) if len(commits) > 1 else commits[0]
+            #     for _, _, buf_list_1, buf_list_2 in self.func_info.out_info_list:
+            #         for buf1 in buf_list_1:
+            #             commits = AllocBuffer(buf1, commits)
+            #         for buf2 in buf_list_2:
+            #             commits = AllocBuffer(buf2, commits)
+            #     commits = [commits]
+            # if self.strategy == "dynamic" and len(pushes) > 0:
+            #     pushes = SeqStmt(pushes) if len(pushes) > 1 else pushes[0]
+            #     for _, _, _, buf_list_list in self.func_info.push_info_list:
+            #         for buf_list in buf_list_list:
+            #             for buf in buf_list:
+            #                 pushes = AllocBuffer(buf, pushes)
+            #     pushes = [pushes]
             body_list = pushes + waits + [block.body] + commits
             new_body = SeqStmt(body_list) if len(body_list) > 1 else body_list[0]
             # Reconstruct the block with the new body, preserving all other attributes.
@@ -519,9 +521,10 @@ class DisjointSet:
         return self.size[self.find(a)]
     
 
-class DependencyHandler:
+class DependencyHandler(StmtExprMutator):
     def __init__(self, tile_idx: List[PrimExpr], in_var_entries: List[VarEntry], sym_vars: Set[Var], relax_var_to_entry: Dict[Var, VarEntry],
                  builder_: relax.BlockBuilder, var_entry_mapping: DisjointSet):
+        super().__init__()
         self.tile_idx = tile_idx
         self.in_var_entries = in_var_entries
         self.sym_vars = sym_vars
@@ -530,52 +533,55 @@ class DependencyHandler:
         self.var_entry_mapping = var_entry_mapping
 
     def _get_func_template(self, accept_idx: bool, job_id: int):
-        # TODO: leverage visit_buffer_store to eliminate extra buffer using
-        def _func_template_1(idx: T.Var, buffer_replace_map, var_replace_map, func, out_buf, input_dim, output_dim, job_id, emit=True):
+        def _func_template_1(idx: T.Var, buffer_replace_map, var_replace_map, func, out_buf_list, input_dim, output_dim, job_id, emit=True):
             replacer = BufferReplacer(
                 buffer_replace_map, var_replace_map | {func.params[input_dim]: idx}
             )
-            stmt = replacer.visit_stmt(func.body)
+            func_body = replacer.visit_stmt(func.body)
+            stmt, output = self.rewrite(func_body, buffer_replace_map, out_buf_list)
             if emit:
                 T.add_to_parent(stmt)
-            return [BufferLoad(out_buf, [i]) for i in range(output_dim)]
+            return output
 
-        def _func_template_2(buffer_replace_map, var_replace_map, func, out_buf, input_dim, output_dim, job_id, emit=True):
+        def _func_template_2(buffer_replace_map, var_replace_map, func, out_buf_list, input_dim, output_dim, job_id, emit=True):
             replacer = BufferReplacer(buffer_replace_map, var_replace_map)
-            stmt = replacer.visit_stmt(func.body)
+            func_body = replacer.visit_stmt(func.body)
+            stmt, output = self.rewrite(func_body, buffer_replace_map, out_buf_list)
             if emit:
                 T.add_to_parent(stmt)
-            return [BufferLoad(out_buf, [i]) for i in range(output_dim)]
+            return output
 
-        def _func_template_3(idx: T.Var, *args, buffer_replace_map, var_replace_map, func, out_buf, input_dim, output_dim, job_id, emit=True):
+        def _func_template_3(idx: T.Var, *args, buffer_replace_map, var_replace_map, func, out_buf_list, input_dim, output_dim, job_id, emit=True):
             replacer = BufferReplacer(
                 buffer_replace_map, var_replace_map | {func.params[i]: args[i] for i in range(input_dim)} | {func.params[input_dim]: idx}
             )
-            stmt = replacer.visit_stmt(func.body)
+            func_body = replacer.visit_stmt(func.body)
+            stmt, output = self.rewrite(func_body, buffer_replace_map, out_buf_list)
             if emit:
                 T.add_to_parent(stmt)
-            return [T.int32(job_id)] + [BufferLoad(out_buf, [i]) for i in range(output_dim)]
+            return [T.int32(job_id)] + output
 
-        def _func_template_4(*args, buffer_replace_map, var_replace_map, func, out_buf, input_dim, output_dim, job_id, emit=True):
+        def _func_template_4(*args, buffer_replace_map, var_replace_map, func, out_buf_list, input_dim, output_dim, job_id, emit=True):
             replacer = BufferReplacer(
                 buffer_replace_map, var_replace_map | {func.params[i]: args[i] for i in range(input_dim)}
             )
-            stmt = replacer.visit_stmt(func.body)
+            func_body = replacer.visit_stmt(func.body)
+            stmt, output = self.rewrite(func_body, buffer_replace_map, out_buf_list)
             if emit:
                 T.add_to_parent(stmt)
-            return [BufferLoad(out_buf, [i]) for i in range(output_dim)]
+            return output
         
         template_map = {(True, True): _func_template_1, (False, True): _func_template_2, 
                         (True, False): _func_template_3, (False, False): _func_template_4}
         return template_map[(accept_idx, job_id == -1)]
     
     def _create_func(self, accept_idx: bool, job_id: int, buffer_replace_map, var_replace_map, func: PrimFunc,
-                     out_buf: Buffer, input_dim: int, output_dim: int):
+                     out_buf_list: List[Buffer], input_dim: int, output_dim: int):
         func_template = self._get_func_template(accept_idx, job_id)
         return partial(func_template, buffer_replace_map=buffer_replace_map, var_replace_map=var_replace_map,
-                       func=func, out_buf=out_buf, input_dim=input_dim, output_dim=output_dim, job_id=job_id)
+                       func=func, out_buf_list=out_buf_list, input_dim=input_dim, output_dim=output_dim, job_id=job_id)
 
-    def handle(self, func: PrimFunc, extra_tensors: List[Expr], extra_tir_vars: List[PrimExpr],
+    def handle(self, func: PrimFunc, extra_args: List[Union[Expr, PrimExpr]],
                 input_dim: int, output_dim: int, accept_idx: bool, job_id: int = -1):
         # notes: here we don't directly capture the outer variables in the closure to avoid wrongly using values when executing rather than compiling
         var_replace_map = {}
@@ -594,34 +600,50 @@ class DependencyHandler:
         if job_id == -1:
             for i, var in enumerate(self.tile_idx):
                 _replace_var(func.params[i], var)
-        # handle extra tensors
-        extra_tensor_offset = input_dim + 1 if accept_idx else input_dim
-        for i, var in enumerate(extra_tensors):
-            if var in self.relax_var_to_entry:
-                var_entry = self.relax_var_to_entry[var]
-                _replace_var(func.params[extra_tensor_offset + i], var_entry.tir_var)
-                _replace_buffer(func.buffer_map[func.params[extra_tensor_offset + i]], var_entry.tir_buffer)
+        # handle extra tensors and tir sym vars
+        extra_args_offset = input_dim + 1 if accept_idx else input_dim
+        for i, var in enumerate(extra_args):
+            if isinstance(var, (Var, PrimExpr)):
+                _replace_var(func.params[extra_args_offset + i], var)
+                self.sym_vars.add(var)
+            elif isinstance(var, Expr):
+                if var in self.relax_var_to_entry:
+                    var_entry = self.relax_var_to_entry[var]
+                    _replace_var(func.params[extra_args_offset + i], var_entry.tir_var)
+                    _replace_buffer(func.buffer_map[func.params[extra_args_offset + i]], var_entry.tir_buffer)
+                else:
+                    binding = self.builder_.lookup_binding(var)
+                    assert isinstance(binding, relax.TupleGetItem), f"unknown source of call_tir_device extra_args: {var} with binding {binding}"
+                    var_entry = VarEntry(
+                        var,
+                        func.params[extra_args_offset + i],
+                        func.buffer_map[func.params[extra_args_offset + i]],
+                    )
+                    self.var_entry_mapping.add_element(var_entry)
+                    self.relax_var_to_entry[var] = var_entry
+                self.in_var_entries.append(var_entry)
             else:
-                binding = self.builder_.lookup_binding(var)
-                assert isinstance(binding, relax.TupleGetItem), f"unknown source of call_tir_device extra_args: {var} with binding {binding}"
-                var_entry = VarEntry(
-                    var,
-                    func.params[extra_tensor_offset + i],
-                    func.buffer_map[func.params[extra_tensor_offset + i]],
-                )
-                self.var_entry_mapping.add_element(var_entry)
-                self.relax_var_to_entry[var] = var_entry
-            self.in_var_entries.append(var_entry)
-        # handle extra tir sym vars
-        extra_tir_var_offset = extra_tensor_offset + len(extra_tensors)
-        for i, var in enumerate(extra_tir_vars):
-            _replace_var(func.params[extra_tir_var_offset + i], var)
-            self.sym_vars.add(var)
+                raise ValueError(f"Unsupported extra arg type: {type(var)}")
         # handle the output buffer
-        out_buf = func.buffer_map[func.params[-1]]
+        out_buf_list = [func.buffer_map[func.params[extra_args_offset + len(extra_args) + i]] for i in range(output_dim)]
         out_func = self._create_func(accept_idx, job_id, buffer_replace_map, var_replace_map,
-                                     func, out_buf, input_dim, output_dim)
-        return out_func, out_buf
+                                     func, out_buf_list, input_dim, output_dim)
+        return out_func
+    
+    def rewrite(self, stmt: Stmt, buffer_replace_map: Dict[Buffer, Buffer], cur_buf_list: List[Buffer]) -> Tuple[Stmt, List[PrimExpr]]:
+        self.cur_buf_set = self.cur_buf_set = {buffer_replace_map[buf]: i for i, buf in enumerate(cur_buf_list)}
+        self.cur_out_prim_expr = [None] * len(cur_buf_list)
+        new_stmt = self.visit_stmt(stmt)
+        for prim_expr in self.cur_out_prim_expr:
+            assert prim_expr is not None, "dependency handling failed to set all output prim exprs"
+        return new_stmt, self.cur_out_prim_expr
+
+    def visit_buffer_store_(self, op):
+        if op.buffer in self.cur_buf_set:
+            assert len(op.indices) == 1 and op.indices[0] == 0
+            self.cur_out_prim_expr[self.cur_buf_set[op.buffer]] = op.value
+            return Evaluate(0)
+        return super().visit_buffer_store_(op)
 
 @mutator
 class _Rewriter(PyExprMutator):
@@ -755,10 +777,8 @@ class _Rewriter(PyExprMutator):
             tir_gvar = call.args[0]
             in_events = call.attrs.in_events
             out_events = call.attrs.out_events
-            in_extra_tensors = call.attrs.in_extra_tensors
-            out_extra_tensors = call.attrs.out_extra_tensors
-            in_extra_tir_vars = call.attrs.in_extra_tir_vars
-            out_extra_tir_vars = call.attrs.out_extra_tir_vars
+            in_extra_args = call.attrs.in_extra_args
+            out_extra_args = call.attrs.out_extra_args
             in_deps = call.attrs.in_deps
             out_deps = call.attrs.out_deps
             in_nums = call.attrs.in_nums
@@ -853,41 +873,32 @@ class _Rewriter(PyExprMutator):
             push_info_list = []
             dep_handler = DependencyHandler(tile_idx, in_var_entries, sym_vars, self.relax_var_to_entry, self.builder_, self.var_entry_mapping)
             for idx in range(len(in_deps)):
-                in_dep_func, in_dep_buf = dep_handler.handle(in_deps[idx], in_extra_tensors[idx], in_extra_tir_vars[idx],
-                                                           len(tile_idx), len(in_events[idx].struct_info.shape) + 1, True)
-                in_num_func, in_num_buf = dep_handler.handle(in_nums[idx], in_extra_tensors[idx], in_extra_tir_vars[idx],
-                                                           len(tile_idx), 1, False)
-                in_info_list.append((in_dep_func, in_num_func, in_dep_buf, in_num_buf))
+                in_dep_func = dep_handler.handle(in_deps[idx], in_extra_args[idx], len(tile_idx), len(in_events[idx].struct_info.shape) + 1, True)
+                in_num_func = dep_handler.handle(in_nums[idx], in_extra_args[idx], len(tile_idx), 1, False)
+                in_info_list.append((in_dep_func, in_num_func))
             for idx in range(len(out_deps)):
-                out_dep_func, out_dep_buf = dep_handler.handle(out_deps[idx], out_extra_tensors[idx], out_extra_tir_vars[idx],
-                                                              len(tile_idx), len(out_events[idx].struct_info.shape) + 1, True)
-                out_num_func, out_num_buf = dep_handler.handle(out_nums[idx], out_extra_tensors[idx], out_extra_tir_vars[idx],
-                                                              len(tile_idx), 1, False)
-                out_info_list.append((out_dep_func, out_num_func, out_dep_buf, out_num_buf))
+                out_dep_func = dep_handler.handle(out_deps[idx], out_extra_args[idx], len(tile_idx), len(out_events[idx].struct_info.shape) + 1, True)
+                out_num_func = dep_handler.handle(out_nums[idx], out_extra_args[idx], len(tile_idx), 1, False)
+                out_info_list.append((out_dep_func, out_num_func))
             if self.strategy == "dynamic":
                 for i, evt in enumerate(out_events):
-                    notify_dep_func, notify_dep_buf = dep_handler.handle(self._deep_copy(out_deps[i]), out_extra_tensors[i], out_extra_tir_vars[i], 
-                                                                         len(tile_idx), len(out_events[i].struct_info.shape) + 1, True)
-                    notify_num_func, notify_num_buf = dep_handler.handle(self._deep_copy(out_nums[i]), out_extra_tensors[i], out_extra_tir_vars[i], 
-                                                                       len(tile_idx), 1, False)
-                    push_info = (notify_dep_func, notify_num_func, [], [notify_dep_buf, notify_num_buf])
+                    notify_dep_func = dep_handler.handle(self._deep_copy(out_deps[i]), out_extra_args[i], len(tile_idx), len(out_events[i].struct_info.shape) + 1, True)
+                    notify_num_func = dep_handler.handle(self._deep_copy(out_nums[i]), out_extra_args[i], len(tile_idx), 1, False)
+                    push_info = (notify_dep_func, notify_num_func, [])
                     for j, push_call in self.evt_handle_helper.in_evt[evt]:
                         assert len(push_call.attrs.in_deps) == 1
-                        push_dep_func, push_dep_buf = dep_handler.handle(self._deep_copy(push_call.attrs.inv_in_deps[j]),
-                                                                       push_call.attrs.inv_in_extra_tensors[j], push_call.attrs.inv_in_extra_tir_vars[j],
-                                                                       len(push_call.attrs.inv_in_events[j].struct_info.shape) + 1, len(tile_idx),
-                                                                       True, job_id=push_call.attrs.job_id)
-                        push_num_func, push_num_buf = dep_handler.handle(self._deep_copy(push_call.attrs.inv_in_nums[j]), 
-                                                                       push_call.attrs.inv_in_extra_tensors[j], push_call.attrs.inv_in_extra_tir_vars[j],
-                                                                       len(push_call.attrs.inv_in_events[j].struct_info.shape) + 1, 1,
-                                                                       False, job_id=push_call.attrs.job_id)
+                        push_dep_func = dep_handler.handle(self._deep_copy(push_call.attrs.inv_in_deps[j]), push_call.attrs.inv_in_extra_args[j],
+                                                            len(push_call.attrs.inv_in_events[j].struct_info.shape) + 1, len(tile_idx),
+                                                            True, job_id=push_call.attrs.job_id)
+                        push_num_func = dep_handler.handle(self._deep_copy(push_call.attrs.inv_in_nums[j]), push_call.attrs.inv_in_extra_args[j], 
+                                                            len(push_call.attrs.inv_in_events[j].struct_info.shape) + 1, 1,
+                                                            False, job_id=push_call.attrs.job_id)
                         def push_map_func(idx: T.Var, notify_dep_func=notify_dep_func, push_dep_func=push_dep_func, push_num_func=push_num_func, emit=True):
                             evt_coord = notify_dep_func(idx, emit=emit)
                             return push_num_func(*evt_coord, emit=emit)[0], lambda idx: push_dep_func(idx, *evt_coord, emit=emit)
                         
                         push_info[2].append(push_map_func)
-                        push_info[3].extend([push_dep_buf, push_num_buf])
-                        
+
                     push_info_list.append(push_info)                                
             self.device_func_infos[call] = DeviceFuncInfo(
                 body, in_var_entries, out_var_entries, tile_idx, in_event_tensors, out_event_tensors, sym_vars,
@@ -1275,7 +1286,7 @@ class _Rewriter(PyExprMutator):
                 out_sinfo.append(TensorStructInfo(shape=(self.profiler_buf_size,), dtype="uint64"))
                 inplace_indices.append(-1)
         if all(i == -1 for i in inplace_indices):
-            return relax.call_tir(new_gvar, new_relax_params, out_sinfo, tir_vars=persistent_kernel_sym_vars)
+            return relax.call_tir(new_gvar, new_relax_params, out_sinfo, tir_vars=persistent_kernel_sym_vars), len(out_sinfo)
         return relax.call_tir_inplace(new_gvar, new_relax_params, inplace_indices, out_sinfo, tir_vars=persistent_kernel_sym_vars), len(out_sinfo)
 
     def visit_seq_expr_(self, op: relax.SeqExpr) -> Expr:

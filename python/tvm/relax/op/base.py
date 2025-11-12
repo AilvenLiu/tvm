@@ -290,82 +290,68 @@ def call_tir_device(
     else:
         tile_idx_dim = len(tile_num)
 
-    def _event_coord_dim(dep: Dependency) -> int:
-        sinfo = dep.event.struct_info
-        if isinstance(sinfo, TensorStructInfo):
-            if sinfo.ndim != -1:
-                return sinfo.ndim + 1
-            if isinstance(sinfo.shape, ShapeExpr):
-                return len(sinfo.shape.values) + 1
-        raise ValueError("Dependency event must have static rank")
-
-    def _handle_dep(dep: Dependency, input_dim: int, output_dim: int):
-        handle_dep_params = len(inspect.signature(dep.handle_dep).parameters)
-        if handle_dep_params == 0:
-            return dep.handle_dep()
-        return dep.handle_dep(input_dim, output_dim)
-
     if not in_deps:
-        in_evt_list, in_extra_tensors_list, in_extra_tir_vars_list, in_dep_list, in_num_list = (
-            [],
-            [],
-            [],
-            [],
-            [],
-        )
+        in_evt_list, in_extra_args_list, in_dep_list, in_num_list = ([], [], [], [])
     else:
         if not isinstance(in_deps, list):
             in_deps = [in_deps]
-        event_dim = _event_coord_dim(in_deps[0])
         (
             in_evt_list,
-            in_extra_tensors_list,
-            in_extra_tir_vars_list,
+            in_extra_args_list,
             in_dep_list,
             in_num_list,
-        ) = map(list, zip(*(_handle_dep(dep, tile_idx_dim, event_dim) for dep in in_deps)))
+        ) = map(
+            list,
+            zip(
+                *(dep.handle_dep(tile_idx_dim, len(dep.event.struct_info.shape) + 1) for dep in in_deps)
+            ),
+        )
 
     if not out_deps:
-        out_evt_list, out_extra_tensors_list, out_extra_tir_vars_list, out_dep_list, out_num_list = (
-            [],
-            [],
-            [],
-            [],
-            [],
-        )
+        out_evt_list, out_extra_args_list, out_dep_list, out_num_list = ([], [], [], [])
     else:
         if not isinstance(out_deps, list):
             out_deps = [out_deps]
-        event_dim = _event_coord_dim(out_deps[0])
         (
             out_evt_list,
-            out_extra_tensors_list,
-            out_extra_tir_vars_list,
+            out_extra_args_list,
             out_dep_list,
             out_num_list,
-        ) = map(list, zip(*(_handle_dep(dep, tile_idx_dim, event_dim) for dep in out_deps)))
-
-    if not inverse_in_deps:
+        ) = map(
+            list,
+            zip(
+                *(
+                    dep.handle_dep(tile_idx_dim, len(dep.event.struct_info.shape) + 1)
+                    for dep in out_deps
+                )
+            ),
+        )
+    if inverse_in_deps is None or not inverse_in_deps:
         (
             inv_in_evt_list,
-            inv_in_extra_tensors_list,
-            inv_in_extra_tir_vars_list,
+            inv_in_extra_args_list,
             inv_in_dep_list,
             inv_in_num_list,
-        ) = ([], [], [], [], [])
+        ) = ([], [], [], [])
     else:
         if not isinstance(inverse_in_deps, list):
             inverse_in_deps = [inverse_in_deps]
-        event_dim = _event_coord_dim(inverse_in_deps[0])
+        assert len(in_deps) == len(
+            inverse_in_deps
+        ), "Length of inverse_in_deps should match that of in_deps."
         (
             inv_in_evt_list,
-            inv_in_extra_tensors_list,
-            inv_in_extra_tir_vars_list,
+            inv_in_extra_args_list,
             inv_in_dep_list,
             inv_in_num_list,
         ) = map(
             list,
-            zip(*(_handle_dep(dep, event_dim, tile_idx_dim) for dep in inverse_in_deps)),
+            zip(
+                *(
+                    dep.handle_dep(len(dep.event.struct_info.shape) + 1, tile_idx_dim)
+                    for dep in inverse_in_deps
+                )
+            ),
         )
 
     if not isinstance(out_sinfo, list):
@@ -401,12 +387,9 @@ def call_tir_device(
         in_evt_list,
         out_evt_list,
         inv_in_evt_list,
-        in_extra_tensors_list,
-        out_extra_tensors_list,
-        inv_in_extra_tensors_list,
-        in_extra_tir_vars_list,
-        out_extra_tir_vars_list,
-        inv_in_extra_tir_vars_list,
+        in_extra_args_list,
+        out_extra_args_list,
+        inv_in_extra_args_list,
         in_dep_list,
         out_dep_list,
         inv_in_dep_list,

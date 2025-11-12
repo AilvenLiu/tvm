@@ -913,12 +913,9 @@ TVM_REGISTER_OP("relax.call_tir_device")
 Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_sinfo_list,
                        ShapeExpr tile_num, int job_id, ffi::Array<Expr> in_events,
                        ffi::Array<Expr> out_events, ffi::Array<Expr> inv_in_events,
-                       ffi::Array<ffi::Array<Expr>> in_extra_tensors,
-                       ffi::Array<ffi::Array<Expr>> out_extra_tensors,
-                       ffi::Array<ffi::Array<Expr>> inv_in_extra_tensors,
-                       ffi::Array<ffi::Array<PrimExpr>> in_extra_tir_vars,
-                       ffi::Array<ffi::Array<PrimExpr>> out_extra_tir_vars,
-                       ffi::Array<ffi::Array<PrimExpr>> inv_in_extra_tir_vars,
+                       ffi::Array<ffi::Array<ffi::Any>> in_extra_args,
+                       ffi::Array<ffi::Array<ffi::Any>> out_extra_args,
+                       ffi::Array<ffi::Array<ffi::Any>> inv_in_extra_args,
                        ffi::Array<tir::PrimFunc> in_deps, ffi::Array<tir::PrimFunc> out_deps,
                        ffi::Array<tir::PrimFunc> inv_in_deps, ffi::Array<tir::PrimFunc> in_nums,
                        ffi::Array<tir::PrimFunc> out_nums, ffi::Array<tir::PrimFunc> inv_in_nums,
@@ -929,12 +926,9 @@ Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_s
   attrs->in_events = in_events;
   attrs->out_events = out_events;
   attrs->inv_in_events = inv_in_events;
-  attrs->in_extra_tensors = in_extra_tensors;
-  attrs->out_extra_tensors = out_extra_tensors;
-  attrs->inv_in_extra_tensors = inv_in_extra_tensors;
-  attrs->in_extra_tir_vars = in_extra_tir_vars;
-  attrs->out_extra_tir_vars = out_extra_tir_vars;
-  attrs->inv_in_extra_tir_vars = inv_in_extra_tir_vars;
+  attrs->in_extra_args = in_extra_args;
+  attrs->out_extra_args = out_extra_args;
+  attrs->inv_in_extra_args = inv_in_extra_args;
   attrs->in_deps = in_deps;
   attrs->out_deps = out_deps;
   attrs->inv_in_deps = inv_in_deps;
