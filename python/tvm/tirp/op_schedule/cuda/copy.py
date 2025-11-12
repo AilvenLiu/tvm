@@ -265,14 +265,14 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
     tmem_st, tmem_extent = get_st_extent(tmem_region)
     local_st, local_extent = get_st_extent(local_region)
     # tmem layout (128, WIDTH):(1@TLane, 1@TCol)
-    tmem_layout = TileLayout(([128, tmem_buf.shape[1]], [1@TLane, 1@TCol])).normalize()
+    tmem_layout = TileLayout(([128, tmem_buf.shape[1]], [1@TLane, 1@TCol])).canonicalize()
     # local layout
-    local_layout = TileLayout(([128, width], [1@tid_in_wg, 1])).normalize()
+    local_layout = TileLayout(([128, width], [1@tid_in_wg, 1])).canonicalize()
 
     # tmem allocated addr is not None
     assert tmem_buf.allocated_addr is not None
-    tvm.ir.assert_structural_equal(tmem_buf.layout.normalize(), tmem_layout)
-    tvm.ir.assert_structural_equal(local_buf.layout.normalize(), local_layout)
+    tvm.ir.assert_structural_equal(tmem_buf.layout.canonicalize(), tmem_layout)
+    tvm.ir.assert_structural_equal(local_buf.layout.canonicalize(), local_layout)
     # local: [0:128, 0:WIDTH] <-> tmem: [0:128, st:st+WIDTH]
     assert analyzer.can_prove_equal(tmem_st[0], 0)
     assert analyzer.can_prove_equal(tmem_extent[0], 128)

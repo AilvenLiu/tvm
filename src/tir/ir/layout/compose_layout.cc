@@ -75,8 +75,8 @@ ffi::Map<ffi::String, PrimExpr> ComposeLayoutNode::Apply(PrimExpr coord) const {
   return layout_A_res;
 }
 
-TLayout ComposeLayoutNode::Normalize() const {
-  auto layout_B_normalized = layout_B->Normalize().as<TileLayout>().value();
+TLayout ComposeLayoutNode::Canonicalize() const {
+  auto layout_B_normalized = layout_B->Canonicalize().as<TileLayout>().value();
   if (layout_B_normalized->IsTrivial()) {
     return layout_A;
   }

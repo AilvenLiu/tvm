@@ -589,7 +589,7 @@ TileLayout SortReplicateIters(TileLayout layout) {
   return ffi::GetRef<TileLayout>(n);
 }
 
-TLayout TileLayoutNode::Normalize() const {
+TLayout TileLayoutNode::Canonicalize() const {
   // 0. Remove unit iters in shard
   TileLayout res = RemoveUnitIters(ffi::GetRef<TileLayout>(this));
   // 1. Remove zero offset
@@ -603,8 +603,8 @@ TLayout TileLayoutNode::Normalize() const {
   return res;
 }
 
-std::pair<TileLayout, std::vector<int64_t>> GroupByShape(TileLayout layout,
-                                                         const ffi::Array<PrimExpr>& shape) {
+std::pair<TileLayout, std::vector<int64_t>> Group(TileLayout layout,
+                                                  const ffi::Array<PrimExpr>& shape) {
   arith::Analyzer analyzer;
   size_t shape_idx = 0;
   PrimExpr prod = 1;
@@ -651,22 +651,22 @@ std::pair<TileLayout, std::vector<int64_t>> GroupByShape(TileLayout layout,
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def(
-      "tir.TileLayoutGroupByShape", [](const TileLayout& layout, const Array<PrimExpr>& shape) {
-        auto [res, seps] = GroupByShape(layout, shape);
+      "tir.TileLayoutGroup", [](const TileLayout& layout, const Array<PrimExpr>& shape) {
+        auto [res, seps] = Group(layout, shape);
         return Tuple<TileLayout, Array<int64_t>>{res, Array<int64_t>(seps.begin(), seps.end())};
       });
 }
 
 TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& outer_shape,
                              const Array<PrimExpr>& inner_shape) const {
-  auto outer = outer_in->Normalize().as<TileLayout>().value();
-  auto inner = ffi::GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+  auto outer = outer_in->Canonicalize().as<TileLayout>().value();
+  auto inner = ffi::GetRef<TileLayout>(this)->Canonicalize().as<TileLayout>().value();
 
   CHECK_EQ(outer_shape.size(), inner_shape.size()) << "Outer and inner shape size must match";
 
   // Group both outer/inner layouts by their respective logical shapes
-  auto [grouped_outer, outer_seps] = GroupByShape(outer, outer_shape);
-  auto [grouped_inner, inner_seps] = GroupByShape(inner, inner_shape);
+  auto [grouped_outer, outer_seps] = Group(outer, outer_shape);
+  auto [grouped_inner, inner_seps] = Group(inner, inner_shape);
 
   outer = grouped_outer;
   inner = grouped_inner;
@@ -727,7 +727,138 @@ TLayout TileLayoutNode::Tile(const TileLayout& outer_in, const Array<PrimExpr>& 
     }
   }
 
-  return TileLayout(tile_shard, tile_rep, tile_offset)->Normalize();
+  return TileLayout(tile_shard, tile_rep, tile_offset)->Canonicalize();
+}
+
+// Slice a contiguous region [begin, begin+extent) over the grouped block (shard).
+ffi::Optional<TileLayout> SlicePerGroup(TileLayout layout, PrimExpr begin, PrimExpr extent) {
+  layout = layout->Canonicalize().as<TileLayout>().value();
+  // Work on normalized form to satisfy canonicalization assumptions
+  const auto& shard = layout->shard;
+
+  if (shard.empty()) {
+    return std::nullopt;
+  }
+
+  arith::Analyzer analyzer;
+
+  // Precompute suffix products B_k = prod_{t=k+1}^{m-1} E_t
+  int m = static_cast<int>(shard.size());
+  std::vector<PrimExpr> B(m);
+  PrimExpr acc = PrimExpr(1);
+  for (int k = m - 1; k >= 0; --k) {
+    B[k] = acc;
+    acc = analyzer.Simplify(acc * shard[k]->extent);
+  }
+
+  // Compute start digits d_k^0 and region-origin offset O* = sum S_k * d_k^0 @ a_k
+  std::vector<PrimExpr> d0(m);
+  ffi::Map<Axis, PrimExpr> new_offset;
+  // Start from existing offset
+  for (const auto& [axis, off] : layout->offset) new_offset.Set(axis, off);
+
+  auto add_axis_offset = [&](const Axis& axis, PrimExpr value) {
+    auto it = new_offset.find(axis);
+    if (it != new_offset.end()) {
+      new_offset.Set(axis, analyzer.Simplify((*it).second + value));
+    } else {
+      new_offset.Set(axis, analyzer.Simplify(value));
+    }
+  };
+
+  for (int k = 0; k < m; ++k) {
+    const PrimExpr& Ek = shard[k]->extent;
+    const PrimExpr& Sk = shard[k]->stride;
+    const Axis& ak = shard[k]->axis;
+    PrimExpr dk0 = analyzer.Simplify(floormod(floordiv(begin, B[k]), Ek));
+    d0[k] = dk0;
+    add_axis_offset(ak, analyzer.Simplify(dk0 * Sk));
+  }
+
+  // Greedy peel from fastest to slowest
+  PrimExpr rem = extent;
+  std::vector<Iter> peeled_rev;  // collected fastest -> slowest
+  int pivot = m - 1;
+  for (; pivot >= 0; --pivot) {
+    const PrimExpr& Ek = shard[pivot]->extent;
+    // peel condition: d_k^0 == 0 and rem % E_k == 0
+    bool peelable =
+        analyzer.CanProveEqual(d0[pivot], 0) && analyzer.CanProveEqual(floormod(rem, Ek), 0);
+    if (!peelable) break;
+    peeled_rev.push_back(shard[pivot]);
+    rem = analyzer.Simplify(floordiv(rem, Ek));
+  }
+
+  // If peeled all axes and rem == 1, region is fully covered by peeled suffix
+  if (pivot < 0) {
+    if (!analyzer.CanProveEqual(rem, 1)) return std::nullopt;
+    std::vector<Iter> peeled_slow_to_fast(peeled_rev.rbegin(), peeled_rev.rend());
+    return TileLayout(peeled_slow_to_fast, layout->replica, new_offset);
+  }
+
+  // Build result in two sufficient forms at pivot
+  const PrimExpr& Ek = shard[pivot]->extent;
+  const PrimExpr& Sk = shard[pivot]->stride;
+  const Axis& ak = shard[pivot]->axis;
+
+  // Case 1: No-wrap, d_k^0 + rem <= E_k
+  if (analyzer.CanProve(d0[pivot] + rem <= Ek)) {
+    std::vector<Iter> new_shard;
+    new_shard.push_back(Iter(rem, Sk, ak));
+    // Append peeled suffix in slow->fast order (right side)
+    new_shard.insert(new_shard.end(), peeled_rev.rbegin(), peeled_rev.rend());
+    return TileLayout(new_shard, layout->replica, new_offset);
+  }
+
+  // Case 2: Symmetric one-wrap midpoint form
+  // Conditions: rem even, d_k^0 + rem/2 == E_k, and (k==0 or d_{k-1}^0 + 1 <= E_{k-1})
+  PrimExpr two = make_const(rem.dtype(), 2);
+  PrimExpr c = analyzer.Simplify(floordiv(rem, two));
+  bool even = analyzer.CanProveEqual(floormod(rem, two), 0);
+  bool mid = analyzer.CanProveEqual(analyzer.Simplify(d0[pivot] + c), Ek);
+  bool cap = true;
+  if (pivot > 0) {
+    cap = analyzer.CanProve(analyzer.Simplify(d0[pivot - 1] + 1 <= shard[pivot - 1]->extent));
+  }
+  if (even && mid && cap) {
+    // Additional representability condition: adjacent axes must be the same to encode Δ
+    if (pivot == 0 || shard[pivot - 1]->axis.same_as(ak)) {
+      PrimExpr delta =
+          analyzer.Simplify((pivot > 0 ? shard[pivot - 1]->stride : PrimExpr(0)) - (Ek - c) * Sk);
+      std::vector<Iter> new_shard;
+      new_shard.push_back(Iter(make_const(c.dtype(), 2), delta, ak));
+      new_shard.push_back(Iter(c, Sk, ak));
+      new_shard.insert(new_shard.end(), peeled_rev.rbegin(), peeled_rev.rend());
+      return TileLayout(new_shard, layout->replica, new_offset);
+    }
+  }
+
+  return std::nullopt;
+}
+
+ffi::Optional<TileLayout> TileLayoutNode::Slice(Array<PrimExpr> shape, Region region) const {
+  arith::Analyzer analyzer;
+  auto [grouped_layout, seps] = Group(ffi::GetRef<TileLayout>(this), shape);
+  std::vector<Iter> new_shard;
+  ffi::Map<Axis, PrimExpr> new_offset;
+  for (size_t i = 0; i < seps.size() - 1; ++i) {
+    std::vector<Iter> shard(grouped_layout->shard.begin() + seps[i],
+                            grouped_layout->shard.begin() + seps[i + 1]);
+    TileLayout group = TileLayout(shard, {}, {});
+    auto sliced_opt = SlicePerGroup(group, region[i]->min, region[i]->extent);
+    if (!sliced_opt.has_value()) return std::nullopt;
+    auto sliced = sliced_opt.value();
+    new_shard.insert(new_shard.end(), sliced->shard.begin(), sliced->shard.end());
+    for (const auto& [axis, off] : sliced->offset) {
+      auto it = new_offset.find(axis);
+      if (it != new_offset.end()) {
+        new_offset.Set(axis, analyzer.Simplify((*it).second + off));
+      } else {
+        new_offset.Set(axis, analyzer.Simplify(off));
+      }
+    }
+  }
+  return TileLayout(new_shard, grouped_layout->replica, new_offset);
 }
 
 // Tiles a logical shape by a given factor array.
@@ -816,8 +947,8 @@ ffi::Optional<TileLayout> TileLayoutNode::IsTileInner(
   auto maybe_tile = tile_layout.as<TileLayout>();
   if (!maybe_tile) return std::nullopt;
 
-  TileLayout tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
-  TileLayout layout = ffi::GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+  TileLayout tiled = maybe_tile.value()->Canonicalize().as<TileLayout>().value();
+  TileLayout layout = ffi::GetRef<TileLayout>(this)->Canonicalize().as<TileLayout>().value();
 
   auto tiled_scope = tiled->GetScope();
   auto inner_scope = layout->GetScope();
@@ -854,10 +985,10 @@ ffi::Optional<TileLayout> TileLayoutNode::IsTileInner(
       << "Tiled shape size must match inner shape size";
 
   auto factored = TileShape(tiled_shape, inner_shape, true);
-  auto [grouped_tiled, tiled_seps] = GroupByShape(tiled, factored);
+  auto [grouped_tiled, tiled_seps] = Group(tiled, factored);
   CHECK(grouped_tiled.defined() && !tiled_seps.empty())
       << "tile layout group by shape failed, layout is " << tiled << " and shape is " << factored;
-  auto [grouped_layout, inner_seps] = GroupByShape(layout, inner_shape);
+  auto [grouped_layout, inner_seps] = Group(layout, inner_shape);
   CHECK(grouped_layout.defined() && !inner_seps.empty())
       << "tile layout group by shape failed, layout is " << layout << " and shape is "
       << inner_shape;
@@ -929,8 +1060,8 @@ ffi::Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
     }
     return std::nullopt;
   }
-  TileLayout tiled = maybe_tile.value()->Normalize().as<TileLayout>().value();
-  TileLayout layout = ffi::GetRef<TileLayout>(this)->Normalize().as<TileLayout>().value();
+  TileLayout tiled = maybe_tile.value()->Canonicalize().as<TileLayout>().value();
+  TileLayout layout = ffi::GetRef<TileLayout>(this)->Canonicalize().as<TileLayout>().value();
 
   auto tiled_scope = tiled->GetScope();
   auto outer_scope = layout->GetScope();
@@ -950,10 +1081,10 @@ ffi::Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
       << "Tiled shape size must match outer shape size";
 
   auto factored = TileShape(tiled_shape, outer_shape, false);
-  auto [grouped_tiled, tiled_seps] = GroupByShape(tiled, factored);
+  auto [grouped_tiled, tiled_seps] = Group(tiled, factored);
   CHECK(grouped_tiled.defined() && !tiled_seps.empty())
       << "tile layout group by shape failed, layout is " << tiled << " and shape is " << factored;
-  auto [grouped_layout, outer_seps] = GroupByShape(layout, outer_shape);
+  auto [grouped_layout, outer_seps] = Group(layout, outer_shape);
   CHECK(grouped_layout.defined() && !outer_seps.empty())
       << "tile layout group by shape failed, layout is " << layout << " and shape is "
       << outer_shape;
@@ -1008,7 +1139,7 @@ ffi::Optional<TLayout> TileLayoutNode::IsTileOuter(const TLayout& tile_layout,
 
   auto inner_layout = TileLayout(inner_shard, inner_replicate, inner_exclude);
   auto try_tile = inner_layout->Tile(layout, outer_shape, ShapeDiv(tiled_shape, outer_shape));
-  if (StructuralEqual()(try_tile->Normalize(), tiled->Normalize())) {
+  if (StructuralEqual()(try_tile->Canonicalize(), tiled->Canonicalize())) {
     return inner_layout;
   }
   return std::nullopt;
@@ -1029,7 +1160,7 @@ bool TileLayoutNode::IsTrivial() const {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("tir.TileLayoutIsTrivial", [](const TileLayout& layout) {
-    return layout->Normalize().as<TileLayout>().value()->IsTrivial();
+    return layout->Canonicalize().as<TileLayout>().value()->IsTrivial();
   });
 }
 
@@ -1135,6 +1266,14 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       [](const TileLayout& layout) -> ffi::Optional<ffi::Tuple<ExecScope, ExecScope>> {
         return layout->GetScope();
       });
+}
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def(
+      "tir.TileLayoutSlice",
+      [](const TileLayout& layout, Array<PrimExpr> shape,
+         Region region) -> ffi::Optional<TileLayout> { return layout->Slice(shape, region); });
 }
 
 }  // namespace tir

@@ -66,7 +66,7 @@ def normalize_and_group(layout, shape):
         If layout is not a valid layout type
     """
     if isinstance(layout, T.TileLayout):
-        return layout.normalize().group_by_shape(shape)
+        return layout.canonicalize().group(shape)
     else:
         raise ValueError("Invalid layout")
 

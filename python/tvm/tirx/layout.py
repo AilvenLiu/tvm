@@ -95,15 +95,15 @@ class TLayout(Object):
             return _ffi_api.TLayoutApply(self, coord)  # pylint: disable=no-member
         return _ffi_api.TLayoutApplyWithShape(self, coord, shape)  # pylint: disable=no-member
 
-    def normalize(self) -> "TLayout":
-        """Normalize the layout by simplifying and fusing iterators where possible.
+    def canonicalize(self) -> "TLayout":
+        """Canonicalize the layout by simplifying and fusing iterators where possible.
 
         Returns
         -------
         TLayout
-            The normalized layout
+            The canonicalized layout
         """
-        return _ffi_api.TLayoutNormalize(self)  # pylint: disable=no-member
+        return _ffi_api.TLayoutCanonicalize(self)  # pylint: disable=no-member
 
     def tile(
         self,
@@ -585,7 +585,7 @@ class TileLayout(TLayout):
         """Check if the layout is trivial."""
         return _ffi_api.TileLayoutIsTrivial(self)  # pylint: disable=no-member
 
-    def group_by_shape(self, shape: List[PrimExpr]) -> Tuple["TLayout", List[int]]:
+    def group(self, shape: List[PrimExpr]) -> Tuple["TLayout", List[int]]:
         """Group the current layout by the given shape.
 
         Parameters
@@ -598,11 +598,20 @@ class TileLayout(TLayout):
         Tuple[TLayout, List[int]]
             The grouped layout and the separators
         """
-        return _ffi_api.TileLayoutGroupByShape(self, shape)  # pylint: disable=no-member
+        return _ffi_api.TileLayoutGroup(self, shape)  # pylint: disable=no-member
 
     def get_scope(self) -> Optional[Tuple[ExecScope, ExecScope]]:
         """Get the scope pair of the layout."""
         return _ffi_api.TileLayoutGetScope(self)  # pylint: disable=no-member
+
+    def slice(
+        self, shape: List[PrimExpr], region: List[Tuple[PrimExpr, PrimExpr]]
+    ) -> Optional["TileLayout"]:
+        """Slice the layout with a given shape and region."""
+        assert len(shape) == len(region), "shape and region must have the same length"
+        region = [tvm.ir.Range(r[0], r[1]) for r in region]
+        print(f"shape: {shape}, region: {region}")
+        return _ffi_api.TileLayoutSlice(self, shape, region)  # pylint: disable=no-member
 
     @classmethod
     def trainium(

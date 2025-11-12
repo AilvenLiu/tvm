@@ -69,8 +69,8 @@ class TLayoutNode : public Object {
   ffi::Map<ffi::String, PrimExpr> Apply(const ffi::Array<PrimExpr>& coord,
                                         const ffi::Array<PrimExpr>& shape) const;
 
-  /*! \brief Turn the layout to normalized form */
-  virtual TLayout Normalize() const = 0;
+  /*! \brief Turn the layout to canonical form */
+  virtual TLayout Canonicalize() const = 0;
 
   /*! \brief Tile the current layout with a given layout */
   virtual TLayout Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
@@ -302,8 +302,8 @@ class TileLayoutNode : public TLayoutNode {
   ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const final;
   ffi::Map<ffi::String, PrimExpr> Apply(PrimExpr coord) const final;
 
-  /*! \brief Turn the layout to normalized form */
-  TLayout Normalize() const final;
+  /*! \brief Turn the layout to canonical form */
+  TLayout Canonicalize() const final;
 
   /*! \brief Tile the layout with an outer layout */
   TLayout Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
@@ -321,6 +321,9 @@ class TileLayoutNode : public TLayoutNode {
 
   /*! \brief Get the shape of the shard */
   ffi::Array<PrimExpr> GetShardShape() const;
+
+  /*! \brief Slice the layout with a given shape and region */
+  ffi::Optional<TileLayout> Slice(Array<PrimExpr> shape, Region region) const;
 
   /*! \brief Is the layout trivial (pure memory, identical mapping) */
   bool IsTrivial() const;
@@ -385,8 +388,8 @@ class SwizzleLayoutNode : public TLayoutNode {
   ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const final;
   ffi::Map<ffi::String, PrimExpr> Apply(PrimExpr coord) const final;
 
-  /*! \brief Turn the layout to normalized form */
-  TLayout Normalize() const final;
+  /*! \brief Turn the layout to canonical form */
+  TLayout Canonicalize() const final;
 
   /*! \brief Tile the layout with an outer layout */
   TLayout Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,
@@ -448,8 +451,8 @@ class ComposeLayoutNode : public TLayoutNode {
   ffi::Map<ffi::String, PrimExpr> Apply(ffi::Array<PrimExpr> coord) const final;
   ffi::Map<ffi::String, PrimExpr> Apply(PrimExpr coord) const final;
 
-  /*! \brief Turn the layout to normalized form */
-  TLayout Normalize() const final;
+  /*! \brief Turn the layout to canonical form */
+  TLayout Canonicalize() const final;
 
   /*! \brief Tile the layout with an outer layout */
   TLayout Tile(const TileLayout& outer, const ffi::Array<PrimExpr>& outer_shape,

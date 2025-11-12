@@ -88,8 +88,8 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
 
     # Check C's region [0:128, st:st+MMA_N] and layout (128, NCOLS):(1@TLane, 1@TCol)
     assert analyzer.can_prove_equal(C_buffer.shape[0], 128)
-    tmem_layout = TileLayout(([128, C_buffer.shape[1]], [1@TLane, 1@TCol])).normalize()
-    tvm.ir.assert_structural_equal(C_buffer.layout.normalize(), tmem_layout)
+    tmem_layout = TileLayout(([128, C_buffer.shape[1]], [1@TLane, 1@TCol])).canonicalize()
+    tvm.ir.assert_structural_equal(C_buffer.layout.canonicalize(), tmem_layout)
     assert analyzer.can_prove_equal(C_st[0], 0)
     assert analyzer.can_prove_equal(C_extent[0], 128)
     tmem_offset = C_st[1]
@@ -110,7 +110,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
             tiler = swizzle_atom.is_tile_inner(buffer.layout, shape, atom_shape)
             if tiler is not None and tma_atom_compatible(shape, st, extent, atom_shape):
                 tiler_shape = [s // a for s, a in zip(shape, atom_shape)]
-                tiler_grouped, seps = tiler.normalize().group_by_shape(tiler_shape)
+                tiler_grouped, seps = tiler.canonicalize().group(tiler_shape)
                 assert seps[-3] == seps[-1] - 2
                 assert seps[-2] == seps[-1] - 1
                 ldo = (tiler_grouped.shard[-1].stride * atom_size) // (

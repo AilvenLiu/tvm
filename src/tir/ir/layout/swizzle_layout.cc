@@ -81,7 +81,7 @@ ffi::Map<ffi::String, PrimExpr> SwizzleLayoutNode::Apply(PrimExpr coord) const {
       {"m", analyzer.Simplify((f(floordiv(input, base)) << per_element) + floormod(input, base))}};
 }
 
-TLayout SwizzleLayoutNode::Normalize() const { return ffi::GetRef<SwizzleLayout>(this); }
+TLayout SwizzleLayoutNode::Canonicalize() const { return ffi::GetRef<SwizzleLayout>(this); }
 
 // Creates a TileLayout mapping a logical shape to itself (identity).
 TileLayout IdentityTileLayout(ffi::Array<PrimExpr> shape) {

@@ -241,7 +241,7 @@ class LayoutApplier : public arith::IRMutatorWithAnalyzer {
         }
         return res;
       }
-      auto res = buffer->layout.value()->Normalize()->Apply(indices, buffer->shape);
+      auto res = buffer->layout.value()->Canonicalize()->Apply(indices, buffer->shape);
       ICHECK_EQ(res.size(), 1) << "Expected a single element offset";
       return {analyzer_->Simplify((*res.begin()).second)};
     }

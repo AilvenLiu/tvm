@@ -490,11 +490,11 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
             (2, 2, 128, 64),  # shared_shape
             ((0, 1), (0, 1), (0, 128), (0, 64)),  # shared_region
             128,  # thread count per CTA
-            TileLayout([128, 64]).normalize(),  # A_layout
-            TileLayout([128, 64]).normalize(),  # B_layout
+            TileLayout([128, 64]).canonicalize(),  # A_layout
+            TileLayout([128, 64]).canonicalize(),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(
                 dtype, swizzle_len, (2, 2, 128, 64)
-            ).normalize(),
+            ).canonicalize(),
         ),
         (
             (128, 64),  # global_shape
@@ -502,11 +502,11 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
             (2, 2, 24, 64),  # shared_shape
             ((0, 1), (0, 1), (0, 24), (0, 64)),  # shared_region
             128,  # thread count per CTA
-            TileLayout([128, 64]).normalize(),  # A_layout
-            TileLayout([128, 64]).normalize(),  # B_layout
+            TileLayout([128, 64]).canonicalize(),  # A_layout
+            TileLayout([128, 64]).canonicalize(),  # B_layout
             lambda dtype, swizzle_len: tma_shared_layout(
                 dtype, swizzle_len, (2, 2, 24, 64)
-            ).normalize(),
+            ).canonicalize(),
         ),
         (
             (256, 64),  # global_shape
@@ -514,9 +514,11 @@ def test_copy_s2g_tma_store(task, dtype, swizzle_len, cache_hint):
             (256, 64),  # shared_shape
             ((0, 128), (0, 64)),  # shared_region
             128,  # thread count per CTA
-            TileLayout([256, 64]).normalize(),  # A_layout
-            TileLayout([256, 64]).normalize(),  # B_layout
-            lambda dtype, swizzle_len: tma_shared_layout(dtype, swizzle_len, (256, 64)).normalize(),
+            TileLayout([256, 64]).canonicalize(),  # A_layout
+            TileLayout([256, 64]).canonicalize(),  # B_layout
+            lambda dtype, swizzle_len: tma_shared_layout(
+                dtype, swizzle_len, (256, 64)
+            ).canonicalize(),
         ),
     ],
 )

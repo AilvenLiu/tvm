@@ -81,7 +81,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.TLayoutNormalize", [](TLayout layout) { return layout->Normalize(); });
+  refl::GlobalDef().def("tir.TLayoutCanonicalize",
+                        [](TLayout layout) { return layout->Canonicalize(); });
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

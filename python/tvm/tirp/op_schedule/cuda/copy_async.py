@@ -85,12 +85,12 @@ def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape) 
     if isinstance(swizzle_mode, int):
         swizzle_mode = SwizzleMode(swizzle_mode)
     if swizzle_mode == SwizzleMode.SWIZZLE_NONE:
-        return TileLayout(shape).normalize()
+        return TileLayout(shape).canonicalize()
     atom_shape = tma_atom_shape(dtype, swizzle_mode, shape)
     layout = tma_atom_layout(dtype, swizzle_mode)
     tile_to_shape = copy.copy(atom_shape)
     tile_to_shape[-2] = shape[-2]
-    return layout.tile_to(tile_to_shape, atom_shape).tile_to(shape, tile_to_shape).normalize()
+    return layout.tile_to(tile_to_shape, atom_shape).tile_to(shape, tile_to_shape).canonicalize()
 
 
 def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
@@ -194,7 +194,7 @@ def copy_tma_impl(
             # Swizzle mode selected
             swizzle_mode = mode
             outer_shape_shared = [s // a for s, a in zip(s_buf.shape, atom_shape_shared)]
-            outer_shared, seps = outer_shared.normalize().group_by_shape(outer_shape_shared)
+            outer_shared, seps = outer_shared.canonicalize().group(outer_shape_shared)
 
             # copy box could be enlarged in this case
             box_dim = copy.copy(atom_shape_global)

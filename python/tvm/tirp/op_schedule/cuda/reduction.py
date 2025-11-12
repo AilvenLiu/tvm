@@ -256,9 +256,9 @@ def reduction_cuda_warp_logical_view_impl(
     # case 0. shuffle-only, no within-thread reduction
     # provided that src and dst are same-shaped buffer
     if src.shape[1] == 4:
-        if red_warp_atom.is_tile_inner(src.layout.normalize(), (64,), (32,)) is None:
+        if red_warp_atom.is_tile_inner(src.layout.canonicalize(), (64,), (32,)) is None:
             fail("src layout not compatible with ROW_RED tile for shuffle-only reduction")
-        if red_warp_atom.is_tile_inner(dst.layout.normalize(), (64,), (32,)) is None:
+        if red_warp_atom.is_tile_inner(dst.layout.canonicalize(), (64,), (32,)) is None:
             fail("dst layout not compatible with ROW_RED tile for shuffle-only reduction")
         if shuffle is False:
             fail("thread_reduce (shuffle) must be enabled for this reduction case")
@@ -288,7 +288,7 @@ def reduction_cuda_warp_logical_view_impl(
     src_tile_outer = warp_atom.is_tile_inner(src.layout, src.shape, [8, 8])
     if src_tile_outer is None:
         fail("src layout not compatible with WGMMA tile for reduction")
-    if red_warp_atom.is_tile_inner(dst.layout.normalize(), (64,), (32,)) is None:
+    if red_warp_atom.is_tile_inner(dst.layout.canonicalize(), (64,), (32,)) is None:
         fail("dst layout not compatible with ROW_RED tile for reduction")
 
     num_rows = 2

@@ -365,7 +365,7 @@ def binary_map_cuda_warp_logical_view_nd_impl(
 
     def check_row_red(buf):
         try:
-            return red_warp_atom.is_tile_inner(buf.layout.normalize(), (64,), (32,))
+            return red_warp_atom.is_tile_inner(buf.layout.canonicalize(), (64,), (32,))
         except InternalError:
             return None
 
