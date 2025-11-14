@@ -133,6 +133,23 @@ class TLayout(Object):
             self, outer, outer_shape, inner_shape
         )
 
+    def direct_sum(
+        self,
+        left: "TileLayout",
+        left_shape: List[PrimExpr],
+        right_shape: List[PrimExpr],
+    ) -> Union["TileLayout", "ComposeLayout"]:
+        """Direct-sum on the tiling domain (unscaled composition): A + B.
+
+        This layout is treated as the right addend B grouped by `right_shape`.
+        The `left` layout is treated as A grouped by `left_shape`.
+        The resulting layout is evaluated over the interleaved domain S_A ⊗ S_B,
+        without span scaling (unlike tiling).
+        """
+        return _ffi_api.TLayoutDirectSum(  # pylint: disable=no-member
+            self, left, left_shape, right_shape
+        )
+
     def is_tile_inner(
         self,
         tile_layout: Union["TileLayout", "ComposeLayout"],
@@ -183,6 +200,34 @@ class TLayout(Object):
         """
         return _ffi_api.TLayoutIsTileOuter(  # pylint: disable=no-member
             self, tile_layout, tiled_shape, outer_shape
+        )
+
+    def is_direct_sum_right(
+        self,
+        sum_layout: Union["TileLayout", "ComposeLayout"],
+        interleaved_shape: List[PrimExpr],
+        right_shape: List[PrimExpr],
+    ) -> Optional["TileLayout"]:
+        """Check if this layout is the right addend B in a direct-sum A + B.
+
+        Returns the left addend A if recognized, otherwise None.
+        """
+        return _ffi_api.TLayoutIsDirectSumRight(  # pylint: disable=no-member
+            self, sum_layout, interleaved_shape, right_shape
+        )
+
+    def is_direct_sum_left(
+        self,
+        sum_layout: Union["TileLayout", "ComposeLayout"],
+        interleaved_shape: List[PrimExpr],
+        left_shape: List[PrimExpr],
+    ) -> Optional["TLayout"]:
+        """Check if this layout is the left addend A in a direct-sum A + B.
+
+        Returns the right addend B if recognized, otherwise None.
+        """
+        return _ffi_api.TLayoutIsDirectSumLeft(  # pylint: disable=no-member
+            self, sum_layout, interleaved_shape, left_shape
         )
 
     def tile_to(self, to_shape: List[PrimExpr], current_shape: List[PrimExpr]) -> "TLayout":

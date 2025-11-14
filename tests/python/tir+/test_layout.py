@@ -28,6 +28,7 @@ from tvm.tir.layout import (
     ComposeLayout,
     SwizzleLayout,
     TileLayout,
+    Iter,
     laneid,
     warpid,
     wid_in_wg,
@@ -1358,12 +1359,42 @@ def test_normalize_trainium_layout():
 
     case3()
 
-    def case4():
-        layout = TileLayout(shard=([8, 8, 8, 8], [8 @ F, 8 @ P, 1 @ P, 1 @ F]))
-        layout_expected = TileLayout(shard=([8, 64, 8], [8 @ F, 1 @ P, 1 @ F]))
-        assert_structural_equal(layout_expected, layout.canonicalize())
 
-    case4()
+def test_direct_sum():
+    def case1():
+        # Example from the appendix: A + B yields contiguous (16):(1)
+        # B = (2,2):(4,1), A = (2,2):(8,2)
+        B = TileLayout(shard=([2, 2], [4, 1]))
+        A = TileLayout(shard=([2, 2], [8, 2]))
+
+        # Compute direct sum on tiling domain S_A ⊗ S_B with shapes (2,2) and (2,2)
+        sum_layout = B.direct_sum(A, [2, 2], [2, 2]).canonicalize()
+        expected = TileLayout(shard=([16], [1]))
+        assert_structural_equal(expected, sum_layout)
+
+        # Verify Apply equality: 8p + 2q + 4i + j
+        print(f"sum_layout: {sum_layout}")
+        an = Analyzer()
+        for p in [0, 1]:
+            for q in [0, 1]:
+                for i in [0, 1]:
+                    for j in [0, 1]:
+                        m = sum_layout.apply(p, q, i, j, shape=(2, 2, 2, 2))["m"]
+                        m_left = A.apply(p, i, shape=(2, 2))["m"]
+                        m_right = B.apply(q, j, shape=(2, 2))["m"]
+                        assert an.can_prove(m == m_left + m_right)
+
+        # Recognition: recover A given B and sum, and recover B given A and sum
+        interleaved_shape = [2, 2, 2, 2]  # [A0, B0, A1, B1]
+        A_rec = B.is_direct_sum_right(sum_layout, interleaved_shape, [2, 2])
+        assert A_rec is not None
+        assert_structural_equal(A.canonicalize(), A_rec.canonicalize())
+
+        B_rec = A.is_direct_sum_left(sum_layout, interleaved_shape, [2, 2])
+        assert B_rec is not None
+        assert_structural_equal(B.canonicalize(), B_rec.canonicalize())
+
+    case1()
 
 
 def test_group_by_logical_shape():

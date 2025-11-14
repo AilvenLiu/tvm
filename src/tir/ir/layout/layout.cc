@@ -56,6 +56,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   def.def("tir.TLayoutTile",
           [](TLayout layout, TileLayout outer, ffi::Array<PrimExpr> outer_shape,
              ffi::Array<PrimExpr> inner_shape) { return layout->Tile(outer, outer_shape, inner_shape); });
+  def.def("tir.TLayoutDirectSum",
+          [](TLayout layout, TileLayout left, ffi::Array<PrimExpr> left_shape,
+             ffi::Array<PrimExpr> right_shape) {
+            return layout->DirectSum(left, left_shape, right_shape);
+          });
   def.def("tir.TLayoutIsTileInner",
           [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
              ffi::Array<PrimExpr> inner_shape) {
@@ -65,6 +70,16 @@ TVM_FFI_STATIC_INIT_BLOCK() {
           [](TLayout layout, TLayout tile_layout, ffi::Array<PrimExpr> tiled_shape,
              ffi::Array<PrimExpr> outer_shape) {
             return layout->IsTileOuter(tile_layout, tiled_shape, outer_shape);
+          });
+  def.def("tir.TLayoutIsDirectSumRight",
+          [](TLayout layout, TLayout sum_layout, ffi::Array<PrimExpr> interleaved_shape,
+             ffi::Array<PrimExpr> right_shape) {
+            return layout->IsDirectSumRight(sum_layout, interleaved_shape, right_shape);
+          });
+  def.def("tir.TLayoutIsDirectSumLeft",
+          [](TLayout layout, TLayout sum_layout, ffi::Array<PrimExpr> interleaved_shape,
+             ffi::Array<PrimExpr> left_shape) {
+            return layout->IsDirectSumLeft(sum_layout, interleaved_shape, left_shape);
           });
 }
 
