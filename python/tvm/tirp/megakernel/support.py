@@ -229,12 +229,15 @@ def get_inverse_plan_info(batch_size, kv_head_num, q_indptr, kv_head_idx, attn_t
     )
 
 
-def push_moe_tasks(central_queue, batch_size, config):
+def push_moe_tasks(central_queue, batch_size, config, insert_wait_etensor_init=False):
     MOE_BLK_M = 128
     gating_blk_m = 128
     for m_idx in range(ceildiv(batch_size, gating_blk_m)):
         for k_idx in range(config["GATING_SPLIT_K_FACTOR"]):
             central_queue.append((m_idx, 0, k_idx, JobType.MOE_GATING.value))
+    if insert_wait_etensor_init:
+        for i in range(KernelConfig.SM_NUMBER):
+            central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INIT.value))
     for m_idx in range(KernelConfig.SM_NUMBER):
         central_queue.append((m_idx, 0, 0, JobType.MOE_TOPK_SOFTMAX.value))
     central_queue.append((0, 0, 0, JobType.MOE_ALIGN.value))
@@ -251,7 +254,7 @@ def push_moe_tasks(central_queue, batch_size, config):
             central_queue.append((m_idx, n_idx, 0, JobType.MOE_GROUP_GEMM_DOWN.value))
 
 
-def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler: Literal["static", "dynamic"]):
+def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_num, scheduler: Literal["static", "dynamic"]):
     """The execution queue generation function for layer testing use."""
     INTERMEDIATE_SIZE = config["INTERMEDIATE_SIZE"] // WORLD_SIZE
     NUM_ATTENTION_HEADS = config["NUM_ATTENTION_HEADS"] // WORLD_SIZE
@@ -264,12 +267,19 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler
         )
         central_queue = []
 
+        # init etensor
+        for i in range(etensor_num):
+            central_queue.append((i, 0, 0, JobType.INIT_ETENSOR.value))
+
         # qkv projection
         for n_idx in range(
             ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"], GemmTile.BLK_N)
         ):
             for k_idx in range(config["SPLIT_QKV_PROJECT_DICT"][WORLD_SIZE]):
                 central_queue.append((0, n_idx, k_idx, JobType.GEMM_QKV_PROJ.value))
+        
+        for i in range(KernelConfig.SM_NUMBER):
+            central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INIT.value))
 
         m_split = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS))
         m_tile = ceildiv(batch_size, m_split)
@@ -409,6 +419,9 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler
         return ret
     elif scheduler == "dynamic":
         exec_queue = MPMCQueueHost(DynamicTileScheduler.MAX_TASKS)
+        # init etensor
+        for i in range(etensor_num):
+            exec_queue.enqueue(JobType.INIT_ETENSOR.value, i, 0, 0)
         for n in reversed(range(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"], GemmTile.BLK_N))):
             for k in range(config["SPLIT_QKV_PROJECT_DICT"][WORLD_SIZE]):
                 exec_queue.enqueue(JobType.GEMM_QKV_PROJ.value, 0, n, k)
@@ -420,20 +433,37 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, scheduler
 
 @tvm_ffi.register_global_func("tirp.megakernel.get_max_num_tokens_padded")
 def get_max_num_tokens_padded(batch_size, topk, num_experts, moe_blk_m):
-    if batch_size * topk < num_experts:
-        return batch_size * topk * moe_blk_m
+    if isinstance(batch_size, int):
+        if batch_size * topk < num_experts:
+            return batch_size * topk * moe_blk_m
+        else:
+            return (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m
     else:
-        return (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m
+        return T.if_then_else(batch_size * topk < num_experts, batch_size * topk * moe_blk_m, (num_experts + ceildiv(batch_size * topk - num_experts, moe_blk_m)) * moe_blk_m)
 
 
-def generate_exec_queue_moe(batch_size, config, scheduler: Literal["static", "dynamic"]):
+def get_max_blocks_padded_relaxed(batch_size, topk, num_experts, moe_blk_m):
+    return batch_size * topk // moe_blk_m + (num_experts + 1)
+
+def generate_etensor_unmatched_dim(i, dim_len, in_par_size, out_par_size):
+    start_out_par = i * out_par_size
+    end_out_par = min(dim_len, (i + 1) * out_par_size)
+    return (end_out_par - 1) // in_par_size - start_out_par // in_par_size + 1
+
+
+def generate_exec_queue_moe(
+    batch_size, config, etensor_num, scheduler: Literal["static", "dynamic"]
+):
     torch.cuda.nvtx.range_push("generate_exec_queue")
     if scheduler == "static":
         exec_queue = np.zeros(
                 (KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS), dtype=np.int32
             )
         central_queue = []
-        push_moe_tasks(central_queue, batch_size, config)
+        # init etensor
+        for i in range(etensor_num):
+            central_queue.append((i, 0, 0, JobType.INIT_ETENSOR.value))
+        push_moe_tasks(central_queue, batch_size, config, insert_wait_etensor_init=True)
         tile_idx = 0
 
         while len(central_queue) > 0:
@@ -452,6 +482,9 @@ def generate_exec_queue_moe(batch_size, config, scheduler: Literal["static", "dy
     elif scheduler == "dynamic":
         exec_queue = MPMCQueueHost(DynamicTileScheduler.MAX_TASKS)
         gating_blk_m = 128
+        # init etensor
+        for i in range(etensor_num):
+            exec_queue.enqueue(JobType.INIT_ETENSOR.value, i, 0, 0)
         for m in range(ceildiv(batch_size, gating_blk_m)):
             for k in range(config["GATING_SPLIT_K_FACTOR"]):
                 exec_queue.enqueue(JobType.MOE_GATING.value, m, 0, k)
@@ -459,148 +492,7 @@ def generate_exec_queue_moe(batch_size, config, scheduler: Literal["static", "dy
         return exec_queue
 
 
-def generate_event_tensor(batch_size, attn_task_num, kv_head_idx, q_indptr, config, WORLD_SIZE):
-    """The event tensor generation function for layer testing use."""
-    INTERMEDIATE_SIZE = config["INTERMEDIATE_SIZE"] // WORLD_SIZE
-    NUM_ATTENTION_HEADS = config["NUM_ATTENTION_HEADS"] // WORLD_SIZE
-    NUM_KEY_VALUE_HEADS = config["NUM_KEY_VALUE_HEADS"] // WORLD_SIZE
-    is_moe = "NUM_EXPERTS" in config
-    DEV = tvm.cuda(0)
-    base = 1 << 16
-    max_int_32 = 2147483647
 
-    # static event tensor
-    etensor_qkv_partial = tvm.runtime.tensor(np.zeros(ceildiv((NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"], SplitKReduceTile.N_UNIT), dtype=np.int32), device=DEV)
-    etensor_o_partial = tvm.runtime.tensor(np.zeros(ceildiv(config["HIDDEN_SIZE"], GemmTile.BLK_N), dtype=np.int32), device=DEV)
-    etensor_o_allreduce = tvm.runtime.tensor(np.zeros(config["HIDDEN_SIZE"] // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV)
-    etensor_attn_add_rms_norm = tvm.runtime.tensor(np.zeros(batch_size, dtype=np.int32), device=DEV)
-    etensor_attn_mlp = tvm.runtime.tensor(np.zeros(1, dtype=np.int32), device=DEV)
-    etensor_gate_up_proj_reduce = tvm.runtime.tensor(np.zeros(INTERMEDIATE_SIZE * 2 // GemmTile.BLK_N, dtype=np.int32), device=DEV)
-    etensor_gate_up_proj = tvm.runtime.tensor(np.zeros(INTERMEDIATE_SIZE // GemmTile.BLK_N, dtype=np.int32), device=DEV)
-    etensor_down_proj_reduce = tvm.runtime.tensor(np.zeros(config["HIDDEN_SIZE"] // GemmTile.BLK_N, dtype=np.int32), device=DEV)
-    etensor_down_proj_allreduce = tvm.runtime.tensor(np.zeros(config["HIDDEN_SIZE"] // WORLD_SIZE // AllreduceTile.N_TILE, dtype=np.int32), device=DEV)
-    etensor_mlp_add_rms_norm = tvm.runtime.tensor(np.zeros((batch_size,), dtype=np.int32), device=DEV)
-    etensor_end = tvm.runtime.tensor(np.zeros(1, dtype=np.int32), device=DEV)
-
-    # dynamic event tensor
-    etensor_notify_attn = np.zeros((KernelConfig.SM_NUMBER), dtype=np.int32)
-    attn_tile_num = ceildiv(attn_task_num, KernelConfig.WG_NUMBER)
-    unit = KernelConfig.WG_NUMBER * (2 + NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)
-    num = unit * (attn_tile_num // KernelConfig.SM_NUMBER)
-    remain = attn_tile_num % KernelConfig.SM_NUMBER
-    for m in range(KernelConfig.SM_NUMBER):
-        if m < remain:
-            etensor_notify_attn[m] = num + unit
-        else:
-            etensor_notify_attn[m] = num
-    assert ((etensor_notify_attn <= base) & (etensor_notify_attn * (base + 1) < max_int_32)).all()
-    etensor_notify_attn *= (base + 1)
-    etensor_notify_attn = tvm.runtime.tensor(etensor_notify_attn, device=DEV)
-
-    etensor_attn_merge = np.full((batch_size * NUM_KEY_VALUE_HEADS), min(KernelConfig.SM_NUMBER, attn_tile_num) * (base + 1), dtype=np.int32)
-    etensor_attn_merge = tvm.runtime.tensor(etensor_attn_merge, device=DEV)
-
-    etensor_o_proj = np.zeros(config["SPLIT_O_PROJECT_DICT"][WORLD_SIZE], dtype=np.int32)
-    o_proj_tile_k = (
-        ceildiv(
-            ceildiv(NUM_ATTENTION_HEADS * config["HEAD_DIM"], config["SPLIT_O_PROJECT_DICT"][WORLD_SIZE]), GemmTile.BLK_K
-        )
-        * GemmTile.BLK_K
-    )
-    if attn_task_num > NUM_KEY_VALUE_HEADS * batch_size:
-        for batch_idx in range(batch_size):
-            for kv_idx in range(NUM_KEY_VALUE_HEADS):
-                range_start = (
-                    (kv_idx * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS)) * config["HEAD_DIM"] // o_proj_tile_k
-                )
-                range_end = (
-                    (kv_idx + 1) * (NUM_ATTENTION_HEADS // NUM_KEY_VALUE_HEADS) * config["HEAD_DIM"] - 1
-                ) // o_proj_tile_k
-                for i in range(range_start, range_end + 1):
-                    etensor_o_proj[i] += 1      
-    else:
-        etensor_o_proj += min(KernelConfig.SM_NUMBER, attn_tile_num)
-    assert ((etensor_o_proj <= base) & (etensor_o_proj * (base + 1) < max_int_32)).all()
-    etensor_o_proj *= (base + 1)
-    etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)
-    if is_moe:
-        etensor_down_proj = None
-    else:
-        etensor_down_proj = np.zeros(config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE], dtype=np.int32)
-        down_proj_tile_k = (ceildiv(ceildiv(INTERMEDIATE_SIZE, config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE]), GemmTile.BLK_K) * GemmTile.BLK_K)
-        if config["GATE_UP_PROJ_SPLIT_K_FACTOR_DICT"][WORLD_SIZE] == 1:
-            for m in range(INTERMEDIATE_SIZE * 2 // GateUpSiluTile.BLK_N):
-                range_start = m * GateUpSiluTile.BLK_N // 2 // down_proj_tile_k
-                range_end = ((m + 1) * GateUpSiluTile.BLK_N // 2 - 1) // down_proj_tile_k
-                for i in range(range_start, range_end + 1):
-                    etensor_down_proj[i] += 1
-        else:
-            for m in range(INTERMEDIATE_SIZE // SiluMultiplyTile.TILE_SIZE):
-                range_start = m * SiluMultiplyTile.TILE_SIZE // down_proj_tile_k
-                range_end = ((m + 1) * SiluMultiplyTile.TILE_SIZE - 1) // down_proj_tile_k
-                for i in range(range_start, range_end + 1):
-                    etensor_down_proj[i] += 1
-        assert ((etensor_down_proj <= base) & (etensor_down_proj * (base + 1) < max_int_32)).all()
-        etensor_down_proj *= (base + 1)
-        etensor_down_proj = tvm.runtime.tensor(etensor_down_proj, device=DEV)
-
-    return (
-        etensor_qkv_partial,
-        etensor_notify_attn,
-        etensor_attn_merge,
-        etensor_o_proj,
-        etensor_o_partial,
-        etensor_o_allreduce,
-        etensor_attn_add_rms_norm,
-        etensor_attn_mlp,
-        etensor_gate_up_proj_reduce,
-        etensor_gate_up_proj,
-        etensor_down_proj,
-        etensor_down_proj_reduce,
-        etensor_down_proj_allreduce,
-        etensor_mlp_add_rms_norm,
-        etensor_end,
-    )
-
-def generate_event_tensor_moe(batch_size, config, unfused=False):
-    
-
-    DEV = tvm.cuda(0)
-    base = 1 << 16
-    factor = base + 1
-    MOE_BLK_M = 128
-
-    gating_blk_m = 128
-    etensor_gating = tvm.runtime.tensor(np.full((1,), factor * config["GATING_SPLIT_K_FACTOR"] * ceildiv(batch_size, gating_blk_m), dtype=np.int32), device=DEV)
-    etensor_topk_softmax = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
-    etensor_moe_align = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
-    etensor_count_and_sort = tvm.runtime.tensor(np.full((1,), factor * KernelConfig.SM_NUMBER, dtype=np.int32), device=DEV)
-    max_num_tokens_padded = get_max_num_tokens_padded(batch_size, config["NUM_EXPERTS_PER_TOK"], config["NUM_EXPERTS"], MOE_BLK_M)
-    if unfused:
-        etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * config["INTERMEDIATE_SIZE"] * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
-        etensor_silu_mul = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * config["INTERMEDIATE_SIZE"] // SiluMultiplyMOETile.TILE_SIZE, dtype=np.int32), device=DEV)
-    else:
-        etensor_group_gemm_gate_up = tvm.runtime.tensor(np.full((max_num_tokens_padded // MOE_BLK_M,),  factor * config["INTERMEDIATE_SIZE"] * 2 // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
-        etensor_silu_mul = tvm.runtime.tensor(
-            np.full(
-                (max_num_tokens_padded // MOE_BLK_M,),
-                factor * config["INTERMEDIATE_SIZE"] // SiluMultiplyMOETile.TILE_SIZE,
-                dtype=np.int32,
-            ),
-            device=DEV,
-        )
-    etensor_group_gemm_down = tvm.runtime.tensor(np.full((1,), factor * (max_num_tokens_padded // MOE_BLK_M) * config["HIDDEN_SIZE"] // GroupGEMMTile.BLK_N, dtype=np.int32), device=DEV)
-    etensor_end = tvm.runtime.tensor(np.full((1,), factor, dtype=np.int32), device=DEV)
-    return (
-        etensor_gating,
-        etensor_topk_softmax,
-        etensor_moe_align,
-        etensor_count_and_sort,
-        etensor_group_gemm_gate_up,
-        etensor_silu_mul,
-        etensor_group_gemm_down,
-        etensor_end,
-    )
 
 
 class ProfilerHandler:

@@ -11,7 +11,6 @@ from tvm.script import tirp as Tp
 from tvm.tirp.bench.utils import ProtonContext, bench
 from tvm.tirp.megakernel.common import ProfileEventType, get_source, KernelConfig
 from tvm.tirp.megakernel.topk_softmax import TopkSoftmaxTile
-from tvm.tirp.megakernel.support import generate_event_tensor, generate_exec_queue
 
 
 class TopkSoftmaxKernel:

@@ -7,7 +7,7 @@ from tvm.tirp.bench.utils import CudaProfiler
 
 from .common import (
     Barriers, JobType, ProfileEventType, KernelConfig, 
-    pack_into_32bit, unpack_from_32bit, any_sync, SemaphoreBase, TileSchedulerBase
+    pack_into_32bit, unpack_from_32bit, any_sync, SemaphoreBase, TileSchedulerBase, gt, atomic_add_int32, is_const_minus_one
 )
 
 while_ld_global_acquire = f"""
@@ -29,8 +29,9 @@ __forceinline__ __device__ void sts(int32_t v, void* dst_addr) {
 }
 """
 
-stg = """
-__forceinline__ __device__ void stg(int32_t v, void* dst_addr, int32_t pe) {
+def stg_remote(v, dst_addr, pe):
+    func = """
+__forceinline__ __device__ void stg_remote(int32_t v, void* dst_addr, int32_t pe) {
     if (pe >= 0) {
         void* ptr = nvshmem_ptr(dst_addr, pe);
         asm volatile("st.global.release.sys.b32 [%0], %1;"
@@ -45,39 +46,24 @@ __forceinline__ __device__ void stg(int32_t v, void* dst_addr, int32_t pe) {
     }
 }
 """
+    return T.cuda.func_call("stg_remote", v, dst_addr, pe, source_code=func)
 
-stg_local = """
-__forceinline__ __device__ void stg(int32_t v, void* dst_addr, int32_t pe) {
-    asm volatile("st.global.release.gpu.b32 [%0], %1;"
-                 :
-                 : "l"(dst_addr), "r"(v)
-                 : "memory");
-}
-"""
-
-
-atomic_add_system = """
-__forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t value, int32_t pe) {
-    if (pe >= 0) {
-        int32_t* ptr = (int32_t*)(nvshmem_ptr(addr, pe));
-        int32_t old_value;
-        asm volatile ("atom.release.gpu.global.add.u32 %0, [%1], %2;"
-                     : "=r"(old_value)
-                     : "l"(ptr), "r"(value)
-                     : "memory");
-        return old_value;
+def stg_local(v, dst_addr, pe):
+    func = """
+    __forceinline__ __device__ void stg_local(int32_t v, void* dst_addr, int32_t pe) {
+        asm volatile("st.global.release.gpu.b32 [%0], %1;"
+                    :
+                    : "l"(dst_addr), "r"(v)
+                    : "memory");
     }
-    else {
-        return atomicAdd(addr, value);
-    }
-}
-"""
+    """
+    return T.cuda.func_call("stg_local", v, dst_addr, pe, source_code=func)
 
-atomic_add = """
-__forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t value, int32_t pe) {
-    return atomicAdd(addr, value);
-}
-"""
+def stg(v, dst_addr, pe):
+    if is_const_minus_one(pe):
+        return stg_local(v, dst_addr, pe)
+    else:
+        return stg_remote(v, dst_addr, pe)
 
 # notes: The following applies to decrement=False. The logic for True is similar.
 #        For semaphore with expected count = expected_cnt, we set it actual count = expected_cnt * (base + 1).
@@ -93,102 +79,60 @@ __forceinline__ __device__ int32_t atomic_add_system(int32_t* addr, int32_t valu
 #        For semaphore wait, we can still use the condition value == expected_cnt * (base + 1) to distinguish.
 
 class Semaphore(SemaphoreBase):
-    def __init__(self, expected_cnt, buffer, base=(1 << 16), decrement=False, use_nvshmem=False, debug=False):
-        self.expected_cnt = expected_cnt
-        self.base = base
-        self.decrement = decrement
-        assert not base & (base - 1), f"base must be a power-of-two, but got {base}"
-        if not self.decrement and debug:
-            T.cuda.trap_when_assert_failed(base >= expected_cnt)
+
+    def __init__(
+        self, buffer, debug=False
+    ):
         self.sem = buffer
         self.state = T.alloc_local([1], "int32", name="semaphore_state")
-        if use_nvshmem:
-            self.atomic_add = atomic_add_system
-        else:
-            self.atomic_add = atomic_add
 
         # cta-level interface
+
     @T.macro
     def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xffffffff):
         if level == "cta":
             with T.thread():
-                if not self.decrement:
-                    while 1:
-                        T.ptx.ld_global_acquire(
-                            self.state[0],
-                            self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
-                        )
-                        if T.cuda.syncthreads_and(self.state[0] == self.expected_cnt * (self.base + 1)):
-                            break
-                        T.cuda.nano_sleep(40)
-                else:
-                    while 1:
-                        T.ptx.ld_global_acquire(
-                            self.state[0],
-                            self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
-                        )
-                        if T.cuda.syncthreads_and(self.state[0] == 0):
-                            break
-                        T.cuda.nano_sleep(40)
+                while 1:
+                    T.ptx.ld_global_acquire(
+                        self.state[0],
+                        self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
+                    )
+                    if T.cuda.syncthreads_and(self.state[0] == 0):
+                        break
+                    T.cuda.nano_sleep(40)
         elif level == "warp":
             with T.thread():
                 warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
                 lane_id = T.thread_id([32], parent="warp")
                 if (mask >> warp_id) & 1 == 1:
                     self.state[0] = -1
-                    if not self.decrement:
-                        while 1:
-                            if lane_id == 0:
-                                T.ptx.ld_global_acquire(
-                                    self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
-                                )
-                            if any_sync(0xffffffff, self.state[0] == self.expected_cnt * (self.base + 1)):
-                                break
-                            T.cuda.nano_sleep(40)
-                    else:
-                        while 1:    
-                            if lane_id == 0:
-                                T.ptx.ld_global_acquire(
-                                    self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
-                                )
-                            if any_sync(0xffffffff, self.state[0] == 0):
-                                break
-                            T.cuda.nano_sleep(40)
+                    while 1:    
+                        if lane_id == 0:
+                            T.ptx.ld_global_acquire(
+                                self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
+                            )
+                        if any_sync(0xffffffff, self.state[0] == 0):
+                            break
+                        T.cuda.nano_sleep(40)
         else:
             assert False
 
     @T.macro
-    def semaphore_notify(self, *coord, pre_notify=False, rank=-1):
+    def semaphore_notify(self, *coord, pre_notify=False, rank=-1, release=False):
         number = T.meta_var(1 if pre_notify else self.base)
         # the old value will be stored in self.state
-        if not self.decrement:
-            self.state[0] = (
-                T.cuda.func_call(
-                    "atomic_add_system",
-                    self.sem.ptr_to(coord),
-                    number,
-                    rank,
-                    source_code=self.atomic_add,
-                    return_type="int32",
-                )
-            )
-        else:
-            self.state[0] = (
-                T.cuda.func_call(
-                    "atomic_add_system",
-                    self.sem.ptr_to(coord),
-                    -number,
-                    rank,
-                    source_code=self.atomic_add,
-                    return_type="int32",
-                )
-            )
+        self.state[0] = atomic_add_int32(self.sem.ptr_to(coord), -number, rank, release=release)
+        if self.state[0] <= 0:
+            while 1:
+                T.ptx.ld_global_acquire(self.state[0], self.sem.ptr_to(coord))
+                if T.cuda.func_call("gt", self.state[0], 0, source_code=gt, return_type="bool"):
+                    self.state[0] = atomic_add_int32(self.sem.ptr_to(coord), -number, rank, release=release)
+                    break
+                sleep_time = T.meta_var(800 if pre_notify else 40)
+                T.cuda.nano_sleep(sleep_time)
 
     def is_triggered(self):
-        if not self.decrement:
-            return self.state[0] % self.base == self.expected_cnt - 1
-        else:
-            return self.state[0] % self.base == 1
+        return self.state[0] % self.base == 1
 
 
 class SchedulerBarrier(Barriers):
@@ -209,7 +153,6 @@ class MPMCQueue:
         head: T.Buffer,
         tail: T.Buffer,
         smem_manager,
-        use_nvshmem=False,
         debug=False
     ):
         # TODO: we currently assume that the queue is infinitely large.
@@ -225,12 +168,6 @@ class MPMCQueue:
         self.tail_smem = smem_manager.alloc((KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER,), "int32", name="tail_smem", method="persistent")
         self.masked_pos = T.local_cell(dtype="int32", name="masked_pos")
         self.idx = T.local_cell(dtype="int32", name="idx")
-        if use_nvshmem:
-            self.stg = stg
-            self.atomic_add = atomic_add_system
-        else:
-            self.stg = stg_local
-            self.atomic_add = atomic_add
         self.debug = debug
 
     @T.macro
@@ -239,24 +176,11 @@ class MPMCQueue:
             with T.thread():
                 if self.debug:
                     T.cuda.trap_when_assert_failed(enqueue_num == 1) # notes: enqueue_num must be 1
-                self.tail_r = T.cuda.func_call(
-                    "atomic_add_system",
-                    self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([T.int32(0)])),
-                    1,
-                    rank,
-                    source_code=self.atomic_add,
-                    return_type="int32",
-                )
+                self.tail_r = atomic_add_int32(self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([T.int32(0)])), 1, rank)
                 self.masked_pos = self.tail_r & self.mask
                 task_type, m_idx, n_idx, k_idx = T.meta_var(func_push(0))
                 task_info = T.meta_var(pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=False, debug=self.debug))
-                T.cuda.func_call(
-                    "stg",
-                    task_info,
-                    self.tasks.access_ptr("rw", offset=self.tasks.elem_offset_of([self.masked_pos])),
-                    rank,
-                    source_code=self.stg,
-                )
+                stg(task_info, self.tasks.access_ptr("rw", offset=self.tasks.elem_offset_of([self.masked_pos])), rank)
         else:
             with T.cta():
                 lane_id = T.thread_id([32], parent="warp")
@@ -269,25 +193,11 @@ class MPMCQueue:
                 scope_idx, tid_in_scope, tid_stride = idx_map[level]
                 if level == "warp":
                     if tid_in_scope == 0:
-                        self.tail_r = T.cuda.func_call(
-                            "atomic_add_system",
-                            self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([T.int32(0)])),
-                            enqueue_num,
-                            rank,
-                            source_code=self.atomic_add,
-                            return_type="int32",
-                        )
+                        self.tail_r = atomic_add_int32(self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([T.int32(0)])), enqueue_num, rank)
                     self.tail_r = T.tvm_warp_shuffle(0xffffffff, self.tail_r, 0, 32, 32)
                 else:
                     if tid_in_scope == 0:
-                        self.tail_smem[scope_idx] = T.cuda.func_call(
-                            "atomic_add_system",
-                            self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([T.int32(0)])),
-                            enqueue_num,
-                            rank,
-                            source_code=self.atomic_add,
-                            return_type="int32",
-                        )
+                        self.tail_smem[scope_idx] = atomic_add_int32(self.tail.access_ptr("rw", offset=self.tail.elem_offset_of([T.int32(0)])), enqueue_num, rank)
                     if level == "warpgroup":
                         T.ptx.bar.sync(6 + wg_id, 128)
                     elif level == "cta":
@@ -299,13 +209,7 @@ class MPMCQueue:
                     self.masked_pos = (self.tail_r + self.idx) & self.mask
                     task_type, m_idx, n_idx, k_idx = T.meta_var(func_push(self.idx))
                     task_info = T.meta_var(pack_into_32bit(m_idx, n_idx, k_idx, task_type, host=False, debug=self.debug))
-                    T.cuda.func_call(
-                        "stg",
-                        task_info,
-                        self.tasks.access_ptr("rw", offset=self.tasks.elem_offset_of([self.masked_pos])),
-                        rank,
-                        source_code=self.stg,
-                    )
+                    stg(task_info, self.tasks.access_ptr("rw", offset=self.tasks.elem_offset_of([self.masked_pos])), rank)
                     self.idx += tid_stride
 
     @T.macro
@@ -356,7 +260,6 @@ class DynamicTileScheduler(TileSchedulerBase):
         head: T.Buffer,
         tail: T.Buffer,
         smem_manager,
-        use_nvshmem=False,
         profiler: CudaProfiler = None,
         debug=False,
     ):
@@ -366,7 +269,6 @@ class DynamicTileScheduler(TileSchedulerBase):
             head=head,
             tail=tail,
             smem_manager=smem_manager,
-            use_nvshmem=use_nvshmem,
         )
         self.task_info = T.local_cell(dtype="int32", name="task_info")
         self.task_type = T.local_cell(dtype="int32", name="task_type")
@@ -437,24 +339,24 @@ class DynamicTileScheduler(TileSchedulerBase):
             self._fetch_from_queue()
             if self.profiler_on:
                 self.profiler.end(ProfileEventType.FETCH, lane_id == 0)
-                
+
     def get_idx_and_task_type(self):
         return [self.m_idx, self.n_idx, self.k_idx], self.task_type
 
     @T.macro
     def wait(self, evt: Semaphore, *coord, wait_level: Literal["cta", "warp"]="cta", mask=0xffffffff):
         evt.semaphore_wait(*coord, level=wait_level, mask=mask)
-            
+
     @T.macro
     def notify(self, evt: Semaphore, notify_num, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, pre_notify=False):
         # Notes: Here each thread will notify only at most one time，
         #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
         # Notes: (rank, coord) = func_notify(notify_idx), rank=-1 for the local rank
         # Notes: scope_id = -1 represents that each scope will separately notify
-        
+
         max_notify_num_map = T.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
         max_scope_id_map = T.meta_var({"thread": KernelConfig.NUM_THREADS, "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1})
-        
+
         @T.macro
         def sync(scope: Literal["thread", "warp", "warpgroup", "cta"], scope_id=0):
             if scope == "thread":
@@ -465,7 +367,7 @@ class DynamicTileScheduler(TileSchedulerBase):
                 T.ptx.bar.sync(6 + scope_id, 128)
             elif scope == "cta":
                 T.tvm_storage_sync("shared")
-        
+
         with T.cta():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
@@ -484,7 +386,8 @@ class DynamicTileScheduler(TileSchedulerBase):
                     if not pre_notify:
                         sync(scope, scope_id)
                     if idx[1] < notify_num:
-                        rank, *coord = func_notify(idx[1])
+                        rank = T.meta_var(func_notify(idx[1])[0])
+                        coord = T.meta_var(func_notify(idx[1])[1:])
                         evt.semaphore_notify(*coord, pre_notify=pre_notify, rank=rank)
 
     def _enqueue(self, idx, func_trigger_list, push_level):
@@ -495,7 +398,7 @@ class DynamicTileScheduler(TileSchedulerBase):
             if num_enqueue == 0:
                 continue
             self.queue.enqueue(-1, num_enqueue, func_push, push_level)
-        
+
     @T.macro
     def pre_notify_and_push(
         self, evt: Semaphore, notify_num, func_notify, func_trigger_list, 
@@ -505,7 +408,7 @@ class DynamicTileScheduler(TileSchedulerBase):
     ):
         max_notify_num_map = T.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
         max_scope_id_map = T.meta_var({"thread": KernelConfig.NUM_THREADS, "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1})
-        
+
         with T.cta():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
@@ -530,7 +433,8 @@ class DynamicTileScheduler(TileSchedulerBase):
                     T.cuda.trap_when_assert_failed(scope_id == -1 or scope_id < max_scope_id_map[scope])
                 if scope_id == -1 or idx[0] == scope_id:
                     if idx[1] < notify_num:
-                        rank, *coord = func_notify(idx[1])
+                        rank = T.meta_var(func_notify(idx[1])[0])
+                        coord = T.meta_var(func_notify(idx[1])[1:])
                         evt.semaphore_notify(*coord, pre_notify=True, rank=rank)
 
             if self.profiler_on:

@@ -1,6 +1,7 @@
 import argparse
 import math
 import tempfile
+import functools
 
 import flashinfer
 import numpy as np
@@ -20,6 +21,7 @@ from tvm.tirp.megakernel.allreduce import AllreduceTile
 from tvm.tirp.megakernel.common import *
 from tvm.tirp.megakernel.batch_attn import BatchAttnTile
 from tvm.tirp.megakernel.batch_merge import BatchMergeTile
+from tvm.tirp.megakernel.init_etensor import InitETensorTile, f_init_const
 from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler
 from tvm.tirp.megakernel.gemm import GemmTile
 from tvm.tirp.megakernel.gemm_splitk_reduce import SplitKReduceTile
@@ -31,7 +33,6 @@ from tvm.tirp.megakernel.reduce_append_v import SplitKReduceAppendVTile
 from tvm.tirp.megakernel.static_scheduler import JobType, StaticTileScheduler
 from tvm.tirp.megakernel import static_scheduler, dynamic_scheduler
 from tvm.tirp.megakernel.support import (
-    generate_event_tensor,
     generate_exec_queue,
     get_inverse_plan_info,
 )
@@ -43,6 +44,7 @@ class MegaKernelWrapper:
     NUM_TASK_ARGS = 10
     MAX_TOTAL_NUM_WORKERS = 1025
     MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * 16
+    ETENSOR_WORKSPACE_SIZE = 1024 * 1024 # 4MB
 
     NUM_GROUPS = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
     PROFILER_BUFFER_SIZE = int(1e7)
@@ -79,6 +81,9 @@ class MegaKernelWrapper:
         self.config = config
         self.tile_attr = {}
         self.class_list = set()
+        self.etensor_and_f_init_pairs = []
+        self.num_etensors = {}
+        self.etensor_workspace_offset = 0
         self.profiler_on = profiler_on
 
     def _init_profiler(self, profiler_buffer):
@@ -109,7 +114,6 @@ class MegaKernelWrapper:
                 exec_head,
                 exec_tail,
                 smem_manager,
-                use_nvshmem=self.tp_size > 1,
                 profiler=self.profiler,
             )
 
@@ -150,6 +154,69 @@ class MegaKernelWrapper:
         self.tile_attr[tile] = (profiler_event_type, predicate)
         self.class_list.add(tile.__class__)
         return tile
+
+    def add_etensor(self, sem_class, etensor_workspace, shape, f_init=None):
+        size = functools.reduce(lambda x, y: x * y, shape, 1)
+        etensor_buffer = T.decl_buffer(shape, "int32", etensor_workspace.data, elem_offset=self.etensor_workspace_offset, name="etensor")
+        self.etensor_workspace_offset += size
+        etensor = sem_class(etensor_buffer)
+        self.etensor_and_f_init_pairs.append((etensor_buffer, f_init))
+        return etensor
+
+    def set_events_complete(self, Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]], etensor_workspace_global):
+        if issubclass(Semaphore, static_scheduler.Semaphore):
+            l = len(self.etensor_and_f_init_pairs)
+            self.evt_etensor_init_complete = self.add_etensor(Semaphore, etensor_workspace_global, shape=[1], f_init=f_init_const(l+1+KernelConfig.SM_NUMBER))
+        else:
+            self.evt_etensor_init_complete = None
+        self.init_etensor_tile = self._add_tile(InitETensorTile(self.etensor_and_f_init_pairs), ProfileEventType.INIT_ETENSOR)
+        if issubclass(Semaphore, static_scheduler.Semaphore):
+            self.num_etensors["static"] = len(self.etensor_and_f_init_pairs)
+            self.num_etensors["unfused"] = len(self.etensor_and_f_init_pairs)
+        else:
+            self.num_etensors["dynamic"] = len(self.etensor_and_f_init_pairs)
+
+    @T.macro
+    def task_impl_init_etensor(self, is_dynamic_sch):
+        # TODO: add wait, notify and push
+        self.run_tile(self.init_etensor_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx)
+        if self.evt_etensor_init_complete is not None:
+            if self.tile_scheduler.m_idx < len(self.etensor_and_f_init_pairs):
+                self.tile_scheduler.notify(
+                    self.evt_etensor_init_complete, 1, lambda notify_idx: (-1, 0), scope="cta", release=True
+                )
+
+    @T.macro
+    def task_impl_wait_etensor_init_complete(self, is_dynamic_sch):
+        if not is_dynamic_sch:
+            with T.thread():
+                warp_id = T.warp_id(
+                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
+                )
+                lane_id = T.thread_id([32], parent="warp")
+                if self.profiler_on:
+                    self.profiler.start(ProfileEventType.WAIT_ETENSOR_INIT, lane_id == 0)
+                state = T.alloc_local([1], "int32")
+                state[0] = -1
+                while 1:
+                    if lane_id == 0:
+                        T.ptx.ld_global_acquire(
+                            state[0],
+                            self.evt_etensor_init_complete.sem.ptr_to([0]),
+                        )
+                    if any_sync(0xFFFFFFFF, state[0] <= KernelConfig.SM_NUMBER * (SemaphoreBase.base + 1) and state[0] > 0):
+                        if lane_id == 0 and warp_id == 0:
+                            T.cuda.atomic_add(self.evt_etensor_init_complete.sem.ptr_to([0]), -(SemaphoreBase.base + 1))
+                        break
+                    T.cuda.nano_sleep(40)
+                if self.profiler_on:
+                    self.profiler.end(ProfileEventType.WAIT_ETENSOR_INIT, lane_id == 0)
+
+    def reset(self):
+        self.etensor_and_f_init_pairs = []
+        self.etensor_workspace_offset = 0
+        self.tile_attr = {}
+        self.class_list = set()
 
     def host_init_all(self):
         for tile, (_, predicate) in self.tile_attr.items():

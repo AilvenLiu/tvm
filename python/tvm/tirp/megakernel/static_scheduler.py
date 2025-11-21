@@ -1,119 +1,70 @@
-
 from typing import Literal
 import tvm
 from tvm.script import tir as T
 
-from .common import JobType, KernelConfig, any_sync, unpack_from_32bit, TileSchedulerBase, SemaphoreBase
+from .common import JobType, KernelConfig, any_sync, unpack_from_32bit, TileSchedulerBase, SemaphoreBase, gt, atomic_add_int32
 
-atomic_add_int32 = f"""
-__forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, int32_t pe) {{
-    if (pe >= 0) {{
-        void* ptr = nvshmem_ptr(addr, pe);
-         asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(ptr), "r"(value)
-                       : "memory");
-        //atomicAdd_system(ptr, value);
-    }} else {{
-        asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(addr), "r"(value)
-                       : "memory");
-    }}
-}}
-"""
 
-atomic_add_int32_local = f"""
-__forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, int32_t pe) {{
-     asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(addr), "r"(value)
-                   : "memory");
-}}
-"""
-
-nvshmem_get_ptr = """
-__forceinline__ __device__ void* nvshmem_get_ptr(void* ptr, int32_t pe) {
-    return nvshmem_ptr(ptr, pe);
-}
-"""
+    
 
 
 class Semaphore(SemaphoreBase):
-    def __init__(self, expected_cnt, buffer, decrement=False, base=(1 << 16), use_nvshmem=False):
-        self.expected_cnt = expected_cnt
-        self.base = base
+    def __init__(self, buffer):
         self.sem = buffer
         self.state = T.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
-        self.decrement = decrement
-        if use_nvshmem:
-            self.atomic_add_int32 = atomic_add_int32
-        else:
-            self.atomic_add_int32 = atomic_add_int32_local
 
     @T.macro
     def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xffffffff):
         if level == "cta":
             with T.thread():
-                if not self.decrement:
-                    while 1:
-                        T.ptx.ld_global_acquire(
-                            self.state[0],
-                            self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
-                        )
-                        if T.cuda.syncthreads_and(self.state[0] == self.expected_cnt * (self.base + 1)):
-                            break
-                        T.cuda.nano_sleep(40)
-                else:
-                    while 1:
-                        T.ptx.ld_global_acquire(
-                            self.state[0],
-                            self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
-                        )
-                        if T.cuda.syncthreads_and(self.state[0] == 0):
-                            break
-                        T.cuda.nano_sleep(40)
+                while 1:
+                    T.ptx.ld_global_acquire(
+                        self.state[0],
+                        self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
+                    )
+                    if T.cuda.syncthreads_and(self.state[0] == 0):
+                        break
+                    T.cuda.nano_sleep(40)
         elif level == "warp":
             with T.thread():
                 warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
                 lane_id = T.thread_id([32], parent="warp")
                 if (mask >> warp_id) & 1 == 1:
                     self.state[0] = -1
-                    if not self.decrement:
-                        while 1:
-                            if lane_id == 0:
-                                T.ptx.ld_global_acquire(
-                                    self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
-                                )
-                            if any_sync(0xffffffff, self.state[0] == self.expected_cnt * (self.base + 1)):
-                                break
-                            T.cuda.nano_sleep(40)
-                    else:
-                        while 1:    
-                            if lane_id == 0:
-                                T.ptx.ld_global_acquire(
-                                    self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
-                                )
-                            if any_sync(0xffffffff, self.state[0] == 0):
-                                break
-                            T.cuda.nano_sleep(40)
+                    while 1:    
+                        if lane_id == 0:
+                            T.ptx.ld_global_acquire(
+                                self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
+                            )
+                        if any_sync(0xffffffff, self.state[0] == 0):
+                            break
+                        T.cuda.nano_sleep(40)
         else:
             assert False
 
     @T.macro
-    def semaphore_notify(self, *coord, rank=-1):
+    def semaphore_notify(self, *coord, rank=-1, release=False):
         # wg is synced
-        if not self.decrement:
-            T.cuda.func_call(
-                "atomic_add_int32",
-                self.sem.ptr_to(coord),
-                self.base + 1,
-                rank,
-                source_code=self.atomic_add_int32,
-            )
-        else:
-            T.cuda.func_call(
-                "atomic_add_int32",
-                self.sem.ptr_to(coord),
-                -(self.base + 1),
-                rank,
-                source_code=self.atomic_add_int32,
-            )
-
+        self.state[0] = atomic_add_int32(
+            self.sem.ptr_to(coord),
+            -(self.base + 1),
+            rank,
+            release=release,
+        )
+        if self.state[0] <= 0:
+            while 1:
+                T.ptx.ld_global_acquire(
+                    self.state[0], self.sem.ptr_to(coord)
+                )
+                if T.cuda.func_call("gt", self.state[0], 0, source_code=gt, return_type="bool"):
+                    atomic_add_int32(
+                        self.sem.ptr_to(coord),
+                        -(self.base + 1),
+                        rank,
+                        release=release,
+                    )
+                    break
+                T.cuda.nano_sleep(40)
 
 
 class StaticTileScheduler(TileSchedulerBase):
@@ -161,7 +112,7 @@ class StaticTileScheduler(TileSchedulerBase):
         evt.semaphore_wait(*coord, level=wait_level, mask=mask)
             
     @T.macro
-    def notify(self, evt: Semaphore, notify_num, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0):
+    def notify(self, evt: Semaphore, notify_num, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, release=False):
         # Notes: Here each thread will notify only at most one time，
         #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
         # Notes: (rank, coord) = func_notify(notify_idx), rank=-1 for the local rank
@@ -198,8 +149,9 @@ class StaticTileScheduler(TileSchedulerBase):
                 if scope_id == -1 or idx[0] == scope_id:
                     sync(scope, scope_id)
                     if idx[1] < notify_num:
-                        rank, *coord = func_notify(idx[1])
-                        evt.semaphore_notify(*coord, rank=rank)
+                        rank = T.meta_var(func_notify(idx[1])[0])
+                        coord = T.meta_var(func_notify(idx[1])[1:])
+                        evt.semaphore_notify(*coord, rank=rank, release=release)
         
 
     def valid(self):

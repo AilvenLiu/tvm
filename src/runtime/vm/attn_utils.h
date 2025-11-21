@@ -82,7 +82,7 @@ inline ffi::Shape GetKVCacheShape(AttnKind attn_kind, int64_t num_total_pages, i
   } else if (attn_kind == AttnKind::kLinearAttn) {
     return {num_sequence, num_kv_heads, qk_head_dim, v_head_dim};
   }
-  TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK(false);
+  TVM_FFI_ITVM_FFI_ICHECK(false);
   return ffi::Shape();
 }
 
@@ -359,12 +359,12 @@ class HostMemoryVector {
 
   explicit HostMemoryVector(int64_t reserved_size, DLDataType dtype, Device device)
       : reserved_size_(reserved_size) {
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK(DataType(dtype) == DataType::Int(32));
+    TVM_FFI_ITVM_FFI_ICHECK(DataType(dtype) == DataType::Int(32));
     data_ = Tensor::Empty({reserved_size}, dtype, device);
   }
 
   void push_back(int32_t value) {
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_LE(current_size_, reserved_size_);
+    TVM_FFI_ITVM_FFI_ICHECK_LE(current_size_, reserved_size_);
     if (current_size_ == reserved_size_) {
       reserved_size_ *= 2;
       Tensor new_data = Tensor::Empty({reserved_size_}, data_->dtype, data_->device);
@@ -391,14 +391,13 @@ class HostMemoryVector {
   }
 
   const int32_t& operator[](int64_t idx) const {
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_GE(idx, 0) << "Index " << idx << " is negative.";
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_)
-        << "Index " << idx << " out of bounds " << current_size_;
+    TVM_FFI_ITVM_FFI_ICHECK_GE(idx, 0) << "Index " << idx << " is negative.";
+    TVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_) << "Index " << idx << " out of bounds " << current_size_;
     return static_cast<int32_t*>(data_->data)[idx];
   }
 
   int32_t back() const {
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_GT(current_size_, 0) << "Vector is empty";
+    TVM_FFI_ITVM_FFI_ICHECK_GT(current_size_, 0) << "Vector is empty";
     return static_cast<int32_t*>(data_->data)[current_size_ - 1];
   }
 
@@ -408,14 +407,13 @@ class HostMemoryVector {
   }
 
   void resize(size_t new_size) {
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_LE(new_size, reserved_size_);
+    TVM_FFI_ITVM_FFI_ICHECK_LE(new_size, reserved_size_);
     current_size_ = new_size;
   }
 
   void set(int64_t idx, int32_t value) {
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_GE(idx, 0) << "Index " << idx << " is negative.";
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_)
-        << "Index " << idx << " out of bounds " << current_size_;
+    TVM_FFI_ITVM_FFI_ICHECK_GE(idx, 0) << "Index " << idx << " is negative.";
+    TVM_FFI_ITVM_FFI_ICHECK_LT(idx, current_size_) << "Index " << idx << " out of bounds " << current_size_;
     static_cast<int32_t*>(data_->data)[idx] = value;
   }
 
@@ -468,7 +466,7 @@ class PagedKVCacheAuxDataManager {
         device_(device),
         preferred_host_device_(preferred_host_device),
         copy_stream_(copy_stream) {
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK(DataType(dtype_aux) == DataType::Int(32));
+    TVM_FFI_ITVM_FFI_ICHECK(DataType(dtype_aux) == DataType::Int(32));
   }
 
   virtual ~PagedKVCacheAuxDataManager() = default;
@@ -545,11 +543,7 @@ class PagedKVCacheAuxDataManager {
 
   virtual Tensor CopyInverseIndicesAsync(HostMemoryVector* data) = 0;
 
-  // Event tensor transfer.
-  virtual void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
-                                    std::vector<Tensor*> etensor_data_views, int num_layers,
-                                    int cur_batch_size, int attn_num, std::string model_name,
-                                    int tp_size) = 0;
+
 
  protected:
   /*! \brief The dtype of the auxiliary data. It is expected to be int32. */
@@ -711,7 +705,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
                                     HostMemoryVector* sliding_window_offset,
                                     HostMemoryVector* sink_size, int depth) final {
     int n_elem = last_page_len->size();
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_GT(n_elem, 0);
+    TVM_FFI_ITVM_FFI_ICHECK_GT(n_elem, 0);
     Tensor view = length_info_on_depths_device_[depth].CreateView({3, n_elem}, dtype_aux_);
     ffi::Shape copy_shape{n_elem};
     CopyVecDataToArray(view, last_page_len->data(), copy_shape);
@@ -737,7 +731,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   Tensor CopyCommitSrcDstPosInPageTableAsync(HostMemoryVector* src_data,
                                              HostMemoryVector* dst_data) final {
     int n_elem = src_data->size();
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_GT(n_elem, 0);
+    TVM_FFI_ITVM_FFI_ICHECK_GT(n_elem, 0);
     Tensor view = commit_copy_src_dst_pos_in_page_table_device_.CreateView({2, n_elem}, dtype_aux_);
     ffi::Shape copy_shape{n_elem};
     CopyVecDataToArray(view, src_data->data(), copy_shape);
@@ -759,14 +753,6 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     throw;
   }
 
-  void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
-                            std::vector<Tensor*> etensor_data_views, int num_layers,
-                            int cur_batch_size, int attn_num, std::string model_name,
-                            int tp_size) final {
-    LOG(FATAL) << "Event tensor transfer is not supported for plain auxiliary data manager.";
-    throw;
-  }
-
  private:
   /*!
    * \brief Copy a vector of data to the input Tensor.
@@ -785,7 +771,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
       void* nptr = workspace->GetNativePtr(array);
       uint64_t copy_size;
       if (shape.defined()) {
-        TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_EQ(shape.value().size(), 1);
+        TVM_FFI_ITVM_FFI_ICHECK_EQ(shape.value().size(), 1);
         copy_size = shape.value()->data[0] * sizeof(int32_t);
       } else {
         copy_size = DeviceAPI::Get(array->device)->GetDataSize(*array.operator->());
@@ -796,7 +782,7 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
 #endif
 
     if (shape.defined()) {
-      TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_EQ(shape.value().size(), 1);
+      TVM_FFI_ITVM_FFI_ICHECK_EQ(shape.value().size(), 1);
       copy_dst.ndim = 1;
       copy_dst.shape = const_cast<int64_t*>(shape.value()->data);
     }
@@ -857,7 +843,7 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     } else {
       const std::optional<ffi::Function> f_nvshmem_init =
           tvm::ffi::Function::GetGlobal("runtime.disco.nvshmem.init_nvshmem");
-      TVM_FFI_ITVM_FFI_ICHECK(f_nvshmem_init.has_value())
+      TVM_FFI_ICHECK(f_nvshmem_init.has_value())
           << "NVSHMEM is not enabled. Please make sure NVSHMEM is enabled when compiling TVM.";
       const ffi::Function f_nvshmem_empty =
           tvm::ffi::Function::GetGlobalRequired("runtime.disco.nvshmem.empty");
@@ -1007,125 +993,6 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   Tensor CopyInverseIndptrAsync(HostMemoryVector* data) { return CopyAttnAuxVecToCache(data); }
 
   Tensor CopyInverseIndicesAsync(HostMemoryVector* data) { return CopyAttnAuxVecToCache(data); }
-
-  void CopyEventTensorAsync(std::vector<HostMemoryVector*> etensor_data,
-                            std::vector<Tensor*> etensor_data_views, int num_layers,
-                            int cur_batch_size, int attn_num, std::string model_name,
-                            int tp_size) final {
-    const auto f_get_config =
-        tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
-    auto config = f_get_config(model_name).cast<ffi::Map<ffi::String, ffi::Any>>();
-    int split_o_project = config["SPLIT_O_PROJECT_DICT"].cast<ffi::Map<int, int>>()[tp_size];
-    TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_NE(split_o_project, -1);
-    int hidden_size = config["HIDDEN_SIZE"].cast<int>();
-    int intermediate_size = config["INTERMEDIATE_SIZE"].cast<int>() / tp_size;
-    int num_qo_heads = config["NUM_ATTENTION_HEADS"].cast<int>() / tp_size;
-    int num_kv_heads = config["NUM_KEY_VALUE_HEADS"].cast<int>() / tp_size;
-    int qk_head_dim = config["HEAD_DIM"].cast<int>();
-    if (model_name == "qwen3_32b" || model_name == "llama3_1b") {
-      int down_proj_split_k_factor =
-          config["DOWN_PROJ_SPLIT_K_FACTOR_DICT"].cast<ffi::Map<int, int>>()[tp_size];
-      TVM_FFI_ITVM_FFI_ITVM_FFI_ICHECK_NE(down_proj_split_k_factor, -1);
-      TVM_FFI_ITVM_FFI_ICHECK_EQ(etensor_data.size(), 15)
-          << "Event tensor size mismatch, expected 15, got " << etensor_data.size();
-      TVM_FFI_ITVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
-      std::vector<Tensor> etensor_data_views_raw;
-      etensor_data_views_raw.reserve(etensor_data.size());
-      for (int i = 0; i < static_cast<int>(etensor_data.size()); i++) {
-        HostMemoryVector* etensor_data_item = etensor_data[i];
-        etensor_data_views_raw.push_back(CopyAttnAuxVecToCache(etensor_data_item));
-        TVM_FFI_ITVM_FFI_ICHECK(etensor_data_views[i] != nullptr) << "Event tensor view is nullptr";
-      }
-      *etensor_data_views[0] = etensor_data_views_raw[0].CreateView(
-          {num_layers, ceildiv((num_qo_heads + 2 * num_kv_heads) * qk_head_dim,
-                               megakernel::kSplitKReduceTileNUnit)},
-          dtype_aux_);
-      *etensor_data_views[1] =
-          etensor_data_views_raw[1].CreateView({num_layers, megakernel::kNumSM}, dtype_aux_);
-      *etensor_data_views[2] = etensor_data_views_raw[2].CreateView(
-          {num_layers, ceildiv(hidden_size, megakernel::kGemmTileBlkN)}, dtype_aux_);
-      *etensor_data_views[3] = etensor_data_views_raw[3].CreateView(
-          {num_layers, ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile)},
-          dtype_aux_);
-      *etensor_data_views[4] =
-          etensor_data_views_raw[4].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-      *etensor_data_views[5] = etensor_data_views_raw[5].CreateView({num_layers, 1}, dtype_aux_);
-      *etensor_data_views[6] = etensor_data_views_raw[6].CreateView(
-          {num_layers, ceildiv(intermediate_size * 2, megakernel::kGemmTileBlkN)}, dtype_aux_);
-      *etensor_data_views[7] = etensor_data_views_raw[7].CreateView(
-          {num_layers, ceildiv(intermediate_size, megakernel::kGemmTileBlkN)}, dtype_aux_);
-      *etensor_data_views[8] = etensor_data_views_raw[8].CreateView(
-          {num_layers, ceildiv(hidden_size, megakernel::kGemmTileBlkN)}, dtype_aux_);
-      *etensor_data_views[9] = etensor_data_views_raw[9].CreateView(
-          {num_layers, ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile)},
-          dtype_aux_);
-      *etensor_data_views[10] =
-          etensor_data_views_raw[10].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-      *etensor_data_views[11] = etensor_data_views_raw[11].CreateView({num_layers, 1}, dtype_aux_);
-      *etensor_data_views[12] =
-          etensor_data_views_raw[12].CreateView({num_layers, split_o_project}, dtype_aux_);
-      *etensor_data_views[13] =
-          etensor_data_views_raw[13].CreateView({num_layers, down_proj_split_k_factor}, dtype_aux_);
-      *etensor_data_views[14] = etensor_data_views_raw[14].CreateView(
-          {num_layers, cur_batch_size * num_kv_heads}, dtype_aux_);
-    } else if (model_name == "qwen3_30b_a3b" || model_name == "qwen3_30b_a3b_unfused") {
-      TVM_FFI_ITVM_FFI_ICHECK_EQ(etensor_data.size(), 16)
-          << "Event tensor size mismatch, expected 15, got " << etensor_data.size();
-      TVM_FFI_ITVM_FFI_ICHECK_EQ(etensor_data_views.size(), etensor_data.size());
-      std::vector<Tensor> etensor_data_views_raw;
-      etensor_data_views_raw.reserve(etensor_data.size());
-      for (int i = 0; i < static_cast<int>(etensor_data.size()); i++) {
-        HostMemoryVector* etensor_data_item = etensor_data[i];
-        etensor_data_views_raw.push_back(CopyAttnAuxVecToCache(etensor_data_item));
-        TVM_FFI_ITVM_FFI_ICHECK(etensor_data_views[i] != nullptr) << "Event tensor view is nullptr";
-      }
-      *etensor_data_views[0] = etensor_data_views_raw[0].CreateView(
-          {num_layers, ceildiv((num_qo_heads + 2 * num_kv_heads) * qk_head_dim,
-                               megakernel::kSplitKReduceTileNUnit)},
-          dtype_aux_);
-      *etensor_data_views[1] =
-          etensor_data_views_raw[1].CreateView({num_layers, megakernel::kNumSM}, dtype_aux_);
-      *etensor_data_views[2] = etensor_data_views_raw[2].CreateView(
-          {num_layers, ceildiv(hidden_size, megakernel::kGemmTileBlkN)}, dtype_aux_);
-      *etensor_data_views[3] = etensor_data_views_raw[3].CreateView(
-          {num_layers, ceildiv(hidden_size / tp_size, megakernel::kAllReduceTileNTile)},
-          dtype_aux_);
-      *etensor_data_views[4] =
-          etensor_data_views_raw[4].CreateView({num_layers, cur_batch_size}, dtype_aux_);
-      *etensor_data_views[5] = etensor_data_views_raw[5].CreateView({num_layers, 1}, dtype_aux_);
-      *etensor_data_views[6] = etensor_data_views_raw[6].CreateView({num_layers, 1}, dtype_aux_);
-      *etensor_data_views[7] =
-          etensor_data_views_raw[7].CreateView({num_layers, split_o_project}, dtype_aux_);
-      *etensor_data_views[8] = etensor_data_views_raw[8].CreateView(
-          {num_layers, cur_batch_size * num_kv_heads}, dtype_aux_);
-
-      *etensor_data_views[9] = etensor_data_views_raw[9].CreateView({num_layers, 1}, dtype_aux_);
-      *etensor_data_views[10] = etensor_data_views_raw[10].CreateView({num_layers, 1}, dtype_aux_);
-      *etensor_data_views[11] = etensor_data_views_raw[11].CreateView({num_layers, 1}, dtype_aux_);
-      *etensor_data_views[12] = etensor_data_views_raw[12].CreateView({num_layers, 1}, dtype_aux_);
-      if (model_name == "qwen3_30b_a3b_unfused") {
-        *etensor_data_views[13] =
-            etensor_data_views_raw[13].CreateView({num_layers, 1}, dtype_aux_);
-        *etensor_data_views[14] =
-            etensor_data_views_raw[14].CreateView({num_layers, 1}, dtype_aux_);
-      } else {
-        int num_experts = config["NUM_EXPERTS"].cast<int>();
-        int num_experts_per_tok = config["NUM_EXPERTS_PER_TOK"].cast<int>();
-        const auto f_get_max_num_tokens_padded =
-            tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_max_num_tokens_padded");
-        int max_num_tokens_padded = f_get_max_num_tokens_padded(cur_batch_size, num_experts_per_tok,
-                                                                num_experts, megakernel::kMoeBlkM)
-                                        .cast<int>();
-        *etensor_data_views[13] = etensor_data_views_raw[13].CreateView(
-            {num_layers, max_num_tokens_padded / megakernel::kMoeBlkM}, dtype_aux_);
-        *etensor_data_views[14] = etensor_data_views_raw[14].CreateView(
-            {num_layers, max_num_tokens_padded / megakernel::kMoeBlkM}, dtype_aux_);
-      }
-      *etensor_data_views[15] = etensor_data_views_raw[15].CreateView({num_layers, 1}, dtype_aux_);
-    } else {
-      LOG(FATAL) << "Unsupported model name: " << model_name;
-    }
-  }
 
  private:
   /*!

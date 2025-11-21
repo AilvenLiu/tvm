@@ -62,6 +62,8 @@ constexpr const int kDyanmicTileSchedulerMaxTasks = 32768;
 constexpr const int kSemaphoreBase = (1 << 16);
 constexpr const int kSemaphoreFactor = (1 << 16) + 1;
 constexpr const int kMaxSemaphore = 2147483647;
+constexpr const int kEtensorWorkspaceSize = 1024 * 1024;
+constexpr const int kMaxNumEtensors = 20;
 // supported model names
 const std::unordered_map<int, std::string> kModelNames = {
     {0, "qwen3_32b"}, {1, "qwen3_30b_a3b"}, {2, "qwen3_30b_a3b_unfused"}, {3, "llama3_1b"}};
@@ -94,6 +96,8 @@ enum class JobType : int32_t {
   kMoeGroupGemmDown = 24,
   kMoeTopkReduce = 25,
   kMoeGroupGemmGateUpSilu = 26,
+  kInitEtensor = 27,
+  kWaitEtensorInit = 28,
   // end
   kEnd = 31,
 };
@@ -123,10 +127,6 @@ ffi::Array<ffi::Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device
                                                         std::string model_name, int num_layers,
                                                         TVMStreamHandle copy_stream);
 
-std::vector<HostMemoryVector> GenerateEventTensorHost(int batch_size, int attn_task_num,
-                                                     int max_batch_size, std::string model_name,
-                                                     int tp_size, DLDataType dtype_aux,
-                                                     Device host_device);
 
 }  // namespace megakernel
 }  // namespace vm

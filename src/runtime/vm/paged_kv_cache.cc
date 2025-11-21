@@ -244,29 +244,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   // Host memory tensor for megakernel
   HostMemoryVector inverse_indptr_host_;
   HostMemoryVector inverse_indices_host_;
-  // Event Tensor host memory vector
-  HostMemoryVector etensor_qkv_partial_host_;
-  HostMemoryVector etensor_notify_attn_host_;
-  HostMemoryVector etensor_o_partial_host_;
-  HostMemoryVector etensor_o_allreduce_host_;
-  HostMemoryVector etensor_attn_add_rms_host_;
-  HostMemoryVector etensor_attn_mlp_host_;
-  HostMemoryVector etensor_gate_up_proj_reduce_host_;
-  HostMemoryVector etensor_gate_up_proj_host_;
-  HostMemoryVector etensor_down_proj_reduce_host_;
-  HostMemoryVector etensor_down_proj_allreduce_host_;
-  HostMemoryVector etensor_mlp_add_rms_host_;
-  HostMemoryVector etensor_o_proj_host_;
-  HostMemoryVector etensor_down_proj_host_;
-  HostMemoryVector etensor_attn_merge_host_;
-  HostMemoryVector etensor_gating_host_;
-  HostMemoryVector etensor_topk_softmax_host_;
-  HostMemoryVector etensor_moe_align_host_;
-  HostMemoryVector etensor_count_and_sort_host_;
-  HostMemoryVector etensor_group_gemm_gate_up_host_;
-  HostMemoryVector etensor_silu_mul_host_;
-  HostMemoryVector etensor_group_gemm_down_host_;
-  HostMemoryVector etensor_end_host_;
   //-------------------------------------------
   // For efficient memory management, the actual sizes of the arrays
   // above are over allocated.
@@ -301,28 +278,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   Tensor inverse_indptr_view_;
   Tensor inverse_indices_view_;
   // Event Tensor device views
-  Tensor etensor_qkv_partial_view_;
-  Tensor etensor_notify_attn_view_;
-  Tensor etensor_o_partial_view_;
-  Tensor etensor_o_allreduce_view_;
-  Tensor etensor_attn_add_rms_view_;
-  Tensor etensor_attn_mlp_view_;
-  Tensor etensor_gate_up_proj_reduce_view_;
-  Tensor etensor_gate_up_proj_view_;
-  Tensor etensor_down_proj_reduce_view_;
-  Tensor etensor_down_proj_allreduce_view_;
-  Tensor etensor_mlp_add_rms_view_;
-  Tensor etensor_o_proj_view_;
-  Tensor etensor_down_proj_view_;
-  Tensor etensor_attn_merge_view_;
-  Tensor etensor_gating_view_;
-  Tensor etensor_topk_softmax_view_;
-  Tensor etensor_moe_align_view_;
-  Tensor etensor_count_and_sort_view_;
-  Tensor etensor_group_gemm_gate_up_view_;
-  Tensor etensor_silu_mul_view_;
-  Tensor etensor_group_gemm_down_view_;
-  Tensor etensor_end_view_;
+  Tensor etensor_workspace_view_;
 
   ffi::Optional<ffi::Function> f_transpose_append_mha_;
   ffi::Optional<ffi::Function> f_transpose_append_mla_;
@@ -534,15 +490,14 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     
 
     retrieve_ret_.reserve(11);
-    // Cache host event tensor
-    int max_event_tensor_init_size = reserved_num_seqs;
-    event_tensor_cache_.resize(max_event_tensor_init_size + 1);
-    for (int bsz = 1; bsz <= max_event_tensor_init_size; ++bsz) {
-      for (int rate = 1; rate <= 8; ++rate) {
-        int attn_task_num = bsz * num_kv_heads * rate;
-        event_tensor_cache_[bsz][attn_task_num] = std::move(megakernel::GenerateEventTensorHost(bsz, attn_task_num, reserved_num_seqs, model_name, tp_size, dtype_aux_, preferred_host_device));
-      }
-    }
+    Tensor etensor_workspace_host = Tensor::Empty({megakernel::kEtensorWorkspaceSize},
+                                           DataType::Int(32), preferred_host_device);
+    etensor_workspace_view_ =
+        Tensor::Empty({megakernel::kEtensorWorkspaceSize}, DataType::Int(32), device);
+    int32_t* etensor_workspace_host_data = static_cast<int32_t*>(etensor_workspace_host->data);
+    memset(etensor_workspace_host_data, 0, megakernel::kEtensorWorkspaceSize * sizeof(int32_t));
+    DLTensor etensor_workspace_device_dl = *etensor_workspace_view_.operator->();
+    Tensor::CopyFromTo(etensor_workspace_host.operator->(), &etensor_workspace_device_dl);
 
     // Cache static execution queue
     int max_exec_queue_init_size = reserved_num_seqs;
@@ -1385,49 +1340,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       TVM_FFI_ICHECK_EQ(inverse_indptr_host_[cur_batch_size_ * num_kv_heads_],
                ceildiv(attn_task_num_, megakernel::kNumWarpgroupPerBlock) *
                    megakernel::kNumWarpgroupPerBlock);
-
-      // if(use_megakernel){
-      //   const auto f_get_config =
-      //       tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
-      //   auto config = f_get_config(model_name_).cast<ffi::Map<ffi::String, ffi::Any>>();
-      //   int tp_size = config["NUM_ATTENTION_HEADS"].cast<int>() / num_qo_heads_;
-      //   Device preferred_host_device = GetPreferredHostDevice(device_);
-      //   auto etensors = megakernel::GenerateEventTensorHost(cur_batch_size_, attn_task_num_, reserved_num_seqs_, model_name_, tp_size, dtype_aux_, preferred_host_device);
-      //   if (model_name_ == "qwen3_32b") {
-      //     etensor_qkv_partial_host_ = std::move(etensors[0]);
-      //     etensor_notify_attn_host_ = std::move(etensors[1]);
-      //     etensor_o_partial_host_ = std::move(etensors[2]);
-      //     etensor_o_allreduce_host_ = std::move(etensors[3]);
-      //     etensor_attn_add_rms_host_ = std::move(etensors[4]);
-      //     etensor_attn_mlp_host_ = std::move(etensors[5]);
-      //     etensor_gate_up_proj_reduce_host_ = std::move(etensors[6]);
-      //     etensor_gate_up_proj_host_ = std::move(etensors[7]);
-      //     etensor_down_proj_reduce_host_ = std::move(etensors[8]);
-      //     etensor_down_proj_allreduce_host_ = std::move(etensors[9]);
-      //     etensor_mlp_add_rms_host_ = std::move(etensors[10]);
-      //     etensor_end_host_ = std::move(etensors[11]);
-      //     etensor_o_proj_host_ = std::move(etensors[12]);
-      //     etensor_down_proj_host_ = std::move(etensors[13]);
-      //     etensor_attn_merge_host_ = std::move(etensors[14]);
-      //   } else if (model_name_ == "qwen3_30b_a3b" || model_name_ == "qwen3_30b_a3b_unfused") {
-      //     etensor_qkv_partial_host_ = std::move(etensors[0]);
-      //     etensor_notify_attn_host_ = std::move(etensors[1]);
-      //     etensor_o_partial_host_ = std::move(etensors[2]);
-      //     etensor_o_allreduce_host_ = std::move(etensors[3]);
-      //     etensor_attn_add_rms_host_ = std::move(etensors[4]);
-      //     etensor_attn_mlp_host_ = std::move(etensors[5]);
-      //     etensor_end_host_ = std::move(etensors[6]);
-      //     etensor_o_proj_host_ = std::move(etensors[7]);
-      //     etensor_attn_merge_host_ = std::move(etensors[8]);
-      //     etensor_gating_host_ = std::move(etensors[9]);
-      //     etensor_topk_softmax_host_ = std::move(etensors[10]);
-      //     etensor_moe_align_host_ = std::move(etensors[11]);
-      //     etensor_count_and_sort_host_ = std::move(etensors[12]);
-      //     etensor_group_gemm_gate_up_host_ = std::move(etensors[13]);
-      //     etensor_silu_mul_host_ = std::move(etensors[14]);
-      //     etensor_group_gemm_down_host_ = std::move(etensors[15]);
-      //   }
-      // }
     }
 
     // 3. Sync the copy stream and the compute stream.
@@ -1973,25 +1885,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     retrieve_ret_.push_back(attn_plan_results_);
     retrieve_ret_.push_back(inverse_indptr_view_);
     retrieve_ret_.push_back(inverse_indices_view_);
-    if (model_name_ == "qwen3_32b" || model_name_ == "llama3_1b") {
-      retrieve_ret_.push_back(ffi::Array<Tensor>{
-          etensor_qkv_partial_view_, etensor_notify_attn_view_, etensor_o_partial_view_,
-          etensor_o_allreduce_view_, etensor_attn_add_rms_view_, etensor_attn_mlp_view_,
-          etensor_gate_up_proj_reduce_view_, etensor_gate_up_proj_view_,
-          etensor_down_proj_reduce_view_, etensor_down_proj_allreduce_view_,
-          etensor_mlp_add_rms_view_, etensor_end_view_, etensor_o_proj_view_,
-          etensor_down_proj_view_, etensor_attn_merge_view_});
-    } else if (model_name_ == "qwen3_30b_a3b" or model_name_ == "qwen3_30b_a3b_unfused") {
-      retrieve_ret_.push_back(ffi::Array<Tensor>{
-          etensor_qkv_partial_view_, etensor_notify_attn_view_, etensor_o_partial_view_,
-          etensor_o_allreduce_view_, etensor_attn_add_rms_view_, etensor_attn_mlp_view_,
-          etensor_end_view_, etensor_o_proj_view_, etensor_attn_merge_view_, etensor_gating_view_,
-          etensor_topk_softmax_view_, etensor_moe_align_view_, etensor_count_and_sort_view_,
-          etensor_group_gemm_gate_up_view_, etensor_silu_mul_view_, etensor_group_gemm_down_view_});
-    } else {
-      TVM_FFI_THROW(InternalError) << "Unknown model name: " << model_name_;
-    }
-
+    retrieve_ret_.push_back(etensor_workspace_view_);
     retrieve_ret_.push_back(attn_task_num_);
     return retrieve_ret_;
   }
@@ -2774,58 +2668,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     if (use_mega_kernel_) {
       inverse_indptr_view_ = aux_data_manager_->CopyInverseIndptrAsync(&inverse_indptr_host_);
       inverse_indices_view_ = aux_data_manager_->CopyInverseIndicesAsync(&inverse_indices_host_);
-      if (!event_tensor_cache_[cur_batch_size_].count(attn_task_num_)) {
-        auto preferred_host_device = GetPreferredHostDevice(device_);
-        event_tensor_cache_[cur_batch_size_][attn_task_num_] = std::move(megakernel::GenerateEventTensorHost(cur_batch_size_, attn_task_num_, reserved_num_seqs_, model_name_, tp_size, dtype_aux_, preferred_host_device));
-      }
-      std::vector<HostMemoryVector*> etensor_data;
-      auto& etensors = event_tensor_cache_[cur_batch_size_][attn_task_num_];
-      etensor_data.reserve(etensors.size());
-      for (auto& etensor : etensors) {
-        etensor_data.push_back(&etensor);
-      }
-      if (model_name_ == "qwen3_32b" || model_name_ == "llama3_1b") {
-        std::vector<Tensor*> etensor_data_views = {&etensor_qkv_partial_view_,
-                                                   &etensor_notify_attn_view_,
-                                                   &etensor_o_partial_view_,
-                                                   &etensor_o_allreduce_view_,
-                                                   &etensor_attn_add_rms_view_,
-                                                   &etensor_attn_mlp_view_,
-                                                   &etensor_gate_up_proj_reduce_view_,
-                                                   &etensor_gate_up_proj_view_,
-                                                   &etensor_down_proj_reduce_view_,
-                                                   &etensor_down_proj_allreduce_view_,
-                                                   &etensor_mlp_add_rms_view_,
-                                                   &etensor_end_view_,
-                                                   &etensor_o_proj_view_,
-                                                   &etensor_down_proj_view_,
-                                                   &etensor_attn_merge_view_};
-        aux_data_manager_->CopyEventTensorAsync(etensor_data, etensor_data_views, num_layers_,
-                                                cur_batch_size_, attn_task_num_, model_name_,
-                                                tp_size);
-      } else if (model_name_ == "qwen3_30b_a3b" || model_name_ == "qwen3_30b_a3b_unfused") {
-        std::vector<Tensor*> etensor_data_views = {&etensor_qkv_partial_view_,
-                                                   &etensor_notify_attn_view_,
-                                                   &etensor_o_partial_view_,
-                                                   &etensor_o_allreduce_view_,
-                                                   &etensor_attn_add_rms_view_,
-                                                   &etensor_attn_mlp_view_,
-                                                   &etensor_end_view_,
-                                                   &etensor_o_proj_view_,
-                                                   &etensor_attn_merge_view_,
-                                                   &etensor_gating_view_,
-                                                   &etensor_topk_softmax_view_,
-                                                   &etensor_moe_align_view_,
-                                                   &etensor_count_and_sort_view_,
-                                                   &etensor_group_gemm_gate_up_view_,
-                                                   &etensor_silu_mul_view_,
-                                                   &etensor_group_gemm_down_view_};
-        aux_data_manager_->CopyEventTensorAsync(etensor_data, etensor_data_views, num_layers_,
-                                                cur_batch_size_, attn_task_num_, model_name_,
-                                                tp_size);
-      } else {
-        TVM_FFI_THROW(InternalError) << "Model " << model_name_ << " is not supported in mega-kernel.";
-      }
     }
 
     // - Commit the copy.

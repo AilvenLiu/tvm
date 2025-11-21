@@ -24,11 +24,22 @@ from tvm.tirp.megakernel.dynamic_scheduler import DynamicTileScheduler
 from tvm.tirp.megakernel.support import get_max_num_tokens_padded
 
 NUM_HIDDEN_LAYERS = 48
-def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Literal["static", "dynamic"], TP_SIZE: int, PROFILER_ON: bool, max_batch_size: int):
+
+
+def get_qwen3_30b_a3b_megakernel_relax_mod(
+    mk: MegaKernelWrapper,
+    scheduler: Literal["static", "dynamic"],
+    TP_SIZE: int,
+    PROFILER_ON: bool,
+    max_batch_size: int,
+):
     assert mk.TIE_WORD_EMBEDDINGS == False, "Qwen3-30B-A3B does not support tie word embeddings"
 
-    max_num_tokens_padded = get_max_num_tokens_padded(max_batch_size, mk.NUM_EXPERTS_PER_TOK, mk.NUM_EXPERTS, mk.MOE_M_PAD_SIZE)
+    max_num_tokens_padded = get_max_num_tokens_padded(
+        max_batch_size, mk.NUM_EXPERTS_PER_TOK, mk.NUM_EXPERTS, mk.MOE_M_PAD_SIZE
+    )
     assert TP_SIZE == 1
+
     def static_mod():
         # fmt: off
         @R.macro(hygienic=False)
@@ -44,50 +55,6 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                 model_layers_0_moe_down_proj_weight1: R.Tensor((mk.NUM_EXPERTS, mk.HIDDEN_SIZE, mk.INTERMEDIATE_SIZE), dtype="float16") = packed_params[9*layer_id+7]
                 model_layers_0_post_attention_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[9*layer_id+9]
                 model_norm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[9*layer_id+17 if layer_id < NUM_HIDDEN_LAYERS-1 else 9*layer_id+10]
-
-                etensors_on_layer = R.call_pure_packed(
-                    "megakernel.get_event_tensors_on_layer",
-                    etensors,
-                    R.prim_value(layer_id),
-                    sinfo_args=[
-                        R.Tuple([R.Tensor(None, dtype="int32")] * 16),
-                    ]
-                )
-                (
-                    etensor_qkv_partial,
-                    etensor_notify_attn,
-                    etensor_o_partial,
-                    etensor_o_allreduce,
-                    etensor_attn_add_rms_norm,
-                    etensor_attn_mlp,
-                    etensor_end,
-                    etensor_o_proj,
-                    etensor_attn_merge,
-                    etensor_gating,
-                    etensor_topk_softmax,
-                    etensor_moe_align,
-                    etensor_count_and_sort,
-                    etensor_group_gemm_gate_up,
-                    etensor_silu_mul,
-                    etensor_group_gemm_down,
-                ) = (
-                    etensors_on_layer[0],
-                    etensors_on_layer[1],
-                    etensors_on_layer[2],
-                    etensors_on_layer[3],
-                    etensors_on_layer[4],
-                    etensors_on_layer[5],
-                    etensors_on_layer[6],
-                    etensors_on_layer[7],
-                    etensors_on_layer[8],
-                    etensors_on_layer[9],
-                    etensors_on_layer[10],
-                    etensors_on_layer[11],
-                    etensors_on_layer[12],
-                    etensors_on_layer[13],
-                    etensors_on_layer[14],
-                    etensors_on_layer[15]
-                )
 
                 default_device = R.call_pure_packed("runtime.disco.device", sinfo_args=[R.Object])
                 partital_qkv = R.builtin.alloc_tensor(R.shape([mk.SPLIT_QKV_PROJECT, batch_size, (mk.NUM_ATTENTION_HEADS + 2* mk.NUM_KEY_VALUE_HEADS) * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)
@@ -136,16 +103,12 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                         # MoE intermediate buffer
                         gating_output, topk_weights, topk_indices, sorted_token_ids, expert_ids, num_valid_tokens,
                         num_tokens_post_pad, cumsum_buffer, reordered_hidden_state, gate_up_output, silu_mul_output,
-                        # attention event tensor
-                        etensor_qkv_partial, etensor_notify_attn, etensor_attn_merge, etensor_o_proj,
-                        etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm, etensor_attn_mlp,
-                        # MoE event tensor
-                        etensor_gating, etensor_topk_softmax, etensor_moe_align, etensor_count_and_sort,
-                        etensor_group_gemm_gate_up, etensor_silu_mul, etensor_group_gemm_down,
+                        # event tensor
+                        etensor_workspace,
                         # execution queue
                         exec_queue, profiler_buffer
                     ),
-                    [2, 1, 68],
+                    [2, 1, 54],
                     out_sinfo=[
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16" if mk.tp_size > 1 else "float32"), # residual
@@ -272,24 +235,8 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                 gate_up_output_ptr: T.handle, # intermediate
                 silu_mul_output_ptr: T.handle, # intermediate
 
-                # Attention event tensors
-                etensor_qkv_partial_ptr: T.handle,
-                etensor_notify_attn_ptr: T.handle,
-                etensor_attn_merge_ptr: T.handle,
-                etensor_o_proj_ptr: T.handle,
-                etensor_o_partial_ptr: T.handle,
-                etensor_o_allreduce_ptr: T.handle,
-                etensor_attn_add_rms_ptr: T.handle,
-                etensor_attn_mlp_ptr: T.handle,
-
-                # MoE event tensors
-                etensor_gating_ptr: T.handle,
-                etensor_topk_softmax_ptr: T.handle,
-                etensor_moe_align_ptr: T.handle,
-                etensor_count_and_sort_ptr: T.handle,
-                etensor_group_gemm_gate_up_ptr: T.handle,
-                etensor_silu_mul_ptr: T.handle,
-                etensor_group_gemm_down_ptr: T.handle,
+                # event tensor
+                etensor_workspace_ptr: T.handle,
 
                 # execution queue
                 exec_queue_ptr: T.handle,
@@ -339,7 +286,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                             R.Tuple([R.Prim("int64")] * 2 + [R.Tuple([R.Tensor(None, dtype="int32")] * 13)] * 2 + [R.Tensor(None, dtype="int32")] * 5),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
-                            R.Tuple([R.Tensor(None, dtype="int32")] * 18),
+                            R.Tensor(None, dtype="int32"),
                             R.Prim("int64"),
                         ],
                     )
@@ -353,7 +300,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                         attn_plan_results,
                         inverse_indptr,
                         inverse_indices,
-                        etensors,
+                        etensor_workspace,
                         attn_task_num,
                     ) = (
                         res0[0],
@@ -536,50 +483,6 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                 model_layers_0_post_attention_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[9*layer_id+9]
                 model_norm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[9*layer_id+17 if layer_id < NUM_HIDDEN_LAYERS-1 else 9*layer_id+10]
 
-                etensors_on_layer = R.call_pure_packed(
-                    "megakernel.get_event_tensors_on_layer",
-                    etensors,
-                    R.prim_value(layer_id),
-                    sinfo_args=[
-                        R.Tuple([R.Tensor(None, dtype="int32")] * 16),
-                    ]
-                )
-                (
-                    etensor_qkv_partial,
-                    etensor_notify_attn,
-                    etensor_o_partial,
-                    etensor_o_allreduce,
-                    etensor_attn_add_rms_norm,
-                    etensor_attn_mlp,
-                    etensor_end,
-                    etensor_o_proj,
-                    etensor_attn_merge,
-                    etensor_gating,
-                    etensor_topk_softmax,
-                    etensor_moe_align,
-                    etensor_count_and_sort,
-                    etensor_group_gemm_gate_up,
-                    etensor_silu_mul,
-                    etensor_group_gemm_down,
-                ) = (
-                    etensors_on_layer[0],
-                    etensors_on_layer[1],
-                    etensors_on_layer[2],
-                    etensors_on_layer[3],
-                    etensors_on_layer[4],
-                    etensors_on_layer[5],
-                    etensors_on_layer[6],
-                    etensors_on_layer[7],
-                    etensors_on_layer[8],
-                    etensors_on_layer[9],
-                    etensors_on_layer[10],
-                    etensors_on_layer[11],
-                    etensors_on_layer[12],
-                    etensors_on_layer[13],
-                    etensors_on_layer[14],
-                    etensors_on_layer[15]
-                )
-
                 default_device = R.call_pure_packed("runtime.disco.device", sinfo_args=[R.Object])
                 partital_qkv = R.builtin.alloc_tensor(R.shape([mk.SPLIT_QKV_PROJECT, batch_size, (mk.NUM_ATTENTION_HEADS + 2* mk.NUM_KEY_VALUE_HEADS) * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)
                 qkv = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS + 2* mk.NUM_KEY_VALUE_HEADS, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)
@@ -641,16 +544,12 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                         # MoE intermediate buffer
                         gating_output, topk_weights, topk_indices, sorted_token_ids, expert_ids, num_valid_tokens,
                         num_tokens_post_pad, cumsum_buffer, reordered_hidden_state, gate_up_output, silu_mul_output,
-                        # attention event tensor
-                        etensor_qkv_partial, etensor_notify_attn, etensor_attn_merge, etensor_o_proj,
-                        etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm, etensor_attn_mlp,
-                        # MoE event tensor
-                        etensor_gating, etensor_topk_softmax, etensor_moe_align, etensor_count_and_sort,
-                        etensor_group_gemm_gate_up, etensor_silu_mul, etensor_group_gemm_down, etensor_end,
+                        # event tensor
+                        etensor_workspace,
                         # execution queue
                         queue_tasks, queue_head, queue_tail, profiler_buffer
                     ),
-                    [2, 1, 71],
+                    [2, 1, 56],
                     out_sinfo=[
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16" if TP_SIZE > 1 else "float32"), # residual
@@ -777,25 +676,8 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                 gate_up_output_ptr: T.handle, # intermediate
                 silu_mul_output_ptr: T.handle, # intermediate
 
-                # Attention event tensors
-                etensor_qkv_partial_ptr: T.handle,
-                etensor_notify_attn_ptr: T.handle,
-                etensor_attn_merge_ptr: T.handle,
-                etensor_o_proj_ptr: T.handle,
-                etensor_o_partial_ptr: T.handle,
-                etensor_o_allreduce_ptr: T.handle,
-                etensor_attn_add_rms_ptr: T.handle,
-                etensor_attn_mlp_ptr: T.handle,
-
-                # MoE event tensors
-                etensor_gating_ptr: T.handle,
-                etensor_topk_softmax_ptr: T.handle,
-                etensor_moe_align_ptr: T.handle,
-                etensor_count_and_sort_ptr: T.handle,
-                etensor_group_gemm_gate_up_ptr: T.handle,
-                etensor_silu_mul_ptr: T.handle,
-                etensor_group_gemm_down_ptr: T.handle,
-                etensor_end_ptr: T.handle,
+                # event tensor
+                etensor_workspace_ptr: T.handle,
 
                 # execution queue
                 queue_tasks_ptr: T.handle,
@@ -848,7 +730,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                             R.Tuple([R.Prim("int64")] * 2 + [R.Tuple([R.Tensor(None, dtype="int32")] * 13)] * 2 + [R.Tensor(None, dtype="int32")] * 5),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
-                            R.Tuple([R.Tensor(None, dtype="int32")] * 18),
+                            R.Tensor(None, dtype="int32"),
                             R.Prim("int64"),
                         ],
                     )
@@ -862,7 +744,7 @@ def get_qwen3_30b_a3b_megakernel_relax_mod(mk: MegaKernelWrapper, scheduler: Lit
                         attn_plan_results,
                         inverse_indptr,
                         inverse_indices,
-                        etensors,
+                        etensor_workspace,
                         attn_task_num,
                     ) = (
                         res0[0],

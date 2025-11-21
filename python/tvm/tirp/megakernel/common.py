@@ -42,6 +42,8 @@ class JobType(Enum):
     MOE_GROUP_GEMM_DOWN = 24
     MOE_TOPK_REDUCE = 25
     MOE_GROUP_GEMM_GATE_UP_SILU = 26
+    INIT_ETENSOR = 27
+    WAIT_ETENSOR_INIT = 28
 
     # end
     END = 31
@@ -86,7 +88,6 @@ def unpack_from_32bit(task_info, task_type_ptr, m_idx_ptr, n_idx_ptr, k_idx_ptr)
         k_idx_ptr,
         source_code=unpack_from_32bit_code,
     )
-
 
 
 class KernelConfig:
@@ -384,7 +385,9 @@ class ProfileEventType(Enum):
     EP_COMBINE_SEND = 49
     EP_COMBINE_RECV = 50
     GROUP_GEMM_GATE_UP_SILU = 51
-    END = 52
+    INIT_ETENSOR = 52
+    WAIT_ETENSOR_INIT = 53    
+    END = 54
 
 map_job_type_to_profile_event_type = {
     JobType.GEMM_GATE_UP_PROJ.value: ProfileEventType.GEMM_GATE_UP_PROJ,
@@ -461,6 +464,8 @@ event_type_names = [
     "EP_COMBINE_SEND",
     "EP_COMBINE_RECV",
     "GROUP_GEMM_GATE_UP_SILU",
+    "INIT_ETENSOR",
+    "WAIT_ETENSOR_INIT",
 ]
 
 
@@ -736,8 +741,10 @@ class SmemManager:
     @T.macro
     def arrive_chunk(self, chunk_id):
         T.ptx.mbarrier.arrive(self.mbar.ptr_to([chunk_id]))
-        
+
 class SemaphoreBase:
+    base = 1 << 16
+    
     """Abstract base class for semaphore."""
     def __init__(self):
         pass
@@ -747,14 +754,14 @@ class SemaphoreBase:
     
     def semaphore_notify(self, *coord, rank=-1):
         raise NotImplementedError
-        
+
 class TileSchedulerBase:
     """Abstract base class for tile schedulers."""
     MAX_TASKS = 128
 
     def __init__(self):
         pass
-    
+
     def get_idx_and_task_type(self) -> Tuple[List[PrimExpr], PrimExpr]:
         raise NotImplementedError
 
@@ -765,19 +772,104 @@ class TileSchedulerBase:
     @T.macro
     def next_tile(self):
         raise NotImplementedError
-        
+
     @T.macro
     def wait(self, evt, *coord, wait_level, mask):
         raise NotImplementedError
-            
+
     @T.macro
     def notify(self, evt, notify_num, func_notify, scope, scope_id):
         raise NotImplementedError
-    
+
     @T.macro
     def pre_notify_and_push(self, evt, notify_num, func_notify, func_trigger, push_level, scope, scope_id):
         # for dynamic scheduler
         pass
-    
+
     def valid(self):
         raise NotImplementedError
+
+gt = """
+__forceinline__ __device__ bool gt(int32_t a, int32_t b) {
+    return a > b;
+}
+
+"""
+
+
+def atomic_add_int32_remote(addr, value, pe):
+    func = """
+__forceinline__ __device__ int32_t atomic_add_int32_remote(int32_t* addr, int32_t value, int32_t pe) {
+    if (pe >= 0) {
+        int32_t* ptr = (int32_t*)(nvshmem_ptr(addr, pe));
+        int32_t old_value;
+        asm volatile ("atom.release.gpu.global.add.u32 %0, [%1], %2;"
+                        : "=r"(old_value)
+                        : "l"(ptr), "r"(value)
+                        : "memory");
+        return old_value;
+    } else {
+        return atomicAdd(addr, value);
+    }
+}
+"""
+    return T.cuda.func_call(
+        "atomic_add_int32_remote",
+        addr,
+        value,
+        pe,
+        source_code=func,
+        return_type="int32",
+    )
+
+
+def atomic_add_int32_local_release(addr, value):
+    func = """
+__forceinline__ __device__ int32_t atomic_add_int32_release(int32_t* addr, int32_t value) {
+    int32_t old_value;
+    asm volatile ("atom.release.gpu.global.add.s32 %0, [%1], %2;"
+                  : "=r"(old_value)
+                  : "l"(addr), "r"(value)
+                  : "memory");
+    return old_value;
+}
+"""
+    return T.cuda.func_call(
+        "atomic_add_int32_release",
+        addr,
+        value,
+        source_code=func,
+        return_type="int32",
+    )
+
+
+def atomic_add_int32_local(addr, value):
+    func = """
+__forceinline__ __device__ int32_t atomic_add_int32(int32_t* addr, int32_t value) {
+    return atomicAdd(addr, value);
+}
+"""
+    return T.cuda.func_call(
+        "atomic_add_int32",
+        addr,
+        value,
+        source_code=func,
+        return_type="int32",
+    )
+
+
+def is_const_minus_one(value):
+    return (isinstance(value, int) and value == -1) or (
+        isinstance(value, tvm.tir.IntImm) and value.value == -1
+    )
+
+
+def atomic_add_int32(addr, value, pe, release=False):
+    if is_const_minus_one(pe):
+        if release:
+            return atomic_add_int32_local_release(addr, value)
+        else:
+            return atomic_add_int32_local(addr, value)
+    else:
+        print(f"pe is not -1: {pe}, {type(pe)}")
+        return atomic_add_int32_remote(addr, value, pe)

@@ -30,48 +30,6 @@ def get_llama3_megakernel_relax_mod(
                 model_layers_0_post_attention_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+6]
                 model_norm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+11 if layer_id < mk.NUM_HIDDEN_LAYERS-1 else 6*layer_id+7]
 
-                etensors_on_layer = R.call_pure_packed(
-                    "megakernel.get_event_tensors_on_layer",
-                    etensors,
-                    R.prim_value(layer_id),
-                    sinfo_args=[
-                        R.Tuple([R.Tensor(None, dtype="int32")] * 15),
-                    ]
-                )
-                (
-                    etensor_qkv_partial,
-                    etensor_notify_attn,
-                    etensor_o_partial,
-                    etensor_o_allreduce,
-                    etensor_attn_add_rms_norm,
-                    etensor_attn_mlp,
-                    etensor_gate_up_proj_reduce,
-                    etensor_gate_up_proj,
-                    etensor_down_proj_reduce,
-                    etensor_down_proj_allreduce,
-                    etensor_mlp_add_rms_norm,
-                    etensor_end,
-                    etensor_o_proj,
-                    etensor_down_proj,
-                    etensor_attn_merge,
-                ) = (
-                    etensors_on_layer[0],
-                    etensors_on_layer[1],
-                    etensors_on_layer[2],
-                    etensors_on_layer[3],
-                    etensors_on_layer[4],
-                    etensors_on_layer[5],
-                    etensors_on_layer[6],
-                    etensors_on_layer[7],
-                    etensors_on_layer[8],
-                    etensors_on_layer[9],
-                    etensors_on_layer[10],
-                    etensors_on_layer[11],
-                    etensors_on_layer[12],
-                    etensors_on_layer[13],
-                    etensors_on_layer[14]
-                )
-
                 default_device = R.call_pure_packed("runtime.disco.device", sinfo_args=[R.Object])
                 partital_qkv = R.builtin.alloc_tensor(R.shape([mk.SPLIT_QKV_PROJECT, batch_size, (mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)
                 qkv = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)
@@ -108,14 +66,11 @@ def get_llama3_megakernel_relax_mod(
                         hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply,
                         partial_sum_down_proj, before_down_proj_allreduce,
                         # event tensor
-                        etensor_qkv_partial, etensor_notify_attn, etensor_attn_merge, etensor_o_proj,
-                        etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm,
-                        etensor_attn_mlp, etensor_gate_up_proj_reduce, etensor_gate_up_proj, etensor_down_proj,
-                        etensor_down_proj_reduce, etensor_down_proj_allreduce, etensor_mlp_add_rms_norm, etensor_end,
+                        etensor_workspace,
                         # execution queue
                         exec_queue, profiler_buffer
                     ),
-                    [2, 1, 61],
+                    [2, 1, 47],
                     out_sinfo=[
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
@@ -232,21 +187,7 @@ def get_llama3_megakernel_relax_mod(
                 before_down_proj_allreduce_ptr: T.handle, # intermediate
 
                 # event tensor
-                etensor_qkv_partial_ptr: T.handle,
-                etensor_notify_attn_ptr: T.handle,
-                etensor_attn_merge_ptr: T.handle,
-                etensor_o_proj_ptr: T.handle,
-                etensor_o_partial_ptr: T.handle,
-                etensor_o_allreduce_ptr: T.handle,
-                etensor_attn_add_rms_ptr: T.handle,
-                etensor_attn_mlp_ptr: T.handle,
-                etensor_gate_up_proj_reduce_ptr: T.handle,
-                etensor_gate_up_proj_ptr: T.handle,
-                etensor_down_proj_ptr: T.handle,
-                etensor_down_proj_reduce_ptr: T.handle,
-                etensor_down_proj_allreduce_ptr: T.handle,
-                etensor_mlp_add_rms_ptr: T.handle,
-                etensor_end_ptr: T.handle,
+                etensor_workspace_ptr: T.handle,
 
                 # execution queue
                 exec_queue_ptr: T.handle,
@@ -293,7 +234,7 @@ def get_llama3_megakernel_relax_mod(
                             R.Tuple([R.Prim("int64")] * 2 + [R.Tuple([R.Tensor(None, dtype="int32")] * 13)] * 2 + [R.Tensor(None, dtype="int32")] * 5),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
-                            R.Tuple([R.Tensor(None, dtype="int32")] * 18),
+                            R.Tensor(None, dtype="int32"),
                             R.Prim("int64"),
                         ],
                     )
@@ -307,7 +248,7 @@ def get_llama3_megakernel_relax_mod(
                         attn_plan_results,
                         inverse_indptr,
                         inverse_indices,
-                        etensors,
+                        etensor_workspace,
                         attn_task_num,
                     ) = (
                         res0[0],
@@ -451,48 +392,6 @@ def get_llama3_megakernel_relax_mod(
                 model_layers_0_post_attention_layernorm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+6]
                 model_norm_weight1: R.Tensor((mk.HIDDEN_SIZE,), dtype="float16") = packed_params[6*layer_id+11 if layer_id < mk.NUM_HIDDEN_LAYERS-1 else 6*layer_id+7]
 
-                etensors_on_layer = R.call_pure_packed(
-                    "megakernel.get_event_tensors_on_layer",
-                    etensors,
-                    R.prim_value(layer_id),
-                    sinfo_args=[
-                        R.Tuple([R.Tensor(None, dtype="int32")] * 15),
-                    ]
-                )
-                (
-                    etensor_qkv_partial,
-                    etensor_notify_attn,
-                    etensor_o_partial,
-                    etensor_o_allreduce,
-                    etensor_attn_add_rms_norm,
-                    etensor_attn_mlp,
-                    etensor_gate_up_proj_reduce,
-                    etensor_gate_up_proj,
-                    etensor_down_proj_reduce,
-                    etensor_down_proj_allreduce,
-                    etensor_mlp_add_rms_norm,
-                    etensor_end,
-                    etensor_o_proj,
-                    etensor_down_proj,
-                    etensor_attn_merge,
-                ) = (
-                    etensors_on_layer[0],
-                    etensors_on_layer[1],
-                    etensors_on_layer[2],
-                    etensors_on_layer[3],
-                    etensors_on_layer[4],
-                    etensors_on_layer[5],
-                    etensors_on_layer[6],
-                    etensors_on_layer[7],
-                    etensors_on_layer[8],
-                    etensors_on_layer[9],
-                    etensors_on_layer[10],
-                    etensors_on_layer[11],
-                    etensors_on_layer[12],
-                    etensors_on_layer[13],
-                    etensors_on_layer[14]
-                )
-
                 default_device = R.call_pure_packed("runtime.disco.device", sinfo_args=[R.Object])
                 partital_qkv = R.builtin.alloc_tensor(R.shape([mk.SPLIT_QKV_PROJECT, batch_size, (mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2) * mk.HEAD_DIM]), dtype="float32", runtime_device_index=0)
                 qkv = R.builtin.alloc_tensor(R.shape([batch_size, mk.NUM_ATTENTION_HEADS + mk.NUM_KEY_VALUE_HEADS * 2, mk.HEAD_DIM]), dtype="float16", runtime_device_index=0)
@@ -543,14 +442,11 @@ def get_llama3_megakernel_relax_mod(
                         hidden_state_attn_mlp, partial_out_gate_up_proj, out_gate_up_proj, out_silu_multiply,
                         partial_sum_down_proj, before_down_proj_allreduce,
                         # event tensor
-                        etensor_qkv_partial, etensor_notify_attn, etensor_attn_merge, etensor_o_proj,
-                        etensor_o_partial, etensor_o_allreduce, etensor_attn_add_rms_norm,
-                        etensor_attn_mlp, etensor_gate_up_proj_reduce, etensor_gate_up_proj, etensor_down_proj,
-                        etensor_down_proj_reduce, etensor_down_proj_allreduce, etensor_mlp_add_rms_norm, etensor_end,
+                        etensor_workspace,
                         # execution queue
                         queue_tasks, queue_head, queue_tail, profiler_buffer
                     ),
-                    [2, 1, 63],
+                    [2, 1, 49],
                     out_sinfo=[
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float16"), # output
                         R.Tensor((batch_size, mk.HIDDEN_SIZE), dtype="float32" if mk.tp_size == 1 else "float16"), # residual
@@ -668,21 +564,7 @@ def get_llama3_megakernel_relax_mod(
                 before_down_proj_allreduce_ptr: T.handle, # intermediate
 
                 # event tensor
-                etensor_qkv_partial_ptr: T.handle,
-                etensor_notify_attn_ptr: T.handle,
-                etensor_attn_merge_ptr: T.handle,
-                etensor_o_proj_ptr: T.handle,
-                etensor_o_partial_ptr: T.handle,
-                etensor_o_allreduce_ptr: T.handle,
-                etensor_attn_add_rms_ptr: T.handle,
-                etensor_attn_mlp_ptr: T.handle,
-                etensor_gate_up_proj_reduce_ptr: T.handle,
-                etensor_gate_up_proj_ptr: T.handle,
-                etensor_down_proj_ptr: T.handle,
-                etensor_down_proj_reduce_ptr: T.handle,
-                etensor_down_proj_allreduce_ptr: T.handle,
-                etensor_mlp_add_rms_ptr: T.handle,
-                etensor_end_ptr: T.handle,
+                etensor_workspace_ptr: T.handle,
 
                 # execution queue
                 queue_task_ptr: T.handle,
@@ -731,7 +613,7 @@ def get_llama3_megakernel_relax_mod(
                             R.Tuple([R.Prim("int64")] * 2 + [R.Tuple([R.Tensor(None, dtype="int32")] * 13)] * 2 + [R.Tensor(None, dtype="int32")] * 5),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
                             R.Tensor((mk.MAX_TOTAL_NUM_WORKERS,), dtype="int32"),
-                            R.Tuple([R.Tensor(None, dtype="int32")] * 18),
+                            R.Tensor(None, dtype="int32"),
                             R.Prim("int64"),
                         ],
                     )
@@ -745,7 +627,7 @@ def get_llama3_megakernel_relax_mod(
                         attn_plan_results,
                         inverse_indptr,
                         inverse_indices,
-                        etensors,
+                        etensor_workspace,
                         attn_task_num,
                     ) = (
                         res0[0],

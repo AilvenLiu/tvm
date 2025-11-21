@@ -35,10 +35,7 @@ from tvm.tirp.megakernel.topk_softmax import TopkSoftmaxTile
 from tvm.tirp.megakernel import static_scheduler, dynamic_scheduler
 from tvm.tirp.megakernel.model_config import qwen3_30b_a3b_config
 from tvm.tirp.megakernel.support import (
-    generate_event_tensor,
-    generate_event_tensor_moe,
     generate_exec_queue,
-    generate_exec_queue_moe,
     get_inverse_plan_info,
     get_max_num_tokens_padded,
 )
@@ -84,8 +81,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         Keep attention tiles from MegaKernelDenseLayer and add MoE tiles.
         """
         # Initialize tile tracking
-        self.tile_attr = {}
-        self.class_list = set()
+        self.reset()
         self.qkv_proj_tile = self._add_tile(
             GemmTile(
                 (self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM,
@@ -181,61 +177,27 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
     def set_events(
         self,
         batch_size,
+        attn_task_num,
         Semaphore: Type[Union[static_scheduler.Semaphore, dynamic_scheduler.Semaphore]],
-        # Attention events
-        etensor_qkv_partial_global,
-        etensor_notify_attn_global,
-        etensor_attn_merge_global,
-        etensor_o_proj_global,
-        etensor_o_partial_global,
-        etensor_o_allreduce_global,
-        etensor_attn_add_rms_global,
-        etensor_attn_mlp_global,
-        # MoE events
-        etensor_gating_global,
-        etensor_topk_softmax_global,
-        etensor_moe_align_global,
-        etensor_count_and_sort_global,
-        etensor_group_gemm_gate_up_global,
-        etensor_silu_mul_global,
-        etensor_group_gemm_down_global,
-        # End event
-        etensor_end_global,
+        etensor_workspace_global,
     ):
         """Combine events from both attention and MoE"""
         # Attention events (similar to MegaKernelDenseLayer.set_events)
-        MegaKernelDenseLayer.set_events(
+        MegaKernelDenseLayer._set_events(
+            self,
+            batch_size,
+            attn_task_num,
+            Semaphore,
+            etensor_workspace_global,
+            ignore_mlp_part=True,
+        )
+        MegaKernelMOE._set_events(
             self,
             batch_size,
             Semaphore,
-            etensor_qkv_partial_global,
-            etensor_notify_attn_global,
-            etensor_attn_merge_global,
-            etensor_o_proj_global,
-            etensor_o_partial_global,
-            etensor_o_allreduce_global,
-            etensor_attn_add_rms_global,
-            etensor_attn_mlp_global,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            etensor_end_global,
+            etensor_workspace_global,
         )
-        MegaKernelMOE.set_events(
-            self,
-            Semaphore,
-            etensor_gating_global,
-            etensor_topk_softmax_global,
-            etensor_moe_align_global,
-            etensor_count_and_sort_global,
-            etensor_group_gemm_gate_up_global,
-            etensor_silu_mul_global,
-            etensor_group_gemm_down_global,
-        )
-        # Note: evt_attn_mlp and evt_add_rms_norm are replaced by MoE events
+        self.set_events_complete(Semaphore, etensor_workspace_global)
 
     # Override attn_add_rms_norm to trigger MoE instead of MLP
     @T.macro
@@ -295,7 +257,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                         lambda push_idx: (
                             JobType.MOE_TOPK_SOFTMAX.value, push_idx, 0, 0
                         )
-                    ), "cta", "cta"
+                    ), "warpgroup", "warpgroup", scope_id=0
                 )
             self.tile_scheduler.wait(self.evt_attn_mlp, 0, wait_level="warp")
             self.run_tile(
@@ -443,24 +405,8 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         reordered_hidden_state_global,
         gate_up_output_global,
         silu_mul_output_global,
-        # Event tensors - attention
-        etensor_qkv_partial_global,
-        etensor_notify_attn_global,
-        etensor_attn_merge_global,
-        etensor_o_proj_global,
-        etensor_o_partial_global,
-        etensor_o_allreduce_global,
-        etensor_attn_add_rms_global,
-        etensor_attn_mlp_global,
-        # Event tensors - MoE
-        etensor_gating_global,
-        etensor_topk_softmax_global,
-        etensor_moe_align_global,
-        etensor_count_and_sort_global,
-        etensor_group_gemm_gate_up_global,
-        etensor_silu_mul_global,
-        etensor_group_gemm_down_global,
-        etensor_end_global,
+        # event tensors
+        etensor_workspace_global,
         # Profiler and execution queue
         profiler_buffer,
         exec_queue,
@@ -578,25 +524,12 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.class_init_all(smem_manager)
 
                 # Initialize event tensors
+                attn_task_num = T.meta_var(work_indptr_global[KernelConfig.SM_NUMBER * KernelConfig.WG_NUMBER])
                 self.set_events(
                     batch_size,
+                    attn_task_num,
                     Semaphore,
-                    etensor_qkv_partial_global,
-                    etensor_notify_attn_global,
-                    etensor_attn_merge_global,
-                    etensor_o_proj_global,
-                    etensor_o_partial_global,
-                    etensor_o_allreduce_global,
-                    etensor_attn_add_rms_global,
-                    etensor_attn_mlp_global,
-                    etensor_gating_global,
-                    etensor_topk_softmax_global,
-                    etensor_moe_align_global,
-                    etensor_count_and_sort_global,
-                    etensor_group_gemm_gate_up_global,
-                    etensor_silu_mul_global,
-                    etensor_group_gemm_down_global,
-                    etensor_end_global,
+                    etensor_workspace_global,
                 )
 
                 # Initialize tile scheduler and smem_manager
@@ -711,10 +644,14 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                             output_global,
                             is_dynamic_sch,
                         )
+                    elif self.tile_scheduler.task_type == JobType.INIT_ETENSOR.value:
+                        self.task_impl_init_etensor(is_dynamic_sch)
+                    elif self.tile_scheduler.task_type == JobType.WAIT_ETENSOR_INIT.value:
+                        self.task_impl_wait_etensor_init_complete(is_dynamic_sch)
                     else:
                         break
                     self.tile_scheduler.next_tile()
-                
+
                 while self.tile_scheduler.valid():
                     is_dynamic_sch = T.meta_var(issubclass(Scheduler, DynamicTileScheduler))
                     # MoE tasks (inherited from MegaKernelMOE)
@@ -858,26 +795,8 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             gate_up_output_ptr: T.handle,
             silu_mul_output_ptr: T.handle,
             
-            # Attention event tensors
-            etensor_qkv_partial_ptr: T.handle,
-            etensor_notify_attn_ptr: T.handle,
-            etensor_attn_merge_ptr: T.handle,
-            etensor_o_proj_ptr: T.handle,
-            etensor_o_partial_ptr: T.handle,
-            etensor_o_allreduce_ptr: T.handle,
-            etensor_attn_add_rms_ptr: T.handle,
-            etensor_attn_mlp_ptr: T.handle,
-            
-            # MoE event tensors
-            etensor_gating_ptr: T.handle,
-            etensor_topk_softmax_ptr: T.handle,
-            etensor_moe_align_ptr: T.handle,
-            etensor_count_and_sort_ptr: T.handle,
-            etensor_group_gemm_gate_up_ptr: T.handle,
-            etensor_silu_mul_ptr: T.handle,
-            etensor_group_gemm_down_ptr: T.handle,
-            etensor_end_ptr: T.handle,
-            
+            # event tensors
+            etensor_workspace_ptr: T.handle,
             # Execution queue
             queue_tasks_ptr: T.handle,
             queue_head_ptr: T.handle,
@@ -958,26 +877,9 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             gate_up_output_global = T.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
             silu_mul_output_global = T.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
             
-            # Attention event tensors
-            etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, SplitKReduceTile.N_UNIT)], "int32", scope="global", offset_factor=1)
-            etensor_notify_attn_global = T.match_buffer(etensor_notify_attn_ptr, [attn_tile_num], "int32", scope="global", offset_factor=1)
-            etensor_attn_merge_global = T.match_buffer(etensor_attn_merge_ptr, [batch_size * self.NUM_KEY_VALUE_HEADS], "int32", scope="global", offset_factor=1)
-            etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [self.SPLIT_O_PROJECT], "int32", scope="global", offset_factor=1)
-            etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N)], "int32", scope="global", offset_factor=1)
-            etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [self.HIDDEN_SIZE // self.world_size // AllreduceTile.N_TILE], "int32", scope="global", offset_factor=1)
-            etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", offset_factor=1)
-            etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", offset_factor=1)
-            
-            # MoE event tensors
-            etensor_gating_global = T.match_buffer(etensor_gating_ptr, [1], "int32", scope="global", offset_factor=1)
-            etensor_topk_softmax_global = T.match_buffer(etensor_topk_softmax_ptr, [1], "int32", scope="global", offset_factor=1)
-            etensor_moe_align_global = T.match_buffer(etensor_moe_align_ptr, [1], "int32", scope="global", offset_factor=1)
-            etensor_count_and_sort_global = T.match_buffer(etensor_count_and_sort_ptr, [1], "int32", scope="global", offset_factor=1)
-            max_blocks_padded = T.int32()
-            etensor_group_gemm_gate_up_global = T.match_buffer(etensor_group_gemm_gate_up_ptr, [max_blocks_padded], "int32", scope="global", offset_factor=1)
-            etensor_silu_mul_global = T.match_buffer(etensor_silu_mul_ptr, [max_blocks_padded], "int32", scope="global", offset_factor=1)
-            etensor_group_gemm_down_global = T.match_buffer(etensor_group_gemm_down_ptr, [1], "int32", scope="global", offset_factor=1)
-            etensor_end_global = T.match_buffer(etensor_end_ptr, [1], "int32", scope="global", offset_factor=1)
+            # event tensor
+            etensor_workspace_size = T.int32()
+            etensor_workspace_global = T.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
             
             # Execution queue
             queue_tasks_global = T.match_buffer(queue_tasks_ptr, [DynamicTileScheduler.MAX_TASKS], "int32", scope="global", offset_factor=1)
@@ -1001,11 +903,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global,
                     expert_ids_global, None, num_tokens_post_pad_global, cumsum_buffer_global, # no num_valid_tokens_global 
                     reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global,
-                    etensor_qkv_partial_global, etensor_notify_attn_global, etensor_attn_merge_global,
-                    etensor_o_proj_global, etensor_o_partial_global, etensor_o_allreduce_global, etensor_attn_add_rms_global, etensor_attn_mlp_global,
-                    etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
-                    etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global,
-                    etensor_group_gemm_down_global, etensor_end_global,
+                    etensor_workspace_global,
                     profiler_buffer, None, queue_tasks_global, queue_head_global, queue_tail_global,
                     BLK_M, down_proj_task_size, low_batch, False,
                     dynamic_scheduler.Semaphore, dynamic_scheduler.DynamicTileScheduler
@@ -1090,25 +988,8 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             gate_up_output_ptr: T.handle,
             silu_mul_output_ptr: T.handle,
             
-            # Attention event tensors
-            etensor_qkv_partial_ptr: T.handle,
-            etensor_notify_attn_ptr: T.handle,
-            etensor_attn_merge_ptr: T.handle,
-            etensor_o_proj_ptr: T.handle,
-            etensor_o_partial_ptr: T.handle,
-            etensor_o_allreduce_ptr: T.handle,
-            etensor_attn_add_rms_ptr: T.handle,
-            etensor_attn_mlp_ptr: T.handle,
-            
-            # MoE event tensors
-            etensor_gating_ptr: T.handle,
-            etensor_topk_softmax_ptr: T.handle,
-            etensor_moe_align_ptr: T.handle,
-            etensor_count_and_sort_ptr: T.handle,
-            etensor_group_gemm_gate_up_ptr: T.handle,
-            etensor_silu_mul_ptr: T.handle,
-            etensor_group_gemm_down_ptr: T.handle,
-            
+            # event tensors
+            etensor_workspace_ptr: T.handle,
             # Execution queue
             exec_queue_ptr: T.handle,
             profiler_buffer: T.Buffer((self.PROFILER_BUFFER_SIZE,), "uint64")
@@ -1186,25 +1067,9 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             gate_up_output_global = T.match_buffer(gate_up_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE * 2], "float16", scope="global")
             silu_mul_output_global = T.match_buffer(silu_mul_output_ptr, [max_num_tokens_padded, self.INTERMEDIATE_SIZE], "float16", scope="global")
             
-            # Attention event tensors
-            etensor_qkv_partial_global = T.match_buffer(etensor_qkv_partial_ptr, [ceildiv((self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, SplitKReduceTile.N_UNIT)], "int32", scope="global", offset_factor=1)
-            etensor_notify_attn_global = T.match_buffer(etensor_notify_attn_ptr, [KernelConfig.SM_NUMBER], "int32", scope="global", offset_factor=1)
-            etensor_attn_merge_global = T.match_buffer(etensor_attn_merge_ptr, [batch_size * self.NUM_KEY_VALUE_HEADS], "int32", scope="global", offset_factor=1)
-            etensor_o_proj_global = T.match_buffer(etensor_o_proj_ptr, [self.SPLIT_O_PROJECT], "int32", scope="global", offset_factor=1)
-            etensor_o_partial_global = T.match_buffer(etensor_o_partial_ptr, [T.ceildiv(self.HIDDEN_SIZE, GemmTile.BLK_N)], "int32", scope="global", offset_factor=1)
-            etensor_o_allreduce_global = T.match_buffer(etensor_o_allreduce_ptr, [self.HIDDEN_SIZE // self.world_size // AllreduceTile.N_TILE], "int32", scope="global", offset_factor=1)
-            etensor_attn_add_rms_global = T.match_buffer(etensor_attn_add_rms_ptr, [batch_size], "int32", scope="global", offset_factor=1)
-            etensor_attn_mlp_global = T.match_buffer(etensor_attn_mlp_ptr, [1], "int32", scope="global", offset_factor=1)
-            
-            # MoE event tensors
-            etensor_gating_global = T.match_buffer(etensor_gating_ptr, [1], "int32", scope="global", offset_factor=1)
-            etensor_topk_softmax_global = T.match_buffer(etensor_topk_softmax_ptr, [1], "int32", scope="global", offset_factor=1)
-            etensor_moe_align_global = T.match_buffer(etensor_moe_align_ptr, [1], "int32", scope="global", offset_factor=1)
-            etensor_count_and_sort_global = T.match_buffer(etensor_count_and_sort_ptr, [1], "int32", scope="global", offset_factor=1)
-            max_blocks_padded = T.int32()
-            etensor_group_gemm_gate_up_global = T.match_buffer(etensor_group_gemm_gate_up_ptr, [max_blocks_padded], "int32", scope="global", offset_factor=1)
-            etensor_silu_mul_global = T.match_buffer(etensor_silu_mul_ptr, [max_blocks_padded], "int32", scope="global", offset_factor=1)
-            etensor_group_gemm_down_global = T.match_buffer(etensor_group_gemm_down_ptr, [1], "int32", scope="global", offset_factor=1)
+            # event tensor
+            etensor_workspace_size = T.int32()
+            etensor_workspace_global = T.match_buffer(etensor_workspace_ptr, [etensor_workspace_size], "int32", scope="global")
             
             # Execution queue
             exec_queue = T.match_buffer(exec_queue_ptr, [KernelConfig.SM_NUMBER, StaticTileScheduler.MAX_TASKS], "int32", scope="global")
@@ -1226,11 +1091,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                     gating_output_global, topk_weights_global, topk_indices_global, sorted_token_ids_global,
                     expert_ids_global, None, num_tokens_post_pad_global, cumsum_buffer_global, # no num_valid_tokens_global 
                     reordered_hidden_state_global, gate_up_output_global, silu_mul_output_global,
-                    etensor_qkv_partial_global, etensor_notify_attn_global, etensor_attn_merge_global,
-                    etensor_o_proj_global, etensor_o_partial_global, etensor_o_allreduce_global, etensor_attn_add_rms_global, etensor_attn_mlp_global,
-                    etensor_gating_global, etensor_topk_softmax_global, etensor_moe_align_global,
-                    etensor_count_and_sort_global, etensor_group_gemm_gate_up_global, etensor_silu_mul_global,
-                    etensor_group_gemm_down_global, None,
+                    etensor_workspace_global,
                     profiler_buffer, exec_queue, None, None, None,
                     BLK_M, 1, low_batch, False,
                     static_scheduler.Semaphore, static_scheduler.StaticTileScheduler
@@ -1552,12 +1413,17 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
         if scheduler == "static":
             # Static scheduler needs exec queue with attention task info
             exec_queue = generate_exec_queue(
-                batch_size, arg_dict["attn_task_num"].item(), mk.config, mk.world_size, "static"
+                batch_size,
+                arg_dict["attn_task_num"].item(),
+                mk.config,
+                mk.world_size,
+                mk.num_etensors[scheduler],
+                "static",
             )
             tvm_arg_dict[f"exec_queue"] = tvm.runtime.tensor(exec_queue, DEV)
         else:
             # Dynamic scheduler
-            exec_queue = generate_exec_queue(None, None, mk.config, mk.world_size, "dynamic")
+            exec_queue = generate_exec_queue(None, None, mk.config, mk.world_size, mk.num_etensors[scheduler],  "dynamic")
             for i in range(REPEAT):
                 tvm_arg_dict[f"queue_tasks_{i}"] = tvm.runtime.tensor(exec_queue.tasks, DEV)
                 tvm_arg_dict[f"queue_head_{i}"] = tvm.runtime.tensor(exec_queue.head, DEV)
@@ -1617,47 +1483,11 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
             tvm_arg_dict[key] = tvm.runtime.tensor(value, device=DEV)
         tvm_arg_dict["append_pos"] = tvm.runtime.tensor(append_pos, device=DEV)
 
+        tvm_arg_dict["etensor_workspace"] = tvm.runtime.tensor(np.zeros([mk.ETENSOR_WORKSPACE_SIZE], dtype=np.int32), device=DEV)
+
         # Prepare per-iteration buffers
         for i in range(REPEAT):
             tvm_arg_dict[f"residual_{i}"] = tvm.runtime.tensor(arg_dict["residual"].to(torch.float32), device=DEV)
-
-            # Generate event tensors (combine attention + MoE)
-            (
-                tvm_arg_dict[f"etensor_qkv_partial_{i}"],
-                tvm_arg_dict[f"etensor_notify_attn_{i}"],
-                tvm_arg_dict[f"etensor_attn_merge_{i}"],
-                tvm_arg_dict[f"etensor_o_proj_{i}"],
-                tvm_arg_dict[f"etensor_o_partial_{i}"],
-                tvm_arg_dict[f"etensor_o_allreduce_{i}"],
-                tvm_arg_dict[f"etensor_attn_add_rms_norm_{i}"],
-                tvm_arg_dict[f"etensor_attn_mlp_{i}"],
-                _,  # etensor_gate_up_proj_reduce (not used)
-                _,  # etensor_gate_up_proj (not used)
-                _,  # etensor_down_proj (not used)
-                _,  # etensor_down_proj_reduce (not used)
-                _,  # etensor_down_proj_allreduce (not used)
-                _,  # etensor_mlp_add_rms_norm (not used)
-                tvm_arg_dict[f"etensor_end_{i}"],
-            ) = generate_event_tensor(
-                batch_size,
-                arg_dict["attn_task_num"].item(),
-                tvm_arg_dict["kv_head_idx"],
-                tvm_arg_dict["q_indptr"],
-                mk.config,
-                mk.world_size,
-            )
-
-            # MoE event tensors
-            (
-                tvm_arg_dict[f"etensor_gating_{i}"],
-                tvm_arg_dict[f"etensor_topk_softmax_{i}"],
-                tvm_arg_dict[f"etensor_moe_align_{i}"],
-                tvm_arg_dict[f"etensor_count_and_sort_{i}"],
-                tvm_arg_dict[f"etensor_group_gemm_gate_up_{i}"],
-                tvm_arg_dict[f"etensor_silu_mul_{i}"],
-                tvm_arg_dict[f"etensor_group_gemm_down_{i}"],
-                _,
-            ) = generate_event_tensor_moe(batch_size, mk.config, unfused=False)
 
         tvm_arg_dict[f"profiler_buffer"] = tvm.runtime.tensor(
             np.zeros([mk.PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV
@@ -1736,21 +1566,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                         work_arg_dict["gate_up_output"],
                         work_arg_dict["silu_mul_output"],
                         # Event tensors
-                        work_arg_dict[f"etensor_qkv_partial_{iter}"],
-                        work_arg_dict[f"etensor_notify_attn_{iter}"],
-                        work_arg_dict[f"etensor_attn_merge_{iter}"],
-                        work_arg_dict[f"etensor_o_proj_{iter}"],
-                        work_arg_dict[f"etensor_o_partial_{iter}"],
-                        work_arg_dict[f"etensor_o_allreduce_{iter}"],
-                        work_arg_dict[f"etensor_attn_add_rms_norm_{iter}"],
-                        work_arg_dict[f"etensor_attn_mlp_{iter}"],
-                        work_arg_dict[f"etensor_gating_{iter}"],
-                        work_arg_dict[f"etensor_topk_softmax_{iter}"],
-                        work_arg_dict[f"etensor_moe_align_{iter}"],
-                        work_arg_dict[f"etensor_count_and_sort_{iter}"],
-                        work_arg_dict[f"etensor_group_gemm_gate_up_{iter}"],
-                        work_arg_dict[f"etensor_silu_mul_{iter}"],
-                        work_arg_dict[f"etensor_group_gemm_down_{iter}"],
+                        work_arg_dict["etensor_workspace"],
                         # Execution queue (static)
                         work_arg_dict["exec_queue"],
                         work_arg_dict[f"profiler_buffer"],
@@ -1821,22 +1637,7 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                         work_arg_dict["gate_up_output"],
                         work_arg_dict["silu_mul_output"],
                         # Event tensors
-                        work_arg_dict[f"etensor_qkv_partial_{iter}"],
-                        work_arg_dict[f"etensor_notify_attn_{iter}"],
-                        work_arg_dict[f"etensor_attn_merge_{iter}"],
-                        work_arg_dict[f"etensor_o_proj_{iter}"],
-                        work_arg_dict[f"etensor_o_partial_{iter}"],
-                        work_arg_dict[f"etensor_o_allreduce_{iter}"],
-                        work_arg_dict[f"etensor_attn_add_rms_norm_{iter}"],
-                        work_arg_dict[f"etensor_attn_mlp_{iter}"],
-                        work_arg_dict[f"etensor_gating_{iter}"],
-                        work_arg_dict[f"etensor_topk_softmax_{iter}"],
-                        work_arg_dict[f"etensor_moe_align_{iter}"],
-                        work_arg_dict[f"etensor_count_and_sort_{iter}"],
-                        work_arg_dict[f"etensor_group_gemm_gate_up_{iter}"],
-                        work_arg_dict[f"etensor_silu_mul_{iter}"],
-                        work_arg_dict[f"etensor_group_gemm_down_{iter}"],
-                        work_arg_dict[f"etensor_end_{iter}"],
+                        work_arg_dict["etensor_workspace"],
                         # Execution queue (dynamic)
                         work_arg_dict[f"queue_tasks_{iter}"],
                         work_arg_dict[f"queue_head_{iter}"],
@@ -2123,7 +1924,6 @@ def test(batch_size, seq_len, mega_kernel_static, mega_kernel_dynamic, mega_kern
                 print("✓ Static scheduler PASSED", flush=True)
             except Exception as e:
                 print(f"✗ Static scheduler FAILED: {e}")
-
 
     if mega_kernel_wrapper.world_size == 1:
         with ProtonContext("moe_full_layer"):

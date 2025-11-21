@@ -266,7 +266,7 @@ class EventOpInserter(StmtExprMutator):
             def get_wait(idx):
                 @T.prim_func(tirp=True, check_well_formed=False)
                 def wait():
-                    sem = T.meta_var(self.semaphore_class(-1, self.func_info.in_event_tensors[idx], decrement=True))
+                    sem = T.meta_var(self.semaphore_class(self.func_info.in_event_tensors[idx]))
                     wait_func = T.meta_var(self.func_info.in_info_list[idx][0])
                     self.tile_scheduler.wait(
                         sem, *(wait_func(T.int32(0))[1:]),
@@ -277,7 +277,7 @@ class EventOpInserter(StmtExprMutator):
             def get_notify(idx):            
                 @T.prim_func(tirp=True, check_well_formed=False)
                 def notify():
-                    sem = T.meta_var(self.semaphore_class(-1, self.func_info.out_event_tensors[idx], decrement=True))
+                    sem = T.meta_var(self.semaphore_class(self.func_info.out_event_tensors[idx]))
                     notify_func = T.meta_var(self.func_info.out_info_list[idx][0])
                     num_func = T.meta_var(self.func_info.out_info_list[idx][1])
                     self.tile_scheduler.notify(
@@ -293,7 +293,7 @@ class EventOpInserter(StmtExprMutator):
                         return None
                     @T.prim_func(tirp=True, check_well_formed=False)
                     def pre_notify_and_push():
-                        sem = T.meta_var(self.semaphore_class(-1, self.func_info.out_event_tensors[idx], decrement=True))
+                        sem = T.meta_var(self.semaphore_class(self.func_info.out_event_tensors[idx]))
                         notify_func = T.meta_var(self.func_info.push_info_list[idx][0])
                         num_func = T.meta_var(self.func_info.push_info_list[idx][1])
                         push_func_list = T.meta_var(self.func_info.push_info_list[idx][2])
