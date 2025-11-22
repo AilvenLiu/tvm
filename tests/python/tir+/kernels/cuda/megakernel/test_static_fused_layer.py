@@ -19,7 +19,6 @@ from tvm.tirp.megakernel.relax_compatible.reduce_rms_rope_append import FuseSpli
 from tvm.tirp.megakernel.relax_compatible.batch_attn import FuseBatchAttnTile
 from tvm.tirp.megakernel.relax_compatible.batch_merge import FuseBatchMergeTile
 from tvm.tirp.megakernel.relax_compatible.add_rmsnorm import FuseAddRMSNormTile, FuseRMSNormTile
-from tvm.tirp.megakernel.relax_compatible.end import FuseEndTile
 
 from tvm.tirp.megakernel.common import KernelConfig, ceildiv, JobType, event_type_names
 from tvm.tirp.bench.utils import ProtonContext, bench, export_to_perfetto_trace
@@ -248,7 +247,6 @@ class MegaKernel:
                     self.RMS_NORM_EPS,
                     self.HIDDEN_SIZE,
                 )
-                end_func, end_num_tiles, _ = FuseEndTile.get_func()
                 
                 # add tile kernels to bb
                 qkv_proj_gv = bb.add_func(qkv_proj_func, f"qkv_proj_blk{blk_m}")
@@ -262,7 +260,6 @@ class MegaKernel:
                 gate_up_silu_gv = bb.add_func(gate_up_silu_func, f"gate_up_silu_blk{blk_m}")
                 down_proj_gv = bb.add_func(down_proj_func, f"down_proj_blk{blk_m}")
                 mlp_add_rms_gv = bb.add_func(mlp_add_rms_func, "mlp_add_rms")
-                end_gv = bb.add_func(end_func, "end")
 
                 # data flow
                 # QKV_GEMM
@@ -275,23 +272,28 @@ class MegaKernel:
                         tile_num=qkv_proj_num_tiles,
                         out_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda i, j, k, notify_idx: (-1, j),
-                            num=1,
+                            dep=lambda i, j, k, notify_idx: (1, -1, j),
                         ),
                     )
                 )
                 
                 # Q_REDUCE_RMS_ROPE 
-                def reduce_rms_rope_q_num_notify(i, j, k, inverse_indptr_buf, inverse_indices_buf, batch_size, m_tile):
+                @T.prim_func(tirp=True, private=True)
+                def reduce_rms_rope_q_dep_notify(i: T.int32, j: T.int32, k: T.int32, notify_idx: T.int32,
+                                            inverse_indptr_buf: T.Buffer([self.MAX_TOTAL_NUM_WORKERS], "int32"),
+                                            inverse_indices_buf: T.Buffer([self.MAX_TOTAL_NUM_WORKERS], "int32"),
+                                            batch_size: T.int32, m_tile: T.int32,
+                                            out_buf0: T.Buffer([1], "int32", scope="local"),
+                                            out_buf1: T.Buffer([1], "int32", scope="local"),
+                                            out_buf2: T.Buffer([1], "int32", scope="local")):
                     beg_idx = j // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * batch_size + i * m_tile
                     end_idx = j // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * batch_size + T.min((i + 1) * m_tile, batch_size)
                     beg = inverse_indptr_buf[beg_idx]
                     end = inverse_indptr_buf[end_idx]
-                    return end - beg
-                def reduce_rms_rope_q_dep_notify(i, j, k, notify_idx, inverse_indptr_buf, inverse_indices_buf, batch_size, m_tile):
-                    beg_idx = j // (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * batch_size + i * m_tile
-                    beg = inverse_indptr_buf[beg_idx]
-                    return (-1, inverse_indices_buf[beg + notify_idx])
+                    out_buf0[0] = end - beg
+                    out_buf1[0] = -1
+                    out_buf2[0] = inverse_indices_buf[beg + notify_idx]
+        
                 q = bb.emit(
                     R.call_tir_device(
                         reduce_rms_rope_q_gv,
@@ -301,35 +303,38 @@ class MegaKernel:
                         tile_num=reduce_rms_rope_q_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda i, j, k, wait_idx: (-1, j),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, j),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda rank, x, inv_idx, m_split: (inv_idx, x, 0),
-                            num=lambda rank, x, m_split: T.if_then_else(x < self.NUM_ATTENTION_HEADS, m_split, 0),
+                            dep=lambda rank, x, inv_idx, m_split: (T.if_then_else(x < self.NUM_ATTENTION_HEADS, m_split, 0), inv_idx, x, 0),
                             extra_args=[reduce_rms_rope_q_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
                             dep=reduce_rms_rope_q_dep_notify,
-                            num=reduce_rms_rope_q_num_notify,
                             extra_args=[inverse_indptr, inverse_indices, batch_size, reduce_rms_rope_q_size[0]],
                         ),
                     )
                 )
 
                 # K_RMS_ROPE_APPEND
-                def reduce_rms_rope_append_k_num_notify(i, j, k, inverse_indptr_buf, inverse_indices_buf, batch_size, m_tile):
+                @T.prim_func(tirp=True, private=True)
+                def reduce_rms_rope_append_k_dep(i: T.int32, j: T.int32, k: T.int32, notify_idx: T.int32,
+                                                        inverse_indptr_buf: T.Buffer([self.MAX_TOTAL_NUM_WORKERS], "int32"),
+                                                        inverse_indices_buf: T.Buffer([self.MAX_TOTAL_NUM_WORKERS], "int32"),
+                                                        batch_size: T.int32, m_tile: T.int32,
+                                                        out_buf0: T.Buffer([1], "int32", scope="local"),
+                                                        out_buf1: T.Buffer([1], "int32", scope="local"),
+                                                        out_buf2: T.Buffer([1], "int32", scope="local")):
                     beg_idx = j * batch_size + i * m_tile
                     end_idx = j * batch_size + T.min((i + 1) * m_tile, batch_size)
                     beg = inverse_indptr_buf[beg_idx]
                     end = inverse_indptr_buf[end_idx]
-                    return end - beg
-                def reduce_rms_rope_append_k_dep_notify(i, j, k, notify_idx, inverse_indptr_buf, inverse_indices_buf, batch_size, m_tile):
-                    beg_idx = j * batch_size + i * m_tile
-                    beg = inverse_indptr_buf[beg_idx]
-                    return (-1, inverse_indices_buf[beg + notify_idx])        
+                    out_buf0[0] = end - beg
+                    out_buf1[0] = -1
+                    out_buf2[0] = inverse_indices_buf[beg + notify_idx]
+       
                 kv_data_ = bb.emit(
                     R.call_tir_device(
                         reduce_rms_rope_append_k_gv,
@@ -339,19 +344,19 @@ class MegaKernel:
                         job_id=JobType.K_REDUCE_RMS_ROPE_APPEND.value,
                         in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda i, j, k, wait_idx: (-1, j + self.NUM_ATTENTION_HEADS),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, j + self.NUM_ATTENTION_HEADS),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda rank, x, inv_idx, m_split: (inv_idx, x - self.NUM_ATTENTION_HEADS, 0),
-                            num=lambda rank, x, m_split: T.if_then_else(tvm.tir.all(x >= self.NUM_ATTENTION_HEADS, x < self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS), m_split, 0),
+                            dep=lambda rank, x, inv_idx, m_split: (
+                                T.if_then_else(tvm.tir.all(x >= self.NUM_ATTENTION_HEADS, x < self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS), m_split, 0),
+                                inv_idx, x - self.NUM_ATTENTION_HEADS, 0
+                            ), 
                             extra_args=[reduce_rms_rope_append_k_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
-                            dep=reduce_rms_rope_append_k_dep_notify,
-                            num=reduce_rms_rope_append_k_num_notify,
+                            dep=reduce_rms_rope_append_k_dep,
                             extra_args=[inverse_indptr, inverse_indices, batch_size, reduce_rms_rope_q_size[0]],
                         ),
                         inplace_indices=5,
@@ -359,16 +364,22 @@ class MegaKernel:
                 )
 
                 # V_REDUCE_APPEND
-                def reduce_append_v_num_notify(i, j, k, inverse_indptr_buf, inverse_indices_buf, batch_size, m_tile):
+                @T.prim_func(tirp=True, private=True)
+                def reduce_append_v_dep_notify(i: T.int32, j: T.int32, k: T.int32, notify_idx: T.int32,
+                                                inverse_indptr_buf: T.Buffer([self.MAX_TOTAL_NUM_WORKERS], "int32"),
+                                                inverse_indices_buf: T.Buffer([self.MAX_TOTAL_NUM_WORKERS], "int32"),
+                                                batch_size: T.int32, m_tile: T.int32,
+                                                out_buf0: T.Buffer([1], "int32", scope="local"),
+                                                out_buf1: T.Buffer([1], "int32", scope="local"),
+                                                out_buf2: T.Buffer([1], "int32", scope="local")):
                     beg_idx = j * batch_size + i * m_tile
                     end_idx = j * batch_size + T.min((i + 1) * m_tile, batch_size)
                     beg = inverse_indptr_buf[beg_idx]
                     end = inverse_indptr_buf[end_idx]
-                    return end - beg
-                def reduce_append_v_dep_notify(i, j, k, notify_idx, inverse_indptr_buf, inverse_indices_buf, batch_size, m_tile):
-                    beg_idx = j * batch_size + i * m_tile
-                    beg = inverse_indptr_buf[beg_idx]
-                    return (-1, inverse_indices_buf[beg + notify_idx])        
+                    out_buf0[0] = end - beg
+                    out_buf1[0] = -1
+                    out_buf2[0] = inverse_indices_buf[beg + notify_idx]
+                              
                 kv_data_ = bb.emit(
                     R.call_tir_device(
                         reduce_append_v_gv,
@@ -378,25 +389,25 @@ class MegaKernel:
                         tile_num=reduce_append_v_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda i, j, k, wait_idx: (-1, j + self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, j + self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_qkv_partial,
-                            dep=lambda rank, x, inv_idx, m_split: (inv_idx, x - self.NUM_ATTENTION_HEADS - self.NUM_KEY_VALUE_HEADS, 0),
-                            num=lambda rank, x, m_split: T.if_then_else(x >= self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS, m_split, 0),
+                            dep=lambda rank, x, inv_idx, m_split: (
+                                T.if_then_else(x >= self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS, m_split, 0),
+                                inv_idx, x - self.NUM_ATTENTION_HEADS - self.NUM_KEY_VALUE_HEADS, 0
+                            ), 
                             extra_args=[reduce_append_v_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
                             dep=reduce_append_v_dep_notify,
-                            num=reduce_append_v_num_notify,
                             extra_args=[inverse_indptr, inverse_indices, batch_size, reduce_rms_rope_q_size[0]],
                         ),
                         inplace_indices=1,
                     )
-                )
-
+                )               
+               
                 # ATTENTION
                 batch_attn_packed = bb.emit(
                     R.call_tir_device(
@@ -414,28 +425,29 @@ class MegaKernel:
                         tile_num=batch_attn_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
-                            dep=lambda i, j, k, wait_idx: (-1, i),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, i),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_notify_attn,
-                            dep=lambda rank, x, inv_idx: (x, 0, 0),
-                            num=1,
+                            dep=lambda rank, x, inv_idx: (1, x, 0, 0),
                         ),
                         out_deps=[
                             rx.utils.Dependency(
                                 event=etensor_attn_merge,
-                                dep=lambda i, j, k, notify_idx, attn_task_num, batch_size: (-1, 0),
-                                num=lambda i, j, k, attn_task_num, batch_size: T.if_then_else(attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS, 1, 0),
+                                dep=lambda i, j, k, notify_idx, attn_task_num, batch_size: (
+                                    T.if_then_else(attn_task_num > batch_size * self.NUM_KEY_VALUE_HEADS, 1, 0), -1, 0
+                                ),
                                 extra_args=[attn_task_num, batch_size],
                             ),
                             rx.utils.Dependency(
                                 event=etensor_o_proj,
-                                dep=lambda i, j, k, notify_idx, attn_task_num, batch_size: (-1, notify_idx),
-                                num=lambda i, j, k, attn_task_num, batch_size: T.if_then_else(attn_task_num <= batch_size * self.NUM_KEY_VALUE_HEADS, self.SPLIT_O_PROJECT, 0),
+                                dep=lambda i, j, k, notify_idx, attn_task_num, batch_size: (
+                                    T.if_then_else(attn_task_num <= batch_size * self.NUM_KEY_VALUE_HEADS, self.SPLIT_O_PROJECT, 0), -1, notify_idx
+                                ),
                                 extra_args=[attn_task_num, batch_size],
                             )
-                        ]
+                        ],
+                        handle_config={"wait_scope": "warp"}
                     )
                 )
                 o, partial_splitkv_o, partial_lse = (
@@ -445,17 +457,20 @@ class MegaKernel:
                 )
                 
                 # ATTN_MERGE
-                def batch_merge_num_notify(i, j, k, batch_size, k_tile):
+                @T.prim_func(tirp=True, private=True)
+                def batch_merge_dep_notify(i: T.int32, j: T.int32, k: T.int32, notify_idx: T.int32,
+                                           batch_size: T.int32, k_tile: T.int32,
+                                           out0: T.Buffer([1], "int32", scope="local"),
+                                           out1: T.Buffer([1], "int32", scope="local"),
+                                           out2: T.Buffer([1], "int32", scope="local")):
                     worker_id = i * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-                    kv_idx = worker_id // (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
-                    range_start = (kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM // k_tile
-                    range_end = (((kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM - 1) // k_tile
-                    return range_end - range_start + 1
-                def batch_merge_dep_notify(i, j, k, notify_idx, batch_size, k_tile):
-                    worker_id = i * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-                    kv_idx = worker_id // (batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
-                    range_start = (kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM // k_tile
-                    return (-1, range_start + notify_idx)
+                    kv_idx = T.truncdiv(worker_id, batch_size * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS))
+                    range_start = T.truncdiv((kv_idx * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM, k_tile)
+                    range_end = T.truncdiv(((kv_idx + 1) * (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)) * self.HEAD_DIM - 1, k_tile)
+                    out0[0] = range_end - range_start + 1
+                    out1[0] = -1
+                    out2[0] = range_start + notify_idx
+
                 o = bb.emit(
                     R.call_tir_device(
                         batch_merge_gv,
@@ -472,19 +487,16 @@ class MegaKernel:
                         tile_num=batch_merge_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_attn_merge,
-                            dep=lambda i, j, k, wait_idx: (-1, 0),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, 0),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_attn_merge,
-                            dep=lambda rank, x, inv_idx, num_tile: (inv_idx, 0, 0),
-                            num=lambda rank, x, num_tile: num_tile,
+                            dep=lambda rank, x, inv_idx, num_tile: (num_tile, inv_idx, 0, 0),
                             extra_args=[batch_merge_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_o_proj,
                             dep=batch_merge_dep_notify,
-                            num=batch_merge_num_notify,
                             extra_args=[batch_size, o_proj_size[2]],
                         ),
                         inplace_indices=[5],
@@ -501,19 +513,16 @@ class MegaKernel:
                         job_id=JobType.GEMM_O_PROJ.value,
                         in_deps=rx.utils.Dependency(
                             event=etensor_o_proj,
-                            dep=lambda i, j, k, wait_idx: (-1, k),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, k),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_o_proj,
-                            dep=lambda rank, x, inv_idx, split_n: (0, inv_idx, x),
-                            num=lambda rank, x, split_n: split_n,
+                            dep=lambda rank, x, inv_idx, split_n: (split_n, 0, inv_idx, x),
                             extra_args=[o_proj_num_tiles[1]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_attn_add_rms,
-                            dep=lambda i, j, k, notify_idx: (-1, 0),
-                            num=1,
+                            dep=lambda i, j, k, notify_idx: (1, -1, 0),
                         ),
                         inplace_indices=[2],
                     )
@@ -529,31 +538,33 @@ class MegaKernel:
                         tile_num=attn_add_rms_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_attn_add_rms,
-                            dep=lambda i, j, k, wait_idx: (-1, 0),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, 0),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_attn_add_rms,
-                            dep=lambda rank, x, inv_idx, batch_size: (inv_idx, 0, 0),
-                            num=lambda rank, x, batch_size: batch_size,
+                            dep=lambda rank, x, inv_idx, batch_size: (batch_size, inv_idx, 0, 0),
                             extra_args=[batch_size],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_attn_mlp,
-                            dep=lambda i, j, k, notify_idx: (-1, 0),
-                            num=1,
+                            dep=lambda i, j, k, notify_idx: (1, -1, 0),
                         )
                     )
                 )
 
                 # GATE_UP_SILU
-                def gate_up_silu_num_notify(i, j, k, n_tile, k_tile):
+                @T.prim_func(tirp=True, private=True)
+                def gate_up_silu_dep_notify(i: T.int32, j: T.int32, k: T.int32, notify_idx: T.int32,
+                                           n_tile: T.int32, k_tile: T.int32,
+                                           out_buf0: T.Buffer([1], "int32", scope="local"),
+                                           out_buf1: T.Buffer([1], "int32", scope="local"),
+                                           out_buf2: T.Buffer([1], "int32", scope="local")):
                     range_start = j * n_tile // 2 // k_tile
                     range_end = ((j + 1) * n_tile // 2 - 1) // k_tile
-                    return range_end - range_start + 1
-                def gate_up_silu_dep_notify(i, j, k, notify_idx, n_tile, k_tile):
-                    range_start = j * n_tile // 2 // k_tile
-                    return (-1, range_start + notify_idx) 
+                    out_buf0[0] = range_end - range_start + 1
+                    out_buf1[0] = -1
+                    out_buf2[0] = range_start + notify_idx
+                    
                 out_silu_mul = bb.emit(
                     R.call_tir_device(
                         gate_up_silu_gv,
@@ -563,19 +574,16 @@ class MegaKernel:
                         tile_num=gate_up_silu_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_attn_mlp,
-                            dep=lambda i, j, k, wait_idx: (-1, 0),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, 0),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_attn_mlp,
-                            dep=lambda rank, x, inv_idx, split_n: (0, inv_idx, 0),
-                            num=lambda rank, x, split_n: split_n,
+                            dep=lambda rank, x, inv_idx, split_n: (split_n, 0, inv_idx, 0),
                             extra_args=[gate_up_silu_num_tiles[1]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_down_proj,
                             dep=gate_up_silu_dep_notify,
-                            num=gate_up_silu_num_notify,
                             extra_args=[gate_up_silu_size[1], down_proj_size[2]],
                         )
                     )
@@ -591,19 +599,16 @@ class MegaKernel:
                         tile_num=down_proj_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_down_proj,
-                            dep=lambda i, j, k, wait_idx: (-1, k),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, k),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_down_proj,
-                            dep=lambda rank, x, inv_idx, split_n: (0, inv_idx, x),
-                            num=lambda rank, x, split_n: split_n,
+                            dep=lambda rank, x, inv_idx, split_n: (split_n, 0, inv_idx, x),
                             extra_args=[down_proj_num_tiles[1]],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_mlp_add_rms,
-                            dep=lambda i, j, k, notify_idx: (-1, 0),
-                            num=1,
+                            dep=lambda i, j, k, notify_idx: (1, -1, 0),
                         ),
                         inplace_indices=[2],
                     )
@@ -619,40 +624,16 @@ class MegaKernel:
                         tile_num=mlp_add_rms_num_tiles,
                         in_deps=rx.utils.Dependency(
                             event=etensor_mlp_add_rms,
-                            dep=lambda i, j, k, wait_idx: (-1, 0),
-                            num=1,
+                            dep=lambda i, j, k, wait_idx: (1, -1, 0),
                         ),
                         inverse_in_deps=rx.utils.Dependency(
                             event=etensor_mlp_add_rms,
-                            dep=lambda rank, x, inv_idx, batch_size: (inv_idx, 0, 0),
-                            num=lambda rank, x, batch_size: batch_size,
+                            dep=lambda rank, x, inv_idx, batch_size: (batch_size, inv_idx, 0, 0),
                             extra_args=[batch_size],
                         ),
                         out_deps=rx.utils.Dependency(
                             event=etensor_end,
-                            dep=lambda i, j, k, notify_idx: (-1, 0),
-                            num=1,
-                        ),
-                    )
-                )
-                
-                # END
-                _ = bb.emit(
-                    R.call_tir_device(
-                        end_gv,
-                        [],
-                        out_sinfo=[],
-                        job_id=JobType.END.value,
-                        tile_num=end_num_tiles,
-                        in_deps=rx.utils.Dependency(
-                            event=etensor_end,
-                            dep=lambda i, j, k, wait_idx: (-1, 0),
-                            num=1,
-                        ),
-                        inverse_in_deps=rx.utils.Dependency(
-                            event=etensor_end,
-                            dep=lambda rank, x, inv_idx: (inv_idx, 0, 0),
-                            num=KernelConfig.SM_NUMBER,
+                            dep=lambda i, j, k, notify_idx: (1, -1, 0),
                         ),
                     )
                 )
@@ -1368,7 +1349,7 @@ if __name__ == "__main__":
             strategy=scheduler, tile_scheduler_class=tile_scheduler_class_map[scheduler],
             semaphore_class=semaphore_class_map[scheduler], profiler_on=args.profiler_on
         )(mod)
-        # mod.show()
+        mod.show()
         ex = rx.build(mod, target="cuda", tir_pipeline="tirp")
         src = ex.mod.imports[0].imports[0].inspect_source()
         print(src)

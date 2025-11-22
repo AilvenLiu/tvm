@@ -384,7 +384,7 @@ def test(batch_size, mod_mlp_static, mod_mlp_dynamic):
                 central_queue.append((0, n, k, JobType.GEMM_DOWN_PROJ.value))
         # down_proj_reduce
         M_split_down_proj_reduce = min(
-            ceildiv(KernelConfig.SM_NUMBER, HIDDEN_SIZE // SplitKReduceTile.N_UNIT), batch_size
+            KernelConfig.SM_NUMBER // (HIDDEN_SIZE // SplitKReduceTile.N_UNIT), batch_size
         )
         M_tile_down_proj_reduce = ceildiv(batch_size, M_split_down_proj_reduce)
         M_split_down_proj_reduce = ceildiv(batch_size, M_tile_down_proj_reduce)

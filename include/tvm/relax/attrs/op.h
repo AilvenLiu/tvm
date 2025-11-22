@@ -131,9 +131,6 @@ struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
   ffi::Array<tir::PrimFunc> in_deps;
   ffi::Array<tir::PrimFunc> out_deps;
   ffi::Array<tir::PrimFunc> inv_in_deps;
-  ffi::Array<tir::PrimFunc> in_nums;
-  ffi::Array<tir::PrimFunc> out_nums;
-  ffi::Array<tir::PrimFunc> inv_in_nums;
   ffi::Map<ffi::String, ffi::Any> handle_config;
   ffi::Array<Integer> inplace_indices;
 
@@ -151,9 +148,6 @@ struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
         .def_ro("in_deps", &CallTIRDeviceAttrs::in_deps, "The input dependencies.")
         .def_ro("out_deps", &CallTIRDeviceAttrs::out_deps, "The output dependencies.")
         .def_ro("inv_in_deps", &CallTIRDeviceAttrs::inv_in_deps, "The inverse input dependencies.")
-        .def_ro("in_nums", &CallTIRDeviceAttrs::in_nums, "The input numbers.")
-        .def_ro("out_nums", &CallTIRDeviceAttrs::out_nums, "The output numbers.")
-        .def_ro("inv_in_nums", &CallTIRDeviceAttrs::inv_in_nums, "The inverse input numbers.")
         .def_ro("handle_config", &CallTIRDeviceAttrs::handle_config, "The handle config.")
         .def_ro("inplace_indices", &CallTIRDeviceAttrs::inplace_indices, "The inplace indices.");
   }

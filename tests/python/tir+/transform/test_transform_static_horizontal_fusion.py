@@ -126,12 +126,12 @@ def test_basic():
             evt.semaphore_wait(*coord, level=wait_level, mask=mask)
 
         @T.macro
-        def notify(self, evt: Semaphore, notify_num, func_notify, scope="cta", scope_id=0):
+        def notify(self, evt: Semaphore, func_notify, scope="cta", scope_id=0):
             with T.cta():
                 tid = T.thread_id([NUM_THREADS], parent="cta")
                 T.cuda.cta_sync()
+                notify_num, rank, *coord = func_notify(tid)
                 if tid < notify_num:
-                    rank, *coord = func_notify(tid)
                     evt.semaphore_notify(*coord, rank=rank)
 
         @T.macro
@@ -197,13 +197,6 @@ def test_basic():
                     Tp.copy(C_ptr[m * BLOCK_M : (m + 1) * BLOCK_M, 0], C_smem)
                     smem_manager.arrive_all("cta")
                     smem_manager.advance()
-            
-        @T.prim_func(tirp=True, private=True)
-        def end(m: T.int32, n: T.int32, k: T.int32):
-            T.func_attr({"megakernel.device_func": "end"})
-            with T.cta():
-                T.block_attr({"tirp.tile_class.run": True})
-                T.add_to_parent(T.evaluate(0))
                 
         @R.function
         def mega_kernel(A: R.Tensor((M, N), "float32"), event_1: R.Tensor((NUM_BLOCK_M,), "int32"), event_2: R.Tensor((1,), "int32")):
@@ -218,8 +211,7 @@ def test_basic():
                     tile_num=(NUM_BLOCK_M, NUM_BLOCK_N, 1),
                     out_deps=relax.utils.Dependency(
                         event=event_1,
-                        dep=lambda i, j, k, notify_idx: (-1, i),
-                        num=lambda i, j, k: 1,
+                        dep=lambda i, j, k, notify_idx: (1, -1, i),
                     ),
                 )
                 C = R.call_tir_device(
@@ -230,35 +222,15 @@ def test_basic():
                     tile_num=(NUM_BLOCK_M, 1, 1),
                     in_deps=relax.utils.Dependency(
                         event=event_1,
-                        dep=lambda i, j, k, wait_idx: (-1, i),
-                        num=lambda i, j, k: 1,
+                        dep=lambda i, j, k, wait_idx: (1, -1, i),
                     ),
                     inverse_in_deps=relax.utils.Dependency(
                         event=event_1,
-                        dep=lambda rank, i, inv_idx: (i, inv_idx // 1, inv_idx % 1),
-                        num=lambda rank, i: 1,
+                        dep=lambda rank, i, inv_idx: (1, i, inv_idx // 1, inv_idx % 1),
                     ),
                     out_deps=relax.utils.Dependency(
                         event=event_2,
-                        dep=lambda i, j, k, notify_idx: (-1, 0),
-                        num=lambda i, j, k: 1,
-                    ),
-                )
-                R.call_tir_device(
-                    cls.end,
-                    [],
-                    out_sinfo=[],
-                    job_id=31,
-                    tile_num=(KernelConfig.SM_NUMBER, 1, 1),
-                    in_deps=relax.utils.Dependency(
-                        event=event_2,
-                        dep=lambda i, j, k, wait_idx: (-1, 0),
-                        num=lambda i, j, k: 1,
-                    ),
-                    inverse_in_deps=relax.utils.Dependency(
-                        event=event_2,
-                        dep=lambda rank, i, inv_idx: (inv_idx, 0, 0),
-                        num=lambda rank, i: KernelConfig.SM_NUMBER,
+                        dep=lambda i, j, k, notify_idx: (1, -1, 0),
                     ),
                 )
                 R.output(C)
@@ -405,8 +377,7 @@ def test_extra_args():
                     tile_num=(NUM_BLOCK_M, NUM_BLOCK_N, 1),
                     out_deps=relax.utils.Dependency(
                         event=event_1,
-                        dep=lambda i, j, k, notify_idx, p: (-1, p[i]),
-                        num=1,
+                        dep=lambda i, j, k, notify_idx, p: (1, -1, p[i]),
                         extra_args=[P],
                     ),
                 )
@@ -418,37 +389,17 @@ def test_extra_args():
                     tile_num=(NUM_BLOCK_M, 1, 1),
                     in_deps=relax.utils.Dependency(
                         event=event_1,
-                        dep=lambda i, j, k, wait_idx, p: (-1, p[i]),
-                        num=1,
+                        dep=lambda i, j, k, wait_idx, p: (1, -1, p[i]),
                         extra_args=[P],
                     ),
                     inverse_in_deps=relax.utils.Dependency(
                         event=event_1,
-                        dep=lambda rank, i, inv_idx, inv_p: (inv_p[i], inv_idx // 1, inv_idx % 1),
-                        num=1,
+                        dep=lambda rank, i, inv_idx, inv_p: (1, inv_p[i], inv_idx // 1, inv_idx % 1),
                         extra_args=[inv_P],
                     ),
                     out_deps=relax.utils.Dependency(
                         event=event_2,
-                        dep=lambda i, j, k, notify_idx: (-1, 0),
-                        num=lambda i, j, k: 1,
-                    ),
-                )
-                R.call_tir_device(
-                    cls.end,
-                    [],
-                    out_sinfo=[],
-                    job_id=31,
-                    tile_num=(KernelConfig.SM_NUMBER, 1, 1),
-                    in_deps=relax.utils.Dependency(
-                        event=event_2,
-                        dep=lambda i, j, k, wait_idx: (-1, 0),
-                        num=lambda i, j, k: 1,
-                    ),
-                    inverse_in_deps=relax.utils.Dependency(
-                        event=event_2,
-                        dep=lambda rank, i, inv_idx: (inv_idx, 0, 0),
-                        num=lambda rank, i: KernelConfig.SM_NUMBER,
+                        dep=lambda i, j, k, notify_idx: (1, -1, 0),
                     ),
                 )
                 R.output(C)

@@ -218,11 +218,11 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
-                    self.evt_attn_mlp, 1, lambda notify_idx: (-1, 0,),
+                    self.evt_attn_mlp, lambda notify_idx: (1, -1, 0,),
                     lambda trigger_idx: (
-                        ceildiv(batch_size, 128) * self.GATING_SPLIT_K_FACTOR,
                         lambda push_idx: (
                             JobType.MOE_GATING.value,
+                            ceildiv(batch_size, 128) * self.GATING_SPLIT_K_FACTOR,
                             0,
                             push_idx // self.GATING_SPLIT_K_FACTOR,
                             push_idx % self.GATING_SPLIT_K_FACTOR,
@@ -244,18 +244,17 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
             if tid * 8 < self.HIDDEN_SIZE:
                 for vec in T.vectorized(8):
                     output_global[self.tile_scheduler.m_idx, tid * 8 + vec] = 0
-            self.tile_scheduler.notify(self.evt_attn_mlp, 1, lambda notify_idx: (-1, 0), scope="cta")
+            self.tile_scheduler.notify(self.evt_attn_mlp, lambda notify_idx: (1, -1, 0), scope="cta")
 
     @T.macro
     def task_impl_moe_gating(self, is_dynamic_sch):
         with T.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
-                    self.evt_gating, 1, lambda notify_idx: (-1, 0,),
+                    self.evt_gating, lambda notify_idx: (1, -1, 0,),
                     lambda trigger_idx: (
-                        self.topk_softmax.PERSISTENT_SM_NUMBER,
                         lambda push_idx: (
-                            JobType.MOE_TOPK_SOFTMAX.value, push_idx, 0, 0
+                            JobType.MOE_TOPK_SOFTMAX.value, self.topk_softmax.PERSISTENT_SM_NUMBER, push_idx, 0, 0
                         )
                     ), "warpgroup", "warpgroup", scope_id=0
                 )
@@ -267,7 +266,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                 self.tile_scheduler.k_idx,
                 self.profiler,
             )
-            self.tile_scheduler.notify(self.evt_gating, 1, lambda notify_idx: (-1, 0), scope="warpgroup", scope_id=0)
+            self.tile_scheduler.notify(self.evt_gating, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_moe_group_gemm_down(
@@ -285,10 +284,9 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         with T.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
-                    self.evt_group_gemm_down, 1, lambda notify_idx: (-1, 0,),
+                    self.evt_group_gemm_down, lambda notify_idx: (1, -1, 0,),
                     lambda trigger_idx: (
-                        batch_size,
-                        lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, push_idx, 0, 0),
+                        lambda push_idx: (JobType.MLP_ADD_RMS_NORM.value, batch_size, push_idx, 0, 0)
                     ), "warpgroup", "warpgroup"
                 )
             wait_idx = T.meta_var(self.tile_scheduler.m_idx if not unfused else 0)
@@ -309,7 +307,7 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
                         num_valid_tokens_global,
                         self.profiler,
                     )
-            self.tile_scheduler.notify(self.evt_group_gemm_down, 1, lambda notify_idx: (-1, 0), scope="warpgroup", scope_id=0)
+            self.tile_scheduler.notify(self.evt_group_gemm_down, lambda notify_idx: (1, -1, 0), scope="warpgroup", scope_id=0)
 
     @T.macro
     def task_impl_mlp_add_rms_norm(
@@ -322,10 +320,9 @@ class MegaKernelMOEFullLayer(MegaKernelDenseLayer, MegaKernelMOE):
         with T.cta():
             if is_dynamic_sch:
                 self.tile_scheduler.pre_notify_and_push(
-                    self.evt_end, 1, lambda notify_idx: (-1, 0,),
+                    self.evt_end, lambda notify_idx: (1, -1, 0,),
                     lambda trigger_idx: (
-                        KernelConfig.SM_NUMBER,
-                        lambda push_idx: (JobType.END.value, 0, 0, 0),
+                        lambda push_idx: (JobType.END.value, KernelConfig.SM_NUMBER, 0, 0, 0)
                     ), "cta", "cta"
                 )
             self.tile_scheduler.wait(self.evt_group_gemm_down, 0, wait_level="cta")

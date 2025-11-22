@@ -22,9 +22,7 @@ class RopeTile(Tile):
         self.bdy = KernelConfig.NUM_THREADS // self.bdx
 
         self.batch_size = batch_size
-        self.m_split = T.min(
-            ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads), self.batch_size
-        )
+        self.m_split = ceildiv(KernelConfig.SM_NUMBER, self.qo_heads + 2 * self.kv_heads)
         self.m_tile = ceildiv(self.batch_size, self.m_split)
         self.m_split = ceildiv(self.batch_size, self.m_tile)
 

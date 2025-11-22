@@ -281,7 +281,7 @@ def generate_exec_queue(batch_size, attn_task_num, config, WORLD_SIZE, etensor_n
         for i in range(KernelConfig.SM_NUMBER):
             central_queue.append((i, 0, 0, JobType.WAIT_ETENSOR_INIT.value))
 
-        m_split = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS))
+        m_split = ceildiv(KernelConfig.SM_NUMBER, NUM_ATTENTION_HEADS + 2 * NUM_KEY_VALUE_HEADS)
         m_tile = ceildiv(batch_size, m_split)
         m_split = ceildiv(batch_size, m_tile)
 

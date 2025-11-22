@@ -128,6 +128,8 @@ ffi::Array<ffi::Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device
                                                         TVMStreamHandle copy_stream);
 
 
+Tensor GetExecQueueStatic(tvm::ffi::AnyView vm_arg, ObjectRef gen_exec_func, ffi::Shape cache_args);                              
+
 }  // namespace megakernel
 }  // namespace vm
 }  // namespace runtime

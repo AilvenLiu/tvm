@@ -28,6 +28,8 @@
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/nvtx.h>
 #include <tvm/runtime/tensor.h>
+#include <tvm/runtime/vm/vm.h>
+#include <tvm/node/cast.h>
 
 #include <utility>
 
@@ -110,7 +112,7 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
     f_push_task(i, 0, 0, JobType::kWaitEtensorInit);
   }
 
-  int32_t m_split = std::min(batch_size, ceildiv(kNumSM, num_qo_heads + 2 * num_kv_heads));
+  int32_t m_split = ceildiv(kNumSM, num_qo_heads + 2 * num_kv_heads);
   int32_t m_tile = ceildiv(batch_size, m_split);
   m_split = ceildiv(batch_size, m_tile);
 
@@ -363,13 +365,38 @@ Array<Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
   return queue_by_layer;
 }
 
-    // RNN State methods
-    TVM_FFI_STATIC_INIT_BLOCK() {
+Tensor GetExecQueueStatic(tvm::ffi::AnyView vm_arg, ObjectRef gen_exec_func, ffi::Shape cache_args) {
+  static std::unordered_map<size_t, Tensor> cache;
+  // calculate hash key
+  size_t hash = cache_args.size();
+  for (int32_t i : cache_args) {
+      hash ^= std::hash<int32_t>()(i) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+  }
+  if (cache.count(hash)) {
+    // hit cache
+    return cache[hash];
+  } else {
+    // miss cache
+    using namespace vm;
+    VirtualMachine* vm = VirtualMachine::GetContextPtr(vm_arg);
+    VMClosure func = Downcast<VMClosure>(gen_exec_func);
+    std::vector<tvm::ffi::AnyView> packed_args(1);
+    packed_args[0] = cache_args;
+    tvm::ffi::Any rv;
+    vm->InvokeClosurePacked(func, tvm::ffi::PackedArgs(packed_args.data(), packed_args.size()), &rv);
+    Tensor exec_queue = rv.cast<Tensor>();
+    cache[hash] = exec_queue;
+    return exec_queue;
+  }
+}
+
+TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
       .def("megakernel.get_event_tensors_on_layer", GetEventTensorsOnLayer)
       .def("megakernel.generate_exec_queue_static", GenerateExecQueueStatic)
-      .def("megakernel.generate_exec_queue_dynamic", GenerateExecQueueDynamic);
+      .def("megakernel.generate_exec_queue_dynamic", GenerateExecQueueDynamic)
+      .def("megakernel.horizontal_fusion.get_exec_queue_static", GetExecQueueStatic);
 }
 
 }  // namespace megakernel

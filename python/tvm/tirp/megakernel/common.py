@@ -518,7 +518,7 @@ class SmemManager:
     #         "exclusive" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will be exclusive on corresponding pages
     #         "shared" -> wait_specific / arrive_specific + wait_unused / arrive_unused, buffer will share the corresponding pages
     #         "persistent" -> persistent smem, cannot be wait / arrive
-    def alloc(self, shape, dtype="float32", strides=None, scope="shared.dyn", align=0, buffer_type="",
+    def alloc(self, shape, dtype="float32", strides=None, scope="shared.dyn", align=1, buffer_type="",
               axis_separators=None, layout="default", split=1, name=None, method: Literal["shared", "exclusive", "persistent"]="shared"):
         # avoid name conflict
         if name is not None:
@@ -768,6 +768,16 @@ class TileSchedulerBase:
     @T.macro
     def init(self):
         raise NotImplementedError
+    
+    @T.macro
+    def fetch_from_queue(self):
+        # for dynamic scheduler
+        pass
+    
+    @T.macro
+    def push(self, func_push_list, push_level):
+        # for dynamic scheduler
+        pass
 
     @T.macro
     def next_tile(self):
@@ -778,7 +788,7 @@ class TileSchedulerBase:
         raise NotImplementedError
 
     @T.macro
-    def notify(self, evt, notify_num, func_notify, scope, scope_id):
+    def notify(self, evt, func_notify, scope, scope_id):
         raise NotImplementedError
 
     @T.macro

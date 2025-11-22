@@ -126,6 +126,8 @@ class MegaKernelWrapper:
         )
         with T.cta():
             self.tile_scheduler.init()
+            if not is_static_scheduler:
+                self.tile_scheduler.fetch_from_queue()
 
     @T.macro
     def run_tile(self, tile, *args, **kwargs):
@@ -183,7 +185,7 @@ class MegaKernelWrapper:
         if self.evt_etensor_init_complete is not None:
             if self.tile_scheduler.m_idx < len(self.etensor_and_f_init_pairs):
                 self.tile_scheduler.notify(
-                    self.evt_etensor_init_complete, 1, lambda notify_idx: (-1, 0), scope="cta", release=True
+                    self.evt_etensor_init_complete, lambda notify_idx: (1, -1, 0), scope="cta", release=True
                 )
 
     @T.macro

@@ -917,8 +917,7 @@ Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_s
                        ffi::Array<ffi::Array<ffi::Any>> out_extra_args,
                        ffi::Array<ffi::Array<ffi::Any>> inv_in_extra_args,
                        ffi::Array<tir::PrimFunc> in_deps, ffi::Array<tir::PrimFunc> out_deps,
-                       ffi::Array<tir::PrimFunc> inv_in_deps, ffi::Array<tir::PrimFunc> in_nums,
-                       ffi::Array<tir::PrimFunc> out_nums, ffi::Array<tir::PrimFunc> inv_in_nums,
+                       ffi::Array<tir::PrimFunc> inv_in_deps,
                        ffi::Map<ffi::String, ffi::Any> handle_config,
                        ffi::Array<Integer> inplace_indices, ffi::Optional<Expr> packed_ints) {
   ObjectPtr<CallTIRDeviceAttrs> attrs = ffi::make_object<CallTIRDeviceAttrs>();
@@ -932,9 +931,6 @@ Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_s
   attrs->in_deps = in_deps;
   attrs->out_deps = out_deps;
   attrs->inv_in_deps = inv_in_deps;
-  attrs->in_nums = in_nums;
-  attrs->out_nums = out_nums;
-  attrs->inv_in_nums = inv_in_nums;
   attrs->handle_config = handle_config;
   attrs->inplace_indices = ffi::Array<Integer>(inplace_indices.begin(), inplace_indices.end());
   for (const TensorStructInfo& sinfo : out_sinfo_list) {

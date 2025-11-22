@@ -76,7 +76,7 @@ class ASTPrinter(StmtVisitor):
         super().__init__()
         self.log = ASTLog()
 
-    def visit_let_(self, op):
+    def visit_let_stmt_(self, op):
         self.log.add("LetStmt")
         self.log.push_scope()
         self.visit_expr(op.value)
@@ -246,8 +246,8 @@ class ASTPrinterMutator(StmtMutator):
         super().__init__()
         self.log = ASTLog()
 
-    def visit_let_(self, op):
-        result = super().visit_let_(op)
+    def visit_let_stmt_(self, op):
+        result = super().visit_let_stmt_(op)
         self.log.add("LetStmt")
         return result
 
@@ -391,10 +391,10 @@ class StmtExprASTPrinter(StmtExprVisitor):
         super().__init__()
         self.log = ASTLog()
 
-    def visit_let_(self, op):
+    def visit_let_stmt_(self, op):
         self.log.add("LetStmt")
         self.log.push_scope()
-        super().visit_let_(op)
+        super().visit_let_stmt_(op)
         self.log.pop_scope()
 
     def visit_attr_(self, op):
@@ -522,8 +522,8 @@ class StmtExprMutatorPrinter(StmtExprMutator):
         super().__init__()
         self.log = ASTLog()
 
-    def visit_let_(self, op):
-        result = super().visit_let_(op)
+    def visit_let_stmt_(self, op):
+        result = super().visit_let_stmt_(op)
         self.log.add("LetStmt")
         return result
 

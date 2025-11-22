@@ -178,12 +178,6 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
       kwargs_values.push_back(IdDoc("Ignored"));
       kwargs_keys.push_back("inv_in_deps");
       kwargs_values.push_back(IdDoc("Ignored"));
-      kwargs_keys.push_back("in_nums");
-      kwargs_values.push_back(IdDoc("Ignored"));
-      kwargs_keys.push_back("out_nums");
-      kwargs_values.push_back(IdDoc("Ignored"));
-      kwargs_keys.push_back("inv_in_nums");
-      kwargs_values.push_back(IdDoc("Ignored"));
       kwargs_keys.push_back("handle_config");
       kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->handle_config,
                                                 n_p->Attr("attrs")->Attr("handle_config")));

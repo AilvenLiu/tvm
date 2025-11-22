@@ -35,7 +35,7 @@ class StmtFunctor:
 
     def __init__(self):
         self._dispatch_map = {
-            "tir.LetStmt": self.visit_let_,
+            "tir.LetStmt": self.visit_let_stmt_,
             "tir.AttrStmt": self.visit_attr_,
             "tir.IfThenElse": self.visit_if_then_else_,
             "tir.For": self.visit_for_,
@@ -93,7 +93,7 @@ class StmtFunctor:
         """Default visitor implementation for statements."""
         raise NotImplementedError(f"Do not have a default for {op.__class__.__name__}")
 
-    def visit_let_(self, op):
+    def visit_let_stmt_(self, op):
         """Visitor for LetStmt nodes."""
         return self.visit_stmt_default_(op)
 
@@ -221,7 +221,7 @@ class StmtVisitor(StmtFunctor):
         """
         pass
 
-    def visit_let_(self, op):
+    def visit_let_stmt_(self, op):
         """Visitor implementation for LetStmt."""
         self.visit_expr(op.value)
         self.visit_stmt(op.body)
@@ -375,7 +375,7 @@ class StmtMutator(StmtFunctor):
         """
         return expr
 
-    def visit_let_(self, op):
+    def visit_let_stmt_(self, op):
         """Mutator implementation for LetStmt."""
         value = self.visit_expr(op.value)
         body = self.visit_stmt(op.body)

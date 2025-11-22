@@ -253,7 +253,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
             for k_idx in range(mk.split_k):
                 central_queue.append((0, n_idx, k_idx, 0))
         if mk.split_k > 1 and not mk.use_tma_reduce:
-            m_split = min(batch_size, ceildiv(KernelConfig.SM_NUMBER, mk.n // SplitKReduceTile.N_UNIT))
+            m_split = min(batch_size, KernelConfig.SM_NUMBER // (mk.n // SplitKReduceTile.N_UNIT))
             m_tile = ceildiv(batch_size, m_split)
             m_split = ceildiv(batch_size, m_tile)
             for m_idx in range(m_split):

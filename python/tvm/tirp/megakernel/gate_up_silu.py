@@ -106,6 +106,7 @@ class GateUpSiluTile(GemmTile):
         self.tmem_phase = T.local_cell("int32", name="tmem_phase")
         self.stage = T.local_cell("int32", name="stage")
         self.wait_complete = T.local_cell("bool", name="wait_complete")
+        self.off = T.local_cell("int32", name="off")
 
     @T.macro
     def init(self, smem_manager: SmemManager):
@@ -155,6 +156,8 @@ class GateUpSiluTile(GemmTile):
             self.mma2ld_bar.wait(self.tmem_idx, self.tmem_phase)
             T.ptx.tcgen05.fence.after_thread_sync()
 
+            SILU_HANDLE_UNIT = T.meta_var(self.TMEM_LD_SIZE // 2)
+            self.off = T.if_then_else(lane_id < 16, SILU_HANDLE_UNIT, 0)
             for ko in T.unroll(self.MMA_M // self.EPI_TILE):
                 self.stage = (
                     self.tile_idx * self.MMA_M // self.EPI_TILE + ko
@@ -180,10 +183,8 @@ class GateUpSiluTile(GemmTile):
                     if self.profiler_on:
                         profiler.start(ProfileEventType.SILU_MUL, lane_id == 0)
                     # for each warp, lane 0~15 holds the gate output, lane 16~31 holds the up output
-                    SILU_HANDLE_UNIT = T.meta_var(self.TMEM_LD_SIZE // 2)
-                    off = T.if_then_else(lane_id < 16, SILU_HANDLE_UNIT, 0)
                     for kv in T.unroll(SILU_HANDLE_UNIT):
-                        self.reg[off + kv] = T.tvm_warp_shuffle_xor(0xffffffff, self.reg[off + kv], 16, 32, 32)
+                        self.reg[self.off + kv] = T.tvm_warp_shuffle_xor(0xffffffff, self.reg[self.off + kv], 16, 32, 32)
                     for kv in T.unroll(SILU_HANDLE_UNIT):
                         self.reg[kv] = silu(self.reg[kv]) * self.reg[SILU_HANDLE_UNIT + kv]
                     Tp.cast(self.reg_fp16[:], self.reg[0:SILU_HANDLE_UNIT], vec=SILU_HANDLE_UNIT)

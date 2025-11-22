@@ -15,6 +15,7 @@ class Semaphore(SemaphoreBase):
 
     @T.macro
     def semaphore_wait(self, *coord, level: Literal["cta", "warp"] = "cta", mask=0xffffffff):
+        state = T.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
         if level == "cta":
             with T.thread():
                 while 1:
@@ -72,21 +73,26 @@ class StaticTileScheduler(TileSchedulerBase):
 
     def __init__(self, prefix: str, exec_queue, smem_manager, debug=False):
         super().__init__()
-        self.m_idx = T.local_cell("int32", name=prefix + "_m_idx")
-        self.n_idx = T.local_cell("int32", name=prefix + "_n_idx")
-        self.k_idx = T.local_cell("int32", name=prefix + "_k_idx")
-        self.task_type = T.local_cell("int32", name=prefix + "_task_type")
-        self.tile_idx = T.local_cell("int32", name=prefix + "_tile_idx")
-        self.queue_smem = smem_manager.alloc((self.MAX_TASKS,), "int32", align=16, name="queue_smem", method="persistent")
         self.exec_queue = exec_queue
         self.debug = debug
+        self.prefix = prefix
+        self.smem_manager = smem_manager
 
     @T.macro
     def _update_current_m_n_idx(self):
         unpack_from_32bit(self.queue_smem[self.tile_idx], T.address_of(self.task_type), T.address_of(self.m_idx), T.address_of(self.n_idx), T.address_of(self.k_idx))
+        
+    def _alloc(self):
+        self.m_idx = T.local_cell("int32", name=self.prefix + "_m_idx")
+        self.n_idx = T.local_cell("int32", name=self.prefix + "_n_idx")
+        self.k_idx = T.local_cell("int32", name=self.prefix + "_k_idx")
+        self.task_type = T.local_cell("int32", name=self.prefix + "_task_type")
+        self.tile_idx = T.local_cell("int32", name=self.prefix + "_tile_idx")
+        self.queue_smem = self.smem_manager.alloc((self.MAX_TASKS,), "int32", align=16, name="queue_smem", method="persistent")
 
     @T.macro
     def init(self):
+        self._alloc()
         with T.cta():
             bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
             tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
@@ -112,10 +118,10 @@ class StaticTileScheduler(TileSchedulerBase):
         evt.semaphore_wait(*coord, level=wait_level, mask=mask)
             
     @T.macro
-    def notify(self, evt: Semaphore, notify_num, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, release=False):
+    def notify(self, evt: Semaphore, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, release=False):
         # Notes: Here each thread will notify only at most one time，
         #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
-        # Notes: (rank, coord) = func_notify(notify_idx), rank=-1 for the local rank
+        # Notes: (num, rank, coord) = func_notify(notify_idx), rank=-1 for the local rank
         # Notes: scope_id = -1 represents that each scope will separately notify
         
         max_notify_num_map = T.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
@@ -140,18 +146,17 @@ class StaticTileScheduler(TileSchedulerBase):
             lane_id = T.thread_id([32], parent="warp")
             idx_map = T.meta_var({"thread": (tid, 0), "warp": (warp_id, lane_id), "warpgroup": (wg_id, tid_in_wg), "cta": (0, tid)})
             idx = idx_map[scope]
-            if notify_num == 0:
-                pass
-            else:
+            if self.debug:
+                T.cuda.trap_when_assert_failed(scope_id == -1 or scope_id < max_scope_id_map[scope])
+            if scope_id == -1 or idx[0] == scope_id:
+                sync(scope, scope_id)
+                notify_num = T.meta_var(func_notify(idx[1])[0])
+                rank = T.meta_var(func_notify(idx[1])[1])
+                coord = T.meta_var(func_notify(idx[1])[2:])
                 if self.debug:
                     T.cuda.trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
-                    T.cuda.trap_when_assert_failed(scope_id == -1 or scope_id < max_scope_id_map[scope])
-                if scope_id == -1 or idx[0] == scope_id:
-                    sync(scope, scope_id)
-                    if idx[1] < notify_num:
-                        rank = T.meta_var(func_notify(idx[1])[0])
-                        coord = T.meta_var(func_notify(idx[1])[1:])
-                        evt.semaphore_notify(*coord, rank=rank, release=release)
+                if idx[1] < notify_num:
+                    evt.semaphore_notify(*coord, rank=rank, release=release)
         
 
     def valid(self):

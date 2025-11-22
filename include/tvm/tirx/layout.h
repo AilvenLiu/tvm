@@ -407,7 +407,9 @@ class SwizzleLayoutNode : public TLayoutNode {
         .def_ro("per_element", &SwizzleLayoutNode::per_element)
         .def_ro("swizzle_len", &SwizzleLayoutNode::swizzle_len)
         .def_ro("atom_len", &SwizzleLayoutNode::atom_len)
-        .def_ro("swizzle_inner", &SwizzleLayoutNode::swizzle_inner);
+        .def_ro("swizzle_inner", &SwizzleLayoutNode::swizzle_inner)
+        .def_ro("inner_mask", &SwizzleLayoutNode::inner_mask)
+        .def_ro("outer_mask", &SwizzleLayoutNode::outer_mask);
   }
 
   /*! \brief Check if the layout is compatible with the shape */
