@@ -4,10 +4,6 @@ from tvm.script import tir as T
 
 from .common import JobType, KernelConfig, any_sync, unpack_from_32bit, TileSchedulerBase, SemaphoreBase, gt, atomic_add_int32
 
-
-    
-
-
 class Semaphore(SemaphoreBase):
     def __init__(self, buffer):
         self.sem = buffer
@@ -32,7 +28,7 @@ class Semaphore(SemaphoreBase):
                 lane_id = T.thread_id([32], parent="warp")
                 if (mask >> warp_id) & 1 == 1:
                     self.state[0] = -1
-                    while 1:    
+                    while 1:
                         if lane_id == 0:
                             T.ptx.ld_global_acquire(
                                 self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
@@ -81,7 +77,7 @@ class StaticTileScheduler(TileSchedulerBase):
     @T.macro
     def _update_current_m_n_idx(self):
         unpack_from_32bit(self.queue_smem[self.tile_idx], T.address_of(self.task_type), T.address_of(self.m_idx), T.address_of(self.n_idx), T.address_of(self.k_idx))
-        
+
     def _alloc(self):
         self.m_idx = T.local_cell("int32", name=self.prefix + "_m_idx")
         self.n_idx = T.local_cell("int32", name=self.prefix + "_n_idx")
@@ -103,8 +99,8 @@ class StaticTileScheduler(TileSchedulerBase):
                     self.queue_smem[idx] = self.exec_queue[bx, idx]
             T.tvm_storage_sync("shared")
             self._update_current_m_n_idx()
-            
-    
+
+
     def get_idx_and_task_type(self):
         return [self.m_idx, self.n_idx, self.k_idx], self.task_type
 
@@ -112,21 +108,21 @@ class StaticTileScheduler(TileSchedulerBase):
     def next_tile(self):
         self.tile_idx += 1
         self._update_current_m_n_idx()
-        
+
     @T.macro
     def wait(self, evt: Semaphore, *coord, wait_level: Literal["cta", "warp"]="cta", mask=0xffffffff):
         evt.semaphore_wait(*coord, level=wait_level, mask=mask)
-            
+
     @T.macro
     def notify(self, evt: Semaphore, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, release=False):
         # Notes: Here each thread will notify only at most one time，
         #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
         # Notes: (num, rank, coord) = func_notify(notify_idx), rank=-1 for the local rank
         # Notes: scope_id = -1 represents that each scope will separately notify
-        
+
         max_notify_num_map = T.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
         max_scope_id_map = T.meta_var({"thread": KernelConfig.NUM_THREADS, "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1})
-        
+
         @T.macro
         def sync(scope: Literal["thread", "warp", "warpgroup", "cta"], scope_id=0):
             if scope == "thread":
@@ -137,7 +133,7 @@ class StaticTileScheduler(TileSchedulerBase):
                 T.ptx.bar.sync(6 + scope_id, 128)
             elif scope == "cta":
                 T.tvm_storage_sync("shared")
-        
+
         with T.cta():
             wg_id = T.warpgroup_id([KernelConfig.WG_NUMBER], parent="cta")
             warp_id = T.warp_id([KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta")
@@ -157,7 +153,7 @@ class StaticTileScheduler(TileSchedulerBase):
                     T.cuda.trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
                 if idx[1] < notify_num:
                     evt.semaphore_notify(*coord, rank=rank, release=release)
-        
+
 
     def valid(self):
         return tvm.tir.all(self.tile_idx < self.MAX_TASKS, self.task_type != JobType.END.value)

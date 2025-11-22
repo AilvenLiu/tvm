@@ -38,41 +38,6 @@ SM_CNT = 148
 NUM_THREADS = 256
 
 
-class Semaphore(SemaphoreBase):
-    def __init__(self, expected_cnt, buffer, decrement=False, base=(1 << 16)):
-        self.expected_cnt = expected_cnt
-        self.base = base
-        self.sem = buffer
-        self.state = T.alloc_buffer([1], "int32", scope="local", align=4, name="semaphore_state")
-        self.atomic_add_int32 = f"""
-__forceinline__ __device__ void atomic_add_int32(int32_t* addr, int32_t value, int32_t pe) {{
-    asm volatile("red.async.release.global.gpu.add.s32 [%0], %1;" ::"l"(addr), "r"(value)
-                : "memory");
-}}
-"""
-
-    @T.macro
-    def semaphore_wait(self, *coord, level="cta", mask=0xFFFFFFFF):
-        with T.thread():
-            while 1:
-                T.ptx.ld_global_acquire(
-                    self.state[0],
-                    self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord)),
-                )
-                if T.cuda.syncthreads_and(self.state[0] == 0):
-                    break
-                T.cuda.nano_sleep(40)
-
-    @T.macro
-    def semaphore_notify(self, *coord, rank=-1):
-        T.cuda.func_call(
-            "atomic_add_int32",
-            self.sem.ptr_to(coord),
-            -(self.base + 1),
-            rank,
-            source_code=self.atomic_add_int32,
-        )
-
 def test_basic():
 
     M = 1024
@@ -122,15 +87,17 @@ def test_basic():
                 self._update_current_m_n_idx()
 
         @T.macro
-        def wait(self, evt: Semaphore, *coord, wait_level="cta", mask=0xFFFFFFFF):
+        def wait(self, evt: static_scheduler.Semaphore, *coord, wait_level="cta", mask=0xFFFFFFFF):
             evt.semaphore_wait(*coord, level=wait_level, mask=mask)
 
         @T.macro
-        def notify(self, evt: Semaphore, func_notify, scope="cta", scope_id=0):
+        def notify(self, evt: static_scheduler.Semaphore, func_notify, scope="cta", scope_id=0):
             with T.cta():
                 tid = T.thread_id([NUM_THREADS], parent="cta")
                 T.cuda.cta_sync()
-                notify_num, rank, *coord = func_notify(tid)
+                notify_num = T.meta_var(func_notify(tid)[0])
+                rank = T.meta_var(func_notify(tid)[1])
+                coord = T.meta_var(func_notify(tid)[2:])
                 if tid < notify_num:
                     evt.semaphore_notify(*coord, rank=rank)
 
@@ -169,7 +136,7 @@ def test_basic():
                     A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")
                     B_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="B_smem")
                     smem_manager.wait_all("cta")
-                    Tp.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])                
+                    Tp.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])
                     Tp.sum(B_smem, A_smem)
                     Tp.copy(B_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n], B_smem)
                     smem_manager.arrive_all("cta")
@@ -197,14 +164,14 @@ def test_basic():
                     Tp.copy(C_ptr[m * BLOCK_M : (m + 1) * BLOCK_M, 0], C_smem)
                     smem_manager.arrive_all("cta")
                     smem_manager.advance()
-                
+
         @R.function
         def mega_kernel(A: R.Tensor((M, N), "float32"), event_1: R.Tensor((NUM_BLOCK_M,), "int32"), event_2: R.Tensor((1,), "int32")):
             cls = Before
-            
+
             with R.dataflow():
                 B = R.call_tir_device(
-                    cls.stage_1, 
+                    cls.stage_1,
                     A,
                     out_sinfo=relax.TensorStructInfo([M, NUM_BLOCK_N], "float32"),
                     job_id=0,
@@ -215,7 +182,7 @@ def test_basic():
                     ),
                 )
                 C = R.call_tir_device(
-                    cls.stage_2, 
+                    cls.stage_2,
                     B,
                     out_sinfo=relax.TensorStructInfo([M, 1], "float32"),
                     job_id=1,
@@ -237,7 +204,7 @@ def test_basic():
             return C
     # fmt: on
     fused_naive_mod = relax.transform.StaticHorizontalFusion(
-        "mega_kernel", "static", SpatialTileScheduler, Semaphore, "mega_kernel_"
+        "mega_kernel", "static", SpatialTileScheduler, static_scheduler.Semaphore, "mega_kernel_"
     )(Before)
     fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion(
         "mega_kernel", "static", static_scheduler.StaticTileScheduler, static_scheduler.Semaphore, "mega_kernel_"
@@ -278,7 +245,7 @@ def test_basic():
         vm = tvm.relax.VirtualMachine(fused_static_scheduler_mod, DEV)
         C_tvm_static_scheduler_fused = vm["mega_kernel"](A_tvm, evt_1_tvm, evt_2_tvm)
         ret_static_scheduler_fused = C_tvm_static_scheduler_fused.numpy()
-        
+
         evt_1_tvm = tvm.runtime.tensor(
             np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
         )
@@ -328,7 +295,7 @@ def test_extra_args():
                     A_smem = smem_manager.alloc([BLOCK_M, BLOCK_N], "float32", align=16, name="A_smem")
                     B_smem = smem_manager.alloc([BLOCK_M, 1], "float32", align=16, name="B_smem")
                     smem_manager.wait_all("cta")
-                    Tp.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])                
+                    Tp.copy(A_smem, A_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n * BLOCK_N: (n + 1) * BLOCK_N])
                     Tp.sum(B_smem, A_smem)
                     Tp.copy(B_ptr[m * BLOCK_M: (m + 1) * BLOCK_M, n], B_smem)
                     smem_manager.arrive_all("cta")
@@ -356,21 +323,21 @@ def test_extra_args():
                     Tp.copy(C_ptr[m * BLOCK_M : (m + 1) * BLOCK_M, 0], C_smem)
                     smem_manager.arrive_all("cta")
                     smem_manager.advance()
-        
+
         @T.prim_func(tirp=True, private=True)
         def end(m: T.int32, n: T.int32, k: T.int32):
             T.func_attr({"megakernel.device_func": "end"})
             with T.cta():
                 T.block_attr({"tirp.tile_class.run": True})
                 T.add_to_parent(T.evaluate(0))
-            
+
         @R.function
         def mega_kernel(A: R.Tensor((M, N), "float32"), event_1: R.Tensor((NUM_BLOCK_M,), "int32"), event_2: R.Tensor((1,), "int32"), P: R.Tensor((NUM_BLOCK_M,), "int32"), inv_P: R.Tensor((NUM_BLOCK_M,), "int32")):
             cls = Before
-            
+
             with R.dataflow():
                 B = R.call_tir_device(
-                    cls.stage_1, 
+                    cls.stage_1,
                     A,
                     out_sinfo=relax.TensorStructInfo([M, NUM_BLOCK_N], "float32"),
                     job_id=0,
@@ -382,7 +349,7 @@ def test_extra_args():
                     ),
                 )
                 C = R.call_tir_device(
-                    cls.stage_2, 
+                    cls.stage_2,
                     B,
                     out_sinfo=relax.TensorStructInfo([M, 1], "float32"),
                     job_id=1,
@@ -437,7 +404,7 @@ def test_extra_args():
         vm = tvm.relax.VirtualMachine(fused_static_scheduler_mod, DEV)
         C_tvm_static_scheduler_fused = vm["mega_kernel"](A_tvm, evt_1, evt_2, P_tvm, P_inv_tvm)
         ret_static_scheduler_fused = C_tvm_static_scheduler_fused.numpy()
-        
+
         evt_1 = tvm.runtime.tensor(
             np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
         )
