@@ -50,8 +50,14 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
 
     C_type, A_type, B_type = C_buffer.dtype, A_buffer.dtype, B_buffer.dtype
     assert C_type == "float32", f"tcgen05 schedule expected C_type=float32, got {C_type}"
-    assert A_type == "float16", f"tcgen05 schedule expected A_type=float16, got {A_type}"
-    assert B_type == "float16", f"tcgen05 schedule expected B_type=float16, got {B_type}"
+    assert A_type in [
+        "float16",
+        "bfloat16",
+    ], f"tcgen05 schedule expected A_type=float16 or bfloat16, got {A_type}"
+    assert B_type in [
+        "float16",
+        "bfloat16",
+    ], f"tcgen05 schedule expected B_type=float16 or bfloat16, got {B_type}"
     C_elem_size = DataType(C_type).bits
     C_elem_per_32b = 32 // C_elem_size
 
@@ -88,7 +94,7 @@ def gemm_async_tcgen05_impl(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
 
     # Check C's region [0:128, st:st+MMA_N] and layout (128, NCOLS):(1@TLane, 1@TCol)
     assert analyzer.can_prove_equal(C_buffer.shape[0], 128)
-    tmem_layout = TileLayout(([128, C_buffer.shape[1]], [1@TLane, 1@TCol])).canonicalize()
+    tmem_layout = TileLayout(([128, C_buffer.shape[1]], [1 @ TLane, 1 @ TCol])).canonicalize()
     tvm.ir.assert_structural_equal(C_buffer.layout.canonicalize(), tmem_layout)
     assert analyzer.can_prove_equal(C_st[0], 0)
     assert analyzer.can_prove_equal(C_extent[0], 128)

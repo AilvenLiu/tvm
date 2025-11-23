@@ -58,14 +58,17 @@ def validate_cast_op(
     return True
 
 
-cuda_intrinsic_dict = {
+vec2_cast_cuda_intrinsic_dict = {
     ("float32", "float16"): "__float22half2_rn",
     ("float16", "float32"): "__half22float2",
+    ("bfloat16", "float32"): "__bfloat1622float2",
+    ("float32", "bfloat16"): "__float22bfloat162_rn",
 }
 
 dtypex2_dict = {
     "float32": "float2",
     "float16": "half2",
+    "bfloat16": "nv_bfloat162",
 }
 
 
@@ -89,7 +92,7 @@ def cast_thread_wise_impl(
     n_elements = functools.reduce(operator.mul, src_extent, 1)
     vec_len = get_vec_len(dst_buffer_region, src_buffer_region, [2, 1])
 
-    intrinsic_name = cuda_intrinsic_dict.get((src.dtype, dst.dtype), None)
+    intrinsic_name = vec2_cast_cuda_intrinsic_dict.get((src.dtype, dst.dtype), None)
     if intrinsic_name is None:
         fail(f"unsupported CUDA cast intrinsic for {src.dtype} -> {dst.dtype}")
 

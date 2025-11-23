@@ -16,18 +16,19 @@
 # under the License.
 
 import os
+import torch
 import numpy as np
 from enum import Enum
 from typing import List, Union
-
+import triton.testing
+import triton.profiler as proton
 import tvm_ffi
 
 import argparse
 import subprocess
 from tvm.contrib import nvcc
-import triton.profiler as proton
-from triton.testing import do_bench
 import tvm
+import triton.runtime as runtime
 from tvm.script import tir as T
 
 
@@ -54,17 +55,32 @@ def setup():
     return args
 
 
+def bench_fn(func, warmup=0, repeat=10, proton_name="kernel"):
+    # cache = runtime.driver.active.get_empty_cache_for_benchmark()
+    flush_l2_size = int(8e9 // 4)
+    for _ in range(warmup):
+        # runtime.driver.active.clear_cache(cache)
+        torch.empty(flush_l2_size, dtype=torch.int, device="cuda").zero_()
+        func()
+    if not is_running_under_pytest():
+        proton.activate(0)
+        with proton.scope(proton_name, metrics={}):
+            for _ in range(repeat):
+                # runtime.driver.active.clear_cache(cache)
+                torch.empty(flush_l2_size, dtype=torch.int, device="cuda").zero_()
+                func()
+        proton.deactivate(0)
+    else:
+        for _ in range(repeat):
+            func()
+
+
 def bench(func, warmup=0, repeat=10, proton_name="kernel", debug=False):
     if not debug:
-        if not is_running_under_pytest():
-            with proton.scope(proton_name, metrics={}):
-                ms = do_bench(func, warmup=warmup, rep=repeat)
-        else:
-            ms = do_bench(func, warmup=warmup, rep=repeat)
+        bench_fn(func, warmup=warmup, repeat=repeat, proton_name=proton_name)
     else:
         func()
-        ms = -1
-    return ms
+    return triton.testing.do_bench(func, warmup=warmup, rep=repeat)
 
 
 class ProtonContext:
@@ -73,19 +89,16 @@ class ProtonContext:
     def __init__(self, name="kernel", hook="triton", debug=False):
         self.name = name
         self.hook = hook
-        self.session = None
         self.debug = debug
 
     def __enter__(self):
         if not is_running_under_pytest() and not self.debug:
-            self.session = proton.start(self.name, hook=self.hook)
-            proton.activate(self.session)
+            proton.start(self.name, hook=self.hook)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not is_running_under_pytest() and not self.debug:
-            proton.deactivate(self.session)
-            proton.finalize(self.session)
+            proton.finalize()
 
             subprocess.run(
                 ["proton-viewer", "-m", "avg_time/ms", f"{self.name}.hatchet"], check=True

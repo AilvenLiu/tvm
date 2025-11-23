@@ -173,7 +173,10 @@ def _compile_cuda_nvcc(
 
     cmd = ["nvcc"]
     cmd += [f"--{target_format}", "-O3"]
-    if os.environ.get("TVM_KERNEL_DEBUG", "0") == "1":
+    if (
+        os.environ.get("TVM_KERNEL_DEBUG", "0") == "1"
+        or os.environ.get("TVM_KERNEL_DUMP", "0") == "1"
+    ):
         cmd += ["-lineinfo"]
         cmd += ["-g"]
         cmd += ["-G"]
