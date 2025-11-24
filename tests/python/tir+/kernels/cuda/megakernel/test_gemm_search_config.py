@@ -34,7 +34,7 @@ class GemmConfigSearcher(MegaKernelWrapper):
         self.use_tma_reduce = use_tma_reduce
         if use_tma_reduce:
             assert split_k > 1
-        
+
     def _set_tiles(self):
         self.gemm_tile = self._add_tile(
             GemmTile(
@@ -65,32 +65,54 @@ class GemmConfigSearcher(MegaKernelWrapper):
             ProfileEventType.GEMM_O_REDUCE,
             predicate=self.split_k > 1 and not self.use_tma_reduce,
         )
-        
+
     def set_tiles(self):
         self.tile_attr = {}
         self.class_list = set()
         self._set_tiles()
 
-    def set_events(
-        self,
-        Semaphore: Type[static_scheduler.Semaphore],
-        etensor
-    ):
-        self.evt = Semaphore(self.split_k * (self.reduce_tile.N_TILE // self.gemm_tile.BLK_N), etensor, decrement=False)
-        
+    def set_events(self, Semaphore: Type[static_scheduler.Semaphore], etensor):
+        self.evt = Semaphore(
+            self.split_k * (self.reduce_tile.N_TILE // self.gemm_tile.BLK_N),
+            etensor,
+            decrement=False,
+        )
+
     @T.macro
     def task_impl_gemm(self):
         with T.cta():
-            self.run_tile(self.gemm_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, self.profiler)
+            self.run_tile(
+                self.gemm_tile,
+                self.tile_scheduler.m_idx,
+                self.tile_scheduler.n_idx,
+                self.tile_scheduler.k_idx,
+                self.profiler,
+            )
             if self.split_k > 1 and not self.use_tma_reduce:
-                self.tile_scheduler.notify(self.evt, 1, lambda notify_idx: (-1, self.tile_scheduler.n_idx * self.gemm_tile.BLK_N // self.reduce_tile.N_TILE), scope="warpgroup", scope_id=0)
+                self.tile_scheduler.notify(
+                    self.evt,
+                    1,
+                    lambda notify_idx: (
+                        -1,
+                        self.tile_scheduler.n_idx * self.gemm_tile.BLK_N // self.reduce_tile.N_TILE,
+                    ),
+                    scope="warpgroup",
+                    scope_id=0,
+                )
 
     @T.macro
     def task_reduce(self, partial_global, output_global):
         with T.cta():
             self.tile_scheduler.wait(self.evt, self.tile_scheduler.n_idx, wait_level="warp")
-            self.run_tile(self.reduce_tile, self.tile_scheduler.m_idx, self.tile_scheduler.n_idx, self.tile_scheduler.k_idx, partial_global, output_global)
-   
+            self.run_tile(
+                self.reduce_tile,
+                self.tile_scheduler.m_idx,
+                self.tile_scheduler.n_idx,
+                self.tile_scheduler.k_idx,
+                partial_global,
+                output_global,
+            )
+
     # fmt: off
     @T.macro
     def fused_body(
@@ -216,9 +238,12 @@ class GemmConfigSearcher(MegaKernelWrapper):
 
 
 arg_dict = {}
+
+
 def prepare_data(mk: GemmConfigSearcher, repeat=100):
     global arg_dict
     import torch
+
     torch.manual_seed(42)
 
     arg_dict["A"] = torch.randn((mk.batch_size, mk.k), dtype=torch.float16)
@@ -239,7 +264,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
     arg_dict = prepare_data(mega_kernel_wrapper, REPEAT)
 
     def tir(arg_dict, mk: GemmConfigSearcher):
-        
+
         DEV = tvm.cuda(0)
         tvm_arg_dict = {}
         for key, value in arg_dict.items():
@@ -265,17 +290,22 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
                 if len(central_queue) > 0:
                     exec_queue[bx, tile_idx] = pack_into_32bit(*central_queue.pop(0), debug=True)
                 else:
-                    exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value, debug=True)
+                    exec_queue[bx, tile_idx] = pack_into_32bit(
+                        -1, -1, -1, JobType.END.value, debug=True
+                    )
             tile_idx += 1
         for bx in range(KernelConfig.SM_NUMBER):
             exec_queue[bx, tile_idx] = pack_into_32bit(-1, -1, -1, JobType.END.value, debug=True)
         tvm_arg_dict["exec_queue"] = tvm.runtime.tensor(exec_queue, device=DEV)
-        tvm_arg_dict[f"profiler_buffer"] = tvm.runtime.tensor(np.zeros([mk.PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV)
+        tvm_arg_dict[f"profiler_buffer"] = tvm.runtime.tensor(
+            np.zeros([mk.PROFILER_BUFFER_SIZE], dtype=np.uint64), device=DEV
+        )
 
         # run
         with target:
             iter = 0
             kernel = mega_kernel_static["main"]
+
             def func():
                 nonlocal iter
                 kernel(
@@ -289,8 +319,13 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
                     tvm_arg_dict[f"profiler_buffer"],
                 )
                 iter += 1
-    
-            ms = bench(func, warmup=1, repeat=3, proton_name=f"tir-blkn{mk.blk_n}-splitk{mk.split_k}{"-tmareduce" if mk.use_tma_reduce else ""}")
+
+            ms = bench(
+                func,
+                warmup=1,
+                repeat=3,
+                proton_name=f"tir-blkn{mk.blk_n}-splitk{mk.split_k}{'-tmareduce' if mk.use_tma_reduce else ''}",
+            )
             print(f"TIR time: {ms:.3f} ms")
             if mk.profiler_on:
                 export_to_perfetto_trace(
@@ -305,6 +340,7 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
 
     def std(arg_dict):
         import torch
+
         torch_dev = torch.device("cuda")
         std_arg_dict = {}
 
@@ -324,12 +360,12 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
             output_tir_static, ms_tir = tir(arg_dict, mega_kernel_wrapper)
             print("static tir finish", flush=True)
         output_std = std(arg_dict)
-        
+
         if mega_kernel_static["main"] is not None:
             np.testing.assert_allclose(output_tir_static, output_std, rtol=1e-3, atol=1e-2)
             print("static pass", flush=True)
         return ms_tir
-            
+
     with ProtonContext("blackwell_layer"):
         ms_tir = run()
     return ms_tir
@@ -338,19 +374,22 @@ def test(batch_size, mega_kernel_static, mega_kernel_wrapper):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="MegaKernel testing script.")
-    parser.add_argument("--batch-size", type=int, nargs='+',
-                        default=[1],
-                        help="A list of batch sizes to test.")
+    parser.add_argument(
+        "--batch-size", type=int, nargs="+", default=[1], help="A list of batch sizes to test."
+    )
     parser.add_argument("--N", type=int)
     parser.add_argument("--K", type=int)
-    parser.add_argument("--split-k", type=int, nargs='+',
-                        default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-                        help="The split k factor.")
-    parser.add_argument("--blk-n", type=int, nargs='+',
-                        default=[16, 32, 64, 128],
-                        help="The block n size.")
-    parser.add_argument("--profiler-on", action="store_true",
-                        help="Enable the profiler.")
+    parser.add_argument(
+        "--split-k",
+        type=int,
+        nargs="+",
+        default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        help="The split k factor.",
+    )
+    parser.add_argument(
+        "--blk-n", type=int, nargs="+", default=[16, 32, 64, 128], help="The block n size."
+    )
+    parser.add_argument("--profiler-on", action="store_true", help="Enable the profiler.")
     args = parser.parse_args()
 
     for batch_size in args.batch_size:
@@ -359,17 +398,29 @@ if __name__ == "__main__":
         for split_k in args.split_k:
             for blk_n in args.blk_n:
                 for use_tma_reduce in [True, False] if split_k > 1 else [False]:
-                    mega_kernel_wrapper = GemmConfigSearcher(batch_size, args.N, args.K, blk_n, split_k, use_tma_reduce, profiler_on=args.profiler_on)
+                    mega_kernel_wrapper = GemmConfigSearcher(
+                        batch_size,
+                        args.N,
+                        args.K,
+                        blk_n,
+                        split_k,
+                        use_tma_reduce,
+                        profiler_on=args.profiler_on,
+                    )
                     mega_static_module = mega_kernel_wrapper.get_module("static")
                     src, lib_static = get_source(mega_static_module)
                     wrappers[(split_k, blk_n, use_tma_reduce)] = (mega_kernel_wrapper, lib_static)
 
         times = {}
         for (split_k, blk_n, use_tma_reduce), (mega_kernel_wrapper, lib_static) in wrappers.items():
-            print(f"split_k: {split_k}, blk_n: {blk_n}, use_tma_reduce: {use_tma_reduce}", flush=True)
+            print(
+                f"split_k: {split_k}, blk_n: {blk_n}, use_tma_reduce: {use_tma_reduce}", flush=True
+            )
             ms = test(batch_size, lib_static, mega_kernel_wrapper)
             times[(split_k, blk_n, use_tma_reduce)] = ms
         sorted_items_asc = sorted(times.items(), key=operator.itemgetter(1))
         print("Top 10 configs:")
         for (split_k, blk_n, use_tma_reduce), ms in sorted_items_asc[:10]:
-            print(f"split_k: {split_k}, blk_n: {blk_n}, use_tma_reduce: {use_tma_reduce}, time: {ms:.3f} ms")
+            print(
+                f"split_k: {split_k}, blk_n: {blk_n}, use_tma_reduce: {use_tma_reduce}, time: {ms:.3f} ms"
+            )
