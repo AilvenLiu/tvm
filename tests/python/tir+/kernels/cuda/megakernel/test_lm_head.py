@@ -14,31 +14,31 @@ def prepare_data(batch_size, N, K):
     return A, B
 
 class LMHeadLayer:
-    
+
     def __init__(self, N, K):
         self.N = N
         self.K = K
-    
+
     class TileScheduler:
         def __init__(self, n):
             self.n = n
             self.task_num = ceildiv(n, GemmTile.BLK_N)
-        
+
         def _alloc_buffer(self):
             self.idx = T.alloc_local([1], "int32", name="idx")
-        
+
         @T.macro
         def init(self, bx):
             self._alloc_buffer()
             self.idx[0] = bx
-            
+
         @T.macro
         def next(self):
             self.idx[0] += KernelConfig.SM_NUMBER
-            
+
         def valid(self):
             return self.idx[0] < self.task_num
-        
+
     @T.macro
     def body(self, A, B, out, blk_m):
         A_tensor_map: T.handle("tensormap") = T.tvm_stack_alloca("tensormap", 1)
@@ -65,14 +65,14 @@ class LMHeadLayer:
                     smem_manager.exit_tile_runtime()
                     scheduler.next()
                 gemm_tile.__class__.class_finalize()
-                    
+
     def get_func(self):
         @T.prim_func(tirp=True)
         def lm_head_gemm(A_ptr: T.handle, B_ptr: T.handle, out_ptr: T.handle):
             batch_size = T.int32()
             A_global = T.match_buffer(A_ptr, [batch_size, self.K], dtype="float16", scope="global")
             B_global = T.match_buffer(B_ptr, [self.N, self.K], dtype="float16", scope="global")
-            out_global = T.match_buffer(out_ptr, [batch_size, self.N], dtype="float16", scope="global") 
+            out_global = T.match_buffer(out_ptr, [batch_size, self.N], dtype="float16", scope="global")
             if batch_size <= 32:
                 self.body(A_global, B_global, out_global, 32)
             elif batch_size <= 64:
@@ -106,7 +106,7 @@ def test(batch_size, N, K, mod):
         out_std = std()
         out_tir = tir()
         np.testing.assert_allclose(out_std, out_tir, rtol=1e-3, atol=1e-2)
-    
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MegaKernel testing script.")
     parser.add_argument("--model", type=str, default="qwen3_32b", choices=["qwen3_32b", "llama3_1b"],

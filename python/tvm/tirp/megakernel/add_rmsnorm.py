@@ -204,7 +204,7 @@ class RMSNormTile(Tile):
                 for kl in T.unroll(self.loop_inner):
                     self.sum_sq[kl, 0] = 0.0
                 self.rms_norm[0] = 0.0
-                for ki in T.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS * self.loop_inner)):                    
+                for ki in T.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS * self.loop_inner)):
                     for kl in T.unroll(self.loop_inner):
                         for kv in T.unroll(self.vec_size):
                             self.input_vec_f32[kl, kv] = 0.0
@@ -251,11 +251,11 @@ class RMSNormTile(Tile):
                 self.rms_norm[0] = rsqrt(self.rms_norm[0] / self.hidden_size + self.EPS)
 
                 # handle the weight
-                for ki in T.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)):                    
+                for ki in T.serial(ceildiv(self.hidden_size, self.vec_size * KernelConfig.NUM_THREADS)):
                     for kl in T.unroll(self.loop_inner):
                         for kv in T.unroll(self.vec_size):
                             self.input_vec_f32[kl, kv] = 0.0
-                    
+
                     st = T.meta_var((ki * KernelConfig.NUM_THREADS + tid) * self.vec_size * self.loop_inner)
                     for kl in T.unroll(self.loop_inner):
                         if st < self.hidden_size - kl * self.vec_size:

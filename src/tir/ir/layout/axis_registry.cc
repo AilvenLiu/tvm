@@ -334,4 +334,3 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
 }  // namespace tir
 }  // namespace tvm
-

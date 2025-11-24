@@ -278,7 +278,7 @@ class GroupGEMMSiluTile(GroupGEMMTile, GateUpSiluTile):
             name="output_smem",
             method="exclusive",
         )
-        
+
     @T.macro
     def _init_A_and_output_tensor_maps(self, BLK_M):
         A_tensor_map = T.meta_var(self.A_tensor_maps[BLK_M])
@@ -288,7 +288,7 @@ class GroupGEMMSiluTile(GroupGEMMTile, GateUpSiluTile):
         if not self.acc_output:
             T.call_packed("runtime.cuTensorMapEncodeTiled", output_tensor_map, self.out_type, 2, self.output.data,
                         self.N // 2, self.M, self.N // 2 * F16_BYTES, self.MMA_N // 2, self.EPI_TILE, 1, 1, 0, 0, 0, 0)
-            
+
     @T.macro
     def _consumer_wg(self, m_idx, n_idx, k_idx, profiler: CudaProfiler):
         GateUpSiluTile._consumer_wg(self, m_idx, n_idx, k_idx, profiler)

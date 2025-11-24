@@ -410,9 +410,9 @@ class Dependency:
         event : Expr
             The variable of event tensor.
         dep : Callable
-            The dependency function. 
-            It takes the (tile index/event coordinate), the index of the (event coordinate/tile index) to be calculated, 
-            and extra arguments, and returns the number of depended (event coordinates/tile indices), 
+            The dependency function.
+            It takes the (tile index/event coordinate), the index of the (event coordinate/tile index) to be calculated,
+            and extra arguments, and returns the number of depended (event coordinates/tile indices),
             the indices of the depended (event coordinate/tile index).
         extra_args : List[Union[Expr, PrimExprLike]], optional
             A list of extra arguments passed to the dependency function.
@@ -428,7 +428,7 @@ class Dependency:
            The index of the (event coordinate/tile index) to be calculated (ranging from 0 to num - 1),
            The extra arguments in the same order as provided in `extra_args`.
         2. The event coordinate in defined as (rank, *evt_tensor_indices). 'rank=-1' represents the local rank.
-           
+
         Examples
         --------
         Task (i, j, k) depends on events E at coordinates (rank=-1, X[i], j, 0), (rank=-1, X[i], j, 1), ..., (rank=-1, X[i], j, Y[k]),
@@ -452,7 +452,7 @@ class Dependency:
                 raise ValueError("extra_args should be Expr or PrimExpr/int/float")
         self.tile_idx_dtype = tile_idx_dtype
         self.dispatch_func = {"int32": T.int32, "int64": T.int64}[tile_idx_dtype]
-        
+
     def _trans_to_primfunc(self, func: Union[Callable, PrimFunc], input_dim: int, output_dim: int) -> PrimFunc:
         if isinstance(func, PrimFunc):
             return func
@@ -471,7 +471,7 @@ class Dependency:
             else:
                 for i in range(length):
                     T.buffer_store(buf_list[i], value_list[i], [0])
-                    
+
         # prepare the tir input and output
         tir_input = [T.var(dtype=self.tile_idx_dtype) for _ in range(input_dim - len(self.extra_args))]
         for arg in self.extra_args:
@@ -482,7 +482,7 @@ class Dependency:
             else: # int
                 tir_input.append(arg)
         tir_output = [T.Buffer(shape=[1], dtype=self.tile_idx_dtype, scope="local") for _ in range(output_dim)]
-        
+
         @T.prim_func(check_well_formed=False)
         def primfunc():
             in_args = T.meta_var([_convert_arg(spec) for spec in tir_input])
@@ -499,5 +499,5 @@ class Dependency:
         elif len(inspect.signature(self.dep).parameters) != input_dim:
              raise ValueError(f"dep requires {input_dim} parameters")
         dep = self._trans_to_primfunc(self.dep, input_dim, output_dim)
-       
+
         return self.event, [(var if isinstance(var, (Expr, PrimExpr)) else self.dispatch_func(var)) for var in self.extra_args], dep

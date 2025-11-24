@@ -10,7 +10,7 @@ class FuseSplitKReduceTile(SplitKReduceTile):
         symbolic_tile = FuseSplitKReduceTile(batch_size, N, dtype, split_k_factor)
         num_tiles = (symbolic_tile.M_split, ceildiv(N, symbolic_tile.N_TILE), 1)
         tile_size = (symbolic_tile.M_TILE, symbolic_tile.N_TILE, 1)
-        
+
         @T.prim_func(tirp=True, private=True)
         def split_k_reduce_func(input_ptr: T.handle, output_ptr: T.handle, m_idx: T.int32, n_idx: T.int32, k_idx: T.int32):
             T.func_attr({"megakernel.device_func": "split_k_reduce"})

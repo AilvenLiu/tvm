@@ -50,7 +50,7 @@ class MegaKernel:
     NUM_TASK_ARGS = 10
     MAX_TOTAL_NUM_WORKERS = 1025
     MAX_NUM_KV_SPLITS = 4 * KernelConfig.SM_NUMBER * 2 * 16
-    
+
     def __init__(self):
         self.world_size = 1
 
@@ -134,7 +134,7 @@ class MegaKernel:
                 _ = bb.match_cast(R.TupleGetItem(packed_info, 23), R.Shape([attn_task_num]))
                 max_page_num = T.var("int64", name="max_page_num")
                 kv_data_ = bb.match_cast(kv_data_, rx.TensorStructInfo([max_page_num, 2, self.NUM_KEY_VALUE_HEADS, self.PAGE_SIZE, self.HEAD_DIM], "float16"))
-                
+
                 # unpack weights
                 qkv_proj_weight = bb.emit(R.TupleGetItem(packed_weights, 0))
                 q_rms_weight = bb.emit(R.TupleGetItem(packed_weights, 1))
@@ -144,7 +144,7 @@ class MegaKernel:
                 gate_up_weight = bb.emit(R.TupleGetItem(packed_weights, 5))
                 down_weight = bb.emit(R.TupleGetItem(packed_weights, 6))
                 mlp_add_rms_weight = bb.emit(R.TupleGetItem(packed_weights, 7))
-                
+
                 # unpack events
                 etensor_qkv_partial = bb.emit(R.TupleGetItem(packed_events, 0))
                 etensor_notify_attn = bb.emit(R.TupleGetItem(packed_events, 1))
@@ -247,7 +247,7 @@ class MegaKernel:
                     self.RMS_NORM_EPS,
                     self.HIDDEN_SIZE,
                 )
-                
+
                 # add tile kernels to bb
                 qkv_proj_gv = bb.add_func(qkv_proj_func, f"qkv_proj_blk{blk_m}")
                 reduce_rms_rope_q_gv = bb.add_func(reduce_rms_rope_q_func, "reduce_rms_rope_q")
@@ -276,8 +276,8 @@ class MegaKernel:
                         ),
                     )
                 )
-                
-                # Q_REDUCE_RMS_ROPE 
+
+                # Q_REDUCE_RMS_ROPE
                 @T.prim_func(tirp=True, private=True)
                 def reduce_rms_rope_q_dep_notify(i: T.int32, j: T.int32, k: T.int32, notify_idx: T.int32,
                                             inverse_indptr_buf: T.Buffer([self.MAX_TOTAL_NUM_WORKERS], "int32"),
@@ -293,7 +293,7 @@ class MegaKernel:
                     out_buf0[0] = end - beg
                     out_buf1[0] = -1
                     out_buf2[0] = inverse_indices_buf[beg + notify_idx]
-        
+
                 q = bb.emit(
                     R.call_tir_device(
                         reduce_rms_rope_q_gv,
@@ -334,7 +334,7 @@ class MegaKernel:
                     out_buf0[0] = end - beg
                     out_buf1[0] = -1
                     out_buf2[0] = inverse_indices_buf[beg + notify_idx]
-       
+
                 kv_data_ = bb.emit(
                     R.call_tir_device(
                         reduce_rms_rope_append_k_gv,
@@ -351,7 +351,7 @@ class MegaKernel:
                             dep=lambda rank, x, inv_idx, m_split: (
                                 T.if_then_else(tvm.tir.all(x >= self.NUM_ATTENTION_HEADS, x < self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS), m_split, 0),
                                 inv_idx, x - self.NUM_ATTENTION_HEADS, 0
-                            ), 
+                            ),
                             extra_args=[reduce_rms_rope_append_k_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
@@ -379,7 +379,7 @@ class MegaKernel:
                     out_buf0[0] = end - beg
                     out_buf1[0] = -1
                     out_buf2[0] = inverse_indices_buf[beg + notify_idx]
-                              
+
                 kv_data_ = bb.emit(
                     R.call_tir_device(
                         reduce_append_v_gv,
@@ -396,7 +396,7 @@ class MegaKernel:
                             dep=lambda rank, x, inv_idx, m_split: (
                                 T.if_then_else(x >= self.NUM_ATTENTION_HEADS + self.NUM_KEY_VALUE_HEADS, m_split, 0),
                                 inv_idx, x - self.NUM_ATTENTION_HEADS - self.NUM_KEY_VALUE_HEADS, 0
-                            ), 
+                            ),
                             extra_args=[reduce_append_v_num_tiles[0]],
                         ),
                         out_deps=rx.utils.Dependency(
@@ -406,8 +406,8 @@ class MegaKernel:
                         ),
                         inplace_indices=1,
                     )
-                )               
-               
+                )
+
                 # ATTENTION
                 batch_attn_packed = bb.emit(
                     R.call_tir_device(
@@ -455,7 +455,7 @@ class MegaKernel:
                     bb.emit(R.TupleGetItem(batch_attn_packed, 1)),
                     bb.emit(R.TupleGetItem(batch_attn_packed, 2)),
                 )
-                
+
                 # ATTN_MERGE
                 @T.prim_func(tirp=True, private=True)
                 def batch_merge_dep_notify(i: T.int32, j: T.int32, k: T.int32, notify_idx: T.int32,
@@ -502,7 +502,7 @@ class MegaKernel:
                         inplace_indices=[5],
                     )
                 )
-                
+
                 # O_PROJ
                 residual = bb.emit(
                     R.call_tir_device(
@@ -527,7 +527,7 @@ class MegaKernel:
                         inplace_indices=[2],
                     )
                 )
-                
+
                 # ATTN_ADD_RMS
                 mlp_hidden_state = bb.emit(
                     R.call_tir_device(
@@ -564,7 +564,7 @@ class MegaKernel:
                     out_buf0[0] = range_end - range_start + 1
                     out_buf1[0] = -1
                     out_buf2[0] = range_start + notify_idx
-                    
+
                 out_silu_mul = bb.emit(
                     R.call_tir_device(
                         gate_up_silu_gv,
@@ -588,7 +588,7 @@ class MegaKernel:
                         )
                     )
                 )
-                
+
                 # DOWN_PROJ
                 residual = bb.emit(
                     R.call_tir_device(
@@ -613,7 +613,7 @@ class MegaKernel:
                         inplace_indices=[2],
                     )
                 )
-                
+
                 # MLP_ADD_RMS
                 output_hidden_state = bb.emit(
                     R.call_tir_device(
@@ -637,7 +637,7 @@ class MegaKernel:
                         ),
                     )
                 )
-                
+
                 output = rx.Tuple([output_hidden_state, residual])
                 # out = bb.emit_output(mlp_add_rmsnorm_packed)
 
@@ -650,11 +650,11 @@ class MegaKernel:
 
     def get_mod(self, max_batch_size, profile_on=False):
         bb = rx.BlockBuilder()
-        
+
         inner_blkm32 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=32, profile_on=profile_on)
         inner_blkm64 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=64, profile_on=profile_on)
         inner_blkm128 = self._qwen3_layer_inner(bb, max_batch_size, blk_m=128, profile_on=profile_on)
-        
+
         # dispatcher function
         batch_size = T.var("int64", name="batch_size")
         x = rx.Var("x", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"))
@@ -730,23 +730,23 @@ class MegaKernel:
                     bindings_blocks = [rx.BindingBlock(bindings)]
                     bindings_seq_expr = rx.SeqExpr(bindings_blocks, bindings_blocks[-1].bindings[-1].var)
                     return bindings_seq_expr
-                
+
                 def bind_branch_with_if_else(cond, then_seq, else_seq):
                     out = rx.Var("out", output_shape)
                     bindings = [rx.VarBinding(out, rx.If(R.prim_value(cond), then_seq, else_seq))]
                     bindings_blocks = [rx.BindingBlock(bindings)]
                     bindings_seq_expr = rx.SeqExpr(bindings_blocks, bindings_blocks[-1].bindings[-1].var)
                     return bindings_seq_expr
-            
+
                 output_tuple = rx.If(
                     R.prim_value(runtime_batch_size <= 32),
                     bind_branch_with_r_func(inner_blkm32, 32),
                     bind_branch_with_if_else(runtime_batch_size <= 64, bind_branch_with_r_func(inner_blkm64, 64), bind_branch_with_r_func(inner_blkm128, 128))
-                )                
+                )
                 out = bb.emit_output(output_tuple)
             bb.emit_func_output(out)
         return bb.get()
-    
+
 
 arg_dict = {}
 def prepare_data(batch_size, seq_len, mk: MegaKernel):
@@ -1040,10 +1040,10 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
     attn_task_num = arg_dict["attn_task_num"].item()
     for _ in range(repeat):
         event_list = []
-        
+
         # etensor_qkv_partial
         event_list.append(tvm.runtime.tensor(np.full(ceildiv((mk.NUM_ATTENTION_HEADS + 2 * mk.NUM_KEY_VALUE_HEADS) * mk.HEAD_DIM, FuseGemmTile.BLK_N), mk.SPLIT_QKV_PROJECT * (base + 1), dtype=np.int32), device=DEV))
-        
+
         # etensor_notify_attn
         etensor_notify_attn = np.zeros((KernelConfig.SM_NUMBER), dtype=np.int32)
         attn_tile_num = ceildiv(attn_task_num, KernelConfig.WG_NUMBER)
@@ -1058,10 +1058,10 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
         etensor_notify_attn *= (base + 1)
         etensor_notify_attn = tvm.runtime.tensor(etensor_notify_attn, device=DEV)
         event_list.append(etensor_notify_attn)
-        
+
         # etensor_attn_merge
         event_list.append(tvm.runtime.tensor(np.full((max_batch_size * mk.NUM_KEY_VALUE_HEADS), min(KernelConfig.SM_NUMBER, attn_tile_num) * (base + 1), dtype=np.int32), device=DEV))
-        
+
         # etensor_o_proj
         etensor_o_proj = np.zeros(mk.SPLIT_O_PROJECT, dtype=np.int32)
         o_proj_tile_k = ceildiv(ceildiv(mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM, mk.SPLIT_O_PROJECT), FuseGemmTile.BLK_K) * FuseGemmTile.BLK_K
@@ -1081,16 +1081,16 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
         etensor_o_proj *= (base + 1)
         etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)
         event_list.append(etensor_o_proj)
-        
+
         # etensor_attn_o_partial
         event_list.append(tvm.runtime.tensor(np.full(mk.HIDDEN_SIZE // FuseGemmTile.BLK_N, mk.SPLIT_O_PROJECT * (base + 1), dtype=np.int32), device=DEV))
-        
+
         # etensor_attn_add_rmsnorm
         event_list.append(tvm.runtime.tensor(np.full(max_batch_size, mk.SPLIT_O_PROJECT * mk.HIDDEN_SIZE // FuseSplitKReduceTile.N_UNIT * (base + 1), dtype=np.int32), device=DEV))
-        
+
         # etensor_attn_mlp
         event_list.append(tvm.runtime.tensor(np.full(1, batch_size * (base + 1), dtype=np.int32), device=DEV))
-        
+
         # etensor_down_proj
         etensor_down_proj = np.zeros(mk.DOWN_PROJ_SPLIT_K_FACTOR, dtype=np.int32)
         down_proj_tile_k = (ceildiv(ceildiv(mk.INTERMEDIATE_SIZE, mk.DOWN_PROJ_SPLIT_K_FACTOR), FuseGemmTile.BLK_K) * FuseGemmTile.BLK_K)
@@ -1102,16 +1102,16 @@ def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=
         etensor_down_proj *= (base + 1)
         etensor_down_proj = tvm.runtime.tensor(etensor_down_proj, device=DEV)
         event_list.append(etensor_down_proj)
-          
+
         # etensor_down_proj_reduce
         event_list.append(tvm.runtime.tensor(np.full(mk.HIDDEN_SIZE // FuseGemmTile.BLK_N, mk.DOWN_PROJ_SPLIT_K_FACTOR * (base + 1), dtype=np.int32), device=DEV))
-        
+
         # etensor_mlp_add_rmsnorm
         event_list.append(tvm.runtime.tensor(np.full(max_batch_size, mk.DOWN_PROJ_SPLIT_K_FACTOR * mk.HIDDEN_SIZE // FuseSplitKReduceTile.N_UNIT * (base + 1), dtype=np.int32), device=DEV))
-        
+
         # etensor_end
         event_list.append(tvm.runtime.tensor(np.array([batch_size * (base + 1)], dtype=np.int32), device=DEV))
-        
+
         all_event_list.append(event_list)
     return all_event_list
 
@@ -1125,7 +1125,7 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper, profile_on=False):
         dev = tvm.cuda()
         hidden_state = tvm.runtime.tensor(arg_dict["hidden_state"], device=dev)
         # residual = tvm.runtime.tensor(arg_dict["residual"].to(torch.float32), device=dev)
-        
+
         if mk.GATE_UP_PROJ_SPLIT_K_FACTOR == 1:
             # reorder the gate_up_weight for the fusion of gate_up projection and silu
             new_order_indices = np.stack(
@@ -1133,12 +1133,12 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper, profile_on=False):
                     np.arange(mk.INTERMEDIATE_SIZE).reshape(-1, 16),
                     np.arange(mk.INTERMEDIATE_SIZE, mk.INTERMEDIATE_SIZE * 2).reshape(-1, 16)
                 ), axis=1
-            ).reshape(-1)      
-            if mk.world_size > 1:      
+            ).reshape(-1)
+            if mk.world_size > 1:
                 gate_up_weight = arg_dict["gate_up_weight"][:, new_order_indices, :]
             else:
                 gate_up_weight = arg_dict["gate_up_weight"][new_order_indices, :]
-        
+
         weights = [
             arg_dict["qkv_proj_weight"],
             arg_dict["q_rms_wight"],
@@ -1168,7 +1168,7 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper, profile_on=False):
     def std(arg_dict, batch_size, use_prefill, mk: MegaKernel):
         import flashinfer
         import torch
-        
+
         FULL_INTERMEDIATE_SIZE = mk.INTERMEDIATE_SIZE * mk.world_size
         FULL_NUM_ATTENTION_HEADS = mk.NUM_ATTENTION_HEADS * mk.world_size
         FULL_NUM_KEY_VALUE_HEADS = mk.NUM_KEY_VALUE_HEADS * mk.world_size
@@ -1318,7 +1318,7 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper, profile_on=False):
     np.testing.assert_allclose(fused_residual, std_residual, atol=1e-2, rtol=1e-3)
 
 if __name__ == "__main__":
-    
+
     parser = argparse.ArgumentParser(description="MegaKernel testing script.")
     parser.add_argument("--scheduler", type=str, nargs='+', default=["static"],
                         choices=["static", "dynamic"], help="A list of test methods to run.")
@@ -1331,7 +1331,7 @@ if __name__ == "__main__":
                         help="A list of sequence lengths to test.")
     parser.add_argument("--profiler-on", action="store_true", help="Enable the profiler.")
     args = parser.parse_args()
-    
+
     tile_scheduler_class_map = {
         "static": static_scheduler.StaticTileScheduler,
         "dynamic": dynamic_scheduler.DynamicTileScheduler,
@@ -1345,7 +1345,7 @@ if __name__ == "__main__":
         megakernel_wrapper = MegaKernel()
         mod = megakernel_wrapper.get_mod(max_batch_size=128, profile_on=args.profiler_on)
         mod = rx.transform.StaticHorizontalFusion(
-            ["megakernel_blkm32", "megakernel_blkm64", "megakernel_blkm128"], 
+            ["megakernel_blkm32", "megakernel_blkm64", "megakernel_blkm128"],
             strategy=scheduler, tile_scheduler_class=tile_scheduler_class_map[scheduler],
             semaphore_class=semaphore_class_map[scheduler], profiler_on=args.profiler_on
         )(mod)
@@ -1359,4 +1359,3 @@ if __name__ == "__main__":
             for seq_len in args.seq_len:
                 print(f"seq_len: {seq_len}", flush=True)
                 test(batch_size, seq_len, vm, megakernel_wrapper, profile_on=args.profiler_on)
-
