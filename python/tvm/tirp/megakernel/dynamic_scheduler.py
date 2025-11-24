@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 import numpy as np
 
 from tvm.script import tir as T
@@ -6,7 +6,7 @@ from tvm.tir.op import ceildiv
 from tvm.tirp.bench.utils import CudaProfiler
 
 from .common import (
-    Barriers, JobType, ProfileEventType, KernelConfig, 
+    Barriers, JobType, ProfileEventType, KernelConfig,
     pack_into_32bit, unpack_from_32bit, any_sync, SemaphoreBase, TileSchedulerBase, gt, atomic_add_int32, is_const_minus_one
 )
 
@@ -106,7 +106,7 @@ class Semaphore(SemaphoreBase):
                 lane_id = T.thread_id([32], parent="warp")
                 if (mask >> warp_id) & 1 == 1:
                     self.state[0] = -1
-                    while 1:    
+                    while 1:
                         if lane_id == 0:
                             T.ptx.ld_global_acquire(
                                 self.state[0], self.sem.access_ptr("r", offset=self.sem.elem_offset_of(coord))
@@ -118,8 +118,9 @@ class Semaphore(SemaphoreBase):
             assert False
 
     @T.macro
-    def semaphore_notify(self, *coord, pre_notify=False, rank=-1, release=False):
-        number = T.meta_var(1 if pre_notify else self.base)
+    def semaphore_notify(self, *coord, notify_mode=1, rank=-1, release=False):
+        # notify_mode: 0 -> pre_notify, 1 -> post_notify, 2 -> full_notify
+        number = T.meta_var([1, self.base, self.base + 1][notify_mode])
         # the old value will be stored in self.state
         self.state[0] = atomic_add_int32(self.sem.ptr_to(coord), -number, rank, release=release)
         if self.state[0] <= 0:
@@ -128,7 +129,7 @@ class Semaphore(SemaphoreBase):
                 if T.cuda.func_call("gt", self.state[0], 0, source_code=gt, return_type="bool"):
                     self.state[0] = atomic_add_int32(self.sem.ptr_to(coord), -number, rank, release=release)
                     break
-                sleep_time = T.meta_var(800 if pre_notify else 40)
+                sleep_time = T.meta_var(800 if notify_mode == 0 else 40)
                 T.cuda.nano_sleep(sleep_time)
 
     def is_triggered(self):
@@ -165,14 +166,14 @@ class MPMCQueue:
         self.tail = tail
         self.debug = debug
         self.smem_manager = smem_manager
-        
+
     def _alloc(self):
         self.head_r = T.local_cell(dtype="int32", name="head_r")
         self.tail_r = T.local_cell(dtype="int32", name="tail_r")
         self.masked_pos = T.local_cell(dtype="int32", name="masked_pos")
         self.idx = T.local_cell(dtype="int32", name="idx")
         self.tail_smem = self.smem_manager.alloc((KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER,), "int32", name="tail_smem", method="persistent")
-        
+
     @T.macro
     def init(self):
         self._alloc()
@@ -268,6 +269,7 @@ class DynamicTileScheduler(TileSchedulerBase):
         head: T.Buffer,
         tail: T.Buffer,
         smem_manager,
+        signal: Optional[T.Buffer] = None,
         profiler: CudaProfiler = None,
         debug=False,
     ):
@@ -282,7 +284,8 @@ class DynamicTileScheduler(TileSchedulerBase):
         self.profiler = profiler
         self.debug = debug
         self.smem_manager = smem_manager
-        
+        self.signal = signal
+
     def _alloc(self):
         self.task_info = T.local_cell(dtype="int32", name="task_info")
         self.task_type = T.local_cell(dtype="int32", name="task_type")
@@ -292,6 +295,8 @@ class DynamicTileScheduler(TileSchedulerBase):
         self.has_prefetched = T.local_cell(dtype="bool", name="has_prefetched")
         self.idx = T.local_cell(dtype="int32", name="idx")
         self.dequeue_phase = T.local_cell(dtype="int32", name="dequeue_phase")
+        if self.signal is not None:
+            self.sig_state = T.alloc_buffer([1], dtype="int32", scope="local", name="sig_state")
         self.p2c_dequeue_barrier = SchedulerBarrier(self.smem_manager, is_p2c=True)
         self.c2p_dequeue_barrier = SchedulerBarrier(self.smem_manager, is_p2c=False)
         self.packed_value = self.smem_manager.alloc((1,), "int32", align=16, name="packed_value", method="persistent")
@@ -327,7 +332,7 @@ class DynamicTileScheduler(TileSchedulerBase):
             self.p2c_dequeue_barrier.wait(0, self.dequeue_phase)
             unpack_from_32bit(self.packed_value[0], T.address_of(self.task_type), T.address_of(self.m_idx), T.address_of(self.n_idx), T.address_of(self.k_idx))
             self.c2p_dequeue_barrier.arrive()
-            self.dequeue_phase = self.dequeue_phase ^ 1    
+            self.dequeue_phase = self.dequeue_phase ^ 1
 
     @T.macro
     def init(self):
@@ -341,15 +346,23 @@ class DynamicTileScheduler(TileSchedulerBase):
         T.tvm_storage_sync("shared")
         T.ptx.fence.proxy("shared")
         T.ptx.fence.mbarrier_init()
-        
+
     @T.macro
     def fetch_from_queue(self):
         self._fetch_from_queue()
-        
+
     @T.macro
     def push(self, func_push_list, push_level):
         self._push(func_push_list, push_level)
-            
+
+    @T.macro
+    def notify_entry_task_push(self):
+        tx = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+        T.cuda.cta_sync()
+        if tx == 0:
+            atomic_add_int32(self.signal.access_ptr("rw", offset=self.signal.elem_offset_of([T.int32(0)])), 1, -1)
+
+
     def _push(self, func_push_list, push_level):
         if not isinstance(func_push_list, list):
             func_push_list = [func_push_list]
@@ -374,7 +387,7 @@ class DynamicTileScheduler(TileSchedulerBase):
         evt.semaphore_wait(*coord, level=wait_level, mask=mask)
 
     @T.macro
-    def notify(self, evt: Semaphore, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0, pre_notify=False):
+    def notify(self, evt: Semaphore, func_notify, scope: Literal["thread", "warp", "warpgroup", "cta"]="thread", scope_id=0):
         # Notes: Here each thread will notify only at most one time，
         #        and the tids of the threads involved among scope in the notification process start from 0 and increment sequentially.
         # Notes: (notify_num, rank, coord) = func_notify(notify_idx), rank=-1 for the local rank
@@ -405,15 +418,14 @@ class DynamicTileScheduler(TileSchedulerBase):
             if self.debug:
                 T.cuda.trap_when_assert_failed(scope_id == -1 or scope_id < max_scope_id_map[scope])
             if scope_id == -1 or idx[0] == scope_id:
-                if not pre_notify:
-                    sync(scope, scope_id)
+                sync(scope, scope_id)
                 notify_num = T.meta_var(func_notify(idx[1])[0])
                 rank = T.meta_var(func_notify(idx[1])[1])
                 coord = T.meta_var(func_notify(idx[1])[2:])
                 if self.debug:
                     T.cuda.trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
                 if idx[1] < notify_num:
-                    evt.semaphore_notify(*coord, pre_notify=pre_notify, rank=rank)
+                    evt.semaphore_notify(*coord, notify_mode=1, rank=rank)
 
     def _enqueue(self, idx, func_trigger_list, push_level):
         if not isinstance(func_trigger_list, list):
@@ -423,10 +435,10 @@ class DynamicTileScheduler(TileSchedulerBase):
 
     @T.macro
     def pre_notify_and_push(
-        self, evt: Semaphore, func_notify, func_trigger_list, 
+        self, evt: Semaphore, func_notify, func_trigger_list,
         push_level: Literal["thread", "warp", "warpgroup", "cta"],
         scope: Literal["thread", "warp", "warpgroup", "cta"],
-        scope_id=0
+        scope_id=0, full_notify=False
     ):
         max_notify_num_map = T.meta_var({"thread": 1, "warp": 32, "warpgroup": KernelConfig.NUM_THREADS // KernelConfig.WG_NUMBER, "cta": KernelConfig.NUM_THREADS})
         max_scope_id_map = T.meta_var({"thread": KernelConfig.NUM_THREADS, "warp": KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER, "warpgroup": KernelConfig.WG_NUMBER, "cta": 1})
@@ -456,12 +468,33 @@ class DynamicTileScheduler(TileSchedulerBase):
                 if self.debug:
                     T.cuda.trap_when_assert_failed(notify_num <= max_notify_num_map[scope])
                 if idx[1] < notify_num:
-                    evt.semaphore_notify(*coord_notify, pre_notify=True, rank=rank)
+                    evt.semaphore_notify(*coord_notify, notify_mode=2 if full_notify else 0, rank=rank)
+                if full_notify:
+                    if scope == "thread":
+                        while 1:
+                            T.ptx.ld_global_acquire(
+                                self.sig_state[0],
+                                self.signal.access_ptr("r", offset=self.signal.elem_offset_of([T.int32(0)])),
+                            )
+                            if self.sig_state[0] == 1:
+                                break
+                            T.cuda.nano_sleep(40)
+                    else:
+                        self.sig_state[0] = -1
+                        while 1:
+                            if lane_id == 0:
+                                T.ptx.ld_global_acquire(
+                                    self.sig_state[0],
+                                    self.signal.access_ptr("r", offset=self.signal.elem_offset_of([T.int32(0)])),
+                                )
+                            if any_sync(0xffffffff, self.sig_state[0] == 1):
+                                break
+                            T.cuda.nano_sleep(40)
                 if self.profiler_on:
                     self.profiler.start(ProfileEventType.PUSH, lane_id == 0)
                 if scope == "thread":
                     if tid == new_scope_id:
-                        if push_level == "thread": 
+                        if push_level == "thread":
                             if evt.is_triggered():
                                 self._enqueue(0, func_trigger_list, push_level)
                         else:

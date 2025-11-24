@@ -60,7 +60,7 @@ from tvm.tir.exec_scope import ExecScope
 from tvm.tirp.bench.utils import CudaProfiler
 
 # FIXME: add decl_buffer for all newly generated buffers
-    
+
 
 @tvm.transform.module_pass(opt_level=0, name="StaticHorizontalFusion")
 class StaticHorizontalFusion:
@@ -85,7 +85,7 @@ class StaticHorizontalFusion:
             del mod[gvar]
         mod = relax.transform.DeadCodeElimination()(mod)
         return mod
-    
+
 @dataclass
 class EventHandleEntry:
     idx: int
@@ -95,7 +95,7 @@ class EventHandleEntry:
     push_level: Literal["thread", "warp", "warpgroup", "cta", "none"]
     push_job_id: int
     freeze: bool
-    
+
 @dataclass
 class EventHandleConfigs:
     func_type: str
@@ -107,7 +107,8 @@ class EventHandleConfigs:
     push_level: Literal["thread", "warp", "warpgroup", "cta", "none"]
     push_scope_id: int
     freeze: bool
-    
+    hard_code_entry_task: bool
+
 
 @dataclass(frozen=True)
 class VarEntry:
@@ -166,7 +167,7 @@ class EventHandleHelper(PyExprVisitor):
             handle_configs = call.attrs.handle_config
             prim_func = load_json(save_json(self.mod[tir_gvar]))
             func_type = prim_func.attrs.get("megakernel.device_func")
-            # set the default handle config            
+            # set the default handle config
             default_config_pool = {
                 "gemm": {
                     "wait_scope": "warp", "notify_scope": "warpgroup", "notify_scope_id": 0,
@@ -178,7 +179,7 @@ class EventHandleHelper(PyExprVisitor):
                 }
             }
             default_config = default_config_pool.get(func_type, default_config_pool["default"])
-            self.event_handle_configs[call] = EventHandleConfigs(func_type, job_id, **default_config, freeze=False)
+            self.event_handle_configs[call] = EventHandleConfigs(func_type, job_id, **default_config, freeze=False, hard_code_entry_task=False)
             if handle_configs:
                 self.event_handle_configs[call].wait_scope = handle_configs.get("wait_scope", self.event_handle_configs[call].wait_scope)
                 self.event_handle_configs[call].notify_scope = handle_configs.get("notify_scope", self.event_handle_configs[call].notify_scope)
@@ -231,6 +232,10 @@ class EventHandleHelper(PyExprVisitor):
             if len(self.next[call]) == 0:
                 self.end_points.add(call)
         self.topological_order = self.topological_order[::-1]
+        for call, config in self.event_handle_configs.items():
+            if call in self.entry_points:
+                config.hard_code_entry_task = True
+                break
         # check the end points
         final_evt = None
         for end_call in self.end_points:
@@ -251,7 +256,7 @@ class EventHandleHelper(PyExprVisitor):
                             config.push_level = "warp"
                             config.push_scope = "warpgroup"
                             config.push_scope_id = 1
-                
+
 class EventPrimFuncHelper(StmtExprMutator):
     # This class is used to post process the primfunc body generated for event operations
     # Will aggregates all statements immediately following a marked Block into that Block's body.
@@ -283,7 +288,7 @@ class EventPrimFuncHelper(StmtExprMutator):
             return new_seq[0]
         else:
             return SeqStmt(new_seq, op.span)
-    
+
     def visit_let_stmt_(self, op):
         op = super().visit_let_stmt_(op)
         if isinstance(op.body, Block) and op.body.annotations.get("marks") is not None and op.body.annotations["marks"].value == "entry_mark":
@@ -296,10 +301,10 @@ class EventPrimFuncHelper(StmtExprMutator):
                     body = SeqStmt(stmt_list)
             else:
                 body = Evaluate(0)
-            return tvm.tir.LetStmt(op.var, op.value, body, op.span) 
+            return tvm.tir.LetStmt(op.var, op.value, body, op.span)
         else:
             return op
-        
+
 
 class EventOpInserter(StmtExprMutator):
     def __init__(
@@ -325,10 +330,10 @@ class EventOpInserter(StmtExprMutator):
         inserter = EventOpInserter(strategy, func_info, tile_scheduler, semaphore_class)
         return inserter.visit_stmt(func_info.func_body)
 
-    def visit_block_(self, block: Block): 
+    def visit_block_(self, block: Block):
         if block.annotations.get("tirp.tile_class.prefetch") is not None:
             return block
-        elif block.annotations.get("tirp.tile_class.run") is not None:  
+        elif block.annotations.get("tirp.tile_class.run") is not None:
             def get_wait(idx):
                 @T.prim_func(tirp=True, check_well_formed=False)
                 def wait():
@@ -339,8 +344,8 @@ class EventOpInserter(StmtExprMutator):
                         wait_level=self.func_info.evt_handle_config.wait_scope,
                     )
                 return EventPrimFuncHelper().visit_stmt(wait.body)
-            
-            def get_notify(idx):            
+
+            def get_notify(idx):
                 @T.prim_func(tirp=True, check_well_formed=False)
                 def notify():
                     sem = T.meta_var(self.semaphore_class(self.func_info.out_event_tensors[idx]))
@@ -366,9 +371,10 @@ class EventOpInserter(StmtExprMutator):
                             push_level=self.func_info.evt_handle_config.push_level,
                             scope=self.func_info.evt_handle_config.push_scope,
                             scope_id=self.func_info.evt_handle_config.push_scope_id,
+                            full_notify=self.func_info.evt_handle_config.hard_code_entry_task,
                         )
                     return EventPrimFuncHelper().visit_stmt(pre_notify_and_push.body)
-            
+
             # insert wait and notify
             waits = [get_wait(idx) for idx in range(len(self.func_info.in_info_list))]
             commits = [get_notify(idx) for idx in range(len(self.func_info.out_info_list))]
@@ -378,8 +384,11 @@ class EventOpInserter(StmtExprMutator):
                     pre_notify_and_push = get_pre_notify_and_push(idx)
                     if pre_notify_and_push is not None:
                         pushes.append(pre_notify_and_push)
-
-            body_list = pushes + waits + [block.body] + commits
+            if self.strategy == "dynamic" and self.func_info.evt_handle_config.hard_code_entry_task:
+                assert len(waits) == 0
+                body_list = [block.body] + pushes
+            else:
+                body_list = pushes + waits + [block.body] + commits
             new_body = SeqStmt(body_list) if len(body_list) > 1 else body_list[0]
             # Reconstruct the block with the new body, preserving all other attributes.
             return Block(
@@ -407,7 +416,7 @@ class PersistentVarInfo:
 
 
 class PersistentVarCollector(StmtExprMutator):
-    
+
     def __init__(self):
         super().__init__()
         self.persistent_vars_tile_class = defaultdict(list)
@@ -417,8 +426,8 @@ class PersistentVarCollector(StmtExprMutator):
         self.persistent_var_megakernel_init = None
         self.persistent_var_megakernel_finalize = None
         self.visit_tile_class = False
-        
-    
+
+
     @staticmethod
     def rewrite(stmt: Stmt) -> Tuple[Stmt, PersistentVarInfo, PersistentVarInfo]:
         collector = PersistentVarCollector()
@@ -427,7 +436,7 @@ class PersistentVarCollector(StmtExprMutator):
             PersistentVarInfo(collector.persistent_var_tile_class_init, collector.persistent_var_tile_class_finalize, collector.persistent_vars_tile_class),
             PersistentVarInfo(collector.persistent_var_megakernel_init, collector.persistent_var_megakernel_finalize, collector.persistent_vars_megakernel)
         )
-    
+
     def visit_alloc_buffer_(self, op):
         op = super().visit_alloc_buffer_(op)
         if "persistent" in op.buffer.scope():
@@ -445,7 +454,7 @@ class PersistentVarCollector(StmtExprMutator):
             cur_persistent_vars[op.buffer.name].append(op.buffer)
             return op.body
         return op
-    
+
     def visit_allocate_(self, op):
         # here buffer with shared.persistent scope will be declared with None data pointer
         # so we need to remove the extra allocate node due to this
@@ -453,7 +462,7 @@ class PersistentVarCollector(StmtExprMutator):
         if "persistent" in op.buffer_var.type_annotation.storage_scope:
             return op.body
         return op
-    
+
     def visit_block_(self, block: Block):
         if any(block.annotations.get(key) is not None for key in ["tirp.tile_class.persistent.init", "tirp.tile_class.persistent.finalize"]):
             self.visit_tile_class = True
@@ -485,12 +494,12 @@ class HostStmtCollector(StmtExprMutator):
     def __init__(self):
         super().__init__()
         self.uppermost_block = None
-    
+
     def visit_block_realize_(self, op: BlockRealize):
         self.uppermost_block = op
         return KernelReplacePoint()
 
-    
+
     @staticmethod
     def rewrite(stmt: Stmt) -> Tuple[Stmt, Stmt]:
         collector = HostStmtCollector()
@@ -498,29 +507,29 @@ class HostStmtCollector(StmtExprMutator):
         return collector.uppermost_block, host_replace_template
 
 class VarCollector(StmtExprVisitor):
-    
+
     def __init__(self):
         super().__init__()
         self.vars = set()
-    
+
     def visit_var_(self, op):
         self.vars.add(op)
         return super().visit_var_(op)
-    
+
 
 class DuplicateVarReplacer(StmtExprMutator):
 
     def __init__(self):
         super().__init__()
         self.vars = {}
-        
+
     def visit_let_stmt_(self, op):
         assert op.var not in self.vars
         self.vars[op.var] = T.Var("var", dtype=op.value.dtype, span=op.var.span)
         value = self.visit_expr(op.value)
         body = self.visit_stmt(op.body)
         return tvm.tir.LetStmt(self.vars[op.var], value, body, op.span)
-    
+
     def visit_for_(self, op):
         assert op.loop_var not in self.vars
         self.vars[op.loop_var] = T.Var("var", dtype=op.loop_var.dtype, span=op.loop_var.span)
@@ -530,7 +539,7 @@ class DuplicateVarReplacer(StmtExprMutator):
         return tvm.tir.For(
             self.vars[op.loop_var], min_val, extent, op.kind, body, op.thread_binding, op.annotations, op.span
         )
-    
+
     def visit_allocate_(self, op):
         assert op.buffer_var not in self.vars
         self.vars[op.buffer_var] = T.Var("var", dtype=op.buffer_var.dtype, span=op.buffer_var.span)
@@ -540,7 +549,7 @@ class DuplicateVarReplacer(StmtExprMutator):
         return tvm.tir.Allocate(
             self.vars[op.buffer_var], op.dtype, extents, condition, body, op.annotations, op.span
         )
-    
+
     def visit_allocate_const_(self, op):
         assert op.buffer_var not in self.vars
         self.vars[op.buffer_var] = T.Var("var", dtype=op.buffer_var.dtype, span=op.buffer_var.span)
@@ -555,7 +564,7 @@ class DuplicateVarReplacer(StmtExprMutator):
         return tvm.tir.AllocateConst(
             self.vars[op.buffer_var], op.dtype, extents, data_or_idx, body, op.annotations, op.span
         )
-    
+
     def visit_var_(self, op):
         if op in self.vars:
             return self.vars[op]
@@ -567,7 +576,7 @@ class DynSharedMemCollector(StmtExprMutator):
     def __init__(self):
         super().__init__()
         self.dyn_shared_mem_buffer = None
-        
+
     def visit_alloc_buffer_(self, op):
         op = super().visit_alloc_buffer_(op)
         if op.buffer.scope() == "shared.dyn":
@@ -610,16 +619,16 @@ class DisjointSet:
                 root_a, root_b = root_b, root_a
             self.parent[root_b] = root_a
             self.size[root_a] += self.size[root_b]
-            
+
     def is_connected(self, a: object, b: object) -> bool:
         return self.find(a) == self.find(b)
 
     def get_size(self, a: object) -> int:
         return self.size[self.find(a)]
-    
+
 
 class DependencyHandler(StmtExprMutator):
-    def __init__(self, tile_idx: List[PrimExpr], in_var_entries: List[VarEntry], sym_vars: Dict[Var, Var], 
+    def __init__(self, tile_idx: List[PrimExpr], in_var_entries: List[VarEntry], sym_vars: Dict[Var, Var],
                  relax_var_to_entry: Dict[Var, VarEntry], builder_: relax.BlockBuilder, var_entry_mapping: DisjointSet):
         super().__init__()
         self.tile_idx = tile_idx
@@ -651,7 +660,7 @@ class DependencyHandler(StmtExprMutator):
                     T.add_to_parent(stmt)
                 return [T.int32(job_id)] + output
         return _func_template
-    
+
     def _create_func(self, job_id: int, buffer_replace_map, var_replace_map, func: PrimFunc, out_buf_list: List[Buffer], input_coord_dim: int):
         func_template = self._get_func_template(job_id)
         return partial(func_template, buffer_replace_map=buffer_replace_map, var_replace_map=var_replace_map,
@@ -661,16 +670,16 @@ class DependencyHandler(StmtExprMutator):
         # notes: here we don't directly capture the outer variables in the closure to avoid wrongly using values when executing rather than compiling
         var_replace_map = {}
         buffer_replace_map = {}
-        
+
         def _replace_var(src: Var, dst: Var):
             var_replace_map[src] = dst
-            
+
         def _replace_buffer(src: Buffer, dst: Buffer):
             buffer_replace_map[src] = dst
             for i in range(len(src.shape)):
                 if isinstance(src.shape[i], Var):
                     var_replace_map[src.shape[i]] = dst.shape[i]
-        
+
         # handle the tile_idx
         if job_id == -1:
             for i, var in enumerate(self.tile_idx):
@@ -707,7 +716,7 @@ class DependencyHandler(StmtExprMutator):
         out_buf_list = [func.buffer_map[func.params[input_dim + i]] for i in range(output_dim)]
         out_func = self._create_func(job_id, buffer_replace_map, var_replace_map, func, out_buf_list, input_dim - len(extra_args) - 1)
         return out_func
-    
+
     def rewrite(self, stmt: Stmt, buffer_replace_map: Dict[Buffer, Buffer], cur_buf_list: List[Buffer]) -> Tuple[Stmt, List[PrimExpr]]:
         self.cur_buf_set = {buffer_replace_map[buf]: i for i, buf in enumerate(cur_buf_list)}
         self.cur_out_prim_expr = [None] * len(cur_buf_list)
@@ -718,23 +727,23 @@ class DependencyHandler(StmtExprMutator):
         # it will be processed to fix the scope of the variables declared in the input dependencies in the post process step
         new_stmt = Block(
             iter_vars=[],
-            reads=[], 
-            writes=[], 
+            reads=[],
+            writes=[],
             name_hint="__mark_wrapper",
             body=new_stmt,
             annotations={"marks": T.StringImm("beg_mark")},
             exec_scope=ExecScope.create("cta")
         )
         return new_stmt, self.cur_out_prim_expr
-    
+
 
     def visit_buffer_store_(self, op):
         if op.buffer in self.cur_buf_set:
             assert len(op.indices) == 1 and op.indices[0] == 0
             entry_mark = Block(
                 iter_vars=[],
-                reads=[], 
-                writes=[], 
+                reads=[],
+                writes=[],
                 name_hint="__mark_wrapper",
                 body=Evaluate(0),
                 annotations={"marks": T.StringImm("entry_mark")},
@@ -751,11 +760,11 @@ class DependencyHandler(StmtExprMutator):
                     body=entry_mark
                 )
         return super().visit_buffer_store_(op)
-    
+
     def _is_entry_mark(self, stmt: Stmt) -> bool:
         return (isinstance(stmt, Block) and stmt.annotations.get("marks") is not None
                 and stmt.annotations["marks"].value == "entry_mark")
-    
+
     def visit_seqstmt_(self, op):
         op = super().visit_seqstmt_(op)
         inv_seq = []
@@ -772,8 +781,8 @@ class DependencyHandler(StmtExprMutator):
                     flag = False
                     entry_mark = Block(
                         iter_vars=[],
-                        reads=[], 
-                        writes=[], 
+                        reads=[],
+                        writes=[],
                         name_hint="__mark_wrapper",
                         body=Evaluate(0),
                         annotations={"marks": T.StringImm("entry_mark")},
@@ -790,8 +799,8 @@ class DependencyHandler(StmtExprMutator):
         if flag:
             entry_mark = Block(
                 iter_vars=[],
-                reads=[], 
-                writes=[], 
+                reads=[],
+                writes=[],
                 name_hint="__mark_wrapper",
                 body=Evaluate(0),
                 annotations={"marks": T.StringImm("entry_mark")},
@@ -811,7 +820,7 @@ class DependencyHandler(StmtExprMutator):
 @mutator
 class _Rewriter(PyExprMutator):
     def __init__(
-        self, mod: IRModule, strategy: Literal["static", "dynamic"], rewrite_func_name: Union[str, List[str]], fusion_prefix: str, 
+        self, mod: IRModule, strategy: Literal["static", "dynamic"], rewrite_func_name: Union[str, List[str]], fusion_prefix: str,
         tile_scheduler_class: Type[TileSchedulerBase], semaphore_class: Type[SemaphoreBase], profiler_on: bool
     ):
         super().__init__(mod)
@@ -907,8 +916,8 @@ class _Rewriter(PyExprMutator):
                         var_list.extend(persistent_info.vars[var_name])
                     tvm.ir.assert_structural_equal(persistent_info.init_body, existing_info.init_body)
                     tvm.ir.assert_structural_equal(persistent_info.finalize_body, existing_info.finalize_body)
-            
-            
+
+
     def visit_function_(self, func: relax.Function) -> Expr:
         self.evt_handle_helper.infer(func)
         for i, para in enumerate(func.params):
@@ -929,10 +938,10 @@ class _Rewriter(PyExprMutator):
                 self.var_entry_mapping.add_element(var_entry)
                 self.relax_var_to_entry[var_entry.relax_var] = var_entry
         return super().visit_function_(func)
-    
+
     def _deep_copy(self, func: PrimFunc) -> PrimFunc:
         return load_json(save_json(func))
-    
+
     def visit_call_(self, call: relax.Call) -> Expr:  # pylint: disable=arguments-renamed
         if call.op == self.call_tir_device_op:
             tile_num = call.args[2]
@@ -969,7 +978,7 @@ class _Rewriter(PyExprMutator):
             body, persistent_var_info_tile_class, persistent_var_info_megakernel = PersistentVarCollector.rewrite(body)
             func_type = prim_func.attrs.get("megakernel.device_func")
             self._update_persistent_var_info(persistent_var_info_tile_class, persistent_var_info_megakernel, func_type)
-            
+
             dyn_shared_mem_buffer, body = DynSharedMemCollector.rewrite(body)
             if dyn_shared_mem_buffer is not None:
                 self.dyn_shared_mem_buffers.append(dyn_shared_mem_buffer)
@@ -1026,9 +1035,9 @@ class _Rewriter(PyExprMutator):
                     self.var_entry_mapping.add_element(var_entry)
                     self.relax_var_to_entry[var_entry.relax_var] = var_entry
                 out_var_entries.append(var_entry)
-                
-            # handle the dep       
-            sym_vars = dict()       
+
+            # handle the dep
+            sym_vars = dict()
             in_info_list = []
             out_info_list = []
             push_info_list = []
@@ -1060,10 +1069,10 @@ class _Rewriter(PyExprMutator):
                                                                 len(tile_idx) + 1, job_id=push_call.attrs.job_id)
                             def push_map_func(idx: T.Var, notify_dep_func=notify_dep_func, push_dep_func=push_dep_func, emit=True):
                                 return lambda push_idx: push_dep_func(push_idx, *(notify_dep_func(idx, emit=emit)[1:]), emit=emit)
-                            
+
                             push_info[1].append(push_map_func)
 
-                    push_info_list.append(push_info)                                
+                    push_info_list.append(push_info)
             self.device_func_infos[call] = DeviceFuncInfo(
                 body, in_var_entries, out_var_entries, tile_idx, in_event_tensors, out_event_tensors, sym_vars,
                 in_info_list, out_info_list, push_info_list, call.attrs.job_id, self.evt_handle_helper.event_handle_configs[call]
@@ -1136,11 +1145,11 @@ class _Rewriter(PyExprMutator):
                         profiler.end(map_job_type_to_profile_event_type[func.job_type_id], lane_id == 0)
                 else_frames[i].__enter__()
             T.add_to_parent(Evaluate(T.cuda.trap_when_assert_failed(False)))
-            
+
             for i in range(total_type_count - 1, -1, -1):
                 else_frames[i].__exit__(None, None, None)
                 if_frames[i].__exit__(None, None, None)
-                
+
         sym_map = {}
         def run_push_init_tasks(tile_scheduler: TileSchedulerBase, profiler: Optional[CudaProfiler], bx, lane_id):
             # build lambda push func for scheduler
@@ -1160,7 +1169,7 @@ class _Rewriter(PyExprMutator):
                         else:
                             sym_map[var] = T.Var("sym", "int32")
                     tile_num.append(sym_map[var])
-                if i == 0:
+                if self.device_func_infos[call].evt_handle_config.hard_code_entry_task:
                     hard_encode_call = call
                     already_pushed_num = T.min(KernelConfig.SM_NUMBER - 1, tile_num[0] * tile_num[1] * tile_num[2])
                     hard_encode_push_num = already_pushed_num
@@ -1168,18 +1177,18 @@ class _Rewriter(PyExprMutator):
                     already_pushed_num = 0
                 push_func = partial(push_func_template, tile_num=tile_num, already_pushed_num=already_pushed_num, job_type_id=device_func_info.job_type_id)
                 push_func_list.append(push_func)
-            
+
             with T.cta():
                 with T.If(bx < hard_encode_push_num):
                     with T.Then():
                         func_info = self.device_func_infos[hard_encode_call]
                         new_body = EventOpInserter.rewrite(self.strategy, func_info, tile_scheduler, self.semaphore_class)
-                        needed_idx_num = len(func_info.tile_idx)                  
+                        needed_idx_num = len(func_info.tile_idx)
                         tile_num = []
                         for var in hard_encode_call.args[2]:
                             if isinstance(var, IntImm):
                                 tile_num.append(T.IntImm("int32", var.value))
-                            else:  
+                            else:
                                 if var not in sym_map:
                                     sym_map[var] = T.Var("sym", "int32")
                                 tile_num.append(sym_map[var])
@@ -1197,23 +1206,25 @@ class _Rewriter(PyExprMutator):
                         if profiler is not None:
                             profiler.start(map_job_type_to_profile_event_type[func_info.job_type_id], lane_id == 0)
                         T.add_to_parent(new_body)
+
                         if profiler is not None:
                             profiler.end(map_job_type_to_profile_event_type[func_info.job_type_id], lane_id == 0)
                     with T.Else():
                         # push rest entry tasks
                         tile_scheduler.push(push_func_list, push_level="cta")
+                        tile_scheduler.notify_entry_task_push()
 
         def replace_dyn_shared_mem_buffer(new_buffer):
             for buffer in self.dyn_shared_mem_buffers:
                 buffer_replace_map[buffer] = new_buffer
-        
-        def set_tile_scheduler(queue, tasks, head, tail, smem_manager):
+
+        def set_tile_scheduler(queue, tasks, head, tail, signal, smem_manager):
             if self.strategy == "static":
                 tile_scheduler = self.tile_scheduler_class("mega_", queue, smem_manager)
             else:
-                tile_scheduler = self.tile_scheduler_class(tasks, head, tail, smem_manager)
+                tile_scheduler = self.tile_scheduler_class(tasks, head, tail, smem_manager, signal=signal)
             return tile_scheduler
-        
+
         def set_profiler(profiler_buf):
             if self.profiler_on:
                 num_groups = KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER
@@ -1222,13 +1233,13 @@ class _Rewriter(PyExprMutator):
                 return profiler
             else:
                 return None
-            
+
         def init_profiler(warp_id, profiler):
             if self.profiler_on:
                 profiler.init(warp_id)
-                
+
         @T.macro
-        def persistent_body(queue, tasks, head, tail, profiler_buf):
+        def persistent_body(queue, tasks, head, tail, signal, profiler_buf):
             with T.kernel():
                 bx = T.scope_id([KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope)
                 tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
@@ -1237,7 +1248,7 @@ class _Rewriter(PyExprMutator):
                 smem_buffer = T.alloc_buffer(KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16)
                 replace_dyn_shared_mem_buffer(smem_buffer)
                 smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data))
-                tile_scheduler = T.meta_var(set_tile_scheduler(queue, tasks, head, tail, smem_manager))
+                tile_scheduler = T.meta_var(set_tile_scheduler(queue, tasks, head, tail, signal, smem_manager))
                 persistent_vars = T.meta_var(PersistentVars(self.persistent_var_infos, smem_manager))
                 profiler = T.meta_var(set_profiler(profiler_buf))
                 init_profiler(warp_id, profiler)
@@ -1258,22 +1269,22 @@ class _Rewriter(PyExprMutator):
                 @T.prim_func(tirp=True, private=True)
                 def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32"),
                                       profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
-                    persistent_body(queue, None, None, None, profiler_buf)
+                    persistent_body(queue, None, None, None, None, profiler_buf)
             else:
                 @T.prim_func(tirp=True, private=True)
                 def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32")):
-                    persistent_body(queue, None, None, None, None)
+                    persistent_body(queue, None, None, None, None, None)
         else:
             if self.profiler_on:
                 @T.prim_func(tirp=True, private=True)
                 def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"),
-                                      tail: T.buffer((1,), "int32"), profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
-                    persistent_body(None, tasks, head, tail, profiler_buf)
+                                      tail: T.buffer((1,), "int32"), signal: T.buffer((1,), "int32"), profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
+                    persistent_body(None, tasks, head, tail, signal, profiler_buf)
             else:
                 @T.prim_func(tirp=True, private=True)
                 def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"),
-                                      tail: T.buffer((1,), "int32")):
-                    persistent_body(None, tasks, head, tail, None)       
+                                      tail: T.buffer((1,), "int32"), signal: T.buffer((1,), "int32")):
+                    persistent_body(None, tasks, head, tail, signal, None)
 
         new_body = persistent_kernel.body
         for template in self.host_templates:
@@ -1326,7 +1337,7 @@ class _Rewriter(PyExprMutator):
                 with T.If(bx == i):
                     with T.Then():
                         with T.If(tx == 0):
-                            with T.Then():     
+                            with T.Then():
                                 for e in tile_num.values:
                                     var_collector.visit_expr(e)
                                 for_grid = T.grid(*tile_num.values)
@@ -1345,7 +1356,7 @@ class _Rewriter(PyExprMutator):
                                 packed_val = pack_into_32bit(0, 0, 0, JobType.END.value, host=False)
                                 T.buffer_store(queue, packed_val, [idx[0] % KernelConfig.SM_NUMBER, idx[0] // KernelConfig.SM_NUMBER])
                                 T.buffer_store(idx, idx[0] + 1, 0)
-                        
+
         if self.strategy == "static":
             @T.prim_func(tirp=True, private=True)
             def gen_exec_queue(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS,), "int32")):
@@ -1354,15 +1365,19 @@ class _Rewriter(PyExprMutator):
                     tx = T.thread_id([THREAD_NUM], parent="cta")
                     idx = T.alloc_buffer([1], "int32", scope="local")
                     idx[0] = 0
-                    emit_task_round_robin(queue, idx, bx, tx)    
+                    emit_task_round_robin(queue, idx, bx, tx)
         else:
             @T.prim_func(tirp=True, private=True)
-            def gen_exec_queue(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS,), "int32"), head: T.buffer((1,), "int32"), tail: T.buffer((1,), "int32")):
+            def gen_exec_queue(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS,), "int32"), head: T.buffer((1,), "int32"), tail: T.buffer((1,), "int32"), signal: T.buffer((1,), "int32")):
                 with T.kernel():
-                    # fill tasks queue with -1 first
+                    # fill tasks queue with -1
                     bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
                     tx = T.thread_id([THREAD_NUM], parent="cta")
                     idx = T.alloc_buffer([1], "int32", scope="local")
+                    if bx == 0 and tx == 0:
+                        head[0] = 0
+                        tail[0] = 0
+                        signal[0] = 0
                     idx[0] = bx * THREAD_NUM + tx
                     while idx[0] < self.tile_scheduler_class.MAX_TASKS:
                         tasks[idx[0]] = -1
@@ -1406,7 +1421,7 @@ class _Rewriter(PyExprMutator):
                 if self.var_entry_mapping.is_connected(e, input_entry):
                     return i
             return None
-        
+
         visited_entry_group = set()
         for call, func in self.device_func_infos.items():
             for entry in func.in_var_entries:
@@ -1423,7 +1438,7 @@ class _Rewriter(PyExprMutator):
             for entry in func.out_var_entries:
                 leader_entry = self.var_entry_mapping.find(entry)
                 visited_entry_group.add(leader_entry)
-                
+
         for e in self.event_buffers:
             event_tensor_var = T.var("handle", name=e.name_hint)
             new_buffer_map[event_tensor_var] = self.event_buffers[e]
@@ -1504,13 +1519,14 @@ class _Rewriter(PyExprMutator):
             task_buffer = list(persistent_kernel.buffer_map.values())[0]
             head_buffer = list(persistent_kernel.buffer_map.values())[1]
             tail_buffer = list(persistent_kernel.buffer_map.values())[2]
+            sig_buffer = list(persistent_kernel.buffer_map.values())[3]
             gen_exec_queue_tir, sym_vars = self._build_gen_exec_queue_kernel()
             gen_exec_queue_gvar = self.builder_.add_func(gen_exec_queue_tir, f"gen_exec_queue_{self.cur_rewrite_func_name}")
-            output_sinfo = [TensorStructInfo(shape=task_buffer.shape, dtype=task_buffer.dtype), TensorStructInfo(shape=head_buffer.shape, dtype=head_buffer.dtype), 
-                            TensorStructInfo(shape=tail_buffer.shape, dtype=tail_buffer.dtype)]
+            output_sinfo = [TensorStructInfo(shape=task_buffer.shape, dtype=task_buffer.dtype), TensorStructInfo(shape=head_buffer.shape, dtype=head_buffer.dtype),
+                            TensorStructInfo(shape=tail_buffer.shape, dtype=tail_buffer.dtype), TensorStructInfo(shape=sig_buffer.shape, dtype=sig_buffer.dtype)]
             packed_exec_queue = self.builder_.emit(relax.call_tir(gen_exec_queue_gvar, [], out_sinfo=output_sinfo, tir_vars=sym_vars))
             new_relax_params.extend(
-                [packed_exec_queue[0], packed_exec_queue[1], packed_exec_queue[2]]
+                [packed_exec_queue[0], packed_exec_queue[1], packed_exec_queue[2], packed_exec_queue[3]]
             )
         if self.profiler_on:
             out_sinfo.append(TensorStructInfo(shape=(self.profiler_buf_size,), dtype="uint64"))
@@ -1521,7 +1537,7 @@ class _Rewriter(PyExprMutator):
             return relax.call_tir_inplace(new_gvar, new_relax_params, inplace_indices, out_sinfo, tir_vars=persistent_kernel_sym_vars), len(out_sinfo)
 
     def visit_seq_expr_(self, op: relax.SeqExpr) -> Expr:
-        op = super().visit_seq_expr_(op)  
+        op = super().visit_seq_expr_(op)
         ret_order = []
         def _handle_var(var: relax.Var):
             binding = self.builder_.lookup_binding(var)

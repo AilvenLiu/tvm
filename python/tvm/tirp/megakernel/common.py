@@ -386,7 +386,7 @@ class ProfileEventType(Enum):
     EP_COMBINE_RECV = 50
     GROUP_GEMM_GATE_UP_SILU = 51
     INIT_ETENSOR = 52
-    WAIT_ETENSOR_INIT = 53    
+    WAIT_ETENSOR_INIT = 53
     END = 54
 
 map_job_type_to_profile_event_type = {
@@ -498,8 +498,8 @@ class SmemManager:
         else:
             self.cur_phase = T.alloc_local([1], "int32", name="cur_phase")
             self.reg_count = T.alloc_local([1], "int32", name="reg_count")
-       
-        
+
+
     @T.macro
     def init(self):
         self.check_smem_well_formed(debug=False)
@@ -744,14 +744,14 @@ class SmemManager:
 
 class SemaphoreBase:
     base = 1 << 16
-    
+
     """Abstract base class for semaphore."""
     def __init__(self):
         pass
-    
+
     def semaphore_wait(self, *coord, level, mask):
         raise NotImplementedError
-    
+
     def semaphore_notify(self, *coord, rank=-1):
         raise NotImplementedError
 
@@ -768,14 +768,19 @@ class TileSchedulerBase:
     @T.macro
     def init(self):
         raise NotImplementedError
-    
+
     @T.macro
     def fetch_from_queue(self):
         # for dynamic scheduler
         pass
-    
+
     @T.macro
     def push(self, func_push_list, push_level):
+        # for dynamic scheduler
+        pass
+
+    @T.macro
+    def notify_entry_task_push(self):
         # for dynamic scheduler
         pass
 
@@ -792,7 +797,7 @@ class TileSchedulerBase:
         raise NotImplementedError
 
     @T.macro
-    def pre_notify_and_push(self, evt, notify_num, func_notify, func_trigger, push_level, scope, scope_id):
+    def pre_notify_and_push(self, evt, func_notify, func_trigger, push_level, scope, scope_id, full_notify):
         # for dynamic scheduler
         pass
 
