@@ -63,13 +63,13 @@ def bench_fn(func, warmup=0, repeat=10, proton_name="kernel"):
         torch.empty(flush_l2_size, dtype=torch.int, device="cuda").zero_()
         func()
     if not is_running_under_pytest():
-        proton.activate(0)
+        proton.activate()
         with proton.scope(proton_name, metrics={}):
             for _ in range(repeat):
                 # runtime.driver.active.clear_cache(cache)
                 torch.empty(flush_l2_size, dtype=torch.int, device="cuda").zero_()
                 func()
-        proton.deactivate(0)
+        proton.deactivate()
     else:
         for _ in range(repeat):
             func()
