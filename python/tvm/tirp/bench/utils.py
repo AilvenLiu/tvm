@@ -57,7 +57,7 @@ def setup():
 
 def bench_fn(func, warmup=0, repeat=10, proton_name="kernel"):
     # cache = runtime.driver.active.get_empty_cache_for_benchmark()
-    flush_l2_size = int(8e9 // 4)
+    flush_l2_size = int(8e8 // 4)
     for _ in range(warmup):
         # runtime.driver.active.clear_cache(cache)
         torch.empty(flush_l2_size, dtype=torch.int, device="cuda").zero_()
