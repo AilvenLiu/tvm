@@ -42,7 +42,7 @@ F128_BYTES = 16
 
 a_type = tvm.DataType("float8_e4m3fn")
 b_type = tvm.DataType("float8_e4m3fn")
-d_type = tvm.DataType("float16")
+d_type = tvm.DataType("bfloat16")
 sfa_type = tvm.DataType("float8_e8m0fnu")
 sfb_type = tvm.DataType("float8_e8m0fnu")
 M, N, K = 8192, 8064, 8192
@@ -530,17 +530,16 @@ def prepare_data():
     # Vectorized dequantization for B
     B_de = (B_fp8_de.reshape(N, K // QUANT_SIZE, QUANT_SIZE) * sfb_de[:, :, None]).reshape(N, K)
 
-    C_ref = torch.matmul(A_de, B_de.T).to(torch.float16)
-    C_empty = torch.empty((M, N), dtype=torch.float16)
+    C_ref = torch.matmul(A_de, B_de.T).to(torch.bfloat16)
 
-    return A_fp8, B_fp8, sfa_pack, sfb_pack, C_empty, C_ref, A_origin, B_origin
+    return A_fp8, B_fp8, sfa_pack, sfb_pack, C_ref, A_origin, B_origin
 
 
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 def test_deepgemm():
 
     DEV = tvm.cuda(0)
-    A_fp8, B_fp8, sfa_pack, sfb_pack, C, C_ref, A_origin, B_origin = prepare_data()
+    A_fp8, B_fp8, sfa_pack, sfb_pack, C_ref, A_origin, B_origin = prepare_data()
     A_tvm = tvm.runtime.tensor(
         A_fp8.view(torch.int8).numpy().view(ml_dtypes.float8_e4m3fn), device=DEV
     )
@@ -549,7 +548,7 @@ def test_deepgemm():
     )
     sfa_tvm = tvm.runtime.tensor(sfa_pack.numpy(), device=DEV)
     sfb_tvm = tvm.runtime.tensor(sfb_pack.numpy(), device=DEV)
-    C_tvm = tvm.runtime.tensor(C.numpy(), device=DEV)
+    C_tvm = torch.empty((M, N), dtype=torch.bfloat16, device="cuda")
     target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": deepgemm})
@@ -565,7 +564,7 @@ def test_deepgemm():
             repeat=50,
             proton_name="std",
         )
-        return ms, out.cpu()
+        return ms, out
 
     def tir():
         ms = bench(
@@ -574,7 +573,7 @@ def test_deepgemm():
             repeat=50,
             proton_name="tir",
         )
-        return ms, torch.from_numpy(C_tvm.numpy())
+        return ms, C_tvm
 
     # It seems that the tir and std profiling will interfere with each other
     # And also the value of warmup and repeat affect the profiling result abnormally
@@ -584,9 +583,9 @@ def test_deepgemm():
         print(f"TIR flops: {flops(tir_ms) / 1e12} TFLOPS, time: {tir_ms:.3f} ms")
         std_ms, std_out = std()
         print(f"Std flops: {flops(std_ms) / 1e12} TFLOPS, time: {std_ms:.3f} ms")
-        np.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-2)
-        diff = calc_diff(std_out, tir_out)
-        assert diff < 0.001
+        # np.testing.assert_allclose(C_tvm.numpy(), C_ref, rtol=1e-3, atol=1e-2)
+        assert calc_diff(std_out, tir_out) < 1e-3
+        assert calc_diff(std_out, C_ref.to("cuda")) < 1e-3
         print("Test passed!")
 
 

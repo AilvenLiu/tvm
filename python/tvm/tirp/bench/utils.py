@@ -55,9 +55,8 @@ def setup():
     return args
 
 
-def bench_fn(func, warmup=0, repeat=10, proton_name="kernel"):
+def bench_fn(func, warmup, repeat, proton_name, flush_l2_size):
     # cache = runtime.driver.active.get_empty_cache_for_benchmark()
-    flush_l2_size = int(8e8 // 4)
     for _ in range(warmup):
         # runtime.driver.active.clear_cache(cache)
         torch.empty(flush_l2_size, dtype=torch.int, device="cuda").zero_()
@@ -75,9 +74,13 @@ def bench_fn(func, warmup=0, repeat=10, proton_name="kernel"):
             func()
 
 
-def bench(func, warmup=0, repeat=10, proton_name="kernel", debug=False):
+def bench(
+    func, warmup=0, repeat=10, proton_name="kernel", debug=False, flush_l2_size=int(8e8 // 4)
+):
     if not debug:
-        bench_fn(func, warmup=warmup, repeat=repeat, proton_name=proton_name)
+        bench_fn(
+            func, warmup=warmup, repeat=repeat, proton_name=proton_name, flush_l2_size=flush_l2_size
+        )
     else:
         func()
     return triton.testing.do_bench(func, warmup=warmup, rep=repeat)
