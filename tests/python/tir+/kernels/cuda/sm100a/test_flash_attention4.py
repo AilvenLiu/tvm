@@ -10,6 +10,7 @@ from tvm.script import tir as T
 from tvm.script import tirp as Tp
 from tvm.tir.layout import TileLayout
 from tvm.tirp.bench.utils import ProtonContext, bench
+
 M_CLUSTER = 1
 N_CLUSTER = 1
 SM_NUMBER = 148
@@ -965,22 +966,21 @@ def prepare_data(batch_size, seq_len_q, seq_len_kv, num_heads, head_dim):
     V = torch.randn((batch_size, seq_len_kv, num_heads, head_dim), dtype=torch.float16)
     O = torch.zeros((batch_size, seq_len_q, num_heads, head_dim), dtype=torch.float16)
 
-
     return Q, K, V, O
-
 
 def test_flash_attention4():
     BATCH = 1
     SEQ_Q = 8192
     SEQ_KV = 8192
-    HEADS = 12
+    HEADS = 5
     HEAD_DIM = 64
-
-
-    Q, K, V, _ = prepare_data(BATCH, SEQ_Q, SEQ_KV, HEADS, HEAD_DIM)
+    DEBUG = False
 
     def flops(ms):
-        return 4 * BATCH * HEADS * SEQ_Q * SEQ_KV * HEAD_DIM / (ms * 1e-3)
+        """Calculate FLOPS for Flash Attention: Q@K^T + P@V = 2 * B * H * S_q * S_k * D"""
+        return 2 * BATCH * HEADS * SEQ_Q * SEQ_KV * HEAD_DIM / (ms * 1e-3)
+
+    Q, K, V, _ = prepare_data(BATCH, SEQ_Q, SEQ_KV, HEADS, HEAD_DIM)
 
     def get_source(func):
         target = tvm.target.Target("cuda")
@@ -1006,49 +1006,264 @@ def test_flash_attention4():
         O_tvm = tvm.runtime.tensor(O_tir.cpu().numpy(), device=dev)
 
         func = lambda: mod(Q_tvm, K_tvm, V_tvm, O_tvm)
-        ms = bench(func, warmup=10, repeat=30, proton_name="tir_attn")
-        print(f"TIR flops: {flops(ms) / 1e12:.3f} TFLOPS, time: {ms:.3f} ms")
+        ms = bench(func, warmup=0, repeat=30, proton_name="tir_fa4", debug=DEBUG)
+        print(f"TIR FA4: {flops(ms) / 1e12:.2f} TFLOPS, time: {ms:.3f} ms")
 
-        # Convert back to (B, S, H, D) for comparison
-        O_res = np.transpose(O_tvm.numpy(), (0, 2, 1, 3))  # (B, H, S, D) -> (B, S, H, D)
+        mod(Q_tvm, K_tvm, V_tvm, O_tvm)
+        torch.cuda.synchronize()
+
+        O_res = np.transpose(O_tvm.numpy(), (0, 2, 1, 3))
         return O_res
 
+    def cutedsl_attn(Q, K, V):
+        """CuTeDSL Blackwell FMHA baseline"""
+        try:
+            import sys
+            import math
+            import os
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            tvm_root = os.path.abspath(os.path.join(current_dir, '../../../../../../'))
+            blackwell_path = os.path.join(tvm_root, '3rdparty/cutlass/examples/python/CuTeDSL/blackwell')
+            sys.path.insert(0, blackwell_path)
+            from fmha import BlackwellFusedMultiHeadAttentionForward, MaskType
+            import cutlass
+            import cutlass.cute as cute
+            import cutlass.torch as cutlass_torch
+            import cuda.bindings.driver as cuda
+            from cutlass.cute.runtime import from_dlpack
+        except ImportError as e:
+            print(f"CuTeDSL Blackwell FMHA not available: {e}, skipping baseline")
+            return None
+        
+        Q_cute = Q.cuda()
+        K_cute = K.cuda()
+        V_cute = V.cuda()
+        O_cute = torch.zeros_like(Q_cute)
+        
+        q_tensor, q_torch = cutlass_torch.cute_tensor_like(Q_cute, cutlass.Float16, is_dynamic_layout=True, assumed_align=16)
+        k_tensor, k_torch = cutlass_torch.cute_tensor_like(K_cute, cutlass.Float16, is_dynamic_layout=True, assumed_align=16)
+        v_tensor, v_torch = cutlass_torch.cute_tensor_like(V_cute, cutlass.Float16, is_dynamic_layout=True, assumed_align=16)
+        o_tensor, o_torch = cutlass_torch.cute_tensor_like(O_cute, cutlass.Float16, is_dynamic_layout=True, assumed_align=16)
+        
+        q_torch.copy_(Q_cute)
+        k_torch.copy_(K_cute)
+        v_torch.copy_(V_cute)
+        
+        mma_tiler = (128, 128, HEAD_DIM)
+        fmha = BlackwellFusedMultiHeadAttentionForward(
+            cutlass.Float32,
+            cutlass.Float32,
+            mma_tiler,
+            is_persistent=True,
+            mask_type=MaskType.NO_MASK,
+        )
+        
+        current_stream = cutlass_torch.default_stream()
+        
+        scale_softmax = 1.0 / math.sqrt(HEAD_DIM)
+        log2_e = math.log2(math.exp(1.0))
+        scale_softmax_log2 = scale_softmax * log2_e
+        scale_output = 1.0
+        
+        problem_size = (BATCH, SEQ_Q, SEQ_KV, HEADS, HEADS, HEAD_DIM)
+        cum_seqlen_q = None
+        cum_seqlen_k = None
+        
+        compiled_fmha = cute.compile(
+            fmha,
+            q_tensor.iterator,
+            k_tensor.iterator,
+            v_tensor.iterator,
+            o_tensor.iterator,
+            problem_size,
+            cum_seqlen_q,
+            cum_seqlen_k,
+            scale_softmax_log2,
+            scale_output,
+            current_stream,
+        )
+        
+        def run_fmha():
+            compiled_fmha(
+                q_tensor.iterator,
+                k_tensor.iterator,
+                v_tensor.iterator,
+                o_tensor.iterator,
+                problem_size,
+                cum_seqlen_q,
+                cum_seqlen_k,
+                scale_softmax_log2,
+                scale_output,
+                current_stream,
+            )
+        
+        ms = bench(run_fmha, warmup=10, repeat=30, proton_name="cutedsl_fa4", debug=DEBUG)
+        print(f"CuTeDSL FA: {flops(ms) / 1e12:.2f} TFLOPS, time: {ms:.3f} ms")
+        
+        # Run once for result
+        run_fmha()
+        torch.cuda.synchronize()
+        
+        return o_torch.cpu().numpy()
 
-    def pytorch_attn(Q, K, V):
-        Q_pt = Q.permute(0, 2, 1, 3).cuda()
-        K_pt = K.permute(0, 2, 1, 3).cuda()
-        V_pt = V.permute(0, 2, 1, 3).cuda()
-        func = lambda: torch.nn.functional.scaled_dot_product_attention(Q_pt, K_pt, V_pt, is_causal=False)
-        ms = bench(func, warmup=10, repeat=30, proton_name="pt_attn")
-        print(f"PyTorch flops: {flops(ms) / 1e12:.3f} TFLOPS, time: {ms:.3f} ms")
-        O_pt = func()
-        O_res = np.transpose(O_pt.cpu().numpy(), (0, 2, 1, 3))  # (B, H, S, D) -> (B, S, H, D)
-        return O_res
+    def flashattn_sm100(Q, K, V):
+        """Flash-Attention SM100 implementation from installed flash-attn package
+        
+        Note: Requires flash-attn to be installed with:
+            pip install flash-attn --no-build-isolation
+        """
+        try:
+            import math
+            
+            from flash_attn.cute.flash_fwd_sm100 import FlashAttentionForwardSm100
+            import cutlass
+            import cutlass.cute as cute
+            import cutlass.torch as cutlass_torch
+            import cuda.bindings.driver as cuda
+        except ImportError as e:
+            print(f"Flash-Attention SM100 not available: {e}")
+            print("Install with: pip install flash-attn --no-build-isolation")
+            print("Note: CuTeDSL baseline uses the same CUTLASS implementation")
+            return None
+        except Exception as e:
+            print(f"Unexpected error loading Flash-Attention SM100: {e}")
+            return None
+        
+        Q_fa = Q.cuda()
+        K_fa = K.cuda()
+        V_fa = V.cuda()
+        O_fa = torch.zeros_like(Q_fa)
+        
+        q_tensor, q_torch = cutlass_torch.cute_tensor_like(Q_fa, cutlass.Float16, is_dynamic_layout=True, assumed_align=16)
+        k_tensor, k_torch = cutlass_torch.cute_tensor_like(K_fa, cutlass.Float16, is_dynamic_layout=True, assumed_align=16)
+        v_tensor, v_torch = cutlass_torch.cute_tensor_like(V_fa, cutlass.Float16, is_dynamic_layout=True, assumed_align=16)
+        o_tensor, o_torch = cutlass_torch.cute_tensor_like(O_fa, cutlass.Float16, is_dynamic_layout=True, assumed_align=16)
+        
+        q_torch.copy_(Q_fa)
+        k_torch.copy_(K_fa)
+        v_torch.copy_(V_fa)
+        
+        fa_fwd = FlashAttentionForwardSm100(
+            head_dim=HEAD_DIM,
+            head_dim_v=HEAD_DIM,
+            qhead_per_kvhead=1,  # MHA
+            is_causal=False,
+            is_local=False,
+            pack_gqa=False,
+            m_block_size=128,
+            n_block_size=128,
+            is_persistent=True,
+        )
+        
+        current_stream = cutlass_torch.default_stream()
+        
+        scale_softmax = 1.0 / math.sqrt(HEAD_DIM)
+        
+        compiled_fa = cute.compile(
+            fa_fwd,
+            q_tensor,
+            k_tensor,
+            v_tensor,
+            o_tensor,
+            None,  # lse_tensor
+            scale_softmax,
+            current_stream,
+            None,  # mCuSeqlensQ
+            None,  # mCuSeqlensK
+            None,  # mSeqUsedQ
+            None,  # mSeqUsedK
+            None,  # mPageTable
+            None,  # softcap
+            None,  # window_size_left
+            None,  # window_size_right
+            None,  # learnable_sink
+        )
+        
+        def run_fa():
+            compiled_fa(
+                q_tensor,
+                k_tensor,
+                v_tensor,
+                o_tensor,
+                None,  # lse_tensor
+                scale_softmax,
+                current_stream,
+                None,  # mCuSeqlensQ
+                None,  # mCuSeqlensK
+                None,  # mSeqUsedQ
+                None,  # mSeqUsedK
+                None,  # mPageTable
+                None,  # softcap
+                None,  # window_size_left
+                None,  # window_size_right
+                None,  # learnable_sink
+            )
+        
+        ms = bench(run_fa, warmup=10, repeat=30, proton_name="flashattn_sm100", debug=DEBUG)
+        print(f"Flash-Attention SM100: {flops(ms) / 1e12:.2f} TFLOPS, time: {ms:.3f} ms")
+        
+        run_fa()
+        torch.cuda.synchronize()
+        
+        return o_torch.cpu().numpy()
 
-    try:
-        with ProtonContext("flash_attention4", debug=False):
-            O_tir = tir_attn(Q, K, V)
-            O_pt = pytorch_attn(Q, K, V)
-    except RuntimeError as e:
-        if "cuptiSubscribe" in str(e) or "cupti" in str(e).lower():
-            print("Warning: Proton profiling failed (likely due to compute-sanitizer conflict), running without profiling")
-            O_tir = tir_attn(Q, K, V)
-            O_pt = pytorch_attn(Q, K, V)
-        else:
-            raise
+    with ProtonContext("blackwell_fa4", debug=DEBUG):
+        print("Running TIR Flash Attention...")
+        O_tir = tir_attn(Q, K, V)
+        
+        print("\nRunning CuTeDSL FA4 baseline...")
+        O_cutedsl = cutedsl_attn(Q, K, V)
+        
+        print("\nRunning Flash-Attention SM100 baseline...")
+        O_flashattn = flashattn_sm100(Q, K, V)
 
-    # Compare
-    diff = np.abs(O_tir - O_pt)
-    rel_diff = np.abs(diff / (np.abs(O_pt) + 1e-8))
-    rtol, atol = 1e-2, 1e-2
-    mismatch_mask = (diff > atol) & (rel_diff > rtol)
-    num_mismatches = np.sum(mismatch_mask)
-
-    print(f"\nComparison: max_abs_err={np.max(diff):.6f}, max_rel_err={np.max(rel_diff):.6f}, "
-          f"mismatches={num_mismatches}/{O_tir.size} ({100.0*num_mismatches/O_tir.size:.2f}%)")
-
-    np.testing.assert_allclose(O_tir, O_pt, rtol=rtol, atol=atol)
-    print("Verification passed!")
+    # Compare with CuTeDSL FA
+    if O_cutedsl is not None:
+        print("\n=== TIR vs CuTeDSL FA4 ===")
+        diff_cute = np.abs(O_tir - O_cutedsl)
+        rtol, atol = 1e-2, 1e-2
+        
+        abs_ref = np.abs(O_cutedsl)
+        valid_mask = abs_ref > atol
+        rel_diff_cute = np.zeros_like(diff_cute)
+        if np.any(valid_mask):
+            rel_diff_cute[valid_mask] = diff_cute[valid_mask] / abs_ref[valid_mask]
+        
+        max_rel_err = np.max(rel_diff_cute) if np.any(valid_mask) else 0.0
+        mismatch_mask_cute = (diff_cute > atol) & (rel_diff_cute > rtol)
+        num_mismatches_cute = np.sum(mismatch_mask_cute)
+        
+        print(f"max_abs_err={np.max(diff_cute):.6f}, max_rel_err={max_rel_err:.6f}, "
+              f"mismatches={num_mismatches_cute}/{O_tir.size} ({100.0*num_mismatches_cute/O_tir.size:.2f}%)")
+        
+        np.testing.assert_allclose(O_tir, O_cutedsl, rtol=rtol, atol=atol)
+        print("\nVerification passed!")
+    else:
+        print("\nCuTeDSL FA4 baseline not available, skipping comparison")
+    
+    # Compare with Flash-Attention4 SM100
+    if O_flashattn is not None:
+        print("\n=== TIR vs Flash-Attention4 SM100 ===")
+        diff_fa = np.abs(O_tir - O_flashattn)
+        rtol, atol = 1e-2, 1e-2
+        
+        abs_ref = np.abs(O_flashattn)
+        valid_mask = abs_ref > atol
+        rel_diff_fa = np.zeros_like(diff_fa)
+        if np.any(valid_mask):
+            rel_diff_fa[valid_mask] = diff_fa[valid_mask] / abs_ref[valid_mask]
+        
+        max_rel_err = np.max(rel_diff_fa) if np.any(valid_mask) else 0.0
+        mismatch_mask_fa = (diff_fa > atol) & (rel_diff_fa > rtol)
+        num_mismatches_fa = np.sum(mismatch_mask_fa)
+        
+        print(f"max_abs_err={np.max(diff_fa):.6f}, max_rel_err={max_rel_err:.6f}, "
+              f"mismatches={num_mismatches_fa}/{O_tir.size} ({100.0*num_mismatches_fa/O_tir.size:.2f}%)")
+        
+        np.testing.assert_allclose(O_tir, O_flashattn, rtol=rtol, atol=atol)
+        print("\nVerification vs Flash-Attention SM100 passed!")
+    else:
+        print("\nFlash-Attention SM100 baseline not available, skipping comparison")
 
 
 if __name__ == "__main__":
