@@ -19,6 +19,7 @@
 
 import inspect
 from collections.abc import Callable
+from typing import Dict, List, Optional, Tuple, Union
 
 import tvm
 import tvm.runtime
@@ -28,7 +29,7 @@ from tvm.runtime.object import Object
 from ...ir import PrimExpr
 from ..expr import Call, Expr, ExternFunc, GlobalVar, ShapeExpr, StringImm, Var
 from ..struct_info import StructInfo, TensorStructInfo
-from ..utils import Dependency, convert_to_expr
+from ..utils import Dependency, args_converter, convert_to_expr, trans_callable_to_primfunc
 from . import _ffi_api
 
 PrimExprLike = int | PrimExpr
@@ -371,6 +372,34 @@ def call_tir_device(
     )
 
 
+def alloc_event_tensor(
+    workspace: Expr,
+    shape: Union[ShapeExpr, Tuple[PrimExpr], List[PrimExpr]],
+    f_init: Union[Callable, PrimExprLike],
+    extra_args: List[Union[Expr, PrimExprLike]] = [],
+) -> Expr:
+    """
+    Allocate an event tensor and initialize it.
+
+    Parameters
+    ----------
+    workspace : Expr
+        The workspace of the event tensor.
+    shape : Union[ShapeExpr, Tuple[PrimExpr], List[PrimExpr]]
+        The shape of the event tensor.
+    f_init : Union[Callable, PrimExprLike]
+        The function to initialize the event tensor. Takes indices, extra args as input and returns the initial count at corresponding index.
+    extra_args : List[Union[Expr, PrimExprLike]], optional
+        A list of extra arguments passed to the initialization function.
+        Defaults to an empty list.
+    """
+    if isinstance(shape, (list, tuple)):
+        shape = ShapeExpr(shape)
+    f_init, extra_args = trans_callable_to_primfunc(f_init, extra_args, len(shape) + len(extra_args), 1, "int32")
+    return _ffi_api.alloc_event_tensor(workspace, shape, f_init, extra_args)
+
+
+@args_converter.auto
 def call_dps_packed(
     func: str | Expr,
     args: Expr,

@@ -127,7 +127,7 @@ class MegaKernelWrapper:
         with T.cta():
             self.tile_scheduler.init()
             if not is_static_scheduler:
-                self.tile_scheduler.fetch_from_queue()
+                self.tile_scheduler.next_tile()
 
     @T.macro
     def run_tile(self, tile, *args, **kwargs):

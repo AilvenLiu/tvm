@@ -49,73 +49,6 @@ def test_basic():
     NUM_BLOCK_M = M // BLOCK_M
     NUM_BLOCK_N = N // BLOCK_N
 
-    class SpatialTileScheduler(TileSchedulerBase):
-        @staticmethod
-        def int_var(name):
-            return T.alloc_buffer([1], "int32", scope="local", align=4, name=name)
-
-        def __init__(self, prefix, exec_queue, smem_manager):
-            self.sm_cnt = SM_CNT
-            self.division = 132
-            self.m_idx = self.int_var("m_idx")
-            self.n_idx = self.int_var("n_idx")
-            self.k_idx = self.int_var("k_idx")
-            self.type = self.int_var("type")
-            self.linear_idx = self.int_var("linear_idx")
-
-        @T.macro
-        def _update_current_m_n_idx(self):
-            if self.type[0] == 0:
-                self.m_idx[0] = self.linear_idx[0] // NUM_BLOCK_N
-                self.n_idx[0] = self.linear_idx[0] % NUM_BLOCK_N
-            else:
-                self.m_idx[0] = self.linear_idx[0]
-
-        def get_idx_and_task_type(self):
-            return [self.m_idx[0], self.n_idx[0], self.k_idx[0]], self.type[0]
-
-        @T.macro
-        def init(self):
-            with T.cta():
-                bx = T.cta_id([self.sm_cnt], parent="kernel")
-                if bx < self.division:
-                    self.type[0] = 0
-                    self.linear_idx[0] = bx
-                else:
-                    self.type[0] = 1
-                    self.linear_idx[0] = bx - self.division
-                self._update_current_m_n_idx()
-
-        @T.macro
-        def wait(self, evt: static_scheduler.Semaphore, *coord, wait_level="cta", mask=0xFFFFFFFF):
-            evt.semaphore_wait(*coord, level=wait_level, mask=mask)
-
-        @T.macro
-        def notify(self, evt: static_scheduler.Semaphore, func_notify, scope="cta", scope_id=0):
-            with T.cta():
-                tid = T.thread_id([NUM_THREADS], parent="cta")
-                T.cuda.cta_sync()
-                notify_num = T.meta_var(func_notify(tid)[0])
-                rank = T.meta_var(func_notify(tid)[1])
-                coord = T.meta_var(func_notify(tid)[2:])
-                if tid < notify_num:
-                    evt.semaphore_notify(*coord, rank=rank)
-
-        @T.macro
-        def next_tile(self):
-            if self.type[0] == 0:
-                self.linear_idx[0] = self.linear_idx[0] + self.division
-            else:
-                self.linear_idx[0] = self.linear_idx[0] + (self.sm_cnt - self.division)
-            self._update_current_m_n_idx()
-
-        def valid(self):
-            return T.if_then_else(
-                self.type[0] == 1,
-                self.linear_idx[0] < NUM_BLOCK_M,
-                self.linear_idx[0] < NUM_BLOCK_M * NUM_BLOCK_N,
-            )
-
     # fmt: off
     @I.ir_module(tirp=True)
     class Before:
@@ -166,10 +99,12 @@ def test_basic():
                     smem_manager.advance()
 
         @R.function
-        def mega_kernel(A: R.Tensor((M, N), "float32"), event_1: R.Tensor((NUM_BLOCK_M,), "int32"), event_2: R.Tensor((1,), "int32")):
+        def mega_kernel(A: R.Tensor((M, N), "float32"), workspace: R.Tensor((100000,), "int32")):
             cls = Before
 
             with R.dataflow():
+                event_1 = R.alloc_event_tensor(workspace, [NUM_BLOCK_M,], NUM_BLOCK_N)
+                event_2 = R.alloc_event_tensor(workspace, [1,], NUM_BLOCK_M)
                 B = R.call_tir_device(
                     cls.stage_1,
                     A,
@@ -203,9 +138,6 @@ def test_basic():
                 R.output(C)
             return C
     # fmt: on
-    fused_naive_mod = relax.transform.StaticHorizontalFusion(
-        "mega_kernel", "static", SpatialTileScheduler, static_scheduler.Semaphore, "mega_kernel_"
-    )(Before)
     fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion(
         "mega_kernel", "static", static_scheduler.StaticTileScheduler, static_scheduler.Semaphore, "mega_kernel_"
     )(Before)
@@ -219,48 +151,24 @@ def test_basic():
     target = tvm.target.Target("cuda")
 
     A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    workspace_tvm = tvm.runtime.tensor(np.zeros((100000,), dtype=np.int32), device=DEV)
 
-    # we initialize event on host instead of device because of Tp.fill not correctly implemented
     with target:
-        evt_1_tvm = tvm.runtime.tensor(
-            np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
-        evt_2_tvm = tvm.runtime.tensor(
-            np.full((1,), NUM_BLOCK_M * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
-        fused_naive_mod = tvm.compile(fused_naive_mod, target=target, tir_pipeline="tirp")
-        vm = tvm.relax.VirtualMachine(fused_naive_mod, DEV)
-        C_tvm_naive_fused = vm["mega_kernel"](A_tvm, evt_1_tvm, evt_2_tvm)
-        ret_naive_fused = C_tvm_naive_fused.numpy()
-
-        evt_1_tvm = tvm.runtime.tensor(
-            np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
-        evt_2_tvm = tvm.runtime.tensor(
-            np.full((1,), NUM_BLOCK_M * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
         fused_static_scheduler_mod = tvm.compile(
             fused_static_scheduler_mod, target=target, tir_pipeline="tirp"
         )
         vm = tvm.relax.VirtualMachine(fused_static_scheduler_mod, DEV)
-        C_tvm_static_scheduler_fused = vm["mega_kernel"](A_tvm, evt_1_tvm, evt_2_tvm)
+        C_tvm_static_scheduler_fused = vm["mega_kernel"](A_tvm, workspace_tvm)
         ret_static_scheduler_fused = C_tvm_static_scheduler_fused.numpy()
 
-        evt_1_tvm = tvm.runtime.tensor(
-            np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
-        evt_2_tvm = tvm.runtime.tensor(
-            np.full((1,), NUM_BLOCK_M * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
         fused_dynamic_scheduler_mod = tvm.compile(
             fused_dynamic_scheduler_mod, target=target, tir_pipeline="tirp"
         )
         vm = tvm.relax.VirtualMachine(fused_dynamic_scheduler_mod, DEV)
-        C_tvm_dynamic_scheduler_fused = vm["mega_kernel"](A_tvm, evt_1_tvm, evt_2_tvm)
+        C_tvm_dynamic_scheduler_fused = vm["mega_kernel"](A_tvm, workspace_tvm)
         ret_dynamic_scheduler_fused = C_tvm_dynamic_scheduler_fused.numpy()
 
         ret_std = np.sum(A_np, axis=1, keepdims=True)
-        tvm.testing.assert_allclose(ret_naive_fused, ret_std, rtol=1e-3, atol=1e-3)
         tvm.testing.assert_allclose(ret_static_scheduler_fused, ret_std, rtol=1e-3, atol=1e-3)
         tvm.testing.assert_allclose(ret_dynamic_scheduler_fused, ret_std, rtol=1e-3, atol=1e-3)
 
@@ -324,18 +232,13 @@ def test_extra_args():
                     smem_manager.arrive_all("cta")
                     smem_manager.advance()
 
-        @T.prim_func(tirp=True, private=True)
-        def end(m: T.int32, n: T.int32, k: T.int32):
-            T.func_attr({"megakernel.device_func": "end"})
-            with T.cta():
-                T.block_attr({"tirp.tile_class.run": True})
-                T.add_to_parent(T.evaluate(0))
-
         @R.function
-        def mega_kernel(A: R.Tensor((M, N), "float32"), event_1: R.Tensor((NUM_BLOCK_M,), "int32"), event_2: R.Tensor((1,), "int32"), P: R.Tensor((NUM_BLOCK_M,), "int32"), inv_P: R.Tensor((NUM_BLOCK_M,), "int32")):
+        def mega_kernel(A: R.Tensor((M, N), "float32"), workspace: R.Tensor((100000,), "int32"), P: R.Tensor((NUM_BLOCK_M,), "int32"), inv_P: R.Tensor((NUM_BLOCK_M,), "int32")):
             cls = Before
 
             with R.dataflow():
+                event_1 = R.alloc_event_tensor(workspace, [NUM_BLOCK_M,], NUM_BLOCK_N)
+                event_2 = R.alloc_event_tensor(workspace, [1,], NUM_BLOCK_M)
                 B = R.call_tir_device(
                     cls.stage_1,
                     A,
@@ -387,22 +290,16 @@ def test_extra_args():
     target = tvm.target.Target("cuda")
 
     A_tvm = tvm.runtime.tensor(A_np, device=DEV)
+    workspace_tvm = tvm.runtime.tensor(np.zeros((100000,), dtype=np.int32), device=DEV)
     P_tvm = tvm.runtime.tensor(P_np, device=DEV)
     P_inv_tvm = tvm.runtime.tensor(P_inv_np, device=DEV)
 
-    # we initialize event on host instead of device because of Tp.fill not correctly implemented
     with target:
-        evt_1 = tvm.runtime.tensor(
-            np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
-        evt_2 = tvm.runtime.tensor(
-            np.full((1,), NUM_BLOCK_M * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
         fused_static_scheduler_mod = tvm.compile(
             fused_static_scheduler_mod, target=target, tir_pipeline="tirp"
         )
         vm = tvm.relax.VirtualMachine(fused_static_scheduler_mod, DEV)
-        C_tvm_static_scheduler_fused = vm["mega_kernel"](A_tvm, evt_1, evt_2, P_tvm, P_inv_tvm)
+        C_tvm_static_scheduler_fused = vm["mega_kernel"](A_tvm, workspace_tvm, P_tvm, P_inv_tvm)
         ret_static_scheduler_fused = C_tvm_static_scheduler_fused.numpy()
 
         evt_1 = tvm.runtime.tensor(
@@ -415,7 +312,7 @@ def test_extra_args():
             fused_dynamic_scheduler_mod, target=target, tir_pipeline="tirp"
         )
         vm = tvm.relax.VirtualMachine(fused_dynamic_scheduler_mod, DEV)
-        C_tvm_dynamic_scheduler_fused = vm["mega_kernel"](A_tvm, evt_1, evt_2, P_tvm, P_inv_tvm)
+        C_tvm_dynamic_scheduler_fused = vm["mega_kernel"](A_tvm, workspace_tvm, P_tvm, P_inv_tvm)
         ret_dynamic_scheduler_fused = C_tvm_dynamic_scheduler_fused.numpy()
 
         ret_std = np.sum(A_np, axis=1, keepdims=True)

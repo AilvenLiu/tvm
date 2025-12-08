@@ -24,6 +24,7 @@ from . import _op_gradient, builtin, ccl, distributed, grad, image, memory, nn, 
 # Operators
 from .base import (
     assert_op,
+    alloc_event_tensor,
     call_builtin_with_ctx,
     call_dps_packed,
     call_inplace_packed,

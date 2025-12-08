@@ -173,11 +173,11 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
       kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->inv_in_extra_args,
                                                 n_p->Attr("attrs")->Attr("inv_in_extra_args")));
       kwargs_keys.push_back("in_deps");
-      kwargs_values.push_back(IdDoc("Ignored"));
+      kwargs_values.push_back(IdDoc("Skipped"));
       kwargs_keys.push_back("out_deps");
-      kwargs_values.push_back(IdDoc("Ignored"));
+      kwargs_values.push_back(IdDoc("Skipped"));
       kwargs_keys.push_back("inv_in_deps");
-      kwargs_values.push_back(IdDoc("Ignored"));
+      kwargs_values.push_back(IdDoc("Skipped"));
       kwargs_keys.push_back("handle_config");
       kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->handle_config,
                                                 n_p->Attr("attrs")->Attr("handle_config")));
@@ -291,17 +291,27 @@ ffi::Optional<ExprDoc> PrintRelaxPrint(const relax::Call& n, const AccessPath& n
   if (!n->op.same_as(print_op)) {
     return std::nullopt;
   }
-  TVM_FFI_ICHECK(n->args.size() >= 1);
-  // special handling: it is important to indicate that the format string (first argument)
-  // is the _format_ string, or else roundtripping will fail
-  // (the format string will be interpreted as an argument and there will be a new default format
-  // string given)
-  ExprDoc first_arg = d->AsDoc<ExprDoc>(n->args[0], n_p->Attr("args")->ArrayItem(0));
-  ffi::Array<ExprDoc> args;
-  for (size_t i = 1; i < n->args.size(); i++) {
-    args.push_back(d->AsDoc<ExprDoc>(n->args[i], n_p->Attr("args")->ArrayItem(i)));
+}
+
+
+ffi::Optional<ExprDoc> PrintAllocEventTensor(const relax::Call& n, const AccessPath& n_p,
+                                            const IRDocsifier& d) {
+  static const Op& alloc_event_tensor_op = Op::Get("relax.alloc_event_tensor");
+  if (!n->op.same_as(alloc_event_tensor_op)) {
+    return std::nullopt;
   }
-  return Relax(d, "print")->Call(args, {"format"}, {first_arg});
+  ffi::Array<ExprDoc> args;
+  args.push_back(d->AsDoc<ExprDoc>(n->args[0], n_p->Attr("args")->ArrayItem(0)));
+  args.push_back(d->AsDoc<ExprDoc>(n->args[1], n_p->Attr("args")->ArrayItem(1)));
+  ffi::Array<ffi::String> kwargs_keys;
+  ffi::Array<ExprDoc> kwargs_values;
+  auto *attrs = n->attrs.as<relax::AllocEventTensorAttrs>();
+  kwargs_keys.push_back("f_init");
+  kwargs_values.push_back(IdDoc("Skipped"));
+  kwargs_keys.push_back("extra_args");
+  kwargs_values.push_back(
+      d->AsDoc<ExprDoc>(attrs->extra_args, n_p->Attr("attrs")->Attr("extra_args")));
+  return Relax(d, "alloc_event_tensor")->Call(args, kwargs_keys, kwargs_values);
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
@@ -325,6 +335,10 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
           }
           // Special case: print
           if (ffi::Optional<ExprDoc> doc = PrintRelaxPrint(n, n_p, d)) {
+            return doc.value();
+          }
+          // Special case: alloc_event_tensor
+          if (ffi::Optional<ExprDoc> doc = PrintAllocEventTensor(n, n_p, d)) {
             return doc.value();
           }
           ExprDoc prefix{ffi::UnsafeInit()};

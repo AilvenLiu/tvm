@@ -20,6 +20,7 @@ The pass is written in Python for experiment, fast development.
 
 from collections import defaultdict
 from functools import partial
+import functools
 from typing import Dict, List, Literal, Set, Type, Tuple, Optional, Union
 from dataclasses import dataclass
 
@@ -28,7 +29,7 @@ from tvm import relax
 from tvm.ir import DictAttrs, load_json, save_json
 from tvm.ir.module import IRModule
 from tvm.meta_schedule.runner import config
-from tvm.relax.expr import Expr
+from tvm.relax.expr import Expr, ShapeExpr
 from tvm.relax.expr_functor import PyExprMutator, PyExprVisitor, mutator
 from tvm.relax.struct_info import StructInfo, TensorStructInfo, TupleStructInfo
 from tvm.script import tir as T
@@ -39,6 +40,7 @@ from tvm.tir import (
     Block,
     Buffer,
     BufferLoad,
+    BufferStore,
     PrimExpr,
     PrimFunc,
     SeqStmt,
@@ -48,13 +50,14 @@ from tvm.tir import (
     Evaluate,
     BlockRealize,
     AllocBuffer,
+    DeclBuffer,
     IntImm,
 )
 from tvm.tir.analysis import verify_tirp_well_formed
 from tvm.tir.op import ret
 from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
 from tvm.tirp.transform.common import seek_kernel_replace_point, BufferReplacer
-from tvm.tirp.megakernel.common import KernelConfig, JobType, SmemManager, TileSchedulerBase, SemaphoreBase, pack_into_32bit, map_job_type_to_profile_event_type
+from tvm.tirp.megakernel.common import KernelConfig, JobType, SmemManager, TileSchedulerBase, SemaphoreBase, any_sync, pack_into_32bit, map_job_type_to_profile_event_type
 from tvm.tirp.operator import KernelReplacePoint
 from tvm.tir.exec_scope import ExecScope
 from tvm.tirp.bench.utils import CudaProfiler
@@ -107,7 +110,6 @@ class EventHandleConfigs:
     push_level: Literal["thread", "warp", "warpgroup", "cta", "none"]
     push_scope_id: int
     freeze: bool
-    hard_code_entry_task: bool
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,14 @@ class DeviceFuncInfo:
     job_type_id: int
     evt_handle_config: EventHandleConfigs
 
+@dataclass
+class AllocEventInfo:
+    workspace: Expr
+    event_tensor: Optional[Expr]
+    shape: ShapeExpr
+    f_init: PrimFunc
+    extra_args: List[Union[Expr, PrimExpr]]
+
 @relax.expr_functor.visitor
 class EventHandleHelper(PyExprVisitor):
     def __init__(self, mod: IRModule, strategy: Literal["static", "dynamic"]):
@@ -139,6 +149,7 @@ class EventHandleHelper(PyExprVisitor):
         self.mod = mod
         self.strategy = strategy
         self.call_tir_device_op = tvm.ir.Op.get("relax.call_tir_device")
+        self.call_alloc_evt_op = tvm.ir.Op.get("relax.alloc_event_tensor")
         self.event_handle_configs: Dict[relax.Call, EventHandleConfigs] = {}
         self.in_evt: Dict[Expr, set[Tuple[int, relax.Call]]] = defaultdict(set)
         self.out_evt: Dict[Expr, set[Tuple[int, relax.Call]]] = defaultdict(set)
@@ -147,6 +158,7 @@ class EventHandleHelper(PyExprVisitor):
         self.topological_order: List[relax.Call] = []
         self.entry_points: set[relax.Call] = set()
         self.end_points: set[relax.Call] = set()
+        self.alloc_evt_infos: Dict[Expr, AllocEventInfo] = {}
 
     def clear_state(self):
         self.event_handle_configs = {}
@@ -157,6 +169,7 @@ class EventHandleHelper(PyExprVisitor):
         self.topological_order = []
         self.entry_points = set()
         self.end_points = set()
+        self.alloc_evt_infos = {}
 
     def visit_call_(self, call: relax.Call) -> None:
         if call.op == self.call_tir_device_op:
@@ -179,7 +192,7 @@ class EventHandleHelper(PyExprVisitor):
                 }
             }
             default_config = default_config_pool.get(func_type, default_config_pool["default"])
-            self.event_handle_configs[call] = EventHandleConfigs(func_type, job_id, **default_config, freeze=False, hard_code_entry_task=False)
+            self.event_handle_configs[call] = EventHandleConfigs(func_type, job_id, **default_config, freeze=False)
             if handle_configs:
                 self.event_handle_configs[call].wait_scope = handle_configs.get("wait_scope", self.event_handle_configs[call].wait_scope)
                 self.event_handle_configs[call].notify_scope = handle_configs.get("notify_scope", self.event_handle_configs[call].notify_scope)
@@ -193,10 +206,19 @@ class EventHandleHelper(PyExprVisitor):
             for idx, evt in enumerate(out_events):
                 self.out_evt[evt].add((idx, call))
             return super().visit_call_(call)
+        elif call.op == self.call_alloc_evt_op:
+            return super().visit_call_(call)
         else:
             raise ValueError(
                 "StaticHorizontalFusion can only be applied to relax function with only call_tir_device"
             )
+
+    def visit_var_binding_(self, binding: relax.VarBinding) -> None:
+        ret = super().visit_var_binding_(binding)
+        if isinstance(binding.value, relax.Call) and binding.value.op == self.call_alloc_evt_op:
+            call = binding.value
+            self.alloc_evt_infos[binding.var] = AllocEventInfo(call.args[0], binding.var, call.args[1], call.attrs.f_init, call.attrs.extra_args)
+        return ret
 
     def infer(self, func: relax.Function):
         self.clear_state()
@@ -232,10 +254,6 @@ class EventHandleHelper(PyExprVisitor):
             if len(self.next[call]) == 0:
                 self.end_points.add(call)
         self.topological_order = self.topological_order[::-1]
-        for call, config in self.event_handle_configs.items():
-            if call in self.entry_points:
-                config.hard_code_entry_task = True
-                break
         # check the end points
         final_evt = None
         for end_call in self.end_points:
@@ -371,7 +389,6 @@ class EventOpInserter(StmtExprMutator):
                             push_level=self.func_info.evt_handle_config.push_level,
                             scope=self.func_info.evt_handle_config.push_scope,
                             scope_id=self.func_info.evt_handle_config.push_scope_id,
-                            full_notify=self.func_info.evt_handle_config.hard_code_entry_task,
                         )
                     return EventPrimFuncHelper().visit_stmt(pre_notify_and_push.body)
 
@@ -384,11 +401,8 @@ class EventOpInserter(StmtExprMutator):
                     pre_notify_and_push = get_pre_notify_and_push(idx)
                     if pre_notify_and_push is not None:
                         pushes.append(pre_notify_and_push)
-            if self.strategy == "dynamic" and self.func_info.evt_handle_config.hard_code_entry_task:
-                assert len(waits) == 0
-                body_list = [block.body] + pushes
-            else:
-                body_list = pushes + waits + [block.body] + commits
+
+            body_list = pushes + waits + [block.body] + commits
             new_body = SeqStmt(body_list) if len(body_list) > 1 else body_list[0]
             # Reconstruct the block with the new body, preserving all other attributes.
             return Block(
@@ -817,6 +831,27 @@ class DependencyHandler(StmtExprMutator):
             assert len(inv_seq) > 1
             return SeqStmt(list(reversed(inv_seq)), op.span)
 
+
+class InitEtensorFuncHandler(StmtExprMutator):
+    def __init__(self):
+        super().__init__()
+
+    def rewrite(self, stmt: Stmt, output_buf: Buffer, etensor_buffer: Buffer, idx) -> Stmt:
+        self.output_buf = output_buf
+        self.etensor_buffer = etensor_buffer
+        self.idx = idx
+        return self.visit_stmt(stmt)
+
+    def visit_buffer_store_(self, op):
+        if op.buffer == self.output_buf:
+            return BufferStore(
+                buffer=self.etensor_buffer,
+                value=op.value * (SemaphoreBase.base + 1),
+                indices=[self.idx[0]],
+                span=op.span
+            )
+        return super().visit_buffer_store_(op)
+
 @mutator
 class _Rewriter(PyExprMutator):
     def __init__(
@@ -827,6 +862,7 @@ class _Rewriter(PyExprMutator):
         self.mod = mod
         self.strategy = strategy
         self.call_tir_device_op = tvm.ir.Op.get("relax.call_tir_device")
+        self.call_alloc_evt_op = tvm.ir.Op.get("relax.alloc_event_tensor")
         self.rewrite_func_name = set(rewrite_func_name)
         self.fusion_prefix = fusion_prefix
         self.tile_scheduler_class = tile_scheduler_class
@@ -841,7 +877,9 @@ class _Rewriter(PyExprMutator):
         self.ret_value_entries: Dict[relax.Call, List[int]] = defaultdict(list)
         self.new_ret_index = {}
         self.var_entry_mapping = DisjointSet()
-        self.relax_var_to_entry = {}
+        self.relax_var_to_entry: Dict[Var, VarEntry] = {}
+        self.workspace_cur_offset: Dict[str, int] = {}
+        self.in_var_entries: List[VarEntry] = []
         self.gvar_to_remove = list()
         self.evt_handle_helper = EventHandleHelper(mod, self.strategy)
         self.profiler_buf_size = int(1e7)
@@ -859,7 +897,8 @@ class _Rewriter(PyExprMutator):
         self.var_entry_mapping = DisjointSet()
         self.relax_var_to_entry = {}
         self.cur_rewrite_func_name = None
-        self.x = 0
+        self.workspace_cur_offset = {}
+        self.in_var_entries = []
 
     def transform(self) -> IRModule:
         """Entry point"""
@@ -891,13 +930,20 @@ class _Rewriter(PyExprMutator):
         if event not in self.event_buffers:
             assert isinstance(event.struct_info, TensorStructInfo), f"event {event} is not a tensor"
             shape = [T.int32(s) for s in event.struct_info.shape.values]
+            alloc_evt_info = self.evt_handle_helper.alloc_evt_infos[event]
+            assert alloc_evt_info.workspace in self.relax_var_to_entry
+            if alloc_evt_info.workspace not in self.workspace_cur_offset:
+                self.workspace_cur_offset[alloc_evt_info.workspace] = 0
             self.event_buffers[event] = T.buffer(
                 shape,
                 event.struct_info.dtype,
+                data=self.relax_var_to_entry[alloc_evt_info.workspace].tir_buffer.data,
                 scope="global",
                 buffer_name="event",
-                offset_factor=1
+                elem_offset=self.workspace_cur_offset[alloc_evt_info.workspace],
             )
+            size = functools.reduce(lambda x, y: x * y, shape, 1)
+            self.workspace_cur_offset[alloc_evt_info.workspace] += size
         return self.event_buffers[event]
 
     def _update_persistent_var_info(self, persistent_var_info_tile_class: PersistentVarInfo, persistent_var_info_megakernel: PersistentVarInfo, class_name: Optional[str]):
@@ -1078,6 +1124,8 @@ class _Rewriter(PyExprMutator):
                 in_info_list, out_info_list, push_info_list, call.attrs.job_id, self.evt_handle_helper.event_handle_configs[call]
             )
             return super().visit_call_(call)
+        elif call.op == self.call_alloc_evt_op:
+            return call
         else:
             raise ValueError(
                 "StaticHorizontalFusion can only be applied to relax function with only call_tir_device"
@@ -1125,9 +1173,9 @@ class _Rewriter(PyExprMutator):
         def switch_task_type(tile_scheduler: TileSchedulerBase, lane_id, profiler: Optional[CudaProfiler]):
             idxs, type = tile_scheduler.get_idx_and_task_type()
             total_type_count = len(self.device_func_infos)
-            if_frames = [T.If(type == info.job_type_id) for info in self.device_func_infos.values()]
-            then_frames = [T.Then() for i in range(total_type_count)]
-            else_frames = [T.Else() for i in range(total_type_count)]
+            if_frames = [T.If(type == info.job_type_id) for info in self.device_func_infos.values()] + [T.If(type == JobType.INIT_ETENSOR.value), T.If(type == JobType.WAIT_ETENSOR_INIT.value)]
+            then_frames = [T.Then() for i in range(total_type_count + 2)]
+            else_frames = [T.Else() for i in range(total_type_count + 2)]
             for i, (call, func) in enumerate(self.device_func_infos.items()):
                 if_frames[i].__enter__()
                 new_body = EventOpInserter.rewrite(self.strategy, func, tile_scheduler, self.semaphore_class)
@@ -1144,85 +1192,161 @@ class _Rewriter(PyExprMutator):
                     if profiler is not None:
                         profiler.end(map_job_type_to_profile_event_type[func.job_type_id], lane_id == 0)
                 else_frames[i].__enter__()
+
+            # manually allocate evt_wait_etensor_init_complete for static scheduler
+            workspace, offset = next(iter(self.workspace_cur_offset.items()))
+            self.workspace_cur_offset[workspace] += 1
+            evt_wait_etensor_init_complete = T.buffer([1], "int32", self.relax_var_to_entry[workspace].tir_buffer.data, buffer_name="event_init_complete", elem_offset=offset)
+
+            if_frames[-2].__enter__()
+            with then_frames[-2]:
+                init_etensor_impl(idxs, tile_scheduler, evt_wait_etensor_init_complete)
+            else_frames[-2].__enter__()
+
+            if_frames[-1].__enter__()
+            with then_frames[-1]:
+                wait_etensor_init_impl(evt_wait_etensor_init_complete)
+            else_frames[-1].__enter__()
+
             T.add_to_parent(Evaluate(T.cuda.trap_when_assert_failed(False)))
 
-            for i in range(total_type_count - 1, -1, -1):
+            for i in range(total_type_count + 1, -1, -1):
                 else_frames[i].__exit__(None, None, None)
                 if_frames[i].__exit__(None, None, None)
 
         sym_map = {}
-        def run_push_init_tasks(tile_scheduler: TileSchedulerBase, profiler: Optional[CudaProfiler], bx, lane_id):
-            # build lambda push func for scheduler
-            def push_func_template(idx, tile_num, already_pushed_num, job_type_id):
-                return (job_type_id, tile_num[0] * tile_num[1] * tile_num[2] - already_pushed_num,
-                        T.truncdiv(idx, (tile_num[1] * tile_num[2])),
-                        T.truncdiv(idx, tile_num[2]) % tile_num[1], idx % tile_num[2])
-            push_func_list = []
-            for i, call in enumerate(self.evt_handle_helper.entry_points):
-                device_func_info = self.device_func_infos[call]
-                tile_num = []
-                # TODO: collect the detailed var into tile_num to reduce the number of symbolic vars
-                for var in call.args[2]:
-                    if var not in sym_map:
-                        if isinstance(var, IntImm):
-                            sym_map[var] = T.IntImm("int32", var.value)
+        def init_etensor_impl(idxs, tile_scheduler: TileSchedulerBase, evt_etensor_init_complete_buf: Buffer):
+            def convert_1d_index_to_nd(idx, shape):
+                nd_idx = []
+                for i in reversed(range(len(shape))):
+                    nd_idx.append(idx % shape[i])
+                    idx = idx // shape[i]
+                return list(reversed(nd_idx))
+
+            def handle_f_init(alloc_evt_info: AllocEventInfo, idx):
+                event = alloc_evt_info.event_tensor
+                etensor_buf_1d = self.event_buffers[event].view(-1).buffer
+                shape = [T.int32(s) for s in event.struct_info.shape.values]
+                st_idx = convert_1d_index_to_nd(idx[0], shape)
+                var_replace_map = {}
+                buffer_replace_map = {}
+
+                def _replace_var(src: Var, dst: Var):
+                    var_replace_map[src] = dst
+
+                def _replace_buffer(src: Buffer, dst: Buffer):
+                    buffer_replace_map[src] = dst
+                    for i in range(len(src.shape)):
+                        if isinstance(src.shape[i], Var):
+                            var_replace_map[src.shape[i]] = dst.shape[i]
+
+                f_init = alloc_evt_info.f_init
+                for i, var in enumerate(st_idx):
+                    _replace_var(f_init.params[i], var)
+                # handle extra tensors and tir sym vars
+                extra_args_offset = len(st_idx)
+                for i, var in enumerate(alloc_evt_info.extra_args):
+                    if isinstance(var, (Var, PrimExpr)):
+                        if var not in sym_map:
+                            if isinstance(var, IntImm):
+                                sym_map[var] = T.IntImm("int32", var.value)
+                            else:
+                                sym_map[var] = T.Var("new_sym", "int32")
+                        _replace_var(f_init.params[extra_args_offset + i], sym_map[var])
+                    elif isinstance(var, Expr):
+                        if var in self.relax_var_to_entry:
+                            var_entry = self.relax_var_to_entry[var]
+                            _replace_var(f_init.params[extra_args_offset + i], var_entry.tir_var)
+                            _replace_buffer(f_init.buffer_map[f_init.params[extra_args_offset + i]], var_entry.tir_buffer)
                         else:
-                            sym_map[var] = T.Var("sym", "int32")
-                    tile_num.append(sym_map[var])
-                if self.device_func_infos[call].evt_handle_config.hard_code_entry_task:
-                    hard_encode_call = call
-                    already_pushed_num = T.min(KernelConfig.SM_NUMBER - 1, tile_num[0] * tile_num[1] * tile_num[2])
-                    hard_encode_push_num = already_pushed_num
-                else:
-                    already_pushed_num = 0
-                push_func = partial(push_func_template, tile_num=tile_num, already_pushed_num=already_pushed_num, job_type_id=device_func_info.job_type_id)
-                push_func_list.append(push_func)
+                            binding = self.builder_.lookup_binding(var)
+                            assert isinstance(binding, relax.TupleGetItem), f"unknown source of call_tir_device extra_args: {var} with binding {binding}"
+                            var_entry = VarEntry(
+                                var,
+                                f_init.params[extra_args_offset + i],
+                                f_init.buffer_map[f_init.params[extra_args_offset + i]],
+                            )
+                            self.var_entry_mapping.add_element(var_entry)
+                            self.relax_var_to_entry[var] = var_entry
+                        self.in_var_entries.append(var_entry)
+                    else:
+                        raise ValueError(f"Unsupported extra arg type: {type(var)}")
+                # handle the output buffer
+                out_buffer = f_init.buffer_map[f_init.params[-1]]
+
+                replacer = BufferReplacer(buffer_replace_map, var_replace_map)
+                func_body = replacer.visit_stmt(f_init.body)
+                stmt = InitEtensorFuncHandler().rewrite(func_body, buffer_replace_map[out_buffer], etensor_buf_1d, idx)
+                T.add_to_parent(stmt)
 
             with T.cta():
-                with T.If(bx < hard_encode_push_num):
-                    with T.Then():
-                        func_info = self.device_func_infos[hard_encode_call]
-                        new_body = EventOpInserter.rewrite(self.strategy, func_info, tile_scheduler, self.semaphore_class)
-                        needed_idx_num = len(func_info.tile_idx)
-                        tile_num = []
-                        for var in hard_encode_call.args[2]:
-                            if isinstance(var, IntImm):
-                                tile_num.append(T.IntImm("int32", var.value))
-                            else:
-                                if var not in sym_map:
-                                    sym_map[var] = T.Var("sym", "int32")
-                                tile_num.append(sym_map[var])
-                        flatten_idx = bx + tile_num[0] * tile_num[1] * tile_num[2] - hard_encode_push_num
-                        # need to transform to more common way to compute idxs
-                        idxs = [T.truncdiv(flatten_idx, (tile_num[1] * tile_num[2])),
-                                T.truncdiv(flatten_idx, tile_num[2]) % tile_num[1], flatten_idx % tile_num[2]]
-                        replacer = BufferReplacer(
-                            buffer_map=buffer_replace_map,
-                            var_map=var_replace_map | {func_info.tile_idx[j]: idxs[j] for j in range(needed_idx_num)},
-                        )
-                        new_body = replacer.visit_stmt(new_body)
-                        duplicated_var_replacer = DuplicateVarReplacer()
-                        new_body = duplicated_var_replacer.visit_stmt(new_body)
-                        if profiler is not None:
-                            profiler.start(map_job_type_to_profile_event_type[func_info.job_type_id], lane_id == 0)
-                        T.add_to_parent(new_body)
+                tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
+                l = len(self.evt_handle_helper.alloc_evt_infos)
+                if_frames = [T.If(idxs[0] == i) for i in range(l)]
+                then_frames = [T.Then() for i in range(l)]
+                else_frames = [T.Else() for i in range(l)]
+                idx = T.alloc_local([1], "int32", name="idx")
+                T.buffer_store(idx, tid, [0])
+                for i, alloc_evt_info in enumerate(self.evt_handle_helper.alloc_evt_infos.values()):
+                    if_frames[i].__enter__()
+                    with then_frames[i]:
+                        shape = [T.int32(s) for s in alloc_evt_info.event_tensor.struct_info.shape.values]
+                        nelem = functools.reduce(lambda x, y: x * y, shape, 1)
+                        with T.While(idx[0] < nelem):
+                            handle_f_init(alloc_evt_info, idx)
+                            T.buffer_store(idx, idx[0] + KernelConfig.NUM_THREADS, [0])
+                    else_frames[i].__enter__()
 
-                        if profiler is not None:
-                            profiler.end(map_job_type_to_profile_event_type[func_info.job_type_id], lane_id == 0)
-                    with T.Else():
-                        # push rest entry tasks
-                        tile_scheduler.push(push_func_list, push_level="cta")
-                        tile_scheduler.notify_entry_task_push()
+                if self.strategy == "static":
+                    # init the evt_etensor_init_complete
+                    with T.If(idxs[0] == l):
+                        with T.Then():
+                            with T.If(tid == 0):
+                                with T.Then():
+                                    T.buffer_store(evt_etensor_init_complete_buf, (l + 1 + KernelConfig.SM_NUMBER) * (SemaphoreBase.base + 1), [0])
+
+                for i in range(l - 1, -1, -1):
+                    else_frames[i].__exit__(None, None, None)
+                    if_frames[i].__exit__(None, None, None)
+
+                if self.strategy == "static":
+                    with T.If(idxs[0] < l + 1):
+                        with T.Then():
+                            evt_etensor_init_complete = self.semaphore_class(evt_etensor_init_complete_buf)
+                            tile_scheduler.notify(evt_etensor_init_complete, lambda notify_idx: (1, -1, 0), scope="cta", release=True)
+
+        @T.macro
+        def wait_etensor_init_impl(evt_etensor_init_complete_buf: Buffer):
+            with T.thread():
+                warp_id = T.warp_id(
+                    [KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER], parent="cta"
+                )
+                lane_id = T.thread_id([32], parent="warp")
+                # if self.profiler_on:
+                #     self.profiler.start(ProfileEventType.WAIT_ETENSOR_INIT, lane_id == 0)
+                state = T.alloc_local([1], "int32", name="state")
+                state[0] = -1
+                while 1:
+                    if lane_id == 0:
+                        T.ptx.ld_global_acquire(
+                            state[0],
+                            evt_etensor_init_complete_buf.ptr_to([0]),
+                        )
+                    if any_sync(0xFFFFFFFF, state[0] <= KernelConfig.SM_NUMBER * (SemaphoreBase.base + 1) and state[0] > 0):
+                        if lane_id == 0 and warp_id == 0:
+                            T.cuda.atomic_add(evt_etensor_init_complete_buf.ptr_to([0]), -(SemaphoreBase.base + 1))
+                        break
+                    T.cuda.nano_sleep(40)
 
         def replace_dyn_shared_mem_buffer(new_buffer):
             for buffer in self.dyn_shared_mem_buffers:
                 buffer_replace_map[buffer] = new_buffer
 
-        def set_tile_scheduler(queue, tasks, head, tail, signal, smem_manager):
+        def set_tile_scheduler(queue, tasks, head, tail, smem_manager):
             if self.strategy == "static":
                 tile_scheduler = self.tile_scheduler_class("mega_", queue, smem_manager)
             else:
-                tile_scheduler = self.tile_scheduler_class(tasks, head, tail, smem_manager, signal=signal)
+                tile_scheduler = self.tile_scheduler_class(tasks, head, tail, smem_manager)
             return tile_scheduler
 
         def set_profiler(profiler_buf):
@@ -1239,7 +1363,7 @@ class _Rewriter(PyExprMutator):
                 profiler.init(warp_id)
 
         @T.macro
-        def persistent_body(queue, tasks, head, tail, signal, profiler_buf):
+        def persistent_body(queue, tasks, head, tail, profiler_buf):
             with T.kernel():
                 bx = T.scope_id([KernelConfig.SM_NUMBER], parent="kernel", cur=self.device_func_exec_scope)
                 tid = T.thread_id([KernelConfig.NUM_THREADS], parent="cta")
@@ -1248,15 +1372,14 @@ class _Rewriter(PyExprMutator):
                 smem_buffer = T.alloc_buffer(KernelConfig.MAX_SMEM_SIZE, "uint8", scope="shared.dyn", align=16)
                 replace_dyn_shared_mem_buffer(smem_buffer)
                 smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, smem_buffer.data))
-                tile_scheduler = T.meta_var(set_tile_scheduler(queue, tasks, head, tail, signal, smem_manager))
+                tile_scheduler = T.meta_var(set_tile_scheduler(queue, tasks, head, tail, smem_manager))
                 persistent_vars = T.meta_var(PersistentVars(self.persistent_var_infos, smem_manager))
                 profiler = T.meta_var(set_profiler(profiler_buf))
                 init_profiler(warp_id, profiler)
                 persistent_vars.init()
                 tile_scheduler.init()
-                if tasks is not None:
-                    run_push_init_tasks(tile_scheduler, profiler, bx, lane_id)
-                    tile_scheduler.fetch_from_queue()
+                if self.strategy == "dynamic":
+                    tile_scheduler.next_tile()
                 while tile_scheduler.valid():
                     switch_task_type(tile_scheduler, lane_id, profiler)
                     tile_scheduler.next_tile()
@@ -1269,22 +1392,22 @@ class _Rewriter(PyExprMutator):
                 @T.prim_func(tirp=True, private=True)
                 def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32"),
                                       profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
-                    persistent_body(queue, None, None, None, None, profiler_buf)
+                    persistent_body(queue, None, None, None, profiler_buf)
             else:
                 @T.prim_func(tirp=True, private=True)
                 def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32")):
-                    persistent_body(queue, None, None, None, None, None)
+                    persistent_body(queue, None, None, None, None)
         else:
             if self.profiler_on:
                 @T.prim_func(tirp=True, private=True)
                 def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"),
-                                      tail: T.buffer((1,), "int32"), signal: T.buffer((1,), "int32"), profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
-                    persistent_body(None, tasks, head, tail, signal, profiler_buf)
+                                      tail: T.buffer((1,), "int32"), profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
+                    persistent_body(None, tasks, head, tail, profiler_buf)
             else:
                 @T.prim_func(tirp=True, private=True)
                 def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"),
-                                      tail: T.buffer((1,), "int32"), signal: T.buffer((1,), "int32")):
-                    persistent_body(None, tasks, head, tail, signal, None)
+                                      tail: T.buffer((1,), "int32")):
+                    persistent_body(None, tasks, head, tail, None)
 
         new_body = persistent_kernel.body
         for template in self.host_templates:
@@ -1329,12 +1452,28 @@ class _Rewriter(PyExprMutator):
         else:
             assert len(self.evt_handle_helper.entry_points) + 1 <= KernelConfig.SM_NUMBER
         var_collector = VarCollector()
+
         def emit_task_round_robin(queue, idx, bx, tx):
-            # generate tasks in topological order
-            for i, call in enumerate(self.evt_handle_helper.topological_order):
+            # init etensor
+            with T.If(bx == 0):
+                with T.Then():
+                    with T.If(tx == 0):
+                        with T.Then():
+                            l = len(self.evt_handle_helper.alloc_evt_infos)
+                            for_grid = T.grid(*[l + 1, 1, 1]) # +1 for wait_etensor_complete evt
+                            vars = for_grid.__enter__()
+                            packed_val = pack_into_32bit(vars[0], vars[1], vars[2], JobType.INIT_ETENSOR.value, host=False)
+                            T.buffer_store(queue, packed_val, [idx[0] % KernelConfig.SM_NUMBER, idx[0] // KernelConfig.SM_NUMBER])
+                            T.buffer_store(idx, idx[0] + 1, 0)
+                            for_grid.__exit__(None, None, None)
+                with T.Else():
+                    T.buffer_store(idx, idx[0] + l + 1, 0)
+
+            # set entry tasks
+            for i, call in enumerate(self.evt_handle_helper.entry_points):
                 device_func_info = self.device_func_infos[call]
                 tile_num = call.args[2]
-                with T.If(bx == i):
+                with T.If(bx == i + 1):
                     with T.Then():
                         with T.If(tx == 0):
                             with T.Then():
@@ -1348,7 +1487,44 @@ class _Rewriter(PyExprMutator):
                                 for_grid.__exit__(None, None, None)
                     with T.Else():
                         T.buffer_store(idx, idx[0] + tile_num[0] * tile_num[1] * tile_num[2], 0)
-            with T.If(bx == len(self.device_func_infos)):
+
+            # wait_etensor_init_complete
+            with T.If(bx == 1 + len(self.evt_handle_helper.entry_points)):
+                with T.Then():
+                    with T.If(tx == 0):
+                        with T.Then():
+                            l = len(self.evt_handle_helper.alloc_evt_infos)
+                            for_grid = T.grid(*[KernelConfig.SM_NUMBER, 1, 1]) # +1 for wait_etensor_complete evt
+                            vars = for_grid.__enter__()
+                            packed_val = pack_into_32bit(vars[0], vars[1], vars[2], JobType.WAIT_ETENSOR_INIT.value, host=False)
+                            T.buffer_store(queue, packed_val, [idx[0] % KernelConfig.SM_NUMBER, idx[0] // KernelConfig.SM_NUMBER])
+                            T.buffer_store(idx, idx[0] + 1, 0)
+                            for_grid.__exit__(None, None, None)
+                with T.Else():
+                    T.buffer_store(idx, idx[0] + KernelConfig.SM_NUMBER, 0)
+
+            # generate rest tasks in topological order
+            for i, call in enumerate(self.evt_handle_helper.topological_order):
+                if call in self.evt_handle_helper.entry_points:
+                    continue
+                device_func_info = self.device_func_infos[call]
+                tile_num = call.args[2]
+                with T.If(bx == i + 2):
+                    with T.Then():
+                        with T.If(tx == 0):
+                            with T.Then():
+                                for e in tile_num.values:
+                                    var_collector.visit_expr(e)
+                                for_grid = T.grid(*tile_num.values)
+                                vars = for_grid.__enter__()
+                                packed_val = pack_into_32bit(vars[0], vars[1], vars[2], device_func_info.job_type_id, host=False)
+                                T.buffer_store(queue, packed_val, [idx[0] % KernelConfig.SM_NUMBER, idx[0] // KernelConfig.SM_NUMBER])
+                                T.buffer_store(idx, idx[0] + 1, 0)
+                                for_grid.__exit__(None, None, None)
+                    with T.Else():
+                        T.buffer_store(idx, idx[0] + tile_num[0] * tile_num[1] * tile_num[2], 0)
+
+            with T.If(bx == len(self.device_func_infos) + 2):
                 with T.Then():
                     with T.If(tx == 0):
                         with T.Then():
@@ -1356,6 +1532,53 @@ class _Rewriter(PyExprMutator):
                                 packed_val = pack_into_32bit(0, 0, 0, JobType.END.value, host=False)
                                 T.buffer_store(queue, packed_val, [idx[0] % KernelConfig.SM_NUMBER, idx[0] // KernelConfig.SM_NUMBER])
                                 T.buffer_store(idx, idx[0] + 1, 0)
+
+        def emit_entry_task(tasks, head, tail, idx, bx, tx):
+            # init etensor
+            with T.If(bx == 0):
+                with T.Then():
+                    with T.If(tx == 0):
+                        with T.Then():
+                            l = len(self.evt_handle_helper.alloc_evt_infos)
+                            for_grid = T.grid(*[l + 1, 1, 1]) # +1 for wait_etensor_complete evt
+                            vars = for_grid.__enter__()
+                            packed_val = pack_into_32bit(vars[0], vars[1], vars[2], JobType.INIT_ETENSOR.value, host=False)
+                            T.buffer_store(tasks, packed_val, [idx[0]])
+                            T.buffer_store(idx, idx[0] + 1, 0)
+                            for_grid.__exit__(None, None, None)
+                with T.Else():
+                    T.buffer_store(idx, idx[0] + l + 1, 0)
+
+            # set entry tasks
+            for i, call in enumerate(self.evt_handle_helper.entry_points):
+                device_func_info = self.device_func_infos[call]
+                tile_num = call.args[2]
+                with T.If(bx == i + 1):
+                    with T.Then():
+                        with T.If(tx == 0):
+                            with T.Then():
+                                for e in tile_num.values:
+                                    var_collector.visit_expr(e)
+                                for_grid = T.grid(*tile_num.values)
+                                vars = for_grid.__enter__()
+                                packed_val = pack_into_32bit(vars[0], vars[1], vars[2], device_func_info.job_type_id, host=False)
+                                T.buffer_store(tasks, packed_val, [idx[0]])
+                                T.buffer_store(idx, idx[0] + 1, 0)
+                                for_grid.__exit__(None, None, None)
+                    with T.Else():
+                        T.buffer_store(idx, idx[0] + tile_num[0] * tile_num[1] * tile_num[2], 0)
+
+            with T.If(bx >= len(self.evt_handle_helper.entry_points) + 1):
+                with T.Then():
+                    with T.If(tvm.tir.all(tx == 0, bx == len(self.evt_handle_helper.entry_points) + 1)):
+                        with T.Then():
+                            T.buffer_store(head, 0, [0])
+                            T.buffer_store(tail, idx[0], [0])
+                    rest_sm_num = KernelConfig.SM_NUMBER - (len(self.evt_handle_helper.entry_points) + 1)
+                    T.buffer_store(idx, idx[0] + (rest_sm_num - (KernelConfig.SM_NUMBER - bx)) * KernelConfig.NUM_THREADS + tx, 0)
+                    with T.While(idx[0] < self.tile_scheduler_class.MAX_TASKS):
+                        T.buffer_store(tasks, -1, [idx[0]])
+                        T.buffer_store(idx, idx[0] + rest_sm_num * KernelConfig.NUM_THREADS, 0)
 
         if self.strategy == "static":
             @T.prim_func(tirp=True, private=True)
@@ -1368,20 +1591,14 @@ class _Rewriter(PyExprMutator):
                     emit_task_round_robin(queue, idx, bx, tx)
         else:
             @T.prim_func(tirp=True, private=True)
-            def gen_exec_queue(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS,), "int32"), head: T.buffer((1,), "int32"), tail: T.buffer((1,), "int32"), signal: T.buffer((1,), "int32")):
+            def gen_exec_queue(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS,), "int32"), head: T.buffer((1,), "int32"), tail: T.buffer((1,), "int32")):
                 with T.kernel():
-                    # fill tasks queue with -1
+                    # fill tasks queue with -1 first
                     bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
                     tx = T.thread_id([THREAD_NUM], parent="cta")
                     idx = T.alloc_buffer([1], "int32", scope="local")
-                    if bx == 0 and tx == 0:
-                        head[0] = 0
-                        tail[0] = 0
-                        signal[0] = 0
-                    idx[0] = bx * THREAD_NUM + tx
-                    while idx[0] < self.tile_scheduler_class.MAX_TASKS:
-                        tasks[idx[0]] = -1
-                        idx[0] = idx[0] + KernelConfig.SM_NUMBER * THREAD_NUM
+                    idx[0] = 0
+                    emit_entry_task(tasks, head, tail, idx, bx, tx)
 
         new_vars = [Var("sym", v.dtype) for v in var_collector.vars]
         replace = BufferReplacer(
@@ -1434,16 +1651,30 @@ class _Rewriter(PyExprMutator):
                     new_buffer_map[leader_entry.tir_var] = leader_entry.tir_buffer
                     input_var_entries_after_merge.append(entry)
                 replace_buffer(entry.tir_buffer, leader_entry.tir_buffer)
-
             for entry in func.out_var_entries:
                 leader_entry = self.var_entry_mapping.find(entry)
                 visited_entry_group.add(leader_entry)
+        for entry in self.in_var_entries:
+            leader_entry = self.var_entry_mapping.find(entry)
+            if leader_entry not in visited_entry_group:
+                visited_entry_group.add(leader_entry)
+                # this is an input tensor after merging
+                new_relax_params.append(entry.relax_var)
+                new_tir_params.append(leader_entry.tir_var)
+                new_buffer_map[leader_entry.tir_var] = leader_entry.tir_buffer
+                input_var_entries_after_merge.append(entry)
+            replace_buffer(entry.tir_buffer, leader_entry.tir_buffer)
 
-        for e in self.event_buffers:
-            event_tensor_var = T.var("handle", name=e.name_hint)
-            new_buffer_map[event_tensor_var] = self.event_buffers[e]
-            new_tir_params.append(event_tensor_var)
-            new_relax_params.append(e)
+        workspace = set()
+        for info in self.evt_handle_helper.alloc_evt_infos.values():
+            if info.workspace not in workspace:
+                assert info.workspace in self.relax_var_to_entry
+                entry = self.relax_var_to_entry[info.workspace]
+                workspace.add(info.workspace)
+                new_buffer_map[entry.tir_var] = entry.tir_buffer
+                new_tir_params.append(entry.tir_var)
+                new_relax_params.append(info.workspace)
+
         total_input_num = len(new_relax_params)
 
         for call, func in self.device_func_infos.items():
@@ -1519,14 +1750,13 @@ class _Rewriter(PyExprMutator):
             task_buffer = list(persistent_kernel.buffer_map.values())[0]
             head_buffer = list(persistent_kernel.buffer_map.values())[1]
             tail_buffer = list(persistent_kernel.buffer_map.values())[2]
-            sig_buffer = list(persistent_kernel.buffer_map.values())[3]
             gen_exec_queue_tir, sym_vars = self._build_gen_exec_queue_kernel()
             gen_exec_queue_gvar = self.builder_.add_func(gen_exec_queue_tir, f"gen_exec_queue_{self.cur_rewrite_func_name}")
             output_sinfo = [TensorStructInfo(shape=task_buffer.shape, dtype=task_buffer.dtype), TensorStructInfo(shape=head_buffer.shape, dtype=head_buffer.dtype),
-                            TensorStructInfo(shape=tail_buffer.shape, dtype=tail_buffer.dtype), TensorStructInfo(shape=sig_buffer.shape, dtype=sig_buffer.dtype)]
+                            TensorStructInfo(shape=tail_buffer.shape, dtype=tail_buffer.dtype)]
             packed_exec_queue = self.builder_.emit(relax.call_tir(gen_exec_queue_gvar, [], out_sinfo=output_sinfo, tir_vars=sym_vars))
             new_relax_params.extend(
-                [packed_exec_queue[0], packed_exec_queue[1], packed_exec_queue[2], packed_exec_queue[3]]
+                [packed_exec_queue[0], packed_exec_queue[1], packed_exec_queue[2]]
             )
         if self.profiler_on:
             out_sinfo.append(TensorStructInfo(shape=(self.profiler_buf_size,), dtype="uint64"))

@@ -155,6 +155,21 @@ struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.CallTIRDeviceAttrs", CallTIRDeviceAttrs,
                                     BaseAttrsNode);
 };  // struct CallTIRDeviceAttrs
+
+struct AllocEventTensorAttrs : public AttrsNodeReflAdapter<AllocEventTensorAttrs> {
+  tir::PrimFunc f_init;
+  ffi::Array<ffi::Any> extra_args;
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<AllocEventTensorAttrs>()
+        .def_ro("f_init", &AllocEventTensorAttrs::f_init, "The initialization function.")
+        .def_ro("extra_args", &AllocEventTensorAttrs::extra_args, "The extra arguments.");
+  }
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.AllocEventTensorAttrs", AllocEventTensorAttrs,
+                                    BaseAttrsNode);
+};  // struct AllocEventTensorAttrs
 }  // namespace relax
 }  // namespace tvm
 

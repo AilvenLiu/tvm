@@ -34,6 +34,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   CallTIRInplaceAttrs::RegisterReflection();
   CallInplacePackedAttrs::RegisterReflection();
   CallTIRDeviceAttrs::RegisterReflection();
+  AllocEventTensorAttrs::RegisterReflection();
   ToVDeviceAttrs::RegisterReflection();
   HintOnDeviceAttrs::RegisterReflection();
 }
@@ -962,6 +963,40 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("relax.op.call_tir_device", MakeCallTIRDevice);
 }
+
+
+// alloc_event_tensor
+
+StructInfo InferStructInfoAllocateEventTensor(const Call& call, const BlockBuilder& ctx) {
+  ICHECK(call->args[0].as<ExprNode>() && call->args[0].as<ExprNode>()->struct_info_.as<TensorStructInfoNode>())
+      << "must be Tensor, but got " << call->args[0]->GetTypeKey();
+  ICHECK(call->args[1].as<ShapeExprNode>())
+      << "must be ShapeExpr, but got " << call->args[1]->GetTypeKey();
+  DataType out_dtype = call->args[0].as<ExprNode>()->struct_info_.as<TensorStructInfoNode>()->dtype;
+  return TensorStructInfo(call->args[1], out_dtype);
+}
+
+TVM_REGISTER_OP("relax.alloc_event_tensor")
+    .set_num_inputs(2)
+    .add_argument("workspace", "Expr", "The workspace tensor to allocate the event tensor.")
+    .add_argument("shape", "Expr", "The shape of the event tensor to allocate.")
+    .set_attrs_type<AllocEventTensorAttrs>()
+    .set_attr<FInferStructInfo>("FInferStructInfo", InferStructInfoAllocateEventTensor)
+    .set_attr<Bool>("FPurity", Bool(true));
+
+Expr MakeAllocEventTensor(Expr workspace, ShapeExpr shape, tvm::tir::PrimFunc f_init, ffi::Array<ffi::Any> extra_args) {
+  ObjectPtr<AllocEventTensorAttrs> attrs = ffi::make_object<AllocEventTensorAttrs>();
+  attrs->f_init = f_init;
+  attrs->extra_args = extra_args;
+  static const Op& op = Op::Get("relax.alloc_event_tensor");
+  return Call(op, {workspace, shape}, Attrs(attrs), {});
+}
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def("relax.op.alloc_event_tensor", MakeAllocEventTensor);
+}
+
 
 // call_dps_packed
 

@@ -396,6 +396,53 @@ from tvm.script import tir as T
 from tvm.tir.function import PrimFunc
 PrimExprLike = Union[int, PrimExpr]
 
+
+def trans_callable_to_primfunc(func: Union[Callable, PrimFunc, PrimExprLike], extra_args: List[Union[Expr, PrimExprLike]],
+                               input_dim: int, output_dim: int, dtype: str) -> Tuple[PrimFunc, List[Union[Expr, PrimExpr]]]:
+    if isinstance(func, PrimFunc):
+        return func, [(var if isinstance(var, (Expr, PrimExpr)) else {"int32": T.int32, "int64": T.int64}[dtype](var)) for var in extra_args]
+    if isinstance(func, PrimExprLike):
+        assert output_dim == 1, "The output_dim must be 1 when func is PrimExprLike."
+        new_func = lambda *args: func
+    else:
+        new_func = func
+    def _convert_arg(para: Union[tir.Var, tir.Buffer]) -> T.Var:
+        if isinstance(para, tir.Var) or isinstance(para, tir.Buffer):
+            ret = T.arg("var", para)
+        else:
+            f_imme_create = {"int32": T.int32, "int64": T.int64}[dtype]
+            ret = T.arg("var", f_imme_create())
+        if isinstance(ret, tir.Var) and ret.dtype != dtype:
+            ret = T.cast(ret, dtype)
+        return ret
+
+    def _unpack_and_assign(value_list: List[T.Var], buf_list: List[T.Buffer], length):
+        if length == 1:
+            T.buffer_store(buf_list[0], value_list, [0])
+        else:
+            for i in range(length):
+                T.buffer_store(buf_list[i], value_list[i], [0])
+
+    # prepare the tir input and output
+    tir_input = [T.var(dtype=dtype) for _ in range(input_dim - len(extra_args))]
+    for arg in extra_args:
+        if isinstance(arg, Expr):
+            tir_input.append(T.Buffer(shape=[v for v in arg.struct_info.shape], dtype=arg.struct_info.dtype, scope="global"))
+        elif isinstance(arg, PrimExpr):
+            tir_input.append(T.var(dtype=arg.dtype))
+        else: # int
+            tir_input.append(arg)
+    tir_output = [T.Buffer(shape=[1], dtype=dtype, scope="local") for _ in range(output_dim)]
+
+    @T.prim_func(check_well_formed=False)
+    def primfunc():
+        in_args = T.meta_var([_convert_arg(spec) for spec in tir_input])
+        out_arg = T.meta_var([_convert_arg(spec) for spec in tir_output])
+        _unpack_and_assign(new_func(*in_args), out_arg, output_dim)
+
+    return primfunc, [(var if isinstance(var, (Expr, PrimExpr)) else {"int32": T.int32, "int64": T.int64}[dtype](var)) for var in extra_args]
+
+
 class Dependency:
     def __init__(
         self,
@@ -453,51 +500,12 @@ class Dependency:
         self.tile_idx_dtype = tile_idx_dtype
         self.dispatch_func = {"int32": T.int32, "int64": T.int64}[tile_idx_dtype]
 
-    def _trans_to_primfunc(self, func: Union[Callable, PrimFunc], input_dim: int, output_dim: int) -> PrimFunc:
-        if isinstance(func, PrimFunc):
-            return func
-        def _convert_arg(para: Union[tir.Var, tir.Buffer]) -> T.Var:
-            if isinstance(para, tir.Var) or isinstance(para, tir.Buffer):
-                ret = T.arg("var", para)
-            else:
-                ret = T.arg("var", self.dispatch_func())
-            if isinstance(ret, tir.Var) and ret.dtype != self.tile_idx_dtype:
-                ret = T.cast(ret, self.tile_idx_dtype)
-            return ret
-
-        def _unpack_and_assign(value_list: List[T.Var], buf_list: List[T.Buffer], length):
-            if length == 1:
-                T.buffer_store(buf_list[0], value_list, [0])
-            else:
-                for i in range(length):
-                    T.buffer_store(buf_list[i], value_list[i], [0])
-
-        # prepare the tir input and output
-        tir_input = [T.var(dtype=self.tile_idx_dtype) for _ in range(input_dim - len(self.extra_args))]
-        for arg in self.extra_args:
-            if isinstance(arg, Expr):
-                tir_input.append(T.Buffer(shape=[v for v in arg.struct_info.shape], dtype=arg.struct_info.dtype, scope="global"))
-            elif isinstance(arg, PrimExpr):
-                tir_input.append(T.var(dtype=arg.dtype))
-            else: # int
-                tir_input.append(arg)
-        tir_output = [T.Buffer(shape=[1], dtype=self.tile_idx_dtype, scope="local") for _ in range(output_dim)]
-
-        @T.prim_func(check_well_formed=False)
-        def primfunc():
-            in_args = T.meta_var([_convert_arg(spec) for spec in tir_input])
-            out_arg = T.meta_var([_convert_arg(spec) for spec in tir_output])
-            _unpack_and_assign(func(*in_args), out_arg, output_dim)
-
-        return primfunc
-
-    def handle_dep(self, input_dim, output_dim) -> Tuple[Expr, List[Expr], List[PrimExpr], PrimFunc]:
+    def handle_dep(self, input_dim, output_dim) -> Tuple[Expr, List[Expr], PrimFunc]:
         # check the signature
         if isinstance(self.dep, PrimFunc):
             if len(self.dep.params) != input_dim + output_dim:
                 raise ValueError(f"dep requires {input_dim + output_dim} parameters")
         elif len(inspect.signature(self.dep).parameters) != input_dim:
              raise ValueError(f"dep requires {input_dim} parameters")
-        dep = self._trans_to_primfunc(self.dep, input_dim, output_dim)
-
-        return self.event, [(var if isinstance(var, (Expr, PrimExpr)) else self.dispatch_func(var)) for var in self.extra_args], dep
+        dep, extra_args = trans_callable_to_primfunc(self.dep, self.extra_args, input_dim, output_dim, self.tile_idx_dtype)
+        return self.event, extra_args, dep

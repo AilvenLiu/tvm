@@ -42,6 +42,7 @@ class MegaKernel:
     MAX_PAGE_NUM = 8192
     PAGE_SIZE = 16
 
+    EVT_WORKSPACE_SIZE = 1024 * 1024 * 128
 
     SPLIT_QKV_PROJECT = 3
     SPLIT_O_PROJECT = 3
@@ -56,6 +57,14 @@ class MegaKernel:
 
 
     def _qwen3_layer_inner(self, bb: rx.BlockBuilder, max_batch_size, blk_m, profile_on):
+
+        def f_init_unmatched_dim(dim_len, in_par_size, out_par_size):
+            def f_init(i):
+                start_out_par = i * out_par_size
+                end_out_par = T.min(dim_len, (i + 1) * out_par_size)
+                return (end_out_par - 1) // in_par_size - start_out_par // in_par_size + 1
+            return f_init
+
         batch_size = T.var("int64", name="batch_size")
         x = rx.Var("x", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float16"))
         residual = rx.Var("residual", rx.TensorStructInfo([batch_size, self.HIDDEN_SIZE], "float32"))
@@ -85,26 +94,9 @@ class MegaKernel:
                 ]
             ),
         )
-        packed_events = rx.Var(
-            "packed_events",
-            rx.TupleStructInfo(
-                [
-                    rx.TensorStructInfo([ceildiv((self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, FuseGemmTile.BLK_N)], "int32"),  # etensor_qkv_partial
-                    rx.TensorStructInfo([KernelConfig.SM_NUMBER], "int32"),  # etensor_notify_attn
-                    rx.TensorStructInfo([max_batch_size * self.NUM_KEY_VALUE_HEADS], "int32"),  # etensor_attn_merge
-                    rx.TensorStructInfo([self.SPLIT_O_PROJECT], "int32"),  # etensor_o_proj
-                    rx.TensorStructInfo([self.HIDDEN_SIZE // FuseGemmTile.BLK_N], "int32"),  # etensor_o_partial
-                    rx.TensorStructInfo([max_batch_size], "int32"),  # etensor_attn_add_rmsnorm
-                    rx.TensorStructInfo([1], "int32"),  # etensor_attn_mlp
-                    rx.TensorStructInfo([self.DOWN_PROJ_SPLIT_K_FACTOR], "int32"),  # etensor_down_proj
-                    rx.TensorStructInfo([self.HIDDEN_SIZE // FuseGemmTile.BLK_N], "int32"),  # etensor_down_proj_reduce
-                    rx.TensorStructInfo([max_batch_size], "int32"),  # etensor_mlp_add_rmsnorm
-                    rx.TensorStructInfo([1], "int32"),  # etensor_end
-                ]
-            ),
-        )
+        workspace = rx.Var("workspace", rx.TensorStructInfo([self.EVT_WORKSPACE_SIZE], "int32"))
 
-        with bb.function(f"megakernel_blkm{blk_m}", [x, residual, packed_info, packed_weights, packed_events]):
+        with bb.function(f"megakernel_blkm{blk_m}", [x, residual, packed_info, packed_weights, workspace]):
             # with bb.dataflow():
                 # unpack info
                 kv_data_ = bb.emit(R.TupleGetItem(packed_info, 0))
@@ -144,19 +136,6 @@ class MegaKernel:
                 gate_up_weight = bb.emit(R.TupleGetItem(packed_weights, 5))
                 down_weight = bb.emit(R.TupleGetItem(packed_weights, 6))
                 mlp_add_rms_weight = bb.emit(R.TupleGetItem(packed_weights, 7))
-
-                # unpack events
-                etensor_qkv_partial = bb.emit(R.TupleGetItem(packed_events, 0))
-                etensor_notify_attn = bb.emit(R.TupleGetItem(packed_events, 1))
-                etensor_attn_merge = bb.emit(R.TupleGetItem(packed_events, 2))
-                etensor_o_proj = bb.emit(R.TupleGetItem(packed_events, 3))
-                etensor_o_partial = bb.emit(R.TupleGetItem(packed_events, 4))
-                etensor_attn_add_rms = bb.emit(R.TupleGetItem(packed_events, 5))
-                etensor_attn_mlp = bb.emit(R.TupleGetItem(packed_events, 6))
-                etensor_down_proj = bb.emit(R.TupleGetItem(packed_events, 7))
-                etensor_down_proj_reduce = bb.emit(R.TupleGetItem(packed_events, 8))
-                etensor_mlp_add_rms = bb.emit(R.TupleGetItem(packed_events, 9))
-                etensor_end = bb.emit(R.TupleGetItem(packed_events, 10))
 
                 # get tile kernels
                 qkv_proj_func, qkv_proj_num_tiles, _ = FuseGemmTile.get_func(
@@ -260,6 +239,92 @@ class MegaKernel:
                 gate_up_silu_gv = bb.add_func(gate_up_silu_func, f"gate_up_silu_blk{blk_m}")
                 down_proj_gv = bb.add_func(down_proj_func, f"down_proj_blk{blk_m}")
                 mlp_add_rms_gv = bb.add_func(mlp_add_rms_func, "mlp_add_rms")
+
+                # alloc and init events
+                etensor_qkv_partial = bb.emit(
+                    R.alloc_event_tensor(
+                        workspace,
+                        [ceildiv((self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, FuseGemmTile.BLK_N)],
+                        f_init=self.SPLIT_QKV_PROJECT
+                    )
+                )
+                attn_tile_num = T.int64(ceildiv(attn_task_num, KernelConfig.WG_NUMBER))
+                etensor_notify_attn = bb.emit(
+                    R.alloc_event_tensor(
+                        workspace,
+                        [KernelConfig.SM_NUMBER],
+                        f_init=lambda i, remain, num, unit: T.if_then_else(i < remain, (num + 1) * unit, num * unit),
+                        extra_args=[
+                            attn_tile_num % KernelConfig.SM_NUMBER,
+                            attn_tile_num // KernelConfig.SM_NUMBER,
+                            KernelConfig.WG_NUMBER * (2 + self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS)
+                        ]
+                    )
+                )
+                etensor_attn_merge = bb.emit(
+                    R.alloc_event_tensor(
+                        workspace,
+                        [max_batch_size * self.NUM_KEY_VALUE_HEADS],
+                        f_init=lambda i, num: T.min(KernelConfig.SM_NUMBER, num),
+                        extra_args=[attn_tile_num]
+                    )
+                )
+                etensor_o_proj = bb.emit(
+                    R.alloc_event_tensor(
+                        workspace,
+                        [self.SPLIT_O_PROJECT],
+                        f_init=lambda i, task_num, bs, tile_k, tile_num: T.if_then_else(
+                                            task_num > self.NUM_KEY_VALUE_HEADS * bs,
+                                            f_init_unmatched_dim(
+                                                self.NUM_ATTENTION_HEADS * self.HEAD_DIM,
+                                                (self.NUM_ATTENTION_HEADS // self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM,
+                                                tile_k,
+                                            )(i) * bs,
+                                            T.min(KernelConfig.SM_NUMBER, tile_num),
+                        ),
+                        extra_args=[attn_task_num, batch_size, o_proj_size[2], attn_tile_num]
+                    )
+                )
+                etensor_attn_add_rms = bb.emit(
+                    R.alloc_event_tensor(
+                        workspace,
+                        [max_batch_size],
+                        f_init=lambda i, blk_n: self.SPLIT_O_PROJECT * (self.HIDDEN_SIZE // blk_n),
+                        extra_args=[o_proj_size[1]]
+                    )
+                )
+                etensor_attn_mlp = bb.emit(
+                    R.alloc_event_tensor(
+                        workspace,
+                        [1],
+                        f_init=lambda i, bs: bs,
+                        extra_args=[batch_size]
+                    )
+                )
+                etensor_down_proj = bb.emit(
+                    R.alloc_event_tensor(
+                        workspace,
+                        [self.DOWN_PROJ_SPLIT_K_FACTOR],
+                        f_init=lambda i, tile_n, tile_k: f_init_unmatched_dim(self.INTERMEDIATE_SIZE, tile_n // 2, tile_k)(i),
+                        extra_args=[gate_up_silu_size[1], down_proj_size[2]]
+                    )
+                )
+                etensor_mlp_add_rms = bb.emit(
+                    R.alloc_event_tensor(
+                        workspace,
+                        [max_batch_size],
+                        f_init=lambda i, blk_n: self.DOWN_PROJ_SPLIT_K_FACTOR * (self.HIDDEN_SIZE // blk_n),
+                        extra_args=[down_proj_size[1]]
+                    )
+                )
+                etensor_end = bb.emit(
+                    R.alloc_event_tensor(
+                        workspace,
+                        [1],
+                        f_init=lambda i, bs: bs,
+                        extra_args=[batch_size]
+                    )
+                )
 
                 # data flow
                 # QKV_GEMM
@@ -685,26 +750,9 @@ class MegaKernel:
                 ]
             ),
         )
-        packed_events = rx.Var(
-            "packed_events",
-            rx.TupleStructInfo(
-                [
-                    rx.TensorStructInfo([ceildiv((self.NUM_ATTENTION_HEADS + 2 * self.NUM_KEY_VALUE_HEADS) * self.HEAD_DIM, FuseGemmTile.BLK_N)], "int32"),  # etensor_qkv_partial
-                    rx.TensorStructInfo([KernelConfig.SM_NUMBER], "int32"),  # etensor_notify_attn
-                    rx.TensorStructInfo([max_batch_size * self.NUM_KEY_VALUE_HEADS], "int32"),  # etensor_attn_merge
-                    rx.TensorStructInfo([self.SPLIT_O_PROJECT], "int32"),  # etensor_o_proj
-                    rx.TensorStructInfo([self.HIDDEN_SIZE // FuseGemmTile.BLK_N], "int32"),  # etensor_o_partial
-                    rx.TensorStructInfo([max_batch_size], "int32"),  # etensor_attn_add_rmsnorm
-                    rx.TensorStructInfo([1], "int32"),  # etensor_attn_mlp
-                    rx.TensorStructInfo([self.DOWN_PROJ_SPLIT_K_FACTOR], "int32"),  # etensor_down_proj
-                    rx.TensorStructInfo([self.HIDDEN_SIZE // FuseGemmTile.BLK_N], "int32"),  # etensor_down_proj_reduce
-                    rx.TensorStructInfo([max_batch_size], "int32"),  # etensor_mlp_add_rmsnorm
-                    rx.TensorStructInfo([1], "int32"),  # etensor_end
-                ]
-            ),
-        )
+        workspace = rx.Var("workspace", rx.TensorStructInfo([self.EVT_WORKSPACE_SIZE], "int32"))
 
-        with bb.function("megakernel", [x, residual, packed_info, packed_weights, packed_events]):
+        with bb.function("megakernel", [x, residual, packed_info, packed_weights, workspace]):
             with bb.dataflow():
                 runtime_batch_size = T.var("int64", name="runtime_batch_size")
                 _ = bb.match_cast(R.shape_of(x), R.Shape([runtime_batch_size, self.HIDDEN_SIZE]))
@@ -726,7 +774,7 @@ class MegaKernel:
                                            R.Tensor([batch_size, self.HIDDEN_SIZE], "float32"))
                 def bind_branch_with_r_func(r_func, blk_m):
                     out = rx.Var(f"out_blkm{blk_m}", output_shape)
-                    bindings = [rx.VarBinding(out, rx.Call(r_func, [x, residual, packed_info, packed_weights, packed_events], sinfo_args=output_sinfo))]
+                    bindings = [rx.VarBinding(out, rx.Call(r_func, [x, residual, packed_info, packed_weights, workspace], sinfo_args=output_sinfo))]
                     bindings_blocks = [rx.BindingBlock(bindings)]
                     bindings_seq_expr = rx.SeqExpr(bindings_blocks, bindings_blocks[-1].bindings[-1].var)
                     return bindings_seq_expr
@@ -1033,89 +1081,6 @@ def get_packed_info(arg_dict, mk: MegaKernel):
     info.append(tvm.runtime.ShapeTuple([arg_dict["attn_task_num"].item()]))
     return info
 
-def prepare_events(arg_dict, batch_size, max_batch_size, mk: MegaKernel, repeat=100):
-    DEV = tvm.cuda()
-    base = 1 << 16
-    all_event_list = []
-    attn_task_num = arg_dict["attn_task_num"].item()
-    for _ in range(repeat):
-        event_list = []
-
-        # etensor_qkv_partial
-        event_list.append(tvm.runtime.tensor(np.full(ceildiv((mk.NUM_ATTENTION_HEADS + 2 * mk.NUM_KEY_VALUE_HEADS) * mk.HEAD_DIM, FuseGemmTile.BLK_N), mk.SPLIT_QKV_PROJECT * (base + 1), dtype=np.int32), device=DEV))
-
-        # etensor_notify_attn
-        etensor_notify_attn = np.zeros((KernelConfig.SM_NUMBER), dtype=np.int32)
-        attn_tile_num = ceildiv(attn_task_num, KernelConfig.WG_NUMBER)
-        unit = KernelConfig.WG_NUMBER * (2 + mk.NUM_ATTENTION_HEADS // mk.NUM_KEY_VALUE_HEADS)
-        num = unit * (attn_tile_num // KernelConfig.SM_NUMBER)
-        remain = attn_tile_num % KernelConfig.SM_NUMBER
-        for m in range(KernelConfig.SM_NUMBER):
-            if m < remain:
-                etensor_notify_attn[m] = num + unit
-            else:
-                etensor_notify_attn[m] = num
-        etensor_notify_attn *= (base + 1)
-        etensor_notify_attn = tvm.runtime.tensor(etensor_notify_attn, device=DEV)
-        event_list.append(etensor_notify_attn)
-
-        # etensor_attn_merge
-        event_list.append(tvm.runtime.tensor(np.full((max_batch_size * mk.NUM_KEY_VALUE_HEADS), min(KernelConfig.SM_NUMBER, attn_tile_num) * (base + 1), dtype=np.int32), device=DEV))
-
-        # etensor_o_proj
-        etensor_o_proj = np.zeros(mk.SPLIT_O_PROJECT, dtype=np.int32)
-        o_proj_tile_k = ceildiv(ceildiv(mk.NUM_ATTENTION_HEADS * mk.HEAD_DIM, mk.SPLIT_O_PROJECT), FuseGemmTile.BLK_K) * FuseGemmTile.BLK_K
-        if attn_task_num > mk.NUM_KEY_VALUE_HEADS * batch_size:
-            # to simply, assume that one merge tile will not use two kv head
-            assert KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER <= mk.NUM_ATTENTION_HEADS // mk.NUM_KEY_VALUE_HEADS
-            for m in range(ceildiv(batch_size * mk.NUM_ATTENTION_HEADS, KernelConfig.WARP_NUMBER * KernelConfig.WG_NUMBER)):
-                worker_id = m * KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER
-                kv_idx = worker_id // (batch_size * (mk.NUM_ATTENTION_HEADS // mk.NUM_KEY_VALUE_HEADS))
-                qo_idx = worker_id % (mk.NUM_ATTENTION_HEADS // mk.NUM_KEY_VALUE_HEADS)
-                range_start = (kv_idx * (mk.NUM_ATTENTION_HEADS // mk.NUM_KEY_VALUE_HEADS) + qo_idx) * mk.HEAD_DIM // o_proj_tile_k
-                range_end = ((kv_idx * (mk.NUM_ATTENTION_HEADS // mk.NUM_KEY_VALUE_HEADS) + qo_idx + KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER) * mk.HEAD_DIM - 1) // o_proj_tile_k
-                for i in range(range_start, range_end + 1):
-                    etensor_o_proj[i] += 1
-        else:
-            etensor_o_proj += min(KernelConfig.SM_NUMBER, attn_tile_num)
-        etensor_o_proj *= (base + 1)
-        etensor_o_proj = tvm.runtime.tensor(etensor_o_proj, device=DEV)
-        event_list.append(etensor_o_proj)
-
-        # etensor_attn_o_partial
-        event_list.append(tvm.runtime.tensor(np.full(mk.HIDDEN_SIZE // FuseGemmTile.BLK_N, mk.SPLIT_O_PROJECT * (base + 1), dtype=np.int32), device=DEV))
-
-        # etensor_attn_add_rmsnorm
-        event_list.append(tvm.runtime.tensor(np.full(max_batch_size, mk.SPLIT_O_PROJECT * mk.HIDDEN_SIZE // FuseSplitKReduceTile.N_UNIT * (base + 1), dtype=np.int32), device=DEV))
-
-        # etensor_attn_mlp
-        event_list.append(tvm.runtime.tensor(np.full(1, batch_size * (base + 1), dtype=np.int32), device=DEV))
-
-        # etensor_down_proj
-        etensor_down_proj = np.zeros(mk.DOWN_PROJ_SPLIT_K_FACTOR, dtype=np.int32)
-        down_proj_tile_k = (ceildiv(ceildiv(mk.INTERMEDIATE_SIZE, mk.DOWN_PROJ_SPLIT_K_FACTOR), FuseGemmTile.BLK_K) * FuseGemmTile.BLK_K)
-        for m in range(mk.INTERMEDIATE_SIZE * 2 // FuseGateUpSiluTile.BLK_N):
-            range_start = m * FuseGateUpSiluTile.BLK_N // 2 // down_proj_tile_k
-            range_end = ((m + 1) * FuseGateUpSiluTile.BLK_N // 2 - 1) // down_proj_tile_k
-            for i in range(range_start, range_end + 1):
-                etensor_down_proj[i] += 1
-        etensor_down_proj *= (base + 1)
-        etensor_down_proj = tvm.runtime.tensor(etensor_down_proj, device=DEV)
-        event_list.append(etensor_down_proj)
-
-        # etensor_down_proj_reduce
-        event_list.append(tvm.runtime.tensor(np.full(mk.HIDDEN_SIZE // FuseGemmTile.BLK_N, mk.DOWN_PROJ_SPLIT_K_FACTOR * (base + 1), dtype=np.int32), device=DEV))
-
-        # etensor_mlp_add_rmsnorm
-        event_list.append(tvm.runtime.tensor(np.full(max_batch_size, mk.DOWN_PROJ_SPLIT_K_FACTOR * mk.HIDDEN_SIZE // FuseSplitKReduceTile.N_UNIT * (base + 1), dtype=np.int32), device=DEV))
-
-        # etensor_end
-        event_list.append(tvm.runtime.tensor(np.array([batch_size * (base + 1)], dtype=np.int32), device=DEV))
-
-        all_event_list.append(event_list)
-    return all_event_list
-
-
 @tvm.testing.requires_cuda_compute_version(10, exact=True)
 @pytest.mark.skip
 def test(batch_size, seq_len, vm, mega_kernel_wrapper, profile_on=False):
@@ -1151,13 +1116,14 @@ def test(batch_size, seq_len, vm, mega_kernel_wrapper, profile_on=False):
         ]
         weights = [tvm.runtime.tensor(weight, device=dev) for weight in weights]
         packed_info = get_packed_info(arg_dict, mk)
-        events = prepare_events(arg_dict, batch_size, max_batch_size=128, mk=mk)
+        # events = prepare_events(arg_dict, batch_size, max_batch_size=128, mk=mk)
+        workspace = tvm.runtime.tensor(np.zeros((mk.EVT_WORKSPACE_SIZE,), dtype=np.int32), device=dev)
         iter = 0
         def func():
             nonlocal iter
             iter += 1
             residual = tvm.runtime.tensor(arg_dict["residual"].to(torch.float32), device=dev)
-            res = vm["megakernel"](hidden_state, residual, packed_info, weights, events[iter])
+            res = vm["megakernel"](hidden_state, residual, packed_info, weights, workspace)
             return res
         res = bench(func, warmup=3, repeat=10, proton_name="tir")
         res = func()

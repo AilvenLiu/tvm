@@ -770,21 +770,6 @@ class TileSchedulerBase:
         raise NotImplementedError
 
     @T.macro
-    def fetch_from_queue(self):
-        # for dynamic scheduler
-        pass
-
-    @T.macro
-    def push(self, func_push_list, push_level):
-        # for dynamic scheduler
-        pass
-
-    @T.macro
-    def notify_entry_task_push(self):
-        # for dynamic scheduler
-        pass
-
-    @T.macro
     def next_tile(self):
         raise NotImplementedError
 
@@ -793,11 +778,11 @@ class TileSchedulerBase:
         raise NotImplementedError
 
     @T.macro
-    def notify(self, evt, func_notify, scope, scope_id):
+    def notify(self, evt, func_notify, scope, scope_id, release):
         raise NotImplementedError
 
     @T.macro
-    def pre_notify_and_push(self, evt, func_notify, func_trigger, push_level, scope, scope_id, full_notify):
+    def pre_notify_and_push(self, evt, notify_num, func_notify, func_trigger, push_level, scope, scope_id):
         # for dynamic scheduler
         pass
 
