@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: F401, RUF005
 
 # pylint: disable=invalid-name,too-many-locals
 
@@ -23,20 +22,19 @@
 import itertools
 import string
 from collections.abc import Callable
-from typing import Any, Optional
-
-import tvm_ffi
+from typing import Tuple as typing_Tuple
+from typing import Any, Dict, List, Optional
 
 import tvm
-
-from .. import tirx
-from ..ir import Array, Attrs, Map, Type, VDevice
-from ..te import Tensor as te_Tensor
-from ..te import create_prim_func
-from ..tirx import PrimExpr
+import tvm_ffi
+from .. import tir
+from ..tir import PrimExpr
 from . import _ffi_api
-from .expr import Expr, Function, PrimValue, ShapeExpr, StringImm, te_tensor
 from .expr import Tuple as rx_Tuple
+from .expr import Expr, ShapeExpr, Function, PrimValue, StringImm, te_tensor
+from ..te import Tensor as te_Tensor, create_prim_func
+from ..ir import Array, Attrs, Type, Map, VDevice
+from ..ir.expr import GlobalVar
 from .struct_info import PrimStructInfo, ShapeStructInfo, TensorStructInfo
 
 
@@ -221,9 +219,9 @@ def gen_call_tir_inputs(
         def _convert_te_arg_helper(arg):
             if isinstance(arg, Expr):  # type: ignore
                 if isinstance(arg.struct_info, TensorStructInfo):
-                    assert isinstance(arg.struct_info.shape, ShapeExpr), (
-                        "emit_te now only supports Tensor that has ShapeExpr shape"
-                    )
+                    assert isinstance(
+                        arg.struct_info.shape, ShapeExpr
+                    ), "emit_te now only supports Tensor that has ShapeExpr shape"
                     for shape_value in arg.struct_info.shape.values:
                         _copy_undefined_var(shape_value)
 
@@ -243,9 +241,9 @@ def gen_call_tir_inputs(
                     return te_arg
 
                 if isinstance(arg.struct_info, ShapeStructInfo):
-                    assert isinstance(arg, ShapeExpr), (
-                        "For Expr having ShapeStructInfo, emit_te now only supports ShapeExpr"
-                    )
+                    assert isinstance(
+                        arg, ShapeExpr
+                    ), "For Expr having ShapeStructInfo, emit_te now only supports ShapeExpr"
                     return [_convert_te_arg_helper(val) for val in arg.values]
 
                 if isinstance(arg.struct_info, PrimStructInfo):
@@ -273,9 +271,9 @@ def gen_call_tir_inputs(
                 return tuple(_convert_te_arg_helper(x) for x in arg)
             elif isinstance(arg, dict | Map):
                 for key in arg:
-                    assert isinstance(key, str), (
-                        "emit_te only supports dict with string as the key currently"
-                    )
+                    assert isinstance(
+                        key, str
+                    ), "emit_te only supports dict with string as the key currently"
                 return {k: _convert_te_arg_helper(arg[k]) for k in arg}
             elif isinstance(arg, tirx.PrimExpr):
                 _copy_undefined_var(arg)
@@ -284,7 +282,7 @@ def gen_call_tir_inputs(
                 return new_arg
             elif isinstance(arg, int | float | str | Type | Attrs) or arg is None:
                 return arg
-            raise TypeError(f"not supported type in emit_te: {type(arg)}")
+            raise TypeError("not supported type in emit_te: {}".format(type(arg)))
 
         new_arg = _convert_te_arg_helper(te_args)
         return new_arg
@@ -396,11 +394,30 @@ from tvm.script import tir as T
 from tvm.tir.function import PrimFunc
 PrimExprLike = Union[int, PrimExpr]
 
+def add_func_to_ir_module(func: PrimFunc) -> GlobalVar:
+    if hasattr(add_func_to_ir_module, 'cnt'):
+        add_func_to_ir_module.cnt += 1
+    else:
+        add_func_to_ir_module.cnt = 0
+    from .block_builder import BlockBuilder
+    from tvm.script.ir_builder.ir import decl_function, lookup_name
+    bb = BlockBuilder.current()
+    if bb is None:
+        # in script context
+        while lookup_name(f"f_{add_func_to_ir_module.cnt}"):
+            add_func_to_ir_module.cnt += 1
+        gvar = decl_function(f"f_{add_func_to_ir_module.cnt}", func)
+    else:
+        # in block builder context
+        gvar = bb.add_func(func, f"f_{add_func_to_ir_module.cnt}")
+    return gvar
+
 
 def trans_callable_to_primfunc(func: Union[Callable, PrimFunc, PrimExprLike], extra_args: List[Union[Expr, PrimExprLike]],
-                               input_dim: int, output_dim: int, dtype: str) -> Tuple[PrimFunc, List[Union[Expr, PrimExpr]]]:
+                               input_dim: int, output_dim: int, dtype: str) -> Tuple[GlobalVar, List[Union[Expr, PrimExpr]]]:
     if isinstance(func, PrimFunc):
-        return func, [(var if isinstance(var, (Expr, PrimExpr)) else {"int32": T.int32, "int64": T.int64}[dtype](var)) for var in extra_args]
+        gvar = add_func_to_ir_module(func)
+        return gvar, [(var if isinstance(var, (Expr, PrimExpr)) else {"int32": T.int32, "int64": T.int64}[dtype](var)) for var in extra_args]
     if isinstance(func, PrimExprLike):
         assert output_dim == 1, "The output_dim must be 1 when func is PrimExprLike."
         new_func = lambda *args: func
@@ -434,13 +451,15 @@ def trans_callable_to_primfunc(func: Union[Callable, PrimFunc, PrimExprLike], ex
             tir_input.append(arg)
     tir_output = [T.Buffer(shape=[1], dtype=dtype, scope="local") for _ in range(output_dim)]
 
-    @T.prim_func(check_well_formed=False)
-    def primfunc():
+
+    @T.prim_func(check_well_formed=False, private=True)
+    def f():
         in_args = T.meta_var([_convert_arg(spec) for spec in tir_input])
         out_arg = T.meta_var([_convert_arg(spec) for spec in tir_output])
         _unpack_and_assign(new_func(*in_args), out_arg, output_dim)
 
-    return primfunc, [(var if isinstance(var, (Expr, PrimExpr)) else {"int32": T.int32, "int64": T.int64}[dtype](var)) for var in extra_args]
+    gvar = add_func_to_ir_module(f)
+    return gvar, [(var if isinstance(var, (Expr, PrimExpr)) else {"int32": T.int32, "int64": T.int64}[dtype](var)) for var in extra_args]
 
 
 class Dependency:
@@ -500,12 +519,12 @@ class Dependency:
         self.tile_idx_dtype = tile_idx_dtype
         self.dispatch_func = {"int32": T.int32, "int64": T.int64}[tile_idx_dtype]
 
-    def handle_dep(self, input_dim, output_dim) -> Tuple[Expr, List[Expr], PrimFunc]:
+    def handle_dep(self, input_dim, output_dim) -> Tuple[GlobalVar, Expr, List[Expr]]:
         # check the signature
         if isinstance(self.dep, PrimFunc):
             if len(self.dep.params) != input_dim + output_dim:
                 raise ValueError(f"dep requires {input_dim + output_dim} parameters")
         elif len(inspect.signature(self.dep).parameters) != input_dim:
              raise ValueError(f"dep requires {input_dim} parameters")
-        dep, extra_args = trans_callable_to_primfunc(self.dep, self.extra_args, input_dim, output_dim, self.tile_idx_dtype)
-        return self.event, extra_args, dep
+        dep_gvar, extra_args = trans_callable_to_primfunc(self.dep, self.extra_args, input_dim, output_dim, self.tile_idx_dtype)
+        return dep_gvar, self.event, extra_args

@@ -456,7 +456,7 @@ Expr NormalizeCallTIR(const BlockBuilder& ctx, Call call) {
   // be written in terms of `call->op`, and should not explicitly
   // reference the `relax.call_tir` operator.`
   if (call->attrs.as<CallTIRDeviceAttrs>()) {
-    TVM_FFI_ICHECK(call->args.size() == 3 || call->args.size() == 4)
+    TVM_FFI_ICHECK(call->args.size() == 6 || call->args.size() == 7)
         << "Operation " << call->op
         << " expects either three arguments [callee, arg_tuple, tile_num], "
         << "or four arguments [callee, arg_tuple, tile_num, tir_args], "
@@ -899,11 +899,14 @@ Expr NormalizeCallTIRDevice(const BlockBuilder& ctx, Call call) {
 }
 
 TVM_REGISTER_OP("relax.call_tir_device")
-    .set_num_inputs(4)
+    .set_num_inputs(7)
     .set_attrs_type<CallTIRDeviceAttrs>()
     .add_argument("func", "Expr", "The destination-passing-style function.")
     .add_argument("args", "Tuple", "The input arguments.")
     .add_argument("tile_num", "Expr", "The number of tiles launched.")
+    .add_argument("in_dep", "Tuple", "The input dependencies.")
+    .add_argument("out_dep", "Tuple", "The output dependencies.")
+    .add_argument("inv_in_dep", "Tuple", "The inverse input dependencies.")
     .add_argument("packed_ints", "Expr",
                   "ShapeExpr representing a tuple of ints to unpack during runtime. Omitted from "
                   "args if unused")
@@ -912,13 +915,12 @@ TVM_REGISTER_OP("relax.call_tir_device")
     .set_attr<Bool>("FPurity", Bool(true));
 
 Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_sinfo_list,
-                       ShapeExpr tile_num, int job_id, ffi::Array<Expr> in_events,
-                       ffi::Array<Expr> out_events, ffi::Array<Expr> inv_in_events,
+                       ShapeExpr tile_num, Tuple in_deps, Tuple out_deps, Tuple inv_in_deps,
+                       int job_id, ffi::Array<Expr> in_events, ffi::Array<Expr> out_events,
+                       ffi::Array<Expr> inv_in_events,
                        ffi::Array<ffi::Array<ffi::Any>> in_extra_args,
                        ffi::Array<ffi::Array<ffi::Any>> out_extra_args,
                        ffi::Array<ffi::Array<ffi::Any>> inv_in_extra_args,
-                       ffi::Array<tir::PrimFunc> in_deps, ffi::Array<tir::PrimFunc> out_deps,
-                       ffi::Array<tir::PrimFunc> inv_in_deps,
                        ffi::Map<ffi::String, ffi::Any> handle_config,
                        ffi::Array<Integer> inplace_indices, ffi::Optional<Expr> packed_ints) {
   ObjectPtr<CallTIRDeviceAttrs> attrs = ffi::make_object<CallTIRDeviceAttrs>();
@@ -929,9 +931,6 @@ Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_s
   attrs->in_extra_args = in_extra_args;
   attrs->out_extra_args = out_extra_args;
   attrs->inv_in_extra_args = inv_in_extra_args;
-  attrs->in_deps = in_deps;
-  attrs->out_deps = out_deps;
-  attrs->inv_in_deps = inv_in_deps;
   attrs->handle_config = handle_config;
   attrs->inplace_indices = ffi::Array<Integer>(inplace_indices.begin(), inplace_indices.end());
   for (const TensorStructInfo& sinfo : out_sinfo_list) {
@@ -952,9 +951,11 @@ Expr MakeCallTIRDevice(Expr func, Tuple args, ffi::Array<TensorStructInfo> out_s
   Call call;
   if (!packed_ints) {
     // don't use additional optional argument
-    call = Call(op, {func, args, tile_num}, Attrs(attrs), {out_sinfo});
+    call =
+        Call(op, {func, args, tile_num, in_deps, out_deps, inv_in_deps}, Attrs(attrs), {out_sinfo});
   } else {
-    call = Call(op, {func, args, tile_num, packed_ints.value()}, Attrs(attrs), {out_sinfo});
+    call = Call(op, {func, args, tile_num, in_deps, out_deps, inv_in_deps, packed_ints.value()},
+                Attrs(attrs), {out_sinfo});
   }
   return call;
 }
@@ -964,39 +965,39 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("relax.op.call_tir_device", MakeCallTIRDevice);
 }
 
-
 // alloc_event_tensor
 
 StructInfo InferStructInfoAllocateEventTensor(const Call& call, const BlockBuilder& ctx) {
-  ICHECK(call->args[0].as<ExprNode>() && call->args[0].as<ExprNode>()->struct_info_.as<TensorStructInfoNode>())
+  TVM_FFI_ICHECK(call->args[0].as<ExprNode>() &&
+         call->args[0].as<ExprNode>()->struct_info_.as<TensorStructInfoNode>())
       << "must be Tensor, but got " << call->args[0]->GetTypeKey();
-  ICHECK(call->args[1].as<ShapeExprNode>())
+  TVM_FFI_ICHECK(call->args[1].as<ShapeExprNode>())
       << "must be ShapeExpr, but got " << call->args[1]->GetTypeKey();
   DataType out_dtype = call->args[0].as<ExprNode>()->struct_info_.as<TensorStructInfoNode>()->dtype;
   return TensorStructInfo(call->args[1], out_dtype);
 }
 
 TVM_REGISTER_OP("relax.alloc_event_tensor")
-    .set_num_inputs(2)
+    .set_num_inputs(3)
     .add_argument("workspace", "Expr", "The workspace tensor to allocate the event tensor.")
     .add_argument("shape", "Expr", "The shape of the event tensor to allocate.")
+    .add_argument("f_init", "Expr", "The function to initialize the event tensor.")
     .set_attrs_type<AllocEventTensorAttrs>()
     .set_attr<FInferStructInfo>("FInferStructInfo", InferStructInfoAllocateEventTensor)
     .set_attr<Bool>("FPurity", Bool(true));
 
-Expr MakeAllocEventTensor(Expr workspace, ShapeExpr shape, tvm::tir::PrimFunc f_init, ffi::Array<ffi::Any> extra_args) {
+Expr MakeAllocEventTensor(Expr workspace, ShapeExpr shape, GlobalVar f_init,
+                          ffi::Array<ffi::Any> extra_args) {
   ObjectPtr<AllocEventTensorAttrs> attrs = ffi::make_object<AllocEventTensorAttrs>();
-  attrs->f_init = f_init;
   attrs->extra_args = extra_args;
   static const Op& op = Op::Get("relax.alloc_event_tensor");
-  return Call(op, {workspace, shape}, Attrs(attrs), {});
+  return Call(op, {workspace, shape, f_init}, Attrs(attrs), {});
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("relax.op.alloc_event_tensor", MakeAllocEventTensor);
 }
-
 
 // call_dps_packed
 

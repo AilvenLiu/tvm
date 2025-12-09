@@ -217,7 +217,7 @@ class EventHandleHelper(PyExprVisitor):
         ret = super().visit_var_binding_(binding)
         if isinstance(binding.value, relax.Call) and binding.value.op == self.call_alloc_evt_op:
             call = binding.value
-            self.alloc_evt_infos[binding.var] = AllocEventInfo(call.args[0], binding.var, call.args[1], call.attrs.f_init, call.attrs.extra_args)
+            self.alloc_evt_infos[binding.var] = AllocEventInfo(call.args[0], binding.var, call.args[1], load_json(save_json(self.mod[call.args[2]])), call.attrs.extra_args)
         return ret
 
     def infer(self, func: relax.Function):
@@ -993,12 +993,12 @@ class _Rewriter(PyExprMutator):
             tile_num = call.args[2]
             assert len(tile_num) == 3, f"tile_num dimension mismatch: {len(tile_num)} != 3"
             tir_gvar = call.args[0]
+            in_deps = call.args[3]
+            out_deps = call.args[4]
             in_events = call.attrs.in_events
             out_events = call.attrs.out_events
             in_extra_args = call.attrs.in_extra_args
             out_extra_args = call.attrs.out_extra_args
-            in_deps = call.attrs.in_deps
-            out_deps = call.attrs.out_deps
             inplace_indices = list(int(i) for i in call.attrs.inplace_indices)
             prim_func = self._deep_copy(self.mod[tir_gvar])
             self.gvar_to_remove.append(tir_gvar)
@@ -1089,16 +1089,16 @@ class _Rewriter(PyExprMutator):
             push_info_list = []
             dep_handler = DependencyHandler(tile_idx, in_var_entries, sym_vars, self.relax_var_to_entry, self.builder_, self.var_entry_mapping)
             for idx in range(len(in_deps)):
-                in_dep_func = dep_handler.handle(in_deps[idx], in_extra_args[idx], len(tile_idx) + 1 + len(in_extra_args[idx]), len(in_events[idx].struct_info.shape) + 2)
+                in_dep_func = dep_handler.handle(self._deep_copy(self.mod[in_deps[idx]]), in_extra_args[idx], len(tile_idx) + 1 + len(in_extra_args[idx]), len(in_events[idx].struct_info.shape) + 2)
                 in_info_list.append(in_dep_func)
             if not (self.strategy == "static" and call in self.evt_handle_helper.end_points):
                 # ignore notify for entry point in static scheduler
                 for idx in range(len(out_deps)):
-                    out_dep_func = dep_handler.handle(out_deps[idx], out_extra_args[idx], len(tile_idx) + 1 + len(out_extra_args[idx]), len(out_events[idx].struct_info.shape) + 2)
+                    out_dep_func = dep_handler.handle(self._deep_copy(self.mod[out_deps[idx]]), out_extra_args[idx], len(tile_idx) + 1 + len(out_extra_args[idx]), len(out_events[idx].struct_info.shape) + 2)
                     out_info_list.append(out_dep_func)
             if self.strategy == "dynamic":
                 for i, evt in enumerate(out_events):
-                    notify_dep_func = dep_handler.handle(self._deep_copy(out_deps[i]), out_extra_args[i], len(tile_idx) + 1 + len(out_extra_args[i]), len(out_events[i].struct_info.shape) + 2)
+                    notify_dep_func = dep_handler.handle(self._deep_copy(self.mod[out_deps[i]]), out_extra_args[i], len(tile_idx) + 1 + len(out_extra_args[i]), len(out_events[i].struct_info.shape) + 2)
                     push_info = (notify_dep_func, [])
                     if call in self.evt_handle_helper.end_points:
                         # handle the special case where the task is end point, which means we need to insert END task pushing
@@ -1109,8 +1109,8 @@ class _Rewriter(PyExprMutator):
                         push_info[1].append(push_map_func)
                     else:
                         for j, push_call in self.evt_handle_helper.in_evt[evt]:
-                            assert len(push_call.attrs.in_deps) == 1
-                            push_dep_func = dep_handler.handle(self._deep_copy(push_call.attrs.inv_in_deps[j]), push_call.attrs.inv_in_extra_args[j],
+                            assert len(push_call.args[3]) == 1
+                            push_dep_func = dep_handler.handle(self._deep_copy(self.mod[push_call.args[5][j]]), push_call.attrs.inv_in_extra_args[j],
                                                                 len(push_call.attrs.inv_in_events[j].struct_info.shape) + 2 + len(push_call.attrs.inv_in_extra_args[j]),
                                                                 len(tile_idx) + 1, job_id=push_call.attrs.job_id)
                             def push_map_func(idx: T.Var, notify_dep_func=notify_dep_func, push_dep_func=push_dep_func, emit=True):

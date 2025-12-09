@@ -83,7 +83,7 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
     return std::nullopt;
   }
   if (n->op.same_as(call_tir_device_op)) {
-    TVM_FFI_ICHECK(n->args.size() == 3 || n->args.size() == 4);
+    TVM_FFI_ICHECK(n->args.size() == 6 || n->args.size() == 7);
   } else {
     TVM_FFI_ICHECK(n->args.size() == 2 || n->args.size() == 3);
   }
@@ -150,6 +150,12 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
   if (n->op.same_as(call_tir_device_op)) {
     kwargs_keys.push_back("tile_num");
     kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[2], n_p->Attr("args")->ArrayItem(2)));
+    kwargs_keys.push_back("in_dep");
+    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[3], n_p->Attr("args")->ArrayItem(3)));
+    kwargs_keys.push_back("out_dep");
+    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[4], n_p->Attr("args")->ArrayItem(4)));
+    kwargs_keys.push_back("inv_in_dep");
+    kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[5], n_p->Attr("args")->ArrayItem(5)));
     if (const auto* call_tir_device_attrs = n->attrs.as<relax::CallTIRDeviceAttrs>()) {
       kwargs_keys.push_back("job_id");
       kwargs_values.push_back(
@@ -172,12 +178,6 @@ ffi::Optional<ExprDoc> PrintCallTIRDPSPacked(const relax::Call& n, const AccessP
       kwargs_keys.push_back("inv_in_extra_args");
       kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->inv_in_extra_args,
                                                 n_p->Attr("attrs")->Attr("inv_in_extra_args")));
-      kwargs_keys.push_back("in_deps");
-      kwargs_values.push_back(IdDoc("Skipped"));
-      kwargs_keys.push_back("out_deps");
-      kwargs_values.push_back(IdDoc("Skipped"));
-      kwargs_keys.push_back("inv_in_deps");
-      kwargs_values.push_back(IdDoc("Skipped"));
       kwargs_keys.push_back("handle_config");
       kwargs_values.push_back(d->AsDoc<ExprDoc>(call_tir_device_attrs->handle_config,
                                                 n_p->Attr("attrs")->Attr("handle_config")));
@@ -293,25 +293,25 @@ ffi::Optional<ExprDoc> PrintRelaxPrint(const relax::Call& n, const AccessPath& n
   }
 }
 
-
 ffi::Optional<ExprDoc> PrintAllocEventTensor(const relax::Call& n, const AccessPath& n_p,
-                                            const IRDocsifier& d) {
+                                             const IRDocsifier& d) {
   static const Op& alloc_event_tensor_op = Op::Get("relax.alloc_event_tensor");
   if (!n->op.same_as(alloc_event_tensor_op)) {
     return std::nullopt;
   }
-  ffi::Array<ExprDoc> args;
-  args.push_back(d->AsDoc<ExprDoc>(n->args[0], n_p->Attr("args")->ArrayItem(0)));
-  args.push_back(d->AsDoc<ExprDoc>(n->args[1], n_p->Attr("args")->ArrayItem(1)));
   ffi::Array<ffi::String> kwargs_keys;
   ffi::Array<ExprDoc> kwargs_values;
-  auto *attrs = n->attrs.as<relax::AllocEventTensorAttrs>();
+  kwargs_keys.push_back("workspace");
+  kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[0], n_p->Attr("args")->ArrayItem(0)));
+  kwargs_keys.push_back("shape");
+  kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[1], n_p->Attr("args")->ArrayItem(1)));
   kwargs_keys.push_back("f_init");
-  kwargs_values.push_back(IdDoc("Skipped"));
+  kwargs_values.push_back(d->AsDoc<ExprDoc>(n->args[2], n_p->Attr("args")->ArrayItem(2)));
+  auto* attrs = n->attrs.as<relax::AllocEventTensorAttrs>();
   kwargs_keys.push_back("extra_args");
   kwargs_values.push_back(
       d->AsDoc<ExprDoc>(attrs->extra_args, n_p->Attr("attrs")->Attr("extra_args")));
-  return Relax(d, "alloc_event_tensor")->Call(args, kwargs_keys, kwargs_values);
+  return Relax(d, "alloc_event_tensor")->Call({}, kwargs_keys, kwargs_values);
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)

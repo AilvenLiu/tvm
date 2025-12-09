@@ -175,3 +175,18 @@ def lookup_vdevice(target_kind: str | None = None, device_index: int = -1) -> VD
         The result virtual device.
     """
     return _ffi_api.LookupVDevice(target_kind, device_index)  # type: ignore[attr-defined] # pylint: disable=no-member
+
+
+def lookup_name(name: str) -> bool:
+    """Check if a global variable with the given name exists.
+    Parameters
+    ----------
+    name: str
+        The name of the global variable.
+
+    Returns
+    -------
+    res : bool
+        True if the global variable exists, False otherwise.
+    """
+    return _ffi_api.LookupName(name)  # type: ignore[attr-defined] # pylint: disable=no-member

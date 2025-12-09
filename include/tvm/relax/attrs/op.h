@@ -128,9 +128,6 @@ struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
   ffi::Array<ffi::Array<ffi::Any>> in_extra_args;
   ffi::Array<ffi::Array<ffi::Any>> out_extra_args;
   ffi::Array<ffi::Array<ffi::Any>> inv_in_extra_args;
-  ffi::Array<tir::PrimFunc> in_deps;
-  ffi::Array<tir::PrimFunc> out_deps;
-  ffi::Array<tir::PrimFunc> inv_in_deps;
   ffi::Map<ffi::String, ffi::Any> handle_config;
   ffi::Array<Integer> inplace_indices;
 
@@ -145,9 +142,6 @@ struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
         .def_ro("out_extra_args", &CallTIRDeviceAttrs::out_extra_args, "The extra output args.")
         .def_ro("inv_in_extra_args", &CallTIRDeviceAttrs::inv_in_extra_args,
                 "The inverse extra input args.")
-        .def_ro("in_deps", &CallTIRDeviceAttrs::in_deps, "The input dependencies.")
-        .def_ro("out_deps", &CallTIRDeviceAttrs::out_deps, "The output dependencies.")
-        .def_ro("inv_in_deps", &CallTIRDeviceAttrs::inv_in_deps, "The inverse input dependencies.")
         .def_ro("handle_config", &CallTIRDeviceAttrs::handle_config, "The handle config.")
         .def_ro("inplace_indices", &CallTIRDeviceAttrs::inplace_indices, "The inplace indices.");
   }
@@ -157,14 +151,12 @@ struct CallTIRDeviceAttrs : public AttrsNodeReflAdapter<CallTIRDeviceAttrs> {
 };  // struct CallTIRDeviceAttrs
 
 struct AllocEventTensorAttrs : public AttrsNodeReflAdapter<AllocEventTensorAttrs> {
-  tir::PrimFunc f_init;
   ffi::Array<ffi::Any> extra_args;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<AllocEventTensorAttrs>()
-        .def_ro("f_init", &AllocEventTensorAttrs::f_init, "The initialization function.")
-        .def_ro("extra_args", &AllocEventTensorAttrs::extra_args, "The extra arguments.");
+    refl::ObjectDef<AllocEventTensorAttrs>().def_ro(
+        "extra_args", &AllocEventTensorAttrs::extra_args, "The extra arguments.");
   }
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("relax.attrs.AllocEventTensorAttrs", AllocEventTensorAttrs,

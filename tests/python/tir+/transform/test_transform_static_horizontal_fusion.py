@@ -138,12 +138,15 @@ def test_basic():
                 R.output(C)
             return C
     # fmt: on
+    # Before.show()
     fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion(
         "mega_kernel", "static", static_scheduler.StaticTileScheduler, static_scheduler.Semaphore, "mega_kernel_"
     )(Before)
     fused_dynamic_scheduler_mod = relax.transform.StaticHorizontalFusion(
         "mega_kernel", "dynamic", dynamic_scheduler.DynamicTileScheduler, dynamic_scheduler.Semaphore, "mega_kernel_"
     )(Before)
+    # fused_static_scheduler_mod.show()
+    # fused_dynamic_scheduler_mod.show()
 
     # testing correctness
     A_np = np.random.randn(M, N).astype(np.float32)

@@ -292,18 +292,19 @@ def call_tir_device(
         tile_idx_dim = len(tile_num)
 
     if not in_deps:
-        in_evt_list, in_extra_args_list, in_dep_list = [], [], []
+        in_dep_list, in_evt_list, in_extra_args_list = [], [], []
     else:
         if not isinstance(in_deps, list):
             in_deps = [in_deps]
         handle_dep = [
-            dep.handle_dep(tile_idx_dim + 1 + len(dep.extra_args), len(dep.event.struct_info.shape) + 2)
+            dep.handle_dep(
+                tile_idx_dim + 1 + len(dep.extra_args), len(dep.event.struct_info.shape) + 2
+            )
             for dep in in_deps
         ]
-        in_evt_list, in_extra_args_list, in_dep_list = map(list, zip(*handle_dep))
-
+        in_dep_list, in_evt_list, in_extra_args_list = map(list, zip(*handle_dep))
     if not out_deps:
-        out_evt_list, out_extra_args_list, out_dep_list = [], [], []
+        out_dep_list, out_evt_list, out_extra_args_list = [], [], []
     else:
         if not isinstance(out_deps, list):
             out_deps = [out_deps]
@@ -311,10 +312,9 @@ def call_tir_device(
             dep.handle_dep(tile_idx_dim + 1 + len(dep.extra_args), len(dep.event.struct_info.shape) + 2)
             for dep in out_deps
         ]
-        out_evt_list, out_extra_args_list, out_dep_list = map(list, zip(*handle_dep))
-
+        out_dep_list, out_evt_list, out_extra_args_list = map(list, zip(*handle_dep))
     if inverse_in_deps is None or not inverse_in_deps:
-        inv_in_evt_list, inv_in_extra_args_list, inv_in_dep_list = [], [], []
+        inv_in_dep_list, inv_in_evt_list, inv_in_extra_args_list = [], [], []
     else:
         if not isinstance(inverse_in_deps, list):
             inverse_in_deps = [inverse_in_deps]
@@ -325,7 +325,7 @@ def call_tir_device(
             dep.handle_dep(len(dep.event.struct_info.shape) + 2 + len(dep.extra_args), tile_idx_dim + 1)
             for dep in inverse_in_deps
         ]
-        inv_in_evt_list, inv_in_extra_args_list, inv_in_dep_list = map(list, zip(*handle_dep))
+        inv_in_dep_list, inv_in_evt_list, inv_in_extra_args_list = map(list, zip(*handle_dep))
 
     if not isinstance(out_sinfo, list):
         out_sinfo = [out_sinfo]
@@ -351,11 +351,18 @@ def call_tir_device(
         raise ValueError(
             "handle_config only supports keys: 'wait_scope', 'notify_scope', 'notify_scope_id', 'push_level', 'push_scope', 'push_scope_id'"
         )
+    in_dep_list = tvm.relax.Tuple(in_dep_list)
+    out_dep_list = tvm.relax.Tuple(out_dep_list)
+    inv_in_dep_list = tvm.relax.Tuple(inv_in_dep_list)
+
     return _ffi_api.call_tir_device(  # type: ignore
         gvar,
         args,
         out_sinfo,
         tile_num,
+        in_dep_list,
+        out_dep_list,
+        inv_in_dep_list,
         job_id,
         in_evt_list,
         out_evt_list,
@@ -363,9 +370,6 @@ def call_tir_device(
         in_extra_args_list,
         out_extra_args_list,
         inv_in_extra_args_list,
-        in_dep_list,
-        out_dep_list,
-        inv_in_dep_list,
         handle_config,
         inplace_indices,
         tir_vars,
@@ -375,7 +379,7 @@ def call_tir_device(
 def alloc_event_tensor(
     workspace: Expr,
     shape: Union[ShapeExpr, Tuple[PrimExpr], List[PrimExpr]],
-    f_init: Union[Callable, PrimExprLike],
+    f_init: Union[Callable, PrimFunc, PrimExprLike],
     extra_args: List[Union[Expr, PrimExprLike]] = [],
 ) -> Expr:
     """
@@ -395,7 +399,9 @@ def alloc_event_tensor(
     """
     if isinstance(shape, (list, tuple)):
         shape = ShapeExpr(shape)
-    f_init, extra_args = trans_callable_to_primfunc(f_init, extra_args, len(shape) + len(extra_args), 1, "int32")
+    f_init, extra_args = trans_callable_to_primfunc(
+        f_init, extra_args, len(shape) + len(extra_args), 1, "int32"
+    )
     return _ffi_api.alloc_event_tensor(workspace, shape, f_init, extra_args)
 
 

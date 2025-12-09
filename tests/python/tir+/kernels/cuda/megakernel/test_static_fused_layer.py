@@ -1310,6 +1310,7 @@ if __name__ == "__main__":
         print(f"Testing with {scheduler} tile scheduler...", flush=True)
         megakernel_wrapper = MegaKernel()
         mod = megakernel_wrapper.get_mod(max_batch_size=128, profile_on=args.profiler_on)
+        # mod.show()
         mod = rx.transform.StaticHorizontalFusion(
             ["megakernel_blkm32", "megakernel_blkm64", "megakernel_blkm128"],
             strategy=scheduler, tile_scheduler_class=tile_scheduler_class_map[scheduler],
