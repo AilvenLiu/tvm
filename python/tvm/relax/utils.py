@@ -392,6 +392,7 @@ from typing import Tuple, Union
 import inspect
 from tvm.script import tir as T
 from tvm.tir.function import PrimFunc
+import types
 PrimExprLike = Union[int, PrimExpr]
 
 def add_func_to_ir_module(func: PrimFunc) -> GlobalVar:
@@ -413,16 +414,76 @@ def add_func_to_ir_module(func: PrimFunc) -> GlobalVar:
     return gvar
 
 
-def trans_callable_to_primfunc(func: Union[Callable, PrimFunc, PrimExprLike], extra_args: List[Union[Expr, PrimExprLike]],
-                               input_dim: int, output_dim: int, dtype: str) -> Tuple[GlobalVar, List[Union[Expr, PrimExpr]]]:
-    if isinstance(func, PrimFunc):
-        gvar = add_func_to_ir_module(func)
-        return gvar, [(var if isinstance(var, (Expr, PrimExpr)) else {"int32": T.int32, "int64": T.int64}[dtype](var)) for var in extra_args]
+
+def extract_extra_args(func: Callable) -> Tuple[Callable, List[Union[Expr, PrimExprLike]]]:
+    # TODO: Now only directly extracting Expr and PrimExprLike from globals and closure
+    #       Need to support extracting Expr and PrimExprLike from List/Dict/Object
+
+    def make_cell(value):
+        return (lambda: value).__closure__[0]
+
+    # copy __globals__ and __closure__ to avoid side effect
+    func = types.FunctionType(
+        func.__code__,
+        func.__globals__.copy(),
+        func.__name__,
+        argdefs=func.__defaults__,
+        closure = tuple(make_cell(c.cell_contents) for c in func.__closure__) if func.__closure__ else None,
+    )
+    code = func.__code__
+    cnt = 0
+    new_arg_names = []
+    cell_index_map = {}
+    extra_args = []
+    for i in range(len(code.co_freevars)):
+        if isinstance(func.__closure__[i].cell_contents, (Expr, PrimExprLike)):
+            new_arg_name = f"extra_arg_{cnt}"
+            new_arg_names.append(new_arg_name)
+            cell_index_map[new_arg_name] = ("closure", i)
+            extra_args.append(func.__closure__[i].cell_contents)
+            cnt += 1
+    for name, value in func.__globals__.items():
+        if name in code.co_names and isinstance(value, (Expr, PrimExprLike)):
+            new_arg_name = f"extra_arg_{cnt}"
+            new_arg_names.append(new_arg_name)
+            cell_index_map[new_arg_name] = ("global", name)
+            extra_args.append(value)
+            cnt += 1
+    if len(new_arg_names) == 0:
+        return func, extra_args
+    original_param_names = list(inspect.signature(func).parameters.keys())
+    new_signature_args = original_param_names + new_arg_names
+
+    def wrapper(*args, **kwargs):
+        arg_values = dict(zip(new_signature_args, args))
+        arg_values.update(kwargs)
+        # replace the content of cell corresponding extra args
+        for new_name, value in arg_values.items():
+            if new_name in cell_index_map:
+                var_scope, idx = cell_index_map[new_name]
+                if var_scope == "global":
+                    func.__globals__[idx] = value
+                else: # closure
+                    func.__closure__[idx].cell_contents = value
+        original_args = args[:len(original_param_names)]
+        original_kwargs = {k: v for k, v in kwargs.items() if k in original_param_names}
+        result = func(*original_args, **original_kwargs)
+        return result
+
+    # modify the signature of wrapper function
+    new_params = [inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                  for name in new_signature_args]
+    wrapper.__signature__ = inspect.Signature(new_params)
+    return wrapper, extra_args
+
+def trans_callable_to_primfunc(func: Union[Callable, PrimExprLike], input_dim: int, output_dim: int, dtype: str) -> Tuple[GlobalVar, List[Union[Expr, PrimExpr]]]:
     if isinstance(func, PrimExprLike):
         assert output_dim == 1, "The output_dim must be 1 when func is PrimExprLike."
         new_func = lambda *args: func
     else:
         new_func = func
+    new_func, extra_args = extract_extra_args(new_func)
+
     def _convert_arg(para: Union[tir.Var, tir.Buffer]) -> T.Var:
         if isinstance(para, tir.Var) or isinstance(para, tir.Buffer):
             ret = T.arg("var", para)
@@ -441,7 +502,7 @@ def trans_callable_to_primfunc(func: Union[Callable, PrimFunc, PrimExprLike], ex
                 T.buffer_store(buf_list[i], value_list[i], [0])
 
     # prepare the tir input and output
-    tir_input = [T.var(dtype=dtype) for _ in range(input_dim - len(extra_args))]
+    tir_input = [T.var(dtype=dtype) for _ in range(input_dim)]
     for arg in extra_args:
         if isinstance(arg, Expr):
             tir_input.append(T.Buffer(shape=[v for v in arg.struct_info.shape], dtype=arg.struct_info.dtype, scope="global"))
@@ -450,7 +511,6 @@ def trans_callable_to_primfunc(func: Union[Callable, PrimFunc, PrimExprLike], ex
         else: # int
             tir_input.append(arg)
     tir_output = [T.Buffer(shape=[1], dtype=dtype, scope="local") for _ in range(output_dim)]
-
 
     @T.prim_func(check_well_formed=False, private=True)
     def f():
@@ -466,8 +526,7 @@ class Dependency:
     def __init__(
         self,
         event: Expr,
-        dep: Union[Callable, PrimFunc],
-        extra_args: List[Union[Expr, PrimExprLike]] = [],
+        dep: Union[Callable, PrimExprLike],
         tile_idx_dtype: str = "int32",
     ):
         """
@@ -475,14 +534,11 @@ class Dependency:
         ----------
         event : Expr
             The variable of event tensor.
-        dep : Callable
+        dep : Union[Callable, PrimExprLike]
             The dependency function.
-            It takes the (tile index/event coordinate), the index of the (event coordinate/tile index) to be calculated,
-            and extra arguments, and returns the number of depended (event coordinates/tile indices),
-            the indices of the depended (event coordinate/tile index).
-        extra_args : List[Union[Expr, PrimExprLike]], optional
-            A list of extra arguments passed to the dependency function.
-            Defaults to an empty list.
+            It takes the (tile index/event coordinate), and the index of the (event coordinate/tile index) to be calculated.
+            It returns the number of depended (event coordinates/tile indices),
+            and the indices of the depended (event coordinate/tile index).
         tile_idx_dtype : str, optional
             The data type of the tile index. Defaults to "int32".
 
@@ -491,9 +547,10 @@ class Dependency:
         The order of parameters for both callable functions is critical and strictly defined.
         1. The dependency function (`dep`) must accept parameters in the following order:
            The (tile index/event coordinate),
-           The index of the (event coordinate/tile index) to be calculated (ranging from 0 to num - 1),
-           The extra arguments in the same order as provided in `extra_args`.
-        2. The event coordinate in defined as (rank, *evt_tensor_indices). 'rank=-1' represents the local rank.
+           The index of the (event coordinate/tile index) to be calculated.
+        2. The dependency function (`dep`) must return the number of depended (event coordinates/tile indices),
+           and the indices of the depended (event coordinate/tile index).
+        3. The event coordinate in defined as (rank, *evt_tensor_indices). 'rank=-1' represents the local rank.
 
         Examples
         --------
@@ -502,29 +559,22 @@ class Dependency:
         Then the Dependency object can be created as follows:
         >>> dependency = Dependency(
         ...     event=E,
-        ...     dep=lambda i, j, k, idx, X, Y: (Y[k] + 1, -1, X[i], j, idx),
-        ...     extra_args=[X, Y],
+        ...     dep=lambda i, j, k, idx: (Y[k] + 1, -1, X[i], j, idx),
         ... )
         Then the dependency can be handled by:
-        >>> handled_info = dependency.handle_dep(input_dim=3, output_dim=4)
+        >>> handled_info = dependency.handle_dep(input_dim=4, output_dim=4)
         """
         self.event = event
         if not isinstance(event, Expr) or isinstance(event, List) or isinstance(event, Tuple) or isinstance(event, tvm.relax.Tuple):
             raise ValueError("One Dependency obj should handle a single event.")
         self.dep = dep
-        self.extra_args = extra_args
-        for arg in self.extra_args:
-            if not isinstance(arg, (Expr, PrimExprLike)):
-                raise ValueError("extra_args should be Expr or PrimExpr/int/float")
         self.tile_idx_dtype = tile_idx_dtype
         self.dispatch_func = {"int32": T.int32, "int64": T.int64}[tile_idx_dtype]
 
     def handle_dep(self, input_dim, output_dim) -> Tuple[GlobalVar, Expr, List[Expr]]:
         # check the signature
-        if isinstance(self.dep, PrimFunc):
-            if len(self.dep.params) != input_dim + output_dim:
-                raise ValueError(f"dep requires {input_dim + output_dim} parameters")
-        elif len(inspect.signature(self.dep).parameters) != input_dim:
-             raise ValueError(f"dep requires {input_dim} parameters")
-        dep_gvar, extra_args = trans_callable_to_primfunc(self.dep, self.extra_args, input_dim, output_dim, self.tile_idx_dtype)
+        if isinstance(self.dep, Callable):
+            if len(inspect.signature(self.dep).parameters) != input_dim:
+                raise ValueError(f"dep requires {input_dim} parameters")
+        dep_gvar, extra_args = trans_callable_to_primfunc(self.dep, input_dim, output_dim, self.tile_idx_dtype)
         return dep_gvar, self.event, extra_args

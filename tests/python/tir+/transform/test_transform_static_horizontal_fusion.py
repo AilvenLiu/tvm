@@ -250,8 +250,7 @@ def test_extra_args():
                     tile_num=(NUM_BLOCK_M, NUM_BLOCK_N, 1),
                     out_deps=relax.utils.Dependency(
                         event=event_1,
-                        dep=lambda i, j, k, notify_idx, p: (1, -1, p[i]),
-                        extra_args=[P],
+                        dep=lambda i, j, k, notify_idx: (1, -1, P[i]),
                     ),
                 )
                 C = R.call_tir_device(
@@ -262,13 +261,11 @@ def test_extra_args():
                     tile_num=(NUM_BLOCK_M, 1, 1),
                     in_deps=relax.utils.Dependency(
                         event=event_1,
-                        dep=lambda i, j, k, wait_idx, p: (1, -1, p[i]),
-                        extra_args=[P],
+                        dep=lambda i, j, k, wait_idx: (1, -1, P[i]),
                     ),
                     inverse_in_deps=relax.utils.Dependency(
                         event=event_1,
-                        dep=lambda rank, i, inv_idx, inv_p: (1, inv_p[i], inv_idx // 1, inv_idx % 1),
-                        extra_args=[inv_P],
+                        dep=lambda rank, i, inv_idx: (1, inv_P[i], inv_idx // 1, inv_idx % 1),
                     ),
                     out_deps=relax.utils.Dependency(
                         event=event_2,
@@ -278,6 +275,7 @@ def test_extra_args():
                 R.output(C)
             return C
     # fmt: on
+    Before.show()
     fused_static_scheduler_mod = relax.transform.StaticHorizontalFusion(
         "mega_kernel", "static", static_scheduler.StaticTileScheduler, static_scheduler.Semaphore, "mega_kernel_"
     )(Before)
@@ -305,12 +303,6 @@ def test_extra_args():
         C_tvm_static_scheduler_fused = vm["mega_kernel"](A_tvm, workspace_tvm, P_tvm, P_inv_tvm)
         ret_static_scheduler_fused = C_tvm_static_scheduler_fused.numpy()
 
-        evt_1 = tvm.runtime.tensor(
-            np.full((NUM_BLOCK_M,), NUM_BLOCK_N * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
-        evt_2 = tvm.runtime.tensor(
-            np.full((1,), NUM_BLOCK_M * (1 + (1 << 16)), dtype=np.int32), device=DEV
-        )
         fused_dynamic_scheduler_mod = tvm.compile(
             fused_dynamic_scheduler_mod, target=target, tir_pipeline="tirp"
         )

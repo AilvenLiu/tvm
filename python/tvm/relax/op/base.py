@@ -297,9 +297,7 @@ def call_tir_device(
         if not isinstance(in_deps, list):
             in_deps = [in_deps]
         handle_dep = [
-            dep.handle_dep(
-                tile_idx_dim + 1 + len(dep.extra_args), len(dep.event.struct_info.shape) + 2
-            )
+            dep.handle_dep(tile_idx_dim + 1, len(dep.event.struct_info.shape) + 2)
             for dep in in_deps
         ]
         in_dep_list, in_evt_list, in_extra_args_list = map(list, zip(*handle_dep))
@@ -309,7 +307,7 @@ def call_tir_device(
         if not isinstance(out_deps, list):
             out_deps = [out_deps]
         handle_dep = [
-            dep.handle_dep(tile_idx_dim + 1 + len(dep.extra_args), len(dep.event.struct_info.shape) + 2)
+            dep.handle_dep(tile_idx_dim + 1, len(dep.event.struct_info.shape) + 2)
             for dep in out_deps
         ]
         out_dep_list, out_evt_list, out_extra_args_list = map(list, zip(*handle_dep))
@@ -322,7 +320,7 @@ def call_tir_device(
             inverse_in_deps
         ), "Length of inverse_in_deps should match that of in_deps."
         handle_dep = [
-            dep.handle_dep(len(dep.event.struct_info.shape) + 2 + len(dep.extra_args), tile_idx_dim + 1)
+            dep.handle_dep(len(dep.event.struct_info.shape) + 2, tile_idx_dim + 1)
             for dep in inverse_in_deps
         ]
         inv_in_dep_list, inv_in_evt_list, inv_in_extra_args_list = map(list, zip(*handle_dep))
@@ -380,7 +378,6 @@ def alloc_event_tensor(
     workspace: Expr,
     shape: Union[ShapeExpr, Tuple[PrimExpr], List[PrimExpr]],
     f_init: Union[Callable, PrimFunc, PrimExprLike],
-    extra_args: List[Union[Expr, PrimExprLike]] = [],
 ) -> Expr:
     """
     Allocate an event tensor and initialize it.
@@ -392,16 +389,11 @@ def alloc_event_tensor(
     shape : Union[ShapeExpr, Tuple[PrimExpr], List[PrimExpr]]
         The shape of the event tensor.
     f_init : Union[Callable, PrimExprLike]
-        The function to initialize the event tensor. Takes indices, extra args as input and returns the initial count at corresponding index.
-    extra_args : List[Union[Expr, PrimExprLike]], optional
-        A list of extra arguments passed to the initialization function.
-        Defaults to an empty list.
+        The function to initialize the event tensor. Takes indices as input and returns the initial count at corresponding index.
     """
     if isinstance(shape, (list, tuple)):
         shape = ShapeExpr(shape)
-    f_init, extra_args = trans_callable_to_primfunc(
-        f_init, extra_args, len(shape) + len(extra_args), 1, "int32"
-    )
+    f_init, extra_args = trans_callable_to_primfunc(f_init, len(shape), 1, "int32")
     return _ffi_api.alloc_event_tensor(workspace, shape, f_init, extra_args)
 
 
