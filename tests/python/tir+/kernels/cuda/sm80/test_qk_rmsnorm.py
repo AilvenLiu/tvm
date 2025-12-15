@@ -55,9 +55,6 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
     bdy = rows_per_warp * NUM_WARPS  # total rows per CTA
     rows_per_cta = bdy  # each CTA processes this many rows
 
-    # Persistent kernel: fixed number of CTAs
-    CTA_COUNT = SM_COUNT * 32
-
     # Reduction shuffle steps based on threads_per_row
     # head_dim=64: threads_per_row=8, need 3 steps (4,2,1)
     # head_dim=128: threads_per_row=16, need 4 steps (8,4,2,1)
@@ -70,6 +67,7 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
         num_tokens = T.int32()
         qo_heads = T.int32()
         kv_heads = T.int32()
+
         q = T.match_buffer(q_ptr, [num_tokens, qo_heads, head_dim], dtype, scope="global")
         k = T.match_buffer(k_ptr, [num_tokens, kv_heads, head_dim], dtype, scope="global")
         q_weight = T.match_buffer(q_weight_ptr, [head_dim], dtype, scope="global")
@@ -78,8 +76,11 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
         weight_bias_global = T.match_buffer(weight_bias_ptr, [1], "float32", scope="global")
         bound_m_global = T.match_buffer(bound_m_ptr, [1], "int32", scope="global")
 
+        cta_count = ceildiv(num_tokens * (qo_heads + kv_heads), rows_per_cta)
+        # cta_count = SM_COUNT * 32
+
         with T.kernel():
-            bx = T.cta_id([CTA_COUNT], parent="kernel")
+            bx = T.cta_id([cta_count], parent="kernel")
             tx, ty = T.thread_id([bdx, bdy], parent="cta")
 
             with T.thread():
@@ -164,7 +165,7 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
                         Tp.copy(qk[actual_row[0], col_offset:col_offset + vec_size], out_reg[:])
 
                     # Advance to next batch of rows for this CTA
-                    job_base[0] += CTA_COUNT * rows_per_cta
+                    job_base[0] += cta_count * rows_per_cta
 
     # fmt: on
 
