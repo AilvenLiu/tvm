@@ -32,7 +32,7 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
     - No SMEM for weights: load directly to registers when needed
     - Multi-row per warp: for small head_dim, each warp processes multiple rows
     - fp16 register storage: only convert to fp32 during computation
-    - Persistent kernel pattern for work distribution
+    - Non-persistent: one CTA per batch of rows, hardware handles scheduling
 
     Thread/warp configuration:
     - head_dim=64:  8 threads/row, 4 rows/warp (32 threads)
@@ -77,20 +77,18 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
         bound_m_global = T.match_buffer(bound_m_ptr, [1], "int32", scope="global")
 
         cta_count = ceildiv(num_tokens * (qo_heads + kv_heads), rows_per_cta)
-        # cta_count = SM_COUNT * 32
 
         with T.kernel():
             bx = T.cta_id([cta_count], parent="kernel")
             tx, ty = T.thread_id([bdx, bdy], parent="cta")
 
             with T.thread():
-                # Load scalar parameters (once per CTA lifetime)
+                # Load scalar parameters
                 eps = T.alloc_local([1], "float32")
                 weight_bias = T.alloc_local([1], "float32")
                 bound_m = T.alloc_local([1], "int32")
                 q_job_cnt = T.alloc_local([1], "int32")
                 total_jobs = T.alloc_local([1], "int32")
-                job_base = T.alloc_local([1], "int32")
 
                 eps[0] = eps_global[0]
                 weight_bias[0] = weight_bias_global[0]
@@ -109,15 +107,10 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
                 row_idx = T.alloc_local([1], "int32")
                 actual_row = T.alloc_local([1], "int32")
 
-                # Persistent loop: each CTA processes multiple batches of rows
-                # CTA bx handles rows: bx*rows_per_cta, bx*rows_per_cta + CTA_COUNT*rows_per_cta, ...
-                job_base[0] = bx * rows_per_cta
+                # Non-persistent: each CTA handles one batch of rows
+                row_idx[0] = bx * rows_per_cta + ty
 
-                while job_base[0] < total_jobs[0]:
-                    # Each thread in the CTA handles one row within this batch
-                    row_idx[0] = job_base[0] + ty
-
-                    if row_idx[0] < total_jobs[0]:
+                if row_idx[0] < total_jobs[0]:
                         # Determine Q or K
                         is_q = T.meta_var(row_idx[0] < q_job_cnt[0])
                         qk_ptr: T.Var(name="qk_ptr", dtype=PointerType(PrimType(dtype))) = T.if_then_else(is_q, q.data, k.data)
@@ -163,9 +156,6 @@ def get_qk_norm_kernel(head_dim, dtype="float16"):
 
                         Tp.cast(out_reg[:], x_reg_f32[:])
                         Tp.copy(qk[actual_row[0], col_offset:col_offset + vec_size], out_reg[:])
-
-                    # Advance to next batch of rows for this CTA
-                    job_base[0] += cta_count * rows_per_cta
 
     # fmt: on
 
@@ -409,7 +399,7 @@ def benchmark_qk_norm() -> None:
         )
 
     for m in [1, 4, 8, 32, 128, 1024, 12 * 1024, 16 * 1024, 32 * 1024]:
-    # for m in [32 * 1024]:
+        # for m in [32 * 1024]:
         bench_qk_norm(m)
 
 
