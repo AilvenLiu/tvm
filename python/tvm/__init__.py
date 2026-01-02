@@ -75,9 +75,9 @@ if not _RUNTIME_ONLY:
 # raise proper error message when user run the package using
 # an older version of the python
 
-# tvm.tirp
-from .tirp import megakernel
-from .tirp import op_schedule
+# tvm.tirx
+from .tirx import megakernel
+from .tirx import op_schedule
 
 
 def _should_print_backtrace():

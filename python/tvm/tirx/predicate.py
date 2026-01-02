@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=no-member
-"""Async structures for TIR+"""
+"""Async structures for TIRX"""
 import inspect
 
 from . import _ffi_api
@@ -27,7 +27,7 @@ from tvm.tirx import Var, PrimExpr
 
 @register_object("tirx.Predicate")
 class Predicate(Object):
-    """A predicate object for TIR+"""
+    """A predicate object for TIRX"""
 
     vars: List[Var]
     pred: PrimExpr

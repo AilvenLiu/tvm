@@ -65,7 +65,7 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
                                Device preferred_host_device) {
   NVTXScopedRange range("Generate execution queue");
   const auto f_get_config =
-      tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
+      tvm::ffi::Function::GetGlobalRequired("tirx.megakernel.get_model_config");
   auto config = f_get_config(model_name).cast<ffi::Map<ffi::String, ffi::Any>>();
   int num_qo_heads = config["NUM_ATTENTION_HEADS"].cast<int>() / tp_size;
   int num_kv_heads = config["NUM_KEY_VALUE_HEADS"].cast<int>() / tp_size;
@@ -195,7 +195,7 @@ Tensor GenerateExecQueueStatic(int batch_size, int attn_task_num, int tp_size,
       f_push_task(m_idx, 0, 0, JobType::kMoeCountAndSort);
     }
     const auto f_get_max_num_tokens_padded =
-        ffi::Function::GetGlobalRequired("tirp.megakernel.get_max_num_tokens_padded");
+        ffi::Function::GetGlobalRequired("tirx.megakernel.get_max_num_tokens_padded");
     int max_num_tokens_padded =
         f_get_max_num_tokens_padded(batch_size, num_experts_per_tok, num_experts, kMoeBlkM)
             .cast<int>();
@@ -302,7 +302,7 @@ Array<Array<Tensor>> GenerateExecQueueDynamic(Tensor exec_queue_device_buf,
   int32_t* exec_queue_host_data = static_cast<int32_t*>(exec_queue_host_buf->data);
   int num_tasks = 0;
   const auto f_get_config =
-      tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
+      tvm::ffi::Function::GetGlobalRequired("tirx.megakernel.get_model_config");
   auto config = f_get_config(model_name).cast<ffi::Map<ffi::String, ffi::Any>>();
   int num_qo_heads = config["NUM_ATTENTION_HEADS"].cast<int>() / tp_size;
   int num_kv_heads = config["NUM_KEY_VALUE_HEADS"].cast<int>() / tp_size;

@@ -1719,8 +1719,8 @@ namespace transform {
 
 Pass StorageRewrite() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
-    // Skip if the it's TIRp function
-    if (f->attrs->dict.count(tvm::attr::kIsTIRp)) return f;
+    // Skip if the it's TIRx function
+    if (f->attrs->dict.count(tvm::attr::kIsTIRx)) return f;
 
     bool enable_reuse = true;
     bool reuse_require_exact_matched_dtype = false;

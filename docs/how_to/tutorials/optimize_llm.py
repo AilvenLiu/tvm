@@ -66,7 +66,7 @@ from tvm import relax, te, tirx
 from tvm.relax import register_pipeline
 from tvm.relax.frontend import nn
 from tvm.relax.frontend.nn import Tensor, op
-from tvm.relax.frontend.nn.llm.kv_cache import PagedKVCache, TIRPagedKVCache
+from tvm.relax.frontend.nn.llm.kv_cache import PagedKVCache, TIRXagedKVCache
 from tvm.runtime import ShapeTuple
 from tvm.s_tir import dlight
 
@@ -286,7 +286,7 @@ class LlamaForCausalLM(nn.Module):
         prefill_chunk_size: tirx.Var,
         page_size: tirx.Var,
     ) -> PagedKVCache:
-        return TIRPagedKVCache(
+        return TIRXagedKVCache(
             attn_kind="mha",
             max_batch_size=max_batch_size,
             max_total_seq_len=max_total_seq_len,

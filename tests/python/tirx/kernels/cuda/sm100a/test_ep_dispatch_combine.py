@@ -1,0 +1,742 @@
+import argparse
+import tempfile
+import numpy as np
+import math
+
+import tvm
+import tvm.testing
+from tvm.runtime import ShapeTuple
+from tvm.runtime import disco as di
+from tvm.script import ir as I
+from tvm.script import tir as T
+from tvm.tirx.megakernel.common import ProfileEventType, get_source, KernelConfig, SmemManager
+from tvm.tirx.megakernel.ep_dispatch import (
+    EPDispatchPrecomputeTile,
+    EPDispatchSendTile,
+    EPDispatchRecvTile,
+)
+from tvm.tirx.megakernel.ep_combine import EPCombineSendTile, EPCombineRecvTile
+
+
+class EPDispatchKernel:
+    def __init__(self):
+        self.tile_attr = {}
+        self.class_list = set()
+
+    def set_tiles(
+        self,
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+    ):
+        self.ep_dispatch_precompute_tile = self._add_tile(
+            EPDispatchPrecomputeTile(
+                num_tokens,
+                total_num_experts,
+                topk,
+                hidden_dim,
+                in_dtype,
+                out_dtype,
+                world_size,
+                n_dp_groups,
+            ),
+            ProfileEventType.EP_DISPATCH_PRECOMPUTE,
+        )
+        self.ep_dispatch_send_tile = self._add_tile(
+            EPDispatchSendTile(
+                num_tokens,
+                total_num_experts,
+                topk,
+                hidden_dim,
+                in_dtype,
+                out_dtype,
+                world_size,
+                n_dp_groups,
+            ),
+            ProfileEventType.EP_DISPATCH_SEND,
+        )
+        self.ep_dispatch_recv_tile = self._add_tile(
+            EPDispatchRecvTile(
+                num_tokens,
+                total_num_experts,
+                topk,
+                hidden_dim,
+                in_dtype,
+                out_dtype,
+                world_size,
+                n_dp_groups,
+            ),
+            ProfileEventType.EP_DISPATCH_RECV,
+        )
+
+    @T.macro
+    def run_tile(self, tile, *args):
+        self.smem_manager.enter_tile_runtime(tile)
+        with T.cta():
+            tile.run(*args)
+
+    def _add_tile(self, tile, profiler_event_type):
+        self.tile_attr[tile] = profiler_event_type
+        self.class_list.add(tile.__class__)
+        return tile
+
+    def class_init_all(self, smem_manager: SmemManager):
+        self.smem_manager = smem_manager
+        for cls in self.class_list:
+            if cls.need_init:
+                smem_manager.set_tile(cls)
+                cls.class_init(smem_manager)
+
+    def class_finalize_all(self):
+        for cls in self.class_list:
+            if cls.need_init:
+                cls.class_finalize()
+
+    def device_init_all(self, smem_manager: SmemManager):
+        for tile, _ in self.tile_attr.items():
+            smem_manager.set_tile(tile)
+            tile.init(smem_manager)
+
+    def get_func_static(
+        self,
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+    ):
+        local_num_experts = total_num_experts // world_size
+
+        # fmt: off
+        @T.prim_func(tirx=True)
+        def main_dispatch(
+            # input
+            send_tokens_ptr: T.handle,
+            route_experts_ptr: T.handle,
+
+            # output
+            recv_tokens_ptr: T.handle,
+            num_recv_tokens_ptr: T.handle,
+
+            # signal buffers
+            target_wait_ptr: T.handle,
+            actual_wait_ptr: T.handle,
+
+            # auxiliary buffers
+            dst_token_indices_ptr: T.handle,
+            dst_token_idx_ptr: T.handle,
+        ):
+            T.func_attr({"global_symbol": "main_dispatch", "target": T.target("cuda")})
+
+            # match buffers
+            send_tokens_global = T.match_buffer(send_tokens_ptr, [num_tokens, hidden_dim], in_dtype, scope="global")
+            route_experts_global = T.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")
+            recv_tokens_global = T.match_buffer(recv_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], in_dtype, scope="global")
+            num_recv_tokens_global = T.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")
+            target_wait_global = T.match_buffer(target_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")
+            actual_wait_global = T.match_buffer(actual_wait_ptr, [local_num_experts, world_size], "uint64", scope="global")
+            dst_token_indices_global = T.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")
+            dst_token_idx_global = T.match_buffer(dst_token_idx_ptr, [total_num_experts], "int32", scope="global")
+
+            self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)
+
+            with T.kernel():
+                bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+                warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+                lane_id = T.thread_id([32], parent="warp")
+                tid = T.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+                rank = T.nvshmem.my_pe()
+
+                with T.cta():
+                    buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+                    smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+                    self.device_init_all(smem_manager)
+                    self.class_init_all(smem_manager)
+
+                    smem_manager.init()
+
+                    with T.cta()[KernelConfig.SM_NUMBER - 16 : KernelConfig.SM_NUMBER]:
+                        dst_expert_st = T.meta_var(T.int32(bx - (KernelConfig.SM_NUMBER - 16)) * 8)
+                        self.run_tile(self.ep_dispatch_precompute_tile, dst_expert_st, route_experts_global, target_wait_global, rank)
+                    with T.cta()[0:num_tokens]:
+                        self.run_tile(self.ep_dispatch_send_tile, bx, send_tokens_global, route_experts_global, recv_tokens_global, actual_wait_global, dst_token_indices_global, dst_token_idx_global, rank)
+                    with T.cta()[0:total_num_experts]:
+                        local_expert_idx = T.meta_var(T.int32(bx // world_size))
+                        src_rank_idx = T.meta_var(T.int32(bx % world_size))
+                        self.run_tile(self.ep_dispatch_recv_tile, local_expert_idx, src_rank_idx, num_recv_tokens_global, target_wait_global, actual_wait_global, rank)
+
+                    smem_manager.exit_tile_runtime()
+                    self.class_finalize_all()
+
+        # fmt: on
+        return main_dispatch
+
+    def get_module_static(
+        self,
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+    ):
+        @I.ir_module(tirx=True)
+        class StaticModule:
+            @T.prim_func(tirx=True)
+            def main_dispatch():
+                pass
+
+        module: tvm.IRModule = StaticModule
+        module.update_func(
+            module.get_global_var("main_dispatch"),
+            self.get_func_static(
+                num_tokens,
+                total_num_experts,
+                topk,
+                hidden_dim,
+                in_dtype,
+                out_dtype,
+                world_size,
+                n_dp_groups,
+            ),
+        )
+        return module
+
+
+class EPCombineKernel:
+    def __init__(self):
+        self.tile_attr = {}
+        self.class_list = set()
+
+    def set_tiles(
+        self,
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+    ):
+        self.ep_combine_send_tile = self._add_tile(
+            EPCombineSendTile(
+                num_tokens,
+                total_num_experts,
+                topk,
+                hidden_dim,
+                in_dtype,
+                out_dtype,
+                world_size,
+                n_dp_groups,
+            ),
+            ProfileEventType.EP_COMBINE_SEND,
+        )
+        self.ep_combine_recv_tile = self._add_tile(
+            EPCombineRecvTile(
+                num_tokens,
+                total_num_experts,
+                topk,
+                hidden_dim,
+                in_dtype,
+                out_dtype,
+                world_size,
+                n_dp_groups,
+            ),
+            ProfileEventType.EP_COMBINE_RECV,
+        )
+
+    @T.macro
+    def run_tile(self, tile, *args):
+        self.smem_manager.enter_tile_runtime(tile)
+        with T.cta():
+            tile.run(*args)
+
+    def _add_tile(self, tile, profiler_event_type):
+        self.tile_attr[tile] = profiler_event_type
+        self.class_list.add(tile.__class__)
+        return tile
+
+    def class_init_all(self, smem_manager: SmemManager):
+        self.smem_manager = smem_manager
+        for cls in self.class_list:
+            if cls.need_init:
+                smem_manager.set_tile(cls)
+                cls.class_init(smem_manager)
+
+    def class_finalize_all(self):
+        for cls in self.class_list:
+            if cls.need_init:
+                cls.class_finalize()
+
+    def device_init_all(self, smem_manager: SmemManager):
+        for tile, _ in self.tile_attr.items():
+            smem_manager.set_tile(tile)
+            tile.init(smem_manager)
+
+    def get_func_static(
+        self,
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+    ):
+        local_num_experts = total_num_experts // world_size
+
+        # fmt: off
+        @T.prim_func(tirx=True)
+        def main_combine(
+            # input
+            send_tokens_ptr: T.handle,
+            route_experts_ptr: T.handle,
+            route_weights_ptr: T.handle,
+            num_recv_tokens_ptr: T.handle,
+            dst_token_indices_ptr: T.handle,
+
+            # output
+            recv_tokens_ptr: T.handle,
+
+            # signal buffers
+            buf_wait_ptr: T.handle,
+
+            # auxiliary buffers
+            buf_recv_ptr: T.handle,
+        ):
+            T.func_attr({"global_symbol": "main_combine", "target": T.target("cuda")})
+
+            # match buffers
+            send_tokens_global = T.match_buffer(send_tokens_ptr, [local_num_experts, world_size, num_tokens, hidden_dim], out_dtype, scope="global")
+            route_experts_global = T.match_buffer(route_experts_ptr, [num_tokens, topk], "uint32", scope="global")
+            route_weights_global = T.match_buffer(route_weights_ptr, [num_tokens, topk], out_dtype, scope="global")
+            num_recv_tokens_global = T.match_buffer(num_recv_tokens_ptr, [local_num_experts, world_size], "uint32", scope="global")
+            dst_token_indices_global = T.match_buffer(dst_token_indices_ptr, [num_tokens, topk], "int32", scope="global")
+            recv_tokens_global = T.match_buffer(recv_tokens_ptr, [num_tokens, hidden_dim], out_dtype, scope="global")
+            buf_wait_global = T.match_buffer(buf_wait_ptr, [total_num_experts,], "uint64", scope="global")
+            buf_recv_global = T.match_buffer(buf_recv_ptr, [total_num_experts, num_tokens, hidden_dim], out_dtype, scope="global")
+
+            self.set_tiles(num_tokens, total_num_experts, topk, hidden_dim, in_dtype, out_dtype, world_size, n_dp_groups)
+
+            with T.kernel():
+                bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
+                warp_id = T.warp_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER], parent="cta")
+                lane_id = T.thread_id([32], parent="warp")
+                tid = T.thread_id([KernelConfig.WG_NUMBER * KernelConfig.WARP_NUMBER * 32], parent="cta")
+                rank = T.nvshmem.my_pe()
+
+                with T.cta():
+                    buf = T.alloc_buffer([KernelConfig.MAX_SMEM_SIZE], "uint8", scope="shared.dyn")
+                    smem_manager = T.meta_var(SmemManager(KernelConfig.MAX_SMEM_SIZE, 16384, buf.data))
+                    self.device_init_all(smem_manager)
+                    self.class_init_all(smem_manager)
+
+                    smem_manager.init()
+
+                    with T.cta()[0:total_num_experts]:
+                        local_expert_idx = T.meta_var(T.int32(bx // world_size))
+                        src_rank_idx = T.meta_var(T.int32(bx % world_size))
+                        self.run_tile(self.ep_combine_send_tile, local_expert_idx, src_rank_idx, send_tokens_global, buf_recv_global, buf_wait_global, num_recv_tokens_global, rank)
+                    with T.cta()[0:num_tokens]:
+                        self.run_tile(self.ep_combine_recv_tile, bx, recv_tokens_global, route_experts_global, route_weights_global, buf_recv_global, buf_wait_global, dst_token_indices_global, rank)
+
+                    smem_manager.exit_tile_runtime()
+                    self.class_finalize_all()
+
+        # fmt: on
+        return main_combine
+
+    def get_module_static(
+        self,
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+    ):
+        @I.ir_module(tirx=True)
+        class StaticModule:
+            @T.prim_func(tirx=True)
+            def main_combine():
+                pass
+
+        module: tvm.IRModule = StaticModule
+        module.update_func(
+            module.get_global_var("main_combine"),
+            self.get_func_static(
+                num_tokens,
+                total_num_experts,
+                topk,
+                hidden_dim,
+                in_dtype,
+                out_dtype,
+                world_size,
+                n_dp_groups,
+            ),
+        )
+        return module
+
+
+arg_dict = {}
+
+
+def prepare_data(
+    num_tokens,
+    total_num_experts,
+    topk,
+    hidden_dim,
+    in_dtype,
+    out_dtype,
+    world_size,
+    n_dp_groups,
+):
+    global arg_dict
+    import torch
+
+    torch.manual_seed(42)
+
+    torch_dev = torch.device("cuda")
+    dtype_dict = {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float8_e4m3fn": torch.float8_e4m3fn,
+    }
+    arg_dict["send_tokens"] = torch.randn(
+        world_size,  # scatter to world_size GPUs
+        num_tokens,
+        hidden_dim,
+        dtype=dtype_dict.get(in_dtype),
+    ).to(torch_dev)
+    rand_scores = torch.rand(world_size * num_tokens, total_num_experts)
+    _, top_indices = torch.topk(rand_scores, k=topk, dim=1)
+    arg_dict["route_experts"] = (
+        top_indices.reshape(world_size, num_tokens, topk).to(torch.uint32).to(torch_dev)
+    )
+    arg_dict["route_weights"] = torch.rand(
+        world_size, num_tokens, topk, dtype=dtype_dict.get(out_dtype)
+    ).to(torch_dev)
+
+    return arg_dict
+
+
+@tvm.testing.requires_cuda_compute_version(10, exact=False)
+def test(
+    dispatch_kernel,
+    combine_kernel,
+    num_tokens,
+    total_num_experts,
+    topk,
+    hidden_dim,
+    in_dtype,
+    out_dtype,
+    world_size,
+    n_dp_groups,
+    debug,
+):
+    import ml_dtypes
+    import torch
+
+    arg_dict = prepare_data(
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+    )
+
+    def tir(arg_dict):
+        devices = list(np.arange(world_size))
+        sess = di.ProcessSession(num_workers=world_size)
+        sess.init_ccl(tvm.get_global_func("runtime.disco.compiled_ccl")(), *devices)
+        f_init_nvshmem_uid = tvm.get_global_func("runtime.disco.nvshmem.init_nvshmem_uid")
+        uid = f_init_nvshmem_uid()
+        init_dfunc = sess.get_global_func("runtime.disco.nvshmem.init_nvshmem")
+        init_dfunc(uid, world_size, 0)
+        sess.sync_worker_0()
+
+        # make tvm data
+        tvm_arg_dict = {}
+        N_REPEAT = 100
+        local_num_experts = total_num_experts // world_size
+        send_tokens_all_tvm = tvm.runtime.from_dlpack(torch.to_dlpack(arg_dict["send_tokens"]))
+        route_experts_all_tvm = tvm.runtime.from_dlpack(torch.to_dlpack(arg_dict["route_experts"]))
+        route_weights_all_tvm = tvm.runtime.from_dlpack(torch.to_dlpack(arg_dict["route_weights"]))
+        send_tokens_all_workers = sess.empty(
+            (world_size, num_tokens, hidden_dim), in_dtype, worker0_only=True
+        )
+        route_experts_all_workers = sess.empty(
+            (world_size, num_tokens, topk), "uint32", worker0_only=True
+        )
+        route_weights_all_workers = sess.empty(
+            (world_size, num_tokens, topk), out_dtype, worker0_only=True
+        )
+        sess.copy_to_worker_0(send_tokens_all_tvm, send_tokens_all_workers)
+        sess.copy_to_worker_0(route_experts_all_tvm, route_experts_all_workers)
+        sess.copy_to_worker_0(route_weights_all_tvm, route_weights_all_workers)
+
+        nvshmem_malloc_hook = sess.get_global_func("runtime.disco.nvshmem.empty")
+        tvm_arg_dict["send_tokens"] = nvshmem_malloc_hook(
+            ShapeTuple((num_tokens, hidden_dim)), in_dtype, None
+        )
+        tvm_arg_dict["recv_tokens"] = nvshmem_malloc_hook(
+            ShapeTuple((local_num_experts, world_size, num_tokens, hidden_dim)), in_dtype, None
+        )
+        tvm_arg_dict["buf_recv"] = nvshmem_malloc_hook(
+            ShapeTuple((total_num_experts, num_tokens, hidden_dim)), out_dtype, None
+        )
+        tvm_arg_dict["route_experts"] = sess.empty((num_tokens, topk), "uint32")
+        tvm_arg_dict["route_weights"] = sess.empty((num_tokens, topk), out_dtype)
+        tvm_arg_dict["num_recv_tokens"] = sess.empty((local_num_experts, world_size), "uint32")
+        tvm_arg_dict["dst_token_indices"] = sess.empty((num_tokens, topk), "int32")
+        tvm_arg_dict["output"] = sess.empty((num_tokens, hidden_dim), out_dtype)
+        for i in range(N_REPEAT):
+            tvm_arg_dict[f"target_wait_{i}"] = nvshmem_malloc_hook(
+                ShapeTuple((local_num_experts, world_size)), "uint64", None
+            )
+            tvm_arg_dict[f"actual_wait_{i}"] = nvshmem_malloc_hook(
+                ShapeTuple((local_num_experts, world_size)), "uint64", None
+            )
+            tvm_arg_dict[f"buf_wait_{i}"] = nvshmem_malloc_hook(
+                ShapeTuple((total_num_experts,)), "uint64", None
+            )
+            tvm_arg_dict[f"dst_token_idx_{i}"] = sess.empty((total_num_experts,), "int32")
+
+        sess.scatter_from_worker0(send_tokens_all_workers, tvm_arg_dict["send_tokens"])
+        sess.scatter_from_worker0(route_experts_all_workers, tvm_arg_dict["route_experts"])
+        sess.scatter_from_worker0(route_weights_all_workers, tvm_arg_dict["route_weights"])
+        sess.sync_worker_0()
+
+        # make result dict
+        res_dict = {}
+        DEV = tvm.cuda(0)
+        res_dict["output_all_workers"] = sess.empty(
+            (world_size, num_tokens, hidden_dim), out_dtype, worker0_only=True
+        )
+        res_dict["output_all_tvm"] = tvm.runtime.empty(
+            (world_size, num_tokens, hidden_dim), out_dtype, device=DEV
+        )
+        if debug:
+            res_dict["recv_tokens_all_workers"] = sess.empty(
+                (world_size, local_num_experts, world_size, num_tokens, hidden_dim),
+                in_dtype,
+                worker0_only=True,
+            )
+            res_dict["recv_tokens_all_tvm"] = tvm.runtime.empty(
+                (world_size, local_num_experts, world_size, num_tokens, hidden_dim),
+                in_dtype,
+                device=DEV,
+            )
+            res_dict["num_recv_tokens_all_workers"] = sess.empty(
+                (world_size, local_num_experts, world_size), "uint32", worker0_only=True
+            )
+            res_dict["num_recv_tokens_all_tvm"] = tvm.runtime.empty(
+                (world_size, local_num_experts, world_size), "uint32", device=DEV
+            )
+            res_dict["dst_token_indices_all_workers"] = sess.empty(
+                (world_size, num_tokens, topk), "int32", worker0_only=True
+            )
+            res_dict["dst_token_indices_all_tvm"] = tvm.runtime.empty(
+                (world_size, num_tokens, topk), "int32", device=DEV
+            )
+            res_dict["buf_recv_all_workers"] = sess.empty(
+                (world_size, total_num_experts, num_tokens, hidden_dim),
+                out_dtype,
+                worker0_only=True,
+            )
+            res_dict["buf_recv_all_tvm"] = tvm.runtime.empty(
+                (world_size, total_num_experts, num_tokens, hidden_dim), out_dtype, device=DEV
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = tvm.target.Target("cuda")
+            dispatch_path = tmpdir + "/dispatch.so"
+            dispatch_mod = tvm.compile(dispatch_kernel, target=target, tir_pipeline="tirx")
+            dispatch_mod.export_library(dispatch_path)
+            print(dispatch_mod.mod.imports[0].inspect_source())
+
+            combine_path = tmpdir + "/combine.so"
+            combine_mod = tvm.compile(combine_kernel, target=target, tir_pipeline="tirx")
+            combine_mod.export_library(combine_path)
+            print(combine_mod.mod.imports[0].inspect_source())
+
+            dispatch_rt_mod = sess.load_vm_module(dispatch_path)
+            combine_rt_mod = sess.load_vm_module(combine_path)
+            barrier_dfunc = sess.get_global_func(
+                "runtime.disco.nvshmem.barrier_all_on_current_stream"
+            )
+            sess._sync_all()
+
+            for itr in range(N_REPEAT):
+                barrier_dfunc()
+                if debug:
+                    print(f"Running dispatch kernel {itr}...")
+                dispatch_rt_mod["main_dispatch"](
+                    tvm_arg_dict["send_tokens"],
+                    tvm_arg_dict["route_experts"],
+                    tvm_arg_dict["recv_tokens"],
+                    tvm_arg_dict["num_recv_tokens"],
+                    tvm_arg_dict[f"target_wait_{itr}"],
+                    tvm_arg_dict[f"actual_wait_{itr}"],
+                    tvm_arg_dict["dst_token_indices"],
+                    tvm_arg_dict[f"dst_token_idx_{itr}"],
+                )
+                if debug:
+                    print(f"Dispatch kernel {itr} finished.")
+                if debug:
+                    print(f"Running combine kernel {itr}...")
+                barrier_dfunc()
+                combine_rt_mod["main_combine"](
+                    tvm_arg_dict["recv_tokens"],
+                    tvm_arg_dict["route_experts"],
+                    tvm_arg_dict["route_weights"],
+                    tvm_arg_dict["num_recv_tokens"],
+                    tvm_arg_dict["dst_token_indices"],
+                    tvm_arg_dict["output"],
+                    tvm_arg_dict[f"buf_wait_{itr}"],
+                    tvm_arg_dict["buf_recv"],
+                )
+                if debug:
+                    print(f"Combine kernel {itr} finished.")
+
+            sess._sync_all()
+
+            print(f"Gathering output to worker 0...")
+            sess.gather_to_worker0(tvm_arg_dict["output"], res_dict["output_all_workers"])
+            sess.copy_from_worker_0(res_dict["output_all_tvm"], res_dict["output_all_workers"])
+            if debug:
+                sess.gather_to_worker0(
+                    tvm_arg_dict["recv_tokens"], res_dict["recv_tokens_all_workers"]
+                )
+                sess.copy_from_worker_0(
+                    res_dict["recv_tokens_all_tvm"], res_dict["recv_tokens_all_workers"]
+                )
+                sess.gather_to_worker0(
+                    tvm_arg_dict["num_recv_tokens"], res_dict["num_recv_tokens_all_workers"]
+                )
+                sess.copy_from_worker_0(
+                    res_dict["num_recv_tokens_all_tvm"], res_dict["num_recv_tokens_all_workers"]
+                )
+                sess.gather_to_worker0(
+                    tvm_arg_dict["dst_token_indices"], res_dict["dst_token_indices_all_workers"]
+                )
+                sess.copy_from_worker_0(
+                    res_dict["dst_token_indices_all_tvm"], res_dict["dst_token_indices_all_workers"]
+                )
+                sess.gather_to_worker0(tvm_arg_dict["buf_recv"], res_dict["buf_recv_all_workers"])
+                sess.copy_from_worker_0(
+                    res_dict["buf_recv_all_tvm"], res_dict["buf_recv_all_workers"]
+                )
+            sess._sync_all()
+            print(f"Kernel execution all finished.")
+
+        finalize_dfunc = sess.get_global_func("runtime.disco.nvshmem.finalize_nvshmem")
+        finalize_dfunc()
+        sess.sync_worker_0()
+
+        return res_dict
+
+    res_dict = tir(arg_dict)
+
+    out = res_dict["output_all_tvm"].numpy()  # [WORLD_SIZE, num_tokens, hidden_dim], out_dtype
+
+    ml_dtype_dict = {
+        "bfloat16": ml_dtypes.bfloat16,
+        "float16": np.float16,
+        "float8_e4m3fn": ml_dtypes.float8_e4m3fn,
+    }
+    ref = torch.zeros_like(arg_dict["send_tokens"]).to(torch.device("cuda"))
+    for k in range(topk):
+        ref += arg_dict["send_tokens"] * arg_dict["route_weights"][:, :, k][..., None]
+    ref = ref.view(torch.uint8).cpu().numpy().view(ml_dtype_dict[out_dtype])
+
+    np.testing.assert_allclose(out, ref, atol=1e-1, rtol=1e-2)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--total-num-experts", type=int, default=128)
+    parser.add_argument("--topk", type=int, default=8)
+    parser.add_argument("--hidden-dim", type=int, default=2048)
+    parser.add_argument("--world-size", type=int, default=8)
+    parser.add_argument("--n-dp-groups", type=int, default=8)
+    parser.add_argument(
+        "--in-dtype",
+        choices=["bfloat16", "float16", "float8_e4m3fn"],
+        default="bfloat16",
+    )
+    parser.add_argument(
+        "--out-dtype",
+        choices=["bfloat16", "float16"],
+        default="bfloat16",
+    )
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+
+    num_tokens = int(args.batch_size)
+    total_num_experts = int(args.total_num_experts)
+    topk = int(args.topk)
+    hidden_dim = int(args.hidden_dim)
+    in_dtype = str(args.in_dtype)
+    out_dtype = str(args.out_dtype)
+    world_size = int(args.world_size)
+    n_dp_groups = int(args.n_dp_groups)
+    debug = args.debug
+
+    dispatch_kernel_wrapper = EPDispatchKernel()
+    dispatch_static_module = dispatch_kernel_wrapper.get_module_static(
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+    )
+    combine_kernel_wrapper = EPCombineKernel()
+    combine_static_module = combine_kernel_wrapper.get_module_static(
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+    )
+
+    print(
+        f"running: EP={world_size}, DP={world_size}, hidden_dim={hidden_dim}, total_num_experts={total_num_experts}, topk={topk}, num_tokens={num_tokens}, in_dtype={in_dtype}, out_dtype={out_dtype}"
+    )
+    test(
+        dispatch_static_module,
+        combine_static_module,
+        num_tokens,
+        total_num_experts,
+        topk,
+        hidden_dim,
+        in_dtype,
+        out_dtype,
+        world_size,
+        n_dp_groups,
+        debug,
+    )

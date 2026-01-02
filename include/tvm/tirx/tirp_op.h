@@ -17,6 +17,7 @@
  * under the License.
  */
 /*!
+<<<<<<<< HEAD:include/tvm/tirx/tirp_op.h
  * \file tvm/tirx/tirp_op.h
  * \brief TIR+ built-in operators.
  */
@@ -32,9 +33,26 @@
 namespace tvm {
 namespace tirx {
 namespace tirp {
+========
+ * \file tvm/tirx/tirx_op.h
+ * \brief TIRX built-in operators.
+ */
+#ifndef TVM_TIRX_TIRX_OP_H_
+#define TVM_TIRX_TIRX_OP_H_
+
+#include <tvm/ir/op.h>
+#include <tvm/target/target.h>
+#include <tvm/tirx/exec_scope.h>
+#include <tvm/tirx/stmt.h>
+#include <tvm/tirx/tirx_stmt.h>
+
+namespace tvm {
+namespace tirx {
+namespace tirx {
+>>>>>>>> bd927f10c7 (rename):include/tvm/tir/tirx_op.h
 
 /*!
- * \brief The type of the function that sanitizes the arguments of a TIR+ operator.
+ * \brief The type of the function that sanitizes the arguments of a TIRX operator.
  * \param op The operator.
  * \param args The arguments.
  */
@@ -93,7 +111,7 @@ class ScheduleContextNode : public Object {
    */
   void AddInitStmt(Stmt stmt, bool host = false);
 
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirp.ScheduleContext", ScheduleContextNode, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tirx.ScheduleContext", ScheduleContextNode, Object);
 };
 
 /*!
@@ -119,7 +137,7 @@ class ScheduleContext : public ObjectRef {
 };
 
 /*!
- * \brief The type of the function that schedules a TIR+ operator.
+ * \brief The type of the function that schedules a TIRX operator.
  * \param op The operator.
  * \param args The arguments.
  * \param context The schedule context.
@@ -129,49 +147,49 @@ using FOpScheduler = ffi::TypedFunction<Stmt(tvm::Op, Array<ObjectRef>, Schedule
 /*!
  * \brief See pesudo code below:
  *
- * Tp.cast(BufferRegion dst, BufferRegion src)
+ * Tx.cast(BufferRegion dst, BufferRegion src)
  */
 TVM_DLL const Op& cast();
 
 /*!
  * \brief See pesudo code below:
  *
- * Tp.permute_dims(BufferRegion buffer, List order)
+ * Tx.permute_dims(BufferRegion buffer, List order)
  */
 TVM_DLL const Op& permute_dims();
 
 /*!
  * \brief See pesudo code below:
  *
- * Tp.copy(BufferRegion dst, BufferRegion src)
+ * Tx.copy(BufferRegion dst, BufferRegion src)
  */
 TVM_DLL const Op& copy();
 
 /*!
  * \brief See pesudo code below:
  *
- * Tp.Async.copy(BufferRegion dst, BufferRegion src, BaseEvent event)
+ * Tx.Async.copy(BufferRegion dst, BufferRegion src, BaseEvent event)
  */
 TVM_DLL const Op& copy_async();
 
 /*!
  * \brief See pesudo code below:
  *
- *  Tp.fill(BufferRegion dst, PrimExpr value)
+ *  Tx.fill(BufferRegion dst, PrimExpr value)
  */
 TVM_DLL const Op& fill();
 
 /*!
  * \brief See pesudo code below:
  *
- * Tp.gemm(Buffer A, Buffer B, Buffer C, Buffer D, PrimExpr alpha, PrimExpr beta)
+ * Tx.gemm(Buffer A, Buffer B, Buffer C, Buffer D, PrimExpr alpha, PrimExpr beta)
  */
 TVM_DLL const Op& gemm();
 
 /*!
  * \brief See pesudo code below:
  *
- * Tp.gemm_async(BufferRegion C, BufferRegion A, BufferRegion B, bool transA, bool transB,
+ * Tx.gemm_async(BufferRegion C, BufferRegion A, BufferRegion B, bool transA, bool transB,
  * bool accum)
  */
 TVM_DLL const Op& gemm_async();
@@ -227,8 +245,16 @@ TVM_DLL const Op& event_wait();
  */
 TVM_DLL const Op& tvm_kernel_replace_point();
 
-}  // namespace tirxxp
-}  // namespace tirxx
+<<<<<<<< HEAD:include/tvm/tirx/tirp_op.h
+}  // namespace tirxxxp
+}  // namespace tirxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_TIRP_OP_H_
+========
+}  // namespace tirxx
+}  // namespace tirx
+}  // namespace tvm
+
+#endif  // TVM_TIRX_TIRX_OP_H_
+>>>>>>>> bd927f10c7 (rename):include/tvm/tir/tirx_op.h

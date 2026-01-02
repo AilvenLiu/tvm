@@ -24,11 +24,11 @@ from tvm.ir.module import IRModule
 from tvm.relax.expr import Expr
 from tvm.relax.expr_functor import PyExprMutator, mutator
 from tvm.script import tir as T
-from tvm.script import tirp as Tp
+from tvm.script import tirx as Tx
 from tvm.tir import Block, PrimFunc
-from tvm.tir.analysis import verify_tirp_well_formed
+from tvm.tir.analysis import verify_tirx_well_formed
 from tvm.tir.stmt_functor import StmtExprVisitor
-from tvm.tirp.transform.common import BufferReplacer, seek_kernel_replace_point
+from tvm.tirx.transform.common import BufferReplacer, seek_kernel_replace_point
 
 
 @tvm.transform.module_pass(opt_level=0, name="LowerCallTIRDevice")
@@ -68,11 +68,11 @@ class DeviceFuncToKernel(StmtExprVisitor):
             else:
                 T.LetStmt(T.Var("id_0", dtype=tile_idx[0].dtype), var_list)
 
-        @T.prim_func(tirp=True)
+        @T.prim_func(tirx=True)
         def kernel_func():
             with T.kernel():
                 _get_scope_id()
-                Tp.tvm_kernel_replace_point()
+                Tx.tvm_kernel_replace_point()
 
         new_body = seek_kernel_replace_point(kernel_func.body, func.body)
         added_vars = new_body.block.exec_scope.scope_id_def[0].def_ids
@@ -113,7 +113,7 @@ class _Rewriter(PyExprMutator):
         tile_num = call.args[2]
         tir_gvar = call.args[0]
         prim_func = self.mod[tir_gvar]
-        verify_tirp_well_formed(prim_func, device_func=True)
+        verify_tirx_well_formed(prim_func, device_func=True)
         new_prim_func = DeviceFuncToKernel.rewrite(prim_func, tile_num)
         new_gvar = self.builder_.add_func(new_prim_func, tir_gvar.name_hint + "_kernel")
         new_call = relax.call_tir(new_gvar, call.args[1], call.sinfo_args[0])

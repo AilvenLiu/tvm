@@ -839,7 +839,7 @@ def DefaultGPUSchedule():
     return _ffi_api.DefaultGPUSchedule()  # type: ignore
 
 
-def LowerTIRp():
+def LowerTIRx():
     """Lower TIR to a lower-level IR.
 
     Returns
@@ -847,7 +847,7 @@ def LowerTIRp():
     fpass : tvm.transform.Pass
         The result pass
     """
-    return _ffi_api.LowerTIRp()  # type: ignore
+    return _ffi_api.LowerTIRx()  # type: ignore
 
 
 def UseAssumeToReduceBranches():

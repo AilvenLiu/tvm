@@ -24,12 +24,12 @@ from deep_gemm.utils.math import per_block_cast_to_fp8, per_token_cast_to_fp8, c
 from deep_gemm.testing import calc_diff
 
 from tvm.script import tir as T
-from tvm.script import tirp as Tp
-from tvm.tirp.bench.utils import ProtonContext, bench
+from tvm.script import tirx as Tx
+from tvm.tirx.bench.utils import ProtonContext, bench
 
-from tvm.tirp.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
+from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
 from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
-from tvm.tirp.tile_scheduler import GroupMajor2D
+from tvm.tirx.tile_scheduler import GroupMajor2D
 from tvm.ir import PointerType, PrimType
 
 
@@ -115,7 +115,7 @@ def fp16_bf16_gemm_2cta_2consumer(dtype: str, M: int, N: int, K: int):
     SM_COUNT = 148  # number of Stream Multiprocessors for B200
     WG_NUMBER = 3  # WG2 (warp0: mma, warp1: mma, warp3: load), WG0 (LD_TMEM + writeback), WG1 (LD_TMEM + writeback)
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirx=True)
     def fp16_bf16_gemm_2cta_2consumer_kernel(
         A: T.Buffer((M, K), a_type),
         B: T.Buffer((N, K), b_type),
@@ -131,7 +131,7 @@ def fp16_bf16_gemm_2cta_2consumer(dtype: str, M: int, N: int, K: int):
 
             # smem allocation
             buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-            pool = T.meta_var(Tp.PoolAllocator(buf.data))
+            pool = T.meta_var(Tx.PoolAllocator(buf.data))
             tmem_addr = pool.alloc((1,), "uint32")
 
             tma2mma = pool.alloc((PIPE_DEPTH,), "uint64", align=8) # align is required for mbarrier
@@ -186,9 +186,9 @@ def fp16_bf16_gemm_2cta_2consumer(dtype: str, M: int, N: int, K: int):
                     def tma_load_stage(stage, k_st):
                         T.ptx.mbarrier.try_wait(mma2tma.ptr_to([stage]), phase_mma2tma) # both CTAs wait for the mma (issued by warp0/1 of CTA-0) to finish]
                         tma_config = T.meta_var({"dispatch": "tma", "cta_group": CTA_GROUP, "mbar": tma2mma_cta0.ptr_to([stage])})
-                        Tp.copy_async(Asmem[stage, 0, :, :], A[m_st : m_st + BLK_M, k_st : k_st + BLK_K], **tma_config)
-                        Tp.copy_async(Asmem[stage, 1, :, :], A[m_st + CTA_GROUP * BLK_M : m_st + (CTA_GROUP + 1) * BLK_M, k_st : k_st + BLK_K], **tma_config)
-                        Tp.copy_async(Bsmem[stage, :, :], B[n_st : n_st + BLK_N, k_st : k_st + BLK_K], **tma_config)
+                        Tx.copy_async(Asmem[stage, 0, :, :], A[m_st : m_st + BLK_M, k_st : k_st + BLK_K], **tma_config)
+                        Tx.copy_async(Asmem[stage, 1, :, :], A[m_st + CTA_GROUP * BLK_M : m_st + (CTA_GROUP + 1) * BLK_M, k_st : k_st + BLK_K], **tma_config)
+                        Tx.copy_async(Bsmem[stage, :, :], B[n_st : n_st + BLK_N, k_st : k_st + BLK_K], **tma_config)
                         if cbx == 0:
                             T.ptx.mbarrier.arrive.expect_tx(tma2mma_cta0.ptr_to([stage]), CTA_GROUP * (NUM_CONSUMER * BLK_M * BLK_K + BLK_N * BLK_K) * F16_SIZE) # signal CTA-0 the issue of tma
 
@@ -226,7 +226,7 @@ def fp16_bf16_gemm_2cta_2consumer(dtype: str, M: int, N: int, K: int):
                     @T.macro
                     def mma_stage(stage, accum):
                         T.ptx.mbarrier.try_wait(tma2mma.ptr_to([stage]), phase_tma2mma) # wait for the tma to finish
-                        Tp.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + BLK_N], Asmem[stage, warp_id, :, :], Bsmem[stage, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI)
+                        Tx.gemm_async(tmem[:, warp_id * MMA_N: warp_id * MMA_N + BLK_N], Asmem[stage, warp_id, :, :], Bsmem[stage, :, :], accum=accum, dispatch="tcgen05", cta_group=CTA_GROUP, descI=descI)
                         T.ptx.tcgen05.commit(mma2tma.ptr_to([stage]), cta_group=CTA_GROUP, cta_mask=3) # signal (both CTAs) the issue of mma
 
                     @T.macro
@@ -268,16 +268,16 @@ def fp16_bf16_gemm_2cta_2consumer(dtype: str, M: int, N: int, K: int):
                         with T.warpgroup():
                             Dreg_wg = Dreg.view(128, TMEM_LD_N, layout=TileLayout(([128, TMEM_LD_N], [1@axis_tid_in_wg, 1])))
                             n_tmem_ld_st = T.meta_var(wg_id * MMA_N + no * TMEM_LD_N)
-                            Tp.copy(Dreg_wg[:, :], tmem[:, n_tmem_ld_st : n_tmem_ld_st + TMEM_LD_N])
+                            Tx.copy(Dreg_wg[:, :], tmem[:, n_tmem_ld_st : n_tmem_ld_st + TMEM_LD_N])
                         with T.thread():
-                            Tp.cast(Dreg_16b[no * TMEM_LD_N : no * TMEM_LD_N + TMEM_LD_N], Dreg[:])
+                            Tx.cast(Dreg_16b[no * TMEM_LD_N : no * TMEM_LD_N + TMEM_LD_N], Dreg[:])
 
                     # signal the finish of LD_TMEM from TMEM
                     T.ptx.mbarrier.arrive(ld2mma.ptr_to([wg_id]), cta_id=0, pred=True) # signal CTA-0 (warp0(1)) the finish of LD_TMEM from TMEM, such that CTA-0 (warp0(1)) can proceed to issue next mma
 
                     for no in T.unroll(MMA_N // EPI_N):
                         with T.thread():
-                            Tp.copy(Dsmem[wg_id, warp_id * 32 + lane_id, :], Dreg_16b[no * EPI_N : (no + 1) * EPI_N])
+                            Tx.copy(Dsmem[wg_id, warp_id * 32 + lane_id, :], Dreg_16b[no * EPI_N : (no + 1) * EPI_N])
                             T.ptx.fence.proxy(scope="shared")
                         T.cuda.warpgroup_sync(wg_id + 10)
 
@@ -285,7 +285,7 @@ def fp16_bf16_gemm_2cta_2consumer(dtype: str, M: int, N: int, K: int):
                         with T.thread(parent="warpgroup")[warp_id == 0 and lane_id == 0]:
                             m_st_epi = T.meta_var((m_idx * NUM_CONSUMER * CTA_GROUP + wg_id * CTA_GROUP + cbx) * BLK_M)
                             n_st_epi = T.meta_var(n_idx * MMA_N + no * EPI_N)
-                            Tp.copy_async(D[m_st_epi: m_st_epi + BLK_M, n_st_epi: n_st_epi + EPI_N], Dsmem[wg_id, :, :], dispatch="tma")
+                            Tx.copy_async(D[m_st_epi: m_st_epi + BLK_M, n_st_epi: n_st_epi + EPI_N], Dsmem[wg_id, :, :], dispatch="tma")
                             T.ptx.cp_async.bulk.commit_group()
                             T.ptx.cp_async.bulk.wait_group(0)
                         T.cuda.warpgroup_sync(wg_id + 10)
@@ -316,7 +316,7 @@ def fp16_bf16_tir_gemm(
     target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
-        ex = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
         func = lambda: ex(A, B, C_tvm)
         bench(func, warmup=warmup, repeat=repeat, proton_name="tir")
     return C_tvm
@@ -527,7 +527,7 @@ def fp8_blockwise_tir_kernel(M: int, N: int, K: int):
     SFA_layout = T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFA // 32, 32), (BLK_SFA, 32, 1)))
     SFB_layout = T.TileLayout(shard=((SMEM_PIPE_DEPTH, BLK_SFB // 32, 32), (BLK_SFB, 32, 1)))
 
-    @T.prim_func(tirp=True)
+    @T.prim_func(tirx=True)
     def fp8_blockwise_deepgemm_kernel(
         A: T.Buffer((M, K), a_type),
         B: T.Buffer((N, K), b_type),
@@ -546,7 +546,7 @@ def fp8_blockwise_tir_kernel(M: int, N: int, K: int):
             with T.cta():
                 # alloc shared memory
                 buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
-                pool = T.meta_var(Tp.PoolAllocator(buf.data))
+                pool = T.meta_var(Tx.PoolAllocator(buf.data))
                 tmem_addr = T.decl_cell("uint32", buf.data, scope="shared.dyn", elem_offset=0)
                 pool.move_base_to(1024)
                 A_smem = pool.alloc((SMEM_PIPE_DEPTH, BLK_M, BLK_K), a_type, layout=A_layout)
@@ -618,9 +618,9 @@ def fp8_blockwise_tir_kernel(M: int, N: int, K: int):
                         epilogue1()
 
                 with T.cta():
-                    T.block_attr({"tirp.scope_partition": True})
+                    T.block_attr({"tirx.scope_partition": True})
                     with T.warpgroup()[wg_id == 1]:
-                        T.block_attr({"tirp.scope_partition": True})
+                        T.block_attr({"tirx.scope_partition": True})
                         with T.warp(parent="warpgroup")[warp_id == 3]:
                             phase = 0
                             while tile_scheduler.valid():
@@ -636,11 +636,11 @@ def fp8_blockwise_tir_kernel(M: int, N: int, K: int):
                                     mma2tma_bar.wait(ks, phase)
                                     tma_copy = T.meta_var({"dispatch": "tma", "mbar": tma2trans_bar.mbar.ptr_to([ks]), "cta_group": CTA_GROUP})
                                     with T.thread()[T.ptx.elect_sync()]:
-                                        Tp.copy_async(A_smem[ks, :, :], A[m_start: m_start + BLK_M, k_start: k_start + BLK_K], **tma_copy)
-                                        Tp.copy_async(B_smem[ks, :, :], B[n_start: n_start + BLK_N, k_start: k_start + BLK_K], **tma_copy)
+                                        Tx.copy_async(A_smem[ks, :, :], A[m_start: m_start + BLK_M, k_start: k_start + BLK_K], **tma_copy)
+                                        Tx.copy_async(B_smem[ks, :, :], B[n_start: n_start + BLK_N, k_start: k_start + BLK_K], **tma_copy)
                                         if stage % 4 == 0:
-                                            Tp.copy_async(SFA_smem_2d[ks, :], SFA[stage // 4, m_start: m_start + BLK_M], **tma_copy)
-                                            Tp.copy_async(SFB_smem_2d[ks, 0:BLK_N * CTA_GROUP], SFB[stage // 4, n_start_sf: n_start_sf + BLK_N * CTA_GROUP], **tma_copy)
+                                            Tx.copy_async(SFA_smem_2d[ks, :], SFA[stage // 4, m_start: m_start + BLK_M], **tma_copy)
+                                            Tx.copy_async(SFB_smem_2d[ks, 0:BLK_N * CTA_GROUP], SFB[stage // 4, n_start_sf: n_start_sf + BLK_N * CTA_GROUP], **tma_copy)
                                         AB_bytes = T.meta_var(BLK_M * BLK_K * F8_BYTES + BLK_N * BLK_K * F8_BYTES)
                                         SFAB_bytes = T.meta_var((BLK_N * CTA_GROUP + BLK_M) * F32_BYTES)
                                         T.ptx.mbarrier.arrive.expect_tx(tma2trans_bar.mbar.ptr_to([ks]), T.if_then_else(stage % 4 == 0, AB_bytes + SFAB_bytes, AB_bytes))
@@ -667,9 +667,9 @@ def fp8_blockwise_tir_kernel(M: int, N: int, K: int):
                                     # wait for sf has been prepared
                                     T.ptx.mbarrier.try_wait(tma2trans_bar.mbar.ptr_to([ks]), phase)
                                     if stage % 4 == 0:
-                                        Tp.permute_dims(SFA_smem[ks], [0, 2, 1])
-                                        Tp.permute_dims(SFB_smem[ks, :4], [0, 2, 1])
-                                        Tp.permute_dims(SFB_smem[ks, 4:], [0, 2, 1])
+                                        Tx.permute_dims(SFA_smem[ks], [0, 2, 1])
+                                        Tx.permute_dims(SFB_smem[ks, :4], [0, 2, 1])
+                                        Tx.permute_dims(SFB_smem[ks, 4:], [0, 2, 1])
                                         T.ptx.fence.proxy("shared")
                                     # mark that transpose is completed
                                     trans2mma_bar.arrive(ks)
@@ -787,11 +787,11 @@ def fp8_blockwise_tir_kernel(M: int, N: int, K: int):
                                 # tmem -> rf (ld) -> smem
                                 for ki in T.unroll(EPI_TILE // TMEM_LD_SIZE):
                                     col_st = T.meta_var(tmem_idx * MMA_N + ko * EPI_TILE + ki * TMEM_LD_SIZE)
-                                    Tp.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
+                                    Tx.copy(reg_wg[:, :], tmem[:, col_st : col_st + TMEM_LD_SIZE])
                                     with T.thread():
                                         st = T.meta_var(ki * TMEM_LD_SIZE)
-                                        Tp.cast(reg_fp16[st : st + TMEM_LD_SIZE], reg[:])
-                                        Tp.copy(D_smem[stage, warp_id * 32 + lane_id, st : st + TMEM_LD_SIZE], reg_fp16[st : st + TMEM_LD_SIZE])
+                                        Tx.cast(reg_fp16[st : st + TMEM_LD_SIZE], reg[:])
+                                        Tx.copy(D_smem[stage, warp_id * 32 + lane_id, st : st + TMEM_LD_SIZE], reg_fp16[st : st + TMEM_LD_SIZE])
 
                                 # the tmem can be overwritten
                                 if ko == MMA_N // EPI_TILE - 1:
@@ -805,7 +805,7 @@ def fp8_blockwise_tir_kernel(M: int, N: int, K: int):
                                 m_start = (m_idx * CTA_GROUP + cbx) * BLK_M
                                 n_start = n_idx * CTA_GROUP * BLK_N + ko * EPI_TILE
                                 with T.thread(parent="warpgroup")[tid_in_wg == 0]:
-                                    Tp.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")
+                                    Tx.copy_async(D[m_start: m_start + BLK_M, n_start: n_start + EPI_TILE], D_smem[stage, :, :], dispatch="tma")
                                     T.ptx.cp_async.bulk.commit_group()
 
                             tile_scheduler.next_tile()
@@ -836,7 +836,7 @@ def fp8_blockwise_tir_gemm(A_fp8, B_fp8, sfa_pack, sfb_pack, C, kernel, warmup, 
     target = tvm.target.Target("cuda")
     with target:
         mod = tvm.IRModule({"main": kernel})
-        ex = tvm.compile(mod, target=target, tir_pipeline="tirp")
+        ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
         func = lambda: ex(A_fp8, B_fp8, C_tvm, sfa_pack, sfb_pack)
         bench(func, warmup=warmup, repeat=repeat, proton_name="tir")
     return C_tvm

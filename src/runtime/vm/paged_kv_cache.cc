@@ -477,7 +477,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         HostMemoryVector(megakernel::kMaxTotalNumWorks, dtype_aux_, preferred_host_device);
     // Event tensor allocation
     const auto f_get_config =
-        tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
+        tvm::ffi::Function::GetGlobalRequired("tirx.megakernel.get_model_config");
     auto config = f_get_config(model_name).cast<ffi::Map<ffi::String, ffi::Any>>();
 
     int tp_size = config["NUM_ATTENTION_HEADS"].cast<int>() / num_qo_heads;
@@ -1896,7 +1896,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       // Generate the dynamic execution queue.
       if (dynamic_layer_id == 0) {
         const auto f_get_config =
-            tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
+            tvm::ffi::Function::GetGlobalRequired("tirx.megakernel.get_model_config");
         auto config = f_get_config(model_name_).cast<ffi::Map<ffi::String, ffi::Any>>();
         int tp_size = config["NUM_ATTENTION_HEADS"].cast<int>() / num_qo_heads_;
         exec_queue_dynamic_ =
@@ -1918,7 +1918,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     }
     // Generate the static execution queue.
     const auto f_get_config =
-        tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
+        tvm::ffi::Function::GetGlobalRequired("tirx.megakernel.get_model_config");
     auto config = f_get_config(model_name_).cast<ffi::Map<ffi::String, ffi::Any>>();
     int tp_size = config["NUM_ATTENTION_HEADS"].cast<int>() / num_qo_heads_;
     Device preferred_host_device = GetPreferredHostDevice(device_);
@@ -2662,7 +2662,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
 
     // Event tensor transfer.
     const auto f_get_config =
-        tvm::ffi::Function::GetGlobalRequired("tirp.megakernel.get_model_config");
+        tvm::ffi::Function::GetGlobalRequired("tirx.megakernel.get_model_config");
     auto config = f_get_config(model_name_).cast<ffi::Map<ffi::String, ffi::Any>>();
     int tp_size = config["NUM_ATTENTION_HEADS"].cast<int>() / num_qo_heads_;
     if (use_mega_kernel_) {

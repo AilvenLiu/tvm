@@ -17,25 +17,38 @@
  * under the License.
  */
 /*!
+<<<<<<<< HEAD:include/tvm/tirx/tirp_stmt.h
  * \file tvm/tirx/tirp_op.h
  * \brief TIR+ statements.
  */
 #ifndef TVM_TIRX_TIRP_STMT_H_
 #define TVM_TIRX_TIRP_STMT_H_
+========
+ * \file tvm/tirx/tirx_op.h
+ * \brief TIRX statements.
+ */
+#ifndef TVM_TIRX_TIRX_STMT_H_
+#define TVM_TIRX_TIRX_STMT_H_
+>>>>>>>> bd927f10c7 (rename):include/tvm/tir/tirx_stmt.h
 
 #include <tvm/ir/op.h>
 #include <tvm/tirx/stmt.h>
 
 namespace tvm {
+<<<<<<<< HEAD:include/tvm/tirx/tirp_stmt.h
 namespace tirx {
 namespace tirp {
+========
+namespace tirx {
+namespace tirx {
+>>>>>>>> bd927f10c7 (rename):include/tvm/tir/tirx_stmt.h
 
 /*!
- * \brief TIR+ OpCall stmt.
+ * \brief TIRX OpCall stmt.
  */
 class OpCallNode : public StmtNode {
  public:
-  // tvm::Op which corresponds to the TIR+ operator.
+  // tvm::Op which corresponds to the TIRX operator.
   tvm::Op op;
 
   // Arguments to the operator.
@@ -80,8 +93,16 @@ class OpCall : public Stmt {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(OpCallNode);
 };
 
-}  // namespace tirxxxxp
-}  // namespace tirxxxx
+<<<<<<<< HEAD:include/tvm/tirx/tirp_stmt.h
+}  // namespace tirxxxxxp
+}  // namespace tirxxxxx
 }  // namespace tvm
 
 #endif  // TVM_TIRX_TIRP_STMT_H_
+========
+}  // namespace tirxx
+}  // namespace tirx
+}  // namespace tvm
+
+#endif  // TVM_TIRX_TIRX_STMT_H_
+>>>>>>>> bd927f10c7 (rename):include/tvm/tir/tirx_stmt.h

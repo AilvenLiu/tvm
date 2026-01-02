@@ -268,9 +268,9 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
         if (op_names.count(op) == 0) {
           LOG(WARNING) << "No TScriptPrinterName attribute for " << op->name;
         }
-        static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
-        ICHECK_EQ(tirp_op_map.count(op), 0)
-            << "TIR+ built-in operators should not be used in normal Call";
+        static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
+        ICHECK_EQ(tirx_op_map.count(op), 0)
+            << "TIRX built-in operators should not be used in normal Call";
         prefix = TIR(d, name);
         if (dtype_locations.count(op)) {
           dtype_print_location =

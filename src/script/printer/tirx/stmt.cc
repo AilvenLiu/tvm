@@ -80,8 +80,8 @@ ffi::Optional<PrimExpr> FindReturnValue(const tirx::Stmt& node) {
 }
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
-    .set_dispatch<tirx::tirp::OpCall>(
-        "", [](tirx::tirp::OpCall op_call, AccessPath p, IRDocsifier d) -> Doc {
+    .set_dispatch<tirx::tirx::OpCall>(
+        "", [](tirx::tirx::OpCall op_call, AccessPath p, IRDocsifier d) -> Doc {
           static const OpAttrMap<tirx::TScriptPrinterName>& op_names =
               Op::GetAttrMap<tirx::TScriptPrinterName>("TScriptPrinterName");
           auto op = op_call->op;
@@ -100,12 +100,12 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
                 args, {}, {}, std::nullopt);
           };
 
-          static const auto& tirp_op_map = Op::GetAttrMap<Bool>("TIsTIRpOp");
+          static const auto& tirx_op_map = Op::GetAttrMap<Bool>("TIsTIRxOp");
           static const auto& schedule_op_map = Op::GetAttrMap<Bool>("TIsScheduleOp");
           static const auto& compose_op_map = Op::GetAttrMap<Bool>("TIsComposeOp");
           static const auto& async_op_map = Op::GetAttrMap<Bool>("TIsAsyncOp");
-          ICHECK(bool(tirp_op_map.get(op, tvm::Bool(false))))
-              << "Only TIR+ ops can be used in tirx::tirp::OpCall";
+          ICHECK(bool(tirx_op_map.get(op, tvm::Bool(false))))
+              << "Only TIRX ops can be used in tirx::tirx::OpCall";
           ffi::String name = op_names.get(op, op->name);
           if (bool(schedule_op_map.get(op, tvm::Bool(false))) ||
               bool(async_op_map.get(op, tvm::Bool(false)))) {
@@ -118,7 +118,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             if (op_call->dispatch.has_value()) {
               disp = LiteralDoc::Str(op_call->dispatch.value(), p->Attr("dispatch"));
             }
-            return OpCallDoc(TIRp(d, name), args,
+            return OpCallDoc(TIRx(d, name), args,
                              d->AsDoc<DictDoc>(op_call->workspace, p->Attr("workspace")),
                              d->AsDoc<DictDoc>(op_call->config, p->Attr("config")), disp);
           } else if (bool(compose_op_map.get(op, tvm::Bool(false)))) {
@@ -150,7 +150,7 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
               kw_values.push_back(
                   d->AsDoc<ExprDoc>(kv.second, p->Attr("config")->MapItem(kv.first)));
             }
-            return ScopeDoc(std::nullopt, TIRp(d, "compose_op")->Call({}, kw_keys, kw_values),
+            return ScopeDoc(std::nullopt, TIRx(d, "compose_op")->Call({}, kw_keys, kw_values),
                             (*f)->stmts);
           } else {
             // Misc ops
@@ -158,10 +158,10 @@ TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
             for (size_t i = 0, n = op_call->args.size(); i < n; ++i) {
               args.push_back(d->AsDoc<Doc>(op_call->args[i], p->Attr("args")->ArrayItem(i)));
             }
-            return OpCallDoc(TIRp(d, name), args, {}, {}, std::nullopt);
+            return OpCallDoc(TIRx(d, name), args, {}, {}, std::nullopt);
           }
         });
-TVM_SCRIPT_REPR(tirx::tirp::OpCallNode, ReprPrintTIR);
+TVM_SCRIPT_REPR(tirx::tirx::OpCallNode, ReprPrintTIR);
 
 TVM_STATIC_IR_FUNCTOR(IRDocsifier, vtable)
     .set_dispatch<tirx::Evaluate>("", [](tirx::Evaluate eval, AccessPath p, IRDocsifier d) -> Doc {

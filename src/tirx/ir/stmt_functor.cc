@@ -145,7 +145,7 @@ void StmtVisitor::VisitStmt_(const SBlockRealizeNode* op) {
   this->VisitStmt(op->block);
 }
 
-void StmtVisitor::VisitStmt_(const tirp::OpCallNode* op) {
+void StmtVisitor::VisitStmt_(const tirx::OpCallNode* op) {
   VisitArray(op->args, [this](const ffi::Any& e) {
     if (e == nullptr) return;
     if (auto buffer_region = e.as<BufferRegion>()) {
@@ -588,7 +588,7 @@ Stmt StmtMutator::VisitStmt_(const SBlockRealizeNode* op) {
   }
 }
 
-Stmt StmtMutator::VisitStmt_(const tirp::OpCallNode* op) {
+Stmt StmtMutator::VisitStmt_(const tirx::OpCallNode* op) {
   auto fmutate = [&](const ffi::Any& e) -> ffi::Any {
     if (e == nullptr) return e;
     if (auto buffer_region = e.as<BufferRegion>()) {

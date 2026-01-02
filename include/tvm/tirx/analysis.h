@@ -385,25 +385,25 @@ TVM_DLL Pass VerifyVTCMLimit(ffi::Optional<Target> target = std::nullopt);
  */
 TVM_DLL Pass OOBChecker();
 
-/******** TIRp analysis helpers ********/
+/******** TIRx analysis helpers ********/
 
 /*!
- * \brief Verify if the given TIR+ is well-formed.
+ * \brief Verify if the given TIRX is well-formed.
  * \param func The PrimFunc to be verified.
  * \param assert_mode The indicator if it raises an error when the function is not well-formed.
  * \param device_func The indicator if it is a device function.
- * \return Whether it is a well-formed TIR+ function.
+ * \return Whether it is a well-formed TIRX function.
  */
-TVM_DLL bool VerifyTIRpWellFormed(const PrimFunc& func, bool assert_mode = true, bool device_func = false);
+TVM_DLL bool VerifyTIRxWellFormed(const PrimFunc& func, bool assert_mode = true, bool device_func = false);
 
 /*!
- * \brief Verify if the TIR+ in the given IRMOdule is well-formed.
+ * \brief Verify if the TIRX in the given IRMOdule is well-formed.
  * \param mod The IRModule to be verified.
  * \param assert_mode The indicator if it raises an error when the function is not well-formed.
  * \param device_func The indicator if it is a device function.
- * \return Whether it is a well-formed TIR+ module.
+ * \return Whether it is a well-formed TIRX module.
  */
-TVM_DLL bool VerifyTIRpWellFormed(const IRModule& mod, bool assert_mode = true, bool device_func = false);
+TVM_DLL bool VerifyTIRxWellFormed(const IRModule& mod, bool assert_mode = true, bool device_func = false);
 
 }  // namespace transform
 }  // namespace tirx

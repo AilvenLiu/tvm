@@ -31,7 +31,7 @@ def prim_func(
     func: Callable | None = None,
     private: bool = False,
     check_well_formed=True,
-    tirp: bool = False,
+    tirx: bool = False,
 ) -> PrimFunc | Callable:
     """The parsing method for tirx prim func, by using `@prim_func` as decorator.
 
@@ -68,7 +68,7 @@ def prim_func(
             return func
         extra_vars = utils.inspect_function_capture(func)
         utils.resolve_closure_vars(func, extra_vars, outer_stack)
-        f = parse(func, extra_vars, check_well_formed=check_well_formed, tirp=tirp)
+        f = parse(func, extra_vars, check_well_formed=check_well_formed, tirx=tirx)
         setattr(f, "__name__", func.__name__)
         return f
 

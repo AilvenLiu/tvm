@@ -19,7 +19,7 @@
 """The TIR backend compilation pipeline."""
 
 import tvm
-from tvm import tir, tirp
+from tvm import tir, tirx
 
 from . import backend
 
@@ -129,8 +129,8 @@ def default_tir_pipeline():
     return _pipeline, finalize_host_passes, finalize_device_passes
 
 
-def tirp_pipeline():
-    """The TIRP pipeline used in tvm.tirx.build"""
+def tirx_pipeline():
+    """The TIRX pipeline used in tvm.tirx.build"""
 
     @tvm.transform.module_pass(opt_level=0)
     def _pipeline(mod: tvm.ir.IRModule, _ctx: tvm.transform.PassContext) -> tvm.ir.IRModule:
@@ -138,8 +138,8 @@ def tirp_pipeline():
         pass_ctx = tvm.transform.PassContext.current()
         config = pass_ctx.config
         passes = [
-            tvm.tirp.transform.PrivateBufferAlloc(),
-            tir.transform.LowerTIRp(),
+            tvm.tirx.transform.PrivateBufferAlloc(),
+            tir.transform.LowerTIRx(),
             tir.transform.UnifyThreadBinding(),
             tir.transform.Simplify(),
             tir.transform.ConvertBlocksToOpaque(),
@@ -175,9 +175,9 @@ def tirp_pipeline():
     #     pass_ctx = tvm.transform.PassContext.current()
     #     config = pass_ctx.config
     #     passes = [
-    #         tvm.tirp.transform.PrivateBufferAlloc(),
-    #         tir.transform.LowerTIRp(),
-    #         # tvm.tirp.transform.EventTensorLegalizer(),
+    #         tvm.tirx.transform.PrivateBufferAlloc(),
+    #         tir.transform.LowerTIRx(),
+    #         # tvm.tirx.transform.EventTensorLegalizer(),
     #         tvm.ir.transform.PrintIR(),
     #         # tir.transform.LowerCrossThreadReduction(),
     #         # tir.transform.LowerInitBlock(),
@@ -283,9 +283,9 @@ def trn_pipeline():
         pass_ctx = tvm.transform.PassContext.current()
         config = pass_ctx.config
         passes = [
-            tirp.transform.PrivateBufferAlloc(),
-            tirp.transform.NaiveAllocator(),
-            tir.transform.LowerTIRp(),
+            tirx.transform.PrivateBufferAlloc(),
+            tirx.transform.NaiveAllocator(),
+            tir.transform.LowerTIRx(),
             tir.transform.DecorateDeviceScope(),
             tir.transform.ConvertBlocksToOpaque(),
             tir.transform.LowerMatchBuffer(),
@@ -338,7 +338,7 @@ def finalize_device_passes_trn():  # pylint: disable=unused-argument
 # global map of pre-built pipelines
 PIPELINE_MAP = {
     "default": default_tir_pipeline,
-    "tirp": tirp_pipeline,
+    "tirx": tirx_pipeline,
     "trn": trn_pipeline,
 }
 

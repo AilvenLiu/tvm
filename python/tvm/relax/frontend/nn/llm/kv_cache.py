@@ -512,7 +512,7 @@ class FlashInferPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-me
         )
 
 
-class TIRPagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-methods
+class TIRXagedKVCache(PagedKVCache):  # pylint: disable=too-few-public-methods
     """Paged KV cache using TIR kernels."""
 
     def __init__(  # pylint: disable=too-many-locals

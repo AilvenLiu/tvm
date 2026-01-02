@@ -510,40 +510,40 @@ TVM_DLL Pass InstrumentProfileIntrinsics();
 TVM_DLL Pass DefaultGPUSchedule();
 
 /*!
- * \brief Resolve scope id definitions in TIRp programs for the given target.
+ * \brief Resolve scope id definitions in TIRx programs for the given target.
  * \return The pass.
  */
-TVM_DLL Pass LowerTIRpResolveScopeIds();
+TVM_DLL Pass LowerTIRxResolveScopeIds();
 
 /*!
- * \brief Lower TIRp op calls using registered op schedulers for the given target.
+ * \brief Lower TIRx op calls using registered op schedulers for the given target.
  * \return The pass.
  */
-TVM_DLL Pass LowerTIRpScheduleOps();
+TVM_DLL Pass LowerTIRxScheduleOps();
 
 /*!
- * \brief Resolve exec scope slices introduced during TIRp lowering.
+ * \brief Resolve exec scope slices introduced during TIRx lowering.
  * \return The pass.
  */
-TVM_DLL Pass LowerTIRpResolveScopeSlices();
+TVM_DLL Pass LowerTIRxResolveScopeSlices();
 
 /*!
  * \brief Deduplicate identical cuTensorMap initializations and unify their variables.
  * \return The pass.
  */
-TVM_DLL Pass LowerTIRpDedupCuTensorMaps();
+TVM_DLL Pass LowerTIRxDedupCuTensorMaps();
 
 /*!
- * \brief Finalize TIRp lowering by applying layout rewriters and cleanup passes.
+ * \brief Finalize TIRx lowering by applying layout rewriters and cleanup passes.
  * \return The pass.
  */
-TVM_DLL Pass LowerTIRpCleanup();
+TVM_DLL Pass LowerTIRxCleanup();
 
 /*!
  * \brief Lower the TIR to a lower level IR for the given target.
  * \return The pass.
  */
-TVM_DLL Pass LowerTIRp();
+TVM_DLL Pass LowerTIRx();
 
 /*!
  * \brief This pass analyzes primfunc & eliminates branch introdued due to layout specific padding.

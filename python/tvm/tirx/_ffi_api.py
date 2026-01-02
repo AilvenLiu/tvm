@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """FFI APIs for tvm.tirx"""
-
 import tvm_ffi
+
 
 tvm_ffi.init_ffi_api("tirx", __name__)

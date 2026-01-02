@@ -33,7 +33,7 @@ from tvm.relax.expr import Expr, ShapeExpr
 from tvm.relax.expr_functor import PyExprMutator, PyExprVisitor, mutator
 from tvm.relax.struct_info import StructInfo, TensorStructInfo, TupleStructInfo
 from tvm.script import tir as T
-from tvm.script import tirp as Tp
+from tvm.script import tirx as Tx
 from tvm.script import relax as R
 from tvm.script.ir_builder import IRBuilder
 from tvm.tir import (
@@ -53,14 +53,14 @@ from tvm.tir import (
     DeclBuffer,
     IntImm,
 )
-from tvm.tir.analysis import verify_tirp_well_formed
+from tvm.tir.analysis import verify_tirx_well_formed
 from tvm.tir.op import ret
 from tvm.tir.stmt_functor import StmtExprMutator, StmtExprVisitor
-from tvm.tirp.transform.common import seek_kernel_replace_point, BufferReplacer
-from tvm.tirp.megakernel.common import KernelConfig, JobType, SmemManager, TileSchedulerBase, SemaphoreBase, any_sync, pack_into_32bit, map_job_type_to_profile_event_type
-from tvm.tirp.operator import KernelReplacePoint
+from tvm.tirx.transform.common import seek_kernel_replace_point, BufferReplacer
+from tvm.tirx.megakernel.common import KernelConfig, JobType, SmemManager, TileSchedulerBase, SemaphoreBase, any_sync, pack_into_32bit, map_job_type_to_profile_event_type
+from tvm.tirx.operator import KernelReplacePoint
 from tvm.tir.exec_scope import ExecScope
-from tvm.tirp.bench.utils import CudaProfiler
+from tvm.tirx.bench.utils import CudaProfiler
 
 # FIXME: add decl_buffer for all newly generated buffers
 
@@ -349,11 +349,11 @@ class EventOpInserter(StmtExprMutator):
         return inserter.visit_stmt(func_info.func_body)
 
     def visit_block_(self, block: Block):
-        if block.annotations.get("tirp.tile_class.prefetch") is not None:
+        if block.annotations.get("tirx.tile_class.prefetch") is not None:
             return block
-        elif block.annotations.get("tirp.tile_class.run") is not None:
+        elif block.annotations.get("tirx.tile_class.run") is not None:
             def get_wait(idx):
-                @T.prim_func(tirp=True, check_well_formed=False)
+                @T.prim_func(tirx=True, check_well_formed=False)
                 def wait():
                     sem = T.meta_var(self.semaphore_class(self.func_info.in_event_tensors[idx]))
                     wait_func = T.meta_var(self.func_info.in_info_list[idx])
@@ -364,7 +364,7 @@ class EventOpInserter(StmtExprMutator):
                 return EventPrimFuncHelper().visit_stmt(wait.body)
 
             def get_notify(idx):
-                @T.prim_func(tirp=True, check_well_formed=False)
+                @T.prim_func(tirx=True, check_well_formed=False)
                 def notify():
                     sem = T.meta_var(self.semaphore_class(self.func_info.out_event_tensors[idx]))
                     notify_func = T.meta_var(self.func_info.out_info_list[idx])
@@ -379,7 +379,7 @@ class EventOpInserter(StmtExprMutator):
                 def get_pre_notify_and_push(idx):
                     if len(self.func_info.push_info_list[idx][1]) == 0:
                         return None
-                    @T.prim_func(tirp=True, check_well_formed=False)
+                    @T.prim_func(tirx=True, check_well_formed=False)
                     def pre_notify_and_push():
                         sem = T.meta_var(self.semaphore_class(self.func_info.out_event_tensors[idx]))
                         notify_func = T.meta_var(self.func_info.push_info_list[idx][0])
@@ -478,16 +478,16 @@ class PersistentVarCollector(StmtExprMutator):
         return op
 
     def visit_block_(self, block: Block):
-        if any(block.annotations.get(key) is not None for key in ["tirp.tile_class.persistent.init", "tirp.tile_class.persistent.finalize"]):
+        if any(block.annotations.get(key) is not None for key in ["tirx.tile_class.persistent.init", "tirx.tile_class.persistent.finalize"]):
             self.visit_tile_class = True
-        elif any(block.annotations.get(key) is not None for key in ["tirp.megakernel.persistent.init", "tirp.megakernel.persistent.finalize"]):
+        elif any(block.annotations.get(key) is not None for key in ["tirx.megakernel.persistent.init", "tirx.megakernel.persistent.finalize"]):
             self.visit_tile_class = False
         block = super().visit_block_(block)
         annotation_to_var = {
-            "tirp.tile_class.persistent.init": "persistent_var_tile_class_init",
-            "tirp.tile_class.persistent.finalize": "persistent_var_tile_class_finalize",
-            "tirp.megakernel.persistent.init": "persistent_var_megakernel_init",
-            "tirp.megakernel.persistent.finalize": "persistent_var_megakernel_finalize",
+            "tirx.tile_class.persistent.init": "persistent_var_tile_class_init",
+            "tirx.tile_class.persistent.finalize": "persistent_var_tile_class_finalize",
+            "tirx.megakernel.persistent.init": "persistent_var_megakernel_init",
+            "tirx.megakernel.persistent.finalize": "persistent_var_megakernel_finalize",
         }
         for annotation, var_name in annotation_to_var.items():
             if block.annotations.get(annotation) is not None:
@@ -1003,7 +1003,7 @@ class _Rewriter(PyExprMutator):
             prim_func = self._deep_copy(self.mod[tir_gvar])
             self.gvar_to_remove.append(tir_gvar)
             # check if this device function is well-formed and has consistent exec scope
-            verify_tirp_well_formed(prim_func, device_func=True)
+            verify_tirx_well_formed(prim_func, device_func=True)
             # collect event tensors and insert event commit/wait
             in_event_tensors = []
             out_event_tensors = []
@@ -1389,22 +1389,22 @@ class _Rewriter(PyExprMutator):
 
         if self.strategy == "static":
             if self.profiler_on:
-                @T.prim_func(tirp=True, private=True)
+                @T.prim_func(tirx=True, private=True)
                 def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32"),
                                       profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
                     persistent_body(queue, None, None, None, profiler_buf)
             else:
-                @T.prim_func(tirp=True, private=True)
+                @T.prim_func(tirx=True, private=True)
                 def persistent_kernel(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS), "int32")):
                     persistent_body(queue, None, None, None, None)
         else:
             if self.profiler_on:
-                @T.prim_func(tirp=True, private=True)
+                @T.prim_func(tirx=True, private=True)
                 def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"),
                                       tail: T.buffer((1,), "int32"), profiler_buf: T.buffer((self.profiler_buf_size,), "uint64")):
                     persistent_body(None, tasks, head, tail, profiler_buf)
             else:
-                @T.prim_func(tirp=True, private=True)
+                @T.prim_func(tirx=True, private=True)
                 def persistent_kernel(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS), "int32"), head: T.buffer((1,), "int32"),
                                       tail: T.buffer((1,), "int32")):
                     persistent_body(None, tasks, head, tail, None)
@@ -1581,7 +1581,7 @@ class _Rewriter(PyExprMutator):
                         T.buffer_store(idx, idx[0] + rest_sm_num * KernelConfig.NUM_THREADS, 0)
 
         if self.strategy == "static":
-            @T.prim_func(tirp=True, private=True)
+            @T.prim_func(tirx=True, private=True)
             def gen_exec_queue(queue: T.buffer((KernelConfig.SM_NUMBER, self.tile_scheduler_class.MAX_TASKS,), "int32")):
                 with T.kernel():
                     bx = T.cta_id([KernelConfig.SM_NUMBER], parent="kernel")
@@ -1590,7 +1590,7 @@ class _Rewriter(PyExprMutator):
                     idx[0] = 0
                     emit_task_round_robin(queue, idx, bx, tx)
         else:
-            @T.prim_func(tirp=True, private=True)
+            @T.prim_func(tirx=True, private=True)
             def gen_exec_queue(tasks: T.buffer((self.tile_scheduler_class.MAX_TASKS,), "int32"), head: T.buffer((1,), "int32"), tail: T.buffer((1,), "int32")):
                 with T.kernel():
                     # fill tasks queue with -1 first
@@ -1720,7 +1720,7 @@ class _Rewriter(PyExprMutator):
             new_buffer_map,
             tvm.ir.make_node(
                 "ir.DictAttrs",
-                is_tirp=True,
+                is_tirx=True,
                 global_symbol=f"persistent_kernel_{self.cur_rewrite_func_name}",
             ),
         )

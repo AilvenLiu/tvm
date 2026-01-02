@@ -87,8 +87,8 @@ class PrimFuncFrameNode : public TIRFrameNode {
   ffi::Array<tvm::tirx::Buffer> root_alloc_buffers;
 
   // TIR utils
-  /*! \brief Whether it is TIR+ PrimFunc. */
-  bool is_tirp;
+  /*! \brief Whether it is TIRX PrimFunc. */
+  bool is_tirx;
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
@@ -101,7 +101,7 @@ class PrimFuncFrameNode : public TIRFrameNode {
         .def_ro("attrs", &PrimFuncFrameNode::attrs)
         .def_ro("env_threads", &PrimFuncFrameNode::env_threads)
         .def_ro("root_alloc_buffers", &PrimFuncFrameNode::root_alloc_buffers)
-        .def_ro("is_tirp", &PrimFuncFrameNode::is_tirp);
+        .def_ro("is_tirx", &PrimFuncFrameNode::is_tirx);
   }
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("script.ir_builder.tirx.PrimFuncFrame", PrimFuncFrameNode,
                                     TIRFrameNode);
@@ -161,7 +161,7 @@ class SBlockFrameNode : public TIRFrameNode {
   /*! \brief The flag whether to construct BlockRealize or Block. */
   bool no_realize;
 
-  // TIR+ signature
+  // TIRX signature
   ffi::Optional<tvm::tirx::ExecScope> exec_scope;
   ffi::String scope_slice_parent;
   ffi::Optional<ffi::Array<PrimExpr>> scope_slice_extents;
@@ -695,7 +695,7 @@ class AllocBufferFrame : public TIRFrame {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(AllocBufferFrame, TIRFrame, AllocBufferFrameNode);
 };
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

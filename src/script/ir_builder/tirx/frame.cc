@@ -67,8 +67,8 @@ void PrimFuncFrameNode::ExitWithScope() {
   if (!is_private && name.has_value() && !attrs.count(tvm::attr::kGlobalSymbol)) {
     insert_attr(tvm::attr::kGlobalSymbol, name.value());
   }
-  if (is_tirp) {
-    insert_attr(tvm::attr::kIsTIRp, tvm::Bool(true));
+  if (is_tirx) {
+    insert_attr(tvm::attr::kIsTIRx, tvm::Bool(true));
   }
   tvm::tirx::PrimFunc func(
       /*params=*/args,
@@ -77,7 +77,7 @@ void PrimFuncFrameNode::ExitWithScope() {
       /*buffer_map=*/buffer_map,
       /*attrs=*/attrs.defined() ? DictAttrs(attrs) : NullValue<DictAttrs>(),
       /*span=*/tvm::Span());
-  func = tvm::tirx::ScriptComplete(func, root_alloc_buffers, is_tirp);
+  func = tvm::tirx::ScriptComplete(func, root_alloc_buffers, is_tirx);
   IRBuilder builder = IRBuilder::Current();
   if (builder->frames.empty()) {
     TVM_FFI_CHECK(!builder->result.defined(), ValueError) << "Builder.result has already been set";
@@ -110,7 +110,7 @@ void SBlockFrameNode::ExitWithScope() {
 
   ffi::Optional<PrimFuncFrame> frame = IRBuilder::Current()->FindFrame<PrimFuncFrame>();
   ICHECK(frame.defined()) << "ValueError: Block must be defined within a PrimFunc";
-  if (!frame.value()->is_tirp) {
+  if (!frame.value()->is_tirx) {
     if (int detect_access = (!reads.defined()) | (!writes.defined() << 1)) {
       attrs.Set("tirx.script_parsing_detect_access", tvm::IntImm(DataType::Int(64), detect_access));
     }
@@ -237,12 +237,12 @@ void ComposeOpFrameNode::ExitWithScope() {
   TIRFrameNode::ExitWithScope();
   ffi::Array<ObjectRef> ops;
   for (const auto& stmt : stmts) {
-    auto op_call = stmt.as<tvm::tirx::tirp::OpCallNode>();
-    ICHECK(op_call) << "ValueError: Only TIRp op calls allowed in ComposeOp. Violated by " << stmt;
-    ops.push_back(ffi::GetRef<tvm::tirx::tirp::OpCall>(op_call));
+    auto op_call = stmt.as<tvm::tirx::tirx::OpCallNode>();
+    ICHECK(op_call) << "ValueError: Only TIRx op calls allowed in ComposeOp. Violated by " << stmt;
+    ops.push_back(ffi::GetRef<tvm::tirx::tirx::OpCall>(op_call));
   }
-  auto compose_op_op = tvm::Op::Get("tirp.compose_op");
-  AddToParent(tvm::tirx::tirp::OpCall(compose_op_op, ops, workspace, config, dispatch));
+  auto compose_op_op = tvm::Op::Get("tirx.compose_op");
+  AddToParent(tvm::tirx::tirx::OpCall(compose_op_op, ops, workspace, config, dispatch));
 }
 
 void AllocBufferFrameNode::ExitWithScope() {
@@ -250,7 +250,7 @@ void AllocBufferFrameNode::ExitWithScope() {
   AddToParent(tvm::tirx::AllocBuffer(buffer, AsStmt(stmts)));
 }
 
-}  // namespace tirx
+}  // namespace tirxx
 }  // namespace ir_builder
 }  // namespace script
 }  // namespace tvm

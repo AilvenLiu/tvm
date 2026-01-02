@@ -96,9 +96,9 @@ class PagedPrefillFunc : public AttnBackendFunc {
 };
 
 /*! \brief The TIR-based paged prefill attention function class. */
-class TIRPagedPrefillFunc : public PagedPrefillFunc {
+class TIRXagedPrefillFunc : public PagedPrefillFunc {
  public:
-  explicit TIRPagedPrefillFunc(ffi::Function attn_func, AttnKind attn_kind)
+  explicit TIRXagedPrefillFunc(ffi::Function attn_func, AttnKind attn_kind)
       : PagedPrefillFunc(std::move(attn_func), attn_kind, AttnBackendKind::kTIR) {}
 
   void MHA(int depth, Tensor q, Tensor qo_indptr, Tensor pages, Tensor page_indptr,
@@ -325,9 +325,9 @@ class PagedDecodeFunc : public AttnBackendFunc {
 };
 
 /*! \brief The TIR-based paged decode attention function class. */
-class TIRPagedDecodeFunc : public PagedDecodeFunc {
+class TIRXagedDecodeFunc : public PagedDecodeFunc {
  public:
-  explicit TIRPagedDecodeFunc(ffi::Function attn_func, AttnKind attn_kind)
+  explicit TIRXagedDecodeFunc(ffi::Function attn_func, AttnKind attn_kind)
       : PagedDecodeFunc(std::move(attn_func), attn_kind, AttnBackendKind::kTIR) {}
 
   void MHA(int depth, Tensor q, Tensor pages, Tensor page_indptr, Tensor page_indices,
@@ -430,9 +430,9 @@ class PagedPrefillTreeMaskFunc : public AttnBackendFunc {
 };
 
 /*! \brief The TIR-based paged prefill with tree mask attention function class. */
-class TIRPagedPrefillTreeMaskFunc : public PagedPrefillTreeMaskFunc {
+class TIRXagedPrefillTreeMaskFunc : public PagedPrefillTreeMaskFunc {
  public:
-  explicit TIRPagedPrefillTreeMaskFunc(ffi::Function attn_func, AttnKind attn_kind)
+  explicit TIRXagedPrefillTreeMaskFunc(ffi::Function attn_func, AttnKind attn_kind)
       : PagedPrefillTreeMaskFunc(std::move(attn_func), attn_kind, AttnBackendKind::kTIR) {}
 
   void MHA(Tensor q, Tensor qo_indptr, Tensor pages, Tensor page_indptr, Tensor page_indices,

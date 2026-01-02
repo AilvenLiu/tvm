@@ -31,12 +31,12 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
       opt_realize.defined() ? opt_realize.value().get() : nullptr;
   AccessPath realize_p = *opt_realize_p;
 
-  bool tirp = false;
+  bool tirx = false;
   for (Frame f : d->frames) {
     if (const auto* tir_f = f.as<TIRFrameNode>()) {
       if (auto func = tir_f->tir.as<tir::PrimFuncNode>()) {
-        if (func->attrs.defined() && func->attrs->dict.count(tvm::attr::kIsTIRp)) {
-          tirp = true;
+        if (func->attrs.defined() && func->attrs->dict.count(tvm::attr::kIsTIRx)) {
+          tirx = true;
           break;
         }
       }
@@ -191,7 +191,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     }
   }
   // Step 3. Handle block read/write regions
-  if (!tirp) {
+  if (!tirx) {
     ffi::Array<ExprDoc> reads;
     for (int i = 0, n = block->reads.size(); i < n; ++i) {
       reads.push_back(d->AsDoc<ExprDoc>(block->reads[i], block_p->Attr("reads")->ArrayItem(i)));
@@ -242,7 +242,7 @@ Doc PrintBlock(IRDocsifier d, tirx::SBlock block, AccessPath block_p,  //
     kwargs_values.push_back(LiteralDoc::Boolean(true, std::nullopt));
   }
 
-  /*********** tir+ ***********/
+  /*********** tirx ***********/
   if (block->exec_scope.defined()) {
     if (auto scope_slice_opt = block->exec_scope.as<tvm::tir::ExecScopeSlice>()) {
       auto scope_slice = scope_slice_opt.value();

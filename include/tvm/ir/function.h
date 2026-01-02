@@ -130,7 +130,7 @@ constexpr const char* kGlobalSymbol = "global_symbol";
  *
  * Type: Bool
  */
-constexpr const char* kIsTIRp = "is_tirp";
+constexpr const char* kIsTIRx = "is_tirx";
 
 /*!
  * \brief Number of inputs of the Primfunc

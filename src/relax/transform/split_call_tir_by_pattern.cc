@@ -45,9 +45,7 @@ namespace tirx {
 
 using relax::FCodegen;
 using relax::MatchResult;
-using relax::TIRPattern;
-using s_tir::ExprComparator;
-using s_tir::TensorizeComparator;
+using relax::TIRXattern;
 
 /*! \brief helper to match a for stmt to a pattern*/
 class ForMatcher : public TensorizeComparator {
@@ -374,22 +372,22 @@ class ForMatcher : public TensorizeComparator {
 };
 
 /*! \brief Analyze the function and match it with a list of patterns */
-class TIRPatternMatcher {
+class TIRXatternMatcher {
  public:
-  static ffi::Array<MatchResult> Match(ffi::Array<TIRPattern> patterns, Stmt body) {
-    TIRPatternMatcher matcher(patterns);
+  static ffi::Array<MatchResult> Match(ffi::Array<TIRXattern> patterns, Stmt body) {
+    TIRXatternMatcher matcher(patterns);
     matcher.OpMatternMatch(body);
     if (matcher.fail_) return {};
     return matcher.match_results_;
   }
 
  private:
-  explicit TIRPatternMatcher(ffi::Array<TIRPattern> patterns) : patterns_(patterns) {}
+  explicit TIRXatternMatcher(ffi::Array<TIRXattern> patterns) : patterns_(patterns) {}
 
   // Find an op that matches this block
   bool BlockPatternMatch(const For& top) {
-    for (const TIRPattern& pattern : patterns_) {
-      tirx::PrimFunc pattern_func = pattern;
+    for (const TIRXattern& pattern : patterns_) {
+      tir::PrimFunc pattern_func = pattern;
       ffi::Array<Var> pattern_symbolic_vars;
       int buffer_count = pattern_func->buffer_map.size();
       for (int i = buffer_count; i < static_cast<int>(pattern_func->params.size()); i++) {
@@ -436,7 +434,7 @@ class TIRPatternMatcher {
   /*! \brief Indicate whether we fail to match.*/
   bool fail_ = false;
   /*! \brief The patterns we match the target stmt to.*/
-  ffi::Array<TIRPattern> patterns_;
+  ffi::Array<TIRXattern> patterns_;
   /*! \brief The results of the matching process.*/
   ffi::Array<MatchResult> match_results_;
 };
@@ -568,12 +566,12 @@ class BlockRemover : public StmtExprMutator {
  * rest.
  */
 std::pair<PrimFunc, ffi::Optional<PrimFunc>> SplitFunctions(
-    PrimFunc func, std::vector<std::vector<int>>* arg_partition, ffi::Array<TIRPattern> patterns,
+    PrimFunc func, std::vector<std::vector<int>>* arg_partition, ffi::Array<TIRXattern> patterns,
     FCodegen f_codegen) {
   // Step 1. Find the library kernel and the rest.
   Stmt body = func->body.as<SBlockRealizeNode>()->block->body;
   ffi::Array<MatchResult> match_results =
-      TIRPatternMatcher::Match(patterns, func->body.as<SBlockRealizeNode>()->block->body);
+      TIRXatternMatcher::Match(patterns, func->body.as<SBlockRealizeNode>()->block->body);
   if (match_results.empty()) {
     return {func, std::nullopt};
   }
@@ -684,9 +682,9 @@ tvm::BaseFunc CodegenWithLibrary(const tirx::PrimFuncNode* pf, ffi::String globa
 /*! \brief Emit 2 calls to the library kernel and the rest of the function. */
 class SplitMutator : public ExprMutator {
  public:
-  SplitMutator(const tvm::IRModule& mod, ffi::Array<TIRPattern> patterns, FCodegen fcodegen)
+  SplitMutator(const tvm::IRModule& mod, ffi::Array<TIRXattern> patterns, FCodegen fcodegen)
       : ExprMutator(mod), mod_(mod), patterns_(patterns), fcodegen_(fcodegen) {}
-  static IRModule Transform(const IRModule& mod, ffi::Array<TIRPattern> patterns,
+  static IRModule Transform(const IRModule& mod, ffi::Array<TIRXattern> patterns,
                             FCodegen fcodegen) {
     SplitMutator mutator(mod, patterns, fcodegen);
     for (auto& kv : mod->functions) {
@@ -769,12 +767,12 @@ class SplitMutator : public ExprMutator {
 
   const Op& call_dps_packed_ = Op::Get("relax.call_dps_packed");
   tvm::IRModule mod_;
-  ffi::Array<TIRPattern> patterns_;
+  ffi::Array<TIRXattern> patterns_;
   FCodegen fcodegen_;
 };
 
 namespace transform {
-Pass SplitCallTIRByPattern(ffi::Array<TIRPattern> patterns, FCodegen fcodegen) {
+Pass SplitCallTIRByPattern(ffi::Array<TIRXattern> patterns, FCodegen fcodegen) {
   auto pass_func =  //
       [=](IRModule m, PassContext pc) { return SplitMutator::Transform(m, patterns, fcodegen); };
   return CreateModulePass(/*pass_function=*/pass_func,            //

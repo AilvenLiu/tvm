@@ -47,8 +47,8 @@ class PrinterConfigNode : public ffi::Object {
   std::string ir_prefix = "I";
   /*! \brief The prefix of TIR nodes */
   std::string tir_prefix = "T";
-  /*! \brief The prefix of TIR+ nodes */
-  std::string tirp_prefix = "Tp";
+  /*! \brief The prefix of TIRX nodes */
+  std::string tirx_prefix = "Tx";
   /*! \brief The prefix of Relax nodes */
   std::string relax_prefix = "R";
   /*!

@@ -310,7 +310,7 @@ void TIRVisitorWithPath::VisitStmt_(const SBlockRealizeNode* op, AccessPath path
   Visit(op->block, path->Attr("block"));
 }
 
-void TIRVisitorWithPath::VisitStmt_(const tirp::OpCallNode* op, AccessPath path) {
+void TIRVisitorWithPath::VisitStmt_(const tirx::OpCallNode* op, AccessPath path) {
   for (size_t i = 0; i < op->args.size(); i++) {
     if (op->args[i] == nullptr) {
       continue;

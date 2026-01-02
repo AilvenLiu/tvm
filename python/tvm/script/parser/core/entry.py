@@ -39,7 +39,7 @@ def _default_globals() -> dict[str, Any]:
     from tvm.script.parser import ir  # pylint: disable=import-outside-toplevel
     from tvm.script.parser import relax  # pylint: disable=import-outside-toplevel
     from tvm.script.parser import tir  # pylint: disable=import-outside-toplevel
-    from tvm.script import tirp  # pylint: disable=import-outside-toplevel
+    from tvm.script import tirx  # pylint: disable=import-outside-toplevel
 
     extra_vars = {
         "tvm": tvm,
@@ -49,7 +49,7 @@ def _default_globals() -> dict[str, Any]:
         "tirx": tirx,
         "R": relax,
         "relax": relax,
-        "Tp": tirp,
+        "Tx": tirx,
     }
     return extra_vars
 
@@ -66,7 +66,7 @@ def parse(
     program: doc.AST | Any | str,
     extra_vars: dict[str, Any] | None = None,
     check_well_formed: bool = True,
-    tirp: bool = False,
+    tirx: bool = False,
 ) -> Any:
     """Register a method for a operand type, AST operator node and operand index.
 
@@ -125,10 +125,10 @@ def parse(
             parser.report_error(source_ast, err=WELL_FORMED_ERROR_MESSAGE)
 
         try:
-            if not tirp:
+            if not tirx:
                 tvm.tir.analysis.verify_well_formed(check_ret)
             else:
-                tvm.tir.analysis.verify_tirp_well_formed(check_ret)
+                tvm.tir.analysis.verify_tirx_well_formed(check_ret)
         except Exception as err:  # pylint: disable=broad-exception-caught
             parser.report_error(
                 source_ast,
