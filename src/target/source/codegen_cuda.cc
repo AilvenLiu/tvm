@@ -196,8 +196,8 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
 
 std::string CodeGenCUDA::Finish() {
   // Generate header
-  auto header_generator = ffi::Function::GetGlobal("tir.hw_ops.cuda.header_generator");
-  TVM_FFI_ICHECK(header_generator.has_value()) << "tir.hw_ops.cuda.header_generator is not defined";
+  auto header_generator = ffi::Function::GetGlobal("tir.device_op_codegen.cuda.header_generator");
+  TVM_FFI_ICHECK(header_generator.has_value()) << "tir.device_op_codegen.cuda.header_generator is not defined";
   ffi::Array<ffi::String> tags;
   for (const auto& tag : codegen_tags_) tags.push_back(ffi::String(tag));
   std::string header = header_generator.value()(tags).cast<ffi::String>().operator std::string();
@@ -871,8 +871,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
 
   if (auto opt_call_opt = op->op.as<Op>()) {
     Op call_op = opt_call_opt.value();
-    auto codegen_getter = tvm::ffi::Function::GetGlobal("tir.hw_ops.cuda.get_codegen");
-    TVM_FFI_ICHECK(codegen_getter.has_value()) << "tir.hw_ops.cuda.get_codegen is not registered";
+    auto codegen_getter = tvm::ffi::Function::GetGlobal("tir.device_op_codegen.cuda.get_codegen");
+    TVM_FFI_ICHECK(codegen_getter.has_value()) << "tir.device_op_codegen.cuda.get_codegen is not registered";
     // either codegen is registered or not
     auto codegen = codegen_getter.value()(call_op->name).cast<ffi::Optional<tvm::ffi::Function>>();
     if (codegen.has_value()) {

@@ -151,7 +151,7 @@ inline DataType DTypeFromString(const std::string str) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.hw_ops.cuda.PTXDTypeFromString", [](const std::string& str) -> int {
+  refl::GlobalDef().def("tir.device_op_codegen.cuda.PTXDTypeFromString", [](const std::string& str) -> int {
     return static_cast<int>(DTypeFromString(str));
   });
 }
@@ -163,7 +163,7 @@ inline std::string DTypeToString(DataType dtype) { return dtype_str[static_cast<
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("tir.hw_ops.cuda.PTXDTypeToString", [](const int dtype) -> std::string {
+  refl::GlobalDef().def("tir.device_op_codegen.cuda.PTXDTypeToString", [](const int dtype) -> std::string {
     return DTypeToString(static_cast<DataType>(dtype));
   });
 }
