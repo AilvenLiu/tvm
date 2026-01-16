@@ -101,6 +101,7 @@ def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
     return True
 
 
+
 def copy_tma_impl(
     op_call: OpCall,
     sctx: "ScheduleContext",
@@ -196,17 +197,23 @@ def copy_tma_impl(
             outer_shape_shared = [s // a for s, a in zip(s_buf.shape, atom_shape_shared)]
             outer_shared, seps = outer_shared.canonicalize().group(outer_shape_shared)
 
-            # copy box could be enlarged in this case
-            box_dim = copy.copy(atom_shape_global)
-            if outer_shared.shard[seps[-2] - 1].stride == 1:
-                enlarge_factor = outer_shared.shard[seps[-2] - 1].extent
-                new_box_dim = box_dim[-2] * enlarge_factor
-                if s_st[-2] % new_box_dim == 0 and s_ext[-2] % new_box_dim == 0:
-                    # exactly multiple of new_box_dim
-                    box_dim[-2] = new_box_dim
-                elif s_st[-2] // new_box_dim == s_ext[-2] // new_box_dim:
-                    # completely within a new_box_dim
-                    box_dim[-2] = s_ext[-2]
+            # copy box starts at atom shape, clamped to actual copy extent
+            # (can't copy more than g_ext in any dimension)
+            box_dim = [min(a, e) for a, e in zip(atom_shape_global, g_ext)]
+
+            # Try to enlarge each dimension where shared layout allows it
+            # Skip innermost dimension to respect TMA swizzle limits
+            for i in range(rank - 1):
+                if box_dim[i] >= g_ext[i]:
+                    continue  # Already at extent limit
+                s_dim = axis_map.get(i, i)
+                if s_dim < len(outer_shared.shard):
+                    if outer_shared.shard[s_dim].stride == 1:
+                        enlarge_factor = outer_shared.shard[s_dim].extent
+                        new_box_dim = atom_shape_shared[s_dim] * enlarge_factor
+                        # Only enlarge if it fits within g_ext and divides evenly
+                        if new_box_dim <= g_ext[i] and g_ext[i] % new_box_dim == 0:
+                            box_dim[i] = new_box_dim
 
             # iterator over global space, each element is a box in global space
             iters_global = [(g_st[i], g_ext[i] // box_dim[i]) for i in range(rank)]

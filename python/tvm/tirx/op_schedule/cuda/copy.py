@@ -219,7 +219,7 @@ def copy_schedule_default(op_call: OpCall, sctx: ScheduleContext) -> PrimFunc:
     return copy_default_impl(op_call, sctx)
 
 
-def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext, async_op=False) -> Optional[PrimFunc]:
     dst_buffer_region, src_buffer_region = op_call.args[:2]
     dst: Buffer = dst_buffer_region.buffer
     src: Buffer = src_buffer_region.buffer
@@ -248,7 +248,7 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
     assert analyzer.can_prove_equal(tmem_buf.shape[0], 128)
 
     # Check width is valid for 32x32b, and determine num
-    width = local_buf.shape[1]
+    width = local_region.region[1].extent
     candidates = [1, 2, 4, 8, 16, 32, 64, 128]
 
     if not analyzer.can_prove_equal(tvm.tir.floormod(width, elem_per_32b), 0):
@@ -272,7 +272,7 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
     # tmem allocated addr is not None
     assert tmem_buf.allocated_addr is not None
     tvm.ir.assert_structural_equal(tmem_buf.layout.canonicalize(), tmem_layout)
-    tvm.ir.assert_structural_equal(local_buf.layout.canonicalize(), local_layout)
+    # tvm.ir.assert_structural_equal(local_buf.layout.canonicalize(), local_layout)
     # local: [0:128, 0:WIDTH] <-> tmem: [0:128, st:st+WIDTH]
     assert analyzer.can_prove_equal(tmem_st[0], 0)
     assert analyzer.can_prove_equal(tmem_extent[0], 128)
@@ -283,9 +283,9 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
     offset = tmem_st[1]
     assert analyzer.can_prove_equal(tvm.tir.floormod(offset, elem_per_32b), 0)
     offset_32b = tvm.tir.floordiv(offset, elem_per_32b)
-    assert analyzer.can_prove_equal(tmem_extent[1], width)
+    assert analyzer.can_prove_equal(tmem_extent[1], width), f"tmem_extent[1]: {tmem_extent[1]}, width: {width}"
 
-    assert analyzer.can_prove_equal(local_st[1], 0)
+    # assert analyzer.can_prove_equal(local_st[1], 0)
     assert analyzer.can_prove_equal(local_extent[1], width)
 
     op = T.ptx.tcgen05.ld if direction == "tmem2local" else T.ptx.tcgen05.st
@@ -295,10 +295,11 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
     @T.prim_func(tirx=True, check_well_formed=False)
     def impl():
         with T.warp():
-            local_storage = local_buf.view(num * elem_per_32b, layout=TileLayout([num * elem_per_32b]))
+            local_storage = local_buf.view(local_buf.shape[1] * elem_per_32b, layout=TileLayout([num * elem_per_32b]))
             local_32b = local_storage.view("uint32")
-            op(tmem_buf.allocated_addr[0], 0, offset_32b, "32x32b", num, False, *[local_32b[i] for i in range(num)])
-            wait_op()
+            op(tmem_buf.allocated_addr[0], 0, offset_32b, "32x32b", num, False, *[local_32b[local_st[1] // elem_per_32b+i] for i in range(num)])
+            if not async_op:
+                wait_op()
     # fmt: on
     return impl
 
@@ -318,3 +319,20 @@ def copy_tmem_local_impl(op_call: OpCall, sctx: ScheduleContext) -> Optional[Pri
 )
 def copy_schedule_tmem_local(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
     return copy_tmem_local_impl(op_call, sctx)
+
+
+@register_dispatch(
+    "copy_async",
+    "cuda",
+    variant="tmem<->local",
+    priority=10,
+    when=[
+        predicate("validate_copy_op", _is_valid_copy),
+        predicate("exec_scope", _exec_scope_ok, expected_scopes=["warpgroup"]),
+        predicate(
+            "storage_scope", _scope_allowed, allowed_pairs=[("tmem", "local"), ("local", "tmem")]
+        ),
+    ],
+)
+def copy_async_schedule_tmem_local_async(op_call: OpCall, sctx: ScheduleContext) -> Optional[PrimFunc]:
+    return copy_tmem_local_impl(op_call, sctx, async_op=True)

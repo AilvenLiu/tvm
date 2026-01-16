@@ -657,7 +657,6 @@ class TileLayout(TLayout):
         """Slice the layout with a given shape and region."""
         assert len(shape) == len(region), "shape and region must have the same length"
         region = [tvm.ir.Range(r[0], r[1]) for r in region]
-        print(f"shape: {shape}, region: {region}")
         return _ffi_api.TileLayoutSlice(self, shape, region)  # pylint: disable=no-member
 
     @classmethod

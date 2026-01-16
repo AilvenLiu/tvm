@@ -1258,6 +1258,11 @@ constexpr const char* tirx_scope_partition = "tirx.scope_partition";
 constexpr const char* irregular_loop_mark = "irregular_loop_mark";
 
 /*!
+ * \brief Mark the kernel as persistent.
+ */
+constexpr const char* kPersistentKernel = "tirx.persistent_kernel";
+
+/*!
  * \brief Check if attr_key is a pragma key extension
  * \param attr_key The attr key to be compared
  * \return true if it is a pragma key

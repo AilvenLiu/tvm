@@ -592,5 +592,223 @@ def test_copy_g2s_cta_tma_load_edge_case(task, dtype="float16", swizzle_len=3):
         np.testing.assert_allclose(B_ref, B.numpy())
 
 
+@tvm.testing.requires_cuda_compute_version(10)
+@pytest.mark.parametrize(
+    "task",
+    [
+        # 4D TMA copy mimicking FA4 scenario where g_ext has unit dimension
+        # but atom_shape has non-unit in that dimension.
+        # Global: (batch, seq, heads, dim) - copy one head at a time
+        # Shared: (pipe, blk, seq, dim) - different axis arrangement
+        # g_ext[2] = 1 (one head), but atom_global[2] = 8
+        # This tests box_dim = [min(a, e) for a, e in zip(atom_shape_global, g_ext)]
+        (
+            (2, 128, 8, 64),  # global_shape: (batch, seq, heads, dim)
+            ((0, 1), (0, 128), (0, 1), (0, 64)),  # global_region: copy 1 batch, 128 seq, 1 head, 64 dim
+            (1, 1, 128, 64),  # shared_shape: (pipe_stage, blk_k, blk_m, blk_k)
+            ((0, 1), (0, 1), (0, 128), (0, 64)),  # shared_region
+            128,  # thread count
+            TileLayout([2, 128, 8, 64]).canonicalize(),  # A_layout (global)
+            TileLayout([2, 128, 8, 64]).canonicalize(),  # B_layout (global)
+            lambda dtype, swizzle_len: tma_shared_layout(
+                dtype, swizzle_len, (1, 1, 128, 64)
+            ).canonicalize(),
+        ),
+        # Another variant with different head/batch sizes
+        (
+            (4, 64, 4, 128),  # global_shape
+            ((0, 1), (0, 64), (0, 1), (0, 128)),  # global_region: g_ext = [1, 64, 1, 128]
+            (1, 1, 64, 128),  # shared_shape
+            ((0, 1), (0, 1), (0, 64), (0, 128)),  # shared_region
+            128,  # thread count
+            TileLayout([4, 64, 4, 128]).canonicalize(),
+            TileLayout([4, 64, 4, 128]).canonicalize(),
+            lambda dtype, swizzle_len: tma_shared_layout(
+                dtype, swizzle_len, (1, 1, 64, 128)
+            ).canonicalize(),
+        ),
+    ],
+)
+def test_copy_g2s_tma_4d_axis_reorder(task, dtype="float16", swizzle_len=3):
+    """Test 4D TMA copy with axis reordering where g_ext < atom_shape in unit dimensions.
+
+    This mimics the FA4 kernel scenario where:
+    - Global tensor is (batch, seq, heads, dim)
+    - We copy one head at a time: g_ext = [1, seq_len, 1, head_dim]
+    - atom_shape_global = [1, 1, 8, 64] for 4D
+    - g_ext[2] = 1 < atom_shape[2] = 8
+
+    Without the fix (box_dim = [min(a, e) for a, e in zip(atom_shape_global, g_ext)]),
+    box_dim[2] = 8 while g_ext[2] = 1, causing g_ext[2] // box_dim[2] = 0 iterations,
+    which hangs on mbarrier wait.
+    """
+    g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, layoutS_fn = task
+    dev = tvm.cuda(0)
+
+    # Compute the shared layout using the provided swizzle length
+    shared_layout = layoutS_fn(dtype, swizzle_len)
+
+    total_bytes = functools.reduce(lambda acc, region: acc * (region[1] - region[0]), s_region, 1)
+    total_bytes = total_bytes * tvm.DataType(dtype).bits // 8
+
+    smem_bytes = functools.reduce(lambda acc, extent: acc * extent, s_shape, 1)
+    smem_bytes = smem_bytes * tvm.DataType(dtype).bits // 8
+
+    r_smem = [slice(s_region[i][0], s_region[i][1]) for i in range(len(s_shape))]
+    r_gmem = [slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape))]
+
+    # fmt: off
+    @T.prim_func(tirx=True)
+    def copy_async(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
+        B = T.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([thread_cnt], parent="cta")
+
+            with T.thread():
+                dyn = T.alloc_buffer([smem_bytes + 8], "uint8", scope="shared.dyn")
+                A_smem = T.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
+                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                mbar_ptr = T.meta_var(mbarrier.ptr_to([0]))
+
+                with T.thread()[0:1]:
+                    T.ptx.mbarrier.init(mbar_ptr, 1)
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+
+                with T.thread()[0:1]:
+                    Tx.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="tma", mbar=mbar_ptr)
+                    T.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
+                T.ptx.mbarrier.try_wait(mbar_ptr, 0)
+
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+                with T.cta():
+                    Tx.copy(B[*r_gmem], A_smem[*r_smem])
+    # fmt: on
+    np_dtype = tvm.testing.np_dtype_from_str(dtype)
+    target = tvm.target.Target("cuda")
+
+    with target:
+        mod = tvm.IRModule({"main": copy_async})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = tvm.testing.generate_random_array(dtype, g_shape)
+        B_np = np.zeros(g_shape, dtype=np_dtype)
+
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(A, B)
+
+        B_ref = np.zeros(g_shape, dtype=np_dtype)
+        B_ref[*r_gmem] = A_np[*r_gmem]
+        np.testing.assert_allclose(B_ref, B.numpy())
+
+
+@pytest.mark.parametrize("dtype", ["float16", "float32"])
+@pytest.mark.parametrize("width_32b", [4, 8, 16, 32])
+def test_copy_tmem2reg_async(dtype, width_32b):
+    """Test async tmem<->local copy using copy_async instead of copy.
+
+    This tests the new copy_async dispatch for tmem<->local that doesn't
+    immediately wait after the operation, allowing for pipelining.
+    """
+
+    def next_power_of_2(x):
+        """Return the smallest power of 2 greater than or equal to x."""
+        if x <= 1:
+            return 1
+        return 1 << (x - 1).bit_length()
+
+    bits = tvm.runtime.DataType(dtype).bits
+    if 128 % bits != 0 or 32 % bits != 0:
+        pytest.skip(f"dtype {dtype} is not supported")
+
+    WIDTH = width_32b * (32 // bits)
+    VEC_LEN = 128 // bits
+    if WIDTH % VEC_LEN != 0:
+        pytest.skip(f"dtype {dtype} + width {width_32b} is not supported")
+
+    g_layout = TileLayout(shard=([128, WIDTH // VEC_LEN, VEC_LEN], [WIDTH, VEC_LEN, 1]))
+    local_view = TileLayout(shard=([128, WIDTH], [(1, "tid_in_wg"), (1, "m")]))
+
+    # fmt: off
+    @T.prim_func(tirx=True)
+    def copy_async_test(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, (128, WIDTH), dtype)
+        B = T.match_buffer(B_ptr, (128, WIDTH), dtype)
+
+        A_flat = A.view(-1)
+        B_flat = B.view(-1)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            wg_id = T.warpgroup_id([1], parent="cta")
+            warp_id = T.warp_id([4], parent="warpgroup")
+            lane_id = T.thread_id([32], parent="warp")
+            tid_in_wg = T.thread_id([128], parent="cta")
+
+            tmem_addr = T.alloc_shared([1], "uint32")
+
+            with T.warpgroup()[0:1]:
+                with T.warp()[0:1]:
+                    T.ptx.tcgen05.alloc(T.address_of(tmem_addr), n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)
+
+                T.tvm_storage_sync("shared")
+
+                tmem = T.decl_buffer((128, WIDTH), dtype, scope="tmem", allocated_addr=tmem_addr[0],
+                                     layout=TileLayout(([128, WIDTH], [(1, "TLane"), (1, "TCol")])))
+
+                A_reg = T.alloc_local((WIDTH), dtype)
+                B_reg = T.alloc_local((WIDTH), dtype)
+                A_local = A_reg.view(128, WIDTH, layout=local_view)
+                B_local = B_reg.view(128, WIDTH, layout=local_view)
+
+                # A -> A_local
+                with T.thread():
+                    for i in range(WIDTH // VEC_LEN):
+                        g_offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
+                        Tx.copy(A_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN], A_flat[g_offset: g_offset + VEC_LEN])
+                    for i in range(WIDTH):
+                        B_reg[i] = T.cast(0, dtype)
+                T.cuda.cta_sync()
+
+                # A_local -> tmem (async)
+                Tx.copy_async(tmem[:, :], A_local[:, :])
+                T.ptx.tcgen05.wait.st()  # explicit wait
+                T.cuda.cta_sync()
+
+                # tmem -> B_local (async)
+                Tx.copy_async(B_local[:, :], tmem[:, :])
+                T.ptx.tcgen05.wait.ld()  # explicit wait
+                T.cuda.cta_sync()
+
+                # B_local -> B
+                with T.thread():
+                    for i in range(WIDTH // VEC_LEN):
+                        g_offset = T.meta_var(g_layout.apply(tid_in_wg, i, 0)["m"])
+                        Tx.copy(B_flat[g_offset: g_offset + VEC_LEN], B_reg[i * VEC_LEN: i * VEC_LEN + VEC_LEN])
+
+                with T.warp()[0:1]:
+                    T.ptx.tcgen05.relinquish_alloc_permit(cta_group=1)
+                    T.ptx.tcgen05.dealloc(tmem_addr[0], n_cols=max(32, next_power_of_2(width_32b)), cta_group=1)
+    # fmt: on
+
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": copy_async_test})
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        A_np = tvm.testing.generate_random_array(dtype, (128, WIDTH))
+        B_np = np.zeros((128, WIDTH), dtype=dtype)
+        DEV = tvm.cuda(0)
+        A = tvm.runtime.tensor(A_np, DEV)
+        B = tvm.runtime.tensor(B_np, DEV)
+        mod(A, B)
+        np.testing.assert_allclose(B.numpy(), A_np)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

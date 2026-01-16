@@ -169,6 +169,8 @@ class ThreadIdxExtractor : public tirx::StmtVisitor {
       if (iv->var->name_hint == "threadIdx.z" || iv->thread_tag == "threadIdx.z") {
         threadIdx_z_ext = op->value;
       }
+    } else if (op->attr_key == tir::attr::kPersistentKernel) {
+      is_persistent_kernel = op->value.as<IntImmNode>()->value;
     }
     StmtVisitor::VisitStmt_(op);
   }
@@ -177,6 +179,7 @@ class ThreadIdxExtractor : public tirx::StmtVisitor {
   PrimExpr threadIdx_x_ext = Integer(1);
   PrimExpr threadIdx_y_ext = Integer(1);
   PrimExpr threadIdx_z_ext = Integer(1);
+  bool is_persistent_kernel = false;
 };
 
 void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
@@ -190,7 +193,11 @@ void CodeGenCUDA::PrintExtraAttrs(const PrimFunc& f, std::ostream& os) {
       // unable to extract the number of threads per block, hence directly return
       return;
     }
-    os << " __launch_bounds__(" << threadIdx_ext_int->value << ")";
+    if (extractor.is_persistent_kernel) {
+      os << " __launch_bounds__(" << threadIdx_ext_int->value << ", 1)";
+    } else {
+      os << " __launch_bounds__(" << threadIdx_ext_int->value << ")";
+    }  
   }
 }
 
@@ -215,6 +222,10 @@ void CodeGenCUDA::VisitStmt_(const tirx::ForNode* op) {
   if (op->kind == tirx::ForKind::kUnrolled) {
     PrintIndent();
     stream << "#pragma unroll\n";
+  }
+  if(op->annotations.count("disable_unroll")){
+    PrintIndent();
+    stream << "#pragma unroll 1\n";
   }
   CodeGenC::VisitStmt_(op);
 }
