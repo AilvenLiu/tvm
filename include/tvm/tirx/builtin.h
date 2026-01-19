@@ -921,6 +921,21 @@ TVM_DLL const Op& cuda_ldg();
  */
 TVM_DLL const Op& cuda_get_tmem_addr();
 
+/*!
+ * \brief tvm intrinsic for cuda 3-input max instruction
+ */
+TVM_DLL const Op& cuda_reduce3_max_f32();
+
+/*!
+ * \brief tvm intrinsic for cuda 3-input min instruction
+ */
+TVM_DLL const Op& cuda_reduce3_min_f32();
+
+/*!
+ * \brief tvm intrinsic for cuda packed add instruction
+ */
+TVM_DLL const Op& cuda_add_packed_f32x2();
+
 }  // namespace builtin
 }  // namespace tirx
 }  // namespace tvm

@@ -166,16 +166,6 @@ __device__ __forceinline__ float {func_name}() {{
 """
         return T.cuda.func_call(func_name, source_code=source_code, return_type="float32")
 
-    def fmax(a, b, c):
-        func_name = "fmax"
-        source_code = f"""
-__device__ __forceinline__ float {func_name}(float a, float b, float c) {{
-  float d;
-  asm volatile("max.f32 %0, %1, %2, %3;" : "=f"(d) : "f"(a), "f"(b), "f"(c));
-  return d;
-}}
-"""
-        return T.cuda.func_call(func_name, a, b, c, source_code=source_code, return_type="float32")
 
     def fma_packed_f32x2(a1, a2, b1, b2, c1, c2, d_addr):
         func_name = "fma_packed_f32x2"
@@ -192,19 +182,6 @@ __device__ __forceinline__ float2 {func_name}(float a1, float a2, float b1, floa
             func_name, a1, a2, b1, b2, c1, c2, d_addr, source_code=source_code, return_type="void"
         )
 
-    def add_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
-        func_name = f"add_packed_{rounding_mode}_f32x2"
-        source_code = f"""
-__device__ __forceinline__ float2 {func_name}(float a1, float a2, float b1, float b2, float* d) {{
-  float2* d_p = (float2*) d;
-  float2 a = make_float2(a1, a2);
-  float2 b = make_float2(b1, b2);
-  asm volatile("add.{rounding_mode}.ftz.f32x2 %0, %1, %2;\\n" : "=l"(reinterpret_cast<uint64_t&>(d_p[0])) : "l"(reinterpret_cast<uint64_t&>(a)), "l"(reinterpret_cast<uint64_t&>(b)));
-}}
-"""
-        return T.cuda.func_call(
-            func_name, a1, a2, b1, b2, d_addr, source_code=source_code, return_type="void"
-        )
 
     def mul_packed_f32x2(a1, a2, b1, b2, d_addr):
         func_name = "mul_packed_f32x2"
@@ -256,17 +233,6 @@ __device__ __forceinline__ float {func_name}(float x_rounded, float frac_ex2) {{
             func_name, x_rounded, frac_ex2, source_code=source_code, return_type="float32"
         )
 
-    def i32x2_to_i64(lo, hi):
-        func_name = "i32x2_to_i64"
-        source_code = f"""
-__device__ __forceinline__ int64_t {func_name}(int32_t lo, int32_t hi) {{
-  
-  int64_t out;
-  asm volatile("mov.b64 %0, {{%1, %2}};" : "=l"(out) : "r"(lo), "r"(hi));
-  return out;
-}}
-"""
-        return T.cuda.func_call(func_name, lo, hi, source_code=source_code, return_type="int64")
 
     def handle_to_uint32(handle):
         func_name = "handle_to_uint32"
@@ -303,7 +269,7 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
 
         # Round down to get integer part (stored as float with integer in lower bits)
         xy_rounded = T.alloc_local([2], "float32")
-        add_packed_f32x2(
+        T.cuda.add_packed_f32x2(
             xy_clamped[0],
             xy_clamped[1],
             fp32_round_int,
@@ -1234,7 +1200,6 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                     bar_s_full.wait(wg_id, phase_s_full[0])
                                     profiler.start(ProfileEventType.Softmax_MAX, tid_in_wg == 0)
                                     tile_max = T.alloc_local([1], "float32")
-                                    temp_max = T.alloc_local([4], "float32")
                                     for chunk_idx in T.serial(BLK_N // SOFTMAX_LD_CHUNK):
                                         Tx.copy_async(
                                             s_chunk[
@@ -1252,26 +1217,12 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                             ],
                                         )
                                     row_max_old = row_max[0]
-                                    for i in T.unroll(4):
-                                        if not is_first and i == 0:
-                                            temp_max[i] = fmax(
-                                                s_chunk_buf[2 * i],
-                                                s_chunk_buf[2 * i + 1],
-                                                row_max_old,
-                                            )
+                                    with T.thread():
+                                        if is_first:
+                                            Tx.max(tile_max, s_chunk_buf)
                                         else:
-                                            temp_max[i] = T.max(
-                                                s_chunk_buf[2 * i], s_chunk_buf[2 * i + 1]
-                                            )
-                                    for outer in T.serial(BLK_N // 8 - 1):
-                                        for i in T.unroll(4):
-                                            temp_max[i] = fmax(
-                                                temp_max[i],
-                                                s_chunk_buf[8 * (outer + 1) + 2 * i],
-                                                s_chunk_buf[8 * (outer + 1) + 2 * i + 1],
-                                            )
-                                    tile_max[0] = T.max(temp_max[0], temp_max[1])
-                                    tile_max[0] = fmax(tile_max[0], temp_max[2], temp_max[3])
+                                            tile_max[0] = row_max_old
+                                            Tx.max(tile_max, s_chunk_buf, accum=True)
                                     row_max_new = T.alloc_local([1], "float32")
                                     acc_scale = T.alloc_local([1], "float32")
                                     acc_scale_ = T.alloc_local([1], "float32")  # For slack check
@@ -1381,46 +1332,12 @@ __device__ __forceinline__ uint32_t {func_name}(void* ptr) {{
                                     profiler.start(ProfileEventType.Softmax_SUM, tid_in_wg == 0)
                                     phase_s_full[0] ^= 1
                                     phase_q[0] ^= 1
-                                    local_sum = T.alloc_local([8], "float32")
-                                    for i in T.unroll(8):
-                                        if not is_first and i == 0:
-                                            local_sum[i] = (
-                                                s_chunk_buf[i] + row_sum[0] * acc_scale[0]
-                                            )
+                                    with T.thread():
+                                        if is_first:
+                                            Tx.sum(row_sum, s_chunk_buf)
                                         else:
-                                            local_sum[i] = s_chunk_buf[i]
-
-                                    for i in T.serial(BLK_N // 8 - 1):
-                                        for j in T.unroll(4):
-                                            add_packed_f32x2(
-                                                local_sum[2 * j],
-                                                local_sum[2 * j + 1],
-                                                s_chunk_buf[8 * i + 2 * j + 8],
-                                                s_chunk_buf[8 * i + 2 * j + 1 + 8],
-                                                T.address_of(local_sum[2 * j]),
-                                            )
-                                    add_packed_f32x2(
-                                        local_sum[0],
-                                        local_sum[1],
-                                        local_sum[2],
-                                        local_sum[3],
-                                        T.address_of(local_sum[0]),
-                                    )
-                                    add_packed_f32x2(
-                                        local_sum[4],
-                                        local_sum[5],
-                                        local_sum[6],
-                                        local_sum[7],
-                                        T.address_of(local_sum[4]),
-                                    )
-                                    add_packed_f32x2(
-                                        local_sum[0],
-                                        local_sum[1],
-                                        local_sum[4],
-                                        local_sum[5],
-                                        T.address_of(local_sum[0]),
-                                    )
-                                    row_sum[0] = local_sum[0] + local_sum[1]
+                                            row_sum[0] = row_sum[0] * acc_scale[0]
+                                            Tx.sum(row_sum, s_chunk_buf, accum=True)
                                     profiler.end(ProfileEventType.Softmax_SUM, tid_in_wg == 0)
                                     if USE_S0_S1_BARRIER:
                                         phase_s0_s1[0] ^= 1

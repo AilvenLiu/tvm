@@ -5641,6 +5641,63 @@ def cuda_get_tmem_addr(addr, row_offset, col_offset):
     return call_intrin("uint32", "tir.cuda_get_tmem_addr", addr, row_offset, col_offset)
 
 
+def cuda_reduce3_max_f32(a, b, c):
+    """TVM intrinsic to call 3-input max.f32 PTX instruction (sm_100a+)
+
+    Parameters
+    ----------
+    a, b, c : PrimExpr
+        The three float32 values to compare.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression returning max(a, b, c).
+    """
+    return call_intrin("float32", "tir.cuda_reduce3_max_f32", a, b, c)
+
+
+def cuda_reduce3_min_f32(a, b, c):
+    """TVM intrinsic to call 3-input min.f32 PTX instruction (sm_100a+)
+
+    Parameters
+    ----------
+    a, b, c : PrimExpr
+        The three float32 values to compare.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression returning min(a, b, c).
+    """
+    return call_intrin("float32", "tir.cuda_reduce3_min_f32", a, b, c)
+
+
+def cuda_add_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
+    """TVM intrinsic to call packed add.{rounding_mode}.ftz.f32x2 PTX instruction (sm_100a+)
+
+    Computes d[0] = a1 + b1, d[1] = a2 + b2 using a single SIMD instruction.
+
+    Parameters
+    ----------
+    a1, a2 : PrimExpr
+        First pair of float32 values.
+    b1, b2 : PrimExpr
+        Second pair of float32 values.
+    d_addr : PrimExpr
+        Address to store the result (float* pointing to 2 floats).
+    rounding_mode : str
+        Rounding mode for the operation. Default is "rz" (round toward zero).
+        Other options: "rn" (round to nearest), "rm" (round towards negative infinity)
+        "rp" (round towards positive infinity).
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("", "tir.cuda_add_packed_f32x2", a1, a2, b1, b2, d_addr, rounding_mode)
+
+
 def ptx_ld_global_acquire(res, addr):
     """TVM intrinsic to call ptx ld.global.acquire instruction
 

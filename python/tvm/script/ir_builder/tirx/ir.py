@@ -2532,6 +2532,9 @@ class CUDANamespace:
         self.printf = _op_wrapper(_tir_op.cuda_printf)
         self.ldg = _op_wrapper(_tir_op.cuda_ldg)
         self.get_tmem_addr = _op_wrapper(_tir_op.cuda_get_tmem_addr)
+        self.reduce3_max_f32 = _op_wrapper(_tir_op.cuda_reduce3_max_f32)
+        self.reduce3_min_f32 = _op_wrapper(_tir_op.cuda_reduce3_min_f32)
+        self.add_packed_f32x2 = _op_wrapper(_tir_op.cuda_add_packed_f32x2)
 
 
 class NVSHMEMNamespace:

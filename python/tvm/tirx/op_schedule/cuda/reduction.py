@@ -19,6 +19,7 @@
 
 import functools
 import operator
+import re
 from typing import Any, Dict, Optional
 
 from tvm.arith.analyzer import Analyzer
@@ -26,10 +27,9 @@ from tvm.script import tir as T
 from tvm.tir import BufferRegion, PrimFunc
 from tvm.tir.layout import laneid
 from tvm.tir.stmt import OpCall
-from tvm.tirx.op_schedule import ScheduleContext, fail
+from tvm.tirx.op_schedule import ScheduleContext, fail, register_dispatch, predicate
 
-from ..common import ReduceOpType, register_unary_binary_schedule
-from .common import target_cuda
+from ..common import ReduceOpType
 
 reduce_op_table = {
     ReduceOpType.SUM: lambda a, b: a + b,
@@ -42,6 +42,75 @@ reduce_default_value_table = lambda dtype: {
     ReduceOpType.MAX: T.min_value(dtype),
     ReduceOpType.MIN: T.max_value(dtype),
 }
+
+
+# ---------------------------------------------------------------------------
+# Predicate functions for dispatch
+# ---------------------------------------------------------------------------
+
+
+def _exec_scope_ok(op: OpCall, sctx: ScheduleContext, expected_scopes: list[str]):
+    """Check if exec_scope is in the allowed list."""
+    ok = sctx.exec_scope.name in expected_scopes
+    return (ok, None if ok else f"exec_scope {sctx.exec_scope.name} not in {expected_scopes}")
+
+
+def _dtype_ok(op: OpCall, sctx: ScheduleContext, expected_dtype: str):
+    """Check if src buffer dtype matches."""
+    _, src_buffer_region = op.args[:2]
+    dtype = src_buffer_region.buffer.dtype
+    ok = dtype == expected_dtype
+    return (ok, None if ok else f"dtype {dtype} != {expected_dtype}")
+
+
+def _sm_version_ok(op: OpCall, sctx: ScheduleContext, min_version: int):
+    """Check if SM version >= min_version."""
+    target_arch = sctx.target.arch if hasattr(sctx.target, "arch") else ""
+    sm_match = re.match(r"sm_(\d+)", target_arch)
+    sm_version = int(sm_match.group(1)) if sm_match else 0
+    ok = sm_version >= min_version
+    return (ok, None if ok else f"sm_version {sm_version} < {min_version}")
+
+
+def _reduction_len_ok(op: OpCall, sctx: ScheduleContext, min_len: int):
+    """Check if reduction_len >= min_len."""
+    _, src_buffer_region = op.args[:2]
+    src_extent = [r.extent for r in src_buffer_region.region]
+    reduction_len = functools.reduce(operator.mul, src_extent, 1)
+    ok = reduction_len >= min_len
+    return (ok, None if ok else f"reduction_len {reduction_len} < {min_len}")
+
+
+def _dst_len_ok(op: OpCall, sctx: ScheduleContext, expected_len: int):
+    """Check if dst_len == expected_len."""
+    dst_buffer_region = op.args[0]
+    dst_extent = [r.extent for r in dst_buffer_region.region]
+    dst_len = functools.reduce(operator.mul, dst_extent, 1)
+    ok = dst_len == expected_len
+    return (ok, None if ok else f"dst_len {dst_len} != {expected_len}")
+
+
+def _src_ndim_ok(op: OpCall, sctx: ScheduleContext, expected_ndim: int):
+    """Check if src buffer is expected_ndim-dimensional."""
+    _, src_buffer_region = op.args[:2]
+    src_extent = [r.extent for r in src_buffer_region.region]
+    ok = len(src_extent) == expected_ndim
+    return (ok, None if ok else f"src ndim {len(src_extent)} != {expected_ndim}")
+
+
+def _local_scope_match(op: OpCall, sctx: ScheduleContext):
+    """Check if both src and dst are local scope with matching dtype."""
+    dst_buffer_region, src_buffer_region = op.args[:2]
+    src, dst = src_buffer_region.buffer, dst_buffer_region.buffer
+    ok = all([
+        src.scope() == "local",
+        dst.scope() == "local",
+        src.dtype == dst.dtype,
+        sctx.is_cuda(),
+    ])
+    if not ok:
+        return (False, "src/dst must be local scope with matching dtype on CUDA")
+    return (True, None)
 
 
 def reduction_cuda_shared_nd_sync_cta_impl(
@@ -168,6 +237,248 @@ def reduction_cuda_shared_nd_sync_cta_impl(
     # fmt: on
 
     return impl
+
+
+def reduction_cuda_local_thread_packed_add_sum_impl(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    accum: bool,
+    reduce_op: ReduceOpType,
+    sctx: ScheduleContext,
+) -> Optional[PrimFunc]:
+    """Schedule thread-level sum reduction using packed add sum with add.f32x2 PTX instruction.
+
+    This implementation uses packed add sum leveraging the PTX `add.rz.ftz.f32x2`
+    instruction which can add two pairs of floats in parallel.
+
+    The algorithm:
+    1. Copy first 8 elements to local_sum buffer (with optional accumulator)
+    2. For remaining full chunks of 8, use add_packed_f32x2 to add them to local_sum
+    3. Handle remainder elements (0-7) with sequential addition
+    4. Final packed add sum: reduce 8 values down to 1
+
+    Note: Requirements are checked via predicates in register_dispatch:
+    - exec_scope == "thread", src/dst scope == "local", dtype == "float32"
+    - sm_version >= 100, reduction_len >= 8, dst_len == 1, src_ndim == 1
+    """
+
+    dst, src = dst_buffer_region.buffer, src_buffer_region.buffer
+    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
+    dtype = src.dtype
+
+    src_extent = [r.extent for r in src_region]
+    dst_extent = [r.extent for r in dst_region]
+    src_st = [r.min for r in src_region]
+    dst_st = [r.min for r in dst_region]
+
+    reduction_len = functools.reduce(operator.mul, src_extent, 1)
+
+    src_base = src_st[0]
+    num_full_chunks = reduction_len // 8
+    remainder = reduction_len % 8
+    remainder_base = num_full_chunks * 8
+
+    # fmt: off
+    @T.prim_func(tirx=True, check_well_formed=False)
+    def impl():
+        with T.thread():
+            local_sum = T.alloc_buffer([8], dtype, scope="local")
+            # First pass: copy first 8 elements (with optional accumulator)
+            for i in T.unroll(8):
+                if accum and i == 0:
+                    # Include accumulator in first element
+                    local_sum[i] = src[src_base + i] + dst[*dst_st]
+                else:
+                    local_sum[i] = src[src_base + i]
+
+            # Process remaining full chunks of 8
+            for outer in T.serial(num_full_chunks - 1):
+                for j in T.unroll(4):
+                    T.cuda.add_packed_f32x2(
+                        local_sum[2 * j],
+                        local_sum[2 * j + 1],
+                        src[src_base + 8 * (outer + 1) + 2 * j],
+                        src[src_base + 8 * (outer + 1) + 2 * j + 1],
+                        T.address_of(local_sum[2 * j]),
+                    )
+
+            # Handle remainder elements (0 to 7)
+            for i in T.serial(remainder):
+                local_sum[0] = local_sum[0] + src[src_base + remainder_base + i]
+
+            # Final packed add sum: 8 -> 4 -> 2 -> 1
+            T.cuda.add_packed_f32x2(
+                local_sum[0], local_sum[1],
+                local_sum[2], local_sum[3],
+                T.address_of(local_sum[0]),
+            )
+            T.cuda.add_packed_f32x2(
+                local_sum[4], local_sum[5],
+                local_sum[6], local_sum[7],
+                T.address_of(local_sum[4]),
+            )
+            T.cuda.add_packed_f32x2(
+                local_sum[0], local_sum[1],
+                local_sum[4], local_sum[5],
+                T.address_of(local_sum[0]),
+            )
+            dst[*dst_st] = local_sum[0] + local_sum[1]
+    # fmt: on
+
+    return impl
+
+
+def reduction_cuda_local_thread_3input_maxmin_impl(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    accum: bool,
+    reduce_op: ReduceOpType,
+    sctx: ScheduleContext,
+) -> Optional[PrimFunc]:
+    """Schedule thread-level max/min reduction using 3-input PTX intrinsics.
+
+    This implementation uses the PTX `max.f32`/`min.f32` instruction which can
+    compare 3 values at once for better performance.
+
+    The algorithm:
+    1. Use 4 temp variables to process elements in parallel
+    2. First pass: temp[i] = op(src[2*i], src[2*i+1]) for i in 0..3
+    3. Loop: temp[i] = op3(temp[i], src[...], src[...]) for remaining elements
+    4. Final merge: dst = op3(op(temp[0], temp[1]), temp[2], temp[3])
+
+    Note: Requirements are checked via predicates in register_dispatch:
+    - exec_scope == "thread", src/dst scope == "local", dtype == "float32"
+    - sm_version >= 100, reduction_len >= 8, dst_len == 1, src_ndim == 1
+    """
+
+    dst, src = dst_buffer_region.buffer, src_buffer_region.buffer
+    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
+    dtype = src.dtype
+
+    src_extent = [r.extent for r in src_region]
+    src_st = [r.min for r in src_region]
+    dst_st = [r.min for r in dst_region]
+
+    reduction_len = functools.reduce(operator.mul, src_extent, 1)
+
+    op_func = reduce_op_table[reduce_op]
+    reduce3_func = T.cuda.reduce3_max_f32 if reduce_op == ReduceOpType.MAX else T.cuda.reduce3_min_f32
+
+    src_base = src_st[0]
+    num_full_chunks = reduction_len // 8
+    remainder = reduction_len % 8
+    remainder_base = num_full_chunks * 8
+
+    # fmt: off
+    @T.prim_func(tirx=True, check_well_formed=False)
+    def impl():
+        with T.thread():
+            temp = T.alloc_buffer([4], dtype, scope="local")
+            # First pass: process first 8 elements into 4 temps
+            for i in T.unroll(4):
+                if accum and i == 0:
+                    # Include accumulator in first temp
+                    temp[i] = reduce3_func(src[src_base + 2 * i], src[src_base + 2 * i + 1], dst[*dst_st])
+                else:
+                    temp[i] = op_func(src[src_base + 2 * i], src[src_base + 2 * i + 1])
+
+            # Process remaining full chunks of 8
+            for outer in T.serial(num_full_chunks - 1):
+                for i in T.unroll(4):
+                    temp[i] = reduce3_func(
+                        temp[i],
+                        src[src_base + 8 * (outer + 1) + 2 * i],
+                        src[src_base + 8 * (outer + 1) + 2 * i + 1],
+                    )
+
+            # Process remainder elements (0 to 7 elements)
+            for i in T.serial(remainder):
+                temp[0] = op_func(temp[0], src[src_base + remainder_base + i])
+
+            # Final merge: combine 4 temps into result
+            dst[*dst_st] = op_func(temp[0], temp[1])
+            dst[*dst_st] = reduce3_func(dst[*dst_st], temp[2], temp[3])
+    # fmt: on
+
+    return impl
+
+
+def reduction_cuda_local_thread_impl(
+    dst_buffer_region: BufferRegion,
+    src_buffer_region: BufferRegion,
+    accum: bool,
+    reduce_op: ReduceOpType,
+    sctx: ScheduleContext,
+) -> Optional[PrimFunc]:
+    """Schedule thread-level reduction operation on local memory on CUDA.
+
+    This is the fallback implementation using simple sequential reduction.
+    """
+
+    dst, src = dst_buffer_region.buffer, src_buffer_region.buffer
+    src_region, dst_region = src_buffer_region.region, dst_buffer_region.region
+    dtype = src.dtype
+
+    # basic validation checks
+    if sctx.exec_scope.name != "thread":
+        fail(f"unsupported exec_scope {sctx.exec_scope.name} for thread-level reduction")
+
+    if not all(
+        [
+            src.scope() == "local",
+            dst.scope() == "local",
+            src.dtype == dst.dtype,
+            sctx.is_cuda(),
+        ]
+    ):
+        fail("unsupported scope or dtype for thread-level local reduction")
+
+    # get region extents
+    src_extent = [r.extent for r in src_region]
+    dst_extent = [r.extent for r in dst_region]
+    src_st = [r.min for r in src_region]
+    dst_st = [r.min for r in dst_region]
+
+    # compute reduction length (product of all src extents)
+    reduction_len = functools.reduce(operator.mul, src_extent, 1)
+    dst_len = functools.reduce(operator.mul, dst_extent, 1)
+
+    # currently only support reducing to a single element
+    if dst_len != 1:
+        fail("thread-level reduction currently only supports reducing to a single element")
+
+    # only support 1D src buffer for now
+    if len(src_extent) != 1:
+        fail("thread-level reduction currently only supports 1D source buffer")
+
+    # get reduce op
+    op_func = reduce_op_table.get(reduce_op)
+    if op_func is None:
+        fail(f"unsupported reduce op: {reduce_op}")
+
+    # get init value if not accum
+    init_value = reduce_default_value_table(dtype).get(reduce_op)
+
+    def get_src_indices(nth, st, extent):
+        """Convert linear index to multi-dimensional indices."""
+        relative_idx = []
+        for e in reversed(extent):
+            relative_idx.append(nth % e)
+            nth //= e
+        return [r + s for r, s in zip(reversed(relative_idx), st)]
+
+    # fmt: off
+    @T.prim_func(tirx=True, check_well_formed=False)
+    def impl_simple():
+        with T.thread():
+            if not accum:
+                dst[*dst_st] = init_value
+            for i in T.serial(reduction_len):
+                src_indices = T.meta_var(get_src_indices(i, src_st, src_extent))
+                dst[*dst_st] = op_func(dst[*dst_st], src[*src_indices])
+    # fmt: on
+
+    return impl_simple
 
 
 def reduction_cuda_warp_logical_view_impl(
@@ -335,21 +646,60 @@ def reduction_cuda_impl(
             dst_buffer_region, src_buffer_region, accum, reduce_op, sctx
         )
     elif src_buffer_region.buffer.scope() == "local":
-        return reduction_cuda_warp_logical_view_impl(
-            dst_buffer_region, src_buffer_region, accum, reduce_op, config, sctx
-        )
+        if sctx.exec_scope.name == "thread":
+            return reduction_cuda_local_thread_impl(
+                dst_buffer_region, src_buffer_region, accum, reduce_op, sctx
+            )
+        else:
+            return reduction_cuda_warp_logical_view_impl(
+                dst_buffer_region, src_buffer_region, accum, reduce_op, config, sctx
+            )
     fail("unsupported buffer scope for reduction")
 
 
-for op_name_, op_type_ in {
-    "sum": ReduceOpType.SUM,
-    "max": ReduceOpType.MAX,
-    "min": ReduceOpType.MIN,
-}.items():
-    register_unary_binary_schedule(
-        op_name_,
-        op_type_,
-        "cuda",
-        target_cuda,
-        [reduction_cuda_impl],
+# ---------------------------------------------------------------------------
+# Common predicates for optimized thread-level local reduction (sm_100a+)
+# ---------------------------------------------------------------------------
+
+_optimized_local_reduction_predicates = [
+    predicate("exec_scope", _exec_scope_ok, expected_scopes=["thread"]),
+    predicate("local_scope", _local_scope_match),
+    predicate("dst_len", _dst_len_ok, expected_len=1),
+    predicate("src_ndim", _src_ndim_ok, expected_ndim=1),
+    predicate("dtype", _dtype_ok, expected_dtype="float32"),
+    predicate("sm_version", _sm_version_ok, min_version=100),
+    predicate("reduction_len", _reduction_len_ok, min_len=8),
+]
+
+
+# ---------------------------------------------------------------------------
+# Register reduction schedules (sum, max, min)
+# ---------------------------------------------------------------------------
+
+# Optimized implementations for sm_100a+ (packed_add_sum for SUM, 3-input for MAX/MIN)
+_optimized_impl_table = {
+    ReduceOpType.SUM: ("packed_add_sum", reduction_cuda_local_thread_packed_add_sum_impl),
+    ReduceOpType.MAX: ("3input_maxmin", reduction_cuda_local_thread_3input_maxmin_impl),
+    ReduceOpType.MIN: ("3input_maxmin", reduction_cuda_local_thread_3input_maxmin_impl),
+}
+
+for op_name, op_type in [("sum", ReduceOpType.SUM), ("max", ReduceOpType.MAX), ("min", ReduceOpType.MIN)]:
+    variant_name, optimized_impl = _optimized_impl_table[op_type]
+
+    # Register optimized dispatch (sm_100a+, float32, thread-level local reduction)
+    @register_dispatch(
+        op_name, "cuda", variant=variant_name, priority=10,
+        when=_optimized_local_reduction_predicates,
     )
+    def _optimized_dispatch(
+        op: OpCall, sctx: ScheduleContext, _impl=optimized_impl, _op_type=op_type
+    ) -> PrimFunc:
+        dst_buffer_region, src_buffer_region, _, accum = op.args
+        return _impl(dst_buffer_region, src_buffer_region, accum, _op_type, sctx)
+
+    # Register default fallback dispatch
+    @register_dispatch(op_name, "cuda", variant="default", priority=0)
+    def _default_dispatch(
+        op: OpCall, sctx: ScheduleContext, _op_type=op_type
+    ) -> PrimFunc:
+        return reduction_cuda_impl(op, _op_type, sctx)

@@ -283,3 +283,47 @@ __forceinline__ __device__ uint32_t {func_name}(uint32_t addr, int row_offset, i
     return cuda_func_call(
         func_name, addr, row_offset, col_offset, source_code=source_code, return_type="uint32"
     ), ["get_tmem_addr"]
+
+
+@register_codegen("cuda_reduce3_max_f32")
+def codegen_cuda_reduce3_max_f32(a, b, c):
+    """3-input max using PTX max.f32 instruction (sm_100a+)."""
+    func_name = "tvm_builtin_cuda_reduce3_max_f32"
+    source_code = f"""
+__forceinline__ __device__ float {func_name}(float a, float b, float c) {{
+    float d;
+    asm volatile("max.f32 %0, %1, %2, %3;" : "=f"(d) : "f"(a), "f"(b), "f"(c));
+    return d;
+}}
+"""
+    return cuda_func_call(func_name, a, b, c, source_code=source_code, return_type="float32")
+
+
+@register_codegen("cuda_reduce3_min_f32")
+def codegen_cuda_reduce3_min_f32(a, b, c):
+    """3-input min using PTX min.f32 instruction (sm_100a+)."""
+    func_name = "tvm_builtin_cuda_reduce3_min_f32"
+    source_code = f"""
+__forceinline__ __device__ float {func_name}(float a, float b, float c) {{
+    float d;
+    asm volatile("min.f32 %0, %1, %2, %3;" : "=f"(d) : "f"(a), "f"(b), "f"(c));
+    return d;
+}}
+"""
+    return cuda_func_call(func_name, a, b, c, source_code=source_code, return_type="float32")
+
+
+@register_codegen("cuda_add_packed_f32x2")
+def codegen_cuda_add_packed_f32x2(a1, a2, b1, b2, d_addr, rounding_mode="rz"):
+    """Packed f32x2 add using PTX add.{rounding_mode}.ftz.f32x2 instruction (sm_100a+)."""
+    rounding_mode = parse_str(rounding_mode)
+    func_name = f"tvm_builtin_cuda_add_packed_{rounding_mode}_f32x2"
+    source_code = f"""
+__forceinline__ __device__ void {func_name}(float a1, float a2, float b1, float b2, float* d) {{
+    float2* d_p = (float2*) d;
+    float2 a = make_float2(a1, a2);
+    float2 b = make_float2(b1, b2);
+    asm volatile("add.{rounding_mode}.ftz.f32x2 %0, %1, %2;" : "=l"(reinterpret_cast<uint64_t&>(d_p[0])) : "l"(reinterpret_cast<uint64_t&>(a)), "l"(reinterpret_cast<uint64_t&>(b)));
+}}
+"""
+    return cuda_func_call(func_name, a1, a2, b1, b2, d_addr, source_code=source_code)
