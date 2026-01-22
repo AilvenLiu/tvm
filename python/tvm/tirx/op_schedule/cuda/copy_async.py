@@ -101,7 +101,6 @@ def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
     return True
 
 
-
 def copy_tma_impl(
     op_call: OpCall,
     sctx: "ScheduleContext",
@@ -328,7 +327,7 @@ def copy_tma_impl(
                 *element_strides,
                 0,  # CU_TENSOR_MAP_INTERLEAVE_NONE
                 swizzle_mode.value,
-                0,  # CU_TENSOR_MAP_L2PROMOTION_NONE
+                2,  # CU_TENSOR_MAP_L2_PROMOTION_L2_128B
                 0,  # CU_TENSOR_MAP_FLOAT_OOBFILL_NONE
             )
             Tx.tvm_kernel_replace_point()
