@@ -76,7 +76,7 @@ def test_printer_ptx_more():
     _assert_print(tir.op.ptx_cp_async_mbarrier_arrive(0), "T.ptx.cp_async.mbarrier.arrive(0)")
     _assert_print(tir.op.ptx_fence_proxy("async"), 'T.ptx.fence.proxy("async")')
     _assert_print(tir.op.ptx_fence_mbarrier_init_release_cluster(), "T.ptx.fence.mbarrier_init()")
-    _assert_print(tir.op.ptx_elect_sync(), "T.ptx.elect_sync(T.int64(4294967295))")
+    _assert_print(tir.op.ptx_elect_sync(), "T.ptx.elect_sync()")
     _assert_print(
         tir.op.ptx_ld_global_acquire(r, s),
         "r = T.handle()\n" "s = T.handle()\n" "T.ptx.ld_global_acquire(r, s)",

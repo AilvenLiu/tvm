@@ -150,7 +150,7 @@ __forceinline__ __device__ void {func_name}() {{
 @register_codegen("ptx_cp_async_bulk_tensor_global_to_cluster")
 def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensormap, *args):
     dim = int(dim)
-    coords, cta_mask, cta_group, cache_hint = args[:-3], int(args[-3]), int(args[-2]), args[-1]
+    coords, cta_mask, cta_group, cache_hint = args[:-3], args[-3], int(args[-2]), args[-1]
     if len(coords) != dim:
         raise ValueError(
             f"Number of coordinate expressions ({len(coords)}) does not match dimension ({dim})."
@@ -158,9 +158,13 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
     if cache_hint != "":
         cache_hint = parse_str(cache_hint)
 
+    # Check if multicast is enabled (cta_mask != 0)
+    is_cta_mask_zero = isinstance(cta_mask, tvm.tir.IntImm) and int(cta_mask) == 0
+    is_multicast = not is_cta_mask_zero
+
     func_name = (
         f"ptx_cp_async_bulk_tensor_global_to_cluster_{dim}d"
-        + (f"_multicast_{cta_mask}" if cta_mask != 0 else "")
+        + (f"_multicast" if is_multicast else "")
         + (f"_cta_group_{cta_group}" if cta_group == 2 else "")
         + (f"_{cache_hint}" if cache_hint != "" else "")
     )
@@ -168,7 +172,7 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
 
     # The operand indices are different for unicast vs. multicast
     coord_arg_start = 3
-    if cta_mask != 0:
+    if is_multicast:
         coord_arg_start += 1
     if cache_hint != "":
         coord_arg_start += 1
@@ -196,15 +200,15 @@ def codegen_ptx_cp_async_bulk_tensor_global_to_cluster(dim, dst_ptr, bar, tensor
     else:
         cache_hint_str = ""
 
-    if cta_mask != 0:
+    if is_multicast:
         cache_hint_operand = f", %4" if cache_hint != "" else ""
         cache_hint_value = f', "n"({CacheHint[cache_hint]})' if cache_hint != "" else ""
         source_code = f"""
-__forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensorMap& tensormap, {coord_arg_list}) {{
+__forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensorMap& tensormap, int cta_mask_arg, {coord_arg_list}) {{
   unsigned int dst_addr = __cvta_generic_to_shared(dst);
   unsigned int bar_addr = __cvta_generic_to_shared(bar);
   uint64_t tensormap_addr = reinterpret_cast<uint64_t>(&tensormap);
-  uint16_t cta_mask = static_cast<uint16_t>({cta_mask});
+  uint16_t cta_mask = static_cast<uint16_t>(cta_mask_arg);
   __asm__ __volatile__(
     "cp.async.bulk.tensor.{dim}d.shared::cluster.global.mbarrier::complete_tx::bytes.multicast::cluster{cta_group_str}{cache_hint_str}"
     " [%0], [%1, {coord_arg_template}], [%2], %3{cache_hint_operand};"
@@ -234,7 +238,12 @@ __forceinline__ __device__ void {func_name}(void* dst, void* bar, const CUtensor
 }}
 """
 
-    return cuda_func_call(func_name, dst_ptr, bar, tensormap, *coords, source_code=source_code)
+    if is_multicast:
+        return cuda_func_call(
+            func_name, dst_ptr, bar, tensormap, cta_mask, *coords, source_code=source_code
+        )
+    else:
+        return cuda_func_call(func_name, dst_ptr, bar, tensormap, *coords, source_code=source_code)
 
 
 @register_codegen("ptx_cp_async_bulk_tensor_shared_to_global")

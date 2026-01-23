@@ -151,7 +151,7 @@ def test_scope_slice():
                     with T.warpgroup()[1:2]:
                         pass
                     with T.warpgroup()[2:3]:
-                        with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
+                        with T.thread()[T.ptx.elect_sync()]:
                             pass
     @T.prim_func(tirx=True, check_well_formed=False)
     def test3() -> None:
@@ -165,20 +165,20 @@ def test_scope_slice():
         with T.kernel():
             with T.cta():
                 with T.thread()[0:3]:
-                    with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
+                    with T.thread()[T.ptx.elect_sync()]:
                         pass
     @T.prim_func(tirx=True, check_well_formed=False)
     def test5() -> None:
         with T.kernel():
             with T.cta():
-                with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
-                    with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
+                with T.thread()[T.ptx.elect_sync()]:
+                    with T.thread()[T.ptx.elect_sync()]:
                         pass
     @T.prim_func(tirx=True, check_well_formed=False)
     def test6() -> None:
         with T.kernel():
             with T.cta():
-                with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
+                with T.thread()[T.ptx.elect_sync()]:
                     with T.thread()[T.int32(0)]:
                         pass
     # fmt: on

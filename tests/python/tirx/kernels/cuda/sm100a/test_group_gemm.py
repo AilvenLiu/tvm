@@ -11,7 +11,7 @@ from tvm.script import tirx as Tx
 from tvm.tirx.bench.utils import ProtonContext, bench
 from tvm.tirx.megakernel.group_gemm_sm100 import GroupGEMMTile
 from tvm.tirx.megakernel.common import SmemManager, KernelConfig, ceildiv
-from tvm.tirx.tile_scheduler import GroupMajor2D
+from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 
 from sglang.srt.layers.moe.fused_moe_triton.fused_moe_triton_kernels import invoke_fused_moe_kernel
 from sglang.srt.layers.moe.fused_moe_triton import moe_align_block_size
@@ -143,7 +143,7 @@ def get_group_gemm_kernel(K, E, top_k, N, acc_output=False, low_batch=True):
             GroupGEMMTile.class_init(smem_manager)
             M_TILE_CNT = T.meta_var(ceildiv(num_tokens_post_padded[0], MAX_BLK_M))
             N_TILE_CNT = ceildiv(N, GroupGEMMTile.BLK_N)
-            tile_scheduler = T.meta_var(GroupMajor2D("sched", M_TILE_CNT, N_TILE_CNT, 1, step=cta_cnt))
+            tile_scheduler = T.meta_var(ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt, l2_group_size=1))
             tile_scheduler.init(bx)
             smem_manager.init()
             while tile_scheduler.valid():

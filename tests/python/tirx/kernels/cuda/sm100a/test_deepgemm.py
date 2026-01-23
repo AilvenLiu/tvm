@@ -5,7 +5,7 @@ import tvm
 import tvm.testing
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
-from tvm.tirx.tile_scheduler import GroupMajor2D
+from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 from tvm.tirx.bench.utils import bench, ProtonContext
 from tvm.tir.layout import TileLayout, TLane, TCol
 from tvm.tir.layout import tid_in_wg as axis_tid_in_wg
@@ -225,7 +225,7 @@ def deepgemm(
             mma2tma_bar = T.meta_var(BarMMA2TMA(buf.data, 6 + 2 * SMEM_PIPE_DEPTH, SMEM_PIPE_DEPTH, False))
             mma2ld_bar = T.meta_var(BarMMA2LD(buf.data, 6 + 3 * SMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, True))
             ld2mma_bar = T.meta_var(BarLD2MMA(buf.data, 6 + 3 * SMEM_PIPE_DEPTH + TMEM_PIPE_DEPTH, TMEM_PIPE_DEPTH, False))
-            tile_scheduler = T.meta_var(GroupMajor2D("tile_scheduler", m_tiles=TILE_M_NUM, n_tiles=TILE_N_NUM, group_rows=TILE_GROUPS_ROW_SIZE, step=SM_NUMBER // 2))
+            tile_scheduler = T.meta_var(ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, num_clusters=SM_NUMBER // 2, l2_group_size=TILE_GROUPS_ROW_SIZE))
 
             tma2trans_bar.init(1)
             trans2mma_bar.init(CTA_GROUP * 32)

@@ -191,12 +191,12 @@ ffi::Optional<ScopeIdDef> Compose(const ScopeIdDef& lhs, const ScopeIdDef& rhs) 
 ffi::Optional<ScopeIdDef> Compliment(const ScopeIdDef& lhs, const ScopeIdDef& rhs) {
   if (lhs->scope->parent == rhs->scope->parent &&
       ExecScope::Create(rhs->scope->cur)->Higher(lhs->scope->cur)) {
-    return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
+    return ScopeIdDef({Var("")}, {floordiv(lhs.fused_extent(), rhs.fused_extent())},
                       ScopePair(rhs->scope->cur, lhs->scope->cur));
   }
   if (lhs->scope->cur == rhs->scope->cur &&
       ExecScope::Create(lhs->scope->parent)->Higher(rhs->scope->parent)) {
-    return ScopeIdDef({Var("")}, {FloorDiv(lhs.fused_extent(), rhs.fused_extent())},
+    return ScopeIdDef({Var("")}, {floordiv(lhs.fused_extent(), rhs.fused_extent())},
                       ScopePair(lhs->scope->parent, rhs->scope->parent));
   }
   return std::nullopt;

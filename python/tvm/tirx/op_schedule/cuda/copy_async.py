@@ -20,6 +20,7 @@ from enum import Enum
 import copy
 import tvm
 
+from tvm.arith import Analyzer
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir import PrimFunc, Buffer
@@ -95,8 +96,12 @@ def tma_shared_layout(dtype: str, swizzle_mode: Union[SwizzleMode, int], shape) 
 
 def tma_atom_compatible(dst_shape, dst_st, dst_extent, atom_shape):
     """Check if the copy region in dst is compatible with the TMA atom shape."""
+    analyzer = Analyzer()
     for i, _ in enumerate(dst_st):
-        if any(x % atom_shape[i] != 0 for x in [dst_shape[i], dst_st[i], dst_extent[i]]):
+        if any(
+            not analyzer.can_prove_equal(x % atom_shape[i], 0)
+            for x in [dst_shape[i], dst_st[i], dst_extent[i]]
+        ):
             return False
     return True
 
@@ -231,6 +236,12 @@ def copy_tma_impl(
     if cta_group is None:
         cta_group = 1 if sctx.target.arch == "sm_100a" else -1
 
+    cta_mask = op_call.config.get("cta_mask", None)
+    if cta_mask is not None:
+        assert direction == "g2s", "cta_mask is only supported for global to shared copy"
+    else:
+        cta_mask = 0
+
     tensor_map = T.Var(g_buf.data.name + "_tensormap", dtype=T.handle("tensormap").type_annotation)
 
     # ---------------------------------------------------------------------
@@ -268,6 +279,7 @@ def copy_tma_impl(
                     mbar,
                     tensor_map,
                     *reversed(g_st),
+                    cta_mask=cta_mask,
                     cta_group=cta_group,
                     cache_hint=op_call.config.get("cache_hint", ""),
                 )
@@ -290,6 +302,7 @@ def copy_tma_impl(
                         mbar,
                         tensor_map,
                         *reversed(g_coord),
+                        cta_mask=cta_mask,
                         cta_group=cta_group,
                         cache_hint=op_call.config.get("cache_hint", ""),
                     )

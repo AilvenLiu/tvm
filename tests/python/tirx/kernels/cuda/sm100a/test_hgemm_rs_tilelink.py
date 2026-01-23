@@ -30,7 +30,7 @@ from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.script.ir_builder import IRBuilder
 from tvm.tirx.bench.utils import export_to_perfetto_trace, CudaProfiler
-from tvm.tirx.tile_scheduler import RankAwareGroupMajorTileScheduler, GroupMajor2D
+from tvm.tirx.tile_scheduler import RankAwareGroupMajorTileScheduler, ClusterPersistentScheduler2D
 from tvm.tir.layout import TileLayout, tid_in_wg, TLane, TCol
 
 
@@ -468,7 +468,7 @@ def test_hgemm_rs():
                     dst_rank = T.meta_var((rank + WORLD_SIZE - 1) % WORLD_SIZE)
                     m_clusters = T.meta_var((LOCAL_M + BLK_M - 1) // BLK_M)
                     n_clusters = T.meta_var((N + BLK_N - 1) // BLK_N)
-                    rs_tile_scheduler = T.meta_var(GroupMajor2D("rs_tile_scheduler", m_tiles=m_clusters, n_tiles=n_clusters, group_rows=GROUP_SIZE * 4, step=RS_SMS))
+                    rs_tile_scheduler = T.meta_var(ClusterPersistentScheduler2D("rs_tile_scheduler", num_m_tiles=m_clusters, num_n_tiles=n_clusters, num_clusters=RS_SMS, l2_group_size=GROUP_SIZE * 4))
                     load_pipe.init(c2p_thread_count=256)
                     T.cuda.cta_sync()
                     for stage in range(WORLD_SIZE):

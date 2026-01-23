@@ -33,7 +33,7 @@ import tvm
 from tvm.tirx.bench.utils import bench, ProtonContext
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
-from tvm.tirx.tile_scheduler import GroupMajor2D
+from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 
 test_configs = [
     {
@@ -442,7 +442,7 @@ __device__ __forceinline__ void {func_name}(void* dst_ptr, void* src_ptr) {{
                     write_C_to_gmem()
 
                 M_TILE_CNT = T.meta_var(ceildiv(num_tokens_post_padded[0], BLK_M))
-                scheduler = T.meta_var(GroupMajor2D("sched", M_TILE_CNT, N_TILE_CNT, 1, step=cta_cnt * 2))
+                scheduler = T.meta_var(ClusterPersistentScheduler2D("sched", num_m_tiles=M_TILE_CNT, num_n_tiles=N_TILE_CNT, num_clusters=cta_cnt * 2, l2_group_size=1))
                 scheduler.init(bx * 2 + wg_id)
                 m_idx = T.meta_var(scheduler.m_idx)
                 n_idx = T.meta_var(scheduler.n_idx)

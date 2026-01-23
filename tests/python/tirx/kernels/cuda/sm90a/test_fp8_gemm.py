@@ -23,7 +23,7 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.tile_scheduler import GroupMajor2D
+from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 
 
 @tvm.testing.requires_cuda_compute_version(9, exact=True)
@@ -148,12 +148,12 @@ def test_fp8_gemm_hopper_no_ws():
                     accum_half = T.alloc_buffer([8], "float16", scope="local")
                     # tile scheduler
                     tile_scheduler = T.meta_var(
-                        GroupMajor2D(
+                        ClusterPersistentScheduler2D(
                             "tile_scheduler",
-                            m_tiles=m_blocks,
-                            n_tiles=n_blocks,
-                            group_rows=GROUP_SIZE,
-                            step=SM_COUNT,
+                            num_m_tiles=m_blocks,
+                            num_n_tiles=n_blocks,
+                            num_clusters=SM_COUNT,
+                            l2_group_size=GROUP_SIZE,
                         )
                     )
 

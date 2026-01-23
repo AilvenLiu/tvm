@@ -126,7 +126,7 @@ def _get_elem_offset(elem_offset, byte_offset, dtype: str):
         return elem_offset
     if byte_offset is None:
         return None
-    return byte_offset // (DataType(dtype).bits // 8)
+    return byte_offset * 8 // (DataType(dtype).bits)
 
 
 _block_name_suffix = threading.local()
@@ -2521,6 +2521,7 @@ class CUDANamespace:
         self.trap_when_assert_failed = _op_wrapper(_tir_op.cuda_trap_when_assert_failed)
         self.runtime_instr_desc = _op_wrapper(_tir_op.cuda_runtime_instr_desc)
         self.half2float = _op_wrapper(_tir_op.cuda_half2float)
+        self.bfloat162float = _op_wrapper(_tir_op.cuda_bfloat162float)
         self.float22half2 = _op_wrapper(_tir_op.cuda_float22half2)
         self.half8tofloat8 = _op_wrapper(_tir_op.cuda_half8tofloat8)
         self.float8tohalf8 = _op_wrapper(_tir_op.cuda_float8tohalf8)

@@ -2994,7 +2994,23 @@ def cuda_half2float(src):
     call : PrimExpr
         The call expression.
     """
-    return call_intrin("", "tir.cuda_half2float", src)
+    return call_intrin("float32", "tir.cuda_half2float", src)
+
+
+def cuda_bfloat162float(src):
+    """TVM intrinsic to convert bfloat16 to float
+
+    Parameters
+    ----------
+    src : PrimExpr
+        Source pointer.
+
+    Returns
+    -------
+    call : PrimExpr
+        The call expression.
+    """
+    return call_intrin("float32", "tir.cuda_bfloat162float", src)
 
 
 def cuda_float22half2(dst, src):
@@ -4015,15 +4031,9 @@ def ptx_barrier_cluster_wait(acquire=False, aligned=True):
     return call_intrin("", "tir.ptx_barrier_cluster_wait", acquire, aligned)
 
 
-def ptx_elect_sync(membermask=0xFFFFFFFF):
-    """TVM intrinsic to call elect.sync
-
-    Parameters
-    ----------
-    membermask : PrimExpr
-        The mask of the member threads in the warp.
-    """
-    return call_intrin("uint32", "tir.ptx_elect_sync", membermask)
+def ptx_elect_sync():
+    """TVM intrinsic to call elect.sync"""
+    return call_intrin("uint32", "tir.ptx_elect_sync")
 
 
 def ptx_fence_mbarrier_init_release_cluster():

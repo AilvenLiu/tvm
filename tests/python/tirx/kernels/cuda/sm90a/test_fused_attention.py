@@ -521,7 +521,7 @@ def test_fp16_fused_attn():
                     b_idx = T.meta_var(tile_scheduler.b_idx)
                     attend_kv_len = T.meta_var(KV_LEN - QO_LEN + (q_idx + 1) * BLK_Q if CAUSAL else KV_LEN) # the kvlen to attend of the current q tile
                     num_kv_tiles = T.meta_var(ceildiv(attend_kv_len, BLK_KV)) # number of kv tiles to attend
-                    is_leader = T.meta_var(T.ptx.elect_sync(0xFFFFFFFF))
+                    is_leader = T.meta_var(T.ptx.elect_sync())
 
                     P_reg_fp16 = T.decl_buffer([S_REG_COUNT], "float16", data=P_reg.data, elem_offset=0)
                     with T.cta():

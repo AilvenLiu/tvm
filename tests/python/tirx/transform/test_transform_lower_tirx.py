@@ -40,7 +40,7 @@ def compare(before, after, transform):
         tvm.ir.assert_structural_equal(transform()(before), after, map_free_vars=False)
 
 
-L_LANE = T.TileLayout(shard=([32], [1@laneid]))
+L_LANE = T.TileLayout(shard=([32], [1 @ laneid]))
 
 
 def test_lower_view_get():
@@ -729,7 +729,7 @@ def test_lower_scope_slice():
                 with T.thread()[0:64]:
                     T.evaluate(tx)
                     T.evaluate(warp_id)
-                with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
+                with T.thread()[T.ptx.elect_sync()]:
                     T.evaluate(tx)
                 with T.thread()[tx == 0]:
                     T.evaluate(tx)
@@ -747,7 +747,7 @@ def test_lower_scope_slice():
                         with T.thread():
                             T.evaluate(threadIdx_x)
                             T.evaluate(threadIdx_x // 32)
-                    if T.ptx.elect_sync(0xFFFFFFFF):
+                    if T.ptx.elect_sync():
                         with T.thread():
                             T.evaluate(threadIdx_x)
                     if threadIdx_x == 0:

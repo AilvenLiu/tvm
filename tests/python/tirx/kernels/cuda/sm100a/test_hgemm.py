@@ -7,7 +7,7 @@ from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg
 from tvm.script import tir as T
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.tile_scheduler import GroupMajor2D
+from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 from tvm.tirx.bench.CuTeDSL.dense_gemm_persistent import run
 
 # cluster: [2, 1], cta_num = 2
@@ -215,7 +215,7 @@ def test_hgemm():
                 tma_finished = T.decl_buffer([PIPELINE_DEPTH], "uint64", data=ptr, scope="shared")
 
                 # Tile scheduler
-                tile_scheduler = T.meta_var(GroupMajor2D("tile_scheduler", m_tiles=TILE_M_NUM, n_tiles=TILE_N_NUM, group_rows=TILE_GROUPS_ROW_SIZE, step=SM_NUMBER // 2))
+                tile_scheduler = T.meta_var(ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=TILE_M_NUM, num_n_tiles=TILE_N_NUM, num_clusters=SM_NUMBER // 2, l2_group_size=TILE_GROUPS_ROW_SIZE))
                 tile_scheduler.init(bx // 2)
                 m_idx = T.meta_var(tile_scheduler.m_idx)
                 n_idx = T.meta_var(tile_scheduler.n_idx)

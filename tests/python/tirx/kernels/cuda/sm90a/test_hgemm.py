@@ -21,7 +21,7 @@ import tvm.testing
 from tvm.script.ir_builder import IRBuilder
 from tvm.script import tir as T
 from tvm.tirx.bench.utils import ProtonContext, bench
-from tvm.tirx.tile_scheduler import GroupMajor2D
+from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
 
 
 @tvm.testing.requires_cuda_compute_version(9, exact=True)
@@ -48,8 +48,6 @@ def test_hgemm_hopper_ws_cooperative():
     # replicate of cutlass3x_sm90_tensorop_s64x256x16gemm_f16_f16_f32_void_f32_128x256x64_2x1x1_0_ttt_align8_warpspecialized_cooperative_epi_tma
     def ceildiv(a, b):
         return (a + b - 1) // b
-
-
 
     class PipelineState:
         def __init__(self, prefix: str):
@@ -139,14 +137,14 @@ def test_hgemm_hopper_ws_cooperative():
                     m_blocks = ceildiv(ceildiv(M, BLK_M), CLUSTER_M) * CLUSTER_M
                     n_blocks = ceildiv(ceildiv(N, BLK_N), CLUSTER_N) * CLUSTER_N
                     tile_scheduler = T.meta_var(
-                        GroupMajor2D(
+                        ClusterPersistentScheduler2D(
                             "tile_scheduler",
-                            m_tiles=m_blocks,
-                            n_tiles=n_blocks,
-                            group_rows=GROUP_SIZE,
-                            step=SM_COUNT,
-                            inner_m=CLUSTER_M,
-                            inner_n=CLUSTER_N,
+                            num_m_tiles=m_blocks,
+                            num_n_tiles=n_blocks,
+                            num_clusters=SM_COUNT,
+                            l2_group_size=GROUP_SIZE,
+                            cluster_m=CLUSTER_M,
+                            cluster_n=CLUSTER_N,
                         )
                     )
                     # produer pipelinen states
@@ -179,7 +177,7 @@ def test_hgemm_hopper_ws_cooperative():
                     is_signal_thread = is_signal_thread & (dst_block_ID < 2)
                     is_signal_thread = is_signal_thread & (dst_block_ID % 2 == cbx or dst_block_ID // 2 == cby)
                     # initialize mainloop pipeline barriers per CTA
-                    if (tid // 32 == 0 and T.ptx.elect_sync(0xFFFFFFFF) > 0):
+                    if (tid // 32 == 0 and T.ptx.elect_sync() > 0):
                         for i in range(STAGES_MMA):
                             T.ptx.mbarrier.init(full.ptr_to([i]), 1) # 1 producer per CTA
                             T.ptx.mbarrier.init(empty.ptr_to([i]), 4) # 2 CTA, 2 consumers per CTA
@@ -198,7 +196,7 @@ def test_hgemm_hopper_ws_cooperative():
                             cur_empty = T.meta_var(empty.ptr_to([stage]))
                             # mainloop producer warp
                             while (tile_scheduler.valid()):
-                                with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
+                                with T.thread()[T.ptx.elect_sync()]:
                                     # only the leader thread does the TMA load
                                     for i in range(k_tile_count):
                                         # producer acquire the slot
@@ -220,7 +218,7 @@ def test_hgemm_hopper_ws_cooperative():
                                 tile_scheduler.next_tile()
                             # producer needs to wait for consumers to finish to prevent early exit
                             # early exit can cause conusmers signaling CTAs that are already finished
-                            with T.thread()[T.ptx.elect_sync(0xFFFFFFFF)]:
+                            with T.thread()[T.ptx.elect_sync()]:
                                 for _ in range(STAGES_MMA):
                                     # producer acquire the slot
                                     T.ptx.mbarrier.try_wait(cur_empty, producer.phase)
@@ -356,8 +354,6 @@ def test_hgemm_hopper_no_ws():
     WG_SIZE = 128
     TMA_BYTES = BLK_M * BLK_K * f16_bytes + BLK_K * BLK_N * f16_bytes
 
-
-
     # fmt: off
     @T.macro
     def tma_load(tid, m_idx, n_idx, k_tile, A_smem: tvm.tir.Buffer, B_smem: tvm.tir.Buffer, A_map, B_map, bars: tvm.tir.Buffer):
@@ -460,14 +456,14 @@ def test_hgemm_hopper_no_ws():
                     m_blocks = ceildiv(ceildiv(M, BLK_M), CLUSTER_M) * CLUSTER_M
                     n_blocks = ceildiv(ceildiv(N, BLK_N), CLUSTER_N) * CLUSTER_N
                     tile_scheduler = T.meta_var(
-                        GroupMajor2D(
+                        ClusterPersistentScheduler2D(
                             "tile_scheduler",
-                            m_tiles=m_blocks,
-                            n_tiles=n_blocks,
-                            group_rows=GROUP_SIZE,
-                            step=SM_COUNT,
-                            inner_m=CLUSTER_M,
-                            inner_n=CLUSTER_N,
+                            num_m_tiles=m_blocks,
+                            num_n_tiles=n_blocks,
+                            num_clusters=SM_COUNT,
+                            l2_group_size=GROUP_SIZE,
+                            cluster_m=CLUSTER_M,
+                            cluster_n=CLUSTER_N,
                         )
                     )
 

@@ -984,7 +984,6 @@ def _tcgen05_mma_block_scaled_common(
     sfb_dtype = parse_str(sfb_dtype)
     use_a_tmem = bool(use_a_tmem)
     cta_group = validate_cta_group(cta_group)
-    enable_input_d = bool(enable_input_d)
 
     kind = _get_tcgen05_mma_kind(d_dtype, a_dtype, b_dtype, sfa_dtype, sfb_dtype)
     valid_kinds = {"mxf8f6f4", "mxf4", "mxf4nvf4"}
@@ -1001,7 +1000,6 @@ def _tcgen05_mma_block_scaled_common(
     a_constraint = '"r"' if use_a_tmem else '"l"'
     a_operand_type = "uint32_t" if use_a_tmem else "uint64_t"
     a_operand_placeholder = "[%1]" if use_a_tmem else "%1"
-    enable_input_d_str = "1" if enable_input_d else "0"
     sp_tmem_addr_str = "uint32_t sp_tmem_addr, " if sparse else ""
     sp_tmem_addr_operand = f', "r"({sp_tmem_addr})' if sparse else ""
 
@@ -1009,10 +1007,9 @@ def _tcgen05_mma_block_scaled_common(
         f"ptx_tcgen05_mma_block_scaled_cta_{cta_group}_kind_{kind}_scale_vec_{scale_vec_size}"
         + ("_sp" if sparse else "")
         + ("TS" if use_a_tmem else "SS")
-        + ("_enable_input_d" if enable_input_d else "")
     )
     source_code = f"""
-__forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_type} a_operand, uint64_t b_desc, {sp_tmem_addr_str}uint32_t i_desc, uint32_t sfa_tmem_addr, uint32_t sfb_tmem_addr) {{
+__forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_type} a_operand, uint64_t b_desc, {sp_tmem_addr_str}uint32_t i_desc, uint32_t sfa_tmem_addr, uint32_t sfb_tmem_addr, int accum) {{
     asm volatile(
         "{{\\n"
         ".reg .pred p;\\n"
@@ -1021,7 +1018,7 @@ __forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_typ
         "[%0], {a_operand_placeholder}, %2, {sparse_placeholder}%3, [%5], [%6], p;\\n"
         "}}\\n"
         :
-        : "r"(d_tmem_addr), {a_constraint}(a_operand), "l"(b_desc), "r"(i_desc), "r"({enable_input_d_str}), "r"(sfa_tmem_addr), "r"(sfb_tmem_addr){sp_tmem_addr_operand}
+        : "r"(d_tmem_addr), {a_constraint}(a_operand), "l"(b_desc), "r"(i_desc), "r"(accum), "r"(sfa_tmem_addr), "r"(sfb_tmem_addr){sp_tmem_addr_operand}
     );
 }}
 """
@@ -1031,6 +1028,7 @@ __forceinline__ __device__ void {func_name}(uint32_t d_tmem_addr, {a_operand_typ
     args.append(i_desc)
     args.append(sfa_tmem_addr)
     args.append(sfb_tmem_addr)
+    args.append(enable_input_d)
 
     return cuda_func_call(*args, source_code=source_code)
 
@@ -1111,12 +1109,11 @@ def codegen_ptx_tcgen05_mma_sp_block_scale(
 @register_codegen("ptx_tcgen05_commit")
 def codegen_ptx_tcgen05_commit(bar, cta_group, cta_mask):
     cta_group = int(cta_group)
-    cta_mask = int(cta_mask)
 
     if cta_group not in [1, 2]:
         raise ValueError(f"The number of cta_group is incorrect, expected 1 or 2, got {cta_group}")
 
-    is_multicast = cta_mask != 0
+    is_multicast = not (isinstance(cta_mask, tvm.tir.IntImm) and int(cta_mask) == 0)
 
     if is_multicast:
         multicast_str = ".multicast::cluster"
@@ -1135,11 +1132,11 @@ def codegen_ptx_tcgen05_commit(bar, cta_group, cta_mask):
 __forceinline__ __device__ void {func_name}(void* bar, int cta_mask_) {{
   unsigned int bar_addr = __cvta_generic_to_shared(bar);
   uint16_t cta_mask = static_cast<uint16_t>(cta_mask_);
-  __asm__ __volatile__(
-    "tcgen05.commit.cta_group::{cta_group}.mbarrier::arrive::one.shared::cluster{multicast_str}.b64 [%0]{mask_operand_str};"
-    :
-    :"r"(bar_addr){cta_mask_arg_str}
-  );
+    __asm__ __volatile__(
+        "tcgen05.commit.cta_group::{cta_group}.mbarrier::arrive::one.shared::cluster{multicast_str}.b64 [%0]{mask_operand_str};"
+        :
+        :"r"(bar_addr){cta_mask_arg_str}
+    );
 }}
 """
     return cuda_func_call(func_name, bar, cta_mask, source_code=source_code)

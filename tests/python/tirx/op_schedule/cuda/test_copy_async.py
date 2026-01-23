@@ -22,6 +22,7 @@ import pytest
 
 import tvm
 import tvm.testing
+from tvm.ir.type import PointerType, PrimType
 from tvm.script import tir as T
 from tvm.script import tirx as Tx
 from tvm.tir.layout import TileLayout

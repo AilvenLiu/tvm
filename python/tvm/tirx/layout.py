@@ -746,6 +746,16 @@ class TileLayout(TLayout):
                 shard.append(i)
         return TileLayout.from_iters(shard, [], dict())  # pylint: disable=no-member
 
+    def permute_dims(self, perm: List[int]) -> "TileLayout":
+        """Permute the dimensions of the layout."""
+        assert len(perm) == len(
+            self.shard
+        ), "perm must have the same length as the number of dimensions in the layout"
+        new_shard = []
+        for i in perm:
+            new_shard.append(self.shard[i])
+        return TileLayout.from_iters(new_shard, self.replica, self.offset)
+
 
 @tvm_ffi.register_object("tir.SwizzleLayout")
 class SwizzleLayout(TLayout):

@@ -1,0 +1,675 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+import argparse
+import math
+from enum import IntEnum
+
+import torch
+import tvm
+import flashinfer
+from flashinfer import SfLayout, nvfp4_quantize
+import torch.nn.functional as F
+
+from tvm.script import tir as T
+from tvm.script import tirx as Tx
+from tvm.tirx.bench.utils import ProtonContext, bench
+
+from tvm.tirx.op_schedule.cuda.copy_async import tma_shared_layout, SwizzleMode
+from tvm.tir.layout import TileLayout, TLane, TCol, tid_in_wg as axis_tid_in_wg
+from tvm.tirx.tile_scheduler import ClusterPersistentScheduler2D
+from tvm.ir import PointerType, PrimType
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--m", type=int, required=True)
+    parser.add_argument("--n", type=int, required=True)
+    parser.add_argument("--k", type=int, required=True)
+    parser.add_argument("--profile-warmup", type=int, default=100)
+    parser.add_argument("--profile-repeat", type=int, default=300)
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--nsight", action="store_true")
+    return parser.parse_args()
+
+
+########################################################################
+# NVFP4 GEMM
+########################################################################
+
+
+def prepare_data(M: int, N: int, K: int):
+    torch.manual_seed(0)
+    A_origin = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+    B_origin = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+    A_global_sf = (448 * 6) / A_origin.float().abs().nan_to_num().max()
+    B_global_sf = (448 * 6) / B_origin.float().abs().nan_to_num().max()
+
+    # CUTLASS path expects 128x4 scale layout and no shuffling.
+    A_fp4, A_sf = nvfp4_quantize(
+        A_origin, A_global_sf, sfLayout=SfLayout.layout_128x4, do_shuffle=False
+    )
+    B_fp4, B_sf = nvfp4_quantize(
+        B_origin, B_global_sf, sfLayout=SfLayout.layout_128x4, do_shuffle=False
+    )
+    alpha = 1.0 / (A_global_sf * B_global_sf)
+    C_ref = torch.mm(A_origin, B_origin.T)
+
+    return A_fp4, B_fp4, A_sf, B_sf, alpha, C_ref
+
+
+def tir_ws_kernel(M: int, N: int, K: int):
+    SM100_TMEM_CAPACITY_COLUMNS = 512
+    SM_COUNT = 148  # B200 SM count
+    CTA_GROUP = 2  # 2SM cooperative mode for tcgen05 instructions
+    CLUSTER_M = 2  # cluster dimension for 2SM pairs
+    CLUSTER_N = 1  # cluster dimension along N
+    CLUSTER_SIZE = CLUSTER_M * CLUSTER_N
+    assert CLUSTER_M % CTA_GROUP == 0
+
+    CTA_M, CTA_N, CTA_K = 128, 128, 256  # single CTA shape
+    MMA_M, MMA_N, MMA_K = (
+        CTA_M * CTA_GROUP,
+        CTA_N * CTA_GROUP,
+        64,
+    )  # 2SM cooperative MMA shape (256x128)
+    SFB_N = math.ceil(MMA_N / 128) * 128
+    assert SFB_N in [128, 256]
+    MMA_K_BLOCKS = CTA_K // MMA_K
+
+    EPI_TILE = 64
+    TMEM_LD_SIZE = 64
+    F16_BYTES = 2
+    WB_PIPE_DEPTH = 2
+
+    if SFB_N == 128:
+        PIPE_DEPTH = 7  # pipeline depth
+        TMEM_SFA = MMA_N * 2
+        TMEM_SFB = TMEM_SFA + 4
+        TMEM_PIPE_DEPTH = 2
+    elif SFB_N == 256:
+        PIPE_DEPTH = 5  # pipeline depth
+        TMEM_SFA = MMA_N * 2 - EPI_TILE  # 2 stages overlap
+        TMEM_SFB = TMEM_SFA + 4 * 4
+        TMEM_PIPE_DEPTH = 1
+    else:
+        raise ValueError(f"Unsupported SFB_N: {SFB_N}")
+
+    M_TILES = M // CTA_M
+    N_TILES = N // MMA_N
+    K_TILES = K // CTA_K
+    assert M % CTA_M == 0 and N % MMA_N == 0 and K % CTA_K == 0
+    assert M_TILES % CLUSTER_M == 0 and N_TILES % CLUSTER_N == 0
+
+    CLUSTER_M_TILES = M_TILES // CLUSTER_M
+    CLUSTER_N_TILES = N_TILES // CLUSTER_N
+    NUM_CLUSTERS = SM_COUNT // CLUSTER_SIZE
+    GRID_SIZE = NUM_CLUSTERS * CLUSTER_SIZE
+
+    SF_VEC_SIZE = 16
+    SF_CTA_K = CTA_K // SF_VEC_SIZE
+    SF_K = K // SF_VEC_SIZE
+    assert MMA_K == 64 and SF_VEC_SIZE == 16
+
+    assert M % 128 == 0 and N % 128 == 0 and SF_CTA_K % 4 == 0
+    assert CTA_M % 128 == 0 and SFB_N % 128 == 0 and SF_CTA_K % 4 == 0
+
+    # SMEM sizes with pipeline depth
+    SMEM_A_SIZE = PIPE_DEPTH * CTA_M * CTA_K // 2
+    SMEM_B_SIZE = PIPE_DEPTH * CTA_N * CTA_K // 2
+    SMEM_SFA_SIZE = PIPE_DEPTH * CTA_M * SF_CTA_K
+    SMEM_SFB_SIZE = PIPE_DEPTH * SFB_N * SF_CTA_K
+    SMEM_D_SIZE = WB_PIPE_DEPTH * CTA_M * EPI_TILE * F16_BYTES
+    SMEM_SIZE = 1024 + SMEM_A_SIZE + SMEM_B_SIZE + SMEM_SFA_SIZE + SMEM_SFB_SIZE + SMEM_D_SIZE
+    assert SMEM_SIZE <= 232448
+
+    NUM_WARPS = 8
+
+    # layouts
+    A_layout_pipe = tma_shared_layout(
+        "uint8", SwizzleMode.SWIZZLE_128B_ATOM, (PIPE_DEPTH, CTA_M, CTA_K // 2)
+    )
+    B_layout_pipe = tma_shared_layout(
+        "uint8", SwizzleMode.SWIZZLE_128B_ATOM, (PIPE_DEPTH, CTA_N, CTA_K // 2)
+    )
+    SFA_layout_pipe = TileLayout([PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 32, 16])
+    SFB_layout_pipe = TileLayout([PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 32, 16])
+    D_layout_wb = tma_shared_layout(
+        "bfloat16", SwizzleMode.SWIZZLE_128B_ATOM, (WB_PIPE_DEPTH, CTA_M, EPI_TILE)
+    )
+    # layouts for descriptor generation
+    A_layout_desc = TileLayout([PIPE_DEPTH, CTA_M, CTA_K // 2]).pack(16)
+    B_layout_desc = TileLayout([PIPE_DEPTH, CTA_N, CTA_K // 2]).pack(16)
+    SFA_layout_desc = TileLayout([PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 32, 16]).pack(16)
+    SFB_layout_desc = TileLayout([PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 32, 16]).pack(16)
+
+    A_BYTES = (CTA_M * CTA_K // 2) * CTA_GROUP
+    B_BYTES = (CTA_N * CTA_K // 2) * CTA_GROUP
+    SFA_BYTES = (CTA_M * SF_CTA_K) * CTA_GROUP
+    SFB_BYTES = (SFB_N * SF_CTA_K) * CTA_GROUP
+
+    class WarpRole(IntEnum):
+        MMA = 0
+        TMA = 2
+        EPILOGUE = 4
+
+    print(
+        f"using ws kernel, cluster shape: {CLUSTER_M}x{CLUSTER_N} num clusters: {NUM_CLUSTERS} grid size: {GRID_SIZE} pipeline depth: {PIPE_DEPTH} Tile shape: {CTA_M}x{CTA_N}x{CTA_K}"
+    )
+
+    class PipelineState:
+        def __init__(self, prefix: str, pipe_depth: int):
+            self.stage = T.local_cell("int32", name=prefix + "_stage")
+            self.phase = T.local_cell("int32", name=prefix + "_phase")
+            self.pipe_depth = pipe_depth
+
+        @T.macro
+        def init(self, is_producer):
+            self.stage = 0
+            if is_producer:
+                self.phase = 1
+            else:
+                self.phase = 0
+
+        @T.macro
+        def move_to_next_stage(self):
+            if self.pipe_depth > 1:
+                self.stage = self.stage + 1
+                if self.stage == self.pipe_depth:
+                    self.stage = 0
+                    self.phase = self.phase ^ 1
+            else:
+                self.phase = self.phase ^ 1
+
+    class SmemDescriptor:
+        def __init__(self, prefix: str):
+            self.desc = T.local_cell("uint64", name=prefix + "sdesc")
+
+        @T.macro
+        def init(self, smem_ptr, ldo, sdo, swizzle):
+            T.ptx.tcgen05.encode_matrix_descriptor(
+                T.address_of(self.desc), smem_ptr, ldo, sdo, swizzle
+            )
+
+        def add_16B_offset(self, offset):
+            func_name = "tvm_builtin_smem_desc_add_16B_offset"
+            source_code = f"""
+__forceinline__ __device__ uint64_t {func_name}(uint64_t desc_base, int32_t offset) {{
+    SmemDescriptor desc;
+    desc.desc_ = desc_base;
+    desc.lo += static_cast<uint32_t>(offset);
+    return desc.desc_;
+}}
+"""
+            return T.cuda.func_call(
+                func_name, self.desc, offset, source_code=source_code, return_type="uint64"
+            )
+
+    warp_id_func_source = R"""
+__forceinline__ __device__ int canonical_warp_idx_sync() {
+    return __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
+}
+"""
+
+    copy_128b_source_code = R"""
+__forceinline__ __device__ void tvm_builtin_copy_128b(void* dst_ptr, void* src_ptr) {
+    uint4* src_ = reinterpret_cast<uint4*>(src_ptr);
+    uint4* dst_ = reinterpret_cast<uint4*>(dst_ptr);
+    *dst_ = *src_;
+}
+"""
+
+    pointer_offset_source_code = R"""
+template <typename T>
+__forceinline__ __device__ T* tvm_builtin_pointer_offset(T* ptr, int offset) {
+    return ptr + offset;
+}
+"""
+
+    # fmt: off
+    @T.macro
+    def copy_128b(src, dst):
+        T.cuda.func_call(
+            "tvm_builtin_copy_128b", src, dst, source_code=copy_128b_source_code, return_type="void"
+        )
+    # fmt: off
+
+    def pointer_offset(ptr, offset):
+        return T.cuda.func_call(
+            "tvm_builtin_pointer_offset", ptr, offset, source_code=pointer_offset_source_code, return_type="handle"
+        )
+
+    class RowiseSwizzleOffset:
+        def __init__(self, swizzle_len, atom_len, per_element, row_base, prefix: str = "row_sw_offset"):
+            self.swizzle_len = swizzle_len
+            self.atom_len = atom_len
+            self.per_element = per_element
+            self.row_base = row_base
+            self.signed_strides = T.alloc_buffer(
+                [self.atom_len], "int32", scope="local", name=prefix + "_sign"
+            )
+            self.n_dim = self.swizzle_len + 1
+            self.shape = [2] * self.n_dim
+            self.shape[-1] = 1 << self.per_element
+
+        @T.macro
+        def init(self):
+            for i in T.unroll(self.swizzle_len):
+                y_i = T.meta_var(self.row_base & (1 << i))
+                stride_i = T.meta_var(1 << (i + self.per_element))
+                self.signed_strides[i] = -stride_i if y_i > 0 else stride_i
+            for i in T.unroll(self.swizzle_len, self.atom_len):
+                stride_i = T.meta_var(1 << (i + self.per_element))
+                self.signed_strides[i] = stride_i
+
+        def apply(self, offset):
+            offset_layout = TileLayout(
+                shard=(self.shape, [self.signed_strides[self.swizzle_len - 1 - i] for i in range(self.atom_len)] + [0])
+            )
+            return offset_layout.apply(offset)["m"]
+
+    # fmt: off
+    @T.prim_func(tirx=True)
+    def kernel(
+        A_packed: T.Buffer((M, K // 2), "uint8"),
+        B_packed: T.Buffer((N, K // 2), "uint8"),
+        SFA_in: T.Buffer((M, SF_K), "uint8"),
+        SFB_in: T.Buffer((N, SF_K), "uint8"),
+        alpha: T.Buffer((1,), "float32"),
+        D: T.Buffer((M, N), "bfloat16"),
+    ):
+        SFA_gmem = T.decl_buffer((M // 128, SF_K // 4, 256), "uint16", data=SFA_in.data, scope="global")
+        SFB_gmem = T.decl_buffer((N // 128, SF_K // 4, 256), "uint16", data=SFB_in.data, scope="global")
+
+        with T.kernel():
+            cluster_rank_ = T.cta_id([CLUSTER_SIZE], parent="cluster")
+            cta_idx = T.cta_id([GRID_SIZE], parent="kernel")
+            warp_id_ = T.warp_id([NUM_WARPS], parent="cta")
+            lane_id = T.thread_id([32], parent="warp")
+            tid_in_wg = T.thread_id([128], parent="warpgroup")
+            
+            warp_id = T.local_cell("int32")
+            warp_id = T.cuda.func_call("canonical_warp_idx_sync", return_type="int32", source_code=warp_id_func_source)
+
+            cluster_rank = T.local_cell("int32")
+            cluster_rank = cluster_rank_
+            # General pair calculations - works for any cluster shape
+            cb_m = cluster_rank % CLUSTER_M
+            cb_n = cluster_rank // CLUSTER_M
+            pair_id = cluster_rank // CTA_GROUP  # which 2SM pair
+            id_in_pair = cluster_rank % CTA_GROUP  # 0=leader, 1=follower
+            pair_leader_rank = pair_id * CTA_GROUP  # rank of pair's leader
+
+            # tile scheduler
+            tile_scheduler = T.meta_var(ClusterPersistentScheduler2D("tile_scheduler", num_m_tiles=CLUSTER_M_TILES, num_n_tiles=CLUSTER_N_TILES, num_clusters=NUM_CLUSTERS))
+            tile_scheduler.init(cta_idx // CLUSTER_SIZE)
+            m_idx = T.meta_var(tile_scheduler.m_idx)
+            n_idx = T.meta_var(tile_scheduler.n_idx)
+
+            ############################ SMEM allocation #################################
+            buf = T.alloc_buffer([SMEM_SIZE], "uint8", scope="shared.dyn")
+            pool = T.meta_var(Tx.PoolAllocator(buf.data))
+            tmem_addr = pool.alloc([1], "uint32", align=4)
+            # Pipeline mbarriers: one per stage
+            tma_full = pool.alloc((PIPE_DEPTH,), "uint64", align=8)
+            tma_empty = pool.alloc((PIPE_DEPTH,), "uint64", align=8)
+            acc_full = pool.alloc((TMEM_PIPE_DEPTH,), "uint64", align=8)
+            acc_empty = pool.alloc((TMEM_PIPE_DEPTH,), "uint64", align=8)
+            # Pipelined SMEM buffers
+            A_smem_packed = pool.alloc((PIPE_DEPTH, CTA_M, CTA_K // 2), "uint8", layout=A_layout_pipe, align=1024)
+            B_smem_packed = pool.alloc((PIPE_DEPTH, CTA_N, CTA_K // 2), "uint8", layout=B_layout_pipe, align=1024)
+            SFA_smem = pool.alloc((PIPE_DEPTH, CTA_M // 128, SF_CTA_K // 4, 256), "uint16", layout=SFA_layout_pipe, align=1024)
+            SFB_smem = pool.alloc((PIPE_DEPTH, SFB_N // 128, SF_CTA_K // 4, 256), "uint16", layout=SFB_layout_pipe, align=1024)
+            output_smem = pool.alloc((WB_PIPE_DEPTH, CTA_M, EPI_TILE), "bfloat16", layout=D_layout_wb, align=1024)
+            with T.thread()[0:1]:
+                for stage in T.unroll(PIPE_DEPTH):
+                    T.ptx.mbarrier.init(tma_full.ptr_to([stage]), 1)
+                    T.ptx.mbarrier.init(tma_empty.ptr_to([stage]), 1)
+                for stage in T.unroll(TMEM_PIPE_DEPTH):
+                    T.ptx.mbarrier.init(acc_full.ptr_to([stage]), 1)
+                    T.ptx.mbarrier.init(acc_empty.ptr_to([stage]), CTA_GROUP * 128)
+
+            ############################ TMEM allocation #################################
+            with T.warp()[warp_id == 0]:
+                T.ptx.tcgen05.alloc(T.address_of(tmem_addr[0]), n_cols=SM100_TMEM_CAPACITY_COLUMNS, cta_group=CTA_GROUP)
+                T.cuda.warp_sync()
+            tmem = T.decl_buffer((CTA_M, SM100_TMEM_CAPACITY_COLUMNS), "float32", scope="tmem",
+                                 allocated_addr=0, layout=TileLayout(([CTA_M, SM100_TMEM_CAPACITY_COLUMNS], [1@TLane, 1@TCol])))
+
+            T.ptx.fence.proxy("shared")
+            T.ptx.fence.mbarrier_init()
+            T.cuda.cluster_sync()
+
+            # Get pointer to pair leader's mbar_tma array for TMA arrive
+            tma_full_cta0_ptr: T.Var(name="tma_full_cta0_ptr", dtype=PointerType(PrimType("uint64"))) = T.reinterpret("handle", T.ptx.map_shared_rank(tma_full.ptr_to([0]), pair_leader_rank))
+            tma_full_cta0 = T.decl_buffer([PIPE_DEPTH], "uint64", data=tma_full_cta0_ptr, scope="shared")
+
+            # descriptor cells
+            descI = T.local_cell("uint32")
+            descA = T.meta_var(SmemDescriptor("A"))
+            descB = T.meta_var(SmemDescriptor("B"))
+            descSFA = T.meta_var(SmemDescriptor("SFA"))
+            descSFB = T.meta_var(SmemDescriptor("SFB"))
+
+            T.ptx.tcgen05.encode_instr_descriptor_block_scaled(T.address_of(descI), "float32", "float4_e2m1fn", "float4_e2m1fn", "float8_e4m3fn", "float8_e4m3fn",
+                                                               TMEM_SFA, TMEM_SFB, MMA_M, MMA_N, MMA_K, False, False, CTA_GROUP)
+
+            # The mask containing the pair leader and follower in the cluster
+            pair_mask = T.local_cell("int32")
+            pair_mask = 0
+            pair_mask = pair_mask | (1 << pair_leader_rank)
+            pair_mask = pair_mask | (1 << (pair_leader_rank + 1))
+
+            tma_state = T.meta_var(PipelineState("state", PIPE_DEPTH))
+            tma_state.init(is_producer=True)
+            mma_state = T.meta_var(PipelineState("state", PIPE_DEPTH))
+            mma_state.init(is_producer=False)
+            acc_state = T.meta_var(PipelineState("acc", TMEM_PIPE_DEPTH))
+            acc_state.init(is_producer=True)
+            accum = T.local_cell("int32")
+            accum = 0
+            epi_state = T.meta_var(PipelineState("epi", TMEM_PIPE_DEPTH))
+            epi_state.init(is_producer=False)
+            epi_wb_state = T.meta_var(PipelineState("epi_wb", WB_PIPE_DEPTH))
+            epi_wb_state.init(is_producer=True)
+
+            alpha_local = T.local_cell("float32")
+            alpha_local = alpha[0]
+
+            # TMA warp
+            if warp_id == int(WarpRole.TMA):
+                while tile_scheduler.valid():
+                    cta_m = m_idx * CLUSTER_M + cb_m
+                    cta_n = n_idx * CLUSTER_N + cb_n
+                    m_st = cta_m * CTA_M
+                    n_st = cta_n * MMA_N + id_in_pair * CTA_N
+                    out_n_st = cta_n * MMA_N
+
+                    @T.macro
+                    def issue_tma_load(stage, phase, k_tile: T.int32):
+                        k_st = T.meta_var(k_tile * CTA_K // 2)
+                        sfk_st = T.meta_var(k_tile * SF_CTA_K)
+                        sfk_st_tile = T.meta_var(sfk_st // 4)
+                        m_st_tile = T.meta_var(m_st // 128)
+                        n_st_tile = T.meta_var(out_n_st // 128)
+
+                        # wait for current stage to be empty
+                        T.ptx.mbarrier.try_wait(tma_empty.ptr_to([stage]), phase)
+                        # issue tma load
+                        tma_config = T.meta_var({"dispatch": "tma", "cta_group": CTA_GROUP, "mbar": tma_full_cta0.ptr_to([stage]), "cache_hint": "evict_normal"})
+                        with T.thread()[T.ptx.elect_sync()]:
+                            Tx.copy_async(A_smem_packed[stage, :, :], A_packed[m_st : m_st + CTA_M, k_st : k_st + CTA_K // 2], **tma_config)
+                            Tx.copy_async(B_smem_packed[stage, :, :], B_packed[n_st : n_st + CTA_N, k_st : k_st + CTA_K // 2], **tma_config)
+                            Tx.copy_async(SFA_smem[stage, :, :, :], SFA_gmem[m_st_tile : m_st_tile + CTA_M // 128, sfk_st_tile : sfk_st_tile + SF_CTA_K // 4, :], **tma_config)
+                            if SFB_N == 128:
+                                Tx.copy_async(SFB_smem[stage, :, :, :], SFB_gmem[n_st_tile : n_st_tile + SFB_N // 128, sfk_st_tile : sfk_st_tile + SF_CTA_K // 4, :], **tma_config)
+                            else:
+                                tma_multicast_config = T.meta_var({"dispatch": "tma", "cta_group": CTA_GROUP, "mbar": tma_full_cta0.ptr_to([stage]), "cta_mask": pair_mask, "cache_hint": "evict_normal"})
+                                Tx.copy_async(SFB_smem[stage, cb_m: cb_m + 1 :, :],
+                                              SFB_gmem[n_st_tile + cb_m : n_st_tile + cb_m + 1, sfk_st_tile : sfk_st_tile + SF_CTA_K // 4, :], **tma_multicast_config)
+                            # signal tma is issued to pair leader
+                            if id_in_pair == 0:
+                                total_bytes = T.meta_var(A_BYTES + B_BYTES + SFA_BYTES + SFB_BYTES)
+                                T.ptx.mbarrier.arrive.expect_tx(tma_full_cta0.ptr_to([stage]), total_bytes)
+
+                    for k_tile in T.serial(K_TILES):
+                        issue_tma_load(tma_state.stage, tma_state.phase, k_tile)
+                        tma_state.move_to_next_stage()
+
+                    tile_scheduler.next_tile()
+
+            elif warp_id == int(WarpRole.MMA) and id_in_pair == 0:
+                descSFA.init(smem_ptr=SFA_smem.ptr_to([0, 0, 0, 0]), ldo=1, sdo=8, swizzle=0)
+                descSFB.init(smem_ptr=SFB_smem.ptr_to([0, 0, 0, 0]), ldo=1, sdo=8, swizzle=0)
+                descA.init(smem_ptr=A_smem_packed.ptr_to([0, 0, 0]), ldo=1, sdo=64, swizzle=3)
+                descB.init(smem_ptr=B_smem_packed.ptr_to([0, 0, 0]), ldo=1, sdo=64, swizzle=3)
+
+                while tile_scheduler.valid():
+                    @T.macro
+                    def execute_mma(stage, phase):
+                        # wait for tma to finish
+                        T.ptx.mbarrier.try_wait(tma_full.ptr_to([stage]), phase)
+                        T.ptx.tcgen05.fence.after_thread_sync()
+                        SFB_CHUNK = T.meta_var(4 if SFB_N == 128 else 8)
+
+                        with T.thread()[T.ptx.elect_sync()]:
+                            # move sf to tmem
+                            for k_block in T.unroll(MMA_K_BLOCKS):
+                                k_offset = T.meta_var(k_block * MMA_K // 2)
+                                T.ptx.tcgen05.cp(0, 0, TMEM_SFA + k_block * 4, descSFA.add_16B_offset(SFA_layout_desc.apply(stage, 0, k_block, 0, 0 )["m"]), "32x128b", "uint8", "uint8", CTA_GROUP, "warpx4")
+                                T.ptx.tcgen05.cp(0, 0, TMEM_SFB + k_block * SFB_CHUNK, descSFB.add_16B_offset(SFB_layout_desc.apply(stage, 0, k_block, 0, 0)["m"]), "32x128b", "uint8", "uint8", CTA_GROUP, "warpx4")
+                                if SFB_N == 256:
+                                    T.ptx.tcgen05.cp(0, 0, TMEM_SFB + k_block * SFB_CHUNK + 4, descSFB.add_16B_offset(SFB_layout_desc.apply(stage, 1, k_block, 0, 0)["m"]), "32x128b", "uint8", "uint8", CTA_GROUP, "warpx4")
+
+                            # issue mma
+                            for k_block in T.unroll(MMA_K_BLOCKS):
+                                k_offset = T.meta_var(k_block * MMA_K // 2)
+                                tmem_acc = T.meta_var(acc_state.stage * MMA_N if MMA_N == 128 else (acc_state.phase ^ 1) * (MMA_N - EPI_TILE))
+                                T.ptx.tcgen05.mma.block_scale("float32", "float4_e2m1fn", "float4_e2m1fn", "float8_e4m3fn", "float8_e4m3fn", T.cuda.get_tmem_addr(0, 0, tmem_acc),
+                                                            descA.add_16B_offset(A_layout_desc.apply(stage, 0, k_offset // 16)["m"]),
+                                                            descB.add_16B_offset(B_layout_desc.apply(stage, 0, k_offset // 16)["m"]),
+                                                            TMEM_SFA + k_block * 4, TMEM_SFB + k_block * SFB_CHUNK, descI, False, CTA_GROUP, accum)
+                                accum = 1
+
+                            # signal mma is issued to both CTAs in the pair
+                            T.ptx.tcgen05.commit(tma_empty.ptr_to([stage]), cta_group=CTA_GROUP, cta_mask=pair_mask)
+
+                    T.ptx.mbarrier.try_wait(acc_empty.ptr_to([acc_state.stage]), acc_state.phase)
+                    accum = 0
+                    for k_tile in T.serial(K_TILES):
+                        execute_mma(mma_state.stage, mma_state.phase)
+                        mma_state.move_to_next_stage()
+                    
+                    with T.thread()[T.ptx.elect_sync()]:
+                        T.ptx.tcgen05.commit(acc_full.ptr_to([acc_state.stage]), cta_group=CTA_GROUP, cta_mask=pair_mask)
+                    acc_state.move_to_next_stage()
+
+                    tile_scheduler.next_tile()
+
+            elif warp_id >= int(WarpRole.EPILOGUE):
+                row_sw_offset = T.meta_var(RowiseSwizzleOffset(3, 3, 3, tid_in_wg)) # D's swizzle settings
+                row_sw_offset.init()
+
+                while tile_scheduler.valid():
+                    cta_m = m_idx * CLUSTER_M + cb_m
+                    cta_n = n_idx * CLUSTER_N + cb_n
+                    m_st = cta_m * CTA_M
+                    out_n_st = cta_n * MMA_N
+                    
+                    @T.macro
+                    def epilogue(stage, phase):
+                        # wait for accumulator to finish
+                        T.ptx.mbarrier.try_wait(acc_full.ptr_to([stage]), phase)
+                        reg = T.alloc_buffer((TMEM_LD_SIZE,), "float32", scope="local")
+                        reg_16b = T.alloc_buffer((EPI_TILE,), "bfloat16", scope="local")
+
+                        for no in T.unroll(MMA_N // EPI_TILE):
+                            col_st = T.local_cell("int32")
+                            if SFB_N == 128:
+                                col_st = epi_state.stage * MMA_N + no * EPI_TILE
+                            elif SFB_N == 256:
+                                if epi_state.phase == 0:
+                                    col_st = MMA_N - (no + 1) * EPI_TILE
+                                else:
+                                    col_st = MMA_N - EPI_TILE + no * EPI_TILE
+                                    
+                            for ni in T.unroll(EPI_TILE // TMEM_LD_SIZE):
+                                # TMEM -> RF
+                                with T.warpgroup():
+                                    reg_wg = reg.view(CTA_M, TMEM_LD_SIZE, layout=TileLayout(([CTA_M, TMEM_LD_SIZE], [1@axis_tid_in_wg, 1])))
+                                    Tx.copy(reg_wg[:, :], tmem[:, col_st + ni * TMEM_LD_SIZE : col_st + (ni + 1) * TMEM_LD_SIZE])
+                                # cast
+                                for v in range(TMEM_LD_SIZE):
+                                    reg_16b[ni * TMEM_LD_SIZE + v] = T.Cast("bfloat16", reg[v] * alpha_local)
+
+                            singal_iter = T.meta_var(no == MMA_N // EPI_TILE - 1 if SFB_N == 128 else no == 0)
+                            if singal_iter:
+                                # both CTAs in the pair singal mma warp (of leader) to start mma
+                                T.ptx.mbarrier.arrive(acc_empty.ptr_to([stage]), cta_id=pair_leader_rank, pred=True)
+
+                            # RF -> SMEM
+                            with T.thread()[tid_in_wg == 0]:
+                                T.ptx.cp_async.bulk.wait_group(WB_PIPE_DEPTH - 1)
+                            T.cuda.warpgroup_sync(10)
+                            # with T.thread():
+                            #     Tx.copy(output_smem[epi_wb_state.stage, tid_in_wg, :], reg_16b[:])
+                            row_st = T.local_cell("int32")
+                            row_st = output_smem.elem_offset_of([epi_wb_state.stage, tid_in_wg, 0])
+                            for ni in T.unroll(EPI_TILE // 8):
+                                copy_128b(pointer_offset(output_smem.ptr_to([0, 0, 0]), row_st + row_sw_offset.apply(ni * 8)), reg_16b.ptr_to([ni * 8]))
+                            T.ptx.fence.proxy(scope="shared")
+                            T.cuda.warpgroup_sync(10)
+                            
+                            # launch tma copy from smem to gmem
+                            out_n = T.local_cell("int32")
+                            if SFB_N == 128:
+                                out_n = out_n_st + no * EPI_TILE
+                            elif SFB_N == 256:
+                                if epi_state.phase == 0:
+                                    out_n = out_n_st + MMA_N - (no + 1) * EPI_TILE
+                                else:
+                                    out_n = out_n_st + no * EPI_TILE
+                            with T.thread()[tid_in_wg == 0]:
+                                Tx.copy_async(D[m_st : m_st + CTA_M, out_n : out_n + EPI_TILE], output_smem[epi_wb_state.stage, :, :], dispatch="tma", cache_hint="evict_normal")
+                                T.ptx.cp_async.bulk.commit_group()
+                            epi_wb_state.move_to_next_stage()
+
+                    epilogue(epi_state.stage, epi_state.phase)
+                    epi_state.move_to_next_stage()
+                    
+                    tile_scheduler.next_tile()
+            
+                with T.thread()[tid_in_wg == 0]:
+                    T.ptx.cp_async.bulk.wait_group(0)
+                T.cuda.warpgroup_sync(10)
+
+            # Cleanup after all tiles processed
+            with T.warp()[warp_id == 0]:
+                T.ptx.tcgen05.relinquish_alloc_permit(cta_group=CTA_GROUP)
+                T.ptx.tcgen05.dealloc(0, n_cols=SM100_TMEM_CAPACITY_COLUMNS, cta_group=CTA_GROUP)
+    # fmt: on
+
+    return kernel
+
+
+def tir_gemm(
+    A_fp4, B_fp4, A_sf, B_sf, alpha, C_ref, kernel, warmup, repeat, debug=False, nsight=False
+):
+    A_fp4, B_fp4, A_sf, B_sf, alpha, C_ref = (
+        A_fp4.clone(),
+        B_fp4.clone(),
+        A_sf.clone(),
+        B_sf.clone(),
+        alpha.clone(),
+        C_ref.clone(),
+    )
+    alpha = torch.tensor([alpha.item()], device="cuda", dtype=torch.float)
+    out = torch.empty_like(C_ref).to("cuda").to(torch.bfloat16)
+    target = tvm.target.Target("cuda")
+    with target:
+        mod = tvm.IRModule({"main": kernel})
+        ex = tvm.compile(mod, target=target, tir_pipeline="tirx")
+        bench(
+            lambda: ex.mod(A_fp4, B_fp4, A_sf, B_sf, alpha, out),
+            warmup=warmup,
+            repeat=repeat,
+            proton_name="tir",
+            debug=debug,
+            nsight=nsight,
+            flush_l2_size=int(8e9 // 4),
+        )
+    return out
+
+
+def flashinfer_gemm(
+    A_fp4, B_fp4, A_sf, B_sf, alpha, C_ref, warmup, repeat, debug=False, nsight=False
+):
+    A_fp4, B_fp4, A_sf, B_sf, alpha, C_ref = (
+        A_fp4.clone(),
+        B_fp4.clone().T,
+        A_sf.clone(),
+        B_sf.clone().T,
+        alpha.clone(),
+        C_ref.clone(),
+    )
+    out = torch.empty_like(C_ref).to("cuda").to(torch.bfloat16)
+    with flashinfer.autotune(False):
+        func = lambda: flashinfer.gemm.mm_fp4(
+            A_fp4,
+            B_fp4,
+            A_sf,
+            B_sf,
+            alpha,
+            torch.bfloat16,
+            out,
+            block_size=16,
+            backend="cutlass",
+            use_nvfp4=True,
+        )
+        bench(
+            func,
+            warmup=warmup,
+            repeat=repeat,
+            proton_name="flashinfer",
+            debug=debug,
+            nsight=nsight,
+            flush_l2_size=int(8e9 // 4),
+        )
+    return out
+
+
+def profile_gemm(
+    M: int,
+    N: int,
+    K: int,
+    kernel,
+    warmup: int,
+    repeat: int,
+    debug: bool = False,
+    nsight: bool = False,
+):
+    A_fp4, B_fp4, A_sf, B_sf, alpha, C_ref = prepare_data(M, N, K)
+
+    with ProtonContext("gemm", debug=debug, nsight=nsight):
+        C_tir = tir_gemm(
+            A_fp4, B_fp4, A_sf, B_sf, alpha, C_ref, kernel, warmup, repeat, debug, nsight
+        )
+        C_flashinfer = flashinfer_gemm(
+            A_fp4, B_fp4, A_sf, B_sf, alpha, C_ref, warmup, repeat, debug, nsight
+        )
+
+    cosine_sim = F.cosine_similarity(C_tir.reshape(-1), C_ref.to("cuda").reshape(-1), dim=0)
+    print(f"TIR vs Reference cosine similarity: {cosine_sim.item():.6f}")
+    assert cosine_sim > 0.97
+
+    cosine_sim = F.cosine_similarity(C_flashinfer.reshape(-1), C_tir.reshape(-1), dim=0)
+    print(f"Flashinfer vs TIR cosine similarity: {cosine_sim.item():.6f}")
+    assert cosine_sim > 0.97
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    kernel = tir_ws_kernel(args.m, args.n, args.k)
+    profile_gemm(
+        args.m,
+        args.n,
+        args.k,
+        kernel,
+        args.profile_warmup,
+        args.profile_repeat,
+        args.debug,
+        args.nsight,
+    )

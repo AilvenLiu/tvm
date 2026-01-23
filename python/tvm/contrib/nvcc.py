@@ -140,7 +140,7 @@ def _compile_cuda_nvcc(
 
     tvm_kernel_dump = os.environ.get("TVM_KERNEL_DUMP", None)
     if tvm_kernel_dump is not None:
-        target_format = "ptx"
+        target_format = "fatbin"  # use fatbin to get cubin for SASS extraction
 
     if target_format not in ["cubin", "ptx", "fatbin"]:
         raise ValueError("target_format must be in cubin, ptx, fatbin")
@@ -173,11 +173,10 @@ def _compile_cuda_nvcc(
 
     cmd = ["nvcc"]
     cmd += [f"--{target_format}", "-O3"]
-    if (
-        os.environ.get("TVM_KERNEL_DEBUG", "0") == "1"
-        or os.environ.get("TVM_KERNEL_DUMP", "0") == "1"
-    ):
-        cmd += ["-lineinfo"]
+    if os.environ.get("TVM_KERNEL_DUMP", None) is not None:
+        # cmd += ["-lineinfo"]
+        cmd += ["--keep", f"--keep-dir={tvm_kernel_dump}"]
+    if os.environ.get("TVM_KERNEL_DEBUG", "0") == "1":
         cmd += ["-g"]
         cmd += ["-G"]
     if isinstance(arch, list):

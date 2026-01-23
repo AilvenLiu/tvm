@@ -113,26 +113,16 @@ __forceinline__ __device__ void {func_name}() {{
 
 
 @register_codegen("ptx_elect_sync")
-def codegen_ptx_elect_sync(mask):
-    func_name = "tvm_builtin_ptx_elect_sync"
+def codegen_ptx_elect_sync():
+    func_name = "tvm_builtin_elect_one_sync_op"
     source_code = f"""
-__forceinline__ __device__ uint32_t {func_name}(uint32_t mask) {{
-  uint32_t pred = 0;
-  uint32_t laneid = 0;
-  asm volatile(
-      "{{\\n"
-      ".reg .b32 %rx;\\n"
-      ".reg .pred %px;\\n"
-      "     elect.sync %rx|%px, %2;\\n"
-      "@%px mov.s32 %1, 1;\\n"
-      "     mov.s32 %0, %rx;\\n"
-      "}}\\n"
-      : "+r"(laneid), "+r"(pred)
-      : "r"(mask));
-  return pred;
+__forceinline__ __device__ uint32_t {func_name}() {{
+  return tvm_builtin_elect_one_sync();
 }}
 """
-    return cuda_func_call(func_name, mask, source_code=source_code)
+    return cuda_func_call(func_name, source_code=source_code, return_type="uint32"), [
+        "elect_one_sync"
+    ]
 
 
 #################### mbarrier
@@ -226,21 +216,26 @@ __forceinline__ __device__ void {func_name}(void* barrier, int byte_count, int c
 @register_codegen("ptx_mbarrier_try_wait")
 def codegen_ptx_mbarrier_try_wait(bar, phase):
     func_name = "tvm_builtin_ptx_mbarrier_wait"
+    # Add timeout parameter to mbarrier.try_wait (same as CUTLASS)
+    # The timeout causes the compiler to generate NANOSLEEP.SYNCS instead of YIELD
+    # 0x989680 = 10,000,000 ns = 10ms timeout
     source_code = f"""
 __forceinline__ __device__ void {func_name}(void* barrier, int phase) {{
    unsigned int barrier_addr_int = __cvta_generic_to_shared(barrier);
+   unsigned int ticks = 0x989680;  // 10ms timeout
   asm volatile (
       "{{\\n"
       ".reg .pred                P1;\\n"
       "LAB_WAIT:\\n"
-      "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1;\\n"
+      "mbarrier.try_wait.parity.shared::cta.b64 P1, [%0], %1, %2;\\n"
       "@P1                       bra.uni DONE;\\n"
       "bra.uni                   LAB_WAIT;\\n"
       "DONE:\\n"
       "}}\\n"
       ::
       "r"(barrier_addr_int),
-      "r"(phase)
+      "r"(phase),
+      "r"(ticks)
   );
 }}
 """

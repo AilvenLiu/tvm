@@ -230,12 +230,13 @@ def test_ptx_elect_sync():
             bx = T.cta_id([1], parent="kernel")
             tx = T.thread_id([128], parent="cta")
             with T.thread():
-                if (T.ptx.elect_sync(0xFFFFFFFF)):
+                if (T.ptx.elect_sync()):
                     A[tx] = tx
     # fmt: on
 
     src, mod = _get_source(func)
-    assert "elect.sync %rx|%px, %2;" in src
+    print(src)
+    assert "elect.sync %%rx|%%px, %2;" in src
 
 
 @tvm.testing.requires_cuda_compute_version(9)

@@ -55,52 +55,63 @@ def setup():
     return args
 
 
-def bench_fn(func, warmup, repeat, proton_name, flush_l2_size):
-    # cache = runtime.driver.active.get_empty_cache_for_benchmark()
+def bench_fn(func, warmup, repeat, proton_name, flush_l2_size, nsight=False):
     for _ in range(warmup):
-        # runtime.driver.active.clear_cache(cache)
         torch.empty(flush_l2_size, dtype=torch.int, device="cuda").zero_()
         func()
-    if not is_running_under_pytest():
+    if not is_running_under_pytest() and not nsight:
         proton.activate()
         with proton.scope(proton_name, metrics={}):
             for _ in range(repeat):
-                # runtime.driver.active.clear_cache(cache)
                 torch.empty(flush_l2_size, dtype=torch.int, device="cuda").zero_()
                 func()
         proton.deactivate()
     else:
         for _ in range(repeat):
+            torch.empty(flush_l2_size, dtype=torch.int, device="cuda").zero_()
             func()
 
 
 def bench(
-    func, warmup=0, repeat=10, proton_name="kernel", debug=False, flush_l2_size=int(8e8 // 4)
+    func,
+    warmup=0,
+    repeat=10,
+    proton_name="kernel",
+    debug=False,
+    nsight=False,
+    flush_l2_size=int(8e8 // 4),
 ):
     if not debug:
         bench_fn(
-            func, warmup=warmup, repeat=repeat, proton_name=proton_name, flush_l2_size=flush_l2_size
+            func,
+            warmup=warmup,
+            repeat=repeat,
+            proton_name=proton_name,
+            flush_l2_size=flush_l2_size,
+            nsight=nsight,
         )
+        return triton.testing.do_bench(func, warmup=warmup, rep=repeat) if not nsight else 1.0
     else:
-        func()
-    return triton.testing.do_bench(func, warmup=warmup, rep=repeat)
+        return 1.0
 
 
 class ProtonContext:
     """Context manager for Proton profiling sessions."""
 
-    def __init__(self, name="kernel", hook="triton", debug=False):
+    def __init__(self, name="kernel", hook="triton", debug=False, nsight=False):
         self.name = name
         self.hook = hook
         self.debug = debug
+        self.nsight = nsight
 
     def __enter__(self):
-        if not is_running_under_pytest() and not self.debug:
+        if not is_running_under_pytest() and not self.debug and not self.nsight:
             proton.start(self.name, hook=self.hook)
+            proton.deactivate()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if not is_running_under_pytest() and not self.debug:
+        if not is_running_under_pytest() and not self.debug and not self.nsight:
             proton.finalize()
 
             subprocess.run(
