@@ -205,7 +205,6 @@ class GemmTile(Tile):
             else:
                 T.cuda.trap_when_assert_failed(False)
 
-
     @T.macro
     def _consumer_wg(self, m_idx, n_idx, k_idx, A, B, output, profiler: CudaProfiler):
         with T.cta():
@@ -259,7 +258,7 @@ class GemmTile(Tile):
                     n_st = T.meta_var(n_idx * self.BLK_N)
                     tma_config = T.meta_var(
                         {"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP} | 
-                        ({"cache_hint": "evict_first" if self.low_batch else ""} if self.split_k_factor > 1 else {}) |
+                        ({"cache_hint": "evict_last" if self.low_batch else ""} if self.split_k_factor > 1 else {}) |
                         ({"use_tma_reduce": "add"} if self.use_tma_reduce else {})
                     )
                     if self.split_k_factor > 1 and not self.use_tma_reduce:
@@ -291,17 +290,25 @@ class GemmTile(Tile):
                         @T.macro
                         def tma_stage(ks, k_st, first_stage):
                             self.mma2tma_bar.wait(ks, self.phase[0])
-                            tma_config = T.meta_var({"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP, 
+                            B_tma_config = T.meta_var({"dispatch": "tma", "cta_group": KernelConfig.CTA_GROUP, 
                                                     "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
                                                     "cache_hint": "evict_first" if self.low_batch else ""})
+                            A_tma_config = T.meta_var(
+                                {
+                                    "dispatch": "tma",
+                                    "cta_group": KernelConfig.CTA_GROUP,
+                                    "mbar": self.tma2mma_bar.mbar.ptr_to([ks]),
+                                    "cache_hint": "evict_last" if self.low_batch else "",
+                                }
+                            )
                             if self.profiler_on:
                                 profiler.start(ProfileEventType.TMA, lane_id == 0)
                             if first_stage:
                                 self.smem_manager.wait_specific_one_thread(self.A_smem, ks)
-                            self._tma(ks, A, "A", m_idx * self.M_pad_size, k_st, tma_config)                 
+                            self._tma(ks, A, "A", m_idx * self.M_pad_size, k_st, A_tma_config)                 
                             if not self.prefetch_on and first_stage:
                                 self.smem_manager.wait_specific_one_thread(self.B_smem, ks)
-                            self._tma(ks, B, "B", n_idx * self.BLK_N, k_st, tma_config, predicate=tvm.tir.Not(self.prefetch_on and first_stage))
+                            self._tma(ks, B, "B", n_idx * self.BLK_N, k_st, B_tma_config, predicate=tvm.tir.Not(self.prefetch_on and first_stage))
                             if self.profiler_on:
                                 profiler.end(ProfileEventType.TMA, lane_id == 0)
                             self.tma2mma_bar.arrive(ks, KernelConfig.CTA_GROUP * self.BLK_K * (self.BLK_M + self.BLK_N) * F16_BYTES)
@@ -354,7 +361,6 @@ class GemmTile(Tile):
                             if self.profiler_on:
                                 profiler.end(ProfileEventType.MMA, lane_id == 0)
                             self.mma2tma_bar.arrive(ks)
-
 
                         with T.thread(parent="warp")[T.ptx.elect_sync()]:
                             self.tmem_idx = self.tile_idx % self.TMEM_PIPE_DEPTH

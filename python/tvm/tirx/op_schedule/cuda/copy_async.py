@@ -213,7 +213,12 @@ def copy_tma_impl(
                 s_dim = axis_map.get(i, i)
                 if s_dim < len(outer_shared.shard):
                     if outer_shared.shard[s_dim].stride == 1:
-                        enlarge_factor = outer_shared.shard[s_dim].extent
+                        # Compute how many atoms fit in the copy extent (not full buffer)
+                        copy_extent_in_atoms = s_ext[s_dim] // atom_shape_shared[s_dim]
+                        # Clamp enlarge_factor by the copy region's extent
+                        enlarge_factor = min(
+                            outer_shared.shard[s_dim].extent, copy_extent_in_atoms
+                        )
                         new_box_dim = atom_shape_shared[s_dim] * enlarge_factor
                         # Only enlarge if it fits within g_ext and divides evenly
                         if new_box_dim <= g_ext[i] and g_ext[i] % new_box_dim == 0:

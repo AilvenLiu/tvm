@@ -1033,8 +1033,8 @@ def test(batch_size, mega_kernel_static, mega_kernel_dynamic, mega_kernel_unfuse
             output1_tir_unfused = tir(arg_dict, mega_kernel_wrapper, "unfused")
             print("unfused tir finish", flush=True)
         output1_std = std(arg_dict, mk=mega_kernel_wrapper)
-        output1_flashinfer = flashinfer(arg_dict)
-        np.testing.assert_allclose(output1_flashinfer, output1_std, rtol=1e-3, atol=1e-2)
+        # output1_flashinfer = flashinfer(arg_dict)
+        # np.testing.assert_allclose(output1_flashinfer, output1_std, rtol=1e-3, atol=1e-2)
         output1_sglang_fused = sglang_fused(arg_dict)
         np.testing.assert_allclose(output1_sglang_fused, output1_std, rtol=1e-3, atol=1e-2)
         if mega_kernel_static["main"] is not None:

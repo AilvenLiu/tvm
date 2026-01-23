@@ -811,5 +811,148 @@ def test_copy_tmem2reg_async(dtype, width_32b):
         np.testing.assert_allclose(B.numpy(), A_np)
 
 
+@tvm.testing.requires_cuda_compute_version(9)
+@pytest.mark.parametrize(
+    "task",
+    [
+        # Test case: 2D global -> 3D shared with partial copy region
+        # This tests that enlarge_factor is computed based on copy extent, not full buffer extent.
+        # Bug scenario: shared buffer is (6, 128, 64), but we only copy (1, 32, 64).
+        # Without fix: enlarge_factor = 16 (128/8), new_box_dim = 128 > g_ext[0]=32, no enlargement
+        # With fix: enlarge_factor = min(16, 32/8) = 4, new_box_dim = 32, single TMA call
+        (
+            (128, 256),  # global_shape: 2D
+            ((0, 32), (0, 64)),  # global_region: copy 32x64
+            (6, 128, 64),  # shared_shape: 3D with extra pipeline dimension
+            ((0, 1), (0, 32), (0, 64)),  # shared_region: unit extent in first dim
+            128,  # thread count
+            TileLayout([128, 256]).canonicalize(),  # A_layout (global)
+            TileLayout([128, 256]).canonicalize(),  # B_layout (global)
+            lambda dtype, swizzle_len: tma_shared_layout(
+                dtype, swizzle_len, (6, 128, 64)
+            ).canonicalize(),
+        ),
+        # Another variant: different copy extent (64 rows instead of 32)
+        (
+            (256, 512),  # global_shape: 2D
+            ((0, 64), (0, 64)),  # global_region: copy 64x64
+            (4, 256, 64),  # shared_shape: 3D
+            ((1, 2), (0, 64), (0, 64)),  # shared_region: different slice index
+            128,  # thread count
+            TileLayout([256, 512]).canonicalize(),
+            TileLayout([256, 512]).canonicalize(),
+            lambda dtype, swizzle_len: tma_shared_layout(
+                dtype, swizzle_len, (4, 256, 64)
+            ).canonicalize(),
+        ),
+    ],
+)
+def test_copy_g2s_tma_partial_region_3d_shared(task, dtype="float16", swizzle_len=3):
+    """Test TMA copy from 2D global to 3D shared with partial copy region.
+
+    This tests the fix for a bug where enlarge_factor was computed based on
+    the full shared buffer extent rather than the actual copy region extent.
+    This caused unnecessary multiple TMA instructions when a single one would suffice.
+
+    For example, with shared buffer shape (6, 128, 64) and copy region (1, 32, 64):
+    - atom_shape = [1, 8, 64]
+    - Old behavior: enlarge_factor = 128/8 = 16, new_box_dim = 128 > 32, no enlargement
+      -> box_dim = [8, 64], needs 32/8 = 4 TMA calls
+    - Fixed behavior: enlarge_factor = min(16, 32/8) = 4, new_box_dim = 32
+      -> box_dim = [32, 64], needs only 1 TMA call
+    """
+    g_shape, g_region, s_shape, s_region, thread_cnt, layoutA, layoutB, layoutS_fn = task
+    dev = tvm.cuda(0)
+
+    shared_layout = layoutS_fn(dtype, swizzle_len)
+    if shared_layout is None:
+        pytest.skip(f"dtype {dtype} + swizzle_len {swizzle_len} is not supported")
+
+    total_bytes = functools.reduce(lambda acc, region: acc * (region[1] - region[0]), s_region, 1)
+    total_bytes = total_bytes * tvm.DataType(dtype).bits // 8
+
+    smem_bytes = functools.reduce(lambda acc, extent: acc * extent, s_shape, 1)
+    smem_bytes = smem_bytes * tvm.DataType(dtype).bits // 8
+
+    r_smem = [slice(s_region[i][0], s_region[i][1]) for i in range(len(s_shape))]
+    r_gmem = [slice(g_region[i][0], g_region[i][1]) for i in range(len(g_shape))]
+
+    # fmt: off
+    @T.prim_func(tirx=True)
+    def copy_async(A_ptr: T.handle, B_ptr: T.handle) -> None:
+        A = T.match_buffer(A_ptr, g_shape, dtype, layout=layoutA)
+        B = T.match_buffer(B_ptr, g_shape, dtype, layout=layoutB)
+
+        with T.kernel():
+            bx = T.cta_id([1], parent="kernel")
+            tx = T.thread_id([thread_cnt], parent="cta")
+
+            with T.thread():
+                dyn = T.alloc_buffer([smem_bytes + 64], "uint8", scope="shared.dyn")
+                A_smem = T.decl_buffer(s_shape, dtype, dyn.data, elem_offset=0, layout=shared_layout)
+                mbarrier = T.decl_buffer([1], "uint64", dyn.data, elem_offset=smem_bytes // 8)
+                mbar_ptr = T.meta_var(mbarrier.ptr_to([0]))
+
+                with T.thread()[0:1]:
+                    T.ptx.mbarrier.init(mbar_ptr, 1)
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+
+                with T.thread()[0:1]:
+                    Tx.copy_async(A_smem[*r_smem], A[*r_gmem], dispatch="tma", mbar=mbar_ptr)
+                    T.ptx.mbarrier.arrive.expect_tx(mbar_ptr, total_bytes)
+
+                T.ptx.mbarrier.try_wait(mbar_ptr, 0)
+                T.ptx.fence.proxy("shared")
+                T.cuda.cta_sync()
+
+                with T.cta():
+                    Tx.copy(B[*r_gmem], A_smem[*r_smem])
+    # fmt: on
+
+    np_dtype = tvm.testing.np_dtype_from_str(dtype)
+    target = tvm.target.Target("cuda")
+
+    with target:
+        mod = tvm.IRModule({"main": copy_async})
+
+        # Verify that LowerTIRx generates exactly 1 TMA instruction
+        lowered = tvm.tir.transform.LowerTIRx()(mod)
+        lowered_str = str(lowered)
+
+        # Check there's exactly one g2c call in the IR
+        assert lowered_str.count("cp_async.bulk.tensor.g2c") == 1, (
+            "Expected exactly 1 cp_async.bulk.tensor.g2c call in lowered IR"
+        )
+
+        # Verify the loop has only 1 iteration (T.grid(1, 1) means 1x1=1 TMA call)
+        # This ensures the fix is working - without fix it would be T.grid(4, 1) or similar
+        import re
+        grid_match = re.search(r'T\.grid\((\d+),\s*(\d+)\)', lowered_str)
+        if grid_match:
+            iters_0 = int(grid_match.group(1))
+            iters_1 = int(grid_match.group(2))
+            total_iters = iters_0 * iters_1
+            assert total_iters == 1, (
+                f"Expected 1 TMA iteration, got {iters_0}x{iters_1}={total_iters}. "
+                "This indicates enlarge_factor was not computed correctly based on copy extent."
+            )
+
+        # Now compile and verify correctness
+        mod = tvm.compile(mod, target=target, tir_pipeline="tirx")
+
+        np.random.seed(0)
+        A_np = tvm.testing.generate_random_array(dtype, g_shape)
+        B_np = np.zeros(g_shape, dtype=np_dtype)
+
+        A = tvm.runtime.tensor(A_np, dev)
+        B = tvm.runtime.tensor(B_np, dev)
+        mod(A, B)
+
+        B_ref = np.zeros(g_shape, dtype=np_dtype)
+        B_ref[*r_gmem] = A_np[*r_gmem]
+        np.testing.assert_allclose(B_ref, B.numpy())
+
+
 if __name__ == "__main__":
     tvm.testing.main()
